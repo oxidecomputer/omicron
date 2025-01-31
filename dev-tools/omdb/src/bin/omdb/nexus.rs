@@ -46,6 +46,7 @@ use nexus_types::internal_api::background::BlueprintRendezvousStatus;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
+use nexus_types::internal_api::background::ReadOnlyRegionReplacementStartStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
 use nexus_types::internal_api::background::RegionReplacementStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus;
@@ -928,6 +929,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "phantom_disks" => {
             print_task_phantom_disks(details);
         }
+        "read_only_region_replacement_start" => {
+            print_task_read_only_region_replacement_start(details);
+        }
         "region_replacement" => {
             print_task_region_replacement(details);
         }
@@ -1722,6 +1726,32 @@ fn print_task_phantom_disks(details: &serde_json::Value) {
             );
         }
     };
+}
+
+fn print_task_read_only_region_replacement_start(details: &serde_json::Value) {
+    match serde_json::from_value::<ReadOnlyRegionReplacementStartStatus>(
+        details.clone(),
+    ) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+
+        Ok(status) => {
+            println!(
+                "    total requests created ok: {}",
+                status.requests_created_ok.len(),
+            );
+            for line in &status.requests_created_ok {
+                println!("    > {line}");
+            }
+
+            println!("    errors: {}", status.errors.len());
+            for line in &status.errors {
+                println!("    > {line}");
+            }
+        }
+    }
 }
 
 fn print_task_region_replacement(details: &serde_json::Value) {

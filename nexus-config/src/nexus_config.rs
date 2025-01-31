@@ -419,6 +419,9 @@ pub struct BackgroundTaskConfig {
         RegionSnapshotReplacementFinishConfig,
     /// configuration for TUF artifact replication task
     pub tuf_artifact_replication: TufArtifactReplicationConfig,
+    /// configuration for read-only region replacement start task
+    pub read_only_region_replacement_start:
+        ReadOnlyRegionReplacementStartConfig,
 }
 
 #[serde_as]
@@ -735,6 +738,14 @@ pub struct TufArtifactReplicationConfig {
     pub min_sled_replication: usize,
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ReadOnlyRegionReplacementStartConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PackageConfig {
@@ -993,6 +1004,7 @@ mod test {
             region_snapshot_replacement_finish.period_secs = 30
             tuf_artifact_replication.period_secs = 300
             tuf_artifact_replication.min_sled_replication = 3
+            read_only_region_replacement_start.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1194,6 +1206,10 @@ mod test {
                                 period_secs: Duration::from_secs(300),
                                 min_sled_replication: 3,
                             },
+                        read_only_region_replacement_start:
+                            ReadOnlyRegionReplacementStartConfig {
+                                period_secs: Duration::from_secs(30),
+                            },
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -1279,6 +1295,7 @@ mod test {
             region_snapshot_replacement_finish.period_secs = 30
             tuf_artifact_replication.period_secs = 300
             tuf_artifact_replication.min_sled_replication = 3
+            read_only_region_replacement_start.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             "##,

@@ -346,6 +346,38 @@ pub async fn run_region_snapshot_replacement_finish(
     status.finish_invoked_ok.len()
 }
 
+/// Run the read_only_region_replacement_start background task, returning how
+/// many actions were taken
+pub async fn run_read_only_region_replacement_start(
+    internal_client: &ClientTestContext,
+) -> usize {
+    let last_background_task = activate_background_task(
+        &internal_client,
+        "read_only_region_replacement_start",
+    )
+    .await;
+
+    let LastResult::Completed(last_result_completed) =
+        last_background_task.last
+    else {
+        panic!(
+            "unexpected {:?} returned from read_only_region_replacement_start \
+            task",
+            last_background_task.last,
+        );
+    };
+
+    let status =
+        serde_json::from_value::<ReadOnlyRegionReplacementStartStatus>(
+            last_result_completed.details,
+        )
+        .unwrap();
+
+    assert!(status.errors.is_empty());
+
+    status.requests_created_ok.len()
+}
+
 /// Run all replacement related background tasks until they aren't doing
 /// anything anymore.
 pub async fn run_replacement_tasks_to_completion(
@@ -361,7 +393,8 @@ pub async fn run_replacement_tasks_to_completion(
                 run_region_snapshot_replacement_start(internal_client).await +
                 run_region_snapshot_replacement_garbage_collection(internal_client).await +
                 run_region_snapshot_replacement_step(internal_client).await +
-                run_region_snapshot_replacement_finish(internal_client).await;
+                run_region_snapshot_replacement_finish(internal_client).await +
+                run_read_only_region_replacement_start(internal_client).await;
 
             if actions_taken > 0 {
                 Err(CondCheckError::<()>::NotYet)
