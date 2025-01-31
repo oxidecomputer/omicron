@@ -763,7 +763,7 @@ async fn sha2_hash(file: &mut tokio::fs::File) -> anyhow::Result<ArtifactHash> {
 }
 
 /// Run a `sled-dianostics` future and save it's output to a corresponding file.
-async fn save_diag_cmd_output_or_error<F, D: std::fmt::Debug>(
+async fn save_diag_cmd_output_or_error<F, S: serde::Serialize>(
     path: &Utf8Path,
     command: &str,
     future: F,
@@ -771,7 +771,7 @@ async fn save_diag_cmd_output_or_error<F, D: std::fmt::Debug>(
 where
     F: Future<
             Output = Result<
-                sled_agent_client::ResponseValue<D>,
+                sled_agent_client::ResponseValue<S>,
                 sled_agent_client::Error<sled_agent_client::types::Error>,
             >,
         > + Send,
@@ -780,11 +780,8 @@ where
     match result {
         Ok(result) => {
             let output = result.into_inner();
-            tokio::fs::write(
-                path.join(format!("{command}.txt")),
-                format!("{output:?}"),
-            )
-            .await?;
+            let json = serde_json::to_string(&output)?;
+            tokio::fs::write(path.join(format!("{command}.txt")), json).await?;
         }
         Err(err) => {
             tokio::fs::write(
