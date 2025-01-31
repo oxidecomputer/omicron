@@ -11,8 +11,8 @@ use super::blueprint_display::{
     BpTable, BpTableColumn, BpTableData, BpTableRow, KvListWithHeading, KvPair,
 };
 use super::{
-    zone_sort_key, Blueprint, ClickhouseClusterConfig,
-    CockroachDbPreserveDowngrade,
+    zone_sort_key, Blueprint, BlueprintDiffSummary, BlueprintZoneConfigDiff,
+    ClickhouseClusterConfig, CockroachDbPreserveDowngrade,
 };
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::Generation;
@@ -37,6 +37,20 @@ pub struct BpDiffZoneDetails {
     pub generation_before: Option<Generation>,
     pub generation_after: Option<Generation>,
     pub zones: Vec<BlueprintZoneConfig>,
+}
+
+impl BpDiffZoneDetails {
+    pub fn new<'a>(
+        generation_before: Option<Generation>,
+        generation_after: Option<Generation>,
+        zones_iter: impl Iterator<Item = &'a BlueprintZoneConfig>,
+    ) -> Self {
+        BpDiffZoneDetails {
+            generation_before,
+            generation_after,
+            zones: zones_iter.cloned().collect(),
+        }
+    }
 }
 
 impl BpTableData for BpDiffZoneDetails {
@@ -84,6 +98,58 @@ impl ZoneSortKey for ModifiedZone {
 }
 
 impl ModifiedZone {
+    pub fn from_diff(
+        diff: &BlueprintZoneConfigDiff,
+    ) -> Result<ModifiedZone, BpDiffZoneError> {
+        // Do we have any errors? If so, create a "reason" string.
+        let mut reason = String::new();
+        // These first two checks are only for backwards compatibility. They are
+        // all included in the zone_type comparison below.
+        if diff.zone_type.before.kind() != diff.zone_type.after.kind() {
+            let msg = format!(
+                "mismatched zone kind: before: {}, after: {}\n",
+                diff.zone_type.before.kind().report_str(),
+                diff.zone_type.after.kind().report_str(),
+            );
+            reason.push_str(&msg);
+        }
+        if diff.zone_type.before.underlay_ip()
+            != diff.zone_type.after.underlay_ip()
+        {
+            let msg = format!(
+                "mismatched underlay IP: before: {}, after: {}\n",
+                diff.zone_type.before.underlay_ip(),
+                diff.zone_type.after.underlay_ip()
+            );
+            reason.push_str(&msg);
+        }
+        if diff.zone_type.before != diff.zone_type.after {
+            let msg = format!(
+                "mismatched zone type: after: {:#?}\n",
+                diff.zone_type.after
+            );
+            reason.push_str(&msg);
+        }
+        if reason.is_empty() {
+            Ok(ModifiedZone {
+                prior_disposition: diff.disposition.before.clone(),
+                zone: BlueprintZoneConfig {
+                    disposition: diff.disposition.after.clone(),
+                    id: *diff.id.after,
+                    filesystem_pool: diff.filesystem_pool.after.clone(),
+                    zone_type: diff.zone_type.after.clone(),
+                },
+            })
+        } else {
+            Err(BpDiffZoneError {
+                zone_before_id: *diff.id.before,
+                zone_after_id: *diff.id.after,
+                reason,
+            })
+        }
+    }
+
+    // TODO: Legacy - remove
     #[allow(clippy::result_large_err)]
     pub fn new(
         before: BlueprintZoneConfig,
@@ -121,8 +187,8 @@ impl ModifiedZone {
             })
         } else {
             Err(BpDiffZoneError {
-                zone_before: before,
-                zone_after: after,
+                zone_before_id: before.id,
+                zone_after_id: after.id,
                 reason,
             })
         }
@@ -135,6 +201,27 @@ pub struct BpDiffZonesModified {
     pub generation_before: Generation,
     pub generation_after: Generation,
     pub zones: Vec<ModifiedZone>,
+}
+
+impl BpDiffZonesModified {
+    pub fn new<'a>(
+        generation_before: Generation,
+        generation_after: Generation,
+        zone_diffs: impl Iterator<Item = &'a BlueprintZoneConfigDiff<'a>>,
+    ) -> (BpDiffZonesModified, BpDiffZoneErrors) {
+        let mut zones = vec![];
+        let mut errors = vec![];
+        for diff in zone_diffs {
+            match ModifiedZone::from_diff(diff) {
+                Ok(modified_zone) => zones.push(modified_zone),
+                Err(error) => errors.push(error),
+            }
+        }
+        (
+            BpDiffZonesModified { generation_before, generation_after, zones },
+            BpDiffZoneErrors { generation_before, generation_after, errors },
+        )
+    }
 }
 
 impl BpTableData for BpDiffZonesModified {
@@ -175,8 +262,8 @@ pub struct BpDiffZoneErrors {
 
 #[derive(Debug)]
 pub struct BpDiffZoneError {
-    pub zone_before: BlueprintZoneConfig,
-    pub zone_after: BlueprintZoneConfig,
+    pub zone_before_id: OmicronZoneUuid,
+    pub zone_after_id: OmicronZoneUuid,
     pub reason: String,
 }
 
@@ -191,6 +278,29 @@ pub struct BpDiffZones {
 }
 
 impl BpDiffZones {
+    /// Convert from our diff summary to our display compatibility layer
+    /// from the prior version of code.
+    pub fn from_diff_summary<'a>(summary: &BlueprintDiffSummary<'a>) -> Self {
+        let mut diffs = BpDiffZones::default();
+        for sled_id in &summary.all_sleds {
+            if let Some(added) = summary.added_zones(sled_id) {
+                diffs.added.insert(*sled_id, added);
+            }
+            if let Some(removed) = summary.removed_zones(sled_id) {
+                diffs.removed.insert(*sled_id, removed);
+            }
+            if let Some(unchanged) = summary.unchanged_zones(sled_id) {
+                diffs.unchanged.insert(*sled_id, unchanged);
+            }
+            if let Some((modified, errors)) = summary.modified_zones(sled_id) {
+                diffs.modified.insert(*sled_id, modified);
+                diffs.errors.insert(*sled_id, errors);
+            }
+        }
+        diffs
+    }
+
+    // Legaacy: remove
     pub fn new(
         before: BTreeMap<SledUuid, BlueprintZonesConfig>,
         mut after: BTreeMap<SledUuid, BlueprintZonesConfig>,
@@ -1673,7 +1783,7 @@ impl fmt::Display for BlueprintDiffDisplayOriginal<'_> {
                 )?;
 
                 for err in &errors.errors {
-                    writeln!(f, "      zone id: {}", err.zone_before.id())?;
+                    writeln!(f, "      zone id: {}", err.zone_before_id)?;
                     writeln!(f, "      reason: {}", err.reason)?;
                 }
             }

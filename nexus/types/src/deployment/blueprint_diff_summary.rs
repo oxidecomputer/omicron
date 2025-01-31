@@ -1,13 +1,20 @@
 // TODO: Move this all to blueprint_diff.rs
 
-use super::blueprint_display::BpTable;
+use super::blueprint_diff::{
+    BpDiffZoneDetails, BpDiffZoneErrors, BpDiffZonesModified,
+};
+use super::blueprint_display::{
+    constants::*, linear_table_modified, linear_table_unchanged,
+    BpClickhouseServersTableSchema, BpDatasetsTableSchema, BpDiffState,
+    BpGeneration, BpOmicronZonesTableSchema, BpPhysicalDisksTableSchema,
+    BpTable, BpTableColumn, BpTableData, BpTableRow, KvListWithHeading, KvPair,
+};
 use super::{
     BlueprintDatasetsConfig, BlueprintDatasetsConfigDiff, BlueprintDiff,
     BlueprintPhysicalDisksConfig, BlueprintPhysicalDisksConfigDiff,
     BlueprintZoneConfig, BlueprintZoneConfigDiff, BlueprintZonesConfig,
     BlueprintZonesConfigDiff,
 };
-use daft::Leaf;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeSet;
@@ -17,6 +24,7 @@ use std::collections::BTreeSet;
 #[derive(Debug, Clone)]
 pub struct BlueprintDiffSummary<'a> {
     pub diff: &'a BlueprintDiff<'a>,
+    pub all_sleds: BTreeSet<SledUuid>,
     pub sleds_added: BTreeSet<SledUuid>,
     pub sleds_removed: BTreeSet<SledUuid>,
     pub sleds_modified: BTreeSet<SledUuid>,
@@ -98,8 +106,17 @@ impl<'a> BlueprintDiffSummary<'a> {
             }
         }
 
+        let all_sleds = sleds_added
+            .iter()
+            .chain(sleds_removed.iter())
+            .chain(sleds_modified.iter())
+            .chain(sleds_unchanged.iter())
+            .cloned()
+            .collect();
+
         BlueprintDiffSummary {
             diff,
+            all_sleds,
             sleds_added,
             sleds_removed,
             sleds_modified,
@@ -246,30 +263,22 @@ impl<'a> BlueprintDiffSummary<'a> {
     }
 
     /// Iterate over all added zones on a sled
-    pub fn added_zones(
-        &self,
-        sled_id: &SledUuid,
-    ) -> Option<(
-        Option<Generation>,
-        Option<Generation>,
-        Box<dyn Iterator<Item = &'a BlueprintZoneConfig> + 'a>,
-    )> {
+    pub fn added_zones(&self, sled_id: &SledUuid) -> Option<BpDiffZoneDetails> {
         // First check if the sled is added
         if let Some(&zones_cfg) = self.diff.blueprint_zones.added.get(sled_id) {
-            return Some((
+            return Some(BpDiffZoneDetails::new(
                 Some(zones_cfg.generation),
                 None,
-                Box::new(zones_cfg.zones.iter()),
+                zones_cfg.zones.iter(),
             ));
         }
 
-        // Then check if the sled is modified and there are any added zones
+        // Then check if the sled is modified and there are any removed zones
         self.diff.blueprint_zones.modified.get(sled_id).map(|zones_cfg_diff| {
-            (
+            BpDiffZoneDetails::new(
                 Some(*zones_cfg_diff.generation.before),
                 Some(*zones_cfg_diff.generation.after),
-                Box::new(zones_cfg_diff.zones.added.values().map(|z| *z))
-                    as Box<dyn Iterator<Item = &BlueprintZoneConfig>>,
+                zones_cfg_diff.zones.added.values().map(|z| *z),
             )
         })
     }
@@ -278,28 +287,23 @@ impl<'a> BlueprintDiffSummary<'a> {
     pub fn removed_zones(
         &self,
         sled_id: &SledUuid,
-    ) -> Option<(
-        Option<Generation>,
-        Option<Generation>,
-        Box<dyn Iterator<Item = &'a BlueprintZoneConfig> + 'a>,
-    )> {
+    ) -> Option<BpDiffZoneDetails> {
         // First check if the sled is removed
         if let Some(&zones_cfg) = self.diff.blueprint_zones.removed.get(sled_id)
         {
-            return Some((
+            return Some(BpDiffZoneDetails::new(
                 Some(zones_cfg.generation),
                 None,
-                Box::new(zones_cfg.zones.iter()),
+                zones_cfg.zones.iter(),
             ));
         }
 
         // Then check if the sled is modified and there are any removed zones
         self.diff.blueprint_zones.modified.get(sled_id).map(|zones_cfg_diff| {
-            (
+            BpDiffZoneDetails::new(
                 Some(*zones_cfg_diff.generation.before),
                 Some(*zones_cfg_diff.generation.after),
-                Box::new(zones_cfg_diff.zones.removed.values().map(|z| *z))
-                    as Box<dyn Iterator<Item = &BlueprintZoneConfig>>,
+                zones_cfg_diff.zones.removed.values().map(|z| *z),
             )
         })
     }
@@ -308,17 +312,39 @@ impl<'a> BlueprintDiffSummary<'a> {
     pub fn modified_zones(
         &self,
         sled_id: &SledUuid,
-    ) -> Option<(
-        Generation,
-        Generation,
-        impl Iterator<Item = &BlueprintZoneConfigDiff<'a>>,
-    )> {
+    ) -> Option<(BpDiffZonesModified, BpDiffZoneErrors)> {
         // Then check if the sled is modified and there are any added zones
         self.diff.blueprint_zones.modified.get(sled_id).map(|zones_cfg_diff| {
-            (
+            BpDiffZonesModified::new(
                 *zones_cfg_diff.generation.before,
                 *zones_cfg_diff.generation.after,
                 zones_cfg_diff.zones.modified.values(),
+            )
+        })
+    }
+
+    /// Iterate over all unchanged zones on a sled
+    pub fn unchanged_zones(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<BpDiffZoneDetails> {
+        // First check if the sled is unchanged
+        if let Some(&zones_cfg) =
+            self.diff.blueprint_zones.unchanged.get(sled_id)
+        {
+            return Some(BpDiffZoneDetails::new(
+                Some(zones_cfg.generation),
+                None,
+                zones_cfg.zones.iter(),
+            ));
+        }
+
+        // Then check if the sled is modified and there are any unchanged zones
+        self.diff.blueprint_zones.modified.get(sled_id).map(|zones_cfg_diff| {
+            BpDiffZoneDetails::new(
+                Some(*zones_cfg_diff.generation.before),
+                Some(*zones_cfg_diff.generation.after),
+                zones_cfg_diff.zones.unchanged.values().map(|z| *z),
             )
         })
     }
@@ -385,9 +411,5 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
     #[inline]
     fn new(diff: &'diff BlueprintDiffSummary<'diff>) -> Self {
         Self { diff }
-    }
-
-    fn to_zones_table(&self, sled_id: &SledUuid) -> Option<BpTable> {
-        todo!()
     }
 }
