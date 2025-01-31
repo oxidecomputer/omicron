@@ -175,6 +175,10 @@ pub(crate) fn generate_impl(
         println!("FAILED");
         return Ok(GenerateResult::Failures);
     }
+    if nproblems == 0 {
+        println!("SUCCESS");
+        return Ok(GenerateResult::Success);
+    }
 
     // Now reload the local files and make sure we have no more problems.
     println!("Re-checking by reloading local files ... ");
@@ -190,7 +194,6 @@ pub(crate) fn generate_impl(
     for api in apis.iter_apis() {
         let ident = api.ident();
         for version in api.iter_versions_semver() {
-            println!("API {} version {}", ident, version);
             // unwrap(): there should be a resolution for every managed API
             let resolution =
                 resolved.resolution_for_api_version(ident, version).unwrap();

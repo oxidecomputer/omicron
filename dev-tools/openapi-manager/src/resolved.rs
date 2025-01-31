@@ -170,7 +170,7 @@ pub enum Problem {
     },
 
     #[error(
-        "No local spec file was found for lockstep or non-blessed version.\
+        "No local spec file was found for lockstep or non-blessed version.  \
          This is normal if you have just changed a lockstep API or added \
          this version to a versioned API.  This tool can generate the file \
          for you."
@@ -333,12 +333,6 @@ impl<'a> Display for Fix<'a> {
                     "fix: write new file {} from generated",
                     generated.spec_file_name().path()
                 )?;
-                writeln!(
-                    f,
-                    "FIX NOTE: be sure to update the corresponding \
-                     progenitor client to refer to this new OpenAPI \
-                     document file!"
-                )?;
             }
             Fix::FixExtraFile { path, check_stale } => {
                 // XXX-dap add diff
@@ -384,6 +378,11 @@ impl<'a> Fix<'a> {
                     "created {}: {:?}",
                     &path,
                     overwrite_file(&path, generated.contents())?
+                );
+                eprintln!(
+                    "FIX NOTE: be sure to update the corresponding \
+                     progenitor client to refer to this new OpenAPI \
+                     document file!"
                 );
             }
             Fix::FixExtraFile { path, check_stale } => {
