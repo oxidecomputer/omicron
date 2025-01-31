@@ -28,6 +28,7 @@ pub struct Metadata {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case", tag = "t")]
 pub enum ArchiveType {
     // Originally defined in helios-build-utils (part of helios-omicron-brand):
     Baseline,
@@ -120,5 +121,31 @@ impl Metadata {
 
     pub fn is_control_plane(&self) -> bool {
         matches!(&self.t, ArchiveType::ControlPlane)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_deserialize() {
+        let metadata: Metadata = serde_json::from_str(
+            r#"{"v":"1","t":"layer","pkg":"nexus","version":"12.0.0-0.ci+git3a2ed5e97b3"}"#,
+        )
+        .unwrap();
+        assert!(metadata.is_layer());
+        let info = metadata.layer_info().unwrap();
+        assert_eq!(info.pkg, "nexus");
+        assert_eq!(info.version, "12.0.0-0.ci+git3a2ed5e97b3".parse().unwrap());
+
+        let metadata: Metadata = serde_json::from_str(
+            r#"{"v":"1","t":"os","i":{"checksum":"42eda100ee0e3bf44b9d0bb6a836046fa3133c378cd9d3a4ba338c3ba9e56eb7","name":"ci 3a2ed5e/9d37813 2024-12-20 08:54"}}"#,
+        ).unwrap();
+        assert!(metadata.is_os());
+
+        let metadata: Metadata =
+            serde_json::from_str(r#"{"v":"1","t":"control_plane"}"#).unwrap();
+        assert!(metadata.is_control_plane());
     }
 }
