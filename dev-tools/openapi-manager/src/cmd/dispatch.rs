@@ -73,10 +73,14 @@ pub enum Command {
 // XXX-dap TODO-doc, examples
 #[derive(Debug, Args)]
 struct BlessedSourceArgs {
-    #[clap(long, conflicts_with("blessed_from_git"))]
+    #[clap(
+        long,
+        conflicts_with("blessed_from_git"),
+        env("OPENAPI_MGR_BLESSED_FROM_DIR")
+    )]
     blessed_from_dir: Option<Utf8PathBuf>,
 
-    #[clap(long)]
+    #[clap(long, env("OPENAPI_MGR_BLESSED_FROM_GIT"))]
     // XXX-dap check no shell injection here
     blessed_from_git: Option<String>,
 }
@@ -128,7 +132,7 @@ impl From<GeneratedSourceArgs> for GeneratedSource {
 #[derive(Debug, Args)]
 pub struct LocalSourceArgs {
     /// local directory where this workspace's OpenAPI documents are stored
-    #[clap(long)]
+    #[clap(long, env("OPENAPI_MGR_DIR"))]
     dir: Option<Utf8PathBuf>,
 }
 
