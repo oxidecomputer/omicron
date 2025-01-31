@@ -146,7 +146,7 @@ pub(crate) fn check_impl(
                                 ),
                             )?;
                         }
-                        CheckStale::New => {
+                        CheckStale::New { .. } => {
                             display_heading(NEW);
                         }
                     }

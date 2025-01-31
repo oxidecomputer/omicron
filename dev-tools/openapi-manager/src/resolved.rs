@@ -9,6 +9,7 @@ use crate::apis::ManagedApi;
 use crate::apis::ManagedApis;
 use crate::compatibility::api_compatible;
 use crate::compatibility::OpenApiCompatibilityError;
+use crate::spec::overwrite_file;
 use crate::spec::Environment;
 use crate::spec_files_blessed::BlessedApiSpecFile;
 use crate::spec_files_blessed::BlessedFiles;
@@ -18,7 +19,7 @@ use crate::spec_files_generic::ApiSpecFileName;
 use crate::spec_files_local::LocalApiSpecFile;
 use crate::spec_files_local::LocalFiles;
 use crate::validation::validate_generated_openapi_document;
-use anyhow::anyhow;
+use anyhow::bail;
 use anyhow::Context;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
@@ -72,13 +73,53 @@ pub enum Note {
 
 /// Describes the result of resolving the blessed spec(s), generated spec(s),
 /// and local spec files for a particular API
-pub enum Resolution {
-    NoProblems,
-    Problems(Vec<Problem>),
+pub struct Resolution<'a> {
+    kind: ResolutionKind<'a>,
+    problems: Vec<Problem>,
+}
+
+impl<'a> Resolution<'a> {
+    pub fn new_lockstep(
+        generated: &'a GeneratedApiSpecFile,
+        problems: Vec<Problem>,
+    ) -> Resolution<'a> {
+        Resolution { kind: ResolutionKind::Lockstep(generated), problems }
+    }
+
+    pub fn new_blessed(problems: Vec<Problem>) -> Resolution<'a> {
+        Resolution { kind: ResolutionKind::Blessed, problems }
+    }
+
+    pub fn new_new_locally(
+        generated: &'a GeneratedApiSpecFile,
+        problems: Vec<Problem>,
+    ) -> Resolution<'a> {
+        Resolution { kind: ResolutionKind::NewLocally(generated), problems }
+    }
+
+    pub fn problems(&self) -> impl Iterator<Item = &'_ Problem> + '_ {
+        self.problems.iter()
+    }
+
+    // XXX-dap add "are all problems fixable"
+    // XXX-dap add a thing to return the list of fixes
+}
+
+#[derive(Debug)]
+pub enum ResolutionKind<'a> {
+    /// This is a lockstep API
+    Lockstep(&'a GeneratedApiSpecFile),
+    /// This is a versioned API and this version is blessed
+    Blessed,
+    /// This version is new to the current workspace (i.e., not present
+    /// upstream)
+    NewLocally(&'a GeneratedApiSpecFile),
 }
 
 /// Describes a problem resolving the blessed spec(s), generated spec(s), and
 /// local spec files for a particular API
+// XXX-dap this should be a struct with ProblemKind and resolution so that fix()
+// and fixable() don't require an argument (and can't be mismatched)
 #[derive(Debug, Error)]
 pub enum Problem {
     // This kind of problem is not associated with any *supported* version of an
@@ -104,6 +145,8 @@ pub enum Problem {
     )]
     BlessedVersionMissingLocal { spec_file_name: ApiSpecFileName },
 
+    // XXX-dap where is the error that means "the blessed file does not match
+    // the corresponding local file"
     #[error(
         "Found extra local file for blessed version that does not match the \
          blessed (upstream) spec file: {spec_file_names}.  This can happen if \
@@ -133,6 +176,12 @@ pub enum Problem {
     LocalVersionMissingLocal,
 
     #[error(
+        "Extra (incorrect) spec files were found for non-blessed version: \
+         {spec_file_names}.  This tool can remove the files for you"
+    )]
+    LocalVersionExtra { spec_file_names: DisplayableVec<ApiSpecFileName> },
+
+    #[error(
         "Spec generated from the current code does not match this locally-\
          added spec: {spec_file_names}.  This tool can update the local \
          file(s) for you."
@@ -160,6 +209,13 @@ pub enum Problem {
         #[source]
         source: anyhow::Error,
     },
+
+    #[error("Extra file associated with API {api_ident:?} is stale")]
+    ExtraFileStale {
+        api_ident: ApiIdent,
+        path: Utf8PathBuf,
+        check_stale: CheckStale,
+    },
 }
 
 impl Problem {
@@ -170,9 +226,170 @@ impl Problem {
             Problem::BlessedVersionExtraLocalSpec { .. } => true,
             Problem::BlessedVersionBroken { .. } => false,
             Problem::LocalVersionMissingLocal => true,
+            Problem::LocalVersionExtra { .. } => true,
             Problem::LocalVersionStale { .. } => true,
             Problem::GeneratedValidationError { .. } => false,
+            Problem::ExtraFileStale { .. } => true,
         }
+    }
+
+    pub fn fix<'a>(
+        &'a self,
+        resolution: &Resolution<'a>,
+        // XXX-dap can this return value not be a vec?
+    ) -> Result<Option<Vec<Fix<'a>>>, anyhow::Error> {
+        let kind = &resolution.kind;
+        Ok(match self {
+            Problem::LocalSpecFilesOrphaned { spec_file_names } => {
+                Some(vec![Fix::DeleteFiles { files: spec_file_names }])
+            }
+            Problem::BlessedVersionMissingLocal { .. } => None,
+            Problem::BlessedVersionExtraLocalSpec { spec_file_names } => {
+                Some(vec![Fix::DeleteFiles { files: spec_file_names }])
+            }
+            Problem::BlessedVersionBroken { .. } => None,
+            Problem::LocalVersionMissingLocal => {
+                if let ResolutionKind::Lockstep(generated) = kind {
+                    Some(vec![Fix::FixLockstepFile { generated }])
+                } else if let ResolutionKind::NewLocally(generated) = kind {
+                    Some(vec![Fix::FixVersionedFiles {
+                        old: DisplayableVec(Vec::new()),
+                        generated,
+                    }])
+                } else {
+                    bail!(
+                        "unexpected problem / resolution kind: {:?} / {:?}",
+                        self,
+                        kind
+                    )
+                }
+            }
+            Problem::LocalVersionExtra { spec_file_names } => {
+                Some(vec![Fix::DeleteFiles { files: spec_file_names }])
+            }
+            Problem::LocalVersionStale { spec_file_names } => {
+                if let ResolutionKind::Lockstep(generated) = kind {
+                    Some(vec![Fix::FixLockstepFile { generated }])
+                } else if let ResolutionKind::NewLocally(generated) = kind {
+                    Some(vec![Fix::FixVersionedFiles {
+                        old: spec_file_names.clone(),
+                        generated,
+                    }])
+                } else {
+                    bail!(
+                        "unexpected problem / resolution kind: {:?} / {:?}",
+                        self,
+                        kind
+                    );
+                }
+            }
+            Problem::GeneratedValidationError { .. } => None,
+            Problem::ExtraFileStale { path, check_stale, .. } => {
+                Some(vec![Fix::FixExtraFile { path, check_stale }])
+            }
+        })
+    }
+}
+
+pub enum Fix<'a> {
+    DeleteFiles {
+        files: &'a DisplayableVec<ApiSpecFileName>,
+    },
+    FixLockstepFile {
+        generated: &'a GeneratedApiSpecFile,
+    },
+    FixVersionedFiles {
+        old: DisplayableVec<ApiSpecFileName>,
+        generated: &'a GeneratedApiSpecFile,
+    },
+    FixExtraFile {
+        path: &'a Utf8Path,
+        check_stale: &'a CheckStale,
+    },
+}
+
+impl<'a> Display for Fix<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Ok(match self {
+            Fix::DeleteFiles { files } => {
+                writeln!(f, "fix: delete files: {files}")?;
+            }
+            Fix::FixLockstepFile { generated } => {
+                // XXX-dap add diff
+                writeln!(
+                    f,
+                    "fix: rewrite lockstep file {}",
+                    generated.spec_file_name().path()
+                )?;
+            }
+            Fix::FixVersionedFiles { old, generated } => {
+                writeln!(f, "fix: remove old files: {old}")?;
+                writeln!(
+                    f,
+                    "fix: write new file: {}",
+                    generated.spec_file_name().path()
+                )?;
+            }
+            Fix::FixExtraFile { path, check_stale } => {
+                // XXX-dap add diff
+                let label = match check_stale {
+                    CheckStale::Modified { .. } => "rewrite",
+                    CheckStale::New { .. } => "write new",
+                };
+                writeln!(f, "fix: {label} file: {path}")?;
+            }
+        })
+    }
+}
+
+impl<'a> Fix<'a> {
+    fn execute(&self, env: &Environment) -> anyhow::Result<()> {
+        let root = env.openapi_dir();
+        match self {
+            Fix::DeleteFiles { files } => {
+                for f in &files.0 {
+                    let path = root.join(f.path());
+                    fs_err::remove_file(&path)?;
+                    // XXX-dap maybe return a representation instead
+                    eprintln!("removed {}", path);
+                }
+            }
+            Fix::FixLockstepFile { generated } => {
+                let path = root.join(generated.spec_file_name().path());
+                eprintln!(
+                    "updated {}: {:?}",
+                    &path,
+                    overwrite_file(&path, generated.contents())?
+                );
+            }
+            Fix::FixVersionedFiles { old, generated } => {
+                for f in &old.0 {
+                    let path = root.join(f.path());
+                    fs_err::remove_file(&path)?;
+                    eprintln!("removed {}", path);
+                }
+
+                let path = root.join(generated.spec_file_name().path());
+                eprintln!(
+                    "created {}: {:?}",
+                    &path,
+                    overwrite_file(&path, generated.contents())?
+                );
+            }
+            Fix::FixExtraFile { path, check_stale } => {
+                let expected_contents = match check_stale {
+                    CheckStale::Modified { expected, .. } => expected,
+                    CheckStale::New { expected } => expected,
+                };
+                eprintln!(
+                    "write {}: {:?}",
+                    &path,
+                    overwrite_file(&path, expected_contents)?
+                );
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -181,20 +398,20 @@ impl Problem {
 
 /// Resolve differences between blessed spec(s), the generated spec, and any
 /// local spec files for a given API
-pub struct Resolved {
+pub struct Resolved<'a> {
     notes: Vec<Note>,
     non_version_problems: Vec<Problem>,
-    api_results: BTreeMap<ApiIdent, BTreeMap<semver::Version, Resolution>>,
+    api_results: BTreeMap<ApiIdent, BTreeMap<semver::Version, Resolution<'a>>>,
 }
 
-impl Resolved {
+impl<'a> Resolved<'a> {
     pub fn new(
-        env: &Environment,
-        apis: &ManagedApis,
-        blessed: &BlessedFiles,
-        generated: &GeneratedFiles,
-        local: &LocalFiles,
-    ) -> Resolved {
+        env: &'a Environment,
+        apis: &'a ManagedApis,
+        blessed: &'a BlessedFiles,
+        generated: &'a GeneratedFiles,
+        local: &'a LocalFiles,
+    ) -> Resolved<'a> {
         // First, assemble a list of supported versions for each API, as defined
         // in the Rust list of supported versions.  We'll use this to identify
         // any blessed spec files or local spec files that don't belong at all.
@@ -321,13 +538,13 @@ fn resolve_orphaned_local_specs<'a>(
     })
 }
 
-fn resolve_api(
-    env: &Environment,
-    api: &ManagedApi,
-    api_blessed: Option<&BTreeMap<semver::Version, Vec<BlessedApiSpecFile>>>,
-    api_generated: &BTreeMap<semver::Version, Vec<GeneratedApiSpecFile>>,
-    api_local: Option<&BTreeMap<semver::Version, Vec<LocalApiSpecFile>>>,
-) -> BTreeMap<semver::Version, Resolution> {
+fn resolve_api<'a>(
+    env: &'a Environment,
+    api: &'a ManagedApi,
+    api_blessed: Option<&'a BTreeMap<semver::Version, Vec<BlessedApiSpecFile>>>,
+    api_generated: &'a BTreeMap<semver::Version, Vec<GeneratedApiSpecFile>>,
+    api_local: Option<&'a BTreeMap<semver::Version, Vec<LocalApiSpecFile>>>,
+) -> BTreeMap<semver::Version, Resolution<'a>> {
     if api.is_lockstep() {
         resolve_api_lockstep(env, api, api_generated, api_local)
     } else {
@@ -391,12 +608,12 @@ fn iter_only<T: Debug>(
     }
 }
 
-fn resolve_api_lockstep(
-    env: &Environment,
-    api: &ManagedApi,
-    api_generated: &BTreeMap<semver::Version, Vec<GeneratedApiSpecFile>>,
-    api_local: Option<&BTreeMap<semver::Version, Vec<LocalApiSpecFile>>>,
-) -> BTreeMap<semver::Version, Resolution> {
+fn resolve_api_lockstep<'a>(
+    env: &'a Environment,
+    api: &'a ManagedApi,
+    api_generated: &'a BTreeMap<semver::Version, Vec<GeneratedApiSpecFile>>,
+    api_local: Option<&'a BTreeMap<semver::Version, Vec<LocalApiSpecFile>>>,
+) -> BTreeMap<semver::Version, Resolution<'a>> {
     assert!(api.is_lockstep());
 
     // unwrap(): Lockstep APIs have exactly one version.
@@ -442,34 +659,35 @@ fn resolve_api_lockstep(
             }
         });
 
-    let problem = match local {
-        Some(local_file) if local_file.contents() == generated.contents() => {
-            None
-        }
-        Some(stale) => Some(Problem::LocalVersionStale {
+    let mut problems = Vec::new();
+
+    // Validate the generated API document.
+    validate_generated(env, api, version, generated, &mut problems);
+
+    match local {
+        Some(local_file) if local_file.contents() == generated.contents() => (),
+        Some(stale) => problems.push(Problem::LocalVersionStale {
             spec_file_names: DisplayableVec(vec![stale
                 .spec_file_name()
                 .clone()]),
         }),
-        None => Some(Problem::LocalVersionMissingLocal),
+        None => problems.push(Problem::LocalVersionMissingLocal),
     };
 
-    let resolution = match problem {
-        Some(p) => Resolution::Problems(vec![p]),
-        None => Resolution::NoProblems,
-    };
-
-    BTreeMap::from([((version.clone(), resolution))])
+    BTreeMap::from([((
+        version.clone(),
+        Resolution::new_lockstep(generated, problems),
+    ))])
 }
 
-fn resolve_api_version(
-    env: &Environment,
-    api: &ManagedApi,
-    version: &semver::Version,
-    blessed: Option<&BlessedApiSpecFile>,
-    generated: &GeneratedApiSpecFile,
-    local: &[LocalApiSpecFile],
-) -> Resolution {
+fn resolve_api_version<'a>(
+    env: &'_ Environment,
+    api: &'_ ManagedApi,
+    version: &'_ semver::Version,
+    blessed: Option<&'a BlessedApiSpecFile>,
+    generated: &'a GeneratedApiSpecFile,
+    local: &'a [LocalApiSpecFile],
+) -> Resolution<'a> {
     match blessed {
         Some(blessed) => resolve_api_version_blessed(
             env, api, version, blessed, generated, local,
@@ -478,14 +696,14 @@ fn resolve_api_version(
     }
 }
 
-fn resolve_api_version_blessed(
-    env: &Environment,
-    api: &ManagedApi,
-    version: &semver::Version,
-    blessed: &BlessedApiSpecFile,
-    generated: &GeneratedApiSpecFile,
-    local: &[LocalApiSpecFile],
-) -> Resolution {
+fn resolve_api_version_blessed<'a>(
+    env: &'_ Environment,
+    api: &'_ ManagedApi,
+    version: &'_ semver::Version,
+    blessed: &'a BlessedApiSpecFile,
+    generated: &'a GeneratedApiSpecFile,
+    local: &'a [LocalApiSpecFile],
+) -> Resolution<'a> {
     let mut problems = Vec::new();
 
     // Validate the generated API document.
@@ -532,46 +750,44 @@ fn resolve_api_version_blessed(
         problems.push(Problem::BlessedVersionExtraLocalSpec { spec_file_names })
     }
 
-    if problems.is_empty() {
-        Resolution::NoProblems
-    } else {
-        Resolution::Problems(problems)
-    }
+    Resolution::new_blessed(problems)
 }
 
-fn resolve_api_version_local(
-    env: &Environment,
-    api: &ManagedApi,
-    version: &semver::Version,
-    generated: &GeneratedApiSpecFile,
-    local: &[LocalApiSpecFile],
-) -> Resolution {
+fn resolve_api_version_local<'a>(
+    env: &'_ Environment,
+    api: &'_ ManagedApi,
+    version: &'_ semver::Version,
+    generated: &'a GeneratedApiSpecFile,
+    local: &'a [LocalApiSpecFile],
+) -> Resolution<'a> {
     let mut problems = Vec::new();
 
     // Validate the generated API document.
     validate_generated(env, api, version, generated, &mut problems);
 
-    if local.is_empty() {
-        // XXX-dap it would be weird if there were _more_ than one matching one.
-        problems.push(Problem::LocalVersionMissingLocal);
-    } else {
-        let (matching, non_matching): (Vec<_>, Vec<_>) = local
-            .iter()
-            .partition(|local| local.contents() == generated.contents());
+    let (matching, non_matching): (Vec<_>, Vec<_>) = local
+        .iter()
+        .partition(|local| local.contents() == generated.contents());
+    let spec_file_names = DisplayableVec(
+        non_matching.iter().map(|s| s.spec_file_name().clone()).collect(),
+    );
 
-        if !non_matching.is_empty() {
-            let spec_file_names = DisplayableVec(
-                local.iter().map(|s| s.spec_file_name().clone()).collect(),
-            );
+    if matching.is_empty() {
+        // There was no matching spec.
+        if non_matching.is_empty() {
+            // There were no non-matching specs, either.
+            problems.push(Problem::LocalVersionMissingLocal);
+        } else {
+            // There were non-matching specs.  This is your basic "stale" case.
             problems.push(Problem::LocalVersionStale { spec_file_names });
         }
+    } else if !non_matching.is_empty() {
+        // There was a matching spec, but also some non-matching ones.
+        // These are superfluous.  (It's not clear how this could happen.)
+        problems.push(Problem::LocalVersionExtra { spec_file_names });
     }
 
-    if problems.is_empty() {
-        Resolution::NoProblems
-    } else {
-        Resolution::Problems(problems)
-    }
+    Resolution::new_new_locally(generated, problems)
 }
 
 fn validate_generated(
@@ -597,19 +813,10 @@ fn validate_generated(
                 match status {
                     CheckStatus::Fresh => (),
                     CheckStatus::Stale(check_stale) => {
-                        problems.push(Problem::GeneratedValidationError {
+                        problems.push(Problem::ExtraFileStale {
                             api_ident: api.ident().clone(),
-                            version: version.clone(),
-                            source: anyhow!(
-                                "related file {:?}: {}",
-                                path,
-                                match check_stale {
-                                    CheckStale::New =>
-                                        "missing (this tool can create it)",
-                                    CheckStale::Modified { .. } =>
-                                        "stale (this tool can update it)",
-                                }
-                            ),
+                            path,
+                            check_stale,
                         });
                     }
                 }
@@ -657,7 +864,7 @@ pub(crate) fn check_file(
                 expected: contents,
             }))
         }
-        None => Ok(CheckStatus::Stale(CheckStale::New)),
+        None => Ok(CheckStatus::Stale(CheckStale::New { expected: contents })),
     }
 }
 
@@ -681,5 +888,5 @@ pub(crate) enum CheckStatus {
 #[must_use]
 pub(crate) enum CheckStale {
     Modified { full_path: Utf8PathBuf, actual: Vec<u8>, expected: Vec<u8> },
-    New,
+    New { expected: Vec<u8> },
 }

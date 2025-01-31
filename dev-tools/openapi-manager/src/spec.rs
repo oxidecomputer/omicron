@@ -416,7 +416,11 @@ pub(crate) use crate::environment::Environment;
 ///
 /// The file is left unchanged if the contents are the same. That's to avoid
 /// mtime-based recompilations.
-fn overwrite_file(path: &Utf8Path, contents: &[u8]) -> Result<OverwriteStatus> {
+// XXX-dap remove pub
+pub fn overwrite_file(
+    path: &Utf8Path,
+    contents: &[u8],
+) -> Result<OverwriteStatus> {
     // Only overwrite the file if the contents are actually different.
     let existing_contents =
         read_opt(path).context("failed to read contents on disk")?;

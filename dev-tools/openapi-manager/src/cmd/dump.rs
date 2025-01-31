@@ -5,7 +5,7 @@
 use crate::{
     apis::{ApiIdent, ManagedApis},
     environment::{BlessedSource, GeneratedSource},
-    resolved::{Resolution, Resolved},
+    resolved::Resolved,
     spec::Environment,
     spec_files_generic::ApiSpecFile,
 };
@@ -60,12 +60,20 @@ pub(crate) fn dump_impl(
             // unwrap(): there should be a resolution for every managed API
             let resolution =
                 resolved.resolution_for_api_version(ident, version).unwrap();
-            match resolution {
-                Resolution::NoProblems => println!("OK"),
-                Resolution::Problems(problems) => {
-                    println!("ERROR");
-                    for p in problems {
-                        println!("    PROBLEM: {}\n", p);
+            let problems: Vec<_> = resolution.problems().collect();
+            if problems.is_empty() {
+                println!("OK");
+            } else {
+                println!("ERROR");
+                for p in problems {
+                    println!("    PROBLEM: {}\n", p);
+                    if let Some(fixes) = p.fix(resolution)? {
+                        assert!(p.is_fixable());
+                        for f in fixes {
+                            println!("        {}", f);
+                        }
+                    } else {
+                        assert!(!p.is_fixable());
                     }
                 }
             }

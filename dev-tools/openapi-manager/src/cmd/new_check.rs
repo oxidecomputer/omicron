@@ -6,7 +6,7 @@ use crate::{
     apis::ManagedApis,
     cmd::output::{OutputOpts, Styles},
     environment::{BlessedSource, GeneratedSource},
-    resolved::{Problem, Resolution, Resolved},
+    resolved::Resolved,
     spec::Environment,
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
 };
@@ -72,14 +72,15 @@ pub(crate) fn new_check_impl(
             // unwrap(): there should be a resolution for every managed API
             let resolution =
                 resolved.resolution_for_api_version(ident, version).unwrap();
-            let (summary, problems): (&str, &[Problem]) = match resolution {
-                Resolution::NoProblems => ("OK", &[]),
-                Resolution::Problems(problems) => {
-                    let fixable = problems.iter().all(|p| p.is_fixable());
-                    found_problems = true;
-                    found_unfixable = found_unfixable || (!fixable);
-                    (if fixable { "Stale" } else { "Error" }, &problems)
-                }
+            let problems: Vec<_> = resolution.problems().collect();
+            let summary = if problems.len() == 0 {
+                "OK"
+            } else if problems.iter().all(|p| p.is_fixable()) {
+                found_problems = true;
+                "STALE"
+            } else {
+                found_unfixable = true;
+                "ERROR"
             };
 
             println!(
