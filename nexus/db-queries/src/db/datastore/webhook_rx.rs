@@ -13,6 +13,7 @@ use crate::db::datastore::RunnableQuery;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::Generation;
+use crate::db::model::WebhookEventClass;
 use crate::db::model::WebhookGlob;
 use crate::db::model::WebhookReceiver;
 use crate::db::model::WebhookReceiverConfig;
@@ -45,7 +46,6 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         params: params::WebhookCreate,
-        event_classes: &[&str],
     ) -> CreateResult<WebhookReceiverConfig> {
         // TODO(eliza): someday we gotta allow creating webhooks with more
         // restrictive permissions...
@@ -96,7 +96,6 @@ impl DataStore {
                             opctx,
                             rx.identity.id.into(),
                             subscription,
-                            event_classes,
                             &conn,
                         )
                         .await
@@ -162,18 +161,11 @@ impl DataStore {
         opctx: &OpContext,
         authz_rx: &authz::WebhookReceiver,
         subscription: WebhookSubscriptionKind,
-        event_classes: &[&str],
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::CreateChild, authz_rx).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
         let num_created = self
-            .add_subscription_on_conn(
-                opctx,
-                authz_rx.id(),
-                subscription,
-                event_classes,
-                &conn,
-            )
+            .add_subscription_on_conn(opctx, authz_rx.id(), subscription, &conn)
             .await
             .map_err(|e| match e {
                 TransactionError::CustomError(e) => e,
@@ -204,7 +196,7 @@ impl DataStore {
             .filter(subscription_dsl::rx_id.eq(rx_id))
             .filter(subscription_dsl::glob.is_null())
             .select(subscription_dsl::event_class)
-            .load_async::<String>(conn)
+            .load_async::<WebhookEventClass>(conn)
             .await
             .map_err(|e| {
                 public_error_from_diesel(
@@ -237,7 +229,6 @@ impl DataStore {
         opctx: &OpContext,
         rx_id: WebhookReceiverUuid,
         subscription: WebhookSubscriptionKind,
-        event_classes: &[&str],
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<usize, TransactionError<Error>> {
         match subscription {
@@ -262,8 +253,7 @@ impl DataStore {
                     .insert_and_get_result_async(conn)
                     .await
                     .map_err(async_insert_error_to_txn(rx_id))?;
-                self.glob_generate_exact_subs(opctx, &glob, event_classes, conn)
-                    .await
+                self.glob_generate_exact_subs(opctx, &glob, conn).await
             }
         }
     }
@@ -296,7 +286,6 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         glob: &WebhookRxEventGlob,
-        event_classes: &[&str],
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<usize, TransactionError<Error>> {
         let regex = match regex::Regex::new(&glob.glob.regex) {
@@ -317,15 +306,15 @@ impl DataStore {
             }
         };
         let mut created = 0;
-        for class in event_classes {
-            if !regex.is_match(class) {
+        for &class in WebhookEventClass::ALL_CLASSES {
+            if !regex.is_match(class.as_str()) {
                 slog::debug!(
                     &opctx.log,
                     "webhook glob does not matche event class";
                     "webhook_id" => ?glob.rx_id,
                     "glob" => ?glob.glob.glob,
                     "regex" => ?regex,
-                    "event_class" => ?class,
+                    "event_class" => %class,
                 );
                 continue;
             }
@@ -336,10 +325,10 @@ impl DataStore {
                 "webhook_id" => ?glob.rx_id,
                 "glob" => ?glob.glob.glob,
                 "regex" => ?regex,
-                "event_class" => ?class,
+                "event_class" => %class,
             );
             self.add_exact_sub_on_conn(
-                WebhookRxSubscription::for_glob(&glob, class.to_string()),
+                WebhookRxSubscription::for_glob(&glob, class),
                 conn,
             )
             .await?;
@@ -361,21 +350,19 @@ impl DataStore {
     /// the provided `event_class`.
     pub(crate) async fn webhook_rx_list_subscribed_to_event_on_conn(
         &self,
-        event_class: impl ToString,
+        event_class: WebhookEventClass,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<
         Vec<(WebhookReceiver, WebhookRxSubscription)>,
         diesel::result::Error,
     > {
-        let class = event_class.to_string();
-
-        Self::rx_list_subscribed_query(class)
+        Self::rx_list_subscribed_query(event_class)
             .load_async::<(WebhookReceiver, WebhookRxSubscription)>(conn)
             .await
     }
 
     fn rx_list_subscribed_query(
-        event_class: String,
+        event_class: WebhookEventClass,
     ) -> impl RunnableQuery<(WebhookReceiver, WebhookRxSubscription)> {
         subscription_dsl::webhook_rx_subscription
             .filter(subscription_dsl::event_class.eq(event_class))
@@ -484,113 +471,91 @@ mod test {
         let logctx = dev::test_setup_log("test_event_class_globs");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        let event_classes: &[&str] = &[
-            "notfoo",
-            "foo.bar",
-            "foo.baz",
-            "foo.bar.baz",
-            "foo.baz.bar",
-            "foo.baz.quux.bar",
-            "baz.quux.bar",
-        ];
-
-        let foo_star = datastore
-            .webhook_rx_create(
-                opctx,
-                params::WebhookCreate {
-                    identity: IdentityMetadataCreateParams {
-                        name: "foo-star".parse().unwrap(),
-                        description: String::new(),
+        let mut all_rxs = Vec::new();
+        async fn create_rx(
+            datastore: &DataStore,
+            opctx: &OpContext,
+            all_rxs: &mut Vec<WebhookReceiverConfig>,
+            name: &str,
+            subscription: &str,
+        ) -> WebhookReceiverConfig {
+            let rx = datastore
+                .webhook_rx_create(
+                    opctx,
+                    params::WebhookCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: name.parse().unwrap(),
+                            description: String::new(),
+                        },
+                        endpoint: format!("http://{name}").parse().unwrap(),
+                        secrets: vec![name.to_string()],
+                        events: vec![subscription.to_string()],
+                        disable_probes: false,
                     },
-                    endpoint: "http://foo.star".parse().unwrap(),
-                    secrets: Vec::new(),
-                    events: vec!["foo.*".to_string()],
-                    disable_probes: false,
-                },
-                &event_classes,
-            )
-            .await
-            .unwrap();
+                )
+                .await
+                .unwrap();
+            all_rxs.push(rx.clone());
+            rx
+        }
 
-        let foo_starstar = datastore
-            .webhook_rx_create(
-                opctx,
-                params::WebhookCreate {
-                    identity: IdentityMetadataCreateParams {
-                        name: "foo-starstar".parse().unwrap(),
-                        description: String::new(),
-                    },
-                    endpoint: "http://foo.starstar".parse().unwrap(),
-                    secrets: Vec::new(),
-                    events: vec!["foo.**".to_string()],
-                    disable_probes: false,
-                },
-                &event_classes,
-            )
-            .await
-            .unwrap();
-
-        let foo_bar = datastore
-            .webhook_rx_create(
-                opctx,
-                params::WebhookCreate {
-                    identity: IdentityMetadataCreateParams {
-                        name: "foo-bar".parse().unwrap(),
-                        description: String::new(),
-                    },
-                    endpoint: "http://foo.bar".parse().unwrap(),
-                    secrets: Vec::new(),
-                    events: vec!["foo.bar".to_string()],
-                    disable_probes: false,
-                },
-                &event_classes,
-            )
-            .await
-            .unwrap();
-
-        let foo_starstar_bar = datastore
-            .webhook_rx_create(
-                opctx,
-                params::WebhookCreate {
-                    identity: IdentityMetadataCreateParams {
-                        name: "foo-starstar-bar".parse().unwrap(),
-                        description: String::new(),
-                    },
-                    endpoint: "http://foo.starstar.bar".parse().unwrap(),
-                    secrets: Vec::new(),
-                    events: vec!["foo.**.bar".parse().unwrap()],
-                    disable_probes: false,
-                },
-                &event_classes,
-            )
-            .await
-            .unwrap();
-
-        let starstar_bar = datastore
-            .webhook_rx_create(
-                opctx,
-                params::WebhookCreate {
-                    identity: IdentityMetadataCreateParams {
-                        name: "starstar-bar".parse().unwrap(),
-                        description: String::new(),
-                    },
-                    endpoint: "http://starstar.bar".parse().unwrap(),
-                    secrets: Vec::new(),
-                    events: vec!["**.bar".parse().unwrap()],
-                    disable_probes: false,
-                },
-                &event_classes,
-            )
-            .await
-            .unwrap();
+        let test_star =
+            create_rx(&datastore, &opctx, &mut all_rxs, "test-star", "test.*")
+                .await;
+        let test_starstar = create_rx(
+            &datastore,
+            &opctx,
+            &mut all_rxs,
+            "test-starstar",
+            "test.**",
+        )
+        .await;
+        let test_foo_star = create_rx(
+            &datastore,
+            &opctx,
+            &mut all_rxs,
+            "test-foo-star",
+            "test.foo.*",
+        )
+        .await;
+        let test_star_baz = create_rx(
+            &datastore,
+            &opctx,
+            &mut all_rxs,
+            "test-star-baz",
+            "test.*.baz",
+        )
+        .await;
+        let test_starstar_baz = create_rx(
+            &datastore,
+            &opctx,
+            &mut all_rxs,
+            "test-starstar-baz",
+            "test.**.baz",
+        )
+        .await;
+        let test_quux_star = create_rx(
+            &datastore,
+            &opctx,
+            &mut all_rxs,
+            "test-quux-star",
+            "test.quux.*",
+        )
+        .await;
+        let test_quux_starstar = create_rx(
+            &datastore,
+            &opctx,
+            &mut all_rxs,
+            "test-quux-starstar",
+            "test.quux.**",
+        )
+        .await;
 
         async fn check_event(
             datastore: &DataStore,
-            // logctx: &LogContext,
-            event_class: &str,
+            all_rxs: &Vec<WebhookReceiverConfig>,
+            event_class: WebhookEventClass,
             matches: &[&WebhookReceiverConfig],
-            not_matches: &[&WebhookReceiverConfig],
         ) {
             let subscribed = datastore
                 .webhook_rx_list_subscribed_to_event_on_conn(
@@ -605,7 +570,7 @@ mod test {
                 .into_iter()
                 .map(|(rx, subscription)| {
                     eprintln!(
-                        "receiver is subscribed to event {event_class:?}:\n\t\
+                        "receiver is subscribed to event {event_class}:\n\t\
                             rx: {} ({})\n\tsubscription: {subscription:?}",
                         rx.identity.name, rx.identity.id,
                     );
@@ -616,15 +581,22 @@ mod test {
             for WebhookReceiverConfig { rx, events, .. } in matches {
                 assert!(
                     subscribed.contains(&rx.identity),
-                    "expected {rx:?} to be subscribed to {event_class:?}\n\
+                    "expected {rx:?} to be subscribed to {event_class}\n\
                      subscriptions: {events:?}"
                 );
             }
 
+            let not_matches = all_rxs.iter().filter(
+                |WebhookReceiverConfig { rx, .. }| {
+                    matches
+                        .iter()
+                        .all(|match_rx| rx.identity != match_rx.rx.identity)
+                },
+            );
             for WebhookReceiverConfig { rx, events, .. } in not_matches {
                 assert!(
                     !subscribed.contains(&rx.identity),
-                    "expected {rx:?} to not be subscribed to {event_class:?}\n\
+                    "expected {rx:?} to not be subscribed to {event_class}\n\
                      subscriptions: {events:?}"
                 );
             }
@@ -632,65 +604,45 @@ mod test {
 
         check_event(
             datastore,
-            "notfoo",
-            &[],
+            &all_rxs,
+            WebhookEventClass::TestFoo,
+            &[&test_star, &test_starstar],
+        )
+        .await;
+        check_event(
+            datastore,
+            &all_rxs,
+            WebhookEventClass::TestFooBar,
+            &[&test_starstar, &test_foo_star],
+        )
+        .await;
+        check_event(
+            datastore,
+            &all_rxs,
+            WebhookEventClass::TestFooBaz,
             &[
-                &foo_star,
-                &foo_starstar,
-                &foo_bar,
-                &foo_starstar_bar,
-                &starstar_bar,
+                &test_starstar,
+                &test_foo_star,
+                &test_star_baz,
+                &test_starstar_baz,
             ],
         )
         .await;
-
         check_event(
             datastore,
-            "foo.bar",
-            &[&foo_star, &foo_starstar, &foo_bar, &starstar_bar],
-            &[&foo_starstar_bar],
+            &all_rxs,
+            WebhookEventClass::TestQuuxBar,
+            &[&test_starstar, &test_quux_star, &test_quux_starstar],
+        )
+        .await;
+        check_event(
+            datastore,
+            &all_rxs,
+            WebhookEventClass::TestQuuxBarBaz,
+            &[&test_starstar, &test_quux_starstar, &test_starstar_baz],
         )
         .await;
 
-        check_event(
-            datastore,
-            "foo.baz",
-            &[&foo_star, &foo_starstar],
-            &[&foo_bar, &foo_starstar_bar, &starstar_bar],
-        )
-        .await;
-
-        check_event(
-            datastore,
-            "foo.bar.baz",
-            &[&foo_starstar],
-            &[&foo_bar, &foo_star, &foo_starstar_bar, &starstar_bar],
-        )
-        .await;
-
-        check_event(
-            datastore,
-            "foo.baz.bar",
-            &[&foo_starstar, &foo_starstar_bar, &starstar_bar],
-            &[&foo_bar, &foo_star],
-        )
-        .await;
-
-        check_event(
-            datastore,
-            "foo.baz.quux.bar",
-            &[&foo_starstar, &foo_starstar_bar, &starstar_bar],
-            &[&foo_bar, &foo_star],
-        )
-        .await;
-
-        check_event(
-            datastore,
-            "baz.quux.bar",
-            &[&starstar_bar],
-            &[&foo_bar, &foo_star, &foo_starstar, &foo_starstar_bar],
-        )
-        .await;
         // Clean up.
         db.terminate().await;
         logctx.cleanup_successful();
@@ -703,7 +655,8 @@ mod test {
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
-        let query = DataStore::rx_list_subscribed_query("foo.bar".to_string());
+        let query =
+            DataStore::rx_list_subscribed_query(WebhookEventClass::TestFooBar);
         let explanation = query
             .explain_async(&conn)
             .await

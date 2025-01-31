@@ -5,6 +5,7 @@
 //! Webhooks
 
 use httpmock::prelude::*;
+use nexus_db_model::WebhookEventClass;
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::resource_helpers;
@@ -53,7 +54,7 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
             },
             endpoint,
             secrets: vec!["my cool secret".to_string()],
-            events: vec!["test".to_string()],
+            events: vec!["test.foo".to_string()],
             disable_probes: false,
         },
     )
@@ -63,7 +64,7 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
     let mock = server
         .mock_async(|when, then| {
             let body = serde_json::json!({
-                "event_class": "test",
+                "event_class": "test.foo",
                 "event_id": id,
                 "data": {
                     "hello_world": true,
@@ -73,7 +74,7 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
             when.method(POST)
                 .path("/webhooks")
                 .json_body_includes(body)
-                .header("x-oxide-event-class", "test")
+                .header("x-oxide-event-class", "test.foo")
                 .header("x-oxide-event-id", id.to_string())
                 .header("x-oxide-webhook-id", webhook.id.to_string())
                 .header("content-type", "application/json")
@@ -89,7 +90,7 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
         .webhook_event_publish(
             &opctx,
             id,
-            "test".to_string(),
+            WebhookEventClass::TestFoo,
             serde_json::json!({"hello_world": true}),
         )
         .await
