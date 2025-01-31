@@ -9,7 +9,6 @@ use crate::apis::ManagedApi;
 use crate::apis::ManagedApis;
 use crate::compatibility::api_compatible;
 use crate::compatibility::OpenApiCompatibilityError;
-use crate::spec::overwrite_file;
 use crate::spec::Environment;
 use crate::spec_files_blessed::BlessedApiSpecFile;
 use crate::spec_files_blessed::BlessedFiles;
@@ -21,12 +20,14 @@ use crate::spec_files_local::LocalFiles;
 use crate::validation::validate_generated_openapi_document;
 use anyhow::bail;
 use anyhow::Context;
+use atomicwrites::AtomicFile;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::fmt::Display;
+use std::io::Write;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -891,4 +892,37 @@ pub(crate) enum CheckStatus {
 pub(crate) enum CheckStale {
     Modified { full_path: Utf8PathBuf, actual: Vec<u8>, expected: Vec<u8> },
     New { expected: Vec<u8> },
+}
+
+#[derive(Debug)]
+#[must_use]
+pub(crate) enum OverwriteStatus {
+    Updated,
+    Unchanged,
+}
+
+/// Overwrite a file with new contents, if the contents are different.
+///
+/// The file is left unchanged if the contents are the same. That's to avoid
+/// mtime-based recompilations.
+// XXX-dap remove pub
+pub fn overwrite_file(
+    path: &Utf8Path,
+    contents: &[u8],
+) -> anyhow::Result<OverwriteStatus> {
+    // Only overwrite the file if the contents are actually different.
+    let existing_contents =
+        read_opt(path).context("failed to read contents on disk")?;
+
+    // None means the file doesn't exist, in which case we always want to write
+    // the new contents.
+    if existing_contents.as_deref() == Some(contents) {
+        return Ok(OverwriteStatus::Unchanged);
+    }
+
+    AtomicFile::new(path, atomicwrites::OverwriteBehavior::AllowOverwrite)
+        .write(|f| f.write_all(contents))
+        .with_context(|| format!("failed to write to `{}`", path))?;
+
+    Ok(OverwriteStatus::Updated)
 }

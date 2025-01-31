@@ -2,18 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{fmt, fmt::Write, io};
-
+use crate::apis::ManagedApi;
 use camino::Utf8Path;
 use clap::{Args, ColorChoice};
 use indent_write::fmt::IndentWriter;
 use owo_colors::{OwoColorize, Style};
 use similar::{ChangeTag, DiffableStr, TextDiff};
-
-use crate::{
-    apis::ManagedApi,
-    spec::{ApiSpec, ApiSpecFileWhich, ApiSpecVersion, DocumentSummary},
-};
+use std::{fmt, fmt::Write, io};
 
 #[derive(Debug, Args)]
 #[clap(next_help_heading = "Global options")]
@@ -118,30 +113,6 @@ where
 }
 
 // XXX-dap should these calls be replaced with a specific version one?
-// XXX-dap actually, remove this one
-pub(crate) fn display_api_spec(spec: &ApiSpec, styles: &Styles) -> String {
-    let versions: Vec<_> = spec.versions().collect();
-    let latest_version =
-        versions.last().as_ref().expect("must be at least one version").version;
-    if spec.is_versioned() {
-        format!(
-            "{} ({}, versioned ({} supported), latest = {})",
-            spec.file_stem().style(styles.filename),
-            spec.title,
-            versions.len(),
-            latest_version,
-        )
-    } else {
-        format!(
-            "{} ({}, unversioned, v{})",
-            spec.file_stem().style(styles.filename),
-            spec.title,
-            latest_version,
-        )
-    }
-}
-
-// XXX-dap should these calls be replaced with a specific version one?
 pub(crate) fn display_api_spec_new(
     api: &ManagedApi,
     styles: &Styles,
@@ -164,62 +135,6 @@ pub(crate) fn display_api_spec_new(
             latest_version,
         )
     }
-}
-
-pub(crate) fn display_api_spec_version(
-    spec_version: &ApiSpecVersion,
-    _styles: &Styles, // XXX-dap remove?
-) -> String {
-    if spec_version.spec.is_versioned() {
-        format!("{} (versioned)", spec_version.version)
-    } else {
-        format!("{} (unversioned)", spec_version.version)
-    }
-}
-
-pub(crate) fn display_api_spec_file(
-    spec_version: &ApiSpecVersion,
-    spec_file: ApiSpecFileWhich<'_>,
-    styles: &Styles,
-) -> String {
-    match spec_file {
-        ApiSpecFileWhich::Openapi => {
-            let contents = &[]; // XXX-dap
-            format!(
-                "OpenAPI document {}",
-                spec_version.file_name(contents).style(styles.filename)
-            )
-        }
-        ApiSpecFileWhich::Extra(path) => {
-            format!("Extra file {}", path.style(styles.filename))
-        }
-    }
-}
-
-pub(crate) fn display_summary(
-    summary: &DocumentSummary,
-    styles: &Styles,
-) -> String {
-    let mut summary_str = format!(
-        "{} {}",
-        summary.path_count.style(styles.bold),
-        plural::paths(summary.path_count),
-    );
-
-    if let Some(schema_count) = summary.schema_count {
-        summary_str.push_str(&format!(
-            ", {} {}",
-            schema_count.style(styles.bold),
-            plural::schemas(schema_count),
-        ));
-    } else {
-        summary_str.push_str(&format!(
-            ", {} for schemas",
-            "data missing".style(styles.failure)
-        ));
-    }
-
-    summary_str
 }
 
 pub(crate) fn display_error(

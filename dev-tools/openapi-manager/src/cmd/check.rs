@@ -2,22 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{io::Write, process::ExitCode};
-
-use anyhow::Result;
-use indent_write::io::IndentWriter;
-use owo_colors::OwoColorize;
-use similar::TextDiff;
-
 use crate::{
-    cmd::output::{
-        display_api_spec, display_api_spec_file, display_api_spec_version,
-        display_error, display_summary, headers::*, plural, write_diff,
-        OutputOpts, Styles,
-    },
-    spec::{all_apis, CheckStale, Environment},
+    apis::ManagedApis,
+    cmd::output::{OutputOpts, Styles},
+    environment::{BlessedSource, GeneratedSource},
+    resolved::Resolved,
+    spec::Environment,
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
 };
+use anyhow::{bail, Result};
+use std::process::ExitCode;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum CheckResult {
@@ -38,190 +32,112 @@ impl CheckResult {
 
 pub(crate) fn check_impl(
     env: &Environment,
+    blessed_source: &BlessedSource,
+    generated_source: &GeneratedSource,
     output: &OutputOpts,
 ) -> Result<CheckResult> {
     let mut styles = Styles::default();
+    let mut found_problems = false;
+    let mut found_unfixable = false;
     if output.use_color(supports_color::Stream::Stderr) {
         styles.colorize();
     }
 
-    let all_apis = all_apis();
-    let all_api_specs: Vec<_> =
-        all_apis.iter().flat_map(|a| a.versions()).collect();
-    let total = all_api_specs.len();
-    let count_width = total.to_string().len();
-    let count_section_indent = count_section_indent(count_width);
-    let continued_indent = continued_indent(count_width);
+    let apis = ManagedApis::all()?;
+    let generated = generated_source.load(&apis)?;
+    print_warnings(&generated.warnings, &generated.errors)?;
+    let local_files = env.local_source.load(&apis)?;
+    print_warnings(&local_files.warnings, &local_files.errors)?;
+    let blessed = blessed_source.load(&apis)?;
+    print_warnings(&blessed.warnings, &blessed.errors)?;
 
-    eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
+    let resolved =
+        Resolved::new(env, &apis, &blessed, &generated, &local_files);
+    for note in resolved.notes() {
+        println!("NOTE: {}", note);
+    }
+    for problem in resolved.general_problems() {
+        println!("PROBLEM: {}", problem);
+        found_problems = true;
+    }
 
-    eprintln!(
-        "{:>HEADER_WIDTH$} {} OpenAPI {}...",
-        CHECKING.style(styles.success_header),
-        total.style(styles.bold),
-        plural::documents(total),
-    );
-    let mut num_fresh = 0;
-    let mut num_stale = 0;
-    let mut num_failed = 0;
+    println!("Checking OpenAPI documents...");
+    let mut napis = 0;
+    let mut nversions = 0;
+    for api in apis.iter_apis() {
+        napis += 1;
+        let ident = api.ident();
+        for version in api.iter_versions_semver() {
+            nversions += 1;
+            // unwrap(): there should be a resolution for every managed API
+            let resolution =
+                resolved.resolution_for_api_version(ident, version).unwrap();
+            let problems: Vec<_> = resolution.problems().collect();
+            let summary = if problems.len() == 0 {
+                "OK"
+            } else if problems.iter().all(|p| p.is_fixable()) {
+                found_problems = true;
+                "STALE"
+            } else {
+                found_unfixable = true;
+                "ERROR"
+            };
 
-    for (ix, spec_version) in all_api_specs.iter().enumerate() {
-        let count = ix + 1;
+            println!(
+                "{:5} {} ({}) v{}",
+                summary,
+                ident,
+                if api.is_versioned() { "versioned" } else { "lockstep" },
+                version
+            );
 
-        match spec_version.check(env) {
-            Ok(status) => {
-                let total_errors = status.total_errors();
-                let total_errors_width = total_errors.to_string().len();
-
-                if total_errors == 0 {
-                    // Success case.
-                    let extra = if status.extra_files_len() > 0 {
-                        format!(
-                            ", {} extra files",
-                            status.extra_files_len().style(styles.bold)
-                        )
-                    } else {
-                        "".to_string()
-                    };
-
-                    eprintln!(
-                        "{:>HEADER_WIDTH$} \
-                         [{count:>count_width$}/{total}] {}: \
-                         {}{extra}",
-                        FRESH.style(styles.success_header),
-                        display_api_spec_version(spec_version, &styles),
-                        display_summary(&status.summary, &styles),
-                    );
-
-                    num_fresh += 1;
-                    continue;
-                }
-
-                // Out of date: print errors.
-                eprintln!(
-                    "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}",
-                    STALE.style(styles.warning_header),
-                    display_api_spec_version(spec_version, &styles),
-                );
-                num_stale += 1;
-
-                for (error_ix, (spec_file, error)) in
-                    status.iter_errors().enumerate()
-                {
-                    let error_count = error_ix + 1;
-
-                    let display_heading = |heading: &str| {
-                        eprintln!(
-                            "{:>HEADER_WIDTH$}{count_section_indent}\
-                             ({error_count:>total_errors_width$}/\
-                             {total_errors}) {}",
-                            heading.style(styles.warning_header),
-                            display_api_spec_file(
-                                spec_version,
-                                spec_file,
-                                &styles
-                            ),
-                        );
-                    };
-
-                    match error {
-                        CheckStale::Modified {
-                            full_path,
-                            actual,
-                            expected,
-                        } => {
-                            display_heading(MODIFIED);
-
-                            let diff =
-                                TextDiff::from_lines(&**actual, &**expected);
-                            write_diff(
-                                &diff,
-                                &full_path,
-                                &styles,
-                                // Add an indent to align diff with the status
-                                // message.
-                                &mut IndentWriter::new(
-                                    &continued_indent,
-                                    std::io::stderr(),
-                                ),
-                            )?;
-                        }
-                        CheckStale::New { .. } => {
-                            display_heading(NEW);
-                        }
+            for p in problems {
+                println!("problem: {}", p);
+                if let Some(fixes) = p.fix(&resolution)? {
+                    for f in fixes {
+                        println!("{}", f);
                     }
                 }
-            }
-            Err(error) => {
-                eprint!(
-                    "{:>HEADER_WIDTH$} [{count:>count_width$}/{total}] {}",
-                    FAILURE.style(styles.failure_header),
-                    display_api_spec_version(spec_version, &styles),
-                );
-                let display = display_error(&error, styles.failure);
-                write!(
-                    IndentWriter::new(&continued_indent, std::io::stderr()),
-                    "{}",
-                    display,
-                )?;
-
-                num_failed += 1;
             }
         }
     }
 
-    eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
+    println!("Checked {} total versions across {} APIs", nversions, napis);
 
-    let status_header = if num_failed > 0 {
-        FAILURE.style(styles.failure_header)
-    } else if num_stale > 0 {
-        STALE.style(styles.warning_header)
-    } else {
-        SUCCESS.style(styles.success_header)
-    };
-
-    eprintln!(
-        "{:>HEADER_WIDTH$} {} {} checked: {} fresh, {} stale, {} failed",
-        status_header,
-        total.style(styles.bold),
-        plural::documents(total),
-        num_fresh.style(styles.bold),
-        num_stale.style(styles.bold),
-        num_failed.style(styles.bold),
-    );
-    if num_failed > 0 {
-        eprintln!(
-            "{:>HEADER_WIDTH$} (fix failures, then run {} to update)",
-            "",
-            "cargo xtask openapi generate".style(styles.bold)
+    if found_unfixable {
+        // XXX-dap wording
+        println!(
+            "Error: please fix one or more problems above and re-run the tool"
         );
         Ok(CheckResult::Failures)
-    } else if num_stale > 0 {
-        eprintln!(
-            "{:>HEADER_WIDTH$} (run {} to update)",
-            "",
-            "cargo xtask openapi generate".style(styles.bold)
-        );
+    } else if found_problems {
+        println!("Stale: one or more versions needs an update");
         Ok(CheckResult::NeedsUpdate)
     } else {
+        println!("Success");
         Ok(CheckResult::Success)
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::process::ExitCode;
-
-    use crate::spec::Environment;
-
-    use super::*;
-
-    #[test]
-    fn check_apis_up_to_date() -> Result<ExitCode> {
-        let output = OutputOpts { color: clap::ColorChoice::Auto };
-        let dir = Environment::new(None)?;
-
-        let result = check_impl(&dir, &output)?;
-        Ok(result.to_exit_code())
+// XXX-dap put somewhere where it can be re-used
+pub fn print_warnings(
+    warnings: &[anyhow::Error],
+    errors: &[anyhow::Error],
+) -> anyhow::Result<()> {
+    for w in warnings {
+        println!("    warn: {:#}", w);
     }
+
+    for e in errors {
+        println!("    error: {:#}", e);
+    }
+
+    if !errors.is_empty() {
+        bail!(
+            "bailing out after error{} above",
+            if errors.len() != 1 { "s" } else { "" }
+        );
+    }
+
+    Ok(())
 }

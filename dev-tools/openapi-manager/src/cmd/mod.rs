@@ -14,4 +14,3 @@ mod check;
 mod dump;
 mod generate;
 mod list;
-mod new_check;

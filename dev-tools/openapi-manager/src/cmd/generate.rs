@@ -5,7 +5,7 @@
 use crate::{
     apis::ManagedApis,
     cmd::{
-        new_check::print_warnings,
+        check::print_warnings,
         output::{OutputOpts, Styles},
     },
     environment::{BlessedSource, GeneratedSource},
@@ -31,7 +31,7 @@ impl GenerateResult {
     }
 }
 
-// XXX-dap this is mostly copy/paste from new_check_impl
+// XXX-dap this is mostly copy/paste from check_impl
 pub(crate) fn generate_impl(
     env: &Environment,
     blessed_source: &BlessedSource,
@@ -39,7 +39,6 @@ pub(crate) fn generate_impl(
     output: &OutputOpts,
 ) -> Result<GenerateResult> {
     let mut styles = Styles::default();
-    let mut found_problems = false;
     let mut found_unfixable = false;
     if output.use_color(supports_color::Stream::Stderr) {
         styles.colorize();
@@ -60,7 +59,6 @@ pub(crate) fn generate_impl(
     }
     for problem in resolved.general_problems() {
         println!("PROBLEM: {}", problem);
-        found_problems = true;
     }
 
     println!("Checking OpenAPI documents...");
@@ -78,7 +76,6 @@ pub(crate) fn generate_impl(
             let summary = if problems.len() == 0 {
                 "OK"
             } else if problems.iter().all(|p| p.is_fixable()) {
-                found_problems = true;
                 "STALE"
             } else {
                 found_unfixable = true;
