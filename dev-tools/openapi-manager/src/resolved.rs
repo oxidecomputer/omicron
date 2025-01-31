@@ -163,7 +163,7 @@ pub enum Problem {
 
     #[error(
         "Spec generated from the current code is not compatible with the \
-         blessed spec (from upstream)"
+         blessed spec (from upstream)."
     )]
     BlessedVersionBroken {
         compatibility_issues: DisplayableVec<OpenApiCompatibilityError>,
@@ -179,7 +179,7 @@ pub enum Problem {
 
     #[error(
         "Extra (incorrect) spec files were found for non-blessed version: \
-         {spec_file_names}.  This tool can remove the files for you"
+         {spec_file_names}.  This tool can remove the files for you."
     )]
     LocalVersionExtra { spec_file_names: DisplayableVec<ApiSpecFileName> },
 
@@ -332,6 +332,12 @@ impl<'a> Display for Fix<'a> {
                     f,
                     "fix: write new file {} from generated",
                     generated.spec_file_name().path()
+                )?;
+                writeln!(
+                    f,
+                    "FIX NOTE: be sure to update the corresponding \
+                     progenitor client to refer to this new OpenAPI \
+                     document file!"
                 )?;
             }
             Fix::FixExtraFile { path, check_stale } => {
