@@ -69,7 +69,8 @@ async fn test_updates() {
         .expect("get_artifacts_and_event_reports succeeded")
         .into_inner();
 
-    // We should have an artifact for every known artifact kind...
+    // We should have an artifact for every known artifact kind (except
+    // `Zone`)...
     let expected_kinds: BTreeSet<_> = KnownArtifactKind::iter()
         .filter(|k| !matches!(k, KnownArtifactKind::Zone))
         .map(ArtifactKind::from)
