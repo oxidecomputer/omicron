@@ -6,6 +6,9 @@
 
 // Copyright 2024 Oxide Computer Company
 
+use std::collections::BTreeSet;
+use std::fmt;
+
 use chrono::DateTime;
 use chrono::Utc;
 use oximeter::TimeseriesName;
@@ -26,18 +29,68 @@ pub struct Query {
     ops: Vec<TableOp>,
 }
 
+impl fmt::Display for Query {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let n_ops = self.ops.len();
+        for (i, op) in self.ops.iter().enumerate() {
+            write!(f, "{op}")?;
+            if i < n_ops - 1 {
+                write!(f, " | ")?;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl Query {
     // Return the first operation in the query, which is always a form of `get`.
     fn first_op(&self) -> &TableOp {
         self.ops.first().expect("Should have parsed at least 1 operation")
     }
 
+    /// Iterate over the table operations.
+    pub(crate) fn table_ops(
+        &self,
+    ) -> impl ExactSizeIterator<Item = &'_ TableOp> + '_ {
+        self.ops.iter()
+    }
+
+    /// Return the name of the first referenced timeseries.
+    ///
+    /// This is from the first `get`, which might be from a subquery.
     pub(crate) fn timeseries_name(&self) -> &TimeseriesName {
         match self.first_op() {
             TableOp::Basic(BasicTableOp::Get(n)) => n,
             TableOp::Basic(_) => unreachable!(),
             TableOp::Grouped(GroupedTableOp { ops }) => {
                 ops.first().unwrap().timeseries_name()
+            }
+        }
+    }
+
+    /// Return _all_ timeseries names referred to by get table operations.
+    pub(crate) fn all_timeseries_names(&self) -> BTreeSet<&TimeseriesName> {
+        let mut set = BTreeSet::new();
+        self.all_timeseries_names_impl(&mut set);
+        set
+    }
+
+    // Add all timeseries names to the provided set, recursing into subqueries.
+    fn all_timeseries_names_impl<'a>(
+        &'a self,
+        set: &mut BTreeSet<&'a TimeseriesName>,
+    ) {
+        for op in self.ops.iter() {
+            match op {
+                TableOp::Basic(BasicTableOp::Get(name)) => {
+                    set.insert(name);
+                }
+                TableOp::Basic(_) => {}
+                TableOp::Grouped(GroupedTableOp { ops }) => {
+                    for query in ops.iter() {
+                        query.all_timeseries_names_impl(set);
+                    }
+                }
             }
         }
     }

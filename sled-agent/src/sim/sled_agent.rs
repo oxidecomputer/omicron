@@ -14,11 +14,15 @@ use super::storage::Storage;
 use crate::artifact_store::ArtifactStore;
 use crate::nexus::NexusClient;
 use crate::sim::simulatable::Simulatable;
+use crate::sim::SimulatedUpstairs;
+use crate::support_bundle::storage::SupportBundleQueryType;
 use crate::updates::UpdateManager;
 use anyhow::bail;
 use anyhow::Context;
+use bytes::Bytes;
+use dropshot::Body;
 use dropshot::HttpError;
-use futures::lock::Mutex;
+use futures::Stream;
 use nexus_sled_agent_shared::inventory::{
     Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
     OmicronZonesConfig, SledRole,
@@ -49,10 +53,10 @@ use propolis_client::{
         Board, Chipset, ComponentV0, InstanceInitializationMethod,
         InstanceSpecV0, SerialPort, SerialPortNumber,
     },
-    Client as PropolisClient, VolumeConstructionRequest,
+    Client as PropolisClient,
 };
+use range_requests::PotentialRange;
 use sled_agent_api::SupportBundleMetadata;
-use sled_agent_api::SupportBundleState;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
@@ -62,10 +66,10 @@ use sled_agent_types::instance::{
     VmmStateRequested, VmmUnregisterResponse,
 };
 use slog::Logger;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -83,14 +87,15 @@ pub struct SledAgent {
     vmms: Arc<SimCollection<SimInstance>>,
     /// collection of simulated disks, indexed by disk uuid
     disks: Arc<SimCollection<SimDisk>>,
-    storage: Arc<Mutex<Storage>>,
+    storage: Storage,
     updates: UpdateManager,
     nexus_address: SocketAddr,
     pub nexus_client: Arc<NexusClient>,
-    disk_id_to_region_ids: Mutex<HashMap<String, Vec<Uuid>>>,
+    pub simulated_upstairs: Arc<SimulatedUpstairs>,
     pub v2p_mappings: Mutex<HashSet<VirtualNetworkInterfaceHost>>,
-    mock_propolis:
-        Mutex<Option<(propolis_mock_server::Server, PropolisClient)>>,
+    mock_propolis: futures::lock::Mutex<
+        Option<(propolis_mock_server::Server, PropolisClient)>,
+    >,
     /// lists of external IPs assigned to instances
     pub external_ips:
         Mutex<HashMap<PropolisUuid, HashSet<InstanceExternalIpBody>>>,
@@ -99,47 +104,9 @@ pub struct SledAgent {
     fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
     pub bootstore_network_config: Mutex<EarlyNetworkConfig>,
-    artifacts: ArtifactStore<SimArtifactStorage>,
+    pub(super) repo_depot:
+        dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
     pub log: Logger,
-}
-
-fn extract_targets_from_volume_construction_request(
-    vcr: &VolumeConstructionRequest,
-) -> Result<Vec<SocketAddr>, std::net::AddrParseError> {
-    // A snapshot is simply a flush with an extra parameter, and flushes are
-    // only sent to sub volumes, not the read only parent. Flushes are only
-    // processed by regions, so extract each region that would be affected by a
-    // flush.
-
-    let mut res = vec![];
-    let mut parts: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
-    parts.push_back(&vcr);
-
-    while let Some(vcr_part) = parts.pop_front() {
-        match vcr_part {
-            VolumeConstructionRequest::Volume { sub_volumes, .. } => {
-                for sub_volume in sub_volumes {
-                    parts.push_back(sub_volume);
-                }
-            }
-
-            VolumeConstructionRequest::Url { .. } => {
-                // noop
-            }
-
-            VolumeConstructionRequest::Region { opts, .. } => {
-                for target in &opts.target {
-                    res.push(*target);
-                }
-            }
-
-            VolumeConstructionRequest::File { .. } => {
-                // noop
-            }
-        }
-    }
-
-    Ok(res)
 }
 
 impl SledAgent {
@@ -151,6 +118,8 @@ impl SledAgent {
         log: Logger,
         nexus_address: SocketAddr,
         nexus_client: Arc<NexusClient>,
+        simulated_upstairs: Arc<SimulatedUpstairs>,
+        sled_index: u16,
     ) -> Arc<SledAgent> {
         let id = config.id;
         let sim_mode = config.sim_mode;
@@ -177,13 +146,17 @@ impl SledAgent {
             },
         });
 
-        let storage = Arc::new(Mutex::new(Storage::new(
+        let storage = Storage::new(
             id.into_untyped_uuid(),
+            sled_index,
             config.storage.ip,
             storage_log,
-        )));
-        let artifacts =
-            ArtifactStore::new(&log, SimArtifactStorage::new(storage.clone()));
+        );
+
+        simulated_upstairs.register_storage(id, &storage);
+
+        let repo_depot = ArtifactStore::new(&log, SimArtifactStorage::new())
+            .start(&log, &config.dropshot);
 
         Arc::new(SledAgent {
             id,
@@ -202,71 +175,21 @@ impl SledAgent {
             updates: UpdateManager::new(config.updates.clone()),
             nexus_address,
             nexus_client,
-            disk_id_to_region_ids: Mutex::new(HashMap::new()),
+            simulated_upstairs,
             v2p_mappings: Mutex::new(HashSet::new()),
             external_ips: Mutex::new(HashMap::new()),
             vpc_routes: Mutex::new(HashMap::new()),
-            mock_propolis: Mutex::new(None),
+            mock_propolis: futures::lock::Mutex::new(None),
             config: config.clone(),
             fake_zones: Mutex::new(OmicronZonesConfig {
                 generation: Generation::new(),
                 zones: vec![],
             }),
             instance_ensure_state_error: Mutex::new(None),
-            artifacts,
+            repo_depot,
             log,
             bootstore_network_config,
         })
-    }
-
-    /// Map disk id to regions for later lookup
-    ///
-    /// Crucible regions are returned with a port number, and volume
-    /// construction requests contain a single Nexus region (which points to
-    /// three crucible regions). Extract the region addresses, lookup the region
-    /// from the port and pair disk id with region ids. This map is referred to
-    /// later when making snapshots.
-    pub async fn map_disk_ids_to_region_ids(
-        &self,
-        volume_construction_request: &VolumeConstructionRequest,
-    ) -> Result<(), Error> {
-        let disk_id = match volume_construction_request {
-            VolumeConstructionRequest::Volume { id, .. } => id,
-
-            _ => {
-                panic!("root of volume construction request not a volume!");
-            }
-        };
-
-        let targets = extract_targets_from_volume_construction_request(
-            &volume_construction_request,
-        )
-        .map_err(|e| {
-            Error::invalid_request(&format!("bad socketaddr: {e:?}"))
-        })?;
-
-        let mut region_ids = Vec::new();
-
-        let storage = self.storage.lock().await;
-        for target in targets {
-            let region = storage
-                .get_region_for_port(target.port())
-                .await
-                .ok_or_else(|| {
-                    Error::internal_error(&format!(
-                        "no region for port {}",
-                        target.port()
-                    ))
-                })?;
-
-            let region_id = Uuid::from_str(&region.id.0).unwrap();
-            region_ids.push(region_id);
-        }
-
-        let mut disk_id_to_region_ids = self.disk_id_to_region_ids.lock().await;
-        disk_id_to_region_ids.insert(disk_id.to_string(), region_ids.clone());
-
-        Ok(())
     }
 
     /// Idempotently ensures that the given API Instance (described by
@@ -414,10 +337,10 @@ impl SledAgent {
 
         for disk_request in &hardware.disks {
             let vcr = serde_json::from_str(&disk_request.vcr_json.0)?;
-            self.map_disk_ids_to_region_ids(&vcr).await?;
+            self.simulated_upstairs.map_id_to_vcr(disk_request.disk_id, &vcr);
         }
 
-        let mut routes = self.vpc_routes.lock().await;
+        let mut routes = self.vpc_routes.lock().unwrap();
         for nic in &hardware.nics {
             let my_routers = [
                 RouterId { vni: nic.vni, kind: RouterKind::System },
@@ -465,7 +388,8 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         state: VmmStateRequested,
     ) -> Result<VmmPutStateResponse, HttpError> {
-        if let Some(e) = self.instance_ensure_state_error.lock().await.as_ref()
+        if let Some(e) =
+            self.instance_ensure_state_error.lock().unwrap().as_ref()
         {
             return Err(e.clone().into());
         }
@@ -568,7 +492,7 @@ impl SledAgent {
     }
 
     pub async fn set_instance_ensure_state_error(&self, error: Option<Error>) {
-        *self.instance_ensure_state_error.lock().await = error;
+        *self.instance_ensure_state_error.lock().unwrap() = error;
     }
 
     /// Idempotently ensures that the given API Disk (described by `api_disk`)
@@ -588,7 +512,7 @@ impl SledAgent {
     }
 
     pub(super) fn artifact_store(&self) -> &ArtifactStore<SimArtifactStorage> {
-        &self.artifacts
+        self.repo_depot.app_private()
     }
 
     pub async fn vmm_count(&self) -> usize {
@@ -608,89 +532,62 @@ impl SledAgent {
     }
 
     /// Adds a Physical Disk to the simulated sled agent.
-    pub async fn create_external_physical_disk(
+    pub fn create_external_physical_disk(
         &self,
         id: PhysicalDiskUuid,
         identity: DiskIdentity,
     ) {
         let variant = DiskVariant::U2;
-        self.storage
-            .lock()
-            .await
-            .insert_physical_disk(id, identity, variant)
-            .await;
+        self.storage.lock().insert_physical_disk(id, identity, variant);
     }
 
-    pub async fn get_all_physical_disks(
+    pub fn get_all_physical_disks(
         &self,
     ) -> Vec<nexus_client::types::PhysicalDiskPutRequest> {
-        self.storage.lock().await.get_all_physical_disks()
+        self.storage.lock().get_all_physical_disks()
     }
 
-    pub async fn get_zpools(
-        &self,
-    ) -> Vec<nexus_client::types::ZpoolPutRequest> {
-        self.storage.lock().await.get_all_zpools()
+    pub fn get_zpools(&self) -> Vec<nexus_client::types::ZpoolPutRequest> {
+        self.storage.lock().get_all_zpools()
     }
 
-    pub async fn get_crucible_datasets(
+    pub fn get_crucible_datasets(
         &self,
         zpool_id: ZpoolUuid,
     ) -> Vec<(DatasetUuid, SocketAddr)> {
-        self.storage.lock().await.get_all_crucible_datasets(zpool_id)
+        self.storage.lock().get_all_crucible_datasets(zpool_id)
     }
 
     /// Adds a Zpool to the simulated sled agent.
-    pub async fn create_zpool(
+    pub fn create_zpool(
         &self,
         id: ZpoolUuid,
         physical_disk_id: PhysicalDiskUuid,
         size: u64,
     ) {
-        self.storage
-            .lock()
-            .await
-            .insert_zpool(id, physical_disk_id, size)
-            .await;
+        self.storage.lock().insert_zpool(id, physical_disk_id, size);
     }
 
-    /// Adds a debug dataset within a zpool
-    pub async fn create_debug_dataset(
-        &self,
-        zpool_id: ZpoolUuid,
-        dataset_id: DatasetUuid,
-    ) {
-        self.storage
-            .lock()
-            .await
-            .insert_debug_dataset(zpool_id, dataset_id)
-            .await
+    pub fn has_zpool(&self, id: ZpoolUuid) -> bool {
+        self.storage.lock().has_zpool(id)
     }
 
     /// Adds a Crucible Dataset within a zpool.
-    pub async fn create_crucible_dataset(
+    pub fn create_crucible_dataset(
         &self,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
     ) -> SocketAddr {
-        self.storage
-            .lock()
-            .await
-            .insert_crucible_dataset(zpool_id, dataset_id)
-            .await
+        self.storage.lock().insert_crucible_dataset(zpool_id, dataset_id)
     }
 
     /// Returns a crucible dataset within a particular zpool.
-    pub async fn get_crucible_dataset(
+    pub fn get_crucible_dataset(
         &self,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
     ) -> Arc<CrucibleData> {
-        self.storage
-            .lock()
-            .await
-            .get_crucible_dataset(zpool_id, dataset_id)
-            .await
+        self.storage.lock().get_crucible_dataset(zpool_id, dataset_id)
     }
 
     /// Issue a snapshot request for a Crucible disk attached to an instance.
@@ -702,69 +599,37 @@ impl SledAgent {
     ///
     /// We're not simulating the propolis server, so directly create a
     /// snapshot here.
-    pub async fn instance_issue_disk_snapshot_request(
+    pub fn instance_issue_disk_snapshot_request(
         &self,
         _propolis_id: PropolisUuid,
         disk_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
-        // In order to fulfill the snapshot request, emulate creating snapshots
-        // for each region that makes up the disk. Use the disk_id_to_region_ids
-        // map to perform lookup based on this function's disk id argument.
-
-        let disk_id_to_region_ids = self.disk_id_to_region_ids.lock().await;
-        let region_ids = disk_id_to_region_ids.get(&disk_id.to_string());
-
-        let region_ids = region_ids.ok_or_else(|| {
-            Error::not_found_by_id(ResourceType::Disk, &disk_id)
-        })?;
-
-        info!(self.log, "disk id {} region ids are {:?}", disk_id, region_ids);
-
-        let storage = self.storage.lock().await;
-
-        for region_id in region_ids {
-            let crucible_data =
-                storage.get_dataset_for_region(*region_id).await;
-
-            if let Some(crucible_data) = crucible_data {
-                crucible_data
-                    .create_snapshot(*region_id, snapshot_id)
-                    .await
-                    .map_err(|e| Error::internal_error(&e.to_string()))?;
-            } else {
-                return Err(Error::not_found_by_id(
-                    ResourceType::Disk,
-                    &disk_id,
-                ));
-            }
-        }
-
-        Ok(())
+        self.simulated_upstairs.snapshot(disk_id, snapshot_id)
     }
 
-    pub async fn set_virtual_nic_host(
+    pub fn set_virtual_nic_host(
         &self,
         mapping: &VirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
-        let mut v2p_mappings = self.v2p_mappings.lock().await;
+        let mut v2p_mappings = self.v2p_mappings.lock().unwrap();
         v2p_mappings.insert(mapping.clone());
         Ok(())
     }
 
-    pub async fn unset_virtual_nic_host(
+    pub fn unset_virtual_nic_host(
         &self,
         mapping: &VirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
-        let mut v2p_mappings = self.v2p_mappings.lock().await;
+        let mut v2p_mappings = self.v2p_mappings.lock().unwrap();
         v2p_mappings.remove(mapping);
         Ok(())
     }
 
-    pub async fn list_virtual_nics(
+    pub fn list_virtual_nics(
         &self,
     ) -> Result<Vec<VirtualNetworkInterfaceHost>, Error> {
-        let v2p_mappings = self.v2p_mappings.lock().await;
+        let v2p_mappings = self.v2p_mappings.lock().unwrap();
         Ok(Vec::from_iter(v2p_mappings.clone()))
     }
 
@@ -779,7 +644,7 @@ impl SledAgent {
             ));
         }
 
-        let mut eips = self.external_ips.lock().await;
+        let mut eips = self.external_ips.lock().unwrap();
         let my_eips = eips.entry(propolis_id).or_default();
 
         // High-level behaviour: this should always succeed UNLESS
@@ -812,7 +677,7 @@ impl SledAgent {
             ));
         }
 
-        let mut eips = self.external_ips.lock().await;
+        let mut eips = self.external_ips.lock().unwrap();
         let my_eips = eips.entry(propolis_id).or_default();
 
         my_eips.remove(&body_args);
@@ -857,10 +722,7 @@ impl SledAgent {
         Ok(addr)
     }
 
-    pub async fn inventory(
-        &self,
-        addr: SocketAddr,
-    ) -> anyhow::Result<Inventory> {
+    pub fn inventory(&self, addr: SocketAddr) -> anyhow::Result<Inventory> {
         let sled_agent_address = match addr {
             SocketAddr::V4(_) => {
                 bail!("sled_agent_ip must be v6 for inventory")
@@ -868,7 +730,7 @@ impl SledAgent {
             SocketAddr::V6(v6) => v6,
         };
 
-        let storage = self.storage.lock().await;
+        let storage = self.storage.lock();
         Ok(Inventory {
             sled_id: self.id,
             sled_agent_address,
@@ -883,7 +745,7 @@ impl SledAgent {
                 self.config.hardware.reservoir_ram,
             )
             .context("reservoir_size")?,
-            omicron_zones: self.fake_zones.lock().await.clone(),
+            omicron_zones: self.fake_zones.lock().unwrap().clone(),
             disks: storage
                 .physical_disks()
                 .values()
@@ -915,7 +777,6 @@ impl SledAgent {
             // represent the "real" datasets the sled agent can observe.
             datasets: storage
                 .datasets_config_list()
-                .await
                 .map(|config| {
                     config
                         .datasets
@@ -942,10 +803,10 @@ impl SledAgent {
         dataset_id: DatasetUuid,
     ) -> Result<Vec<SupportBundleMetadata>, HttpError> {
         self.storage
-            .lock()
+            .as_support_bundle_storage(&self.log)
+            .list(zpool_id, dataset_id)
             .await
-            .support_bundle_list(zpool_id, dataset_id)
-            .await
+            .map_err(|err| err.into())
     }
 
     pub async fn support_bundle_create(
@@ -954,35 +815,49 @@ impl SledAgent {
         dataset_id: DatasetUuid,
         support_bundle_id: SupportBundleUuid,
         expected_hash: ArtifactHash,
+        stream: impl Stream<Item = Result<Bytes, HttpError>>,
     ) -> Result<SupportBundleMetadata, HttpError> {
         self.storage
-            .lock()
-            .await
-            .support_bundle_create(
+            .as_support_bundle_storage(&self.log)
+            .create(
                 zpool_id,
                 dataset_id,
                 support_bundle_id,
                 expected_hash,
+                stream,
             )
-            .await?;
-
-        Ok(SupportBundleMetadata {
-            support_bundle_id,
-            state: SupportBundleState::Complete,
-        })
+            .await
+            .map_err(|err| err.into())
     }
 
-    pub async fn support_bundle_get(
+    pub(crate) async fn support_bundle_get(
         &self,
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
         support_bundle_id: SupportBundleUuid,
-    ) -> Result<(), HttpError> {
+        range: Option<PotentialRange>,
+        query: SupportBundleQueryType,
+    ) -> Result<http::Response<Body>, HttpError> {
         self.storage
-            .lock()
+            .as_support_bundle_storage(&self.log)
+            .get(zpool_id, dataset_id, support_bundle_id, range, query)
             .await
-            .support_bundle_exists(zpool_id, dataset_id, support_bundle_id)
+            .map_err(|err| err.into())
+    }
+
+    pub(crate) async fn support_bundle_head(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+        support_bundle_id: SupportBundleUuid,
+        range: Option<PotentialRange>,
+        query: SupportBundleQueryType,
+    ) -> Result<http::Response<Body>, HttpError> {
+        self.storage
+            .as_support_bundle_storage(&self.log)
+            .head(zpool_id, dataset_id, support_bundle_id, range, query)
             .await
+            .map_err(|err| err.into())
     }
 
     pub async fn support_bundle_delete(
@@ -992,67 +867,58 @@ impl SledAgent {
         support_bundle_id: SupportBundleUuid,
     ) -> Result<(), HttpError> {
         self.storage
-            .lock()
+            .as_support_bundle_storage(&self.log)
+            .delete(zpool_id, dataset_id, support_bundle_id)
             .await
-            .support_bundle_delete(zpool_id, dataset_id, support_bundle_id)
-            .await
+            .map_err(|err| err.into())
     }
 
-    pub async fn datasets_ensure(
+    pub fn datasets_ensure(
         &self,
         config: DatasetsConfig,
     ) -> Result<DatasetsManagementResult, HttpError> {
-        self.storage.lock().await.datasets_ensure(config).await
+        self.storage.lock().datasets_ensure(config)
     }
 
-    pub async fn datasets_config_list(
-        &self,
-    ) -> Result<DatasetsConfig, HttpError> {
-        self.storage.lock().await.datasets_config_list().await
+    pub fn datasets_config_list(&self) -> Result<DatasetsConfig, HttpError> {
+        self.storage.lock().datasets_config_list()
     }
 
-    pub async fn omicron_physical_disks_list(
+    pub fn omicron_physical_disks_list(
         &self,
     ) -> Result<OmicronPhysicalDisksConfig, HttpError> {
-        self.storage.lock().await.omicron_physical_disks_list().await
+        self.storage.lock().omicron_physical_disks_list()
     }
 
-    pub async fn omicron_physical_disks_ensure(
+    pub fn omicron_physical_disks_ensure(
         &self,
         config: OmicronPhysicalDisksConfig,
     ) -> Result<DisksManagementResult, HttpError> {
-        self.storage.lock().await.omicron_physical_disks_ensure(config).await
+        self.storage.lock().omicron_physical_disks_ensure(config)
     }
 
-    pub async fn omicron_zones_list(&self) -> OmicronZonesConfig {
-        self.fake_zones.lock().await.clone()
+    pub fn omicron_zones_list(&self) -> OmicronZonesConfig {
+        self.fake_zones.lock().unwrap().clone()
     }
 
-    pub async fn omicron_zones_ensure(
-        &self,
-        requested_zones: OmicronZonesConfig,
-    ) {
-        *self.fake_zones.lock().await = requested_zones;
+    pub fn omicron_zones_ensure(&self, requested_zones: OmicronZonesConfig) {
+        *self.fake_zones.lock().unwrap() = requested_zones;
     }
 
-    pub async fn drop_dataset(
-        &self,
-        zpool_id: ZpoolUuid,
-        dataset_id: DatasetUuid,
-    ) {
-        self.storage.lock().await.drop_dataset(zpool_id, dataset_id)
+    pub fn drop_dataset(&self, zpool_id: ZpoolUuid, dataset_id: DatasetUuid) {
+        self.storage.lock().drop_dataset(zpool_id, dataset_id)
     }
 
-    pub async fn list_vpc_routes(&self) -> Vec<ResolvedVpcRouteState> {
-        let routes = self.vpc_routes.lock().await;
+    pub fn list_vpc_routes(&self) -> Vec<ResolvedVpcRouteState> {
+        let routes = self.vpc_routes.lock().unwrap();
         routes
             .iter()
             .map(|(k, v)| ResolvedVpcRouteState { id: *k, version: v.version })
             .collect()
     }
 
-    pub async fn set_vpc_routes(&self, new_routes: Vec<ResolvedVpcRouteSet>) {
-        let mut routes = self.vpc_routes.lock().await;
+    pub fn set_vpc_routes(&self, new_routes: Vec<ResolvedVpcRouteSet>) {
+        let mut routes = self.vpc_routes.lock().unwrap();
         for new in new_routes {
             // Disregard any route information for a subnet we don't have.
             let Some(old) = routes.get(&new.id) else {

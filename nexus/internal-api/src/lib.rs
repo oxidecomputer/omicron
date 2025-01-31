@@ -5,9 +5,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use dropshot::{
-    FreeformBody, HttpError, HttpResponseCreated, HttpResponseDeleted,
-    HttpResponseOk, HttpResponseUpdatedNoContent, Path, Query, RequestContext,
-    ResultsPage, TypedBody,
+    HttpError, HttpResponseCreated, HttpResponseDeleted, HttpResponseOk,
+    HttpResponseUpdatedNoContent, Path, Query, RequestContext, ResultsPage,
+    TypedBody,
 };
 use nexus_types::{
     deployment::{
@@ -27,25 +27,23 @@ use nexus_types::{
         views::{BackgroundTask, DemoSaga, Ipv4NatEntryView, Saga},
     },
 };
-use omicron_common::{
-    api::{
-        external::{http_pagination::PaginatedById, Instance},
-        internal::nexus::{
-            DiskRuntimeState, DownstairsClientStopRequest,
-            DownstairsClientStopped, ProducerEndpoint,
-            ProducerRegistrationResponse, RepairFinishInfo, RepairProgress,
-            RepairStartInfo, SledVmmState,
-        },
+use omicron_common::api::{
+    external::{http_pagination::PaginatedById, Instance},
+    internal::nexus::{
+        DiskRuntimeState, DownstairsClientStopRequest, DownstairsClientStopped,
+        ProducerEndpoint, ProducerRegistrationResponse, RepairFinishInfo,
+        RepairProgress, RepairStartInfo, SledVmmState,
     },
-    update::ArtifactId,
 };
 use omicron_uuid_kinds::{
     DemoSagaUuid, DownstairsKind, PropolisUuid, SledUuid, TypedUuid,
-    UpstairsKind, UpstairsRepairKind,
+    UpstairsKind, UpstairsRepairKind, VolumeUuid,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+const RACK_INITIALIZATION_REQUEST_MAX_BYTES: usize = 10 * 1024 * 1024;
 
 #[dropshot::api_description]
 pub trait NexusInternalApi {
@@ -92,6 +90,7 @@ pub trait NexusInternalApi {
     #[endpoint {
         method = PUT,
         path = "/racks/{rack_id}/initialization-complete",
+        request_body_max_bytes = RACK_INITIALIZATION_REQUEST_MAX_BYTES,
     }]
     async fn rack_initialization_complete(
         rqctx: RequestContext<Self::Context>,
@@ -204,16 +203,6 @@ pub trait NexusInternalApi {
         request_context: RequestContext<Self::Context>,
         oximeter_info: TypedBody<OximeterInfo>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// Endpoint used by Sled Agents to download cached artifacts.
-    #[endpoint {
-    method = GET,
-    path = "/artifacts/{kind}/{name}/{version}",
-    }]
-    async fn cpapi_artifact_download(
-        request_context: RequestContext<Self::Context>,
-        path_params: Path<ArtifactId>,
-    ) -> Result<HttpResponseOk<FreeformBody>, HttpError>;
 
     /// An Upstairs will notify this endpoint when a repair starts
     #[endpoint {
@@ -567,7 +556,7 @@ pub struct DiskPathParam {
 /// Path parameters for Volume requests (internal API)
 #[derive(Deserialize, JsonSchema)]
 pub struct VolumePathParam {
-    pub volume_id: Uuid,
+    pub volume_id: VolumeUuid,
 }
 
 /// Path parameters for Rack requests.

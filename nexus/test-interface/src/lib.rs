@@ -39,10 +39,10 @@ use nexus_types::internal_api::params::{
 };
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
+use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use slog::Logger;
 use std::net::{SocketAddr, SocketAddrV6};
-use uuid::Uuid;
 
 #[async_trait]
 pub trait NexusServer: Send + Sync + 'static {
@@ -70,14 +70,15 @@ pub trait NexusServer: Send + Sync + 'static {
         blueprint: Blueprint,
         physical_disks: Vec<PhysicalDiskPutRequest>,
         zpools: Vec<nexus_types::internal_api::params::ZpoolPutRequest>,
-        datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
+        datasets: Vec<
+            nexus_types::internal_api::params::CrucibleDatasetCreateRequest,
+        >,
         internal_dns_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
         recovery_silo: nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
         tls_certificates: Vec<
             omicron_common::api::internal::nexus::Certificate,
         >,
-        disable_sled_id: Uuid,
     ) -> Self;
 
     async fn get_http_server_external_address(&self) -> SocketAddr;
@@ -108,12 +109,13 @@ pub trait NexusServer: Send + Sync + 'static {
     // use the "RackInitializationRequest" handoff, but this would require
     // creating all our Zpools and Datasets before performing handoff to Nexus.
     // However, doing so would let us remove this test-only API.
-    async fn upsert_crucible_dataset(
+    async fn upsert_test_dataset(
         &self,
         physical_disk: PhysicalDiskPutRequest,
         zpool: ZpoolPutRequest,
         dataset_id: DatasetUuid,
-        address: SocketAddrV6,
+        kind: DatasetKind,
+        address: Option<SocketAddrV6>,
     );
 
     async fn inventory_collect_and_get_latest_collection(

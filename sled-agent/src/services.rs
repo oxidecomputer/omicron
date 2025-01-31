@@ -54,7 +54,8 @@ use illumos_utils::running_zone::{
 };
 use illumos_utils::smf_helper::SmfHelper;
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
-use illumos_utils::zpool::{PathInPool, ZpoolName};
+use illumos_utils::zone::AddressRequest;
+use illumos_utils::zpool::{PathInPool, ZpoolName, ZpoolOrRamdisk};
 use illumos_utils::{execute, PFEXEC};
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
@@ -532,32 +533,11 @@ impl illumos_utils::smf_helper::Service for SwitchService {
     }
 }
 
-/// Combines the generic `SwitchZoneConfig` with other locally-determined
-/// configuration
-///
-/// This is analogous to `OmicronZoneConfigLocal`, but for the switch zone.
-struct SwitchZoneConfigLocal {
-    zone: SwitchZoneConfig,
-    root: Utf8PathBuf,
-}
-
-/// Service that sets up common networking across zones
-struct ZoneNetworkSetupService {}
-
-impl illumos_utils::smf_helper::Service for ZoneNetworkSetupService {
-    fn service_name(&self) -> String {
-        "zone-network-setup".to_string()
-    }
-    fn smf_name(&self) -> String {
-        format!("svc:/oxide/{}", self.service_name())
-    }
-}
-
 /// Describes either an Omicron-managed zone or the switch zone, used for
 /// functions that operate on either one or the other
 enum ZoneArgs<'a> {
     Omicron(&'a OmicronZoneConfigLocal),
-    Switch(&'a SwitchZoneConfigLocal),
+    Switch(&'a SwitchZoneConfig),
 }
 
 impl<'a> ZoneArgs<'a> {
@@ -576,20 +556,7 @@ impl<'a> ZoneArgs<'a> {
     ) -> Box<dyn Iterator<Item = &'a SwitchService> + 'a> {
         match self {
             ZoneArgs::Omicron(_) => Box::new(std::iter::empty()),
-            ZoneArgs::Switch(request) => Box::new(request.zone.services.iter()),
-        }
-    }
-
-    /// Return the root filesystem path for this zone
-    pub fn root(&self) -> PathInPool {
-        match self {
-            ZoneArgs::Omicron(zone_config) => PathInPool {
-                pool: zone_config.zone.filesystem_pool.clone(),
-                path: zone_config.root.clone(),
-            },
-            ZoneArgs::Switch(zone_request) => {
-                PathInPool { pool: None, path: zone_request.root.clone() }
-            }
+            ZoneArgs::Switch(request) => Box::new(request.services.iter()),
         }
     }
 }
@@ -1455,6 +1422,7 @@ impl ServiceManager {
     async fn initialize_zone(
         &self,
         request: ZoneArgs<'_>,
+        zone_root_path: PathInPool,
         filesystems: &[zone::Fs],
         data_links: &[String],
         fake_install_dir: Option<&String>,
@@ -1538,7 +1506,7 @@ impl ServiceManager {
         let installed_zone = zone_builder
             .with_log(self.inner.log.clone())
             .with_underlay_vnic_allocator(&self.inner.underlay_vnic_allocator)
-            .with_zone_root_path(request.root())
+            .with_zone_root_path(zone_root_path)
             .with_zone_image_paths(zone_image_paths.as_slice())
             .with_zone_type(zone_type_str)
             .with_datasets(datasets.as_slice())
@@ -2383,9 +2351,7 @@ impl ServiceManager {
                         tls: *external_tls,
                         dropshot: dropshot::ConfigDropshot {
                             bind_address: SocketAddr::new(*opte_ip, nexus_port),
-                            // This has to be large enough to support:
-                            // - bulk writes to disks
-                            request_body_max_bytes: 8192 * 1024,
+                            default_request_body_max_bytes: 1048576,
                             default_handler_task_mode:
                                 HandlerTaskMode::Detached,
                             log_headers: vec![],
@@ -2393,11 +2359,7 @@ impl ServiceManager {
                     },
                     dropshot_internal: dropshot::ConfigDropshot {
                         bind_address: (*internal_address).into(),
-                        // This has to be large enough to support, among
-                        // other things, the initial list of TLS
-                        // certificates provided by the customer during
-                        // rack setup.
-                        request_body_max_bytes: 10 * 1024 * 1024,
+                        default_request_body_max_bytes: 1048576,
                         default_handler_task_mode: HandlerTaskMode::Detached,
                         log_headers: vec![],
                     },
@@ -2472,10 +2434,7 @@ impl ServiceManager {
                     })?;
                 RunningZone::boot(installed_zone).await?
             }
-            ZoneArgs::Switch(SwitchZoneConfigLocal {
-                zone: SwitchZoneConfig { id, services, addresses },
-                ..
-            }) => {
+            ZoneArgs::Switch(SwitchZoneConfig { id, services, addresses }) => {
                 let info = self.inner.sled_info.get();
 
                 let gw_addr = match info {
@@ -3264,7 +3223,7 @@ impl ServiceManager {
         }
 
         // Ensure that this zone's storage is ready.
-        let root = self
+        let zone_root_path = self
             .validate_storage_and_pick_mountpoint(
                 mount_config,
                 &zone,
@@ -3272,12 +3231,15 @@ impl ServiceManager {
             )
             .await?;
 
-        let config =
-            OmicronZoneConfigLocal { zone: zone.clone(), root: root.path };
+        let config = OmicronZoneConfigLocal {
+            zone: zone.clone(),
+            root: zone_root_path.path.clone(),
+        };
 
         let runtime = self
             .initialize_zone(
                 ZoneArgs::Omicron(&config),
+                zone_root_path,
                 // filesystems=
                 &[],
                 // data_links=
@@ -3749,7 +3711,8 @@ impl ServiceManager {
         }
         let path = filesystem_pool
             .dataset_mountpoint(&mount_config.root, ZONE_DATASET);
-        Ok(PathInPool { pool: Some(filesystem_pool), path })
+        let pool = ZpoolOrRamdisk::Zpool(filesystem_pool);
+        Ok(PathInPool { pool, path })
     }
 
     pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {
@@ -4298,52 +4261,58 @@ impl ServiceManager {
                 );
                 *request = new_request;
 
-                // Add SMF properties here and restart zone-network-setup service
                 let first_address = request.addresses.get(0);
                 let address = first_address
                     .map(|addr| addr.to_string())
                     .unwrap_or_else(|| "".to_string());
 
-                // Set new properties for the network set up service and refresh
-                let nw_setup_svc = ZoneNetworkSetupService {};
-                let nsmfh = SmfHelper::new(&zone, &nw_setup_svc);
-
-                nsmfh.delpropvalue("config/gateway", "*")?;
-                nsmfh.delpropvalue("config/static_addr", "*")?;
-
-                if let Some(info) = self.inner.sled_info.get() {
-                    nsmfh.addpropvalue_type(
-                        "config/gateway",
-                        &info.underlay_address,
-                        "astring",
-                    )?;
-                } else {
-                    // It should be impossible for the `sled_info` not to be set here.
-                    // When the request addresses have changed this means the underlay is
-                    // available as well.
-                    error!(
+                for addr in &request.addresses {
+                    if *addr == Ipv6Addr::LOCALHOST {
+                        continue;
+                    }
+                    info!(
                         self.inner.log,
-                        concat!(
-                            "sled agent info is not present,",
-                            " even though underlay address exists"
-                        )
+                        "Ensuring address {} exists",
+                        addr.to_string()
+                    );
+                    let addr_request =
+                        AddressRequest::new_static(IpAddr::V6(*addr), None);
+                    zone.ensure_address(addr_request).await?;
+                    info!(
+                        self.inner.log,
+                        "Ensuring address {} exists - OK",
+                        addr.to_string()
                     );
                 }
 
-                for address in &request.addresses {
-                    if *address != Ipv6Addr::LOCALHOST {
-                        nsmfh.addpropvalue_type(
-                            "config/static_addr",
-                            &address,
-                            "astring",
-                        )?;
-                    }
+                // When the request addresses have changed this means the underlay is
+                // available now as well.
+                if let Some(info) = self.inner.sled_info.get() {
+                    info!(
+                        self.inner.log,
+                        "Ensuring there is a default route";
+                        "gateway" => ?info.underlay_address,
+                    );
+                    match zone.add_default_route(info.underlay_address).map_err(
+                        |err| Error::ZoneCommand {
+                            intent: "Adding Route".to_string(),
+                            err,
+                        },
+                    ) {
+                        Ok(_) => (),
+                        Err(e) => {
+                            if e.to_string().contains("entry exists") {
+                                info!(
+                                    self.inner.log,
+                                    "Default route already exists";
+                                    "gateway" => ?info.underlay_address,
+                                )
+                            } else {
+                                return Err(e);
+                            }
+                        }
+                    };
                 }
-                nsmfh.refresh()?;
-                info!(
-                    self.inner.log,
-                    "refreshed zone-network-setup service with new configuration"
-                );
 
                 for service in &request.services {
                     let smfh = SmfHelper::new(&zone, service);
@@ -4658,12 +4627,18 @@ impl ServiceManager {
         // we could not create the U.2 disks due to lack of encryption. To break
         // the cycle we put the switch zone root fs on the ramdisk.
         let root = Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
-        let zone_request =
-            SwitchZoneConfigLocal { root, zone: request.clone() };
-        let zone_args = ZoneArgs::Switch(&zone_request);
-        info!(self.inner.log, "Starting switch zone",);
+        let zone_root_path =
+            PathInPool { pool: ZpoolOrRamdisk::Ramdisk, path: root.clone() };
+        let zone_args = ZoneArgs::Switch(&request);
+        info!(self.inner.log, "Starting switch zone");
         let zone = self
-            .initialize_zone(zone_args, filesystems, data_links, None)
+            .initialize_zone(
+                zone_args,
+                zone_root_path,
+                filesystems,
+                data_links,
+                None,
+            )
             .await?;
         *sled_zone =
             SwitchZoneState::Running { request: request.clone(), zone };
@@ -5071,10 +5046,7 @@ mod illumos_tests {
     }
 
     impl<'a> LedgerTestHelper<'a> {
-        async fn new(
-            log: slog::Logger,
-            test_config: &'a TestConfig,
-        ) -> LedgerTestHelper {
+        async fn new(log: slog::Logger, test_config: &'a TestConfig) -> Self {
             let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
             let storage_test_harness = setup_storage(&log).await;
             let zone_bundler = ZoneBundler::new(

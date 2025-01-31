@@ -37,6 +37,7 @@ use super::{
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::volume_delete;
 use crate::app::{authn, db};
+use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -51,7 +52,7 @@ pub(crate) struct Params {
     /// The fake volume created for the region that was replaced
     // Note: this is only required in the params to build the volume-delete sub
     // saga
-    pub region_volume_id: Uuid,
+    pub region_volume_id: VolumeUuid,
     pub request: db::model::RegionReplacement,
 }
 
@@ -214,11 +215,12 @@ pub(crate) mod test {
     use nexus_db_model::Region;
     use nexus_db_model::RegionReplacement;
     use nexus_db_model::RegionReplacementState;
-    use nexus_db_model::Volume;
     use nexus_db_queries::authn::saga::Serialized;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
     use omicron_uuid_kinds::DatasetUuid;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::VolumeUuid;
     use sled_agent_client::CrucibleOpts;
     use sled_agent_client::VolumeConstructionRequest;
     use uuid::Uuid;
@@ -238,8 +240,8 @@ pub(crate) mod test {
         );
 
         // Manually insert required records
-        let old_region_volume_id = Uuid::new_v4();
-        let new_volume_id = Uuid::new_v4();
+        let old_region_volume_id = VolumeUuid::new_v4();
+        let new_volume_id = VolumeUuid::new_v4();
 
         let replaced_region = {
             let dataset_id = DatasetUuid::new_v4();
@@ -266,7 +268,7 @@ pub(crate) mod test {
         }
 
         let volume_construction_request = VolumeConstructionRequest::Volume {
-            id: old_region_volume_id,
+            id: *old_region_volume_id.as_untyped_uuid(),
             block_size: 0,
             sub_volumes: vec![VolumeConstructionRequest::Region {
                 block_size: 0,
@@ -274,7 +276,7 @@ pub(crate) mod test {
                 extent_count: 0,
                 gen: 0,
                 opts: CrucibleOpts {
-                    id: old_region_volume_id,
+                    id: Uuid::new_v4(),
                     target: vec![
                         // if you put something here, you'll need a synthetic
                         // dataset record
@@ -292,11 +294,8 @@ pub(crate) mod test {
             read_only_parent: None,
         };
 
-        let volume_data =
-            serde_json::to_string(&volume_construction_request).unwrap();
-
         datastore
-            .volume_create(Volume::new(old_region_volume_id, volume_data))
+            .volume_create(old_region_volume_id, volume_construction_request)
             .await
             .unwrap();
 
@@ -304,24 +303,23 @@ pub(crate) mod test {
             id: Uuid::new_v4(),
             request_time: Utc::now(),
             old_region_id: replaced_region.id(),
-            volume_id: new_volume_id,
-            old_region_volume_id: Some(old_region_volume_id),
+            volume_id: new_volume_id.into(),
+            old_region_volume_id: Some(old_region_volume_id.into()),
             new_region_id: None, // no value needed here
             replacement_state: RegionReplacementState::ReplacementDone,
             operating_saga_id: None,
         };
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 new_volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
-                    id: new_volume_id,
+                VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(),
                     block_size: 512,
                     sub_volumes: vec![], // nothing needed here
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 

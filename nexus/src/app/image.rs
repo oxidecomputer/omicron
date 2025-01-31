@@ -23,6 +23,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
+use omicron_uuid_kinds::VolumeUuid;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -122,7 +123,7 @@ impl super::Nexus {
                 let image_volume = self
                     .db_datastore
                     .volume_checkout_randomize_ids(
-                        db_snapshot.volume_id,
+                        db_snapshot.volume_id(),
                         db::datastore::VolumeCheckoutReason::ReadOnlyCopy,
                     )
                     .await?;
@@ -134,7 +135,7 @@ impl super::Nexus {
                     ),
                     silo_id: authz_silo.id(),
                     project_id: maybe_authz_project.clone().map(|p| p.id()),
-                    volume_id: image_volume.id(),
+                    volume_id: image_volume.id().into(),
                     url: None,
                     os: params.os.clone(),
                     version: params.version.clone(),
@@ -162,9 +163,6 @@ impl super::Nexus {
                             .into(),
                     };
 
-                let volume_data =
-                    serde_json::to_string(&volume_construction_request)?;
-
                 // Nexus runs in its own zone so we can't ask the propolis zone
                 // image tar file for size of alpine.iso. Conservatively set the
                 // size to 100M (at the time of this comment, it's 41M). Any
@@ -178,10 +176,13 @@ impl super::Nexus {
                         )
                     })?;
 
-                let new_image_volume =
-                    db::model::Volume::new(Uuid::new_v4(), volume_data);
-                let volume =
-                    self.db_datastore.volume_create(new_image_volume).await?;
+                let volume = self
+                    .db_datastore
+                    .volume_create(
+                        VolumeUuid::new_v4(),
+                        volume_construction_request,
+                    )
+                    .await?;
 
                 db::model::Image {
                     identity: db::model::ImageIdentity::new(
@@ -190,7 +191,7 @@ impl super::Nexus {
                     ),
                     silo_id: authz_silo.id(),
                     project_id: maybe_authz_project.clone().map(|p| p.id()),
-                    volume_id: volume.id(),
+                    volume_id: volume.id().into(),
                     url: None,
                     os: "alpine".into(),
                     version: "propolis-blob".into(),

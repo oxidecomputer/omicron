@@ -32,6 +32,44 @@ fn most_recent_activate_time(
     }
 }
 
+/// Given the name of a background task, wait for it to complete if it's
+/// running, then return the last polled `BackgroundTask` object. Panics if the
+/// task has never been activated.
+pub async fn wait_background_task(
+    internal_client: &ClientTestContext,
+    task_name: &str,
+) -> BackgroundTask {
+    // Wait for the task to finish
+    let last_task_poll = wait_for_condition(
+        || async {
+            let task = NexusRequest::object_get(
+                internal_client,
+                &format!("/bgtasks/view/{task_name}"),
+            )
+            .execute_and_parse_unwrap::<BackgroundTask>()
+            .await;
+
+            // Wait until the task has actually run and then is idle
+            if matches!(&task.current, CurrentStatus::Idle) {
+                match &task.last {
+                    LastResult::Completed(_) => Ok(task),
+                    LastResult::NeverCompleted => {
+                        panic!("task never activated")
+                    }
+                }
+            } else {
+                Err(CondCheckError::<()>::NotYet)
+            }
+        },
+        &Duration::from_millis(500),
+        &Duration::from_secs(60),
+    )
+    .await
+    .unwrap();
+
+    last_task_poll
+}
+
 /// Given the name of a background task, activate it, then wait for it to
 /// complete. Return the last polled `BackgroundTask` object.
 pub async fn activate_background_task(
@@ -336,4 +374,52 @@ pub async fn run_replacement_tasks_to_completion(
     )
     .await
     .unwrap();
+}
+
+pub async fn wait_tuf_artifact_replication_step(
+    internal_client: &ClientTestContext,
+) -> TufArtifactReplicationStatus {
+    let last_background_task =
+        wait_background_task(&internal_client, "tuf_artifact_replication")
+            .await;
+
+    let LastResult::Completed(last_result_completed) =
+        last_background_task.last
+    else {
+        panic!(
+            "unexpected {:?} returned from tuf_artifact_replication task",
+            last_background_task.last,
+        );
+    };
+
+    let status = serde_json::from_value::<TufArtifactReplicationStatus>(
+        last_result_completed.details,
+    )
+    .unwrap();
+    assert_eq!(status.last_run_counters.err(), 0);
+    status
+}
+
+pub async fn run_tuf_artifact_replication_step(
+    internal_client: &ClientTestContext,
+) -> TufArtifactReplicationStatus {
+    let last_background_task =
+        activate_background_task(&internal_client, "tuf_artifact_replication")
+            .await;
+
+    let LastResult::Completed(last_result_completed) =
+        last_background_task.last
+    else {
+        panic!(
+            "unexpected {:?} returned from tuf_artifact_replication task",
+            last_background_task.last,
+        );
+    };
+
+    let status = serde_json::from_value::<TufArtifactReplicationStatus>(
+        last_result_completed.details,
+    )
+    .unwrap();
+    assert_eq!(status.last_run_counters.err(), 0);
+    status
 }

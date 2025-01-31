@@ -94,14 +94,14 @@ impl DataStore {
     ) -> LookupResult<Vec<RegionSnapshot>> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::crucible_dataset::dsl as dataset_dsl;
         use db::schema::physical_disk::dsl as physical_disk_dsl;
         use db::schema::region_snapshot::dsl as region_snapshot_dsl;
         use db::schema::zpool::dsl as zpool_dsl;
 
         region_snapshot_dsl::region_snapshot
             .filter(region_snapshot_dsl::dataset_id.eq_any(
-                dataset_dsl::dataset
+                dataset_dsl::crucible_dataset
                     .filter(dataset_dsl::time_deleted.is_null())
                     .filter(dataset_dsl::pool_id.eq_any(
                         zpool_dsl::zpool
@@ -129,14 +129,14 @@ impl DataStore {
     ) -> LookupResult<Vec<RegionSnapshot>> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::crucible_dataset::dsl as dataset_dsl;
         use db::schema::physical_disk::dsl as physical_disk_dsl;
         use db::schema::region_snapshot::dsl as region_snapshot_dsl;
         use db::schema::zpool::dsl as zpool_dsl;
 
         region_snapshot_dsl::region_snapshot
             .filter(region_snapshot_dsl::dataset_id.eq_any(
-                dataset_dsl::dataset
+                dataset_dsl::crucible_dataset
                     .filter(dataset_dsl::time_deleted.is_null())
                     .filter(dataset_dsl::pool_id.eq_any(
                         zpool_dsl::zpool

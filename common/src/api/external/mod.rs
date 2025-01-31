@@ -77,13 +77,25 @@ pub trait ObjectIdentity {
 }
 
 /// Exists for types that don't properly implement `ObjectIdentity` but
-/// still need to be paginated by name or id.
+/// still need to be paginated by id.
 pub trait SimpleIdentity {
+    fn id(&self) -> Uuid;
+}
+
+impl<T: ObjectIdentity> SimpleIdentity for T {
+    fn id(&self) -> Uuid {
+        self.identity().id
+    }
+}
+
+/// Exists for types that don't properly implement `ObjectIdentity` but
+/// still need to be paginated by name or id.
+pub trait SimpleIdentityOrName {
     fn id(&self) -> Uuid;
     fn name(&self) -> &Name;
 }
 
-impl<T: ObjectIdentity> SimpleIdentity for T {
+impl<T: ObjectIdentity> SimpleIdentityOrName for T {
     fn id(&self) -> Uuid {
         self.identity().id
     }
@@ -751,9 +763,26 @@ impl From<ByteCount> for i64 {
     PartialEq,
     PartialOrd,
     Serialize,
-    Diffus,
 )]
 pub struct Generation(u64);
+
+// We have to manually implement `Diffable` because this is newtype with private
+// data, and we want to see the diff on the newtype not the inner data.
+impl<'a> Diffable<'a> for Generation {
+    type Diff = (&'a Generation, &'a Generation);
+
+    fn diff(&'a self, other: &'a Self) -> edit::Edit<'a, Self> {
+        if self == other {
+            edit::Edit::Copy(self)
+        } else {
+            edit::Edit::Change {
+                before: self,
+                after: other,
+                diff: (self, other),
+            }
+        }
+    }
+}
 
 impl Generation {
     pub const fn new() -> Generation {
@@ -979,6 +1008,7 @@ pub enum ResourceType {
     Instance,
     LoopbackAddress,
     SwitchPortSettings,
+    SupportBundle,
     IpPool,
     IpPoolResource,
     InstanceNetworkInterface,
@@ -1014,6 +1044,7 @@ pub enum ResourceType {
     FloatingIp,
     Probe,
     ProbeNetworkInterface,
+    LldpLinkConfig,
 }
 
 // IDENTITY METADATA
@@ -1947,7 +1978,11 @@ impl<'a> Diffable<'a> for MacAddr {
         if self == other {
             edit::Edit::Copy(self)
         } else {
-            edit::Edit::Change((self, other))
+            edit::Edit::Change {
+                before: self,
+                after: other,
+                diff: (self, other),
+            }
         }
     }
 }
@@ -2580,6 +2615,50 @@ pub struct LldpLinkConfig {
 
     /// The LLDP management IP TLV.
     pub management_ip: Option<oxnet::IpNet>,
+}
+
+/// Information about LLDP advertisements from other network entities directly
+/// connected to a switch port.  This structure contains both metadata about
+/// when and where the neighbor was seen, as well as the specific information
+/// the neighbor was advertising.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct LldpNeighbor {
+    // Unique ID assigned to this neighbor - only used for pagination
+    #[serde(skip)]
+    pub id: Uuid,
+
+    /// The port on which the neighbor was seen
+    pub local_port: String,
+
+    /// Initial sighting of this LldpNeighbor
+    pub first_seen: DateTime<Utc>,
+
+    /// Most recent sighting of this LldpNeighbor
+    pub last_seen: DateTime<Utc>,
+
+    /// The LLDP link name advertised by the neighbor
+    pub link_name: String,
+
+    /// The LLDP link description advertised by the neighbor
+    pub link_description: Option<String>,
+
+    /// The LLDP chassis identifier advertised by the neighbor
+    pub chassis_id: String,
+
+    /// The LLDP system name advertised by the neighbor
+    pub system_name: Option<String>,
+
+    /// The LLDP system description advertised by the neighbor
+    pub system_description: Option<String>,
+
+    /// The LLDP management IP(s) advertised by the neighbor
+    pub management_ip: Vec<oxnet::IpNet>,
+}
+
+impl SimpleIdentity for LldpNeighbor {
+    fn id(&self) -> Uuid {
+        self.id
+    }
 }
 
 /// Per-port tx-eq overrides.  This can be used to fine-tune the transceiver

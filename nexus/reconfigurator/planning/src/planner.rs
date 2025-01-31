@@ -1051,7 +1051,7 @@ mod test {
                 .get(&sled_id)
                 .expect("missing kept sled")
                 .zones
-                .values()
+                .iter()
                 .filter(|z| z.zone_type.is_nexus())
                 .count(),
             1
@@ -1134,7 +1134,7 @@ mod test {
             assert_eq!(
                 sled_config
                     .zones
-                    .values()
+                    .iter()
                     .filter(|z| z.zone_type.is_nexus())
                     .count(),
                 1
@@ -1217,7 +1217,7 @@ mod test {
             assert_eq!(
                 sled_config
                     .zones
-                    .values()
+                    .iter()
                     .filter(|z| z.zone_type.is_internal_dns())
                     .count(),
                 1
@@ -1252,12 +1252,12 @@ mod test {
         // Remove two of the internal DNS zones; the planner should put new
         // zones back in their places.
         for (_sled_id, zones) in blueprint1.blueprint_zones.iter_mut().take(2) {
-            zones.zones.retain(|_, z| !z.zone_type.is_internal_dns());
+            zones.zones.retain(|z| !z.zone_type.is_internal_dns());
         }
         for (_, dataset_config) in
             blueprint1.blueprint_datasets.iter_mut().take(2)
         {
-            dataset_config.datasets.retain(|_id, dataset| {
+            dataset_config.datasets.retain(|dataset| {
                 // This is gross; once zone configs know explicit dataset IDs,
                 // we should retain by ID instead.
                 match &dataset.kind {
@@ -1366,7 +1366,7 @@ mod test {
         // The expunged sled should have an expunged Nexus zone.
         let zone = blueprint2.blueprint_zones[&sled_id]
             .zones
-            .values()
+            .iter()
             .find(|zone| matches!(zone.zone_type, BlueprintZoneType::Nexus(_)))
             .expect("no nexus zone found");
         assert_eq!(zone.disposition, BlueprintZoneDisposition::Expunged);
@@ -1402,7 +1402,7 @@ mod test {
         let new_zone = blueprint3
             .blueprint_zones
             .values()
-            .flat_map(|c| c.zones.values())
+            .flat_map(|c| c.zones.iter())
             .find(|zone| {
                 zone.disposition == BlueprintZoneDisposition::InService
                     && zone
@@ -1561,7 +1561,7 @@ mod test {
         assert_eq!(
             blueprint3.blueprint_zones[&sled_id]
                 .zones
-                .values()
+                .iter()
                 .filter(|zone| {
                     zone.disposition == BlueprintZoneDisposition::Expunged
                         && zone.zone_type.is_external_dns()
@@ -1644,13 +1644,13 @@ mod test {
         for _ in 0..NEW_IN_SERVICE_DISKS {
             sled_details.resources.zpools.insert(
                 ZpoolUuid::from(zpool_rng.next()),
-                (new_sled_disk(PhysicalDiskPolicy::InService), vec![]),
+                new_sled_disk(PhysicalDiskPolicy::InService),
             );
         }
         for _ in 0..NEW_EXPUNGED_DISKS {
             sled_details.resources.zpools.insert(
                 ZpoolUuid::from(zpool_rng.next()),
-                (new_sled_disk(PhysicalDiskPolicy::Expunged), vec![]),
+                new_sled_disk(PhysicalDiskPolicy::Expunged),
             );
         }
 
@@ -1715,22 +1715,27 @@ mod test {
         builder.policy_mut().target_internal_dns_zone_count = 1;
 
         // Manually update the blueprint to report an abnormal "Debug dataset"
-        let (_sled_id, datasets_config) =
-            blueprint1.blueprint_datasets.iter_mut().next().unwrap();
-        let (_dataset_id, dataset_config) = datasets_config
-            .datasets
-            .iter_mut()
-            .find(|(_, config)| {
-                matches!(config.kind, omicron_common::disk::DatasetKind::Debug)
-            })
-            .expect("No debug dataset found");
+        {
+            let (_sled_id, datasets_config) =
+                blueprint1.blueprint_datasets.iter_mut().next().unwrap();
+            let mut dataset_config = datasets_config
+                .datasets
+                .iter_mut()
+                .find(|config| {
+                    matches!(
+                        config.kind,
+                        omicron_common::disk::DatasetKind::Debug
+                    )
+                })
+                .expect("No debug dataset found");
 
-        // These values are out-of-sync with what the blueprint will typically
-        // enforce.
-        dataset_config.quota = None;
-        dataset_config.reservation = Some(
-            omicron_common::api::external::ByteCount::from_gibibytes_u32(1),
-        );
+            // These values are out-of-sync with what the blueprint will typically
+            // enforce.
+            dataset_config.quota = None;
+            dataset_config.reservation = Some(
+                omicron_common::api::external::ByteCount::from_gibibytes_u32(1),
+            );
+        }
 
         let input = builder.build();
 
@@ -1798,7 +1803,7 @@ mod test {
         // multiple zones of distinct types.
         let mut zpool_by_zone_usage = HashMap::new();
         for zones in blueprint1.blueprint_zones.values() {
-            for (_, zone) in &zones.zones {
+            for zone in &zones.zones {
                 let pool = zone.filesystem_pool.as_ref().unwrap();
                 zpool_by_zone_usage
                     .entry(pool.id())
@@ -1807,7 +1812,7 @@ mod test {
             }
         }
         let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
-        let (_, (disk, _datasets)) = sled_details
+        let (_, disk) = sled_details
             .resources
             .zpools
             .iter_mut()
@@ -1931,7 +1936,7 @@ mod test {
             .blueprint_zones
             .iter()
             .find_map(|(_, zones_config)| {
-                for (_, zone_config) in &zones_config.zones {
+                for zone_config in &zones_config.zones {
                     if zone_config.zone_type.is_ntp() {
                         return zone_config.filesystem_pool.clone();
                     }
@@ -1946,7 +1951,7 @@ mod test {
             0,
             |acc, (_, zones_config)| {
                 let mut zones_using_zpool = 0;
-                for (_, zone_config) in &zones_config.zones {
+                for zone_config in &zones_config.zones {
                     if let Some(pool) = &zone_config.filesystem_pool {
                         if pool == &pool_to_expunge {
                             zones_using_zpool += 1;
@@ -1971,7 +1976,7 @@ mod test {
         // For that pool, find the physical disk behind it, and mark it
         // expunged.
         let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
-        let (disk, _datasets) = sled_details
+        let disk = sled_details
             .resources
             .zpools
             .get_mut(&pool_to_expunge.id())
@@ -2057,7 +2062,7 @@ mod test {
             assert_eq!(
                 sled_config
                     .zones
-                    .values()
+                    .iter()
                     .filter(|z| z.zone_type.is_nexus())
                     .count(),
                 1
@@ -2091,7 +2096,7 @@ mod test {
             // expunged, so lie and pretend like that already happened
             // (otherwise the planner will rightfully fail to generate a new
             // blueprint, because we're feeding it invalid inputs).
-            for (_, zone) in
+            for mut zone in
                 &mut blueprint1.blueprint_zones.get_mut(sled_id).unwrap().zones
             {
                 zone.disposition = BlueprintZoneDisposition::Expunged;
@@ -2223,7 +2228,7 @@ mod test {
             .unwrap()
             .zones;
 
-        zones.retain(|_, zone| {
+        zones.retain(|zone| {
             if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 internal_address,
                 ..

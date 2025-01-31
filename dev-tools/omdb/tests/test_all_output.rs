@@ -114,7 +114,7 @@ async fn test_omdb_usage_errors() {
     assert_contents("tests/usage_errors.out", &output);
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 1)]
 async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     clear_omdb_env();
 
@@ -219,6 +219,14 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         redactor.extra_variable_length("cockroachdb_version", &crdb_version);
     }
 
+    // The `tuf_artifact_replication` task's output depends on how
+    // many sleds happened to register with Nexus before its first
+    // execution. These redactions work around the issue described in
+    // https://github.com/oxidecomputer/omicron/issues/7417.
+    redactor
+        .field("list ok:", r"\d+")
+        .section(&["task: \"tuf_artifact_replication\"", "request ringbuf:"]);
+
     for args in invocations {
         println!("running commands with args: {:?}", args);
         let p = postgres_url.to_string();
@@ -306,7 +314,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
 /// (1) no URL is specified in either place because that's covered by the usage
 /// test above, nor (2) the URL is specified only in the environment because
 /// that's covered by the success tests above.
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 1)]
 async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     clear_omdb_env();
 

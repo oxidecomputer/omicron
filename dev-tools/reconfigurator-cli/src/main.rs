@@ -15,6 +15,8 @@ use internal_dns_types::diff::DnsDiff;
 use itertools::Itertools;
 use log_capture::LogCapture;
 use nexus_inventory::CollectionBuilder;
+use nexus_reconfigurator_blippy::Blippy;
+use nexus_reconfigurator_blippy::BlippyReportSortKey;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
@@ -33,6 +35,7 @@ use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
 use omicron_common::policy::NEXUS_REDUNDANCY;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -47,7 +50,6 @@ use std::io::BufRead;
 use std::io::IsTerminal;
 use swrite::{swriteln, SWrite};
 use tabled::Tabled;
-use uuid::Uuid;
 
 mod log_capture;
 
@@ -276,6 +278,7 @@ fn process_entry(
         Commands::InventoryList => cmd_inventory_list(sim),
         Commands::InventoryGenerate => cmd_inventory_generate(sim),
         Commands::BlueprintList => cmd_blueprint_list(sim),
+        Commands::BlueprintBlippy(args) => cmd_blueprint_blippy(sim, args),
         Commands::BlueprintEdit(args) => cmd_blueprint_edit(sim, args),
         Commands::BlueprintPlan(args) => cmd_blueprint_plan(sim, args),
         Commands::BlueprintShow(args) => cmd_blueprint_show(sim, args),
@@ -339,6 +342,8 @@ enum Commands {
 
     /// list all blueprints
     BlueprintList,
+    /// run blippy on a blueprint
+    BlueprintBlippy(BlueprintArgs),
     /// run planner to generate a new blueprint
     BlueprintPlan(BlueprintPlanArgs),
     /// edit contents of a blueprint directly
@@ -403,7 +408,7 @@ struct InventoryArgs {
 #[derive(Debug, Args)]
 struct BlueprintPlanArgs {
     /// id of the blueprint on which this one will be based
-    parent_blueprint_id: Uuid,
+    parent_blueprint_id: BlueprintUuid,
     /// id of the inventory collection to use in planning
     ///
     /// Must be provided unless there is only one collection in the loaded
@@ -414,7 +419,7 @@ struct BlueprintPlanArgs {
 #[derive(Debug, Args)]
 struct BlueprintEditArgs {
     /// id of the blueprint to edit
-    blueprint_id: Uuid,
+    blueprint_id: BlueprintUuid,
     /// "creator" field for the new blueprint
     #[arg(long)]
     creator: Option<String>,
@@ -441,7 +446,7 @@ enum BlueprintEditCommands {
 #[derive(Debug, Args)]
 struct BlueprintArgs {
     /// id of the blueprint
-    blueprint_id: Uuid,
+    blueprint_id: BlueprintUuid,
 }
 
 #[derive(Debug, Args)]
@@ -451,7 +456,7 @@ struct BlueprintDiffDnsArgs {
     /// DNS version to diff against
     dns_version: u32,
     /// id of the blueprint
-    blueprint_id: Uuid,
+    blueprint_id: BlueprintUuid,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -465,13 +470,13 @@ struct BlueprintDiffInventoryArgs {
     /// id of the inventory collection
     collection_id: CollectionUuid,
     /// id of the blueprint
-    blueprint_id: Uuid,
+    blueprint_id: BlueprintUuid,
 }
 
 #[derive(Debug, Args)]
 struct BlueprintSaveArgs {
     /// id of the blueprint
-    blueprint_id: Uuid,
+    blueprint_id: BlueprintUuid,
     /// output file
     filename: Utf8PathBuf,
 }
@@ -479,9 +484,9 @@ struct BlueprintSaveArgs {
 #[derive(Debug, Args)]
 struct BlueprintDiffArgs {
     /// id of the first blueprint
-    blueprint1_id: Uuid,
+    blueprint1_id: BlueprintUuid,
     /// id of the second blueprint
-    blueprint2_id: Uuid,
+    blueprint2_id: BlueprintUuid,
 }
 
 #[derive(Debug, Subcommand)]
@@ -660,12 +665,9 @@ fn cmd_sled_show(
     swriteln!(s, "sled {}", sled_id);
     swriteln!(s, "subnet {}", sled_resources.subnet.net());
     swriteln!(s, "zpools ({}):", sled_resources.zpools.len());
-    for (zpool, (disk, datasets)) in &sled_resources.zpools {
+    for (zpool, disk) in &sled_resources.zpools {
         swriteln!(s, "    {:?}", zpool);
         swriteln!(s, "    {:?}", disk);
-        for dataset in datasets {
-            swriteln!(s, "    ↳ {:?}", dataset);
-        }
     }
     Ok(Some(s))
 }
@@ -728,7 +730,7 @@ fn cmd_blueprint_list(
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct BlueprintRow {
-        id: Uuid,
+        id: BlueprintUuid,
         parent: Cow<'static, str>,
         time_created: String,
     }
@@ -753,6 +755,17 @@ fn cmd_blueprint_list(
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
         .to_string();
     Ok(Some(table))
+}
+
+fn cmd_blueprint_blippy(
+    sim: &mut ReconfiguratorSim,
+    args: BlueprintArgs,
+) -> anyhow::Result<Option<String>> {
+    let state = sim.current_state();
+    let blueprint = state.system().get_blueprint(args.blueprint_id)?;
+    let report =
+        Blippy::new(&blueprint).into_report(BlippyReportSortKey::Severity);
+    Ok(Some(format!("{}", report.display())))
 }
 
 fn cmd_blueprint_plan(

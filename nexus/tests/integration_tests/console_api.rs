@@ -384,6 +384,7 @@ async fn test_absolute_static_dir() {
         &mut config,
         sim::SimMode::Explicit,
         None,
+        0,
     )
     .await;
     let testctx = &cptestctx.external_client;

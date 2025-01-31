@@ -19,6 +19,7 @@ use oxql_types::point::Values;
 use oxql_types::Alignment;
 use oxql_types::Table;
 use oxql_types::Timeseries;
+use std::fmt;
 use std::time::Duration;
 
 // The maximum factor by which an alignment operation may upsample data.
@@ -68,7 +69,7 @@ fn verify_max_upsampling_ratio(
 ///
 /// Alignment is used to produce data at the defined timestamps, so that samples
 /// from multiple timeseries may be combined or correlated in meaningful ways.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Align {
     /// The alignment method, used to describe how data over the input period
     /// is used to generate an output sample.
@@ -85,6 +86,12 @@ pub struct Align {
     // For now, we'll enforce that the output period and input window are the
     // same.
     pub period: Duration,
+}
+
+impl std::fmt::Display for Align {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}({:?})", self.method, self.period)
+    }
 }
 
 impl Align {
@@ -108,7 +115,7 @@ impl Align {
 }
 
 /// An alignment method.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AlignmentMethod {
     /// Alignment is done by interpolating the output data at the specified
     /// period.
@@ -116,6 +123,15 @@ pub enum AlignmentMethod {
     /// Alignment is done by computing the mean of the output data within the
     /// specified period.
     MeanWithin,
+}
+
+impl fmt::Display for AlignmentMethod {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlignmentMethod::Interpolate => write!(f, "interpolate"),
+            AlignmentMethod::MeanWithin => write!(f, "mean_within"),
+        }
+    }
 }
 
 // Align the timeseries in a table by computing the average within each output

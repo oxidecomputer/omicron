@@ -5134,6 +5134,93 @@
         }
       }
     },
+    "/v1/system/hardware/rack-switch-port/{rack_id}/{switch_location}/{port}/lldp/neighbors": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Fetch the LLDP neighbors seen on a switch port",
+        "operationId": "networking_switch_port_lldp_neighbors",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "description": "A name to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rack_id",
+            "description": "A rack id to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch_location",
+            "description": "A switch location to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LldpNeighborResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
     "/v1/system/hardware/racks": {
       "get": {
         "tags": [
@@ -5670,6 +5757,121 @@
         },
         "x-dropshot-pagination": {
           "required": []
+        }
+      }
+    },
+    "/v1/system/hardware/switch-port/{port}/lldp/config": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Fetch the LLDP configuration for a switch port",
+        "operationId": "networking_switch_port_lldp_config_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "description": "A name to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "rack_id",
+            "description": "A rack id to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "switch_location",
+            "description": "A switch location to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LldpLinkConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Update the LLDP configuration for a switch port",
+        "operationId": "networking_switch_port_lldp_config_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "description": "A name to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "rack_id",
+            "description": "A rack id to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "switch_location",
+            "description": "A switch location to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LldpLinkConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -17794,6 +17996,85 @@
         },
         "required": [
           "enabled"
+        ]
+      },
+      "LldpNeighbor": {
+        "description": "Information about LLDP advertisements from other network entities directly connected to a switch port.  This structure contains both metadata about when and where the neighbor was seen, as well as the specific information the neighbor was advertising.",
+        "type": "object",
+        "properties": {
+          "chassis_id": {
+            "description": "The LLDP chassis identifier advertised by the neighbor",
+            "type": "string"
+          },
+          "first_seen": {
+            "description": "Initial sighting of this LldpNeighbor",
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_seen": {
+            "description": "Most recent sighting of this LldpNeighbor",
+            "type": "string",
+            "format": "date-time"
+          },
+          "link_description": {
+            "nullable": true,
+            "description": "The LLDP link description advertised by the neighbor",
+            "type": "string"
+          },
+          "link_name": {
+            "description": "The LLDP link name advertised by the neighbor",
+            "type": "string"
+          },
+          "local_port": {
+            "description": "The port on which the neighbor was seen",
+            "type": "string"
+          },
+          "management_ip": {
+            "description": "The LLDP management IP(s) advertised by the neighbor",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNet"
+            }
+          },
+          "system_description": {
+            "nullable": true,
+            "description": "The LLDP system description advertised by the neighbor",
+            "type": "string"
+          },
+          "system_name": {
+            "nullable": true,
+            "description": "The LLDP system name advertised by the neighbor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chassis_id",
+          "first_seen",
+          "last_seen",
+          "link_name",
+          "local_port",
+          "management_ip"
+        ]
+      },
+      "LldpNeighborResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LldpNeighbor"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "LoopbackAddress": {

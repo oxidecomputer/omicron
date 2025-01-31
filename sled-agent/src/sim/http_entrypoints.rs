@@ -5,9 +5,11 @@
 //! HTTP entrypoint functions for the sled agent's exposed API
 
 use super::collection::PokeMode;
+use crate::support_bundle::storage::SupportBundleQueryType;
 use camino::Utf8PathBuf;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
+use dropshot::ErrorStatusCode;
 use dropshot::FreeformBody;
 use dropshot::HttpError;
 use dropshot::HttpResponseAccepted;
@@ -25,7 +27,6 @@ use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::{Inventory, OmicronZonesConfig};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::SledVmmState;
-use omicron_common::api::internal::nexus::UpdateArtifactId;
 use omicron_common::api::internal::shared::ExternalIpGatewayMap;
 use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
@@ -37,6 +38,7 @@ use omicron_common::disk::DatasetsManagementResult;
 use omicron_common::disk::DisksManagementResult;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_common::update::ArtifactHash;
+use range_requests::RequestContextEx;
 use sled_agent_api::*;
 use sled_agent_types::boot_disk::BootDiskOsWriteStatus;
 use sled_agent_types::boot_disk::BootDiskPathParams;
@@ -169,21 +171,6 @@ impl SledAgentApi for SledAgentSimImpl {
         ))
     }
 
-    async fn update_artifact(
-        rqctx: RequestContext<Self::Context>,
-        artifact: TypedBody<UpdateArtifactId>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let sa = rqctx.context();
-        sa.updates()
-            .download_artifact(
-                artifact.into_inner(),
-                rqctx.context().nexus_client.as_ref(),
-            )
-            .await
-            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
-        Ok(HttpResponseUpdatedNoContent())
-    }
-
     async fn artifact_list(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<BTreeMap<ArtifactHash, usize>>, HttpError> {
@@ -241,7 +228,6 @@ impl SledAgentApi for SledAgentSimImpl {
             path_params.disk_id,
             body.snapshot_id,
         )
-        .await
         .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
         Ok(HttpResponseOk(VmmIssueDiskSnapshotRequestResponse {
@@ -269,7 +255,6 @@ impl SledAgentApi for SledAgentSimImpl {
         let body_args = body.into_inner();
 
         sa.set_virtual_nic_host(&body_args)
-            .await
             .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
         Ok(HttpResponseUpdatedNoContent())
@@ -283,7 +268,6 @@ impl SledAgentApi for SledAgentSimImpl {
         let body_args = body.into_inner();
 
         sa.unset_virtual_nic_host(&body_args)
-            .await
             .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
         Ok(HttpResponseUpdatedNoContent())
@@ -295,7 +279,7 @@ impl SledAgentApi for SledAgentSimImpl {
     {
         let sa = rqctx.context();
 
-        let vnics = sa.list_virtual_nics().await.map_err(HttpError::from)?;
+        let vnics = sa.list_virtual_nics().map_err(HttpError::from)?;
 
         Ok(HttpResponseOk(vnics))
     }
@@ -311,7 +295,7 @@ impl SledAgentApi for SledAgentSimImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<EarlyNetworkConfig>, HttpError> {
         let config =
-            rqctx.context().bootstore_network_config.lock().await.clone();
+            rqctx.context().bootstore_network_config.lock().unwrap().clone();
         Ok(HttpResponseOk(config))
     }
 
@@ -319,7 +303,8 @@ impl SledAgentApi for SledAgentSimImpl {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<EarlyNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let mut config = rqctx.context().bootstore_network_config.lock().await;
+        let mut config =
+            rqctx.context().bootstore_network_config.lock().unwrap();
         *config = body.into_inner();
         Ok(HttpResponseUpdatedNoContent())
     }
@@ -330,7 +315,7 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseOk<Inventory>, HttpError> {
         let sa = rqctx.context();
         Ok(HttpResponseOk(
-            sa.inventory(rqctx.server.local_addr).await.map_err(|e| {
+            sa.inventory(rqctx.server.local_addr).map_err(|e| {
                 HttpError::for_internal_error(format!("{:#}", e))
             })?,
         ))
@@ -342,7 +327,7 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseOk<DatasetsManagementResult>, HttpError> {
         let sa = rqctx.context();
         let body_args = body.into_inner();
-        let result = sa.datasets_ensure(body_args).await?;
+        let result = sa.datasets_ensure(body_args)?;
         Ok(HttpResponseOk(result))
     }
 
@@ -350,7 +335,7 @@ impl SledAgentApi for SledAgentSimImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<DatasetsConfig>, HttpError> {
         let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.datasets_config_list().await?))
+        Ok(HttpResponseOk(sa.datasets_config_list()?))
     }
 
     async fn omicron_physical_disks_put(
@@ -359,7 +344,7 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseOk<DisksManagementResult>, HttpError> {
         let sa = rqctx.context();
         let body_args = body.into_inner();
-        let result = sa.omicron_physical_disks_ensure(body_args).await?;
+        let result = sa.omicron_physical_disks_ensure(body_args)?;
         Ok(HttpResponseOk(result))
     }
 
@@ -367,7 +352,7 @@ impl SledAgentApi for SledAgentSimImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<OmicronPhysicalDisksConfig>, HttpError> {
         let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.omicron_physical_disks_list().await?))
+        Ok(HttpResponseOk(sa.omicron_physical_disks_list()?))
     }
 
     async fn omicron_zones_put(
@@ -376,7 +361,7 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let body_args = body.into_inner();
-        sa.omicron_zones_ensure(body_args).await;
+        sa.omicron_zones_ensure(body_args);
         Ok(HttpResponseUpdatedNoContent())
     }
 
@@ -391,7 +376,7 @@ impl SledAgentApi for SledAgentSimImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<ResolvedVpcRouteState>>, HttpError> {
         let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.list_vpc_routes().await))
+        Ok(HttpResponseOk(sa.list_vpc_routes()))
     }
 
     async fn set_vpc_routes(
@@ -399,7 +384,7 @@ impl SledAgentApi for SledAgentSimImpl {
         body: TypedBody<Vec<ResolvedVpcRouteSet>>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
-        sa.set_vpc_routes(body.into_inner()).await;
+        sa.set_vpc_routes(body.into_inner());
         Ok(HttpResponseUpdatedNoContent())
     }
 
@@ -420,7 +405,7 @@ impl SledAgentApi for SledAgentSimImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePathParam>,
         query_params: Query<SupportBundleCreateQueryParams>,
-        _body: StreamingBody,
+        body: StreamingBody,
     ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
         let sa = rqctx.context();
 
@@ -434,6 +419,7 @@ impl SledAgentApi for SledAgentSimImpl {
                 dataset_id,
                 support_bundle_id,
                 hash,
+                body.into_stream(),
             )
             .await?,
         ))
@@ -447,15 +433,15 @@ impl SledAgentApi for SledAgentSimImpl {
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
-        sa.support_bundle_get(zpool_id, dataset_id, support_bundle_id).await?;
-
-        Ok(http::Response::builder()
-            .status(http::StatusCode::OK)
-            .header(http::header::CONTENT_TYPE, "text/html")
-            .body(dropshot::Body::with_content(
-                "simulated support bundle; do not eat",
-            ))
-            .unwrap())
+        let range = rqctx.range();
+        sa.support_bundle_get(
+            zpool_id,
+            dataset_id,
+            support_bundle_id,
+            range,
+            SupportBundleQueryType::Whole,
+        )
+        .await
     }
 
     async fn support_bundle_download_file(
@@ -466,18 +452,18 @@ impl SledAgentApi for SledAgentSimImpl {
         let SupportBundleFilePathParam {
             parent:
                 SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id },
-            file: _,
+            file,
         } = path_params.into_inner();
 
-        sa.support_bundle_get(zpool_id, dataset_id, support_bundle_id).await?;
-
-        Ok(http::Response::builder()
-            .status(http::StatusCode::OK)
-            .header(http::header::CONTENT_TYPE, "text/html")
-            .body(dropshot::Body::with_content(
-                "simulated support bundle file; do not eat",
-            ))
-            .unwrap())
+        let range = rqctx.range();
+        sa.support_bundle_get(
+            zpool_id,
+            dataset_id,
+            support_bundle_id,
+            range,
+            SupportBundleQueryType::Path { file_path: file },
+        )
+        .await
     }
 
     async fn support_bundle_index(
@@ -488,15 +474,15 @@ impl SledAgentApi for SledAgentSimImpl {
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
-        sa.support_bundle_get(zpool_id, dataset_id, support_bundle_id).await?;
-
-        Ok(http::Response::builder()
-            .status(http::StatusCode::OK)
-            .header(http::header::CONTENT_TYPE, "text/html")
-            .body(dropshot::Body::with_content(
-                "simulated support bundle index; do not eat",
-            ))
-            .unwrap())
+        let range = rqctx.range();
+        sa.support_bundle_get(
+            zpool_id,
+            dataset_id,
+            support_bundle_id,
+            range,
+            SupportBundleQueryType::Index,
+        )
+        .await
     }
 
     async fn support_bundle_head(
@@ -507,17 +493,15 @@ impl SledAgentApi for SledAgentSimImpl {
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
-        sa.support_bundle_get(zpool_id, dataset_id, support_bundle_id).await?;
-
-        let fictional_length = 10000;
-
-        Ok(http::Response::builder()
-            .status(http::StatusCode::OK)
-            .header(http::header::CONTENT_TYPE, "text/html")
-            .header(hyper::header::ACCEPT_RANGES, "bytes")
-            .header(hyper::header::CONTENT_LENGTH, fictional_length)
-            .body(dropshot::Body::empty())
-            .unwrap())
+        let range = rqctx.range();
+        sa.support_bundle_head(
+            zpool_id,
+            dataset_id,
+            support_bundle_id,
+            range,
+            SupportBundleQueryType::Whole,
+        )
+        .await
     }
 
     async fn support_bundle_head_file(
@@ -528,20 +512,18 @@ impl SledAgentApi for SledAgentSimImpl {
         let SupportBundleFilePathParam {
             parent:
                 SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id },
-            file: _,
+            file,
         } = path_params.into_inner();
 
-        sa.support_bundle_get(zpool_id, dataset_id, support_bundle_id).await?;
-
-        let fictional_length = 10000;
-
-        Ok(http::Response::builder()
-            .status(http::StatusCode::OK)
-            .header(http::header::CONTENT_TYPE, "text/html")
-            .header(hyper::header::ACCEPT_RANGES, "bytes")
-            .header(hyper::header::CONTENT_LENGTH, fictional_length)
-            .body(dropshot::Body::empty())
-            .unwrap())
+        let range = rqctx.range();
+        sa.support_bundle_get(
+            zpool_id,
+            dataset_id,
+            support_bundle_id,
+            range,
+            SupportBundleQueryType::Path { file_path: file },
+        )
+        .await
     }
 
     async fn support_bundle_head_index(
@@ -552,17 +534,15 @@ impl SledAgentApi for SledAgentSimImpl {
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
-        sa.support_bundle_get(zpool_id, dataset_id, support_bundle_id).await?;
-
-        let fictional_length = 10000;
-
-        Ok(http::Response::builder()
-            .status(http::StatusCode::OK)
-            .header(http::header::CONTENT_TYPE, "text/html")
-            .header(hyper::header::ACCEPT_RANGES, "bytes")
-            .header(hyper::header::CONTENT_LENGTH, fictional_length)
-            .body(dropshot::Body::empty())
-            .unwrap())
+        let range = rqctx.range();
+        sa.support_bundle_head(
+            zpool_id,
+            dataset_id,
+            support_bundle_id,
+            range,
+            SupportBundleQueryType::Index,
+        )
+        .await
     }
 
     async fn support_bundle_delete(
@@ -768,12 +748,13 @@ fn method_unimplemented<T>() -> Result<T, HttpError> {
         // Use a client error here (405 Method Not Allowed vs 501 Not
         // Implemented) even though it isn't strictly accurate here, so tests
         // get to see the error message.
-        status_code: http::StatusCode::METHOD_NOT_ALLOWED,
+        status_code: ErrorStatusCode::METHOD_NOT_ALLOWED,
         error_code: None,
         external_message: "Method not implemented in sled-agent-sim"
             .to_string(),
         internal_message: "Method not implemented in sled-agent-sim"
             .to_string(),
+        headers: None,
     })
 }
 

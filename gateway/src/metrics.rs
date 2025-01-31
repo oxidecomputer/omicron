@@ -1104,7 +1104,7 @@ impl ServerManager {
                     let config = oximeter_producer::Config {
                         server_info,
                         registration_address,
-                        request_body_max_bytes: METRIC_REQUEST_MAX_SIZE,
+                        default_request_body_max_bytes: METRIC_REQUEST_MAX_SIZE,
                         log: oximeter_producer::LogConfig::Logger(
                             self.log.clone(),
                         ),

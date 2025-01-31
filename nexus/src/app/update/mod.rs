@@ -11,9 +11,8 @@ use nexus_db_model::TufRepoDescription;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::{
-    Error, SemverVersion, TufRepoInsertResponse,
+    Error, SemverVersion, TufRepoInsertResponse, TufRepoInsertStatus,
 };
-use omicron_common::update::ArtifactId;
 use update_common::artifacts::ArtifactsWithPlan;
 
 mod common_sp_update;
@@ -56,17 +55,40 @@ impl super::Nexus {
             ArtifactsWithPlan::from_stream(body, Some(file_name), &self.log)
                 .await
                 .map_err(|error| error.to_http_error())?;
-
         // Now store the artifacts in the database.
         let tuf_repo_description = TufRepoDescription::from_external(
             artifacts_with_plan.description().clone(),
         );
-
         let response = self
             .db_datastore
             .update_tuf_repo_insert(opctx, tuf_repo_description)
             .await
             .map_err(HttpError::from)?;
+
+        // If we inserted a new repository, move the `ArtifactsWithPlan` (which
+        // carries with it the `Utf8TempDir`s storing the artifacts) into the
+        // artifact replication background task, then immediately activate the
+        // task.
+        if response.status == TufRepoInsertStatus::Inserted {
+            self.tuf_artifact_replication_tx
+                .send(artifacts_with_plan)
+                .await
+                .map_err(|err| {
+                    // In theory this should never happen; `Sender::send`
+                    // returns an error only if the receiver has hung up, and
+                    // the receiver should live for as long as Nexus does (it
+                    // belongs to the background task driver).
+                    //
+                    // If this _does_ happen, the impact is that the database
+                    // has recorded a repository for which we no longer have
+                    // the artifacts.
+                    Error::internal_error(&format!(
+                        "failed to send artifacts for replication: {err}"
+                    ))
+                })?;
+            self.background_tasks.task_tuf_artifact_replication.activate();
+        }
+
         Ok(response.into_external())
     }
 
@@ -89,18 +111,5 @@ impl super::Nexus {
             .map_err(HttpError::from)?;
 
         Ok(tuf_repo_description)
-    }
-
-    /// Downloads a file (currently not implemented).
-    pub(crate) async fn updates_download_artifact(
-        &self,
-        _opctx: &OpContext,
-        _artifact: ArtifactId,
-    ) -> Result<Vec<u8>, Error> {
-        // TODO: this is part of the TUF repo depot.
-        return Err(Error::internal_error(
-            "artifact download not implemented, \
-             will be part of TUF repo depot",
-        ));
     }
 }
