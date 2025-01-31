@@ -5958,30 +5958,16 @@ mod test {
             .expect("reconciled successfully");
             assert_eq!(
                 reconciled.zones_to_be_removed,
-                existing
-                    .iter()
-                    .skip(2)
-                    .cloned()
-                    .map(|(z, _)| z)
-                    .collect::<HashSet<_>>()
+                HashSet::from([existing[2].0.clone()]),
             );
             assert_eq!(
                 reconciled.zones_to_be_added,
-                new_request
-                    .zones
-                    .iter()
-                    .skip(2)
-                    .cloned()
-                    .collect::<HashSet<_>>()
+                HashSet::from([new_request.zones[2].clone()]),
             );
             // The first two existing zones should have been updated to match
             // the new request.
             assert_eq!(
-                existing
-                    .iter()
-                    .take(2)
-                    .map(|(z, _)| z.clone())
-                    .collect::<Vec<_>>(),
+                Vec::from_iter(existing[..2].iter().map(|(z, _)| z.clone())),
                 &new_request.zones[..2],
             );
         }
@@ -6091,21 +6077,13 @@ mod test {
 
             assert_eq!(
                 reconciled.zones_to_be_removed,
-                existing
-                    .iter()
-                    .skip(1)
-                    .cloned()
-                    .map(|(z, _)| z)
-                    .collect::<HashSet<_>>()
+                HashSet::from_iter(
+                    existing[1..].iter().map(|(z, _)| z.clone())
+                ),
             );
             assert_eq!(
                 reconciled.zones_to_be_added,
-                new_request
-                    .zones
-                    .iter()
-                    .skip(1)
-                    .cloned()
-                    .collect::<HashSet<_>>()
+                HashSet::from_iter(new_request.zones[1..].iter().cloned()),
             );
             // Only the first existing zone is being kept; ensure it matches the
             // new request.
