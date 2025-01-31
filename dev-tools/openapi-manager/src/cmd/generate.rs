@@ -173,9 +173,42 @@ pub(crate) fn generate_impl(
     println!("fixes failed:   {}", nerrors);
     if nerrors > 0 {
         println!("FAILED");
-        Ok(GenerateResult::Failures)
-    } else {
+        return Ok(GenerateResult::Failures);
+    }
+
+    // Now reload the local files and make sure we have no more problems.
+    println!("Re-checking by reloading local files ... ");
+    nproblems = 0;
+    let local_files = env.local_source.load(&apis)?;
+    print_warnings(&local_files.warnings, &local_files.errors)?;
+    let resolved =
+        Resolved::new(env, &apis, &blessed, &generated, &local_files);
+    for p in resolved.general_problems() {
+        println!("PROBLEM: {p}");
+        nproblems += 1;
+    }
+    for api in apis.iter_apis() {
+        let ident = api.ident();
+        for version in api.iter_versions_semver() {
+            println!("API {} version {}", ident, version);
+            // unwrap(): there should be a resolution for every managed API
+            let resolution =
+                resolved.resolution_for_api_version(ident, version).unwrap();
+            for p in resolution.problems() {
+                println!("PROBLEM: {p}");
+                nproblems += 1;
+            }
+        }
+    }
+
+    if nproblems == 0 {
         println!("Success");
         Ok(GenerateResult::Success)
+    } else {
+        println!(
+            "FAILED: unexpectedly found problems after successfully \
+             applying all fixes"
+        );
+        Ok(GenerateResult::Failures)
     }
 }
