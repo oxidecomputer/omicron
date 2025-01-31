@@ -184,9 +184,9 @@ pub enum Problem {
     LocalVersionExtra { spec_file_names: DisplayableVec<ApiSpecFileName> },
 
     #[error(
-        "Spec generated from the current code does not match this locally-\
-         added spec: {spec_file_names}.  This tool can update the local \
-         file(s) for you."
+        "Spec generated from the current code does not match this lockstep \
+         or locally-added spec: {spec_file_names}.  This tool can update the \
+         local file(s) for you."
     )]
     // For versioned APIs, since the filename has its own hash in it, when the
     // local file is stale, it's not that the file contents will be wrong, but
