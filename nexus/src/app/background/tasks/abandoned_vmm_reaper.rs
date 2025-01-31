@@ -201,12 +201,12 @@ mod tests {
     use nexus_db_model::Generation;
     use nexus_db_model::Resources;
     use nexus_db_model::SledResource;
-    use nexus_db_model::SledResourceKind;
     use nexus_db_model::Vmm;
     use nexus_db_model::VmmRuntimeState;
     use nexus_db_model::VmmState;
     use nexus_test_utils::resource_helpers;
     use nexus_test_utils_macros::nexus_test;
+    use omicron_uuid_kinds::InstanceUuid;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -267,8 +267,8 @@ mod tests {
             dbg!(datastore
                 .sled_reservation_create(
                     &opctx,
-                    destroyed_vmm_id.into_untyped_uuid(),
-                    SledResourceKind::Instance,
+                    InstanceUuid::from_untyped_uuid(instance.identity.id),
+                    destroyed_vmm_id,
                     resources.clone(),
                     constraints,
                 )
