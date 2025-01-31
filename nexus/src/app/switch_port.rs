@@ -28,7 +28,7 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         params: params::SwitchPortSettingsCreate,
-    ) -> CreateResult<SwitchPortSettingsCombinedResult> {
+    ) -> CreateResult<(SwitchPortSettingsCombinedResult, String)> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         Self::switch_port_settings_validate(&params)?;
 
@@ -90,7 +90,7 @@ impl super::Nexus {
         opctx: &OpContext,
         params: params::SwitchPortSettingsCreate,
         id: Option<Uuid>,
-    ) -> CreateResult<SwitchPortSettingsCombinedResult> {
+    ) -> CreateResult<(SwitchPortSettingsCombinedResult, String)> {
         self.db_datastore.switch_port_settings_create(opctx, &params, id).await
     }
 
@@ -99,7 +99,7 @@ impl super::Nexus {
         opctx: &OpContext,
         switch_port_settings_id: Uuid,
         new_settings: params::SwitchPortSettingsCreate,
-    ) -> CreateResult<SwitchPortSettingsCombinedResult> {
+    ) -> CreateResult<(SwitchPortSettingsCombinedResult, String)> {
         let result = self
             .db_datastore
             .switch_port_settings_update(
@@ -153,7 +153,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         name_or_id: &NameOrId,
-    ) -> LookupResult<SwitchPortSettingsCombinedResult> {
+    ) -> LookupResult<(SwitchPortSettingsCombinedResult, String)> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.db_datastore.switch_port_settings_get(opctx, name_or_id).await
     }
@@ -189,7 +189,9 @@ impl super::Nexus {
         opctx: &OpContext,
         switch_port_id: Uuid,
         port_settings_id: Option<Uuid>,
-        current_id: UpdatePrecondition<Uuid>,
+        precondition: UpdatePrecondition<
+            params::SwitchPortApplySettingsChecksums,
+        >,
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         self.db_datastore
@@ -197,7 +199,7 @@ impl super::Nexus {
                 opctx,
                 switch_port_id,
                 port_settings_id,
-                current_id,
+                precondition,
             )
             .await
     }
@@ -229,11 +231,16 @@ impl super::Nexus {
             }
         };
 
+        let precondition = match settings.precondition.clone() {
+            Some(v) => UpdatePrecondition::Value(v),
+            None => UpdatePrecondition::Null,
+        };
+
         self.set_switch_port_settings_id(
             &opctx,
             switch_port_id,
             Some(switch_port_settings_id),
-            UpdatePrecondition::DontCare,
+            precondition,
         )
         .await?;
 

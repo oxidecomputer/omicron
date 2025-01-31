@@ -39,6 +39,7 @@ semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
+sha2.workspace = true
 sled-agent-client.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true

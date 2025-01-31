@@ -562,6 +562,7 @@ impl super::Nexus {
                 };
 
             let mut port_settings_params = SwitchPortSettingsCreate {
+                precondition: None,
                 identity,
                 port_config,
                 groups: vec![],
