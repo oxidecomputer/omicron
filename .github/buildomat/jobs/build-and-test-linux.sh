@@ -26,5 +26,11 @@
 #: from_output = "/work/environment.json"
 #:
 
+#
+# /tmp is not tmpfs on Ubuntu; pointing our tests at /dev/shm should give us
+# a reasonable speedup.
+#
+export TEST_TMPDIR=/dev/shm/omicron_tmp
+
 sudo apt-get install -y jq
 exec .github/buildomat/build-and-test.sh linux
