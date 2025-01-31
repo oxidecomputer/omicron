@@ -6,7 +6,6 @@ mod archive;
 mod artifact;
 pub mod assemble;
 mod key;
-pub mod oxide_metadata;
 mod repository;
 mod root;
 mod target;

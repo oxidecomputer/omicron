@@ -36,6 +36,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::io;
 use tokio::io::AsyncReadExt;
+use tokio::runtime::Handle;
 use tufaceous_lib::ControlPlaneZoneImages;
 use tufaceous_lib::HostPhaseImages;
 use tufaceous_lib::RotArchives;
@@ -745,64 +746,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             }
             ControlPlaneZonesMode::Split => {
                 // Extract each zone image into its own artifact.
-
-                // Since stream isn't guaranteed to be 'static, we have to
-                // use block_in_place here, not spawn_blocking. This does mean
-                // that the current task is taken over, and that this function
-                // can only be used from a multithreaded Tokio runtime. (See
-                // `extract_nested_artifact_pair` for more commentary on
-                // alternatives.)
-                tokio::task::block_in_place(|| {
-                    let stream = std::pin::pin!(stream);
-                    let reader = tokio_util::io::StreamReader::new(
-                        stream.map_err(|error| {
-                            // StreamReader requires a conversion from tough's errors to
-                            // std::io::Error.
-                            std::io::Error::new(io::ErrorKind::Other, error)
-                        }),
-                    );
-
-                    // ControlPlaneZoneImages::extract_into takes a synchronous
-                    // reader, so we need to use this bridge. The bridge can
-                    // only be used from a blocking context.
-                    let reader = tokio_util::io::SyncIoBridge::new(reader);
-
-                    ControlPlaneZoneImages::extract_into(
-                        reader,
-                        |name, reader| {
-                            let mut out =
-                                self.extracted_artifacts.new_tempfile()?;
-                            io::copy(reader, &mut out)?;
-                            let data =
-                                self.extracted_artifacts.store_tempfile(
-                                    KnownArtifactKind::Zone.into(),
-                                    out,
-                                )?;
-                            let artifact_id = ArtifactId {
-                                name,
-                                version: artifact_id.version.clone(),
-                                kind: KnownArtifactKind::Zone.into(),
-                            };
-                            self.record_extracted_artifact(
-                                artifact_id,
-                                data,
-                                KnownArtifactKind::Zone.into(),
-                                self.log,
-                            )?;
-                            Ok(())
-                        },
-                    )
-                })
-                .map_err(|error| {
-                    // Fish the original RepositoryError out of this
-                    // anyhow::Error if it is one.
-                    error.downcast().unwrap_or_else(|error| {
-                        RepositoryError::TarballExtract {
-                            kind: KnownArtifactKind::ControlPlane,
-                            error,
-                        }
-                    })
-                })?;
+                self.extract_control_plane_zones(stream)?;
             }
         }
 
@@ -940,6 +884,75 @@ impl<'a> UpdatePlanBuilder<'a> {
             extracted_artifacts.store_tempfile(kind.into(), image2_out)?;
 
         Ok((image1, image2))
+    }
+
+    /// Helper function for extracting and recording zones out of `stream`, a
+    /// composite control plane artifact.
+    ///
+    /// This code can only be used with multithreaded Tokio executors; see
+    /// `extract_nested_artifact_pair` for context on `block_in_place`.
+    fn extract_control_plane_zones(
+        &mut self,
+        stream: impl Stream<Item = Result<bytes::Bytes, tough::error::Error>> + Send,
+    ) -> Result<(), RepositoryError> {
+        tokio::task::block_in_place(|| {
+            let stream = std::pin::pin!(stream);
+            let reader =
+                tokio_util::io::StreamReader::new(stream.map_err(|error| {
+                    // StreamReader requires a conversion from tough's errors to
+                    // std::io::Error.
+                    std::io::Error::new(io::ErrorKind::Other, error)
+                }));
+            let reader = tokio_util::io::SyncIoBridge::new(reader);
+            self.extract_control_plane_zones_impl(reader)
+        })
+    }
+
+    fn extract_control_plane_zones_impl(
+        &mut self,
+        reader: impl io::Read,
+    ) -> Result<(), RepositoryError> {
+        ControlPlaneZoneImages::extract_into(reader, |_, reader| {
+            let mut out = self.extracted_artifacts.new_tempfile()?;
+            io::copy(reader, &mut out)?;
+            let data = self
+                .extracted_artifacts
+                .store_tempfile(KnownArtifactKind::Zone.into(), out)?;
+
+            // Read the zone name and version from the `oxide.json` at the root
+            // of the zone.
+            let data_clone = data.clone();
+            let file = Handle::current().block_on(async move {
+                std::io::Result::Ok(data_clone.file().await?.into_std().await)
+            })?;
+            let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(file));
+            let metadata =
+                omicron_brand_metadata::Metadata::read_from_tar(&mut tar)?;
+            let info = metadata.layer_info()?;
+
+            let artifact_id = ArtifactId {
+                name: info.pkg.clone(),
+                version: SemverVersion(info.version.clone()),
+                kind: KnownArtifactKind::Zone.into(),
+            };
+            self.record_extracted_artifact(
+                artifact_id,
+                data,
+                KnownArtifactKind::Zone.into(),
+                self.log,
+            )?;
+            Ok(())
+        })
+        .map_err(|error| {
+            // Fish the original RepositoryError out of this
+            // anyhow::Error if it is one.
+            error.downcast().unwrap_or_else(|error| {
+                RepositoryError::TarballExtract {
+                    kind: KnownArtifactKind::ControlPlane,
+                    error,
+                }
+            })
+        })
     }
 
     // Record an artifact in `by_id` and `by_hash`, or fail if either already has an

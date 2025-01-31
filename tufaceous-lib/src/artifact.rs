@@ -12,9 +12,8 @@ use buf_list::BufList;
 use bytes::Bytes;
 use camino::Utf8PathBuf;
 use fs_err::File;
+use omicron_brand_metadata::Metadata;
 use omicron_common::{api::external::SemverVersion, update::ArtifactKind};
-
-use crate::oxide_metadata;
 
 mod composite;
 
@@ -162,7 +161,7 @@ impl HostPhaseImages {
                 .context("error reading path from archive")?;
             if path == Path::new(OXIDE_JSON_FILE_NAME) {
                 let json_bytes = read_entry(entry, OXIDE_JSON_FILE_NAME)?;
-                let metadata: oxide_metadata::Metadata =
+                let metadata: Metadata =
                     serde_json::from_slice(&json_bytes).with_context(|| {
                         format!(
                             "error deserializing JSON from {OXIDE_JSON_FILE_NAME}"
@@ -282,7 +281,7 @@ impl RotArchives {
                 .context("error reading path from archive")?;
             if path == Path::new(OXIDE_JSON_FILE_NAME) {
                 let json_bytes = read_entry(entry, OXIDE_JSON_FILE_NAME)?;
-                let metadata: oxide_metadata::Metadata =
+                let metadata: Metadata =
                     serde_json::from_slice(&json_bytes).with_context(|| {
                         format!(
                             "error deserializing JSON from {OXIDE_JSON_FILE_NAME}"
@@ -379,7 +378,7 @@ impl ControlPlaneZoneImages {
                 .context("error reading path from archive")?;
             if path == Path::new(OXIDE_JSON_FILE_NAME) {
                 let json_bytes = read_entry(entry, OXIDE_JSON_FILE_NAME)?;
-                let metadata: oxide_metadata::Metadata =
+                let metadata: Metadata =
                     serde_json::from_slice(&json_bytes).with_context(|| {
                         format!(
                             "error deserializing JSON from {OXIDE_JSON_FILE_NAME}"
