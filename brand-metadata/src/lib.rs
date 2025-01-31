@@ -5,7 +5,7 @@
 //! Handling of `oxide.json` metadata files in tarballs.
 //!
 //! `oxide.json` is originally defined by the omicron1(7) zone brand, which
-//! lives at https://github.com/oxidecomputer/helios-omicron-brand. tufaceous
+//! lives at <https://github.com/oxidecomputer/helios-omicron-brand>. tufaceous
 //! extended this format with additional archive types for identifying other
 //! types of tarballs; this crate covers those extensions so they can be used
 //! across the Omicron codebase.
