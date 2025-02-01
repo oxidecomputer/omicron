@@ -103,7 +103,6 @@ impl<'a> Resolution<'a> {
     }
 
     // XXX-dap add "are all problems fixable"
-    // XXX-dap add a thing to return the list of fixes
 }
 
 #[derive(Debug)]
@@ -854,8 +853,7 @@ fn validate(
 }
 
 /// Check a file against expected contents.
-// XXX-dap non-pub
-pub(crate) fn check_file(
+fn check_file(
     full_path: Utf8PathBuf,
     contents: Vec<u8>,
 ) -> anyhow::Result<CheckStatus> {
@@ -877,8 +875,7 @@ pub(crate) fn check_file(
     }
 }
 
-// XXX-dap non-pub
-pub(crate) fn read_opt(path: &Utf8Path) -> std::io::Result<Option<Vec<u8>>> {
+fn read_opt(path: &Utf8Path) -> std::io::Result<Option<Vec<u8>>> {
     match fs_err::read(path) {
         Ok(contents) => Ok(Some(contents)),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -911,8 +908,7 @@ pub(crate) enum OverwriteStatus {
 ///
 /// The file is left unchanged if the contents are the same. That's to avoid
 /// mtime-based recompilations.
-// XXX-dap remove pub
-pub fn overwrite_file(
+fn overwrite_file(
     path: &Utf8Path,
     contents: &[u8],
 ) -> anyhow::Result<OverwriteStatus> {

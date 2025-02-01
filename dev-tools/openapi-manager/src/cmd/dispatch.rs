@@ -81,7 +81,6 @@ struct BlessedSourceArgs {
     blessed_from_dir: Option<Utf8PathBuf>,
 
     #[clap(long, env("OPENAPI_MGR_BLESSED_FROM_GIT"))]
-    // XXX-dap check no shell injection here
     blessed_from_git: Option<String>,
 }
 

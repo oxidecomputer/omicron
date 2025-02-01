@@ -73,10 +73,9 @@ pub struct ValidationResult {
     pub(crate) extra_files: Vec<(Utf8PathBuf, Vec<u8>)>,
 }
 
-// XXX-dap remove pub(crate) on struct and fields
-pub(crate) struct ValidationContextImpl {
-    pub(crate) errors: Vec<anyhow::Error>,
-    pub(crate) files: Vec<(Utf8PathBuf, Vec<u8>)>,
+struct ValidationContextImpl {
+    errors: Vec<anyhow::Error>,
+    files: Vec<(Utf8PathBuf, Vec<u8>)>,
 }
 
 impl ValidationBackend for ValidationContextImpl {

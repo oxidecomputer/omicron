@@ -160,7 +160,6 @@ impl ManagedApi {
         &self,
         version: &semver::Version,
     ) -> anyhow::Result<Vec<u8>> {
-        // XXX-dap this was the old to_json_bytes()
         let description = (self.api_description)().map_err(|error| {
             // ApiDescriptionBuildError is actually a list of errors so it
             // doesn't implement std::error::Error itself. Its Display
@@ -200,7 +199,6 @@ impl ManagedApi {
 /// tool
 #[derive(Debug)]
 pub struct ManagedApis {
-    // XXX-dap use IdMap?
     apis: BTreeMap<ApiIdent, ManagedApi>,
 }
 

@@ -16,8 +16,7 @@ use std::collections::BTreeMap;
 /// Container for OpenAPI spec files found in the local filesystem
 ///
 /// Most validation is not done at this point.
-/// XXX-dap be more specific about what has and has not been validated at this
-/// point.
+// XXX-dap see comments on BlessedFiles
 #[derive(Debug)]
 pub struct LocalFiles {
     pub spec_files:

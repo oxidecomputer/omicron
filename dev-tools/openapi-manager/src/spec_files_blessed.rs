@@ -21,6 +21,16 @@ use std::collections::BTreeMap;
 /// point.
 // XXX-dap actually, maybe the thing to do here is to have one type with a
 // sentinel generic type paramter, like SpecFileContainer<Local>.
+// XXX-dap alternatively: maybe the thing to do has have ApiSpecFilesBuilder
+// accept a config option which is either whether to allow more than one, or to
+// have it be parametrized across a "thing" that can accept a found spec (which
+// would either be Vec<X> or ... X?  That way, it would produce an error during
+// loading for BlessedFiles and GeneratedFiles if we found more than one
+// matching file *and* these structures' types could reflect that there's
+// exactly one.
+// XXX-dap however, we should probably decide on the question of whether to
+// include checksums in local file names first because if not, this will all get
+// a lot simpler and they *can* use the same type as LocalFiles
 #[derive(Debug)]
 pub struct BlessedFiles {
     pub spec_files:
