@@ -20,7 +20,6 @@ use crate::db::model::AffinityGroupUpdate;
 use crate::db::model::AntiAffinityGroup;
 use crate::db::model::AntiAffinityGroupInstanceMembership;
 use crate::db::model::AntiAffinityGroupUpdate;
-use crate::db::model::InstanceState;
 use crate::db::model::Name;
 use crate::db::model::Project;
 use crate::db::pagination::paginated;
@@ -477,6 +476,7 @@ impl DataStore {
                 use db::schema::affinity_group::dsl as group_dsl;
                 use db::schema::affinity_group_instance_membership::dsl as membership_dsl;
                 use db::schema::instance::dsl as instance_dsl;
+                use db::schema::sled_resource::dsl as resource_dsl;
 
                 async move {
                     // Check that the group exists
@@ -497,7 +497,8 @@ impl DataStore {
                             })
                         })?;
 
-                    // Check that the instance exists, and has no VMM
+                    // Check that the instance exists, and has no sled
+                    // reservation.
                     //
                     // NOTE: I'd prefer to use the "LookupPath" infrastructure
                     // to look up the path, but that API does not give the
@@ -506,11 +507,12 @@ impl DataStore {
                     // Looking up the instance on a different database
                     // connection than the transaction risks several concurrency
                     // issues, so we do the lookup manually.
-                    let instance_state = instance_dsl::instance
+
+                    let _check_instance_exists = instance_dsl::instance
                         .filter(instance_dsl::time_deleted.is_null())
                         .filter(instance_dsl::id.eq(instance_id.into_untyped_uuid()))
-                        .select(instance_dsl::state)
-                        .first_async(&conn)
+                        .select(instance_dsl::id)
+                        .get_result_async::<uuid::Uuid>(&conn)
                         .await
                         .map_err(|e| {
                             err.bail_retryable_or_else(e, |e| {
@@ -523,21 +525,31 @@ impl DataStore {
                                 )
                             })
                         })?;
+                    let has_reservation: bool = diesel::select(
+                            diesel::dsl::exists(
+                                resource_dsl::sled_resource
+                                    .filter(resource_dsl::instance_id.eq(instance_id.into_untyped_uuid()))
+                            )
+                        ).get_result_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            err.bail_retryable_or_else(e, |e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Server,
+                                )
+                            })
+                        })?;
 
                     // NOTE: It may be possible to add non-stopped instances to
                     // affinity groups, depending on where they have already
                     // been placed. However, only operating on "stopped"
                     // instances is much easier to work with, as it does not
                     // require any understanding of the group policy.
-                    match instance_state {
-                        InstanceState::NoVmm => (),
-                        other => {
-                            return Err(err.bail(Error::invalid_request(
-                                format!(
-                                    "Instance cannot be added to affinity group in state: {other}"
-                                )
-                            )));
-                        },
+                    if has_reservation {
+                        return Err(err.bail(Error::invalid_request(
+                            "Instance cannot be added to affinity group with reservation".to_string()
+                        )));
                     }
 
                     diesel::insert_into(membership_dsl::affinity_group_instance_membership)
@@ -593,6 +605,7 @@ impl DataStore {
                 use db::schema::anti_affinity_group::dsl as group_dsl;
                 use db::schema::anti_affinity_group_instance_membership::dsl as membership_dsl;
                 use db::schema::instance::dsl as instance_dsl;
+                use db::schema::sled_resource::dsl as resource_dsl;
 
                 async move {
                     // Check that the group exists
@@ -613,12 +626,13 @@ impl DataStore {
                             })
                         })?;
 
-                    // Check that the instance exists, and has no VMM
-                    let instance_state = instance_dsl::instance
+                    // Check that the instance exists, and has no sled
+                    // reservation.
+                    let _check_instance_exists = instance_dsl::instance
                         .filter(instance_dsl::time_deleted.is_null())
                         .filter(instance_dsl::id.eq(instance_id.into_untyped_uuid()))
-                        .select(instance_dsl::state)
-                        .first_async(&conn)
+                        .select(instance_dsl::id)
+                        .get_result_async::<uuid::Uuid>(&conn)
                         .await
                         .map_err(|e| {
                             err.bail_retryable_or_else(e, |e| {
@@ -631,21 +645,31 @@ impl DataStore {
                                 )
                             })
                         })?;
+                    let has_reservation: bool = diesel::select(
+                            diesel::dsl::exists(
+                                resource_dsl::sled_resource
+                                    .filter(resource_dsl::instance_id.eq(instance_id.into_untyped_uuid()))
+                            )
+                        ).get_result_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            err.bail_retryable_or_else(e, |e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Server,
+                                )
+                            })
+                        })?;
 
                     // NOTE: It may be possible to add non-stopped instances to
-                    // anti affinity groups, depending on where they have already
+                    // anti-affinity groups, depending on where they have already
                     // been placed. However, only operating on "stopped"
                     // instances is much easier to work with, as it does not
                     // require any understanding of the group policy.
-                    match instance_state {
-                        InstanceState::NoVmm => (),
-                        other => {
-                            return Err(err.bail(Error::invalid_request(
-                                format!(
-                                    "Instance cannot be added to anti-affinity group in state: {other}"
-                                )
-                            )));
-                        },
+                    if has_reservation {
+                        return Err(err.bail(Error::invalid_request(
+                            "Instance cannot be added to anti-affinity group with reservation".to_string()
+                        )));
                     }
 
                     diesel::insert_into(membership_dsl::anti_affinity_group_instance_membership)
@@ -728,7 +752,6 @@ impl DataStore {
                 let err = err.clone();
                 use db::schema::affinity_group::dsl as group_dsl;
                 use db::schema::affinity_group_instance_membership::dsl as membership_dsl;
-                use db::schema::instance::dsl as instance_dsl;
 
                 async move {
                     // Check that the group exists
@@ -744,25 +767,6 @@ impl DataStore {
                                     e,
                                     ErrorHandler::NotFoundByResource(
                                         authz_affinity_group,
-                                    ),
-                                )
-                            })
-                        })?;
-
-                    // Check that the instance exists
-                    instance_dsl::instance
-                        .filter(instance_dsl::time_deleted.is_null())
-                        .filter(instance_dsl::id.eq(instance_id.into_untyped_uuid()))
-                        .select(instance_dsl::id)
-                        .first_async::<uuid::Uuid>(&conn)
-                        .await
-                        .map_err(|e| {
-                            err.bail_retryable_or_else(e, |e| {
-                                public_error_from_diesel(
-                                    e,
-                                    ErrorHandler::NotFoundByLookup(
-                                        ResourceType::Instance,
-                                        LookupType::ById(instance_id.into_untyped_uuid())
                                     ),
                                 )
                             })
@@ -817,7 +821,6 @@ impl DataStore {
                 let err = err.clone();
                 use db::schema::anti_affinity_group::dsl as group_dsl;
                 use db::schema::anti_affinity_group_instance_membership::dsl as membership_dsl;
-                use db::schema::instance::dsl as instance_dsl;
 
                 async move {
                     // Check that the group exists
@@ -833,25 +836,6 @@ impl DataStore {
                                     e,
                                     ErrorHandler::NotFoundByResource(
                                         authz_anti_affinity_group,
-                                    ),
-                                )
-                            })
-                        })?;
-
-                    // Check that the instance exists
-                    instance_dsl::instance
-                        .filter(instance_dsl::time_deleted.is_null())
-                        .filter(instance_dsl::id.eq(instance_id.into_untyped_uuid()))
-                        .select(instance_dsl::id)
-                        .first_async::<uuid::Uuid>(&conn)
-                        .await
-                        .map_err(|e| {
-                            err.bail_retryable_or_else(e, |e| {
-                                public_error_from_diesel(
-                                    e,
-                                    ErrorHandler::NotFoundByLookup(
-                                        ResourceType::Instance,
-                                        LookupType::ById(instance_id.into_untyped_uuid())
                                     ),
                                 )
                             })
@@ -893,12 +877,16 @@ mod tests {
     use crate::db::lookup::LookupPath;
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::Instance;
+    use nexus_db_model::Resources;
+    use nexus_db_model::SledResource;
     use nexus_types::external_api::params;
     use omicron_common::api::external::{
         self, ByteCount, DataPageParams, IdentityMetadataCreateParams,
     };
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::InstanceUuid;
+    use omicron_uuid_kinds::PropolisUuid;
+    use omicron_uuid_kinds::SledUuid;
     use std::num::NonZeroU32;
 
     // Helper function for creating a project
@@ -1006,14 +994,6 @@ mod tests {
         instance
     }
 
-    // Helper for explicitly modifying instance state.
-    //
-    // The interaction we typically use to create and modify instance state
-    // is more complex in production, since it's the result of a back-and-forth
-    // between Nexus and Sled Agent, using carefully crafted rcgen values.
-    //
-    // Here, we just set the value of state explicitly. Be warned, there
-    // are no guardrails!
     async fn set_instance_state_stopped(
         datastore: &DataStore,
         instance: uuid::Uuid,
@@ -1032,17 +1012,43 @@ mod tests {
             .unwrap();
     }
 
-    async fn set_instance_state_running(
+    // Helper for explicitly modifying sled resource usage
+    //
+    // The interaction we typically use to create and modify instance state
+    // is more complex in production, using a real allocation algorithm.
+    //
+    // Here, we just set the value of state explicitly. Be warned, there
+    // are no guardrails!
+    async fn allocate_instance_reservation(
         datastore: &DataStore,
-        instance: uuid::Uuid,
+        instance: InstanceUuid,
     ) {
-        use db::schema::instance::dsl;
-        diesel::update(dsl::instance)
-            .filter(dsl::id.eq(instance))
-            .set((
-                dsl::state.eq(db::model::InstanceState::Vmm),
-                dsl::active_propolis_id.eq(uuid::Uuid::new_v4()),
+        use db::schema::sled_resource::dsl;
+        diesel::insert_into(dsl::sled_resource)
+            .values(SledResource::new_for_vmm(
+                PropolisUuid::new_v4(),
+                instance,
+                SledUuid::new_v4(),
+                Resources::new(
+                    1,
+                    ByteCount::from_kibibytes_u32(1).into(),
+                    ByteCount::from_kibibytes_u32(1).into(),
+                ),
             ))
+            .execute_async(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn delete_instance_reservation(
+        datastore: &DataStore,
+        instance: InstanceUuid,
+    ) {
+        use db::schema::sled_resource::dsl;
+        diesel::delete(dsl::sled_resource)
+            .filter(dsl::instance_id.eq(instance.into_untyped_uuid()))
             .execute_async(
                 &*datastore.pool_connection_for_tests().await.unwrap(),
             )
@@ -1673,7 +1679,12 @@ mod tests {
             "my-instance",
         )
         .await;
-        set_instance_state_running(&datastore, instance.id()).await;
+
+        allocate_instance_reservation(
+            &datastore,
+            InstanceUuid::from_untyped_uuid(instance.id()),
+        )
+        .await;
 
         // Cannot add the instance to the group while it's running.
         let err = datastore
@@ -1691,13 +1702,17 @@ mod tests {
         assert!(matches!(err, Error::InvalidRequest { .. }));
         assert!(
             err.to_string().contains(
-                "Instance cannot be added to affinity group in state"
+                "Instance cannot be added to affinity group with reservation"
             ),
             "{err:?}"
         );
 
-        // If we stop the instance, we can add it to the group.
-        set_instance_state_stopped(&datastore, instance.id()).await;
+        // If we have no reservation for the instance, we can add it to the group.
+        delete_instance_reservation(
+            &datastore,
+            InstanceUuid::from_untyped_uuid(instance.id()),
+        )
+        .await;
         datastore
             .affinity_group_member_add(
                 &opctx,
@@ -1709,8 +1724,12 @@ mod tests {
             .await
             .unwrap();
 
-        // Now we can set the instance state to "running" once more.
-        set_instance_state_running(&datastore, instance.id()).await;
+        // Now we can reserve a sled for the instance once more.
+        allocate_instance_reservation(
+            &datastore,
+            InstanceUuid::from_untyped_uuid(instance.id()),
+        )
+        .await;
 
         // We should now be able to list the new member
         let members = datastore
@@ -1796,7 +1815,11 @@ mod tests {
             "my-instance",
         )
         .await;
-        set_instance_state_running(&datastore, instance.id()).await;
+        allocate_instance_reservation(
+            &datastore,
+            InstanceUuid::from_untyped_uuid(instance.id()),
+        )
+        .await;
 
         // Cannot add the instance to the group while it's running.
         let err = datastore
@@ -1812,13 +1835,17 @@ mod tests {
         assert!(matches!(err, Error::InvalidRequest { .. }));
         assert!(
             err.to_string().contains(
-                "Instance cannot be added to anti-affinity group in state"
+                "Instance cannot be added to anti-affinity group with reservation"
             ),
             "{err:?}"
         );
 
-        // If we stop the instance, we can add it to the group.
-        set_instance_state_stopped(&datastore, instance.id()).await;
+        // If we have no reservation for the instance, we can add it to the group.
+        delete_instance_reservation(
+            &datastore,
+            InstanceUuid::from_untyped_uuid(instance.id()),
+        )
+        .await;
         datastore
             .anti_affinity_group_member_add(
                 &opctx,
@@ -1830,8 +1857,12 @@ mod tests {
             .await
             .unwrap();
 
-        // Now we can set the instance state to "running" once more.
-        set_instance_state_running(&datastore, instance.id()).await;
+        // Now we can reserve a sled for the instance once more.
+        allocate_instance_reservation(
+            &datastore,
+            InstanceUuid::from_untyped_uuid(instance.id()),
+        )
+        .await;
 
         // We should now be able to list the new member
         let members = datastore
@@ -2314,7 +2345,7 @@ mod tests {
                     assert!(
                         matches!(err, Error::ObjectNotFound {
                         type_name, ..
-                    } if type_name == ResourceType::Instance),
+                    } if type_name == ResourceType::AffinityGroupMember),
                         "{err:?}"
                     );
                 }
@@ -2474,7 +2505,7 @@ mod tests {
                     assert!(
                         matches!(err, Error::ObjectNotFound {
                         type_name, ..
-                    } if type_name == ResourceType::Instance),
+                    } if type_name == ResourceType::AntiAffinityGroupMember),
                         "{err:?}"
                     );
                 }

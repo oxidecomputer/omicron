@@ -294,6 +294,12 @@ impl<'a> From<&'a Name> for &'a str {
     }
 }
 
+impl From<Name> for String {
+    fn from(name: Name) -> Self {
+        name.0
+    }
+}
+
 /// `Name` instances are comparable like Strings, primarily so that they can
 /// be used as keys in trees.
 impl<S> PartialEq<S> for Name
