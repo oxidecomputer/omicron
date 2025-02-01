@@ -12,21 +12,21 @@ use serde::{Deserialize, Serialize};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("I/O Error: while accessing {path}: {err}")]
+    #[error("I/O Error: while accessing {path}")]
     Io {
         path: Utf8PathBuf,
         #[source]
         err: std::io::Error,
     },
 
-    #[error("failed to read zone version from {path}: {err}")]
+    #[error("failed to read zone version from {path}")]
     ZoneVersion {
         path: Utf8PathBuf,
         #[source]
         err: std::io::Error,
     },
 
-    #[error("Cannot parse semver in {path}: {err}")]
+    #[error("Cannot parse semver in {path}")]
     Semver { path: Utf8PathBuf, err: semver::Error },
 }
 
