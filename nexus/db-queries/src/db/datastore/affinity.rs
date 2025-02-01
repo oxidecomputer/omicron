@@ -664,7 +664,7 @@ impl DataStore {
                         })?;
 
                     // NOTE: It may be possible to add non-stopped instances to
-                    // affinity groups, depending on where they have already
+                    // anti-affinity groups, depending on where they have already
                     // been placed. However, only operating on "stopped"
                     // instances is much easier to work with, as it does not
                     // require any understanding of the group policy.
