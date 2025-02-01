@@ -243,6 +243,8 @@ macro_rules! impl_dyn_authorized_resource_for_resource {
 }
 
 impl_dyn_authorized_resource_for_resource!(authz::AddressLot);
+impl_dyn_authorized_resource_for_resource!(authz::AffinityGroup);
+impl_dyn_authorized_resource_for_resource!(authz::AntiAffinityGroup);
 impl_dyn_authorized_resource_for_resource!(authz::Blueprint);
 impl_dyn_authorized_resource_for_resource!(authz::Certificate);
 impl_dyn_authorized_resource_for_resource!(authz::DeviceAccessToken);

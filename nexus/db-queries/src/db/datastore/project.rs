@@ -225,6 +225,8 @@ impl DataStore {
     generate_fn_to_ensure_none_in_project!(project_image, name, String);
     generate_fn_to_ensure_none_in_project!(snapshot, name, String);
     generate_fn_to_ensure_none_in_project!(vpc, name, String);
+    generate_fn_to_ensure_none_in_project!(affinity_group, name, String);
+    generate_fn_to_ensure_none_in_project!(anti_affinity_group, name, String);
 
     /// Delete a project
     pub async fn project_delete(
@@ -242,6 +244,9 @@ impl DataStore {
         self.ensure_no_project_images_in_project(opctx, authz_project).await?;
         self.ensure_no_snapshots_in_project(opctx, authz_project).await?;
         self.ensure_no_vpcs_in_project(opctx, authz_project).await?;
+        self.ensure_no_affinity_groups_in_project(opctx, authz_project).await?;
+        self.ensure_no_anti_affinity_groups_in_project(opctx, authz_project)
+            .await?;
 
         use db::schema::project::dsl;
 
