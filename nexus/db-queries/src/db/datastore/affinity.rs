@@ -548,9 +548,7 @@ impl DataStore {
                     // require any understanding of the group policy.
                     if has_reservation {
                         return Err(err.bail(Error::invalid_request(
-                            format!(
-                                "Instance cannot be added to affinity group with reservation"
-                            )
+                            "Instance cannot be added to affinity group with reservation".to_string()
                         )));
                     }
 
@@ -670,9 +668,7 @@ impl DataStore {
                     // require any understanding of the group policy.
                     if has_reservation {
                         return Err(err.bail(Error::invalid_request(
-                            format!(
-                                "Instance cannot be added to anti-affinity group with reservation"
-                            )
+                            "Instance cannot be added to anti-affinity group with reservation".to_string()
                         )));
                     }
 
