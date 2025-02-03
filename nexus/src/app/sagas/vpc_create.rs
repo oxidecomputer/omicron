@@ -343,6 +343,7 @@ async fn svc_create_subnet(
     let (authz_vpc, db_vpc) =
         sagactx.lookup::<(authz::Vpc, db::model::Vpc)>("vpc")?;
     let default_subnet_id = sagactx.lookup::<Uuid>("default_subnet_id")?;
+    let authz_router = sagactx.lookup::<authz::VpcRouter>("router")?;
 
     // Allocate the first /64 sub-range from the requested or created
     // prefix.
@@ -375,7 +376,7 @@ async fn svc_create_subnet(
     // in our code.
     osagactx
         .datastore()
-        .vpc_create_subnet(&opctx, &authz_vpc, subnet)
+        .vpc_create_subnet(&opctx, &authz_vpc, &authz_router, subnet, None)
         .await
         .map_err(|err| match err {
             InsertVpcSubnetError::OverlappingIpRange(ip) => {

@@ -73,6 +73,10 @@ impl super::Nexus {
         params: &params::VpcSubnetCreate,
     ) -> CreateResult<db::model::VpcSubnet> {
         let (.., authz_vpc, db_vpc) = vpc_lookup.fetch().await?;
+        let (.., authz_router) = LookupPath::new(opctx, self.datastore())
+            .vpc_router_id(db_vpc.system_router_id)
+            .lookup_for(authz::Action::CreateChild)
+            .await?;
 
         // Validate IPv4 range
         if !params.ipv4_block.prefix().is_private() {
@@ -134,7 +138,13 @@ impl super::Nexus {
                     );
                     let result = self
                         .db_datastore
-                        .vpc_create_subnet(opctx, &authz_vpc, subnet)
+                        .vpc_create_subnet(
+                            opctx,
+                            &authz_vpc,
+                            &authz_router,
+                            subnet,
+                            None,
+                        )
                         .await;
                     match result {
                         // Allow NUM_RETRIES retries, after the first attempt.
@@ -208,7 +218,13 @@ impl super::Nexus {
                     ipv6_block,
                 );
                 self.db_datastore
-                    .vpc_create_subnet(opctx, &authz_vpc, subnet)
+                    .vpc_create_subnet(
+                        opctx,
+                        &authz_vpc,
+                        &authz_router,
+                        subnet,
+                        None,
+                    )
                     .await
                     .map(|(.., subnet)| subnet)
                     .map_err(InsertVpcSubnetError::into_external)
