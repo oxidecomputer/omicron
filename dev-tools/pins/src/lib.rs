@@ -7,11 +7,13 @@ use camino::Utf8Path;
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Pins {
     pub helios: Option<Helios>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Helios {
     pub commit: String,
     pub incorporation: String,
