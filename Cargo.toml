@@ -2,6 +2,7 @@
 members = [
     "api_identity",
     "bootstore",
+    "brand-metadata",
     "certificates",
     "clickhouse-admin",
     "clickhouse-admin/api",
@@ -135,6 +136,7 @@ members = [
 default-members = [
     "api_identity",
     "bootstore",
+    "brand-metadata",
     "certificates",
     "clickhouse-admin",
     "clickhouse-admin/api",
@@ -493,6 +495,7 @@ nexus-types = { path = "nexus/types" }
 nom = "7.1.3"
 num-integer = "0.1.46"
 num = { version = "0.4.3", default-features = false, features = [ "libm" ] }
+omicron-brand-metadata = { path = "brand-metadata" }
 omicron-clickhouse-admin = { path = "clickhouse-admin" }
 omicron-certificates = { path = "certificates" }
 omicron-cockroach-admin = { path = "cockroach-admin" }
