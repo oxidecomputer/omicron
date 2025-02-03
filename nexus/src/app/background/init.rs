@@ -893,6 +893,7 @@ impl BackgroundTasksInitializer {
         driver.register(TaskDefinition {
             name: "tuf_artifact_replication",
             description: "replicate update repo artifacts across sleds",
+            period: config.tuf_artifact_replication.period_secs,
             task_impl: Box::new(
                 tuf_artifact_replication::ArtifactReplication::new(
                     datastore.clone(),
@@ -906,6 +907,7 @@ impl BackgroundTasksInitializer {
         });
 
         driver.register(TaskDefinition {
+            name: "webhook_dispatcher",
             description: "dispatches queued webhook events to receivers",
             period: config.webhook_dispatcher.period_secs,
             task_impl: Box::new(WebhookDispatcher::new(
