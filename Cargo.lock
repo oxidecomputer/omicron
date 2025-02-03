@@ -6674,6 +6674,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-brand-metadata"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "semver 1.0.24",
+ "serde",
+ "serde_json",
+ "tar",
+]
+
+[[package]]
 name = "omicron-certificates"
 version = "0.1.0"
 dependencies = [
@@ -7336,6 +7347,7 @@ dependencies = [
  "nexus-reconfigurator-blippy",
  "nexus-sled-agent-shared",
  "nexus-types",
+ "omicron-brand-metadata",
  "omicron-common",
  "omicron-ddm-admin-client",
  "omicron-test-utils",
@@ -12406,11 +12418,13 @@ dependencies = [
  "hex",
  "hubtools",
  "itertools 0.13.0",
+ "omicron-brand-metadata",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
  "parse-size",
  "rand",
+ "semver 1.0.24",
  "serde",
  "serde_json",
  "serde_path_to_error",
@@ -12752,15 +12766,19 @@ dependencies = [
  "debug-ignore",
  "display-error-chain",
  "dropshot 0.15.1",
+ "flate2",
+ "fs-err",
  "futures",
  "hex",
  "hubtools",
+ "omicron-brand-metadata",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
  "rand",
  "sha2",
  "slog",
+ "tar",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
