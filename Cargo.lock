@@ -7245,6 +7245,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-pins"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "cargo_metadata",
+ "fs-err",
+ "omicron-workspace-hack",
+ "serde",
+ "toml_edit 0.22.22",
+]
+
+[[package]]
 name = "omicron-releng"
 version = "0.1.0"
 dependencies = [
@@ -7258,6 +7271,7 @@ dependencies = [
  "futures",
  "hex",
  "omicron-common",
+ "omicron-pins",
  "omicron-workspace-hack",
  "omicron-zone-package",
  "once_cell",
