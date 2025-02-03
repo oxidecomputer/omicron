@@ -5,27 +5,27 @@
 //! VPC Subnets and their network interfaces
 
 use crate::external_api::params;
+use nexus_auth::authn;
 use nexus_config::MIN_VPC_IPV4_SUBNET_PREFIX;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::VpcSubnet;
-use nexus_db_queries::db::queries::vpc_subnet::InsertVpcSubnetError;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::Ipv6NetExt;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
-use oxnet::IpNet;
-use uuid::Uuid;
+
+use super::sagas;
 
 impl super::Nexus {
     pub fn vpc_subnet_lookup<'a>(
@@ -73,10 +73,42 @@ impl super::Nexus {
         params: &params::VpcSubnetCreate,
     ) -> CreateResult<db::model::VpcSubnet> {
         let (.., authz_vpc, db_vpc) = vpc_lookup.fetch().await?;
-        let (.., authz_router) = LookupPath::new(opctx, self.datastore())
-            .vpc_router_id(db_vpc.system_router_id)
-            .lookup_for(authz::Action::CreateChild)
-            .await?;
+        let (.., authz_system_router) =
+            LookupPath::new(opctx, self.datastore())
+                .vpc_router_id(db_vpc.system_router_id)
+                .lookup_for(authz::Action::CreateChild)
+                .await?;
+        let custom_router = match &params.custom_router {
+            Some(key @ NameOrId::Name(_)) => {
+                let (.., rtr) = self
+                    .vpc_router_lookup(
+                        opctx,
+                        params::RouterSelector {
+                            project: None,
+                            vpc: Some(NameOrId::Id(authz_vpc.id())),
+                            router: key.clone(),
+                        },
+                    )?
+                    .lookup_for(authz::Action::Read)
+                    .await?;
+                Some(rtr)
+            }
+            Some(key @ NameOrId::Id(_)) => {
+                let (.., rtr) = self
+                    .vpc_router_lookup(
+                        opctx,
+                        params::RouterSelector {
+                            project: None,
+                            vpc: None,
+                            router: key.clone(),
+                        },
+                    )?
+                    .lookup_for(authz::Action::Read)
+                    .await?;
+                Some(rtr)
+            }
+            None => None,
+        };
 
         // Validate IPv4 range
         if !params.ipv4_block.prefix().is_private() {
@@ -98,8 +130,6 @@ impl super::Nexus {
             )));
         }
 
-        // Allocate an ID and insert the record.
-        //
         // If the client provided an IPv6 range, we try to insert that or fail
         // with a conflict error.
         //
@@ -112,13 +142,20 @@ impl super::Nexus {
         // TODO-robustness: We'd really prefer to allocate deterministically.
         // See <https://github.com/oxidecomputer/omicron/issues/685> for
         // details.
-        let subnet_id = Uuid::new_v4();
-        let mut out = match params.ipv6_block {
-            None => {
-                const NUM_RETRIES: usize = 2;
-                let mut retry = 0;
-                let result = loop {
-                    let ipv6_block = db_vpc
+        let ipv6_blocks = if let Some(ipv6_block) = params.ipv6_block {
+            if !ipv6_block.is_vpc_subnet(&db_vpc.ipv6_prefix) {
+                return Err(external::Error::invalid_request(&format!(
+                    "VPC Subnet IPv6 address range '{}' is not valid for \
+                    VPC with IPv6 prefix '{}'",
+                    ipv6_block, db_vpc.ipv6_prefix.0,
+                )));
+            }
+            vec![ipv6_block]
+        } else {
+            const NUM_RETRIES: usize = 2;
+            (0..=NUM_RETRIES)
+                .map(|_| {
+                    db_vpc
                         .ipv6_prefix
                         .random_subnet(
                             oxnet::Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH,
@@ -128,125 +165,31 @@ impl super::Nexus {
                             external::Error::internal_error(
                                 "Failed to create random IPv6 subnet",
                             )
-                        })?;
-                    let subnet = db::model::VpcSubnet::new(
-                        subnet_id,
-                        authz_vpc.id(),
-                        params.identity.clone(),
-                        params.ipv4_block,
-                        ipv6_block,
-                    );
-                    let result = self
-                        .db_datastore
-                        .vpc_create_subnet(
-                            opctx,
-                            &authz_vpc,
-                            &authz_router,
-                            subnet,
-                            None,
-                        )
-                        .await;
-                    match result {
-                        // Allow NUM_RETRIES retries, after the first attempt.
-                        //
-                        // Note that we only catch IPv6 overlaps. The client
-                        // always specifies the IPv4 range, so we fail the
-                        // request if that overlaps with an existing range.
-                        Err(InsertVpcSubnetError::OverlappingIpRange(
-                            IpNet::V6(_),
-                        )) if retry <= NUM_RETRIES => {
-                            debug!(
-                                self.log,
-                                "autogenerated random IPv6 range overlap";
-                                "subnet_id" => ?subnet_id,
-                                "ipv6_block" => %ipv6_block
-                            );
-                            retry += 1;
-                            continue;
-                        }
-                        other => break other,
-                    }
-                };
-                match result {
-                    Err(InsertVpcSubnetError::OverlappingIpRange(
-                        IpNet::V6(_),
-                    )) => {
-                        // TODO-monitoring TODO-debugging
-                        //
-                        // We should maintain a counter for this occurrence, and
-                        // export that via `oximeter`, so that we can see these
-                        // failures through the timeseries database. The main
-                        // goal here is for us to notice that this is happening
-                        // before it becomes a major issue for customers.
-                        let vpc_id = authz_vpc.id();
-                        error!(
-                            self.log,
-                            "failed to generate unique random IPv6 address \
-                            range in {} retries",
-                            NUM_RETRIES;
-                            "vpc_id" => ?vpc_id,
-                            "subnet_id" => ?subnet_id,
-                        );
-                        Err(external::Error::internal_error(
-                            "Unable to allocate unique IPv6 address range \
-                            for VPC Subnet",
-                        ))
-                    }
-                    Err(InsertVpcSubnetError::OverlappingIpRange(_)) => {
-                        // Overlapping IPv4 ranges, which is always a client error.
-                        Err(result.unwrap_err().into_external())
-                    }
-                    Err(InsertVpcSubnetError::External(e)) => Err(e),
-                    Ok((.., subnet)) => Ok(subnet),
-                }
-            }
-            Some(ipv6_block) => {
-                if !ipv6_block.is_vpc_subnet(&db_vpc.ipv6_prefix) {
-                    return Err(external::Error::invalid_request(&format!(
-                        concat!(
-                            "VPC Subnet IPv6 address range '{}' is not valid for ",
-                            "VPC with IPv6 prefix '{}'",
-                        ),
-                        ipv6_block, db_vpc.ipv6_prefix.0,
-                    )));
-                }
-                let subnet = db::model::VpcSubnet::new(
-                    subnet_id,
-                    db_vpc.id(),
-                    params.identity.clone(),
-                    params.ipv4_block,
-                    ipv6_block,
-                );
-                self.db_datastore
-                    .vpc_create_subnet(
-                        opctx,
-                        &authz_vpc,
-                        &authz_router,
-                        subnet,
-                        None,
-                    )
-                    .await
-                    .map(|(.., subnet)| subnet)
-                    .map_err(InsertVpcSubnetError::into_external)
-            }
-        }?;
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        };
 
-        // XX: rollback the creation if this fails?
-        if let Some(custom_router) = &params.custom_router {
-            let (.., authz_subnet) = LookupPath::new(opctx, &self.db_datastore)
-                .vpc_subnet_id(out.id())
-                .lookup_for(authz::Action::Modify)
-                .await?;
+        let saga_params = sagas::vpc_subnet_create::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            subnet_create: params.clone(),
+            ipv6_blocks,
+            custom_router,
+            authz_vpc,
+            authz_system_router,
+        };
 
-            out = self
-                .vpc_subnet_update_custom_router(
-                    opctx,
-                    &authz_vpc,
-                    &authz_subnet,
-                    Some(custom_router),
-                )
-                .await?;
-        }
+        let saga_outputs = self
+            .sagas
+            .saga_execute::<sagas::vpc_subnet_create::SagaVpcSubnetCreate>(
+                saga_params,
+            )
+            .await?;
+
+        let out = saga_outputs
+            .lookup_node_output::<VpcSubnet>("output")
+            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .internal_context("looking up output from ip attach saga")?;
 
         self.vpc_needed_notify_sleds();
 
@@ -359,16 +302,25 @@ impl super::Nexus {
         opctx: &OpContext,
         vpc_subnet_lookup: &lookup::VpcSubnet<'_>,
     ) -> DeleteResult {
-        let (.., authz_subnet, db_subnet) =
+        let (.., authz_vpc, authz_subnet, db_subnet) =
             vpc_subnet_lookup.fetch_for(authz::Action::Delete).await?;
-        let out = self
-            .db_datastore
-            .vpc_delete_subnet(opctx, &db_subnet, &authz_subnet)
+
+        let saga_params = sagas::vpc_subnet_delete::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            authz_vpc,
+            authz_subnet,
+            db_subnet,
+        };
+
+        self.sagas
+            .saga_execute::<sagas::vpc_subnet_delete::SagaVpcSubnetDelete>(
+                saga_params,
+            )
             .await?;
 
         self.vpc_needed_notify_sleds();
 
-        Ok(out)
+        Ok(())
     }
 
     pub(crate) async fn subnet_list_instance_network_interfaces(

@@ -318,21 +318,33 @@ impl DataStore {
             {
                 continue;
             }
-            self.vpc_create_subnet(
-                opctx,
-                &authz_vpc,
-                &authz_router,
-                vpc_subnet.clone(),
-                Some(route_id),
-            )
-            .await
-            .map(|_| ())
-            .map_err(InsertVpcSubnetError::into_external)
-            .or_else(|e| match e {
-                Error::ObjectAlreadyExists { .. } => Ok(()),
-                _ => Err(e),
-            })?;
+            let subnet = self
+                .vpc_create_subnet(opctx, &authz_vpc, vpc_subnet.clone())
+                .await
+                .map(Some)
+                .map_err(InsertVpcSubnetError::into_external)
+                .or_else(|e| match e {
+                    Error::ObjectAlreadyExists { .. } => Ok(None),
+                    _ => Err(e),
+                })?;
+            if let Some((.., subnet)) = subnet {
+                self.vpc_create_subnet_route(
+                    opctx,
+                    &authz_router,
+                    subnet,
+                    route_id,
+                )
+                .await
+                .map(|_| ())
+                .map_err(InsertVpcSubnetError::into_external)
+                .or_else(|e| match e {
+                    Error::ObjectAlreadyExists { .. } => Ok(()),
+                    _ => Err(e),
+                })?;
+            }
         }
+
+        self.vpc_increment_rpw_version(opctx, authz_vpc.id()).await?;
 
         info!(opctx.log, "created built-in services vpc subnets");
 
@@ -843,9 +855,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_vpc: &authz::Vpc,
-        authz_system_router: &authz::VpcRouter,
         subnet: VpcSubnet,
-        route_id: Option<Uuid>,
     ) -> Result<(authz::VpcSubnet, VpcSubnet), InsertVpcSubnetError> {
         opctx
             .authorize(authz::Action::CreateChild, authz_vpc)
@@ -854,22 +864,6 @@ impl DataStore {
         assert_eq!(authz_vpc.id(), subnet.vpc_id);
 
         let db_subnet = self.vpc_create_subnet_raw(subnet).await?;
-
-        let route_id = route_id.unwrap_or_else(Uuid::new_v4);
-        let route = db::model::RouterRoute::new_subnet(
-            route_id,
-            authz_system_router.id(),
-            db_subnet.name().clone().into(),
-            db_subnet.id(),
-        );
-
-        self.router_create_route(opctx, authz_system_router, route)
-            .await
-            .map_err(InsertVpcSubnetError::External)?;
-
-        self.vpc_increment_rpw_version(opctx, authz_vpc.id())
-            .await
-            .map_err(InsertVpcSubnetError::External)?;
 
         Ok((
             authz::VpcSubnet::new(
@@ -946,30 +940,66 @@ impl DataStore {
             return Err(Error::invalid_request(
                 "deletion failed due to concurrent modification",
             ));
-        } else {
-            // Now, clean up the system route.
-            use db::schema::router_route::dsl as rr_dsl;
-            diesel::update(rr_dsl::router_route)
-                .filter(rr_dsl::time_deleted.is_null())
-                .filter(
-                    rr_dsl::kind
-                        .eq(RouterRouteKind(ExternalRouteKind::VpcSubnet)),
-                )
-                .filter(rr_dsl::vpc_subnet_id.eq(Some(authz_subnet.id())))
-                .set(rr_dsl::time_deleted.eq(now))
-                .execute_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(
-                        e,
-                        ErrorHandler::NotFoundByResource(authz_subnet),
-                    )
-                })?;
-
-            self.vpc_increment_rpw_version(opctx, db_subnet.vpc_id).await?;
-
-            Ok(())
         }
+        Ok(())
+    }
+
+    /// Insert the system route for a VPC Subnet.
+    pub async fn vpc_create_subnet_route(
+        &self,
+        opctx: &OpContext,
+        authz_system_router: &authz::VpcRouter,
+        subnet: VpcSubnet,
+        route_id: Uuid,
+    ) -> Result<(authz::RouterRoute, RouterRoute), InsertVpcSubnetError> {
+        let route = db::model::RouterRoute::new_subnet(
+            route_id,
+            authz_system_router.id(),
+            subnet.name().clone().into(),
+            subnet.id(),
+        );
+
+        let route = self
+            .router_create_route(opctx, authz_system_router, route)
+            .await
+            .map_err(InsertVpcSubnetError::External)?;
+
+        Ok((
+            authz::RouterRoute::new(
+                authz_system_router.clone(),
+                route_id,
+                LookupType::ById(subnet.id()),
+            ),
+            route,
+        ))
+    }
+
+    /// Delete the system route for a VPC Subnet.
+    pub async fn vpc_delete_subnet_route(
+        &self,
+        opctx: &OpContext,
+        authz_subnet: &authz::VpcSubnet,
+    ) -> DeleteResult {
+        use db::schema::router_route::dsl as rr_dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        diesel::update(rr_dsl::router_route)
+            .filter(rr_dsl::time_deleted.is_null())
+            .filter(
+                rr_dsl::kind.eq(RouterRouteKind(ExternalRouteKind::VpcSubnet)),
+            )
+            .filter(rr_dsl::vpc_subnet_id.eq(Some(authz_subnet.id())))
+            .set(rr_dsl::time_deleted.eq(Utc::now()))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_subnet),
+                )
+            })?;
+
+        Ok(())
     }
 
     pub async fn vpc_update_subnet(
