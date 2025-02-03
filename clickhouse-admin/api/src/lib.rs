@@ -4,9 +4,9 @@
 
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, DistributedDdlQueue,
-    GenerateConfigResult, KeeperConf, KeeperConfig, KeeperConfigurableSettings,
-    Lgif, MetricInfoPath, RaftConfig, ServerConfigurableSettings,
-    SystemTimeSeries, TimeSeriesSettingsQuery,
+    GenerateConfigResult, KeeperConf, KeeperConfigurableSettings, Lgif,
+    MetricInfoPath, RaftConfig, ServerConfigurableSettings, SystemTimeSeries,
+    TimeSeriesSettingsQuery,
 };
 use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk,
@@ -41,7 +41,7 @@ pub trait ClickhouseAdminKeeperApi {
     async fn generate_config_and_enable_svc(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<KeeperConfigurableSettings>,
-    ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError>;
+    ) -> Result<HttpResponseCreated<GenerateConfigResult>, HttpError>;
 
     /// Retrieve the generation number of a configuration
     #[endpoint {

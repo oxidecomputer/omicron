@@ -6,17 +6,15 @@ use crate::context::{KeeperServerContext, ServerContext};
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, DistributedDdlQueue,
-    GenerateConfigResult, KeeperConf, KeeperConfig, KeeperConfigurableSettings,
-    Lgif, MetricInfoPath, NodeGeneration, RaftConfig,
-    ServerConfigurableSettings, SystemTimeSeries, SystemTimeSeriesSettings,
-    TimeSeriesSettingsQuery,
+    GenerateConfigResult, KeeperConf, KeeperConfigurableSettings, Lgif,
+    MetricInfoPath, RaftConfig, ServerConfigurableSettings, SystemTimeSeries,
+    SystemTimeSeriesSettings, TimeSeriesSettingsQuery,
 };
 use dropshot::{
     ApiDescription, HttpError, HttpResponseCreated, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
 };
 use http::StatusCode;
-use illumos_utils::svcadm::Svcadm;
 use omicron_common::api::external::Generation;
 use std::sync::Arc;
 
@@ -110,53 +108,19 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
     async fn generate_config_and_enable_svc(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<KeeperConfigurableSettings>,
-    ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError> {
+    ) -> Result<HttpResponseCreated<GenerateConfigResult>, HttpError> {
         let ctx = rqctx.context();
-        let keeper = body.into_inner();
-        let incoming_generation = keeper.generation();
-        let generation_rx = ctx.generation_tx.subscribe();
-        let current_generation = *generation_rx.borrow();
-
-        // If the incoming generation number is lower, then we have a problem.
-        // We should return an error instead of silently skipping the configuration
-        // file generation.
-        if let Some(current) = current_generation {
-            if current > incoming_generation {
-                return Err(HttpError::for_client_error(
-                    Some(String::from("Conflict")),
-                    StatusCode::CONFLICT,
-                    format!(
-                        "current generation '{}' is greater than incoming generation '{}'",
-                        current,
-                        incoming_generation,
-                    )
-                ));
-            }
-        };
-
-        let output = ctx.clickward().generate_keeper_config(&keeper)?;
-
-        // We want to update the generation number only if the config file has been
-        // generated successfully.
-        ctx.generation_tx.send(Some(incoming_generation)).map_err(|e| {
-            HttpError::for_internal_error(format!(
-                "failure to send request: {e}"
-            ))
-        })?;
-
-        // Once we have generated the client we can safely enable the clickhouse_keeper service
-        let fmri = "svc:/oxide/clickhouse_keeper:default".to_string();
-        Svcadm::enable_service(fmri)?;
-
-        Ok(HttpResponseCreated(output))
+        let keeper_settings = body.into_inner();
+        let result =
+            ctx.send_generate_config_and_enable_svc(keeper_settings).await?;
+        Ok(HttpResponseCreated(result))
     }
 
     async fn generation(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Generation>, HttpError> {
         let ctx = rqctx.context();
-        let generation_rx = ctx.generation_tx.subscribe();
-        let gen = match *generation_rx.borrow() {
+        let gen = match *ctx.generation_rx.borrow() {
             Some(g) => g,
             None => {
                 return Err(HttpError::for_client_error(

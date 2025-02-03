@@ -7,7 +7,7 @@ use crate::{ClickhouseCli, Clickward};
 use anyhow::{anyhow, bail, Result};
 use camino::Utf8PathBuf;
 use clickhouse_admin_types::{
-    GenerateConfigResult, KeeperConfigurableSettings, NodeGeneration,
+    GenerateConfigResult, KeeperConfigurableSettings,
     ServerConfigurableSettings, CLICKHOUSE_KEEPER_CONFIG_DIR,
     CLICKHOUSE_KEEPER_CONFIG_FILE, CLICKHOUSE_SERVER_CONFIG_DIR,
     CLICKHOUSE_SERVER_CONFIG_FILE,
@@ -32,7 +32,8 @@ pub struct KeeperServerContext {
     clickward: Clickward,
     clickhouse_cli: ClickhouseCli,
     log: Logger,
-    pub generation_tx: watch::Sender<Option<Generation>>,
+    pub generate_config_tx: Sender<GenerateConfigRequest>,
+    pub generation_rx: watch::Receiver<Option<Generation>>,
 }
 
 impl KeeperServerContext {
@@ -52,25 +53,66 @@ impl KeeperServerContext {
         // If there is already a configuration file with a generation number we'll
         // use that. Otherwise, we set the generation number to None.
         let gen = read_generation_from_file(config_path)?;
-        let (generation_tx, _rx) = watch::channel(gen);
+        let (generation_tx, generation_rx) = watch::channel(gen);
 
-        Ok(Self { clickward, clickhouse_cli, log, generation_tx })
+        // We only want to handle one in flight request at a time. Reconfigurator execution will retry
+        // again later anyway. We use flume bounded channels with a size of 0 to act as a rendezvous channel.
+        let (generate_config_tx, generate_config_rx) = flume::bounded(0);
+        tokio::spawn(long_running_generate_config_task(
+            generate_config_rx,
+            generation_tx,
+        ));
+
+        Ok(Self {
+            clickward,
+            clickhouse_cli,
+            log,
+            generate_config_tx,
+            generation_rx,
+        })
     }
 
-    pub fn clickward(&self) -> &Clickward {
-        &self.clickward
+    pub async fn send_generate_config_and_enable_svc(
+        &self,
+        keeper_settings: KeeperConfigurableSettings,
+    ) -> Result<GenerateConfigResult, HttpError> {
+        let clickward = self.clickward();
+        let log = self.log();
+        let node_settings = NodeSettings::Keeper {
+            settings: keeper_settings,
+            fmri: "svc:/oxide/clickhouse_keeper:default".to_string(),
+        };
+
+        let (response_tx, response_rx) = oneshot::channel();
+        self.generate_config_tx
+            .try_send(GenerateConfigRequest::GenerateConfig {
+                clickward,
+                log,
+                replica_settings: node_settings,
+                response: response_tx,
+            })
+            .map_err(|e| {
+                HttpError::for_internal_error(format!(
+                    "failure to send request: {e}"
+                ))
+            })?;
+        response_rx.await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failure to receive response: {e}"
+            ))
+        })?
+    }
+
+    pub fn clickward(&self) -> Clickward {
+        self.clickward
     }
 
     pub fn clickhouse_cli(&self) -> &ClickhouseCli {
         &self.clickhouse_cli
     }
 
-    pub fn log(&self) -> &Logger {
-        &self.log
-    }
-
-    pub fn generation_tx(&self) -> watch::Sender<Option<Generation>> {
-        self.generation_tx.clone()
+    pub fn log(&self) -> Logger {
+        self.log.clone()
     }
 }
 
@@ -243,16 +285,9 @@ pub enum GenerateConfigRequest {
     GenerateConfig {
         clickward: Clickward,
         log: Logger,
-        //replica_settings: ServerConfigurableSettings,
         replica_settings: NodeSettings,
         response: oneshot::Sender<Result<GenerateConfigResult, HttpError>>,
     },
-    //    GenerateKeeperConfig {
-    //        clickward: Clickward,
-    //        log: Logger,
-    //        keeper_settings: KeeperConfigurableSettings,
-    //        response: oneshot::Sender<Result<KeeperConfig, HttpError>>,
-    //    },
 }
 
 async fn long_running_generate_config_task(
@@ -278,14 +313,7 @@ async fn long_running_generate_config_task(
                         "failed to send value from configuration generation to channel: {e:?}"
                     );
                 };
-            } //    GenerateConfigRequest::GenerateKeeperConfig {
-              //        clickward,
-              //        log,
-              //        keeper_settings,
-              //        response,
-              //    } => {
-              //        todo!()
-              //    }
+            }
         }
     }
 }
@@ -303,9 +331,7 @@ impl NodeSettings {
             NodeSettings::Keeper { fmri, .. } => fmri,
         }
     }
-}
 
-impl NodeGeneration for NodeSettings {
     fn generation(&self) -> Generation {
         match self {
             NodeSettings::Replica { settings, .. } => settings.generation(),
@@ -341,7 +367,6 @@ pub fn generate_config_and_enable_svc(
         }
     };
 
-    //let output = clickward.generate_server_config(replica_settings)?;
     let output = match replica_settings {
         NodeSettings::Replica { ref settings, .. } => {
             GenerateConfigResult::Replica(
@@ -362,7 +387,6 @@ pub fn generate_config_and_enable_svc(
     })?;
 
     // Once we have generated the client we can safely enable the clickhouse_server service
-    // let fmri = "svc:/oxide/clickhouse_server:default".to_string();
     Svcadm::enable_service(replica_settings.fmri())?;
 
     Ok(output)

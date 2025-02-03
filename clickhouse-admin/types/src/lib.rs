@@ -87,10 +87,6 @@ pub struct KeeperId(pub u64);
 )]
 pub struct ServerId(pub u64);
 
-pub trait NodeGeneration {
-    fn generation(&self) -> Generation;
-}
-
 /// The top most type for configuring clickhouse-servers via
 /// clickhouse-admin-server-api
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -151,9 +147,9 @@ impl ServerConfigurableSettings {
         Ok(config)
     }
 
-    //  pub fn generation(&self) -> Generation {
-    //      self.generation
-    //  }
+    pub fn generation(&self) -> Generation {
+        self.generation
+    }
 
     fn listen_addr(&self) -> Ipv6Addr {
         self.settings.listen_addr
@@ -161,12 +157,6 @@ impl ServerConfigurableSettings {
 
     fn datastore_path(&self) -> Utf8PathBuf {
         self.settings.datastore_path.clone()
-    }
-}
-
-impl NodeGeneration for ServerConfigurableSettings {
-    fn generation(&self) -> Generation {
-        self.generation
     }
 }
 
@@ -222,9 +212,9 @@ impl KeeperConfigurableSettings {
         Ok(config)
     }
 
-    //    pub fn generation(&self) -> Generation {
-    //        self.generation
-    //    }
+    pub fn generation(&self) -> Generation {
+        self.generation
+    }
 
     fn listen_addr(&self) -> Ipv6Addr {
         self.settings.listen_addr
@@ -236,12 +226,6 @@ impl KeeperConfigurableSettings {
 
     fn datastore_path(&self) -> Utf8PathBuf {
         self.settings.datastore_path.clone()
-    }
-}
-
-impl NodeGeneration for KeeperConfigurableSettings {
-    fn generation(&self) -> Generation {
-        self.generation
     }
 }
 
