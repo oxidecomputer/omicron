@@ -126,6 +126,62 @@ impl ServerContext {
         })
     }
 
+    pub async fn send_generate_config_and_enable_svc(
+        &self,
+        replica_settings: ServerConfigurableSettings,
+    ) -> Result<ReplicaConfig, HttpError> {
+        let clickward = self.clickward();
+        let log = self.log();
+        let generation_tx = self.generation_tx();
+
+        let (response_tx, response_rx) = oneshot::channel();
+        self.generate_config_tx
+            .try_send(GenerateConfigRequest::GenerateConfig {
+                generation_tx,
+                clickward,
+                log,
+                replica_settings,
+                response: response_tx,
+            })
+            .map_err(|e| {
+                HttpError::for_internal_error(format!(
+                    "failure to send request: {e}"
+                ))
+            })?;
+        response_rx.await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failure to receive response: {e}"
+            ))
+        })?
+    }
+
+    pub async fn send_init_db(
+        &self,
+        replicated: bool,
+    ) -> Result<(), HttpError> {
+        let log = self.log();
+        let clickhouse_address = self.clickhouse_address();
+
+        let (response_tx, response_rx) = oneshot::channel();
+        self.db_init_tx
+            .try_send(DbInitRequest::DbInit {
+                clickhouse_address,
+                log,
+                replicated,
+                response: response_tx,
+            })
+            .map_err(|e| {
+                HttpError::for_internal_error(format!(
+                    "failure to send request: {e}"
+                ))
+            })?;
+        response_rx.await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failure to receive response: {e}"
+            ))
+        })?
+    }
+
     pub fn clickhouse_cli(&self) -> &ClickhouseCli {
         &self.clickhouse_cli
     }

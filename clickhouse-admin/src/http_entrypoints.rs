@@ -2,9 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::context::{
-    DbInitRequest, GenerateConfigRequest, KeeperServerContext, ServerContext,
-};
+use crate::context::{KeeperServerContext, ServerContext};
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
@@ -20,7 +18,6 @@ use http::StatusCode;
 use illumos_utils::svcadm::Svcadm;
 use omicron_common::api::external::Generation;
 use std::sync::Arc;
-use tokio::sync::oneshot;
 
 pub fn clickhouse_admin_server_api() -> ApiDescription<Arc<ServerContext>> {
     clickhouse_admin_server_api_mod::api_description::<ClickhouseAdminServerImpl>()
@@ -49,30 +46,8 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
     ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError> {
         let ctx = rqctx.context();
         let replica_settings = body.into_inner();
-        let clickward = ctx.clickward();
-        let log = ctx.log();
-        let generation_tx = ctx.generation_tx();
-
-        let (response_tx, response_rx) = oneshot::channel();
-        ctx.generate_config_tx
-            .try_send(GenerateConfigRequest::GenerateConfig {
-                generation_tx,
-                clickward,
-                log,
-                replica_settings,
-                response: response_tx,
-            })
-            .map_err(|e| {
-                HttpError::for_internal_error(format!(
-                    "failure to send request: {e}"
-                ))
-            })?;
-        let result = response_rx.await.map_err(|e| {
-            HttpError::for_internal_error(format!(
-                "failure to receive response: {e}"
-            ))
-        })??;
-
+        let result =
+            ctx.send_generate_config_and_enable_svc(replica_settings).await?;
         Ok(HttpResponseCreated(result))
     }
 
@@ -122,27 +97,7 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let ctx = rqctx.context();
         let replicated = true;
-        let log = ctx.log();
-        let clickhouse_address = ctx.clickhouse_address();
-        let (response_tx, response_rx) = oneshot::channel();
-        ctx.db_init_tx
-            .try_send(DbInitRequest::DbInit {
-                clickhouse_address,
-                log,
-                replicated,
-                response: response_tx,
-            })
-            .map_err(|e| {
-                HttpError::for_internal_error(format!(
-                    "failure to send request: {e}"
-                ))
-            })?;
-        response_rx.await.map_err(|e| {
-            HttpError::for_internal_error(format!(
-                "failure to receive response: {e}"
-            ))
-        })??;
-
+        ctx.send_init_db(replicated).await?;
         Ok(HttpResponseUpdatedNoContent())
     }
 }
@@ -258,28 +213,7 @@ impl ClickhouseAdminSingleApi for ClickhouseAdminSingleImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let ctx = rqctx.context();
         let replicated = false;
-        let log = ctx.log();
-        let clickhouse_address = ctx.clickhouse_address();
-        let (response_tx, response_rx) = oneshot::channel();
-        ctx.db_init_tx
-            .send_async(DbInitRequest::DbInit {
-                clickhouse_address,
-                log,
-                replicated,
-                response: response_tx,
-            })
-            .await
-            .map_err(|e| {
-                HttpError::for_internal_error(format!(
-                    "failure to send request: {e}"
-                ))
-            })?;
-        response_rx.await.map_err(|e| {
-            HttpError::for_internal_error(format!(
-                "failure to receive response: {e}"
-            ))
-        })??;
-
+        ctx.send_init_db(replicated).await?;
         Ok(HttpResponseUpdatedNoContent())
     }
 
