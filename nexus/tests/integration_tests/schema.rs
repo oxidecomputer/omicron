@@ -17,8 +17,6 @@ use nexus_test_utils::{load_test_config, ControlPlaneTestContextBuilder};
 use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_test_utils::dev::db::{Client, CockroachInstance};
-use omicron_uuid_kinds::InstanceUuid;
-use omicron_uuid_kinds::SledUuid;
 use pretty_assertions::{assert_eq, assert_ne};
 use similar_asserts;
 use slog::Logger;
@@ -945,16 +943,6 @@ async fn dbinit_equals_sum_of_all_up() {
         );
     }
 
-    // Create a connection pool after we apply the first schema version but
-    // before applying the rest, and grab a connection from that pool. We'll use
-    // it for an extra check later.
-    let pool = nexus_db_queries::db::Pool::new_single_host(
-        log,
-        &nexus_db_queries::db::Config { url: crdb.pg_config().clone() },
-    );
-    let conn_from_pool =
-        pool.claim().await.expect("failed to get pooled connection");
-
     // Go from the second version to the latest version.
     for version in all_versions.iter_versions().skip(1) {
         apply_update(log, &crdb, version, 1).await;
@@ -972,39 +960,6 @@ async fn dbinit_equals_sum_of_all_up() {
     let observed_schema = InformationSchema::new(&crdb).await;
     let observed_data = observed_schema.query_all_tables(log, &crdb).await;
 
-    // Using the connection we got from the connection pool prior to applying
-    // the schema migrations, attempt to insert a sled resource. This involves
-    // the `sled_resource_kind` enum, whose OID was changed by the schema
-    // migration in version 53.0.0 (by virtue of the enum being dropped and
-    // added back with a different set of variants). If the diesel OID cache was
-    // populated when we acquired the connection from the pool, this will fail
-    // with a `type with ID $NUM does not exist` error.
-    {
-        use async_bb8_diesel::AsyncRunQueryDsl;
-        use nexus_db_model::schema::sled_resource::dsl;
-        use nexus_db_model::Resources;
-        use nexus_db_model::SledResource;
-        use nexus_db_model::SledResourceKind;
-
-        diesel::insert_into(dsl::sled_resource)
-            .values(SledResource {
-                id: Uuid::new_v4(),
-                instance_id: Some(InstanceUuid::new_v4().into()),
-                sled_id: SledUuid::new_v4().into(),
-                kind: SledResourceKind::Instance,
-                resources: Resources {
-                    hardware_threads: 8_u32.into(),
-                    rss_ram: 1024_i64.try_into().unwrap(),
-                    reservoir_ram: 1024_i64.try_into().unwrap(),
-                },
-            })
-            .execute_async(&*conn_from_pool)
-            .await
-            .expect("failed to insert - did we poison the OID cache?");
-    }
-    std::mem::drop(conn_from_pool);
-    pool.terminate().await;
-    std::mem::drop(pool);
     db.terminate().await;
 
     // Create a new DB with data populated from dbinit.sql for comparison

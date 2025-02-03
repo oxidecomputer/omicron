@@ -6141,7 +6141,7 @@ async fn cmd_db_vmm_info(
     &VmmInfoArgs { uuid }: &VmmInfoArgs,
 ) -> Result<(), anyhow::Error> {
     use db::schema::migration::dsl as migration_dsl;
-    use db::schema::sled_resource::dsl as resource_dsl;
+    use db::schema::sled_resource_vmm::dsl as resource_dsl;
     use db::schema::vmm::dsl as vmm_dsl;
 
     let vmm = vmm_dsl::vmm
@@ -6184,7 +6184,6 @@ async fn cmd_db_vmm_info(
         let db::model::SledResource {
             id: _,
             sled_id,
-            kind: _,
             resources:
                 db::model::Resources {
                     hardware_threads,
@@ -6206,7 +6205,7 @@ async fn cmd_db_vmm_info(
         println!("    {RESERVOIR:>WIDTH$}: {reservoir}");
     }
 
-    let reservations = resource_dsl::sled_resource
+    let reservations = resource_dsl::sled_resource_vmm
         .filter(resource_dsl::id.eq(uuid))
         .select(db::model::SledResource::as_select())
         .load_async::<db::model::SledResource>(

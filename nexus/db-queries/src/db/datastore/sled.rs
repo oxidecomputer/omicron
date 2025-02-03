@@ -265,9 +265,9 @@ impl DataStore {
                 let resources = resources.clone();
 
                 async move {
-                    use db::schema::sled_resource::dsl as resource_dsl;
+                    use db::schema::sled_resource_vmm::dsl as resource_dsl;
                     // Check if resource ID already exists - if so, return it.
-                    let old_resource = resource_dsl::sled_resource
+                    let old_resource = resource_dsl::sled_resource_vmm
                         .filter(resource_dsl::id.eq(*propolis_id.as_untyped_uuid()))
                         .select(SledResource::as_select())
                         .limit(1)
@@ -320,7 +320,7 @@ impl DataStore {
                     // for this reservation.
                     let mut sled_targets = sled_dsl::sled
                         .left_join(
-                            resource_dsl::sled_resource
+                            resource_dsl::sled_resource_vmm
                                 .on(resource_dsl::sled_id.eq(sled_dsl::id)),
                         )
                         .group_by(sled_dsl::id)
@@ -541,7 +541,7 @@ impl DataStore {
                         resources,
                     );
 
-                    diesel::insert_into(resource_dsl::sled_resource)
+                    diesel::insert_into(resource_dsl::sled_resource_vmm)
                         .values(resource)
                         .returning(SledResource::as_returning())
                         .get_result_async(&conn)
@@ -560,11 +560,11 @@ impl DataStore {
     pub async fn sled_reservation_delete(
         &self,
         opctx: &OpContext,
-        resource_id: Uuid,
+        vmm_id: PropolisUuid,
     ) -> DeleteResult {
-        use db::schema::sled_resource::dsl as resource_dsl;
-        diesel::delete(resource_dsl::sled_resource)
-            .filter(resource_dsl::id.eq(resource_id))
+        use db::schema::sled_resource_vmm::dsl as resource_dsl;
+        diesel::delete(resource_dsl::sled_resource_vmm)
+            .filter(resource_dsl::id.eq(vmm_id.into_untyped_uuid()))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -1371,7 +1371,7 @@ pub(in crate::db::datastore) mod test {
             );
 
             datastore
-                .sled_reservation_delete(&opctx, resource.id)
+                .sled_reservation_delete(&opctx, resource.id.into())
                 .await
                 .unwrap();
         }
