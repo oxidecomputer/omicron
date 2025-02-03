@@ -8,7 +8,7 @@ use crate::{
         display_api_spec_version, headers::*, plural, OutputOpts, Styles,
     },
     environment::{BlessedSource, GeneratedSource},
-    resolved::{iter_only, Resolution, Resolved},
+    resolved::{iter_only, Problem, Resolution, Resolved},
     spec::Environment,
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
 };
@@ -192,6 +192,22 @@ pub fn summarize(
         }
     }
 
+    let general_problems: Vec<_> = resolved.general_problems().collect();
+    let num_general_problems = if !general_problems.is_empty() {
+        eprintln!(
+            "Other problems not associated with a specific supported API \
+             version:"
+        );
+
+        let (fixable, unfixable): (Vec<&Problem>, Vec<&Problem>) =
+            general_problems.iter().partition(|p| p.is_fixable());
+        num_failed += unfixable.len();
+        print_problems(general_problems, output, styles);
+        fixable.len()
+    } else {
+        0
+    };
+
     let status_header = if num_failed > 0 {
         FAILURE.style(styles.failure_header)
     } else if num_stale > 0 {
@@ -201,13 +217,16 @@ pub fn summarize(
     };
 
     eprintln!(
-        "{:>HEADER_WIDTH$} {} {} checked: {} fresh, {} stale, {} failed",
+        "{:>HEADER_WIDTH$} {} {} checked: {} fresh, {} stale, {} failed, \
+         {} other {}",
         status_header,
         total.style(styles.bold),
         plural::documents(total),
         num_fresh.style(styles.bold),
         num_stale.style(styles.bold),
         num_failed.style(styles.bold),
+        num_general_problems.style(styles.bold),
+        plural::problems(num_general_problems),
     );
     if num_failed > 0 {
         eprintln!(
@@ -260,7 +279,14 @@ fn summarize_one(
         display_api_spec_version(api, version, &styles),
     );
 
-    for p in &problems {
+    print_problems(problems, output, styles);
+}
+
+fn print_problems<'a, T>(problems: T, output: &OutputOpts, styles: &Styles)
+where
+    T: IntoIterator<Item = &'a Problem<'a>>,
+{
+    for p in problems.into_iter() {
         let subheader_width = HEADER_WIDTH + 4;
         let first_indent = format!(
             "{:>subheader_width$}: ",

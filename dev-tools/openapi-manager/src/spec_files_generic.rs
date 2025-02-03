@@ -213,7 +213,7 @@ impl ApiSpecFile {
         {
             if *version != parsed_version {
                 bail!(
-                    "file {:?}: version in the file ({:?}) differs from \
+                    "file {:?}: version in the file ({}) differs from \
                      the one in the filename",
                     spec_file_name.path(),
                     parsed_version

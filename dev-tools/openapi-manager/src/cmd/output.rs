@@ -274,6 +274,14 @@ pub(crate) mod plural {
         }
     }
 
+    pub(crate) fn problems(count: usize) -> &'static str {
+        if count == 1 {
+            "problem"
+        } else {
+            "problems"
+        }
+    }
+
     pub(crate) fn schemas(count: usize) -> &'static str {
         if count == 1 {
             "schema"
