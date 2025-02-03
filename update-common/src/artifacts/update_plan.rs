@@ -11,6 +11,7 @@
 
 use super::ArtifactIdData;
 use super::Board;
+use super::ControlPlaneZonesMode;
 use super::ExtractedArtifactDataHandle;
 use super::ExtractedArtifacts;
 use super::HashingNamedUtf8TempFile;
@@ -35,6 +36,8 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::io;
 use tokio::io::AsyncReadExt;
+use tokio::runtime::Handle;
+use tufaceous_lib::ControlPlaneZoneImages;
 use tufaceous_lib::HostPhaseImages;
 use tufaceous_lib::RotArchives;
 
@@ -75,6 +78,9 @@ pub struct UpdatePlan {
     // We also need to send installinator the hash of the control_plane image it
     // should fetch from us. This is already present in the TUF repository, but
     // we record it here for use by the update process.
+    //
+    // When built with `ControlPlaneZonesMode::Split`, this hash does not
+    // reference any artifacts in our corresponding `ArtifactsWithPlan`.
     pub control_plane_hash: ArtifactHash,
 }
 
@@ -146,12 +152,14 @@ pub struct UpdatePlanBuilder<'a> {
 
     // extra fields we use to build the plan
     extracted_artifacts: ExtractedArtifacts,
+    zone_mode: ControlPlaneZonesMode,
     log: &'a Logger,
 }
 
 impl<'a> UpdatePlanBuilder<'a> {
     pub fn new(
         system_version: SemverVersion,
+        zone_mode: ControlPlaneZonesMode,
         log: &'a Logger,
     ) -> Result<Self, RepositoryError> {
         let extracted_artifacts = ExtractedArtifacts::new(log)?;
@@ -181,6 +189,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             artifacts_meta: Vec::new(),
 
             extracted_artifacts,
+            zone_mode,
             log,
         })
     }
@@ -246,6 +255,12 @@ impl<'a> UpdatePlanBuilder<'a> {
                 )
                 .await
             }
+            KnownArtifactKind::Zone => {
+                // We don't currently support repos with already split-out
+                // zones.
+                self.add_unknown_artifact(artifact_id, artifact_hash, stream)
+                    .await
+            }
         }
     }
 
@@ -265,6 +280,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             | KnownArtifactKind::Host
             | KnownArtifactKind::Trampoline
             | KnownArtifactKind::ControlPlane
+            | KnownArtifactKind::Zone
             | KnownArtifactKind::PscRot
             | KnownArtifactKind::SwitchRot
             | KnownArtifactKind::GimletRotBootloader
@@ -357,6 +373,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             | KnownArtifactKind::Host
             | KnownArtifactKind::Trampoline
             | KnownArtifactKind::ControlPlane
+            | KnownArtifactKind::Zone
             | KnownArtifactKind::PscRot
             | KnownArtifactKind::SwitchRot
             | KnownArtifactKind::GimletSp
@@ -451,6 +468,7 @@ impl<'a> UpdatePlanBuilder<'a> {
             | KnownArtifactKind::Host
             | KnownArtifactKind::Trampoline
             | KnownArtifactKind::ControlPlane
+            | KnownArtifactKind::Zone
             | KnownArtifactKind::PscSp
             | KnownArtifactKind::SwitchSp
             | KnownArtifactKind::GimletRotBootloader
@@ -708,24 +726,34 @@ impl<'a> UpdatePlanBuilder<'a> {
             ));
         }
 
-        // The control plane artifact is the easiest one: we just need to copy
-        // it into our tempdir and record it. Nothing to inspect or extract.
-        let artifact_hash_id = ArtifactHashId {
-            kind: artifact_id.kind.clone(),
-            hash: artifact_hash,
-        };
+        match self.zone_mode {
+            ControlPlaneZonesMode::Composite => {
+                // Just copy it into our tempdir and record it.
+                let artifact_hash_id = ArtifactHashId {
+                    kind: artifact_id.kind.clone(),
+                    hash: artifact_hash,
+                };
+                let data = self
+                    .extracted_artifacts
+                    .store(artifact_hash_id, stream)
+                    .await?;
+                self.record_extracted_artifact(
+                    artifact_id,
+                    data,
+                    KnownArtifactKind::ControlPlane.into(),
+                    self.log,
+                )?;
+            }
+            ControlPlaneZonesMode::Split => {
+                // Extract each zone image into its own artifact.
+                self.extract_control_plane_zones(stream)?;
+            }
+        }
 
-        let data =
-            self.extracted_artifacts.store(artifact_hash_id, stream).await?;
-
-        self.control_plane_hash = Some(data.hash());
-
-        self.record_extracted_artifact(
-            artifact_id,
-            data,
-            KnownArtifactKind::ControlPlane.into(),
-            self.log,
-        )?;
+        // Even if we split the control plane artifact, use this as a marker
+        // that we've seen the artifact before. The hash is meaningless in
+        // `Split` mode.
+        self.control_plane_hash = Some(artifact_hash);
 
         Ok(())
     }
@@ -856,6 +884,75 @@ impl<'a> UpdatePlanBuilder<'a> {
             extracted_artifacts.store_tempfile(kind.into(), image2_out)?;
 
         Ok((image1, image2))
+    }
+
+    /// Helper function for extracting and recording zones out of `stream`, a
+    /// composite control plane artifact.
+    ///
+    /// This code can only be used with multithreaded Tokio executors; see
+    /// `extract_nested_artifact_pair` for context on `block_in_place`.
+    fn extract_control_plane_zones(
+        &mut self,
+        stream: impl Stream<Item = Result<bytes::Bytes, tough::error::Error>> + Send,
+    ) -> Result<(), RepositoryError> {
+        tokio::task::block_in_place(|| {
+            let stream = std::pin::pin!(stream);
+            let reader =
+                tokio_util::io::StreamReader::new(stream.map_err(|error| {
+                    // StreamReader requires a conversion from tough's errors to
+                    // std::io::Error.
+                    std::io::Error::new(io::ErrorKind::Other, error)
+                }));
+            let reader = tokio_util::io::SyncIoBridge::new(reader);
+            self.extract_control_plane_zones_impl(reader)
+        })
+    }
+
+    fn extract_control_plane_zones_impl(
+        &mut self,
+        reader: impl io::Read,
+    ) -> Result<(), RepositoryError> {
+        ControlPlaneZoneImages::extract_into(reader, |_, reader| {
+            let mut out = self.extracted_artifacts.new_tempfile()?;
+            io::copy(reader, &mut out)?;
+            let data = self
+                .extracted_artifacts
+                .store_tempfile(KnownArtifactKind::Zone.into(), out)?;
+
+            // Read the zone name and version from the `oxide.json` at the root
+            // of the zone.
+            let data_clone = data.clone();
+            let file = Handle::current().block_on(async move {
+                std::io::Result::Ok(data_clone.file().await?.into_std().await)
+            })?;
+            let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(file));
+            let metadata =
+                omicron_brand_metadata::Metadata::read_from_tar(&mut tar)?;
+            let info = metadata.layer_info()?;
+
+            let artifact_id = ArtifactId {
+                name: info.pkg.clone(),
+                version: SemverVersion(info.version.clone()),
+                kind: KnownArtifactKind::Zone.into(),
+            };
+            self.record_extracted_artifact(
+                artifact_id,
+                data,
+                KnownArtifactKind::Zone.into(),
+                self.log,
+            )?;
+            Ok(())
+        })
+        .map_err(|error| {
+            // Fish the original RepositoryError out of this
+            // anyhow::Error if it is one.
+            error.downcast().unwrap_or_else(|error| {
+                RepositoryError::TarballExtract {
+                    kind: KnownArtifactKind::ControlPlane,
+                    error,
+                }
+            })
+        })
     }
 
     // Record an artifact in `by_id` and `by_hash`, or fail if either already has an
@@ -1180,11 +1277,15 @@ mod tests {
 
     use super::*;
     use bytes::Bytes;
+    use flate2::{write::GzEncoder, Compression};
     use futures::StreamExt;
+    use omicron_brand_metadata::{ArchiveType, LayerInfo, Metadata};
     use omicron_test_utils::dev::test_setup_log;
     use rand::{distributions::Standard, thread_rng, Rng};
     use sha2::{Digest, Sha256};
-    use tufaceous_lib::{CompositeEntry, MtimeSource};
+    use tufaceous_lib::{
+        CompositeControlPlaneArchiveBuilder, CompositeEntry, MtimeSource,
+    };
 
     fn make_random_bytes() -> Vec<u8> {
         thread_rng().sample_iter(Standard).take(128).collect()
@@ -1369,8 +1470,12 @@ mod tests {
 
         let logctx = test_setup_log("test_bad_rot_version");
 
-        let mut plan_builder =
-            UpdatePlanBuilder::new(VERSION_0, &logctx.log).unwrap();
+        let mut plan_builder = UpdatePlanBuilder::new(
+            VERSION_0,
+            ControlPlaneZonesMode::Composite,
+            &logctx.log,
+        )
+        .unwrap();
 
         // The control plane artifact can be arbitrary bytes; just populate it
         // with random data.
@@ -1537,9 +1642,12 @@ mod tests {
 
         let logctx = test_setup_log("test_multi_rot_version");
 
-        let mut plan_builder =
-            UpdatePlanBuilder::new("0.0.0".parse().unwrap(), &logctx.log)
-                .unwrap();
+        let mut plan_builder = UpdatePlanBuilder::new(
+            "0.0.0".parse().unwrap(),
+            ControlPlaneZonesMode::Composite,
+            &logctx.log,
+        )
+        .unwrap();
 
         // The control plane artifact can be arbitrary bytes; just populate it
         // with random data.
@@ -1722,9 +1830,12 @@ mod tests {
 
         let logctx = test_setup_log("test_update_plan_from_artifacts");
 
-        let mut plan_builder =
-            UpdatePlanBuilder::new("0.0.0".parse().unwrap(), &logctx.log)
-                .unwrap();
+        let mut plan_builder = UpdatePlanBuilder::new(
+            "0.0.0".parse().unwrap(),
+            ControlPlaneZonesMode::Composite,
+            &logctx.log,
+        )
+        .unwrap();
 
         // Add a couple artifacts with kinds wicketd/nexus don't understand; it
         // should still ingest and serve them.
@@ -1919,6 +2030,12 @@ mod tests {
                     assert_eq!(hash_ids.len(), 1);
                     assert_eq!(plan.control_plane_hash, hash_ids[0].hash);
                 }
+                KnownArtifactKind::Zone => {
+                    unreachable!(
+                        "tufaceous does not yet generate repos \
+                        with split-out control plane zones"
+                    );
+                }
                 KnownArtifactKind::PscSp => {
                     assert!(
                         id.name.starts_with("test-psc-"),
@@ -2018,9 +2135,12 @@ mod tests {
 
         let logctx = test_setup_log("test_bad_hubris_cabooses");
 
-        let mut plan_builder =
-            UpdatePlanBuilder::new("0.0.0".parse().unwrap(), &logctx.log)
-                .unwrap();
+        let mut plan_builder = UpdatePlanBuilder::new(
+            "0.0.0".parse().unwrap(),
+            ControlPlaneZonesMode::Composite,
+            &logctx.log,
+        )
+        .unwrap();
 
         let gimlet_rot = make_bad_rot_image("gimlet");
         let psc_rot = make_bad_rot_image("psc");
@@ -2096,9 +2216,12 @@ mod tests {
         // bootloader
         let logctx = test_setup_log("test_too_many_rot_bootloader");
 
-        let mut plan_builder =
-            UpdatePlanBuilder::new("0.0.0".parse().unwrap(), &logctx.log)
-                .unwrap();
+        let mut plan_builder = UpdatePlanBuilder::new(
+            "0.0.0".parse().unwrap(),
+            ControlPlaneZonesMode::Composite,
+            &logctx.log,
+        )
+        .unwrap();
 
         let gimlet_rot_bootloader =
             make_fake_rot_bootloader_image("test-gimlet-a", "test-gimlet-a");
@@ -2159,9 +2282,12 @@ mod tests {
 
         let logctx = test_setup_log("test_update_plan_from_artifacts");
 
-        let mut plan_builder =
-            UpdatePlanBuilder::new("0.0.0".parse().unwrap(), &logctx.log)
-                .unwrap();
+        let mut plan_builder = UpdatePlanBuilder::new(
+            "0.0.0".parse().unwrap(),
+            ControlPlaneZonesMode::Composite,
+            &logctx.log,
+        )
+        .unwrap();
 
         // The control plane artifact can be arbitrary bytes; just populate it
         // with random data.
@@ -2320,9 +2446,12 @@ mod tests {
 
         let logctx = test_setup_log("test_update_plan_from_artifacts");
 
-        let mut plan_builder =
-            UpdatePlanBuilder::new("0.0.0".parse().unwrap(), &logctx.log)
-                .unwrap();
+        let mut plan_builder = UpdatePlanBuilder::new(
+            "0.0.0".parse().unwrap(),
+            ControlPlaneZonesMode::Composite,
+            &logctx.log,
+        )
+        .unwrap();
 
         let gimlet_rot = make_random_rot_image("gimlet", "gimlet", "gitc1");
         let gimlet2_rot = make_random_rot_image("gimlet", "gimlet", "gitc2");
@@ -2355,6 +2484,80 @@ mod tests {
             Ok(_) => panic!("unexpected success"),
             Err(_) => (),
         };
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_split_control_plane() {
+        const VERSION_0: SemverVersion = SemverVersion::new(0, 0, 0);
+
+        let logctx = test_setup_log("test_split_control_plane");
+
+        let mut zones = Vec::new();
+        for name in ["first", "second"] {
+            let mut tar = tar::Builder::new(GzEncoder::new(
+                Vec::new(),
+                Compression::fast(),
+            ));
+            let metadata = Metadata::new(ArchiveType::Layer(LayerInfo {
+                pkg: name.to_owned(),
+                version: VERSION_0.0.clone(),
+            }));
+            metadata.append_to_tar(&mut tar, 0).unwrap();
+            let data = tar.into_inner().unwrap().finish().unwrap();
+            zones.push((name, data));
+        }
+
+        let mut cp_builder = CompositeControlPlaneArchiveBuilder::new(
+            Vec::new(),
+            MtimeSource::Now,
+        )
+        .unwrap();
+        for (name, data) in &zones {
+            cp_builder
+                .append_zone(
+                    name,
+                    CompositeEntry { data, mtime_source: MtimeSource::Now },
+                )
+                .unwrap();
+        }
+        let data = Bytes::from(cp_builder.finish().unwrap());
+
+        let mut plan_builder = UpdatePlanBuilder::new(
+            VERSION_0,
+            ControlPlaneZonesMode::Split,
+            &logctx.log,
+        )
+        .unwrap();
+        let hash = ArtifactHash(Sha256::digest(&data).into());
+        let id = ArtifactId {
+            name: "control_plane".into(),
+            version: VERSION_0,
+            kind: KnownArtifactKind::ControlPlane.into(),
+        };
+        plan_builder
+            .add_artifact(id, hash, futures::stream::iter([Ok(data.clone())]))
+            .await
+            .unwrap();
+
+        // All of the artifacts created should be Zones (and notably, not
+        // ControlPlane). Their artifact hashes should match the calculated hash
+        // of the zone contents.
+        for (id, vec) in &plan_builder.by_id {
+            let content =
+                &zones.iter().find(|(name, _)| *name == id.name).unwrap().1;
+            let expected_hash = ArtifactHash(Sha256::digest(content).into());
+            assert_eq!(id.version, VERSION_0);
+            assert_eq!(id.kind, KnownArtifactKind::Zone.into());
+            assert_eq!(
+                vec,
+                &vec![ArtifactHashId {
+                    kind: KnownArtifactKind::Zone.into(),
+                    hash: expected_hash
+                }]
+            );
+        }
 
         logctx.cleanup_successful();
     }

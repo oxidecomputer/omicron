@@ -5,6 +5,7 @@
 //! Background task for managing Support Bundles
 
 use crate::app::background::BackgroundTask;
+use anyhow::Context;
 use camino::Utf8DirEntry;
 use camino::Utf8Path;
 use camino_tempfile::tempdir_in;
@@ -649,7 +650,16 @@ impl BundleCollection<'_> {
                 .buffer_unordered(10);
 
                 while let Some(result) = diag_cmds.next().await {
-                    result?;
+                    // Log that we failed to write the diag command output to a
+                    // file but don't return early as we wish to get as much
+                    // information as we can.
+                    if let Err(e) = result {
+                        error!(
+                            &self.log,
+                            "failed to write diagnostic command output to \
+                            file: {e}"
+                        );
+                    }
                 }
             }
         }
@@ -762,7 +772,7 @@ async fn sha2_hash(file: &mut tokio::fs::File) -> anyhow::Result<ArtifactHash> {
     Ok(ArtifactHash(digest.as_slice().try_into()?))
 }
 
-/// Run a `sled-dianostics` future and save it's output to a corresponding file.
+/// Run a `sled-dianostics` future and save its output to a corresponding file.
 async fn save_diag_cmd_output_or_error<F, S: serde::Serialize>(
     path: &Utf8Path,
     command: &str,
@@ -780,8 +790,14 @@ where
     match result {
         Ok(result) => {
             let output = result.into_inner();
-            let json = serde_json::to_string(&output)?;
-            tokio::fs::write(path.join(format!("{command}.txt")), json).await?;
+            let json = serde_json::to_string(&output).with_context(|| {
+                format!("failed to serialize {command} output as json")
+            })?;
+            tokio::fs::write(path.join(format!("{command}.json")), json)
+                .await
+                .with_context(|| {
+                    format!("failed to write output of {command} to file")
+                })?;
         }
         Err(err) => {
             tokio::fs::write(

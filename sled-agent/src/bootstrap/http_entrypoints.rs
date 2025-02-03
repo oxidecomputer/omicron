@@ -28,6 +28,7 @@ use sled_agent_types::rack_ops::RackOperationStatus;
 use sled_hardware_types::Baseboard;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use sprockets_tls::keys::SprocketsConfig;
 use std::net::Ipv6Addr;
 use tokio::sync::mpsc::error::TrySendError;
@@ -85,10 +86,11 @@ impl BootstrapAgentApi for BootstrapAgentImpl {
     ) -> Result<HttpResponseOk<Vec<Component>>, HttpError> {
         let ctx = rqctx.context();
         let updates = UpdateManager::new(ctx.updates.clone());
-        let components = updates
-            .components_get()
-            .await
-            .map_err(|err| HttpError::for_internal_error(err.to_string()))?;
+        let components = updates.components_get().await.map_err(|err| {
+            HttpError::for_internal_error(
+                InlineErrorChain::new(&err).to_string(),
+            )
+        })?;
         Ok(HttpResponseOk(components))
     }
 
