@@ -88,7 +88,7 @@ impl KeeperServerContext {
             .try_send(GenerateConfigRequest::GenerateConfig {
                 clickward,
                 log,
-                replica_settings: node_settings,
+                node_settings,
                 response: response_tx,
             })
             .map_err(|e| {
@@ -188,7 +188,7 @@ impl ServerContext {
             .try_send(GenerateConfigRequest::GenerateConfig {
                 clickward,
                 log,
-                replica_settings: node_settings,
+                node_settings,
                 response: response_tx,
             })
             .map_err(|e| {
@@ -281,11 +281,11 @@ async fn long_running_db_init_task(incoming: Receiver<DbInitRequest>) {
 }
 
 pub enum GenerateConfigRequest {
-    /// Generates a configuration file for a replicated cluster server
+    /// Generates a configuration file for a server or keeper node
     GenerateConfig {
         clickward: Clickward,
         log: Logger,
-        replica_settings: NodeSettings,
+        node_settings: NodeSettings,
         response: oneshot::Sender<Result<GenerateConfigResult, HttpError>>,
     },
 }
@@ -299,13 +299,13 @@ async fn long_running_generate_config_task(
             GenerateConfigRequest::GenerateConfig {
                 clickward,
                 log,
-                replica_settings,
+                node_settings,
                 response,
             } => {
                 let result = generate_config_and_enable_svc(
                     generation_tx.clone(),
                     clickward,
-                    replica_settings,
+                    node_settings,
                 );
                 if let Err(e) = response.send(result) {
                     error!(
@@ -343,10 +343,9 @@ impl NodeSettings {
 pub fn generate_config_and_enable_svc(
     generation_tx: watch::Sender<Option<Generation>>,
     clickward: Clickward,
-    //replica_settings: ServerConfigurableSettings,
-    replica_settings: NodeSettings,
+    node_settings: NodeSettings,
 ) -> Result<GenerateConfigResult, HttpError> {
-    let incoming_generation = replica_settings.generation();
+    let incoming_generation = node_settings.generation();
     let generation_rx = generation_tx.subscribe();
     let current_generation = *generation_rx.borrow();
 
@@ -367,7 +366,7 @@ pub fn generate_config_and_enable_svc(
         }
     };
 
-    let output = match replica_settings {
+    let output = match node_settings {
         NodeSettings::Replica { ref settings, .. } => {
             GenerateConfigResult::Replica(
                 clickward.generate_server_config(settings)?,
@@ -387,7 +386,7 @@ pub fn generate_config_and_enable_svc(
     })?;
 
     // Once we have generated the client we can safely enable the clickhouse_server service
-    Svcadm::enable_service(replica_settings.fmri())?;
+    Svcadm::enable_service(node_settings.fmri())?;
 
     Ok(output)
 }
