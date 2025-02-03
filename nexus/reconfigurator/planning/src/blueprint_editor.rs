@@ -20,7 +20,6 @@ pub use sled_editor::DuplicateZoneId;
 pub use sled_editor::MultipleDatasetsOfKind;
 pub use sled_editor::SledEditError;
 pub use sled_editor::SledInputError;
-pub use sled_editor::SledUnderlayIpOutOfRange;
 pub use sled_editor::ZonesEditError;
 
 pub(crate) use allocators::BlueprintResourceAllocator;

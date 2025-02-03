@@ -41,7 +41,6 @@ pub use self::datasets::DatasetsEditError;
 pub use self::datasets::MultipleDatasetsOfKind;
 pub use self::disks::DisksEditError;
 pub use self::disks::DuplicateDiskId;
-pub use self::underlay_ip_allocator::SledUnderlayIpOutOfRange;
 pub use self::zones::DuplicateZoneId;
 pub use self::zones::ZonesEditError;
 
@@ -58,8 +57,6 @@ pub enum SledInputError {
     DuplicateDiskId(#[from] DuplicateDiskId),
     #[error(transparent)]
     MultipleDatasetsOfKind(#[from] MultipleDatasetsOfKind),
-    #[error(transparent)]
-    UnderlayIp(#[from] SledUnderlayIpOutOfRange),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -113,8 +110,6 @@ pub enum SledEditError {
     ZoneOnNonexistentZpool { zone_id: OmicronZoneUuid, zpool: ZpoolName },
     #[error("ran out of underlay IP addresses")]
     OutOfUnderlayIps,
-    #[error("cannot add zone with invalid underlay IP")]
-    AddZoneBadUnderlayIp(#[source] SledUnderlayIpOutOfRange),
 }
 
 #[derive(Debug)]
@@ -333,14 +328,13 @@ impl ActiveSledEditor {
         // dispositions. If a zone has been fully removed from the blueprint
         // some time after expungement, we may reuse its IP; reconfigurator must
         // know that's safe prior to pruning the expunged zone.
-        let zone_ips = zones
-            .zones(BlueprintZoneFilter::All)
-            .map(|z| (z.zone_type.kind(), z.underlay_ip()));
+        let zone_ips =
+            zones.zones(BlueprintZoneFilter::All).map(|z| z.underlay_ip());
 
         Ok(Self {
             underlay_ip_allocator: SledUnderlayIpAllocator::new(
                 subnet, zone_ips,
-            )?,
+            ),
             zones,
             disks: disks.try_into()?,
             datasets: DatasetsEditor::new(datasets)?,
@@ -353,12 +347,7 @@ impl ActiveSledEditor {
         // all, so this can't fail. Match explicitly to guard against this error
         // turning into an enum and getting new variants we'd need to check.
         let underlay_ip_allocator =
-            match SledUnderlayIpAllocator::new(subnet, iter::empty()) {
-                Ok(allocator) => allocator,
-                Err(SledUnderlayIpOutOfRange { .. }) => {
-                    unreachable!("iter::empty() returns no IPs")
-                }
-            };
+            SledUnderlayIpAllocator::new(subnet, iter::empty());
 
         Self {
             underlay_ip_allocator,
@@ -469,12 +458,10 @@ impl ActiveSledEditor {
         // Ensure we can construct the configs for the datasets for this zone.
         let datasets = ZoneDatasetConfigs::new(&self.disks, &zone)?;
 
-        // Ensure this zone's IP is within our subnet and that future IP
-        // allocations take it into account. (Unless `zone` is an internal DNS
-        // zone, in which case validation is higher-level planner's job.)
-        self.underlay_ip_allocator
-            .mark_as_allocated(zone.zone_type.kind(), zone.underlay_ip())
-            .map_err(SledEditError::AddZoneBadUnderlayIp)?;
+        // This zone's underlay IP should have come from us (via
+        // `alloc_underlay_ip()`), but in case it wasn't, ensure we don't hand
+        // out this IP again later.
+        self.underlay_ip_allocator.mark_as_allocated(zone.underlay_ip());
 
         // Actually add the zone and its datasets.
         self.zones.add_zone(zone)?;
