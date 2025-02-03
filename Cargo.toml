@@ -2,7 +2,6 @@
 members = [
     "api_identity",
     "bootstore",
-    "brand-metadata",
     "certificates",
     "clickhouse-admin",
     "clickhouse-admin/api",
@@ -136,7 +135,6 @@ members = [
 default-members = [
     "api_identity",
     "bootstore",
-    "brand-metadata",
     "certificates",
     "clickhouse-admin",
     "clickhouse-admin/api",
@@ -360,10 +358,10 @@ crossterm = { version = "0.28.1", features = ["event-stream"] }
 # NOTE: if you change the pinned revision of the `crucible` dependencies, you
 # must also update the references in package-manifest.toml to match the new
 # revision.
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "86a2ce1f9f13912a5fe652472de765ec5fc22e76" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "86a2ce1f9f13912a5fe652472de765ec5fc22e76" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "86a2ce1f9f13912a5fe652472de765ec5fc22e76" }
-crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "86a2ce1f9f13912a5fe652472de765ec5fc22e76" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "ace54d9cb5957fda79422e8237d7c54c33af928e" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "ace54d9cb5957fda79422e8237d7c54c33af928e" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "ace54d9cb5957fda79422e8237d7c54c33af928e" }
+crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "ace54d9cb5957fda79422e8237d7c54c33af928e" }
 # NOTE: See above!
 csv = "1.3.1"
 curve25519-dalek = "4"
@@ -437,7 +435,7 @@ illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.61"
 indent_write = "2.2.0"
 indexmap = "2.7.1"
-indicatif = { version = "0.17.11", features = ["rayon"] }
+indicatif = { version = "0.17.9", features = ["rayon"] }
 indoc = "2.0.5"
 installinator = { path = "installinator" }
 installinator-api = { path = "installinator-api" }
@@ -495,7 +493,6 @@ nexus-types = { path = "nexus/types" }
 nom = "7.1.3"
 num-integer = "0.1.46"
 num = { version = "0.4.3", default-features = false, features = [ "libm" ] }
-omicron-brand-metadata = { path = "brand-metadata" }
 omicron-clickhouse-admin = { path = "clickhouse-admin" }
 omicron-certificates = { path = "certificates" }
 omicron-cockroach-admin = { path = "cockroach-admin" }
@@ -562,10 +559,10 @@ progenitor-client = "0.9.1"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "99251f841debbe9aaceb4a407a984190c63dead5" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "99251f841debbe9aaceb4a407a984190c63dead5" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "99251f841debbe9aaceb4a407a984190c63dead5" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "99251f841debbe9aaceb4a407a984190c63dead5" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "e9db2377f4300a7539ebb3e4237e06d46ec1e6cc" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "e9db2377f4300a7539ebb3e4237e06d46ec1e6cc" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "e9db2377f4300a7539ebb3e4237e06d46ec1e6cc" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "e9db2377f4300a7539ebb3e4237e06d46ec1e6cc" }
 # NOTE: see above!
 proptest = "1.5.0"
 qorb = "0.2.1"
