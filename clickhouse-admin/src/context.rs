@@ -79,7 +79,7 @@ pub struct ServerContext {
     clickhouse_address: SocketAddrV6,
     log: Logger,
     pub generate_config_tx: Sender<GenerateConfigRequest>,
-    pub generation_tx: watch::Sender<Option<Generation>>,
+    pub generation_rx: watch::Receiver<Option<Generation>>,
     pub db_init_tx: Sender<DbInitRequest>,
 }
 
@@ -105,12 +105,15 @@ impl ServerContext {
         // If there is already a configuration file with a generation number we'll
         // use that. Otherwise, we set the generation number to None.
         let gen = read_generation_from_file(config_path)?;
-        let (generation_tx, _rx) = watch::channel(gen);
+        let (generation_tx, generation_rx) = watch::channel(gen);
 
         // We only want to handle one in flight request at a time. Reconfigurator execution will retry
         // again later anyway. We use flume bounded channels with a size of 0 to act as a rendezvous channel.
         let (generate_config_tx, generate_config_rx) = flume::bounded(0);
-        tokio::spawn(long_running_generate_config_task(generate_config_rx));
+        tokio::spawn(long_running_generate_config_task(
+            generate_config_rx,
+            generation_tx,
+        ));
 
         let (db_init_tx, db_init_rx) = flume::bounded(0);
         tokio::spawn(long_running_db_init_task(db_init_rx));
@@ -121,7 +124,7 @@ impl ServerContext {
             clickhouse_address,
             log,
             generate_config_tx,
-            generation_tx,
+            generation_rx,
             db_init_tx,
         })
     }
@@ -132,12 +135,10 @@ impl ServerContext {
     ) -> Result<ReplicaConfig, HttpError> {
         let clickward = self.clickward();
         let log = self.log();
-        let generation_tx = self.generation_tx();
 
         let (response_tx, response_rx) = oneshot::channel();
         self.generate_config_tx
             .try_send(GenerateConfigRequest::GenerateConfig {
-                generation_tx,
                 clickward,
                 log,
                 replica_settings,
@@ -197,10 +198,6 @@ impl ServerContext {
     pub fn log(&self) -> Logger {
         self.log.clone()
     }
-
-    pub fn generation_tx(&self) -> watch::Sender<Option<Generation>> {
-        self.generation_tx.clone()
-    }
 }
 
 pub enum DbInitRequest {
@@ -239,7 +236,6 @@ async fn long_running_db_init_task(incoming: Receiver<DbInitRequest>) {
 pub enum GenerateConfigRequest {
     /// Generates configuration files for a replicated cluster
     GenerateConfig {
-        generation_tx: watch::Sender<Option<Generation>>,
         clickward: Clickward,
         log: Logger,
         replica_settings: ServerConfigurableSettings,
@@ -249,18 +245,18 @@ pub enum GenerateConfigRequest {
 
 async fn long_running_generate_config_task(
     incoming: Receiver<GenerateConfigRequest>,
+    generation_tx: watch::Sender<Option<Generation>>,
 ) {
     while let Ok(request) = incoming.recv_async().await {
         match request {
             GenerateConfigRequest::GenerateConfig {
-                generation_tx,
                 clickward,
                 log,
                 replica_settings,
                 response,
             } => {
                 let result = generate_config_and_enable_svc(
-                    generation_tx,
+                    generation_tx.clone(),
                     clickward,
                     replica_settings,
                 );

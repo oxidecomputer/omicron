@@ -55,8 +55,7 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Generation>, HttpError> {
         let ctx = rqctx.context();
-        let generation_rx = ctx.generation_tx.subscribe();
-        let gen = match *generation_rx.borrow() {
+        let gen = match *ctx.generation_rx.borrow() {
             Some(g) => g,
             None => {
                 return Err(HttpError::for_client_error(
