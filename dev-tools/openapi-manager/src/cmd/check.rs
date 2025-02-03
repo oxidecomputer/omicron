@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    apis::ManagedApis,
+    apis::{ManagedApi, ManagedApis},
     cmd::output::{
         display_api_spec_version, headers::*, plural, OutputOpts, Styles,
     },
@@ -162,7 +162,6 @@ pub fn summarize(
     eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
 
     let total = resolved.nexpected_documents();
-    let count_width = total.to_string().len();
 
     eprintln!(
         "{:>HEADER_WIDTH$} {} OpenAPI {}...",
@@ -174,72 +173,22 @@ pub fn summarize(
     let mut num_fresh = 0;
     let mut num_stale = 0;
     let mut num_failed = 0;
-    let mut which = 0;
-    let continued_indent = continued_indent(count_width).len();
 
     for api in apis.iter_apis() {
         let ident = api.ident();
-        if api.is_lockstep() {
-            which += 1;
-            let version =
-                iter_only(api.iter_versions_semver()).with_context(|| {
-                    format!("list of API versions for lockstep API {:?}", ident)
-                })?;
+
+        for version in api.iter_versions_semver() {
             let resolution = resolved
                 .resolution_for_api_version(ident, version)
                 .expect("resolution for all supported API versions");
-            let problems: Vec<_> = resolution.problems().collect();
-            let nerrors = problems.iter().filter(|p| !p.is_fixable()).count();
-
-            if problems.is_empty() {
-                // Success case: file is up-to-date.
-                // XXX-dap this used to print a summary and "extra"
-                eprintln!(
-                    "{:>HEADER_WIDTH$} [{which:>count_width$}/{total}] {}",
-                    FRESH.style(styles.success_header),
-                    display_api_spec_version(api, version, &styles),
-                );
-                num_fresh += 1;
-                continue;
-            }
-
-            // There were one or more problems, some of which may be unfixable.
-            let header = if nerrors == 0 {
+            if resolution.has_errors() {
                 num_failed += 1;
-                FAILURE.style(styles.failure_header)
-            } else {
+            } else if resolution.has_problems() {
                 num_stale += 1;
-                STALE.style(styles.warning_header)
-            };
-            eprintln!(
-                "{:>HEADER_WIDTH$} [{which:>count_width$}/{total}] {}",
-                header,
-                display_api_spec_version(api, version, &styles),
-            );
-
-            for p in &problems {
-                let first_indent = format!(
-                    "{:>continued_indent$}:",
-                    if p.is_fixable() {
-                        "problem".style(styles.warning_header)
-                    } else {
-                        "error".style(styles.failure_header)
-                    }
-                );
-                let more_indent = "".repeat(first_indent.len());
-                eprintln!(
-                    "{}",
-                    textwrap::fill(
-                        &p.to_string(),
-                        textwrap::Options::with_termwidth()
-                            .initial_indent(&first_indent)
-                            .subsequent_indent(&more_indent)
-                    )
-                );
+            } else {
+                num_fresh += 1;
             }
-        } else {
-            // XXX-dap
-            which += api.iter_versions_semver().count();
+            summarize_one(api, version, resolution, output, styles);
         }
     }
 
@@ -277,7 +226,81 @@ pub fn summarize(
     } else {
         Ok(CheckResult::Success)
     }
-    // XXX-dap todo: fixes
-    // XXX-dap todo: general problems
-    // XXX-dap todo: non-lockstep APIs
+    // XXX-dap todo: general problems and notes
+}
+
+fn summarize_one(
+    api: &ManagedApi,
+    version: &semver::Version,
+    resolution: &Resolution<'_>,
+    output: &OutputOpts,
+    styles: &Styles,
+) {
+    let problems: Vec<_> = resolution.problems().collect();
+    if problems.is_empty() {
+        // Success case: file is up-to-date.
+        // XXX-dap this used to print a summary and "extra"
+        eprintln!(
+            "{:>HEADER_WIDTH$} {}",
+            FRESH.style(styles.success_header),
+            display_api_spec_version(api, version, &styles),
+        );
+        return;
+    }
+
+    // There were one or more problems, some of which may be unfixable.
+    eprintln!(
+        "{:>HEADER_WIDTH$} {}",
+        if resolution.has_errors() {
+            FAILURE.style(styles.failure_header)
+        } else {
+            assert!(resolution.has_problems());
+            STALE.style(styles.warning_header)
+        },
+        display_api_spec_version(api, version, &styles),
+    );
+
+    for p in &problems {
+        let subheader_width = HEADER_WIDTH + 4;
+        let first_indent = format!(
+            "{:>subheader_width$}: ",
+            if p.is_fixable() {
+                "problem".style(styles.warning_header)
+            } else {
+                "error".style(styles.failure_header)
+            }
+        );
+        let more_indent = " ".repeat(subheader_width + 2);
+        eprintln!(
+            "{}",
+            textwrap::fill(
+                &p.to_string(),
+                textwrap::Options::with_termwidth()
+                    .initial_indent(&first_indent)
+                    .subsequent_indent(&more_indent)
+            )
+        );
+
+        let Some(fix) = p.fix() else {
+            continue;
+        };
+
+        let first_indent = format!(
+            "{:>subheader_width$}: ",
+            "fix".style(styles.warning_header)
+        );
+        let fix_str = fix.to_string();
+        let steps = fix_str.trim_right().split("\n");
+        for s in steps {
+            eprintln!(
+                "{}",
+                textwrap::fill(
+                    &format!("will {}", s),
+                    textwrap::Options::with_termwidth()
+                        .initial_indent(&first_indent)
+                        .subsequent_indent(&more_indent)
+                )
+            );
+        }
+    }
 }

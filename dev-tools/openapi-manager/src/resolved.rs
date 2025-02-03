@@ -79,10 +79,7 @@ pub struct Resolution<'a> {
 }
 
 impl<'a> Resolution<'a> {
-    pub fn new_lockstep(
-        generated: &'a GeneratedApiSpecFile,
-        problems: Vec<Problem<'a>>,
-    ) -> Resolution<'a> {
+    pub fn new_lockstep(problems: Vec<Problem<'a>>) -> Resolution<'a> {
         Resolution { kind: ResolutionKind::Lockstep, problems }
     }
 
@@ -90,18 +87,21 @@ impl<'a> Resolution<'a> {
         Resolution { kind: ResolutionKind::Blessed, problems }
     }
 
-    pub fn new_new_locally(
-        generated: &'a GeneratedApiSpecFile,
-        problems: Vec<Problem<'a>>,
-    ) -> Resolution<'a> {
+    pub fn new_new_locally(problems: Vec<Problem<'a>>) -> Resolution<'a> {
         Resolution { kind: ResolutionKind::NewLocally, problems }
+    }
+
+    pub fn has_problems(&self) -> bool {
+        !self.problems.is_empty()
+    }
+
+    pub fn has_errors(&self) -> bool {
+        self.problems().any(|p| !p.is_fixable())
     }
 
     pub fn problems(&self) -> impl Iterator<Item = &'_ Problem<'a>> + '_ {
         self.problems.iter()
     }
-
-    // XXX-dap add "are all problems fixable"
 }
 
 #[derive(Debug)]
@@ -295,23 +295,23 @@ impl<'a> Display for Fix<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         Ok(match self {
             Fix::DeleteFiles { files } => {
-                writeln!(f, "fix: delete files: {files}")?;
+                writeln!(f, "delete files: {files}")?;
             }
             Fix::FixLockstepFile { generated } => {
                 // XXX-dap add diff
                 writeln!(
                     f,
-                    "fix: rewrite lockstep file {} from generated",
+                    "rewrite lockstep file {} from generated",
                     generated.spec_file_name().path()
                 )?;
             }
             Fix::FixVersionedFiles { old, generated } => {
                 if !old.0.is_empty() {
-                    writeln!(f, "fix: remove old files: {old}")?;
+                    writeln!(f, "remove old files: {old}")?;
                 }
                 writeln!(
                     f,
-                    "fix: write new file {} from generated",
+                    "write new file {} from generated",
                     generated.spec_file_name().path()
                 )?;
             }
@@ -321,7 +321,7 @@ impl<'a> Display for Fix<'a> {
                     CheckStale::Modified { .. } => "rewrite",
                     CheckStale::New { .. } => "write new",
                 };
-                writeln!(f, "fix: {label} file {path} from generated")?;
+                writeln!(f, "{label} file {path} from generated")?;
             }
         })
     }
@@ -670,10 +670,7 @@ fn resolve_api_lockstep<'a>(
         None => problems.push(Problem::LockstepMissingLocal { generated }),
     };
 
-    BTreeMap::from([((
-        version.clone(),
-        Resolution::new_lockstep(generated, problems),
-    ))])
+    BTreeMap::from([((version.clone(), Resolution::new_lockstep(problems)))])
 }
 
 fn resolve_api_version<'a>(
@@ -786,7 +783,7 @@ fn resolve_api_version_local<'a>(
         problems.push(Problem::LocalVersionExtra { spec_file_names });
     }
 
-    Resolution::new_new_locally(generated, problems)
+    Resolution::new_new_locally(problems)
 }
 
 fn validate_generated(
