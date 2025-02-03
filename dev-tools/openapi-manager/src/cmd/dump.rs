@@ -67,13 +67,8 @@ pub(crate) fn dump_impl(
                 println!("ERROR");
                 for p in problems {
                     println!("    PROBLEM: {}\n", p);
-                    if let Some(fixes) = p.fix(resolution)? {
-                        assert!(p.is_fixable());
-                        for f in fixes {
-                            println!("        {}", f);
-                        }
-                    } else {
-                        assert!(!p.is_fixable());
+                    if let Some(fix) = p.fix() {
+                        println!("        {}", fix);
                     }
                 }
             }

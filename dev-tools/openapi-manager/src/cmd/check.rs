@@ -6,7 +6,7 @@ use crate::{
     apis::ManagedApis,
     cmd::output::{OutputOpts, Styles},
     environment::{BlessedSource, GeneratedSource},
-    resolved::{Resolution, Resolved},
+    resolved::Resolved,
     spec::Environment,
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
 };
@@ -62,12 +62,8 @@ pub(crate) fn check_impl(
         if !p.is_fixable() {
             found_unfixable = true;
         }
-        // XXX-dap this is temporary -- see the comment on enum Problem
-        let fake_resolution = Resolution::new_blessed(Vec::new());
-        if let Some(fixes) = p.fix(&fake_resolution)? {
-            for f in fixes {
-                println!("{}", f);
-            }
+        if let Some(fix) = p.fix() {
+            println!("{}", fix);
         }
     }
 
@@ -103,10 +99,8 @@ pub(crate) fn check_impl(
 
             for p in problems {
                 println!("problem: {}", p);
-                if let Some(fixes) = p.fix(&resolution)? {
-                    for f in fixes {
-                        println!("{}", f);
-                    }
+                if let Some(fix) = p.fix() {
+                    println!("{}", fix);
                 }
             }
         }

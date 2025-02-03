@@ -18,7 +18,6 @@ use crate::spec_files_generic::ApiSpecFileName;
 use crate::spec_files_local::LocalApiSpecFile;
 use crate::spec_files_local::LocalFiles;
 use crate::validation::validate_generated_openapi_document;
-use anyhow::bail;
 use anyhow::Context;
 use atomicwrites::AtomicFile;
 use camino::Utf8Path;
@@ -76,29 +75,29 @@ pub enum Note {
 /// and local spec files for a particular API
 pub struct Resolution<'a> {
     kind: ResolutionKind<'a>,
-    problems: Vec<Problem>,
+    problems: Vec<Problem<'a>>,
 }
 
 impl<'a> Resolution<'a> {
     pub fn new_lockstep(
         generated: &'a GeneratedApiSpecFile,
-        problems: Vec<Problem>,
+        problems: Vec<Problem<'a>>,
     ) -> Resolution<'a> {
         Resolution { kind: ResolutionKind::Lockstep(generated), problems }
     }
 
-    pub fn new_blessed(problems: Vec<Problem>) -> Resolution<'a> {
+    pub fn new_blessed(problems: Vec<Problem<'a>>) -> Resolution<'a> {
         Resolution { kind: ResolutionKind::Blessed, problems }
     }
 
     pub fn new_new_locally(
         generated: &'a GeneratedApiSpecFile,
-        problems: Vec<Problem>,
+        problems: Vec<Problem<'a>>,
     ) -> Resolution<'a> {
         Resolution { kind: ResolutionKind::NewLocally(generated), problems }
     }
 
-    pub fn problems(&self) -> impl Iterator<Item = &'_ Problem> + '_ {
+    pub fn problems(&self) -> impl Iterator<Item = &'_ Problem<'a>> + '_ {
         self.problems.iter()
     }
 
@@ -118,10 +117,8 @@ pub enum ResolutionKind<'a> {
 
 /// Describes a problem resolving the blessed spec(s), generated spec(s), and
 /// local spec files for a particular API
-// XXX-dap this should be a struct with ProblemKind and resolution so that fix()
-// and fixable() don't require an argument (and can't be mismatched)
 #[derive(Debug, Error)]
-pub enum Problem {
+pub enum Problem<'a> {
     // This kind of problem is not associated with any *supported* version of an
     // API.  (All the others are.)
     #[error(
@@ -169,12 +166,25 @@ pub enum Problem {
     },
 
     #[error(
-        "No local spec file was found for lockstep or non-blessed version.  \
-         This is normal if you have just changed a lockstep API or added \
-         this version to a versioned API.  This tool can generate the file \
-         for you."
+        "No local spec file was found for lockstep API.  This is only \
+         expected if you're adding a new lockstep API.  This tool can \
+         generate the file for you."
     )]
-    LocalVersionMissingLocal,
+    LockstepMissingLocal { generated: &'a GeneratedApiSpecFile },
+
+    #[error(
+        "Spec generated from the current code does not match this lockstep \
+         spec: {:?}.  This tool can update the local file for \
+         you.", generated.spec_file_name().path()
+    )]
+    LockstepStale { generated: &'a GeneratedApiSpecFile },
+
+    #[error(
+        "No local spec file was found for locally-added API version.  \
+         This is normal if you have added or changed this API version.  \
+         This tool can generate the file for you."
+    )]
+    LocalVersionMissingLocal { generated: &'a GeneratedApiSpecFile },
 
     #[error(
         "Extra (incorrect) spec files were found for non-blessed version: \
@@ -183,8 +193,8 @@ pub enum Problem {
     LocalVersionExtra { spec_file_names: DisplayableVec<ApiSpecFileName> },
 
     #[error(
-        "Spec generated from the current code does not match this lockstep \
-         or locally-added spec: {spec_file_names}.  This tool can update the \
+        "Spec generated from the current code does not match spec file(s) for \
+         locally-new API: {spec_file_names}.  This tool can update the \
          local file(s) for you."
     )]
     // For versioned APIs, since the filename has its own hash in it, when the
@@ -199,7 +209,10 @@ pub enum Problem {
     // bumped your local version.  Really, it'd be nice if the client filename
     // was somehow checked by this tool.  Maybe this library should define
     // constants like API_NAME_LATEST that are used in the client specs?
-    LocalVersionStale { spec_file_names: DisplayableVec<ApiSpecFileName> },
+    LocalVersionStale {
+        spec_file_names: DisplayableVec<ApiSpecFileName>,
+        generated: &'a GeneratedApiSpecFile,
+    },
 
     #[error(
         "Generated spec for API {api_ident:?} version {version} is not valid"
@@ -219,76 +232,45 @@ pub enum Problem {
     },
 }
 
-impl Problem {
+impl<'a> Problem<'a> {
     pub fn is_fixable(&self) -> bool {
-        match self {
-            Problem::LocalSpecFilesOrphaned { .. } => true,
-            Problem::BlessedVersionMissingLocal { .. } => false,
-            Problem::BlessedVersionExtraLocalSpec { .. } => true,
-            Problem::BlessedVersionBroken { .. } => false,
-            Problem::LocalVersionMissingLocal => true,
-            Problem::LocalVersionExtra { .. } => true,
-            Problem::LocalVersionStale { .. } => true,
-            Problem::GeneratedValidationError { .. } => false,
-            Problem::ExtraFileStale { .. } => true,
-        }
+        self.fix().is_some()
     }
 
-    pub fn fix<'a>(
-        &'a self,
-        resolution: &Resolution<'a>,
-        // XXX-dap can this return value not be a vec?
-    ) -> Result<Option<Vec<Fix<'a>>>, anyhow::Error> {
-        let kind = &resolution.kind;
-        Ok(match self {
+    pub fn fix(&'a self) -> Option<Fix<'a>> {
+        match self {
             Problem::LocalSpecFilesOrphaned { spec_file_names } => {
-                Some(vec![Fix::DeleteFiles { files: spec_file_names }])
+                Some(Fix::DeleteFiles { files: spec_file_names })
             }
             Problem::BlessedVersionMissingLocal { .. } => None,
             Problem::BlessedVersionExtraLocalSpec { spec_file_names } => {
-                Some(vec![Fix::DeleteFiles { files: spec_file_names }])
+                Some(Fix::DeleteFiles { files: spec_file_names })
             }
             Problem::BlessedVersionBroken { .. } => None,
-            Problem::LocalVersionMissingLocal => {
-                if let ResolutionKind::Lockstep(generated) = kind {
-                    Some(vec![Fix::FixLockstepFile { generated }])
-                } else if let ResolutionKind::NewLocally(generated) = kind {
-                    Some(vec![Fix::FixVersionedFiles {
-                        old: DisplayableVec(Vec::new()),
-                        generated,
-                    }])
-                } else {
-                    bail!(
-                        "unexpected problem / resolution kind: {:?} / {:?}",
-                        self,
-                        kind
-                    )
-                }
+            Problem::LockstepMissingLocal { generated }
+            | Problem::LockstepStale { generated } => {
+                Some(Fix::FixLockstepFile { generated })
+            }
+            Problem::LocalVersionMissingLocal { generated } => {
+                Some(Fix::FixVersionedFiles {
+                    old: DisplayableVec(Vec::new()),
+                    generated,
+                })
             }
             Problem::LocalVersionExtra { spec_file_names } => {
-                Some(vec![Fix::DeleteFiles { files: spec_file_names }])
+                Some(Fix::DeleteFiles { files: spec_file_names })
             }
-            Problem::LocalVersionStale { spec_file_names } => {
-                if let ResolutionKind::Lockstep(generated) = kind {
-                    Some(vec![Fix::FixLockstepFile { generated }])
-                } else if let ResolutionKind::NewLocally(generated) = kind {
-                    Some(vec![Fix::FixVersionedFiles {
-                        old: spec_file_names.clone(),
-                        generated,
-                    }])
-                } else {
-                    bail!(
-                        "unexpected problem / resolution kind: {:?} / {:?}",
-                        self,
-                        kind
-                    );
-                }
+            Problem::LocalVersionStale { spec_file_names, generated } => {
+                Some(Fix::FixVersionedFiles {
+                    old: spec_file_names.clone(),
+                    generated,
+                })
             }
             Problem::GeneratedValidationError { .. } => None,
             Problem::ExtraFileStale { path, check_stale, .. } => {
-                Some(vec![Fix::FixExtraFile { path, check_stale }])
+                Some(Fix::FixExtraFile { path, check_stale })
             }
-        })
+        }
     }
 }
 
@@ -408,7 +390,7 @@ impl<'a> Fix<'a> {
 /// local spec files for a given API
 pub struct Resolved<'a> {
     notes: Vec<Note>,
-    non_version_problems: Vec<Problem>,
+    non_version_problems: Vec<Problem<'a>>,
     api_results: BTreeMap<ApiIdent, BTreeMap<semver::Version, Resolution<'a>>>,
 }
 
@@ -490,7 +472,7 @@ impl<'a> Resolved<'a> {
         self.notes.iter()
     }
 
-    pub fn general_problems(&self) -> impl Iterator<Item = &Problem> + '_ {
+    pub fn general_problems(&self) -> impl Iterator<Item = &Problem<'a>> + '_ {
         self.non_version_problems.iter()
     }
 
@@ -668,12 +650,8 @@ fn resolve_api_lockstep<'a>(
 
     match local {
         Some(local_file) if local_file.contents() == generated.contents() => (),
-        Some(stale) => problems.push(Problem::LocalVersionStale {
-            spec_file_names: DisplayableVec(vec![stale
-                .spec_file_name()
-                .clone()]),
-        }),
-        None => problems.push(Problem::LocalVersionMissingLocal),
+        Some(_) => problems.push(Problem::LockstepStale { generated }),
+        None => problems.push(Problem::LockstepMissingLocal { generated }),
     };
 
     BTreeMap::from([((
@@ -778,10 +756,13 @@ fn resolve_api_version_local<'a>(
         // There was no matching spec.
         if non_matching.is_empty() {
             // There were no non-matching specs, either.
-            problems.push(Problem::LocalVersionMissingLocal);
+            problems.push(Problem::LocalVersionMissingLocal { generated });
         } else {
             // There were non-matching specs.  This is your basic "stale" case.
-            problems.push(Problem::LocalVersionStale { spec_file_names });
+            problems.push(Problem::LocalVersionStale {
+                spec_file_names,
+                generated,
+            });
         }
     } else if !non_matching.is_empty() {
         // There was a matching spec, but also some non-matching ones.
@@ -797,7 +778,7 @@ fn validate_generated(
     api: &ManagedApi,
     version: &semver::Version,
     generated: &GeneratedApiSpecFile,
-    problems: &mut Vec<Problem>,
+    problems: &mut Vec<Problem<'_>>,
 ) {
     match validate(env, api, generated) {
         Err(source) => {

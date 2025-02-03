@@ -9,7 +9,7 @@ use crate::{
         output::{OutputOpts, Styles},
     },
     environment::{BlessedSource, GeneratedSource},
-    resolved::{Resolution, Resolved},
+    resolved::Resolved,
     spec::Environment,
     FAILURE_EXIT_CODE,
 };
@@ -62,12 +62,8 @@ pub(crate) fn generate_impl(
         if !p.is_fixable() {
             found_unfixable = true;
         }
-        // XXX-dap this is temporary -- see the comment on enum Problem
-        let fake_resolution = Resolution::new_blessed(Vec::new());
-        if let Some(fixes) = p.fix(&fake_resolution)? {
-            for f in fixes {
-                println!("{}", f);
-            }
+        if let Some(fix) = p.fix() {
+            println!("{}", fix);
         }
     }
 
@@ -102,10 +98,8 @@ pub(crate) fn generate_impl(
 
             for p in problems {
                 println!("problem: {}", p);
-                if let Some(fixes) = p.fix(&resolution)? {
-                    for f in fixes {
-                        println!("{}", f);
-                    }
+                if let Some(fix) = p.fix() {
+                    println!("{}", fix);
                 }
             }
         }
@@ -127,17 +121,13 @@ pub(crate) fn generate_impl(
     let mut nfixed = 0;
     for p in resolved.general_problems() {
         nproblems += 1;
-        // XXX-dap this is temporary -- see the comment on enum Problem
-        let fake_resolution = Resolution::new_blessed(Vec::new());
-        if let Some(fixes) = p.fix(&fake_resolution)? {
-            for f in fixes {
-                eprint!("{f}");
-                if let Err(error) = f.execute(env) {
-                    eprintln!("fix failed: {error:#}");
-                    nerrors += 1;
-                } else {
-                    nfixed += 1;
-                }
+        if let Some(fix) = p.fix() {
+            eprint!("{fix}");
+            if let Err(error) = fix.execute(env) {
+                eprintln!("fix failed: {error:#}");
+                nerrors += 1;
+            } else {
+                nfixed += 1;
             }
         }
     }
@@ -152,15 +142,13 @@ pub(crate) fn generate_impl(
             for p in resolution.problems() {
                 nproblems += 1;
 
-                if let Some(fixes) = p.fix(&resolution)? {
-                    for f in fixes {
-                        eprint!("{f}");
-                        if let Err(error) = f.execute(env) {
-                            eprintln!("fix failed: {error:#}");
-                            nerrors += 1;
-                        } else {
-                            nfixed += 1;
-                        }
+                if let Some(fix) = p.fix() {
+                    eprint!("{fix}");
+                    if let Err(error) = fix.execute(env) {
+                        eprintln!("fix failed: {error:#}");
+                        nerrors += 1;
+                    } else {
+                        nfixed += 1;
                     }
                 }
             }
