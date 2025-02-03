@@ -649,7 +649,16 @@ impl BundleCollection<'_> {
                 .buffer_unordered(10);
 
                 while let Some(result) = diag_cmds.next().await {
-                    result?;
+                    // Log that we failed to write the diag command output to a
+                    // file but don't return early as we wish to get as much
+                    // information as we can.
+                    if let Err(e) = result {
+                        error!(
+                            &self.log,
+                            "failed to write diagnostic command output to \
+                            file: {e}"
+                        );
+                    }
                 }
             }
         }
@@ -762,7 +771,7 @@ async fn sha2_hash(file: &mut tokio::fs::File) -> anyhow::Result<ArtifactHash> {
     Ok(ArtifactHash(digest.as_slice().try_into()?))
 }
 
-/// Run a `sled-dianostics` future and save it's output to a corresponding file.
+/// Run a `sled-dianostics` future and save its output to a corresponding file.
 async fn save_diag_cmd_output_or_error<F, D: std::fmt::Debug>(
     path: &Utf8Path,
     command: &str,

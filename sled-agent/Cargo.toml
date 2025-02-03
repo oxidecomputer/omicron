@@ -108,6 +108,7 @@ omicron-workspace-hack.workspace = true
 slog-error-chain.workspace = true
 walkdir.workspace = true
 zip.workspace = true
+omicron-brand-metadata.workspace = true
 
 [target.'cfg(target_os = "illumos")'.dependencies]
 opte-ioctl.workspace = true
