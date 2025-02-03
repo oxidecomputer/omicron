@@ -653,7 +653,7 @@ tempfile = "3.10"
 term = "0.7"
 termios = "0.3"
 termtree = "0.5.1"
-textwrap = "0.16.1"
+textwrap = { version = "0.16.1", features = [ "terminal_size" ] }
 test-strategy = "0.3.1"
 thiserror = "1.0"
 tofino = { git = "https://github.com/oxidecomputer/tofino", branch = "main" }

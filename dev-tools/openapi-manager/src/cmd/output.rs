@@ -137,6 +137,28 @@ pub(crate) fn display_api_spec_new(
     }
 }
 
+pub(crate) fn display_api_spec_version(
+    api: &ManagedApi,
+    version: &semver::Version,
+    styles: &Styles,
+) -> String {
+    if api.is_lockstep() {
+        format!(
+            "{} (lockstep v{}): {}",
+            api.ident().style(styles.filename),
+            version,
+            api.title(),
+        )
+    } else {
+        format!(
+            "{} (versioned v{}): {}",
+            api.ident().style(styles.filename),
+            version,
+            api.title(),
+        )
+    }
+}
+
 pub(crate) fn display_error(
     error: &anyhow::Error,
     failure_style: Style,

@@ -39,6 +39,8 @@ semver.workspace = true
 serde_json.workspace = true
 similar.workspace = true
 sled-agent-api.workspace = true
+textwrap.workspace = true
 thiserror.workspace = true
 supports-color.workspace = true
 wicketd-api.workspace = true
+# XXX-dap check all of these

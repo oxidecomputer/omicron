@@ -74,7 +74,7 @@ pub enum Note {
 /// Describes the result of resolving the blessed spec(s), generated spec(s),
 /// and local spec files for a particular API
 pub struct Resolution<'a> {
-    kind: ResolutionKind<'a>,
+    kind: ResolutionKind,
     problems: Vec<Problem<'a>>,
 }
 
@@ -83,7 +83,7 @@ impl<'a> Resolution<'a> {
         generated: &'a GeneratedApiSpecFile,
         problems: Vec<Problem<'a>>,
     ) -> Resolution<'a> {
-        Resolution { kind: ResolutionKind::Lockstep(generated), problems }
+        Resolution { kind: ResolutionKind::Lockstep, problems }
     }
 
     pub fn new_blessed(problems: Vec<Problem<'a>>) -> Resolution<'a> {
@@ -94,7 +94,7 @@ impl<'a> Resolution<'a> {
         generated: &'a GeneratedApiSpecFile,
         problems: Vec<Problem<'a>>,
     ) -> Resolution<'a> {
-        Resolution { kind: ResolutionKind::NewLocally(generated), problems }
+        Resolution { kind: ResolutionKind::NewLocally, problems }
     }
 
     pub fn problems(&self) -> impl Iterator<Item = &'_ Problem<'a>> + '_ {
@@ -105,14 +105,14 @@ impl<'a> Resolution<'a> {
 }
 
 #[derive(Debug)]
-pub enum ResolutionKind<'a> {
+pub enum ResolutionKind {
     /// This is a lockstep API
-    Lockstep(&'a GeneratedApiSpecFile),
+    Lockstep,
     /// This is a versioned API and this version is blessed
     Blessed,
     /// This version is new to the current workspace (i.e., not present
     /// upstream)
-    NewLocally(&'a GeneratedApiSpecFile),
+    NewLocally,
 }
 
 /// Describes a problem resolving the blessed spec(s), generated spec(s), and
@@ -392,6 +392,7 @@ pub struct Resolved<'a> {
     notes: Vec<Note>,
     non_version_problems: Vec<Problem<'a>>,
     api_results: BTreeMap<ApiIdent, BTreeMap<semver::Version, Resolution<'a>>>,
+    nexpected_documents: usize,
 }
 
 impl<'a> Resolved<'a> {
@@ -417,6 +418,11 @@ impl<'a> Resolved<'a> {
                 )
             })
             .collect();
+
+        let nexpected_documents = supported_versions_by_api
+            .values()
+            .map(|v| v.len())
+            .fold(0, |sum_so_far, count| sum_so_far + count);
 
         // Get one easy case out of the way: if there are any blessed API
         // versions that aren't supported any more, note that.
@@ -465,7 +471,16 @@ impl<'a> Resolved<'a> {
             })
             .collect();
 
-        Resolved { notes, non_version_problems, api_results }
+        Resolved {
+            notes,
+            non_version_problems,
+            api_results,
+            nexpected_documents,
+        }
+    }
+
+    pub fn nexpected_documents(&self) -> usize {
+        self.nexpected_documents
     }
 
     pub fn notes(&self) -> impl Iterator<Item = &Note> + '_ {
@@ -565,7 +580,7 @@ fn resolve_api<'a>(
 }
 
 #[derive(Debug, Error)]
-enum OnlyError {
+pub enum OnlyError {
     #[error("list was unexpectedly empty")]
     Empty,
 
@@ -579,7 +594,8 @@ enum OnlyError {
     Extra(String, String),
 }
 
-fn iter_only<T: Debug>(
+// XXX-dap move somewhere common
+pub fn iter_only<T: Debug>(
     mut iter: impl Iterator<Item = T>,
 ) -> Result<T, OnlyError> {
     let first = iter.next().ok_or(OnlyError::Empty)?;

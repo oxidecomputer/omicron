@@ -4,13 +4,16 @@
 
 use crate::{
     apis::ManagedApis,
-    cmd::output::{OutputOpts, Styles},
+    cmd::output::{
+        display_api_spec_version, headers::*, plural, OutputOpts, Styles,
+    },
     environment::{BlessedSource, GeneratedSource},
-    resolved::Resolved,
+    resolved::{iter_only, Resolution, Resolved},
     spec::Environment,
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
 };
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
+use owo_colors::OwoColorize;
 use std::process::ExitCode;
 
 #[derive(Clone, Copy, Debug)]
@@ -108,19 +111,22 @@ pub(crate) fn check_impl(
 
     println!("Checked {} total versions across {} APIs", nversions, napis);
 
-    if found_unfixable {
-        // XXX-dap wording
-        println!(
-            "Error: please fix one or more problems above and re-run the tool"
-        );
-        Ok(CheckResult::Failures)
-    } else if found_problems {
-        println!("Stale: one or more versions needs an update");
-        Ok(CheckResult::NeedsUpdate)
-    } else {
-        println!("Success");
-        Ok(CheckResult::Success)
-    }
+    // XXX-dap
+    summarize(&apis, &resolved, output, &styles)
+
+    // if found_unfixable {
+    //     // XXX-dap wording
+    //     println!(
+    //         "Error: please fix one or more problems above and re-run the tool"
+    //     );
+    //     Ok(CheckResult::Failures)
+    // } else if found_problems {
+    //     println!("Stale: one or more versions needs an update");
+    //     Ok(CheckResult::NeedsUpdate)
+    // } else {
+    //     println!("Success");
+    //     Ok(CheckResult::Success)
+    // }
 }
 
 // XXX-dap put somewhere where it can be re-used
@@ -144,4 +150,134 @@ pub fn print_warnings(
     }
 
     Ok(())
+}
+
+// XXX-dap put somewhere where it can be re-used
+pub fn summarize(
+    apis: &ManagedApis,
+    resolved: &Resolved,
+    output: &OutputOpts,
+    styles: &Styles,
+) -> anyhow::Result<CheckResult> {
+    eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
+
+    let total = resolved.nexpected_documents();
+    let count_width = total.to_string().len();
+
+    eprintln!(
+        "{:>HEADER_WIDTH$} {} OpenAPI {}...",
+        CHECKING.style(styles.success_header),
+        total.style(styles.bold),
+        plural::documents(total),
+    );
+
+    let mut num_fresh = 0;
+    let mut num_stale = 0;
+    let mut num_failed = 0;
+    let mut which = 0;
+    let continued_indent = continued_indent(count_width).len();
+
+    for api in apis.iter_apis() {
+        let ident = api.ident();
+        if api.is_lockstep() {
+            which += 1;
+            let version =
+                iter_only(api.iter_versions_semver()).with_context(|| {
+                    format!("list of API versions for lockstep API {:?}", ident)
+                })?;
+            let resolution = resolved
+                .resolution_for_api_version(ident, version)
+                .expect("resolution for all supported API versions");
+            let problems: Vec<_> = resolution.problems().collect();
+            let nerrors = problems.iter().filter(|p| !p.is_fixable()).count();
+
+            if problems.is_empty() {
+                // Success case: file is up-to-date.
+                // XXX-dap this used to print a summary and "extra"
+                eprintln!(
+                    "{:>HEADER_WIDTH$} [{which:>count_width$}/{total}] {}",
+                    FRESH.style(styles.success_header),
+                    display_api_spec_version(api, version, &styles),
+                );
+                num_fresh += 1;
+                continue;
+            }
+
+            // There were one or more problems, some of which may be unfixable.
+            let header = if nerrors == 0 {
+                num_failed += 1;
+                FAILURE.style(styles.failure_header)
+            } else {
+                num_stale += 1;
+                STALE.style(styles.warning_header)
+            };
+            eprintln!(
+                "{:>HEADER_WIDTH$} [{which:>count_width$}/{total}] {}",
+                header,
+                display_api_spec_version(api, version, &styles),
+            );
+
+            for p in &problems {
+                let first_indent = format!(
+                    "{:>continued_indent$}:",
+                    if p.is_fixable() {
+                        "problem".style(styles.warning_header)
+                    } else {
+                        "error".style(styles.failure_header)
+                    }
+                );
+                let more_indent = "".repeat(first_indent.len());
+                eprintln!(
+                    "{}",
+                    textwrap::fill(
+                        &p.to_string(),
+                        textwrap::Options::with_termwidth()
+                            .initial_indent(&first_indent)
+                            .subsequent_indent(&more_indent)
+                    )
+                );
+            }
+        } else {
+            // XXX-dap
+            which += api.iter_versions_semver().count();
+        }
+    }
+
+    let status_header = if num_failed > 0 {
+        FAILURE.style(styles.failure_header)
+    } else if num_stale > 0 {
+        STALE.style(styles.warning_header)
+    } else {
+        SUCCESS.style(styles.success_header)
+    };
+
+    eprintln!(
+        "{:>HEADER_WIDTH$} {} {} checked: {} fresh, {} stale, {} failed",
+        status_header,
+        total.style(styles.bold),
+        plural::documents(total),
+        num_fresh.style(styles.bold),
+        num_stale.style(styles.bold),
+        num_failed.style(styles.bold),
+    );
+    if num_failed > 0 {
+        eprintln!(
+            "{:>HEADER_WIDTH$} (fix failures, then run {} to update)",
+            "",
+            "cargo xtask openapi generate".style(styles.bold)
+        );
+        Ok(CheckResult::Failures)
+    } else if num_stale > 0 {
+        eprintln!(
+            "{:>HEADER_WIDTH$} (run {} to update)",
+            "",
+            "cargo xtask openapi generate".style(styles.bold)
+        );
+        Ok(CheckResult::NeedsUpdate)
+    } else {
+        Ok(CheckResult::Success)
+    }
+    // XXX-dap todo: fixes
+    // XXX-dap todo: general problems
+    // XXX-dap todo: non-lockstep APIs
 }
