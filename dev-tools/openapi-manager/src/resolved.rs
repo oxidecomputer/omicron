@@ -510,19 +510,13 @@ fn resolve_removed_blessed_versions<'a>(
     >,
     blessed: &'a BlessedFiles,
 ) -> impl Iterator<Item = (&'a ApiIdent, &'a semver::Version)> + 'a {
-    let mut notes = Vec::new();
-    for (ident, version_map) in &blessed.spec_files {
-        let supported = supported_versions_by_api.get(ident);
-        for version in version_map.keys() {
-            match supported {
-                Some(set) if set.contains(version) => (),
-                _ => notes.push((ident, version)),
-            };
-        }
-    }
-
-    // XXX-dap TODO-cleanup rewrite like orphaned_local_specs()
-    notes.into_iter()
+    blessed.spec_files.iter().flat_map(|(ident, version_map)| {
+        let set = supported_versions_by_api.get(ident);
+        version_map.keys().filter_map(move |version| match set {
+            Some(set) if set.contains(version) => None,
+            _ => Some((ident, version)),
+        })
+    })
 }
 
 fn resolve_orphaned_local_specs<'a>(
