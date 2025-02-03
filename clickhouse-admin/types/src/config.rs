@@ -16,6 +16,14 @@ use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::{fmt::Display, str::FromStr};
 
+/// Result after generating a configuration file
+#[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GenerateConfigResult {
+    Replica(ReplicaConfig),
+    Keeper(KeeperConfig),
+}
+
 /// Configuration for a ClickHouse replica server
 #[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
 pub struct ReplicaConfig {

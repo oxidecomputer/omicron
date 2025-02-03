@@ -3,10 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use clickhouse_admin_types::{
-    ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
-    KeeperConfig, KeeperConfigurableSettings, Lgif, MetricInfoPath, RaftConfig,
-    ReplicaConfig, ServerConfigurableSettings, SystemTimeSeries,
-    TimeSeriesSettingsQuery,
+    ClickhouseKeeperClusterMembership, DistributedDdlQueue,
+    GenerateConfigResult, KeeperConf, KeeperConfig, KeeperConfigurableSettings,
+    Lgif, MetricInfoPath, RaftConfig, ServerConfigurableSettings,
+    SystemTimeSeries, TimeSeriesSettingsQuery,
 };
 use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk,
@@ -116,7 +116,7 @@ pub trait ClickhouseAdminServerApi {
     async fn generate_config_and_enable_svc(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<ServerConfigurableSettings>,
-    ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError>;
+    ) -> Result<HttpResponseCreated<GenerateConfigResult>, HttpError>;
 
     /// Retrieve the generation number of a configuration
     #[endpoint {

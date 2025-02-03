@@ -26,9 +26,10 @@ use std::str::FromStr;
 
 mod config;
 pub use config::{
-    ClickhouseHost, KeeperConfig, KeeperConfigsForReplica, KeeperNodeConfig,
-    LogConfig, LogLevel, Macros, NodeType, RaftServerConfig,
-    RaftServerSettings, RaftServers, ReplicaConfig, ServerNodeConfig,
+    ClickhouseHost, GenerateConfigResult, KeeperConfig,
+    KeeperConfigsForReplica, KeeperNodeConfig, LogConfig, LogLevel, Macros,
+    NodeType, RaftServerConfig, RaftServerSettings, RaftServers, ReplicaConfig,
+    ServerNodeConfig,
 };
 
 pub const CLICKHOUSE_SERVER_CONFIG_DIR: &str =
@@ -85,6 +86,10 @@ pub struct KeeperId(pub u64);
     Diffus,
 )]
 pub struct ServerId(pub u64);
+
+pub trait NodeGeneration {
+    fn generation(&self) -> Generation;
+}
 
 /// The top most type for configuring clickhouse-servers via
 /// clickhouse-admin-server-api
@@ -146,9 +151,9 @@ impl ServerConfigurableSettings {
         Ok(config)
     }
 
-    pub fn generation(&self) -> Generation {
-        self.generation
-    }
+    //  pub fn generation(&self) -> Generation {
+    //      self.generation
+    //  }
 
     fn listen_addr(&self) -> Ipv6Addr {
         self.settings.listen_addr
@@ -156,6 +161,12 @@ impl ServerConfigurableSettings {
 
     fn datastore_path(&self) -> Utf8PathBuf {
         self.settings.datastore_path.clone()
+    }
+}
+
+impl NodeGeneration for ServerConfigurableSettings {
+    fn generation(&self) -> Generation {
+        self.generation
     }
 }
 
@@ -211,9 +222,9 @@ impl KeeperConfigurableSettings {
         Ok(config)
     }
 
-    pub fn generation(&self) -> Generation {
-        self.generation
-    }
+    //    pub fn generation(&self) -> Generation {
+    //        self.generation
+    //    }
 
     fn listen_addr(&self) -> Ipv6Addr {
         self.settings.listen_addr
@@ -225,6 +236,12 @@ impl KeeperConfigurableSettings {
 
     fn datastore_path(&self) -> Utf8PathBuf {
         self.settings.datastore_path.clone()
+    }
+}
+
+impl NodeGeneration for KeeperConfigurableSettings {
+    fn generation(&self) -> Generation {
+        self.generation
     }
 }
 

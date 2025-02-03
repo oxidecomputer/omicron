@@ -44,7 +44,7 @@ impl Clickward {
 
     pub fn generate_server_config(
         &self,
-        settings: ServerConfigurableSettings,
+        settings: &ServerConfigurableSettings,
     ) -> Result<ReplicaConfig, ClickwardError> {
         let replica_config = settings
             .generate_xml_file()
@@ -55,7 +55,7 @@ impl Clickward {
 
     pub fn generate_keeper_config(
         &self,
-        settings: KeeperConfigurableSettings,
+        settings: &KeeperConfigurableSettings,
     ) -> Result<KeeperConfig, ClickwardError> {
         let keeper_config = settings
             .generate_xml_file()

@@ -7,7 +7,8 @@ use crate::{ClickhouseCli, Clickward};
 use anyhow::{anyhow, bail, Result};
 use camino::Utf8PathBuf;
 use clickhouse_admin_types::{
-    ReplicaConfig, ServerConfigurableSettings, CLICKHOUSE_KEEPER_CONFIG_DIR,
+    GenerateConfigResult, KeeperConfigurableSettings, NodeGeneration,
+    ServerConfigurableSettings, CLICKHOUSE_KEEPER_CONFIG_DIR,
     CLICKHOUSE_KEEPER_CONFIG_FILE, CLICKHOUSE_SERVER_CONFIG_DIR,
     CLICKHOUSE_SERVER_CONFIG_FILE,
 };
@@ -132,16 +133,20 @@ impl ServerContext {
     pub async fn send_generate_config_and_enable_svc(
         &self,
         replica_settings: ServerConfigurableSettings,
-    ) -> Result<ReplicaConfig, HttpError> {
+    ) -> Result<GenerateConfigResult, HttpError> {
         let clickward = self.clickward();
         let log = self.log();
+        let node_settings = NodeSettings::Replica {
+            settings: replica_settings,
+            fmri: "svc:/oxide/clickhouse_server:default".to_string(),
+        };
 
         let (response_tx, response_rx) = oneshot::channel();
         self.generate_config_tx
             .try_send(GenerateConfigRequest::GenerateConfig {
                 clickward,
                 log,
-                replica_settings,
+                replica_settings: node_settings,
                 response: response_tx,
             })
             .map_err(|e| {
@@ -234,13 +239,20 @@ async fn long_running_db_init_task(incoming: Receiver<DbInitRequest>) {
 }
 
 pub enum GenerateConfigRequest {
-    /// Generates configuration files for a replicated cluster
+    /// Generates a configuration file for a replicated cluster server
     GenerateConfig {
         clickward: Clickward,
         log: Logger,
-        replica_settings: ServerConfigurableSettings,
-        response: oneshot::Sender<Result<ReplicaConfig, HttpError>>,
+        //replica_settings: ServerConfigurableSettings,
+        replica_settings: NodeSettings,
+        response: oneshot::Sender<Result<GenerateConfigResult, HttpError>>,
     },
+    //    GenerateKeeperConfig {
+    //        clickward: Clickward,
+    //        log: Logger,
+    //        keeper_settings: KeeperConfigurableSettings,
+    //        response: oneshot::Sender<Result<KeeperConfig, HttpError>>,
+    //    },
 }
 
 async fn long_running_generate_config_task(
@@ -266,7 +278,38 @@ async fn long_running_generate_config_task(
                         "failed to send value from configuration generation to channel: {e:?}"
                     );
                 };
-            }
+            } //    GenerateConfigRequest::GenerateKeeperConfig {
+              //        clickward,
+              //        log,
+              //        keeper_settings,
+              //        response,
+              //    } => {
+              //        todo!()
+              //    }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum NodeSettings {
+    Replica { settings: ServerConfigurableSettings, fmri: String },
+    Keeper { settings: KeeperConfigurableSettings, fmri: String },
+}
+
+impl NodeSettings {
+    fn fmri(self) -> String {
+        match self {
+            NodeSettings::Replica { fmri, .. } => fmri,
+            NodeSettings::Keeper { fmri, .. } => fmri,
+        }
+    }
+}
+
+impl NodeGeneration for NodeSettings {
+    fn generation(&self) -> Generation {
+        match self {
+            NodeSettings::Replica { settings, .. } => settings.generation(),
+            NodeSettings::Keeper { settings, .. } => settings.generation(),
         }
     }
 }
@@ -274,8 +317,9 @@ async fn long_running_generate_config_task(
 pub fn generate_config_and_enable_svc(
     generation_tx: watch::Sender<Option<Generation>>,
     clickward: Clickward,
-    replica_settings: ServerConfigurableSettings,
-) -> Result<ReplicaConfig, HttpError> {
+    //replica_settings: ServerConfigurableSettings,
+    replica_settings: NodeSettings,
+) -> Result<GenerateConfigResult, HttpError> {
     let incoming_generation = replica_settings.generation();
     let generation_rx = generation_tx.subscribe();
     let current_generation = *generation_rx.borrow();
@@ -297,7 +341,19 @@ pub fn generate_config_and_enable_svc(
         }
     };
 
-    let output = clickward.generate_server_config(replica_settings)?;
+    //let output = clickward.generate_server_config(replica_settings)?;
+    let output = match replica_settings {
+        NodeSettings::Replica { ref settings, .. } => {
+            GenerateConfigResult::Replica(
+                clickward.generate_server_config(settings)?,
+            )
+        }
+        NodeSettings::Keeper { ref settings, .. } => {
+            GenerateConfigResult::Keeper(
+                clickward.generate_keeper_config(settings)?,
+            )
+        }
+    };
 
     // We want to update the generation number only if the config file has been
     // generated successfully.
@@ -306,8 +362,8 @@ pub fn generate_config_and_enable_svc(
     })?;
 
     // Once we have generated the client we can safely enable the clickhouse_server service
-    let fmri = "svc:/oxide/clickhouse_server:default".to_string();
-    Svcadm::enable_service(fmri)?;
+    // let fmri = "svc:/oxide/clickhouse_server:default".to_string();
+    Svcadm::enable_service(replica_settings.fmri())?;
 
     Ok(output)
 }

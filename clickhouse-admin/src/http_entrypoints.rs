@@ -5,10 +5,11 @@
 use crate::context::{KeeperServerContext, ServerContext};
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::{
-    ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
-    KeeperConfig, KeeperConfigurableSettings, Lgif, MetricInfoPath, RaftConfig,
-    ReplicaConfig, ServerConfigurableSettings, SystemTimeSeries,
-    SystemTimeSeriesSettings, TimeSeriesSettingsQuery,
+    ClickhouseKeeperClusterMembership, DistributedDdlQueue,
+    GenerateConfigResult, KeeperConf, KeeperConfig, KeeperConfigurableSettings,
+    Lgif, MetricInfoPath, NodeGeneration, RaftConfig,
+    ServerConfigurableSettings, SystemTimeSeries, SystemTimeSeriesSettings,
+    TimeSeriesSettingsQuery,
 };
 use dropshot::{
     ApiDescription, HttpError, HttpResponseCreated, HttpResponseOk,
@@ -43,7 +44,7 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
     async fn generate_config_and_enable_svc(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<ServerConfigurableSettings>,
-    ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError> {
+    ) -> Result<HttpResponseCreated<GenerateConfigResult>, HttpError> {
         let ctx = rqctx.context();
         let replica_settings = body.into_inner();
         let result =
@@ -133,7 +134,7 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
             }
         };
 
-        let output = ctx.clickward().generate_keeper_config(keeper)?;
+        let output = ctx.clickward().generate_keeper_config(&keeper)?;
 
         // We want to update the generation number only if the config file has been
         // generated successfully.
