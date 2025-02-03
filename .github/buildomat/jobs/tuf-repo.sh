@@ -58,6 +58,8 @@ rustc --version
 # runs without `--locked` and will update the lockfile.
 cargo tree --locked >/dev/null
 
+export CARGO_INCREMENTAL=0
+
 ptime -m ./tools/install_builder_prerequisites.sh -yp
 source ./tools/include/force-git-over-https.sh
 
