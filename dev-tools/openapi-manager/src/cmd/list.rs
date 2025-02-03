@@ -7,10 +7,9 @@ use std::io::Write;
 use indent_write::io::IndentWriter;
 use owo_colors::OwoColorize;
 
-use super::output::display_api_spec_new;
 use crate::{
     apis::ManagedApis,
-    cmd::output::{display_error, OutputOpts, Styles},
+    output::{display_api_spec_new, display_error, OutputOpts, Styles},
 };
 
 pub(crate) fn list_impl(

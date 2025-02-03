@@ -14,10 +14,11 @@ use clap::{Args, Parser, Subcommand};
 use crate::{
     cmd::{
         check::check_impl, dump::dump_impl, generate::generate_impl,
-        list::list_impl, output::OutputOpts,
+        list::list_impl,
     },
     environment::{BlessedSource, GeneratedSource},
     git::GitRevision,
+    output::OutputOpts,
     spec::Environment,
 };
 

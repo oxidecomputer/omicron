@@ -4,11 +4,9 @@
 
 use crate::{
     apis::ManagedApis,
-    cmd::{
-        check::print_warnings,
-        output::{OutputOpts, Styles},
-    },
+    cmd::check::print_warnings,
     environment::{BlessedSource, GeneratedSource},
+    output::{OutputOpts, Styles},
     resolved::Resolved,
     spec::Environment,
     FAILURE_EXIT_CODE,
@@ -45,11 +43,11 @@ pub(crate) fn generate_impl(
     }
 
     let apis = ManagedApis::all()?;
-    let generated = generated_source.load(&apis)?;
+    let generated = generated_source.load(&apis, &styles)?;
     print_warnings(&generated.warnings, &generated.errors)?;
-    let local_files = env.local_source.load(&apis)?;
+    let local_files = env.local_source.load(&apis, &styles)?;
     print_warnings(&local_files.warnings, &local_files.errors)?;
-    let blessed = blessed_source.load(&apis)?;
+    let blessed = blessed_source.load(&apis, &styles)?;
     print_warnings(&blessed.warnings, &blessed.errors)?;
 
     let resolved =
@@ -171,7 +169,7 @@ pub(crate) fn generate_impl(
     // Now reload the local files and make sure we have no more problems.
     println!("Re-checking by reloading local files ... ");
     nproblems = 0;
-    let local_files = env.local_source.load(&apis)?;
+    let local_files = env.local_source.load(&apis, &styles)?;
     print_warnings(&local_files.warnings, &local_files.errors)?;
     let resolved =
         Resolved::new(env, &apis, &blessed, &generated, &local_files);

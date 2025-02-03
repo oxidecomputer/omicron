@@ -5,6 +5,7 @@
 use crate::{
     apis::{ApiIdent, ManagedApis},
     environment::{BlessedSource, GeneratedSource},
+    output::Styles,
     resolved::Resolved,
     spec::Environment,
     spec_files_generic::ApiSpecFile,
@@ -18,9 +19,10 @@ pub(crate) fn dump_impl(
     generated_source: &GeneratedSource,
 ) -> anyhow::Result<()> {
     let apis = ManagedApis::all()?;
+    let mut styles = Styles::default();
 
     // Print information about local files.
-    let local_files = env.local_source.load(&apis)?;
+    let local_files = env.local_source.load(&apis, &styles)?;
     dump_structure(
         &local_files.spec_files,
         &local_files.errors,
@@ -28,11 +30,11 @@ pub(crate) fn dump_impl(
     );
 
     // Print information about what we found in Git.
-    let blessed = blessed_source.load(&apis)?;
+    let blessed = blessed_source.load(&apis, &styles)?;
     dump_structure(&blessed.spec_files, &blessed.errors, &blessed.warnings);
 
     // Print information about generated files.
-    let generated = generated_source.load(&apis)?;
+    let generated = generated_source.load(&apis, &styles)?;
     dump_structure(
         &generated.spec_files,
         &generated.errors,

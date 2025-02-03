@@ -16,6 +16,7 @@ mod cmd;
 mod compatibility;
 mod environment;
 mod git;
+mod output;
 mod resolved;
 mod spec;
 mod spec_files_blessed;

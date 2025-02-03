@@ -7,7 +7,6 @@
 
 // helpers
 pub mod dispatch;
-mod output;
 
 // subcommands
 mod check;

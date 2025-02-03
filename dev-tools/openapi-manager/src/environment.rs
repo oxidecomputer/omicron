@@ -7,12 +7,15 @@
 
 use crate::apis::ManagedApis;
 use crate::git::GitRevision;
+use crate::output::headers::HEADER_WIDTH;
+use crate::output::Styles;
 use crate::spec_files_blessed::BlessedFiles;
 use crate::spec_files_generated::GeneratedFiles;
 use crate::spec_files_local::walk_local_directory;
 use crate::spec_files_local::LocalFiles;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
+use owo_colors::OwoColorize;
 
 pub(crate) struct Environment {
     /// Path to the root of this Omicron workspace
@@ -67,21 +70,28 @@ pub enum BlessedSource {
 
 impl BlessedSource {
     /// Load the blessed OpenAPI documents
-    pub fn load(&self, apis: &ManagedApis) -> anyhow::Result<BlessedFiles> {
+    pub fn load(
+        &self,
+        apis: &ManagedApis,
+        styles: &Styles,
+    ) -> anyhow::Result<BlessedFiles> {
         match self {
             BlessedSource::Directory { local_directory } => {
                 eprintln!(
-                    "Using blessed OpenAPI documents from {:?}",
-                    local_directory
+                    "{:>HEADER_WIDTH$} blessed OpenAPI documents from {:?}",
+                    "Loading".style(styles.success_header),
+                    local_directory,
                 );
                 let api_files = walk_local_directory(local_directory, apis)?;
                 Ok(BlessedFiles::from(api_files))
             }
             BlessedSource::GitRevisionMergeBase { revision, directory } => {
                 eprintln!(
-                    "Using blessed OpenAPI documents from git revision {:?} \
-                     path {:?}",
-                    revision, directory
+                    "{:>HEADER_WIDTH$} blessed OpenAPI documents from git \
+                     revision {:?} path {:?}",
+                    "Loading".style(styles.success_header),
+                    revision,
+                    directory
                 );
                 BlessedFiles::load_from_git_parent_branch(
                     &revision, &directory, apis,
@@ -104,16 +114,26 @@ pub enum GeneratedSource {
 
 impl GeneratedSource {
     /// Load the generated OpenAPI documents (i.e., generating them as needed)
-    pub fn load(&self, apis: &ManagedApis) -> anyhow::Result<GeneratedFiles> {
+    pub fn load(
+        &self,
+        apis: &ManagedApis,
+        styles: &Styles,
+    ) -> anyhow::Result<GeneratedFiles> {
         match self {
             GeneratedSource::Generated => {
-                eprintln!("Generating OpenAPI documents from API definitions",);
+                eprintln!(
+                    "{:>HEADER_WIDTH$} OpenAPI documents from API \
+                     definitions ... ",
+                    "Generating".style(styles.success_header)
+                );
                 GeneratedFiles::generate(apis)
             }
             GeneratedSource::Directory { local_directory } => {
                 eprintln!(
-                    "Using \"generated\" OpenAPI documents from {:?}",
-                    local_directory
+                    "{:>HEADER_WIDTH$} \"generated\" OpenAPI documents from \
+                     {:?} ... ",
+                    "Loading".style(styles.success_header),
+                    local_directory,
                 );
                 let api_files = walk_local_directory(local_directory, apis)?;
                 Ok(GeneratedFiles::from(api_files))
@@ -130,12 +150,18 @@ pub enum LocalSource {
 
 impl LocalSource {
     /// Load the local OpenAPI documents
-    pub fn load(&self, apis: &ManagedApis) -> anyhow::Result<LocalFiles> {
+    pub fn load(
+        &self,
+        apis: &ManagedApis,
+        styles: &Styles,
+    ) -> anyhow::Result<LocalFiles> {
         match self {
             LocalSource::Directory { local_directory } => {
                 eprintln!(
-                    "Loading local OpenAPI documents in {:?}",
-                    local_directory
+                    "{:>HEADER_WIDTH$} local OpenAPI documents from \
+                     {:?} ... ",
+                    "Loading".style(styles.success_header),
+                    local_directory,
                 );
                 Ok(LocalFiles::load_from_directory(local_directory, apis)?)
             }

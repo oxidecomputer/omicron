@@ -4,10 +4,10 @@
 
 use crate::{
     apis::{ManagedApi, ManagedApis},
-    cmd::output::{
+    environment::{BlessedSource, GeneratedSource},
+    output::{
         display_api_spec_version, headers::*, plural, OutputOpts, Styles,
     },
-    environment::{BlessedSource, GeneratedSource},
     resolved::{iter_only, Problem, Resolution, Resolved},
     spec::Environment,
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
@@ -40,93 +40,24 @@ pub(crate) fn check_impl(
     output: &OutputOpts,
 ) -> Result<CheckResult> {
     let mut styles = Styles::default();
-    let mut found_problems = false;
-    let mut found_unfixable = false;
     if output.use_color(supports_color::Stream::Stderr) {
         styles.colorize();
     }
 
+    eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
     let apis = ManagedApis::all()?;
-    let generated = generated_source.load(&apis)?;
+    let generated = generated_source.load(&apis, &styles)?;
     print_warnings(&generated.warnings, &generated.errors)?;
-    let local_files = env.local_source.load(&apis)?;
+    let local_files = env.local_source.load(&apis, &styles)?;
     print_warnings(&local_files.warnings, &local_files.errors)?;
-    let blessed = blessed_source.load(&apis)?;
+    let blessed = blessed_source.load(&apis, &styles)?;
     print_warnings(&blessed.warnings, &blessed.errors)?;
 
     let resolved =
         Resolved::new(env, &apis, &blessed, &generated, &local_files);
-    for note in resolved.notes() {
-        println!("NOTE: {}", note);
-    }
-    for p in resolved.general_problems() {
-        println!("PROBLEM: {}", p);
-        found_problems = true;
-        if !p.is_fixable() {
-            found_unfixable = true;
-        }
-        if let Some(fix) = p.fix() {
-            println!("{}", fix);
-        }
-    }
 
-    println!("Checking OpenAPI documents...");
-    let mut napis = 0;
-    let mut nversions = 0;
-    for api in apis.iter_apis() {
-        napis += 1;
-        let ident = api.ident();
-        for version in api.iter_versions_semver() {
-            nversions += 1;
-            // unwrap(): there should be a resolution for every managed API
-            let resolution =
-                resolved.resolution_for_api_version(ident, version).unwrap();
-            let problems: Vec<_> = resolution.problems().collect();
-            let summary = if problems.len() == 0 {
-                "OK"
-            } else if problems.iter().all(|p| p.is_fixable()) {
-                found_problems = true;
-                "STALE"
-            } else {
-                found_unfixable = true;
-                "ERROR"
-            };
-
-            println!(
-                "{:5} {} ({}) v{}",
-                summary,
-                ident,
-                if api.is_versioned() { "versioned" } else { "lockstep" },
-                version
-            );
-
-            for p in problems {
-                println!("problem: {}", p);
-                if let Some(fix) = p.fix() {
-                    println!("{}", fix);
-                }
-            }
-        }
-    }
-
-    println!("Checked {} total versions across {} APIs", nversions, napis);
-
-    // XXX-dap
+    eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
     summarize(&apis, &resolved, output, &styles)
-
-    // if found_unfixable {
-    //     // XXX-dap wording
-    //     println!(
-    //         "Error: please fix one or more problems above and re-run the tool"
-    //     );
-    //     Ok(CheckResult::Failures)
-    // } else if found_problems {
-    //     println!("Stale: one or more versions needs an update");
-    //     Ok(CheckResult::NeedsUpdate)
-    // } else {
-    //     println!("Success");
-    //     Ok(CheckResult::Success)
-    // }
 }
 
 // XXX-dap put somewhere where it can be re-used
@@ -153,14 +84,14 @@ pub fn print_warnings(
 }
 
 // XXX-dap put somewhere where it can be re-used
+/// Summarize the results of checking all supported API versions, plus other
+/// problems found during resolution
 pub fn summarize(
     apis: &ManagedApis,
     resolved: &Resolved,
     output: &OutputOpts,
     styles: &Styles,
 ) -> anyhow::Result<CheckResult> {
-    eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
-
     let total = resolved.nexpected_documents();
 
     eprintln!(
@@ -174,6 +105,8 @@ pub fn summarize(
     let mut num_stale = 0;
     let mut num_failed = 0;
 
+    // Print problems associated with a supported API version
+    // (i.e., one of the expected OpenAPI documents).
     for api in apis.iter_apis() {
         let ident = api.ident();
 
@@ -192,11 +125,13 @@ pub fn summarize(
         }
     }
 
+    // Print problems not associated with any supported version, if any.
     let general_problems: Vec<_> = resolved.general_problems().collect();
     let num_general_problems = if !general_problems.is_empty() {
         eprintln!(
-            "Other problems not associated with a specific supported API \
-             version:"
+            "\n{:>HEADER_WIDTH$} problems not associated with a specific \
+             supported API version:",
+            "Other".style(styles.warning_header),
         );
 
         let (fixable, unfixable): (Vec<&Problem>, Vec<&Problem>) =
@@ -208,6 +143,23 @@ pub fn summarize(
         0
     };
 
+    // Print informational notes, if any.
+    for n in resolved.notes() {
+        let initial_indent =
+            format!("{:>HEADER_WIDTH$} ", "Note".style(styles.warning_header));
+        let more_indent = " ".repeat(HEADER_WIDTH + " ".len());
+        eprintln!(
+            "\n{}\n",
+            textwrap::fill(
+                &n.to_string(),
+                textwrap::Options::with_termwidth()
+                    .initial_indent(&initial_indent)
+                    .subsequent_indent(&more_indent)
+            )
+        );
+    }
+
+    // Print a summary line.
     let status_header = if num_failed > 0 {
         FAILURE.style(styles.failure_header)
     } else if num_stale > 0 {
@@ -216,6 +168,7 @@ pub fn summarize(
         SUCCESS.style(styles.success_header)
     };
 
+    eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
     eprintln!(
         "{:>HEADER_WIDTH$} {} {} checked: {} fresh, {} stale, {} failed, \
          {} other {}",
@@ -245,9 +198,9 @@ pub fn summarize(
     } else {
         Ok(CheckResult::Success)
     }
-    // XXX-dap todo: general problems and notes
 }
 
+/// Summarize the "check" status of one supported API version
 fn summarize_one(
     api: &ManagedApi,
     version: &semver::Version,
@@ -282,6 +235,7 @@ fn summarize_one(
     print_problems(problems, output, styles);
 }
 
+/// Print a formatted list of Problems
 fn print_problems<'a, T>(problems: T, output: &OutputOpts, styles: &Styles)
 where
     T: IntoIterator<Item = &'a Problem<'a>>,
