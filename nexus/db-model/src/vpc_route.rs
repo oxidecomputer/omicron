@@ -183,7 +183,7 @@ impl RouterRoute {
             // so prepend it with another string.
             // - length constraint is <63 chars,
             // - a UUID is 36 chars including hyphens,
-            // - "{subnet}-" is 11 chars
+            // - "{name}-" is 11 chars
             // - "conflict-" is 9 chars
             //   = 56 chars
             format!("conflict-{name}-{route_id}").parse().unwrap()
