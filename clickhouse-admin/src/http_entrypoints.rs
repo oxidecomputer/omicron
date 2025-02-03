@@ -55,14 +55,13 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
 
         let (response_tx, response_rx) = oneshot::channel();
         ctx.generate_config_tx
-            .send_async(GenerateConfigRequest::GenerateConfig {
+            .try_send(GenerateConfigRequest::GenerateConfig {
                 generation_tx,
                 clickward,
                 log,
                 replica_settings,
                 response: response_tx,
             })
-            .await
             .map_err(|e| {
                 HttpError::for_internal_error(format!(
                     "failure to send request: {e}"
@@ -127,13 +126,12 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         let clickhouse_address = ctx.clickhouse_address();
         let (response_tx, response_rx) = oneshot::channel();
         ctx.db_init_tx
-            .send_async(DbInitRequest::DbInit {
+            .try_send(DbInitRequest::DbInit {
                 clickhouse_address,
                 log,
                 replicated,
                 response: response_tx,
             })
-            .await
             .map_err(|e| {
                 HttpError::for_internal_error(format!(
                     "failure to send request: {e}"
