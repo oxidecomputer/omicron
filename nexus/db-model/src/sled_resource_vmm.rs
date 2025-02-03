@@ -37,7 +37,7 @@ impl Resources {
 /// Describes sled resource usage by a VMM
 #[derive(Clone, Selectable, Queryable, Insertable, Debug)]
 #[diesel(table_name = sled_resource_vmm)]
-pub struct SledResource {
+pub struct SledResourceVmm {
     pub id: DbPropolisUuid,
     pub sled_id: DbSledUuid,
 
@@ -47,8 +47,8 @@ pub struct SledResource {
     pub instance_id: Option<DbInstanceUuid>,
 }
 
-impl SledResource {
-    pub fn new_for_vmm(
+impl SledResourceVmm {
+    pub fn new(
         id: PropolisUuid,
         instance_id: InstanceUuid,
         sled_id: SledUuid,

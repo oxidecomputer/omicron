@@ -216,7 +216,7 @@ CREATE INDEX IF NOT EXISTS lookup_sled_by_policy_and_state ON omicron.public.sle
     sled_state
 );
 
--- Accounting for instances using resources on a sled
+-- Accounting for VMMs using resources on a sled
 CREATE TABLE IF NOT EXISTS omicron.public.sled_resource_vmm (
     -- Should match the UUID of the corresponding VMM
     id UUID PRIMARY KEY,
@@ -246,13 +246,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_resource_vmm (
 );
 
 -- Allow looking up all VMM resources which reside on a sled
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_resource_by_sled ON omicron.public.sled_resource_vmm (
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_vmm_resource_by_sled ON omicron.public.sled_resource_vmm (
     sled_id,
     id
 );
 
 -- Allow looking up all resources by instance
-CREATE INDEX IF NOT EXISTS lookup_resource_by_instance ON omicron.public.sled_resource_vmm (
+CREATE INDEX IF NOT EXISTS lookup_vmm_resource_by_instance ON omicron.public.sled_resource_vmm (
     instance_id
 );
 
@@ -4902,7 +4902,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '123.0.0', NULL)
+    (TRUE, NOW(), NOW(), '124.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

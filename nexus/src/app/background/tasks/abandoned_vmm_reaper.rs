@@ -196,7 +196,7 @@ mod tests {
     use nexus_db_model::ByteCount;
     use nexus_db_model::Generation;
     use nexus_db_model::Resources;
-    use nexus_db_model::SledResource;
+    use nexus_db_model::SledResourceVmm;
     use nexus_db_model::Vmm;
     use nexus_db_model::VmmRuntimeState;
     use nexus_db_model::VmmState;
@@ -304,8 +304,8 @@ mod tests {
                         sled_resource_vmm_dsl::id
                             .eq(self.destroyed_vmm_id.into_untyped_uuid()),
                     )
-                    .select(SledResource::as_select())
-                    .first_async::<SledResource>(&*conn)
+                    .select(SledResourceVmm::as_select())
+                    .first_async::<SledResourceVmm>(&*conn)
                     .await
                     .optional()
                     .expect("sled resource query should succeed");

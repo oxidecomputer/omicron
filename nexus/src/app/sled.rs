@@ -170,7 +170,7 @@ impl super::Nexus {
         propolis_id: PropolisUuid,
         resources: db::model::Resources,
         constraints: db::model::SledReservationConstraints,
-    ) -> Result<db::model::SledResource, Error> {
+    ) -> Result<db::model::SledResourceVmm, Error> {
         self.db_datastore
             .sled_reservation_create(
                 &self.opctx_alloc,

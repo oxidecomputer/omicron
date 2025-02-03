@@ -878,7 +878,7 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::Instance;
     use nexus_db_model::Resources;
-    use nexus_db_model::SledResource;
+    use nexus_db_model::SledResourceVmm;
     use nexus_types::external_api::params;
     use omicron_common::api::external::{
         self, ByteCount, DataPageParams, IdentityMetadataCreateParams,
@@ -1025,7 +1025,7 @@ mod tests {
     ) {
         use db::schema::sled_resource_vmm::dsl;
         diesel::insert_into(dsl::sled_resource_vmm)
-            .values(SledResource::new_for_vmm(
+            .values(SledResourceVmm::new(
                 PropolisUuid::new_v4(),
                 instance,
                 SledUuid::new_v4(),
