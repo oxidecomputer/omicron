@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::blippy::Blippy;
+use crate::blippy::MultimapInconsistency;
 use crate::blippy::Severity;
 use crate::blippy::SledKind;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -13,6 +14,7 @@ use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
+use nexus_types::external_api::views::SledState;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
@@ -25,10 +27,106 @@ use std::collections::BTreeSet;
 use std::net::Ipv6Addr;
 
 pub(crate) fn perform_all_blueprint_only_checks(blippy: &mut Blippy<'_>) {
+    check_multiple_map_keys(blippy);
     check_underlay_ips(blippy);
     check_external_networking(blippy);
     check_dataset_zpool_uniqueness(blippy);
     check_datasets(blippy);
+}
+
+fn check_multiple_map_keys(blippy: &mut Blippy<'_>) {
+    // Until we merge the maps together
+    // (https://github.com/oxidecomputer/omicron/issues/7078), we'll treat
+    // `blueprint_zones` as the "primary" map. Any sled present in
+    // `blueprint_zones` should also have an entry in:
+    //
+    // * `sled_state`
+    // * `blueprint_disks` (only partially implemented - only active sleds are
+    //   present, which needs to be fixed before we can merge the maps)
+    // * `blueprint_datasets` (only partially implemented - only active sleds
+    //   are present, which needs to be fixed before we can merge the maps)
+    let blueprint = blippy.blueprint();
+
+    for &sled_id in blueprint.blueprint_zones.keys() {
+        match blueprint.sled_state.get(&sled_id) {
+            Some(SledState::Active) => {
+                // sled is active; no note needed for `sled_state`, but we need
+                // to check `blueprint_datasets` and `blueprint_disks` too.
+                if !blueprint.blueprint_disks.contains_key(&sled_id) {
+                    blippy.push_sled_note(
+                        sled_id,
+                        Severity::BackwardsCompatibility,
+                        SledKind::MultimapInconsistency(
+                            MultimapInconsistency::PresentInZonesNotDisks,
+                        ),
+                    );
+                }
+                if !blueprint.blueprint_datasets.contains_key(&sled_id) {
+                    blippy.push_sled_note(
+                        sled_id,
+                        Severity::BackwardsCompatibility,
+                        SledKind::MultimapInconsistency(
+                            MultimapInconsistency::PresentInZonesNotDatasets,
+                        ),
+                    );
+                }
+            }
+            Some(SledState::Decommissioned) => {
+                // For now, we don't check `blueprint_disks` or
+                // `blueprint_datasets` because we know those entries are
+                // missing. But we should fix that!
+            }
+            None => {
+                blippy.push_sled_note(
+                    sled_id,
+                    Severity::BackwardsCompatibility,
+                    SledKind::MultimapInconsistency(
+                        MultimapInconsistency::PresentInZonesNotState,
+                    ),
+                );
+
+                // Same as `Decommissioned`: For now, we don't check
+                // `blueprint_disks` or `blueprint_datasets` because we know
+                // those entries are missing. But we should fix that!
+            }
+        }
+    }
+
+    // Also check the other direction: do any of the "non-primary" maps have
+    // sleds that aren't in `blueprint_zones`?
+    for &sled_id in blueprint.sled_state.keys() {
+        if !blueprint.blueprint_zones.contains_key(&sled_id) {
+            blippy.push_sled_note(
+                sled_id,
+                Severity::BackwardsCompatibility,
+                SledKind::MultimapInconsistency(
+                    MultimapInconsistency::PresentInStateNotZones,
+                ),
+            );
+        }
+    }
+    for &sled_id in blueprint.blueprint_disks.keys() {
+        if !blueprint.blueprint_zones.contains_key(&sled_id) {
+            blippy.push_sled_note(
+                sled_id,
+                Severity::BackwardsCompatibility,
+                SledKind::MultimapInconsistency(
+                    MultimapInconsistency::PresentInDisksNotZones,
+                ),
+            );
+        }
+    }
+    for &sled_id in blueprint.blueprint_datasets.keys() {
+        if !blueprint.blueprint_zones.contains_key(&sled_id) {
+            blippy.push_sled_note(
+                sled_id,
+                Severity::BackwardsCompatibility,
+                SledKind::MultimapInconsistency(
+                    MultimapInconsistency::PresentInDatasetsNotZones,
+                ),
+            );
+        }
+    }
 }
 
 fn check_underlay_ips(blippy: &mut Blippy<'_>) {
@@ -1745,6 +1843,135 @@ mod tests {
         let report =
             Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
+        for note in expected_notes {
+            assert!(
+                report.notes().contains(&note),
+                "did not find expected note {note:?}"
+            );
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_sled_in_zones_map_but_not_others() {
+        static TEST_NAME: &str = "test_sled_in_zones_map_but_not_others";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
+
+        let mut sled_ids = blueprint.blueprint_zones.keys();
+        let some_sled_0 = *sled_ids.next().expect("at least 1 sled");
+        let some_sled_1 = *sled_ids.next().expect("at least 2 sleds");
+
+        // remove sled 0 from `sled_state`
+        blueprint
+            .sled_state
+            .remove(&some_sled_0)
+            .expect("removed sled 0 from sled_state");
+
+        // remove sled 1 from blueprint_disks and blueprint_datasets; we
+        // shouldn't need to use a second sled ID here, but for now we only
+        // expecte disks/datasets entries for active sleds, so blippy only
+        // checks disks/datasets if the sled is in `sled_state`
+        blueprint
+            .blueprint_disks
+            .remove(&some_sled_1)
+            .expect("removed sled 1 from blueprint_disks");
+        blueprint
+            .blueprint_datasets
+            .remove(&some_sled_1)
+            .expect("removed sled 1 from blueprint_datasets");
+
+        let expected_notes = [
+            Note {
+                severity: Severity::BackwardsCompatibility,
+                kind: Kind::Sled {
+                    sled_id: some_sled_0,
+                    kind: SledKind::MultimapInconsistency(
+                        MultimapInconsistency::PresentInZonesNotState,
+                    ),
+                },
+            },
+            Note {
+                severity: Severity::BackwardsCompatibility,
+                kind: Kind::Sled {
+                    sled_id: some_sled_1,
+                    kind: SledKind::MultimapInconsistency(
+                        MultimapInconsistency::PresentInZonesNotDisks,
+                    ),
+                },
+            },
+            Note {
+                severity: Severity::BackwardsCompatibility,
+                kind: Kind::Sled {
+                    sled_id: some_sled_1,
+                    kind: SledKind::MultimapInconsistency(
+                        MultimapInconsistency::PresentInZonesNotDatasets,
+                    ),
+                },
+            },
+        ];
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+
+        for note in expected_notes {
+            assert!(
+                report.notes().contains(&note),
+                "did not find expected note {note:?}"
+            );
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_sled_not_in_zones_map() {
+        static TEST_NAME: &str = "test_sled_not_in_zones_map";
+        let logctx = test_setup_log(TEST_NAME);
+        let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
+
+        let mut sled_ids = blueprint.blueprint_zones.keys();
+        let some_sled = *sled_ids.next().expect("at least 1 sled");
+
+        blueprint
+            .blueprint_zones
+            .remove(&some_sled)
+            .expect("removed sled from blueprint_zones");
+
+        let expected_notes = [
+            Note {
+                severity: Severity::BackwardsCompatibility,
+                kind: Kind::Sled {
+                    sled_id: some_sled,
+                    kind: SledKind::MultimapInconsistency(
+                        MultimapInconsistency::PresentInStateNotZones,
+                    ),
+                },
+            },
+            Note {
+                severity: Severity::BackwardsCompatibility,
+                kind: Kind::Sled {
+                    sled_id: some_sled,
+                    kind: SledKind::MultimapInconsistency(
+                        MultimapInconsistency::PresentInDisksNotZones,
+                    ),
+                },
+            },
+            Note {
+                severity: Severity::BackwardsCompatibility,
+                kind: Kind::Sled {
+                    sled_id: some_sled,
+                    kind: SledKind::MultimapInconsistency(
+                        MultimapInconsistency::PresentInDatasetsNotZones,
+                    ),
+                },
+            },
+        ];
+        let report =
+            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        eprintln!("{}", report.display());
+
         for note in expected_notes {
             assert!(
                 report.notes().contains(&note),

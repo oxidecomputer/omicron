@@ -474,24 +474,33 @@ impl<'a> BlueprintBuilder<'a> {
             let state = match parent_blueprint.sled_state.get(sled_id).copied()
             {
                 Some(state) => state,
-                None => {
-                    // If we have zones but no state for a sled, we assume
-                    // it was removed by an earlier version of the planner
-                    // (which pruned decommissioned sleds from
-                    // `sled_state`). Check that all of its zones are
-                    // expunged, which is a prerequisite for
-                    // decommissioning. If any zones aren't, then we don't
-                    // know what to do: the state is missing but we can't
-                    // assume "decommissioned", so fail.
-                    if zones.are_all_zones_expunged() {
-                        SledState::Decommissioned
-                    } else {
+                // If we have zones but no state for a sled, we assume
+                // it was removed by an earlier version of the planner
+                // (which pruned decommissioned sleds from
+                // `sled_state`). Check that the sled is decommissioned in
+                // the planning input, which is a prerequisite for
+                // decommissioning. If it isn't, then we don't know what to
+                // do: the state is missing but we can't assume
+                // "decommissioned", so fail.
+                None => match input
+                    .sled_lookup(SledFilter::All, *sled_id)
+                    .map(|sled| sled.state)
+                {
+                    Ok(SledState::Decommissioned) => SledState::Decommissioned,
+                    Ok(SledState::Active) => {
                         bail!(
-                            "sled {sled_id} is missing in parent blueprint \
-                             sled_state map, but has non-expunged zones"
+                            "sled {sled_id} is present in parent_blueprint \
+                             zones map, but still active in planning input"
                         );
                     }
-                }
+                    Err(err) => {
+                        bail!(
+                            "sled {sled_id} is present in parent_blueprint \
+                             zones map, but lookup from planning input failed: \
+                             {err}"
+                        );
+                    }
+                },
             };
 
             // If we don't have disks/datasets entries, we'll start with an
@@ -655,18 +664,6 @@ impl<'a> BlueprintBuilder<'a> {
                 );
             }
         }
-        // Preserving backwards compatibility, for now: prune sled_state of any
-        // fully decommissioned sleds, which we determine by the state being
-        // `Decommissioned` _and_ the sled is no longer in our PlanningInput's
-        // list of commissioned sleds.
-        let commissioned_sled_ids = self
-            .input
-            .all_sled_ids(SledFilter::Commissioned)
-            .collect::<BTreeSet<_>>();
-        sled_state.retain(|sled_id, state| {
-            *state != SledState::Decommissioned
-                || commissioned_sled_ids.contains(sled_id)
-        });
         // Preserving backwards compatibility, for now: disks should only
         // have entries for in-service sleds, and expunged disks should be
         // removed entirely.
@@ -2202,9 +2199,8 @@ pub mod test {
     }
 
     #[test]
-    fn test_prune_decommissioned_sleds() {
-        static TEST_NAME: &str =
-            "blueprint_builder_test_prune_decommissioned_sleds";
+    fn test_decommissioned_sleds() {
+        static TEST_NAME: &str = "blueprint_builder_test_decommissioned_sleds";
         let logctx = test_setup_log(TEST_NAME);
         let (collection, input, mut blueprint1) =
             example(&logctx.log, TEST_NAME);
@@ -2250,7 +2246,7 @@ pub mod test {
             &blueprint1,
             &input,
             &collection,
-            "test_prune_decommissioned_sleds",
+            "test_decommissioned_sleds",
         )
         .expect("created builder")
         .build();
@@ -2279,32 +2275,48 @@ pub mod test {
             z.disposition = BlueprintZoneDisposition::Expunged;
         }
 
-        // Generate a new blueprint. This desired sled state should no longer be
-        // present: it has reached the terminal decommissioned state, so there's
-        // no more work to be done.
-        let blueprint3 = BlueprintBuilder::new_based_on(
+        // Generate a new blueprint. This desired sled state should still be
+        // decommissioned, because we haven't implemented all the cleanup
+        // necessary to prune sleds from the blueprint.
+        let mut blueprint3 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint2,
             &input,
             &collection,
-            "test_prune_decommissioned_sleds",
+            "test_decommissioned_sleds",
         )
         .expect("created builder")
         .build();
         verify_blueprint(&blueprint3);
-
-        // Ensure we've dropped the decommissioned sled. (We may still have
-        // _zones_ for it that need cleanup work, but all state transitions for
-        // it are complete.)
         assert_eq!(
             blueprint3.sled_state.get(&decommision_sled_id).copied(),
-            None,
+            Some(SledState::Decommissioned),
+        );
+
+        // By hand, drop the decommissioned sled out of `sled_state`. This
+        // matches old builder behavior. Rerunning the builder should put it
+        // back, since it's still present in `blueprint_zones`.
+        blueprint3.sled_state.remove(&decommision_sled_id);
+        let blueprint4 = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint3,
+            &input,
+            &collection,
+            "test_decommissioned_sleds",
+        )
+        .expect("created builder")
+        .build();
+        eprintln!("{}", blueprint4.diff_since_blueprint(&blueprint3).display());
+        verify_blueprint(&blueprint4);
+        assert_eq!(
+            blueprint4.sled_state.get(&decommision_sled_id).copied(),
+            Some(SledState::Decommissioned),
         );
 
         // Test a no-op planning iteration.
         assert_planning_makes_no_changes(
             &logctx.log,
-            &blueprint3,
+            &blueprint4,
             &input,
             TEST_NAME,
         );
