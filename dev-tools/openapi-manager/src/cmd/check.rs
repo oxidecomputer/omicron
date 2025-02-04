@@ -8,11 +8,11 @@ use crate::{
     output::{
         display_api_spec_version, headers::*, plural, OutputOpts, Styles,
     },
-    resolved::{iter_only, Problem, Resolution, Resolved},
+    resolved::{Problem, Resolution, Resolved},
     spec::Environment,
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
 };
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use owo_colors::OwoColorize;
 use std::process::ExitCode;
 
@@ -57,7 +57,7 @@ pub(crate) fn check_impl(
         Resolved::new(env, &apis, &blessed, &generated, &local_files);
 
     eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
-    summarize(&apis, &resolved, output, &styles)
+    summarize(&apis, &resolved, &styles)
 }
 
 // XXX-dap put somewhere where it can be re-used
@@ -89,7 +89,6 @@ pub fn print_warnings(
 pub fn summarize(
     apis: &ManagedApis,
     resolved: &Resolved,
-    output: &OutputOpts,
     styles: &Styles,
 ) -> anyhow::Result<CheckResult> {
     let total = resolved.nexpected_documents();
@@ -121,7 +120,7 @@ pub fn summarize(
             } else {
                 num_fresh += 1;
             }
-            summarize_one(api, version, resolution, output, styles);
+            summarize_one(api, version, resolution, styles);
         }
     }
 
@@ -137,7 +136,7 @@ pub fn summarize(
         let (fixable, unfixable): (Vec<&Problem>, Vec<&Problem>) =
             general_problems.iter().partition(|p| p.is_fixable());
         num_failed += unfixable.len();
-        print_problems(general_problems, output, styles);
+        print_problems(general_problems, styles);
         fixable.len()
     } else {
         0
@@ -205,7 +204,6 @@ fn summarize_one(
     api: &ManagedApi,
     version: &semver::Version,
     resolution: &Resolution<'_>,
-    output: &OutputOpts,
     styles: &Styles,
 ) {
     let problems: Vec<_> = resolution.problems().collect();
@@ -217,26 +215,25 @@ fn summarize_one(
             FRESH.style(styles.success_header),
             display_api_spec_version(api, version, &styles),
         );
-        return;
+    } else {
+        // There were one or more problems, some of which may be unfixable.
+        eprintln!(
+            "{:>HEADER_WIDTH$} {}",
+            if resolution.has_errors() {
+                FAILURE.style(styles.failure_header)
+            } else {
+                assert!(resolution.has_problems());
+                STALE.style(styles.warning_header)
+            },
+            display_api_spec_version(api, version, &styles),
+        );
+
+        print_problems(problems, styles);
     }
-
-    // There were one or more problems, some of which may be unfixable.
-    eprintln!(
-        "{:>HEADER_WIDTH$} {}",
-        if resolution.has_errors() {
-            FAILURE.style(styles.failure_header)
-        } else {
-            assert!(resolution.has_problems());
-            STALE.style(styles.warning_header)
-        },
-        display_api_spec_version(api, version, &styles),
-    );
-
-    print_problems(problems, output, styles);
 }
 
 /// Print a formatted list of Problems
-fn print_problems<'a, T>(problems: T, output: &OutputOpts, styles: &Styles)
+pub fn print_problems<'a, T>(problems: T, styles: &Styles)
 where
     T: IntoIterator<Item = &'a Problem<'a>>,
 {
@@ -270,7 +267,7 @@ where
             "fix".style(styles.warning_header)
         );
         let fix_str = fix.to_string();
-        let steps = fix_str.trim_right().split("\n");
+        let steps = fix_str.trim_end().split("\n");
         for s in steps {
             eprintln!(
                 "{}",

@@ -328,58 +328,59 @@ impl<'a> Display for Fix<'a> {
 }
 
 impl<'a> Fix<'a> {
-    pub fn execute(&self, env: &Environment) -> anyhow::Result<()> {
+    pub fn execute(&self, env: &Environment) -> anyhow::Result<Vec<String>> {
         let root = env.openapi_dir();
         match self {
             Fix::DeleteFiles { files } => {
+                let mut rv = Vec::new();
                 for f in &files.0 {
                     let path = root.join(f.path());
                     fs_err::remove_file(&path)?;
-                    // XXX-dap maybe return a representation instead
-                    eprintln!("removed {}", path);
+                    rv.push(format!("removed {}", path));
                 }
+                Ok(rv)
             }
             Fix::FixLockstepFile { generated } => {
                 let path = root.join(generated.spec_file_name().path());
-                eprintln!(
+                Ok(vec![format!(
                     "updated {}: {:?}",
                     &path,
                     overwrite_file(&path, generated.contents())?
-                );
+                )])
             }
             Fix::FixVersionedFiles { old, generated } => {
+                let mut rv = Vec::new();
                 for f in &old.0 {
                     let path = root.join(f.path());
                     fs_err::remove_file(&path)?;
-                    eprintln!("removed {}", path);
+                    rv.push(format!("removed {}", path));
                 }
 
                 let path = root.join(generated.spec_file_name().path());
-                eprintln!(
+                rv.push(format!(
                     "created {}: {:?}",
                     &path,
                     overwrite_file(&path, generated.contents())?
-                );
-                eprintln!(
+                ));
+                rv.push(format!(
                     "FIX NOTE: be sure to update the corresponding \
                      progenitor client to refer to this new OpenAPI \
                      document file!"
-                );
+                ));
+                Ok(rv)
             }
             Fix::FixExtraFile { path, check_stale } => {
                 let expected_contents = match check_stale {
                     CheckStale::Modified { expected, .. } => expected,
                     CheckStale::New { expected } => expected,
                 };
-                eprintln!(
+                Ok(vec![format!(
                     "write {}: {:?}",
                     &path,
                     overwrite_file(&path, expected_contents)?
-                );
+                )])
             }
         }
-
-        Ok(())
     }
 }
 
