@@ -4,7 +4,7 @@
 
 use crate::{ClickhouseCli, Clickward};
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use camino::Utf8PathBuf;
 use clickhouse_admin_types::{
     GenerateConfigResult, KeeperConfigurableSettings,
@@ -13,7 +13,7 @@ use clickhouse_admin_types::{
     CLICKHOUSE_SERVER_CONFIG_FILE,
 };
 use dropshot::HttpError;
-use flume::{Receiver, Sender};
+use flume::{Receiver, Sender, TrySendError};
 use http::StatusCode;
 use illumos_utils::svcadm::Svcadm;
 use omicron_common::address::CLICKHOUSE_TCP_PORT;
@@ -22,6 +22,7 @@ use oximeter_db::Client as OximeterClient;
 use oximeter_db::OXIMETER_VERSION;
 use slog::Logger;
 use slog::{error, info};
+use slog_error_chain::InlineErrorChain;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::net::SocketAddrV6;
@@ -81,24 +82,39 @@ impl KeeperServerContext {
             fmri: "svc:/oxide/clickhouse_keeper:default".to_string(),
         };
 
-        let (response_tx, response_rx) = oneshot::channel();
-        self.generate_config_tx
-            .try_send(GenerateConfigRequest::GenerateConfig {
-                clickward,
-                log,
-                node_settings,
-                response: response_tx,
-            })
-            .map_err(|e| {
-                HttpError::for_internal_error(format!(
-                    "failure to send request: {e}"
-                ))
-            })?;
-        response_rx.await.map_err(|e| {
-            HttpError::for_internal_error(format!(
-                "failure to receive response: {e}"
-            ))
-        })?
+        generate_config_request(
+            &self.generate_config_tx,
+            node_settings,
+            clickward,
+            log,
+        )
+        .await
+
+        //   let (response_tx, response_rx) = oneshot::channel();
+        //   self.generate_config_tx
+        //       .try_send(GenerateConfigRequest::GenerateConfig {
+        //           clickward,
+        //           log,
+        //           node_settings,
+        //           response: response_tx,
+        //       })
+        //       .map_err(|e| match e {
+        //           TrySendError::Full(_) => HttpError::for_unavail(
+        //               None,
+        //               "channel full: another config request is still running"
+        //                   .to_string(),
+        //           ),
+        //           TrySendError::Disconnected(_) => {
+        //               HttpError::for_internal_error(
+        //                   "long-running generate-config task died".to_string(),
+        //               )
+        //           }
+        //       })?;
+        //   response_rx.await.map_err(|e| {
+        //       HttpError::for_internal_error(format!(
+        //           "failure to receive response; long-running task died before it could respond: {e}"
+        //       ))
+        //   })?
     }
 
     pub fn clickward(&self) -> Clickward {
@@ -183,31 +199,42 @@ impl ServerContext {
             settings: replica_settings,
             fmri: "svc:/oxide/clickhouse_server:default".to_string(),
         };
+        generate_config_request(
+            &self.generate_config_tx,
+            node_settings,
+            clickward,
+            log,
+        )
+        .await
 
-        let (response_tx, response_rx) = oneshot::channel();
-        self.generate_config_tx
-            .try_send(GenerateConfigRequest::GenerateConfig {
-                clickward,
-                log,
-                node_settings,
-                response: response_tx,
-            })
-            .map_err(|e| {
-                HttpError::for_internal_error(format!(
-                    "failure to send request: {e}"
-                ))
-            })?;
-        response_rx.await.map_err(|e| {
-            HttpError::for_internal_error(format!(
-                "failure to receive response: {e}"
-            ))
-        })?
+        //  let (response_tx, response_rx) = oneshot::channel();
+        //  self.generate_config_tx
+        //      .try_send(GenerateConfigRequest::GenerateConfig {
+        //          clickward,
+        //          log,
+        //          node_settings,
+        //          response: response_tx,
+        //      })
+        //      .map_err(|e| match e {
+        //          TrySendError::Full(_) => HttpError::for_unavail(
+        //              None,
+        //              "channel full: another config request is still running"
+        //                  .to_string(),
+        //          ),
+        //          TrySendError::Disconnected(_) => {
+        //              HttpError::for_internal_error(
+        //                  "long-running generate-config task died".to_string(),
+        //              )
+        //          }
+        //      })?;
+        //  response_rx.await.map_err(|e| {
+        //      HttpError::for_internal_error(format!(
+        //          "failure to receive response; long-running task died before it could respond: {e}"
+        //      ))
+        //  })?
     }
 
-    pub async fn init_db(
-        &self,
-        replicated: bool,
-    ) -> Result<(), HttpError> {
+    pub async fn init_db(&self, replicated: bool) -> Result<(), HttpError> {
         let log = self.log();
         let clickhouse_address = self.clickhouse_address();
 
@@ -219,14 +246,19 @@ impl ServerContext {
                 replicated,
                 response: response_tx,
             })
-            .map_err(|e| {
-                HttpError::for_internal_error(format!(
-                    "failure to send request: {e}"
-                ))
+            .map_err(|e| match e {
+                TrySendError::Full(_) => HttpError::for_unavail(
+                    None,
+                    "channel full: another config request is still running"
+                        .to_string(),
+                ),
+                TrySendError::Disconnected(_) => HttpError::for_internal_error(
+                    "long-running generate-config task died".to_string(),
+                ),
             })?;
         response_rx.await.map_err(|e| {
             HttpError::for_internal_error(format!(
-                "failure to receive response: {e}"
+                "failure to receive response; long-running task died before it could respond: {e}"
             ))
         })?
     }
@@ -345,14 +377,14 @@ impl NodeSettings {
     }
 }
 
-pub fn generate_config_and_enable_svc(
+fn generate_config_and_enable_svc(
     generation_tx: watch::Sender<Option<Generation>>,
     clickward: Clickward,
     node_settings: NodeSettings,
 ) -> Result<GenerateConfigResult, HttpError> {
     let incoming_generation = node_settings.generation();
-    let generation_rx = generation_tx.subscribe();
-    let current_generation = *generation_rx.borrow();
+    //let generation_rx = generation_tx.subscribe();
+    let current_generation = *generation_tx.borrow();
 
     // If the incoming generation number is lower, then we have a problem.
     // We should return an error instead of silently skipping the configuration
@@ -371,24 +403,23 @@ pub fn generate_config_and_enable_svc(
         }
     };
 
-    let output = match node_settings {
-        NodeSettings::Replica { ref settings, .. } => {
+    let output = match &node_settings {
+        NodeSettings::Replica { settings, .. } => {
             GenerateConfigResult::Replica(
                 clickward.generate_server_config(settings)?,
             )
         }
-        NodeSettings::Keeper { ref settings, .. } => {
-            GenerateConfigResult::Keeper(
-                clickward.generate_keeper_config(settings)?,
-            )
-        }
+        NodeSettings::Keeper { settings, .. } => GenerateConfigResult::Keeper(
+            clickward.generate_keeper_config(settings)?,
+        ),
     };
 
     // We want to update the generation number only if the config file has been
     // generated successfully.
-    generation_tx.send(Some(incoming_generation)).map_err(|e| {
-        HttpError::for_internal_error(format!("failure to send request: {e}"))
-    })?;
+    generation_tx.send_replace(Some(incoming_generation));
+    //.map_err(|e| {
+    //    HttpError::for_internal_error(format!("failure to send request: {e}"))
+    //})?;
 
     // Once we have generated the client we can safely enable the clickhouse_server service
     Svcadm::enable_service(node_settings.fmri())?;
@@ -396,7 +427,38 @@ pub fn generate_config_and_enable_svc(
     Ok(output)
 }
 
-pub async fn init_db(
+async fn generate_config_request(
+    generate_config_tx: &Sender<GenerateConfigRequest>,
+    node_settings: NodeSettings,
+    clickward: Clickward,
+    log: Logger,
+) -> Result<GenerateConfigResult, HttpError> {
+    let (response_tx, response_rx) = oneshot::channel();
+    generate_config_tx
+        .try_send(GenerateConfigRequest::GenerateConfig {
+            clickward,
+            log,
+            node_settings,
+            response: response_tx,
+        })
+        .map_err(|e| match e {
+            TrySendError::Full(_) => HttpError::for_unavail(
+                None,
+                "channel full: another config request is still running"
+                    .to_string(),
+            ),
+            TrySendError::Disconnected(_) => HttpError::for_internal_error(
+                "long-running generate-config task died".to_string(),
+            ),
+        })?;
+    response_rx.await.map_err(|e| {
+            HttpError::for_internal_error(format!(
+                "failure to receive response; long-running task died before it could respond: {e}"
+            ))
+        })?
+}
+
+async fn init_db(
     clickhouse_address: SocketAddrV6,
     log: Logger,
     replicated: bool,
@@ -409,7 +471,8 @@ pub async fn init_db(
     // TODO: Migrate schema to newer version without wiping data.
     let version = client.read_latest_version().await.map_err(|e| {
         HttpError::for_internal_error(format!(
-            "can't read ClickHouse version: {e}",
+            "can't read ClickHouse version: {}",
+            InlineErrorChain::new(&e),
         ))
     })?;
     if version == 0 {
@@ -423,7 +486,8 @@ pub async fn init_db(
             .map_err(|e| {
             HttpError::for_internal_error(format!(
                 "can't initialize oximeter database \
-                     to version {OXIMETER_VERSION}: {e}",
+                     to version {OXIMETER_VERSION}: {}",
+                InlineErrorChain::new(&e),
             ))
         })?;
     } else {
@@ -443,7 +507,8 @@ fn read_generation_from_file(path: Utf8PathBuf) -> Result<Option<Generation>> {
         return Ok(None);
     }
 
-    let file = File::open(&path)?;
+    let file =
+        File::open(&path).with_context(|| format!("failed to open {path}"))?;
     let reader = BufReader::new(file);
     // We know the generation number is on the top of the file so we only
     // need the first line.
@@ -460,23 +525,32 @@ fn read_generation_from_file(path: Utf8PathBuf) -> Result<Option<Generation>> {
 
     let line_parts: Vec<&str> = first_line.rsplit(':').collect();
     if line_parts.len() != 2 {
-        bail!("first line of configuration file is malformed: {}", first_line);
+        bail!(
+            "first line of configuration file '{}' is malformed: {}",
+            path,
+            first_line
+        );
     }
 
     // It's safe to unwrap since we already know `line_parts` contains two items.
     let line_end_part: Vec<&str> =
         line_parts.first().unwrap().split_terminator(" -->").collect();
     if line_end_part.len() != 1 {
-        bail!("first line of configuration file is malformed: {}", first_line);
+        bail!(
+            "first line of configuration file '{}' is malformed: {}",
+            path,
+            first_line
+        );
     }
 
     // It's safe to unwrap since we already know `line_end_part` contains an item.
     let gen_u64: u64 = line_end_part.first().unwrap().parse().map_err(|e| {
         anyhow!(
             concat!(
-                "first line of configuration file is malformed: {}; ",
+                "first line of configuration file '{}' is malformed: {}; ",
                 "error = {}",
             ),
+            path,
             first_line,
             e
         )
