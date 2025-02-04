@@ -12,9 +12,8 @@ use clickhouse_admin_types::{
     CLICKHOUSE_KEEPER_CONFIG_FILE, CLICKHOUSE_SERVER_CONFIG_DIR,
     CLICKHOUSE_SERVER_CONFIG_FILE,
 };
-use dropshot::HttpError;
+use dropshot::{ClientErrorStatusCode, HttpError};
 use flume::{Receiver, Sender, TrySendError};
-use http::StatusCode;
 use illumos_utils::svcadm::Svcadm;
 use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use omicron_common::api::external::Generation;
@@ -340,7 +339,7 @@ fn generate_config_and_enable_svc(
         if current > incoming_generation {
             return Err(HttpError::for_client_error(
                 Some(String::from("Conflict")),
-                StatusCode::CONFLICT,
+                ClientErrorStatusCode::CONFLICT,
                 format!(
                     "current generation '{}' is greater than incoming generation '{}'",
                     current,
