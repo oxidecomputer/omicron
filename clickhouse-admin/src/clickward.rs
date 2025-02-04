@@ -3,7 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use clickhouse_admin_types::{
-    KeeperConfig, KeeperSettings, ReplicaConfig, ServerSettings,
+    KeeperConfig, KeeperConfigurableSettings, ReplicaConfig,
+    ServerConfigurableSettings,
 };
 use dropshot::HttpError;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
@@ -35,7 +36,7 @@ impl From<ClickwardError> for HttpError {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Clickward {}
 
 impl Clickward {
@@ -45,7 +46,7 @@ impl Clickward {
 
     pub fn generate_server_config(
         &self,
-        settings: ServerSettings,
+        settings: &ServerConfigurableSettings,
     ) -> Result<ReplicaConfig, ClickwardError> {
         let replica_config = settings
             .generate_xml_file()
@@ -56,7 +57,7 @@ impl Clickward {
 
     pub fn generate_keeper_config(
         &self,
-        settings: KeeperSettings,
+        settings: &KeeperConfigurableSettings,
     ) -> Result<KeeperConfig, ClickwardError> {
         let keeper_config = settings
             .generate_xml_file()

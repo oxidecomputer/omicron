@@ -31,6 +31,8 @@ pub enum StartError {
     RegisterDtraceProbes(String),
     #[error("failed to initialize HTTP server")]
     InitializeHttpServer(#[source] dropshot::BuildError),
+    #[error("failed to initialize context")]
+    InitializeContext(#[source] anyhow::Error),
 }
 
 /// Start the dropshot server for `clickhouse-admin-server` which
@@ -58,12 +60,8 @@ pub async fn start_server_admin_server(
         }
     }
 
-    let clickhouse_cli = ClickhouseCli::new(
-        binary_path,
-        listen_address,
-        log.new(slog::o!("component" => "ClickhouseCli")),
-    );
-    let context = ServerContext::new(clickhouse_cli);
+    let context = ServerContext::new(&log, binary_path, listen_address)
+        .map_err(StartError::InitializeContext)?;
     dropshot::ServerBuilder::new(
         http_entrypoints::clickhouse_admin_server_api(),
         Arc::new(context),
@@ -99,12 +97,8 @@ pub async fn start_keeper_admin_server(
         }
     }
 
-    let clickhouse_cli = ClickhouseCli::new(
-        binary_path,
-        listen_address,
-        log.new(slog::o!("component" => "ClickhouseCli")),
-    );
-    let context = KeeperServerContext::new(clickhouse_cli);
+    let context = KeeperServerContext::new(&log, binary_path, listen_address)
+        .map_err(StartError::InitializeContext)?;
     dropshot::ServerBuilder::new(
         http_entrypoints::clickhouse_admin_keeper_api(),
         Arc::new(context),
@@ -140,12 +134,8 @@ pub async fn start_single_admin_server(
         }
     }
 
-    let clickhouse_cli = ClickhouseCli::new(
-        binary_path,
-        listen_address,
-        log.new(slog::o!("component" => "ClickhouseCli")),
-    );
-    let context = ServerContext::new(clickhouse_cli);
+    let context = ServerContext::new(&log, binary_path, listen_address)
+        .map_err(StartError::InitializeContext)?;
     dropshot::ServerBuilder::new(
         http_entrypoints::clickhouse_admin_single_api(),
         Arc::new(context),
