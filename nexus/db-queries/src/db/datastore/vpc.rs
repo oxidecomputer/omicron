@@ -331,12 +331,11 @@ impl DataStore {
                 self.vpc_create_subnet_route(
                     opctx,
                     &authz_router,
-                    subnet,
+                    &subnet,
                     route_id,
                 )
                 .await
                 .map(|_| ())
-                .map_err(InsertVpcSubnetError::into_external)
                 .or_else(|e| match e {
                     Error::ObjectAlreadyExists { .. } => Ok(()),
                     _ => Err(e),
@@ -896,6 +895,22 @@ impl DataStore {
         db_subnet: &VpcSubnet,
         authz_subnet: &authz::VpcSubnet,
     ) -> DeleteResult {
+        let updated_rows =
+            self.vpc_delete_subnet_raw(opctx, db_subnet, authz_subnet).await?;
+        if updated_rows == 0 {
+            return Err(Error::invalid_request(
+                "deletion failed due to concurrent modification",
+            ));
+        }
+        Ok(())
+    }
+
+    pub async fn vpc_delete_subnet_raw(
+        &self,
+        opctx: &OpContext,
+        db_subnet: &VpcSubnet,
+        authz_subnet: &authz::VpcSubnet,
+    ) -> Result<usize, Error> {
         opctx.authorize(authz::Action::Delete, authz_subnet).await?;
 
         use db::schema::network_interface;
@@ -923,7 +938,7 @@ impl DataStore {
 
         // Delete the subnet, conditional on the rcgen not having changed.
         let now = Utc::now();
-        let updated_rows = diesel::update(dsl::vpc_subnet)
+        diesel::update(dsl::vpc_subnet)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_subnet.id()))
             .filter(dsl::rcgen.eq(db_subnet.rcgen))
@@ -935,13 +950,7 @@ impl DataStore {
                     e,
                     ErrorHandler::NotFoundByResource(authz_subnet),
                 )
-            })?;
-        if updated_rows == 0 {
-            return Err(Error::invalid_request(
-                "deletion failed due to concurrent modification",
-            ));
-        }
-        Ok(())
+            })
     }
 
     /// Insert the system route for a VPC Subnet.
@@ -949,9 +958,9 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_system_router: &authz::VpcRouter,
-        subnet: VpcSubnet,
+        subnet: &VpcSubnet,
         route_id: Uuid,
-    ) -> Result<(authz::RouterRoute, RouterRoute), InsertVpcSubnetError> {
+    ) -> CreateResult<(authz::RouterRoute, RouterRoute)> {
         let route = db::model::RouterRoute::new_subnet(
             route_id,
             authz_system_router.id(),
@@ -959,10 +968,8 @@ impl DataStore {
             subnet.id(),
         );
 
-        let route = self
-            .router_create_route(opctx, authz_system_router, route)
-            .await
-            .map_err(InsertVpcSubnetError::External)?;
+        let route =
+            self.router_create_route(opctx, authz_system_router, route).await?;
 
         Ok((
             authz::RouterRoute::new(
@@ -3362,6 +3369,8 @@ mod tests {
         (authz_project, authz_vpc, db_vpc, authz_router, db_router)
     }
 
+    /// Create a new subnet, while also doing the additional steps
+    /// covered by the subnet create saga.
     #[allow(clippy::too_many_arguments)]
     async fn new_subnet_ez(
         opctx: &OpContext,
@@ -3381,11 +3390,10 @@ mod tests {
             .map(|block| block.0)
             .unwrap();
 
-        datastore
+        let out = datastore
             .vpc_create_subnet(
                 &opctx,
                 authz_vpc,
-                authz_router,
                 db::model::VpcSubnet::new(
                     Uuid::new_v4(),
                     db_vpc.id(),
@@ -3397,10 +3405,45 @@ mod tests {
                         .unwrap(),
                     ipv6_block,
                 ),
-                None,
             )
             .await
-            .unwrap()
+            .unwrap();
+
+        datastore
+            .vpc_create_subnet_route(
+                &opctx,
+                authz_router,
+                &out.1,
+                Uuid::new_v4(),
+            )
+            .await
+            .unwrap();
+
+        datastore
+            .vpc_increment_rpw_version(&opctx, authz_vpc.id())
+            .await
+            .unwrap();
+
+        out
+    }
+
+    /// Remove an existing subnet, while also doing the additional steps
+    /// covered by the subnet delete saga.
+    async fn del_subnet_ez(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        authz_subnet: &authz::VpcSubnet,
+        db_subnet: &db::model::VpcSubnet,
+    ) {
+        datastore
+            .vpc_delete_subnet(opctx, db_subnet, authz_subnet)
+            .await
+            .unwrap();
+        datastore.vpc_delete_subnet_route(opctx, authz_subnet).await.unwrap();
+        datastore
+            .vpc_increment_rpw_version(&opctx, db_subnet.vpc_id)
+            .await
+            .unwrap();
     }
 
     // Test to verify that subnet CRUD operations are correctly
@@ -3494,7 +3537,7 @@ mod tests {
         .await;
 
         // Delete one, and routes should stay in sync.
-        datastore.vpc_delete_subnet(&opctx, &sub0, &authz_sub0).await.unwrap();
+        del_subnet_ez(&opctx, &datastore, &authz_sub0, &sub0).await;
 
         verify_all_subnet_routes_in_router(
             &opctx,

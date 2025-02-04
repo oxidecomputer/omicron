@@ -121,10 +121,8 @@ impl super::Nexus {
                 > self.tunables.max_vpc_ipv4_subnet_prefix
         {
             return Err(external::Error::invalid_request(&format!(
-                concat!(
-                    "VPC Subnet IPv4 address ranges must have prefix ",
-                    "length between {} and {}, inclusive"
-                ),
+                "VPC Subnet IPv4 address ranges must have prefix \
+                length between {} and {}, inclusive",
                 MIN_VPC_IPV4_SUBNET_PREFIX,
                 self.tunables.max_vpc_ipv4_subnet_prefix,
             )));

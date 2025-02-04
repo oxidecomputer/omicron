@@ -427,11 +427,15 @@ async fn svc_create_subnet_undo(
     let (authz_subnet, db_subnet) =
         sagactx.lookup::<(authz::VpcSubnet, db::model::VpcSubnet)>("subnet")?;
 
-    osagactx
+    let res = osagactx
         .datastore()
-        .vpc_delete_subnet(&opctx, &db_subnet, &authz_subnet)
-        .await?;
-    Ok(())
+        .vpc_delete_subnet_raw(&opctx, &db_subnet, &authz_subnet)
+        .await;
+
+    match res {
+        Ok(_) | Err(external::Error::ObjectNotFound { .. }) => Ok(()),
+        Err(e) => Err(e.into()),
+    }
 }
 
 async fn svc_create_subnet_route(
@@ -454,11 +458,11 @@ async fn svc_create_subnet_route(
         .vpc_create_subnet_route(
             &opctx,
             &authz_system_router,
-            db_subnet,
+            &db_subnet,
             route_id,
         )
         .await
-        .map_err(|e| ActionError::action_failed(e.into_external()))
+        .map_err(ActionError::action_failed)
         .map(|(auth, ..)| auth)
 }
 

@@ -5,10 +5,10 @@
 use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
-use super::SagaInitError;
 use super::ACTION_GENERATE_ID;
 use crate::app::sagas::declare_saga_actions;
 use crate::external_api::params;
+use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::queries::vpc_subnet::InsertVpcSubnetError;
 use nexus_db_queries::{authn, authz, db};
 use omicron_common::api::external;
@@ -48,36 +48,12 @@ declare_saga_actions! {
         + svsc_link_custom
         - svsc_link_custom_undo
     }
-    VPC_NOTIFY_RPW -> "no_result" {
+    VPC_NOTIFY_RPW -> "notified" {
         + svsc_notify_rpw
     }
 }
 
 // vpc subnet create saga: definition
-
-/// Identical to [SagaVpcSubnetCreate::make_saga_dag], but using types
-/// to identify that parameters do not need to be supplied as input.
-pub fn create_dag(
-    mut builder: steno::DagBuilder,
-) -> Result<steno::Dag, SagaInitError> {
-    builder.append(Node::action(
-        "subnet_id",
-        "GenerateVpcSubnetId",
-        ACTION_GENERATE_ID.as_ref(),
-    ));
-    builder.append(Node::action(
-        "route_id",
-        "GenerateRouteId",
-        ACTION_GENERATE_ID.as_ref(),
-    ));
-
-    builder.append(vpc_subnet_create_subnet_action());
-    builder.append(vpc_subnet_create_sys_route_action());
-    builder.append(vpc_subnet_create_link_custom_action());
-    builder.append(vpc_notify_rpw_action());
-
-    Ok(builder.build()?)
-}
 
 #[derive(Debug)]
 pub(crate) struct SagaVpcSubnetCreate;
@@ -91,9 +67,25 @@ impl NexusSaga for SagaVpcSubnetCreate {
 
     fn make_saga_dag(
         _params: &Self::Params,
-        builder: steno::DagBuilder,
+        mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
-        create_dag(builder)
+        builder.append(Node::action(
+            "subnet_id",
+            "GenerateVpcSubnetId",
+            ACTION_GENERATE_ID.as_ref(),
+        ));
+        builder.append(Node::action(
+            "route_id",
+            "GenerateRouteId",
+            ACTION_GENERATE_ID.as_ref(),
+        ));
+
+        builder.append(vpc_subnet_create_subnet_action());
+        builder.append(vpc_subnet_create_sys_route_action());
+        builder.append(vpc_subnet_create_link_custom_action());
+        builder.append(vpc_notify_rpw_action());
+
+        Ok(builder.build()?)
     }
 }
 
@@ -206,11 +198,15 @@ async fn svsc_create_subnet_undo(
     let (authz_subnet, db_subnet) =
         sagactx.lookup::<(authz::VpcSubnet, db::model::VpcSubnet)>("subnet")?;
 
-    osagactx
+    let res = osagactx
         .datastore()
-        .vpc_delete_subnet(&opctx, &db_subnet, &authz_subnet)
-        .await?;
-    Ok(())
+        .vpc_delete_subnet_raw(&opctx, &db_subnet, &authz_subnet)
+        .await;
+
+    match res {
+        Ok(_) | Err(external::Error::ObjectNotFound { .. }) => Ok(()),
+        Err(e) => Err(e.into()),
+    }
 }
 
 async fn svsc_create_route(
@@ -227,17 +223,28 @@ async fn svsc_create_route(
     let (.., db_subnet) =
         sagactx.lookup::<(authz::VpcSubnet, db::model::VpcSubnet)>("subnet")?;
 
-    osagactx
+    let out = osagactx
         .datastore()
         .vpc_create_subnet_route(
             &opctx,
             &params.authz_system_router,
-            db_subnet,
+            &db_subnet,
             route_id,
         )
-        .await
-        .map_err(|e| ActionError::action_failed(e.into_external()))
-        .map(|(auth, ..)| auth)
+        .await;
+
+    match out {
+        Ok((auth, ..)) => Ok(auth),
+        Err(external::Error::ObjectAlreadyExists { .. }) => {
+            LookupPath::new(&opctx, osagactx.datastore())
+                .router_route_id(route_id)
+                .lookup_for(authz::Action::Read)
+                .await
+                .map_err(ActionError::action_failed)
+                .map(|(.., v)| v)
+        }
+        Err(e) => Err(ActionError::action_failed(e)),
+    }
 }
 
 async fn svsc_create_route_undo(
@@ -252,9 +259,10 @@ async fn svsc_create_route_undo(
 
     let authz_route = sagactx.lookup::<authz::RouterRoute>("route")?;
 
-    osagactx.datastore().router_delete_route(&opctx, &authz_route).await?;
-
-    Ok(())
+    match osagactx.datastore().router_delete_route(&opctx, &authz_route).await {
+        Ok(_) | Err(external::Error::ObjectNotFound { .. }) => Ok(()),
+        Err(e) => Err(e.into()),
+    }
 }
 
 async fn svsc_link_custom(
@@ -293,10 +301,10 @@ async fn svsc_link_custom_undo(
         sagactx.lookup::<(authz::VpcSubnet, db::model::VpcSubnet)>("subnet")?;
 
     if params.custom_router.is_some() {
-        osagactx
+        let _ = osagactx
             .datastore()
             .vpc_subnet_unset_custom_router(&opctx, &authz_subnet)
-            .await?;
+            .await;
     }
 
     Ok(())
@@ -321,16 +329,18 @@ async fn svsc_notify_rpw(
 
 #[cfg(test)]
 pub(crate) mod test {
+    use crate::app::saga::create_saga_dag;
+    use crate::app::sagas::test_helpers;
     use crate::{
-        app::sagas::vpc_create::Params, app::sagas::vpc_create::SagaVpcCreate,
+        app::sagas::vpc_subnet_create::Params,
+        app::sagas::vpc_subnet_create::SagaVpcSubnetCreate,
         external_api::params,
     };
     use async_bb8_diesel::AsyncRunQueryDsl;
-    use diesel::{
-        ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
-    };
+    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::ClientTestContext;
-    use nexus_db_queries::db::fixed_data::vpc::SERVICES_INTERNET_GATEWAY_ID;
+    use nexus_db_model::RouterRouteKind;
+    use nexus_db_queries::db;
     use nexus_db_queries::{
         authn::saga::Serialized, authz, context::OpContext,
         db::datastore::DataStore, db::fixed_data::vpc::SERVICES_VPC_ID,
@@ -339,9 +349,11 @@ pub(crate) mod test {
     use nexus_test_utils::resource_helpers::create_default_ip_pool;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
-    use omicron_common::api::external::IdentityMetadataCreateParams;
-    use omicron_common::api::external::Name;
+    use nexus_types::external_api::params::VpcSelector;
     use omicron_common::api::external::NameOrId;
+    use omicron_common::api::external::{
+        self, IdentityMetadataCreateParams, Ipv6NetExt,
+    };
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -355,22 +367,34 @@ pub(crate) mod test {
         project.identity.id
     }
 
-    // Helper for creating VPC create parameters
+    // Helper for creating VPC subnet create parameters
     fn new_test_params(
         opctx: &OpContext,
-        authz_project: authz::Project,
+        authz_vpc: authz::Vpc,
+        db_vpc: db::model::Vpc,
+        authz_system_router: authz::VpcRouter,
     ) -> Params {
+        let ipv6_block = db_vpc
+            .ipv6_prefix
+            .random_subnet(oxnet::Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH)
+            .map(|block| block.0)
+            .unwrap();
+
         Params {
             serialized_authn: Serialized::for_opctx(opctx),
-            vpc_create: params::VpcCreate {
+            subnet_create: params::VpcSubnetCreate {
                 identity: IdentityMetadataCreateParams {
-                    name: "my-vpc".parse().unwrap(),
-                    description: "My VPC".to_string(),
+                    name: "my-subnet".parse().unwrap(),
+                    description: "My New Subnet.".to_string(),
                 },
-                ipv6_prefix: None,
-                dns_name: "abc".parse().unwrap(),
+                ipv4_block: "192.168.0.0/24".parse().unwrap(),
+                ipv6_block: None,
+                custom_router: None,
             },
-            authz_project,
+            ipv6_blocks: vec![ipv6_block],
+            authz_vpc,
+            authz_system_router,
+            custom_router: None,
         }
     }
 
@@ -381,218 +405,43 @@ pub(crate) mod test {
         )
     }
 
-    async fn get_authz_project(
+    async fn get_vpc_state(
         cptestctx: &ControlPlaneTestContext,
         project_id: Uuid,
-        action: authz::Action,
-    ) -> authz::Project {
+    ) -> (authz::Vpc, db::model::Vpc, authz::VpcRouter) {
         let nexus = &cptestctx.server.server_context().nexus;
-        let project_selector =
-            params::ProjectSelector { project: NameOrId::Id(project_id) };
         let opctx = test_opctx(&cptestctx);
-        let (.., authz_project) = nexus
-            .project_lookup(&opctx, project_selector)
-            .expect("Invalid parameters constructing project lookup")
-            .lookup_for(action)
-            .await
-            .expect("Project does not exist");
-        authz_project
-    }
-
-    async fn delete_project_vpc_defaults(
-        cptestctx: &ControlPlaneTestContext,
-        project_id: Uuid,
-    ) {
-        let opctx = test_opctx(&cptestctx);
-        let datastore = cptestctx.server.server_context().nexus.datastore();
-        let default_name = Name::try_from("default".to_string()).unwrap();
-        let system_name = Name::try_from("system".to_string()).unwrap();
-
-        // Default Subnet
-        let (.., authz_subnet, subnet) = LookupPath::new(&opctx, &datastore)
-            .project_id(project_id)
-            .vpc_name(&default_name.clone().into())
-            .vpc_subnet_name(&default_name.clone().into())
-            .fetch()
-            .await
-            .expect("Failed to fetch default Subnet");
-        datastore
-            .vpc_delete_subnet(&opctx, &subnet, &authz_subnet)
-            .await
-            .expect("Failed to delete default Subnet");
-
-        // Default gateway routes
-        let (.., authz_route, _route) = LookupPath::new(&opctx, &datastore)
-            .project_id(project_id)
-            .vpc_name(&default_name.clone().into())
-            .vpc_router_name(&system_name.clone().into())
-            .router_route_name(&"default-v4".parse::<Name>().unwrap().into())
-            .fetch()
-            .await
-            .expect("Failed to fetch default route");
-        datastore
-            .router_delete_route(&opctx, &authz_route)
-            .await
-            .expect("Failed to delete default route");
-
-        let (.., authz_route, _route) = LookupPath::new(&opctx, &datastore)
-            .project_id(project_id)
-            .vpc_name(&default_name.clone().into())
-            .vpc_router_name(&system_name.clone().into())
-            .router_route_name(&"default-v6".parse::<Name>().unwrap().into())
-            .fetch()
-            .await
-            .expect("Failed to fetch default route");
-        datastore
-            .router_delete_route(&opctx, &authz_route)
-            .await
-            .expect("Failed to delete default route");
-
-        // System router
-        let (.., authz_router, _router) = LookupPath::new(&opctx, &datastore)
-            .project_id(project_id)
-            .vpc_name(&default_name.clone().into())
-            .vpc_router_name(&system_name.into())
-            .fetch()
-            .await
-            .expect("Failed to fetch system router");
-        datastore
-            .vpc_delete_router(&opctx, &authz_router)
-            .await
-            .expect("Failed to delete system router");
-
-        // Default gateway
-        let (.., authz_vpc, authz_igw, _igw) =
-            LookupPath::new(&opctx, &datastore)
-                .project_id(project_id)
-                .vpc_name(&default_name.clone().into())
-                .internet_gateway_name(&default_name.clone().into())
-                .fetch()
-                .await
-                .expect("Failed to fetch default gateway");
-        datastore
-            .vpc_delete_internet_gateway(
+        let datastore = nexus.datastore();
+        let (.., authz_vpc, db_vpc) = nexus
+            .vpc_lookup(
                 &opctx,
-                &authz_igw,
-                authz_vpc.id(),
-                true,
+                VpcSelector {
+                    vpc: NameOrId::Name("default".parse().unwrap()),
+                    project: Some(project_id.into()),
+                },
             )
-            .await
-            .expect("Failed to delete default gateway");
-
-        // Default VPC & Firewall Rules
-        let (.., authz_vpc, vpc) = LookupPath::new(&opctx, &datastore)
-            .project_id(project_id)
-            .vpc_name(&default_name.into())
+            .unwrap()
             .fetch()
             .await
-            .expect("Failed to fetch default VPC");
-        datastore
-            .vpc_delete_all_firewall_rules(&opctx, &authz_vpc)
+            .unwrap();
+        let (.., authz_system_router) = LookupPath::new(&opctx, datastore)
+            .vpc_router_id(db_vpc.system_router_id)
+            .lookup_for(authz::Action::CreateChild)
             .await
-            .expect("Failed to delete all firewall rules for VPC");
-        datastore
-            .project_delete_vpc(&opctx, &vpc, &authz_vpc)
-            .await
-            .expect("Failed to delete VPC");
+            .unwrap();
+
+        (authz_vpc, db_vpc, authz_system_router)
     }
 
-    pub(crate) async fn verify_clean_slate(datastore: &DataStore) {
-        assert!(no_vpcs_exist(datastore).await);
-        assert!(no_routers_exist(datastore).await);
-        assert!(no_routes_exist(datastore).await);
-        assert!(no_subnets_exist(datastore).await);
-        assert!(no_gateways_exist(datastore).await);
-        assert!(no_gateway_links_exist(datastore).await);
-        assert!(no_firewall_rules_exist(datastore).await);
+    pub(crate) async fn verify_clean_slate(
+        datastore: &DataStore,
+        vpc_id: Uuid,
+    ) {
+        assert!(one_vpc_route_exists(datastore).await);
+        assert!(one_subnet_exists(datastore, vpc_id).await);
     }
 
-    async fn no_vpcs_exist(datastore: &DataStore) -> bool {
-        use nexus_db_queries::db::model::Vpc;
-        use nexus_db_queries::db::schema::vpc::dsl;
-
-        dsl::vpc
-            .filter(dsl::time_deleted.is_null())
-            // ignore built-in services VPC
-            .filter(dsl::id.ne(*SERVICES_VPC_ID))
-            .select(Vpc::as_select())
-            .first_async::<Vpc>(
-                &*datastore.pool_connection_for_tests().await.unwrap(),
-            )
-            .await
-            .optional()
-            .unwrap()
-            .map(|vpc| {
-                eprintln!("VPC exists: {vpc:?}");
-            })
-            .is_none()
-    }
-
-    async fn no_routers_exist(datastore: &DataStore) -> bool {
-        use nexus_db_queries::db::model::VpcRouter;
-        use nexus_db_queries::db::schema::vpc_router::dsl;
-
-        dsl::vpc_router
-            .filter(dsl::time_deleted.is_null())
-            // ignore built-in services VPC
-            .filter(dsl::vpc_id.ne(*SERVICES_VPC_ID))
-            .select(VpcRouter::as_select())
-            .first_async::<VpcRouter>(
-                &*datastore.pool_connection_for_tests().await.unwrap(),
-            )
-            .await
-            .optional()
-            .unwrap()
-            .map(|router| {
-                eprintln!("Router exists: {router:?}");
-            })
-            .is_none()
-    }
-
-    async fn no_gateways_exist(datastore: &DataStore) -> bool {
-        use nexus_db_queries::db::model::InternetGateway;
-        use nexus_db_queries::db::schema::internet_gateway::dsl;
-
-        dsl::internet_gateway
-            .filter(dsl::time_deleted.is_null())
-            // ignore built-in services VPC
-            .filter(dsl::vpc_id.ne(*SERVICES_VPC_ID))
-            .select(InternetGateway::as_select())
-            .first_async::<InternetGateway>(
-                &*datastore.pool_connection_for_tests().await.unwrap(),
-            )
-            .await
-            .optional()
-            .unwrap()
-            .map(|igw| {
-                eprintln!("Internet gateway exists: {igw:?}");
-            })
-            .is_none()
-    }
-
-    async fn no_gateway_links_exist(datastore: &DataStore) -> bool {
-        use nexus_db_queries::db::model::InternetGatewayIpPool;
-        use nexus_db_queries::db::schema::internet_gateway_ip_pool::dsl;
-
-        dsl::internet_gateway_ip_pool
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::internet_gateway_id.ne(*SERVICES_INTERNET_GATEWAY_ID))
-            .select(InternetGatewayIpPool::as_select())
-            .first_async::<InternetGatewayIpPool>(
-                &*datastore.pool_connection_for_tests().await.unwrap(),
-            )
-            .await
-            .optional()
-            .unwrap()
-            .map(|igw_ip_pool| {
-                eprintln!(
-                    "Internet gateway ip pool links exists: {igw_ip_pool:?}"
-                );
-            })
-            .is_none()
-    }
-
-    async fn no_routes_exist(datastore: &DataStore) -> bool {
+    async fn one_vpc_route_exists(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::RouterRoute;
         use nexus_db_queries::db::schema::router_route::dsl;
         use nexus_db_queries::db::schema::vpc_router::dsl as vpc_router_dsl;
@@ -608,59 +457,31 @@ pub(crate) mod test {
                         .filter(vpc_router_dsl::time_deleted.is_null()),
                 ),
             )
-            .select(RouterRoute::as_select())
-            .first_async::<RouterRoute>(
-                &*datastore.pool_connection_for_tests().await.unwrap(),
+            .filter(
+                dsl::kind
+                    .eq(RouterRouteKind(external::RouterRouteKind::VpcSubnet)),
             )
+            .select(RouterRoute::as_select())
+            .load_async(&*datastore.pool_connection_for_tests().await.unwrap())
             .await
-            .optional()
             .unwrap()
-            .map(|route| {
-                eprintln!("Route exists: {route:?}");
-            })
-            .is_none()
+            .len()
+            == 1
     }
 
-    async fn no_subnets_exist(datastore: &DataStore) -> bool {
+    async fn one_subnet_exists(datastore: &DataStore, vpc_id: Uuid) -> bool {
         use nexus_db_queries::db::model::VpcSubnet;
         use nexus_db_queries::db::schema::vpc_subnet::dsl;
 
         dsl::vpc_subnet
             .filter(dsl::time_deleted.is_null())
-            // ignore built-in services VPC
-            .filter(dsl::vpc_id.ne(*SERVICES_VPC_ID))
+            .filter(dsl::vpc_id.eq(vpc_id))
             .select(VpcSubnet::as_select())
-            .first_async::<VpcSubnet>(
-                &*datastore.pool_connection_for_tests().await.unwrap(),
-            )
+            .load_async(&*datastore.pool_connection_for_tests().await.unwrap())
             .await
-            .optional()
             .unwrap()
-            .map(|subnet| {
-                eprintln!("Subnet exists: {subnet:?}");
-            })
-            .is_none()
-    }
-
-    async fn no_firewall_rules_exist(datastore: &DataStore) -> bool {
-        use nexus_db_queries::db::model::VpcFirewallRule;
-        use nexus_db_queries::db::schema::vpc_firewall_rule::dsl;
-
-        dsl::vpc_firewall_rule
-            .filter(dsl::time_deleted.is_null())
-            // ignore built-in services VPC
-            .filter(dsl::vpc_id.ne(*SERVICES_VPC_ID))
-            .select(VpcFirewallRule::as_select())
-            .first_async::<VpcFirewallRule>(
-                &*datastore.pool_connection_for_tests().await.unwrap(),
-            )
-            .await
-            .optional()
-            .unwrap()
-            .map(|rule| {
-                eprintln!("Firewall rule exists: {rule:?}");
-            })
-            .is_none()
+            .len()
+            == 1
     }
 
     #[nexus_test(server = crate::Server)]
@@ -670,21 +491,14 @@ pub(crate) mod test {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let project_id = create_org_and_project(&client).await;
-        delete_project_vpc_defaults(&cptestctx, project_id).await;
-
-        // Before running the test, confirm we have no records of any VPCs.
-        verify_clean_slate(nexus.datastore()).await;
-
-        // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);
-        let authz_project = get_authz_project(
-            &cptestctx,
-            project_id,
-            authz::Action::CreateChild,
-        )
-        .await;
-        let params = new_test_params(&opctx, authz_project);
-        nexus.sagas.saga_execute::<SagaVpcCreate>(params).await.unwrap();
+
+        let (authz_vpc, db_vpc, authz_system_router) =
+            get_vpc_state(&cptestctx, project_id).await;
+        verify_clean_slate(nexus.datastore(), authz_vpc.id()).await;
+        let params =
+            new_test_params(&opctx, authz_vpc, db_vpc, authz_system_router);
+        nexus.sagas.saga_execute::<SagaVpcSubnetCreate>(params).await.unwrap();
     }
 
     #[nexus_test(server = crate::Server)]
@@ -696,35 +510,90 @@ pub(crate) mod test {
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.server_context().nexus;
         let project_id = create_org_and_project(&client).await;
-        delete_project_vpc_defaults(&cptestctx, project_id).await;
+        let (authz_vpc, ..) = get_vpc_state(&cptestctx, project_id).await;
+        let vpc_id = authz_vpc.id();
 
         let opctx = test_opctx(&cptestctx);
-        crate::app::sagas::test_helpers::action_failure_can_unwind::<
-            SagaVpcCreate,
+        test_helpers::action_failure_can_unwind::<SagaVpcSubnetCreate, _, _>(
+            nexus,
+            || {
+                Box::pin(async {
+                    let (authz_vpc, db_vpc, authz_system_router) =
+                        get_vpc_state(&cptestctx, project_id).await;
+                    new_test_params(
+                        &opctx,
+                        authz_vpc,
+                        db_vpc,
+                        authz_system_router,
+                    )
+                })
+            },
+            || {
+                Box::pin(async {
+                    verify_clean_slate(nexus.datastore(), vpc_id).await;
+                })
+            },
+            log,
+        )
+        .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_action_failure_can_unwind_idempotently(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let log = &cptestctx.logctx.log;
+
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let project_id = create_org_and_project(&client).await;
+        let (authz_vpc, ..) = get_vpc_state(&cptestctx, project_id).await;
+        let vpc_id = authz_vpc.id();
+
+        let opctx = test_opctx(&cptestctx);
+        test_helpers::action_failure_can_unwind_idempotently::<
+            SagaVpcSubnetCreate,
             _,
             _,
         >(
             nexus,
             || {
                 Box::pin(async {
+                    let (authz_vpc, db_vpc, authz_system_router) =
+                        get_vpc_state(&cptestctx, project_id).await;
                     new_test_params(
                         &opctx,
-                        get_authz_project(
-                            &cptestctx,
-                            project_id,
-                            authz::Action::CreateChild,
-                        )
-                        .await,
+                        authz_vpc,
+                        db_vpc,
+                        authz_system_router,
                     )
                 })
             },
             || {
                 Box::pin(async {
-                    verify_clean_slate(nexus.datastore()).await;
+                    verify_clean_slate(nexus.datastore(), vpc_id).await;
                 })
             },
             log,
         )
         .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_actions_succeed_idempotently(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let project_id = create_org_and_project(&client).await;
+        let opctx = test_opctx(&cptestctx);
+
+        let (authz_vpc, db_vpc, authz_system_router) =
+            get_vpc_state(&cptestctx, project_id).await;
+        verify_clean_slate(nexus.datastore(), authz_vpc.id()).await;
+        let params =
+            new_test_params(&opctx, authz_vpc, db_vpc, authz_system_router);
+        let dag = create_saga_dag::<SagaVpcSubnetCreate>(params).unwrap();
+        test_helpers::actions_succeed_idempotently(nexus, dag).await;
     }
 }
