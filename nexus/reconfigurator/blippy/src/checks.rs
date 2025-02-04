@@ -1871,7 +1871,7 @@ mod tests {
 
         // remove sled 1 from blueprint_disks and blueprint_datasets; we
         // shouldn't need to use a second sled ID here, but for now we only
-        // expecte disks/datasets entries for active sleds, so blippy only
+        // expect disks/datasets entries for active sleds, so blippy only
         // checks disks/datasets if the sled is in `sled_state`
         blueprint
             .blueprint_disks
