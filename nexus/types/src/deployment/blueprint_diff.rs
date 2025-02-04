@@ -28,10 +28,8 @@ use std::fmt;
 
 use crate::deployment::blueprint_display::BpClickhouseKeepersTableSchema;
 use crate::deployment::{
-    Blueprint, BlueprintDatasetConfig, BlueprintDatasetsConfig,
-    BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
-    BlueprintZoneDisposition, BlueprintZonesConfig,
-    CollectionDatasetIdentifier, ZoneSortKey,
+    Blueprint, BlueprintDatasetConfig, BlueprintZoneConfig,
+    BlueprintZoneDisposition, CollectionDatasetIdentifier, ZoneSortKey,
 };
 
 // A wrapper type around a `daft` generated `BlueprintDiff that provides summary
@@ -287,22 +285,6 @@ impl<'a> BlueprintDiffSummary<'a> {
             .fold(0, |acc, c| acc + c.datasets.modified.len())
     }
 
-    /// Return the `BlueprintZonesConfig` for a newly added sled
-    pub fn zones_on_added_sled(
-        &self,
-        sled_id: &SledUuid,
-    ) -> Option<&'a BlueprintZonesConfig> {
-        self.diff.blueprint_zones.added.get(sled_id).cloned()
-    }
-
-    /// Return the `BlueprintZonesConfig` for a removed sled
-    pub fn zones_on_removed_sled(
-        &self,
-        sled_id: &SledUuid,
-    ) -> Option<&'a BlueprintZonesConfig> {
-        self.diff.blueprint_zones.removed.get(sled_id).cloned()
-    }
-
     /// Return the `BlueprintZonesConfigDiff` for a modified sled
     pub fn zones_on_modified_sled(
         &self,
@@ -311,44 +293,12 @@ impl<'a> BlueprintDiffSummary<'a> {
         self.diff.blueprint_zones.modified.get(sled_id)
     }
 
-    /// Return the `BlueprintDisksConfig` for a newly added sled
-    pub fn disks_on_added_sled(
-        &self,
-        sled_id: &SledUuid,
-    ) -> Option<&'a BlueprintPhysicalDisksConfig> {
-        self.diff.blueprint_disks.added.get(sled_id).cloned()
-    }
-
-    /// Return the `BlueprintDisksConfig` for a removed sled
-    pub fn disks_on_removed_sled(
-        &self,
-        sled_id: &SledUuid,
-    ) -> Option<&'a BlueprintPhysicalDisksConfig> {
-        self.diff.blueprint_disks.removed.get(sled_id).cloned()
-    }
-
     /// Return the `BlueprintDisksConfigDiff` for a modified sled
     pub fn disks_on_modified_sled(
         &self,
         sled_id: &SledUuid,
     ) -> Option<&'a BlueprintPhysicalDisksConfigDiff> {
         self.diff.blueprint_disks.modified.get(sled_id)
-    }
-
-    /// Return the `BlueprintDatasetsConfig` for a newly added sled
-    pub fn datasets_on_added_sled(
-        &self,
-        sled_id: &SledUuid,
-    ) -> Option<&'a BlueprintDatasetsConfig> {
-        self.diff.blueprint_datasets.added.get(sled_id).cloned()
-    }
-
-    /// Return the `BlueprintDatasetsConfig` for a removed sled
-    pub fn datasets_on_removed_sled(
-        &self,
-        sled_id: &SledUuid,
-    ) -> Option<&'a BlueprintDatasetsConfig> {
-        self.diff.blueprint_datasets.removed.get(sled_id).cloned()
     }
 
     /// Return the `BlueprintDatasetsConfigDiff` for a modified sled
@@ -363,6 +313,9 @@ impl<'a> BlueprintDiffSummary<'a> {
     pub fn added_zones(&self, sled_id: &SledUuid) -> Option<BpDiffZoneDetails> {
         // First check if the sled is added
         if let Some(&zones_cfg) = self.diff.blueprint_zones.added.get(sled_id) {
+            if zones_cfg.zones.is_empty() {
+                return None;
+            }
             return Some(BpDiffZoneDetails::new(
                 None,
                 Some(zones_cfg.generation),
@@ -371,13 +324,15 @@ impl<'a> BlueprintDiffSummary<'a> {
         }
 
         // Then check if the sled is modified and there are any added zones
-        self.diff.blueprint_zones.modified.get(sled_id).map(|zones_cfg_diff| {
-            BpDiffZoneDetails::new(
-                Some(*zones_cfg_diff.generation.before),
-                Some(*zones_cfg_diff.generation.after),
-                zones_cfg_diff.zones.added.values().map(|z| *z),
-            )
-        })
+        let zones_cfg_diff = self.diff.blueprint_zones.modified.get(sled_id)?;
+        if zones_cfg_diff.zones.added.is_empty() {
+            return None;
+        }
+        Some(BpDiffZoneDetails::new(
+            Some(*zones_cfg_diff.generation.before),
+            Some(*zones_cfg_diff.generation.after),
+            zones_cfg_diff.zones.added.values().map(|z| *z),
+        ))
     }
 
     /// Iterate over all removed zones on a sled
@@ -388,6 +343,9 @@ impl<'a> BlueprintDiffSummary<'a> {
         // First check if the sled is removed
         if let Some(&zones_cfg) = self.diff.blueprint_zones.removed.get(sled_id)
         {
+            if zones_cfg.zones.is_empty() {
+                return None;
+            }
             return Some(BpDiffZoneDetails::new(
                 Some(zones_cfg.generation),
                 None,
@@ -396,13 +354,15 @@ impl<'a> BlueprintDiffSummary<'a> {
         }
 
         // Then check if the sled is modified and there are any removed zones
-        self.diff.blueprint_zones.modified.get(sled_id).map(|zones_cfg_diff| {
-            BpDiffZoneDetails::new(
-                Some(*zones_cfg_diff.generation.before),
-                Some(*zones_cfg_diff.generation.after),
-                zones_cfg_diff.zones.removed.values().map(|z| *z),
-            )
-        })
+        let zones_cfg_diff = self.diff.blueprint_zones.modified.get(sled_id)?;
+        if zones_cfg_diff.zones.removed.is_empty() {
+            return None;
+        }
+        Some(BpDiffZoneDetails::new(
+            Some(*zones_cfg_diff.generation.before),
+            Some(*zones_cfg_diff.generation.after),
+            zones_cfg_diff.zones.removed.values().map(|z| *z),
+        ))
     }
 
     /// Iterate over all modified zones on a sled
@@ -410,14 +370,16 @@ impl<'a> BlueprintDiffSummary<'a> {
         &'a self,
         sled_id: &SledUuid,
     ) -> Option<(BpDiffZonesModified, BpDiffZoneErrors)> {
-        // Then check if the sled is modified and there are any added zones
-        self.diff.blueprint_zones.modified.get(sled_id).map(|zones_cfg_diff| {
-            BpDiffZonesModified::new(
-                *zones_cfg_diff.generation.before,
-                *zones_cfg_diff.generation.after,
-                zones_cfg_diff.zones.modified.values(),
-            )
-        })
+        // Then check if the sled is modified and there are any modified zones
+        let zones_cfg_diff = self.diff.blueprint_zones.modified.get(sled_id)?;
+        if zones_cfg_diff.zones.modified.is_empty() {
+            return None;
+        }
+        Some(BpDiffZonesModified::new(
+            *zones_cfg_diff.generation.before,
+            *zones_cfg_diff.generation.after,
+            zones_cfg_diff.zones.modified.values(),
+        ))
     }
 
     /// Iterate over all unchanged zones on a sled
@@ -429,6 +391,9 @@ impl<'a> BlueprintDiffSummary<'a> {
         if let Some(&zones_cfg) =
             self.diff.blueprint_zones.unchanged.get(sled_id)
         {
+            if zones_cfg.zones.is_empty() {
+                return None;
+            }
             return Some(BpDiffZoneDetails::new(
                 None,
                 Some(zones_cfg.generation),
@@ -437,13 +402,15 @@ impl<'a> BlueprintDiffSummary<'a> {
         }
 
         // Then check if the sled is modified and there are any unchanged zones
-        self.diff.blueprint_zones.modified.get(sled_id).map(|zones_cfg_diff| {
-            BpDiffZoneDetails::new(
-                Some(*zones_cfg_diff.generation.before),
-                Some(*zones_cfg_diff.generation.after),
-                zones_cfg_diff.zones.unchanged.values().map(|z| *z),
-            )
-        })
+        let zones_cfg_diff = self.diff.blueprint_zones.modified.get(sled_id)?;
+        if zones_cfg_diff.zones.unchanged.is_empty() {
+            return None;
+        }
+        Some(BpDiffZoneDetails::new(
+            Some(*zones_cfg_diff.generation.before),
+            Some(*zones_cfg_diff.generation.after),
+            zones_cfg_diff.zones.unchanged.values().map(|z| *z),
+        ))
     }
 
     /// Iterate over all added disks on a sled
@@ -453,6 +420,9 @@ impl<'a> BlueprintDiffSummary<'a> {
     ) -> Option<DiffPhysicalDisksDetails> {
         // First check if the sled is added
         if let Some(&disks_cfg) = self.diff.blueprint_disks.added.get(sled_id) {
+            if disks_cfg.disks.is_empty() {
+                return None;
+            }
             return Some(DiffPhysicalDisksDetails::new(
                 None,
                 Some(disks_cfg.generation),
@@ -460,14 +430,16 @@ impl<'a> BlueprintDiffSummary<'a> {
             ));
         }
 
-        // Then check if the sled is modified and there are any removed disks
-        self.diff.blueprint_disks.modified.get(sled_id).map(|disks_cfg_diff| {
-            DiffPhysicalDisksDetails::new(
-                Some(*disks_cfg_diff.generation.before),
-                Some(*disks_cfg_diff.generation.after),
-                disks_cfg_diff.disks.added.values().map(|z| *z),
-            )
-        })
+        // Then check if the sled is modified and there are any added disks
+        let disks_cfg_diff = self.diff.blueprint_disks.modified.get(sled_id)?;
+        if disks_cfg_diff.disks.added.is_empty() {
+            return None;
+        }
+        Some(DiffPhysicalDisksDetails::new(
+            Some(*disks_cfg_diff.generation.before),
+            Some(*disks_cfg_diff.generation.after),
+            disks_cfg_diff.disks.added.values().map(|z| *z),
+        ))
     }
 
     /// Iterate over all removed disks on a sled
@@ -478,6 +450,9 @@ impl<'a> BlueprintDiffSummary<'a> {
         // First check if the sled is removed
         if let Some(&disks_cfg) = self.diff.blueprint_disks.removed.get(sled_id)
         {
+            if disks_cfg.disks.is_empty() {
+                return None;
+            }
             return Some(DiffPhysicalDisksDetails::new(
                 Some(disks_cfg.generation),
                 None,
@@ -486,13 +461,15 @@ impl<'a> BlueprintDiffSummary<'a> {
         }
 
         // Then check if the sled is modified and there are any removed disks
-        self.diff.blueprint_disks.modified.get(sled_id).map(|disks_cfg_diff| {
-            DiffPhysicalDisksDetails::new(
-                Some(*disks_cfg_diff.generation.before),
-                Some(*disks_cfg_diff.generation.after),
-                disks_cfg_diff.disks.removed.values().map(|z| *z),
-            )
-        })
+        let disks_cfg_diff = self.diff.blueprint_disks.modified.get(sled_id)?;
+        if disks_cfg_diff.disks.removed.is_empty() {
+            return None;
+        }
+        Some(DiffPhysicalDisksDetails::new(
+            Some(*disks_cfg_diff.generation.before),
+            Some(*disks_cfg_diff.generation.after),
+            disks_cfg_diff.disks.removed.values().map(|z| *z),
+        ))
     }
 
     /// Iterate over all unchanged disks on a sled
@@ -504,6 +481,9 @@ impl<'a> BlueprintDiffSummary<'a> {
         if let Some(&disks_cfg) =
             self.diff.blueprint_disks.unchanged.get(sled_id)
         {
+            if disks_cfg.disks.is_empty() {
+                return None;
+            }
             return Some(DiffPhysicalDisksDetails::new(
                 None,
                 Some(disks_cfg.generation),
@@ -512,13 +492,15 @@ impl<'a> BlueprintDiffSummary<'a> {
         }
 
         // Then check if the sled is modified and there are any unchanged disks
-        self.diff.blueprint_disks.modified.get(sled_id).map(|disks_cfg_diff| {
-            DiffPhysicalDisksDetails::new(
-                Some(*disks_cfg_diff.generation.before),
-                Some(*disks_cfg_diff.generation.after),
-                disks_cfg_diff.disks.unchanged.values().map(|z| *z),
-            )
-        })
+        let disks_cfg_diff = self.diff.blueprint_disks.modified.get(sled_id)?;
+        if disks_cfg_diff.disks.unchanged.is_empty() {
+            return None;
+        }
+        Some(DiffPhysicalDisksDetails::new(
+            Some(*disks_cfg_diff.generation.before),
+            Some(*disks_cfg_diff.generation.after),
+            disks_cfg_diff.disks.unchanged.values().map(|z| *z),
+        ))
     }
 
     /// Iterate over all added datasets on a sled
@@ -530,6 +512,9 @@ impl<'a> BlueprintDiffSummary<'a> {
         if let Some(&datasets_cfg) =
             self.diff.blueprint_datasets.added.get(sled_id)
         {
+            if datasets_cfg.datasets.is_empty() {
+                return None;
+            }
             return Some(DiffDatasetsDetails::new(
                 None,
                 Some(datasets_cfg.generation),
@@ -537,16 +522,17 @@ impl<'a> BlueprintDiffSummary<'a> {
             ));
         }
 
-        // Then check if the sled is modified and there are any removed datasets
-        self.diff.blueprint_datasets.modified.get(sled_id).map(
-            |datasets_cfg_diff| {
-                DiffDatasetsDetails::new(
-                    Some(*datasets_cfg_diff.generation.before),
-                    Some(*datasets_cfg_diff.generation.after),
-                    datasets_cfg_diff.datasets.added.values().map(|z| *z),
-                )
-            },
-        )
+        // Then check if the sled is modified and there are any added datasets
+        let datasets_cfg_diff =
+            self.diff.blueprint_datasets.modified.get(sled_id)?;
+        if datasets_cfg_diff.datasets.added.is_empty() {
+            return None;
+        }
+        Some(DiffDatasetsDetails::new(
+            Some(*datasets_cfg_diff.generation.before),
+            Some(*datasets_cfg_diff.generation.after),
+            datasets_cfg_diff.datasets.added.values().map(|z| *z),
+        ))
     }
 
     /// Iterate over all removed datasets on a sled
@@ -558,6 +544,9 @@ impl<'a> BlueprintDiffSummary<'a> {
         if let Some(&datasets_cfg) =
             self.diff.blueprint_datasets.removed.get(sled_id)
         {
+            if datasets_cfg.datasets.is_empty() {
+                return None;
+            }
             return Some(DiffDatasetsDetails::new(
                 Some(datasets_cfg.generation),
                 None,
@@ -566,15 +555,16 @@ impl<'a> BlueprintDiffSummary<'a> {
         }
 
         // Then check if the sled is modified and there are any removed datasets
-        self.diff.blueprint_datasets.modified.get(sled_id).map(
-            |datasets_cfg_diff| {
-                DiffDatasetsDetails::new(
-                    Some(*datasets_cfg_diff.generation.before),
-                    Some(*datasets_cfg_diff.generation.after),
-                    datasets_cfg_diff.datasets.removed.values().map(|z| *z),
-                )
-            },
-        )
+        let datasets_cfg_diff =
+            self.diff.blueprint_datasets.modified.get(sled_id)?;
+        if datasets_cfg_diff.datasets.removed.is_empty() {
+            return None;
+        }
+        Some(DiffDatasetsDetails::new(
+            Some(*datasets_cfg_diff.generation.before),
+            Some(*datasets_cfg_diff.generation.after),
+            datasets_cfg_diff.datasets.removed.values().map(|z| *z),
+        ))
     }
 
     /// Iterate over all unchanged datasets on a sled
@@ -586,6 +576,9 @@ impl<'a> BlueprintDiffSummary<'a> {
         if let Some(&datasets_cfg) =
             self.diff.blueprint_datasets.unchanged.get(sled_id)
         {
+            if datasets_cfg.datasets.is_empty() {
+                return None;
+            }
             return Some(DiffDatasetsDetails::new(
                 None,
                 Some(datasets_cfg.generation),
@@ -594,15 +587,16 @@ impl<'a> BlueprintDiffSummary<'a> {
         }
 
         // Then check if the sled is modified and there are any unchanged datasets
-        self.diff.blueprint_datasets.modified.get(sled_id).map(
-            |datasets_cfg_diff| {
-                DiffDatasetsDetails::new(
-                    Some(*datasets_cfg_diff.generation.before),
-                    Some(*datasets_cfg_diff.generation.after),
-                    datasets_cfg_diff.datasets.unchanged.values().map(|z| *z),
-                )
-            },
-        )
+        let datasets_cfg_diff =
+            self.diff.blueprint_datasets.modified.get(sled_id)?;
+        if datasets_cfg_diff.datasets.unchanged.is_empty() {
+            return None;
+        }
+        Some(DiffDatasetsDetails::new(
+            Some(*datasets_cfg_diff.generation.before),
+            Some(*datasets_cfg_diff.generation.after),
+            datasets_cfg_diff.datasets.unchanged.values().map(|z| *z),
+        ))
     }
 
     /// Iterate over all modified datasets on a sled
@@ -610,20 +604,20 @@ impl<'a> BlueprintDiffSummary<'a> {
         &'a self,
         sled_id: &SledUuid,
     ) -> Option<BpDiffDatasetsModified<'a>> {
-        // Then check if the sled is modified and there are any added datasets
-        self.diff.blueprint_datasets.modified.get(sled_id).map(
-            |datasets_cfg_diff| {
-                let mut datasets: Vec<_> =
-                    datasets_cfg_diff.datasets.modified.values().collect();
-                datasets
-                    .sort_unstable_by_key(|d| (d.kind.before, d.pool.before));
-                BpDiffDatasetsModified {
-                    generation_before: *datasets_cfg_diff.generation.before,
-                    generation_after: *datasets_cfg_diff.generation.after,
-                    datasets,
-                }
-            },
-        )
+        // Check if the sled is modified and there are any modified datasets
+        let datasets_cfg_diff =
+            self.diff.blueprint_datasets.modified.get(sled_id)?;
+        if datasets_cfg_diff.datasets.modified.is_empty() {
+            return None;
+        }
+        let mut datasets: Vec<_> =
+            datasets_cfg_diff.datasets.modified.values().collect();
+        datasets.sort_unstable_by_key(|d| (d.kind.before, d.pool.before));
+        Some(BpDiffDatasetsModified {
+            generation_before: *datasets_cfg_diff.generation.before,
+            generation_after: *datasets_cfg_diff.generation.after,
+            datasets,
+        })
     }
 }
 
@@ -738,51 +732,6 @@ impl ModifiedZone {
             Err(BpDiffZoneError {
                 zone_before_id: *diff.id.before,
                 zone_after_id: *diff.id.after,
-                reason,
-            })
-        }
-    }
-
-    // TODO: Legacy - remove
-    #[allow(clippy::result_large_err)]
-    pub fn new(
-        before: BlueprintZoneConfig,
-        after: BlueprintZoneConfig,
-    ) -> Result<ModifiedZone, BpDiffZoneError> {
-        // Do we have any errors? If so, create a "reason" string.
-        let mut reason = String::new();
-        if before.kind() != after.kind() {
-            let msg = format!(
-                "mismatched zone kind: before: {}, after: {}\n",
-                before.kind().report_str(),
-                after.kind().report_str(),
-            );
-            reason.push_str(&msg);
-        }
-        if before.underlay_ip() != after.underlay_ip() {
-            let msg = format!(
-                "mismatched underlay IP: before: {}, after: {}\n",
-                before.underlay_ip(),
-                after.underlay_ip()
-            );
-            reason.push_str(&msg);
-        }
-        if before.zone_type != after.zone_type {
-            let msg = format!(
-                "mismatched zone type: after: {:#?}\n",
-                after.zone_type
-            );
-            reason.push_str(&msg);
-        }
-        if reason.is_empty() {
-            Ok(ModifiedZone {
-                prior_disposition: before.disposition,
-                zone: after,
-            })
-        } else {
-            Err(BpDiffZoneError {
-                zone_before_id: before.id,
-                zone_after_id: after.id,
                 reason,
             })
         }
@@ -1129,11 +1078,7 @@ impl BpTableData for BpDiffDatasetsModified<'_> {
                 dataset.kind.after.clone(),
             )
             .full_name();
-            if before == after {
-                columns.push(BpTableColumn::Value(before))
-            } else {
-                columns.push(BpTableColumn::diff(before, after));
-            }
+            columns.push(BpTableColumn::new(before, after));
 
             // IDs don't change
             columns.push(BpTableColumn::Value(dataset.id.before.to_string()));
@@ -1141,29 +1086,17 @@ impl BpTableData for BpDiffDatasetsModified<'_> {
             // Quota
             let before = unwrap_or_none(dataset.quota.before);
             let after = unwrap_or_none(dataset.quota.after);
-            if before == after {
-                columns.push(BpTableColumn::Value(before));
-            } else {
-                columns.push(BpTableColumn::Diff { before, after });
-            }
+            columns.push(BpTableColumn::new(before, after));
 
             // Reservation
             let before = unwrap_or_none(dataset.reservation.before);
             let after = unwrap_or_none(dataset.reservation.after);
-            if before == after {
-                columns.push(BpTableColumn::Value(before));
-            } else {
-                columns.push(BpTableColumn::Diff { before, after });
-            }
+            columns.push(BpTableColumn::new(before, after));
 
             // Compression
             let before = dataset.compression.before.to_string();
             let after = dataset.compression.after.to_string();
-            if before == after {
-                columns.push(BpTableColumn::Value(before));
-            } else {
-                columns.push(BpTableColumn::Diff { before, after });
-            }
+            columns.push(BpTableColumn::new(before, after));
 
             BpTableRow::new(state, columns)
         })
@@ -1437,12 +1370,8 @@ impl ClickhouseClusterConfigDiffTables {
                 BpTableRow::new(
                     BpDiffState::Added,
                     vec![
-                        BpTableColumn::CollectionNotPresentDiff {
-                            after: zone_id.to_string(),
-                        },
-                        BpTableColumn::CollectionNotPresentDiff {
-                            after: server_id.to_string(),
-                        },
+                        BpTableColumn::Value(zone_id.to_string()),
+                        BpTableColumn::Value(server_id.to_string()),
                     ],
                 )
             })

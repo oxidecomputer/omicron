@@ -139,8 +139,6 @@ pub use blueprint_diff::BlueprintDiffSummary;
 // zones deployed on each host and some supporting configuration (e.g., DNS).
 // This is aimed at supporting add/remove sleds.  The plan is to grow this to
 // include more of the system as we support more use cases.
-//
-// TODO: #[derive(Diff)]
 #[derive(
     Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diff,
 )]
