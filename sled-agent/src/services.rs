@@ -3504,9 +3504,7 @@ impl ServiceManager {
             zones_to_be_removed,
             zones_to_be_added,
         } = reconcile_running_zones_with_new_request(
-            existing_zones
-                .values_mut()
-                .map(|z| (&mut z.config.zone, z.runtime.root_zpool())),
+            existing_zones,
             new_request,
             &self.inner.log,
         )?;
@@ -4698,7 +4696,24 @@ struct ReconciledNewZonesRequest {
     zones_to_be_added: HashSet<OmicronZoneConfig>,
 }
 
-fn reconcile_running_zones_with_new_request<'a>(
+fn reconcile_running_zones_with_new_request(
+    existing_zones: &mut MutexGuard<'_, ZoneMap>,
+    new_request: OmicronZonesConfig,
+    log: &Logger,
+) -> Result<ReconciledNewZonesRequest, Error> {
+    reconcile_running_zones_with_new_request_impl(
+        existing_zones
+            .values_mut()
+            .map(|z| (&mut z.config.zone, z.runtime.root_zpool())),
+        new_request,
+        log,
+    )
+}
+
+// Separate helper function for `reconcile_running_zones_with_new_request` that
+// allows unit tests to exercise the implementation without having to construct
+// a `&mut MutexGuard<'_, ZoneMap>` for `existing_zones`.
+fn reconcile_running_zones_with_new_request_impl<'a>(
     existing_zones_with_runtime_zpool: impl Iterator<
         Item = (&'a mut OmicronZoneConfig, &'a ZpoolOrRamdisk),
     >,
@@ -5857,7 +5872,7 @@ mod test {
                 generation: Generation::new().next(),
                 zones: existing.iter().map(|(zone, _)| zone.clone()).collect(),
             };
-            let reconciled = reconcile_running_zones_with_new_request(
+            let reconciled = reconcile_running_zones_with_new_request_impl(
                 existing.iter_mut().map(|(z, p)| (z, &*p)),
                 new_request.clone(),
                 log,
@@ -5900,7 +5915,7 @@ mod test {
                     })
                     .collect(),
             };
-            let reconciled = reconcile_running_zones_with_new_request(
+            let reconciled = reconcile_running_zones_with_new_request_impl(
                 existing.iter_mut().map(|(z, p)| (z, &*p)),
                 new_request.clone(),
                 log,
@@ -5950,7 +5965,7 @@ mod test {
                     })
                     .collect(),
             };
-            let reconciled = reconcile_running_zones_with_new_request(
+            let reconciled = reconcile_running_zones_with_new_request_impl(
                 existing.iter_mut().map(|(z, p)| (z, &*p)),
                 new_request.clone(),
                 log,
@@ -6008,7 +6023,7 @@ mod test {
                     })
                     .collect(),
             };
-            let err = reconcile_running_zones_with_new_request(
+            let err = reconcile_running_zones_with_new_request_impl(
                 existing.iter_mut().map(|(z, p)| (z, &*p)),
                 new_request.clone(),
                 log,
@@ -6068,7 +6083,7 @@ mod test {
                     make_omicron_zone_config(None),
                 ],
             };
-            let reconciled = reconcile_running_zones_with_new_request(
+            let reconciled = reconcile_running_zones_with_new_request_impl(
                 existing.iter_mut().map(|(z, p)| (z, &*p)),
                 new_request.clone(),
                 log,
