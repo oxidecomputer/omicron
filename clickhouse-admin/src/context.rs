@@ -25,15 +25,14 @@ use slog::{error, info};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::net::SocketAddrV6;
-use std::str::FromStr;
 use tokio::sync::{oneshot, watch};
 
 pub struct KeeperServerContext {
     clickward: Clickward,
     clickhouse_cli: ClickhouseCli,
     log: Logger,
-    pub generate_config_tx: Sender<GenerateConfigRequest>,
-    pub generation_rx: watch::Receiver<Option<Generation>>,
+    generate_config_tx: Sender<GenerateConfigRequest>,
+    generation_rx: watch::Receiver<Option<Generation>>,
 }
 
 impl KeeperServerContext {
@@ -46,8 +45,7 @@ impl KeeperServerContext {
             ClickhouseCli::new(binary_path, listen_address, log);
         let log = log.new(slog::o!("component" => "KeeperServerContext"));
         let clickward = Clickward::new();
-        let config_path = Utf8PathBuf::from_str(CLICKHOUSE_KEEPER_CONFIG_DIR)
-            .unwrap()
+        let config_path = Utf8PathBuf::from(CLICKHOUSE_KEEPER_CONFIG_DIR)
             .join(CLICKHOUSE_KEEPER_CONFIG_FILE);
 
         // If there is already a configuration file with a generation number we'll
@@ -72,7 +70,7 @@ impl KeeperServerContext {
         })
     }
 
-    pub async fn send_generate_config_and_enable_svc(
+    pub async fn generate_config_and_enable_svc(
         &self,
         keeper_settings: KeeperConfigurableSettings,
     ) -> Result<GenerateConfigResult, HttpError> {
@@ -114,6 +112,10 @@ impl KeeperServerContext {
     pub fn log(&self) -> Logger {
         self.log.clone()
     }
+
+    pub fn generation(&self) -> Option<Generation> {
+        *self.generation_rx.borrow()
+    }
 }
 
 pub struct ServerContext {
@@ -121,9 +123,9 @@ pub struct ServerContext {
     clickward: Clickward,
     clickhouse_address: SocketAddrV6,
     log: Logger,
-    pub generate_config_tx: Sender<GenerateConfigRequest>,
-    pub generation_rx: watch::Receiver<Option<Generation>>,
-    pub db_init_tx: Sender<DbInitRequest>,
+    generate_config_tx: Sender<GenerateConfigRequest>,
+    generation_rx: watch::Receiver<Option<Generation>>,
+    db_init_tx: Sender<DbInitRequest>,
 }
 
 impl ServerContext {
@@ -141,8 +143,7 @@ impl ServerContext {
         let clickward = Clickward::new();
         let log = log.new(slog::o!("component" => "ServerContext"));
 
-        let config_path = Utf8PathBuf::from_str(CLICKHOUSE_SERVER_CONFIG_DIR)
-            .unwrap()
+        let config_path = Utf8PathBuf::from(CLICKHOUSE_SERVER_CONFIG_DIR)
             .join(CLICKHOUSE_SERVER_CONFIG_FILE);
 
         // If there is already a configuration file with a generation number we'll
@@ -172,7 +173,7 @@ impl ServerContext {
         })
     }
 
-    pub async fn send_generate_config_and_enable_svc(
+    pub async fn generate_config_and_enable_svc(
         &self,
         replica_settings: ServerConfigurableSettings,
     ) -> Result<GenerateConfigResult, HttpError> {
@@ -203,7 +204,7 @@ impl ServerContext {
         })?
     }
 
-    pub async fn send_init_db(
+    pub async fn init_db(
         &self,
         replicated: bool,
     ) -> Result<(), HttpError> {
@@ -244,6 +245,10 @@ impl ServerContext {
 
     pub fn log(&self) -> Logger {
         self.log.clone()
+    }
+
+    pub fn generation(&self) -> Option<Generation> {
+        *self.generation_rx.borrow()
     }
 }
 

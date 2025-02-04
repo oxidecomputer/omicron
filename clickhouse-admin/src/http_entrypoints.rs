@@ -46,7 +46,7 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         let ctx = rqctx.context();
         let replica_settings = body.into_inner();
         let result =
-            ctx.send_generate_config_and_enable_svc(replica_settings).await?;
+            ctx.generate_config_and_enable_svc(replica_settings).await?;
         Ok(HttpResponseCreated(result))
     }
 
@@ -54,7 +54,7 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Generation>, HttpError> {
         let ctx = rqctx.context();
-        let gen = match *ctx.generation_rx.borrow() {
+        let gen = match ctx.generation() {
             Some(g) => g,
             None => {
                 return Err(HttpError::for_client_error(
@@ -95,7 +95,7 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let ctx = rqctx.context();
         let replicated = true;
-        ctx.send_init_db(replicated).await?;
+        ctx.init_db(replicated).await?;
         Ok(HttpResponseUpdatedNoContent())
     }
 }
@@ -112,7 +112,7 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
         let ctx = rqctx.context();
         let keeper_settings = body.into_inner();
         let result =
-            ctx.send_generate_config_and_enable_svc(keeper_settings).await?;
+            ctx.generate_config_and_enable_svc(keeper_settings).await?;
         Ok(HttpResponseCreated(result))
     }
 
@@ -120,7 +120,7 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Generation>, HttpError> {
         let ctx = rqctx.context();
-        let gen = match *ctx.generation_rx.borrow() {
+        let gen = match ctx.generation() {
             Some(g) => g,
             None => {
                 return Err(HttpError::for_client_error(
@@ -177,7 +177,7 @@ impl ClickhouseAdminSingleApi for ClickhouseAdminSingleImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let ctx = rqctx.context();
         let replicated = false;
-        ctx.send_init_db(replicated).await?;
+        ctx.init_db(replicated).await?;
         Ok(HttpResponseUpdatedNoContent())
     }
 
