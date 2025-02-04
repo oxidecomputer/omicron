@@ -140,11 +140,6 @@ project_policy_view                      GET      /v1/projects/{project}/policy
 project_update                           PUT      /v1/projects/{project}
 project_view                             GET      /v1/projects/{project}
 
-API operations found with tag "roles"
-OPERATION ID                             METHOD   URL PATH
-role_list                                GET      /v1/system/roles
-role_view                                GET      /v1/system/roles/{role_name}
-
 API operations found with tag "silos"
 OPERATION ID                             METHOD   URL PATH
 auth_settings_update                     PUT      /v1/auth-settings

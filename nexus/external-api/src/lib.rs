@@ -3077,32 +3077,6 @@ pub trait NexusExternalApi {
         path_params: Path<params::UserBuiltinSelector>,
     ) -> Result<HttpResponseOk<views::UserBuiltin>, HttpError>;
 
-    // Built-in roles
-
-    /// List built-in roles
-    #[endpoint {
-        method = GET,
-        path = "/v1/system/roles",
-        tags = ["roles"],
-    }]
-    async fn role_list(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<
-            PaginationParams<EmptyScanParams, params::RolePage>,
-        >,
-    ) -> Result<HttpResponseOk<ResultsPage<views::Role>>, HttpError>;
-
-    /// Fetch built-in role
-    #[endpoint {
-        method = GET,
-        path = "/v1/system/roles/{role_name}",
-        tags = ["roles"],
-    }]
-    async fn role_view(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::RolePath>,
-    ) -> Result<HttpResponseOk<views::Role>, HttpError>;
-
     // Current user
 
     /// Fetch user for current session
