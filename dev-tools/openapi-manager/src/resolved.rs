@@ -501,6 +501,14 @@ impl<'a> Resolved<'a> {
     ) -> Option<&Resolution> {
         self.api_results.get(ident).and_then(|v| v.get(version))
     }
+
+    pub fn has_unfixable_problems(&self) -> bool {
+        self.general_problems().any(|p| !p.is_fixable())
+            || self
+                .api_results
+                .values()
+                .any(|version_map| version_map.values().any(|r| r.has_errors()))
+    }
 }
 
 fn resolve_removed_blessed_versions<'a>(

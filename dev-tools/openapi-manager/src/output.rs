@@ -258,6 +258,14 @@ pub(crate) mod plural {
         }
     }
 
+    pub(crate) fn changes(count: usize) -> &'static str {
+        if count == 1 {
+            "change"
+        } else {
+            "changes"
+        }
+    }
+
     pub(crate) fn documents(count: usize) -> &'static str {
         if count == 1 {
             "document"

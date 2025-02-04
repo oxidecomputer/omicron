@@ -13,11 +13,9 @@ use crate::{
     },
     resolved::{Problem, Resolved},
     spec::Environment,
-    spec_files_blessed::BlessedFiles,
-    spec_files_generated::GeneratedFiles,
     FAILURE_EXIT_CODE,
 };
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use owo_colors::OwoColorize;
 use std::process::ExitCode;
 
@@ -60,56 +58,6 @@ pub(crate) fn generate_impl(
         Resolved::new(env, &apis, &blessed, &generated, &local_files);
     eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
 
-    match summarize(&apis, &resolved, &styles)? {
-        CheckResult::Failures => {
-            // summarize() already printed a useful bottom-line summary.
-            return Ok(GenerateResult::Failures);
-        }
-        CheckResult::Success => {
-            let ndocuments = resolved.nexpected_documents();
-            print_final_status(&styles, ndocuments, 0, ndocuments, 0);
-            Ok(GenerateResult::Success)
-        }
-        CheckResult::NeedsUpdate => {
-            do_generate(env, &apis, &blessed, &generated, &resolved, &styles)
-        }
-    }
-}
-
-fn print_final_status(
-    styles: &Styles,
-    ndocuments: usize,
-    num_updated: usize,
-    num_unchanged: usize,
-    num_errors: usize,
-) {
-    eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
-    let status_header = if num_errors == 0 {
-        headers::SUCCESS.style(styles.success_header)
-    } else {
-        headers::FAILURE.style(styles.failure_header)
-    };
-    eprintln!(
-        "{:>HEADER_WIDTH$} {} {}: {} updated, {} unchanged, {} failed",
-        status_header,
-        ndocuments.style(styles.bold),
-        plural::documents(ndocuments),
-        num_updated.style(styles.bold),
-        num_unchanged.style(styles.bold),
-        num_errors.style(styles.bold),
-    );
-}
-
-fn do_generate(
-    env: &Environment,
-    apis: &ManagedApis,
-    blessed: &BlessedFiles,
-    generated: &GeneratedFiles,
-    resolved: &Resolved,
-    styles: &Styles,
-) -> anyhow::Result<GenerateResult> {
-    // XXX-dap this is where we could confirm
-
     let total = resolved.nexpected_documents();
     eprintln!(
         "{:>HEADER_WIDTH$} {} OpenAPI {}...",
@@ -117,6 +65,17 @@ fn do_generate(
         total.style(styles.bold),
         plural::documents(total),
     );
+
+    if resolved.has_unfixable_problems() {
+        return match summarize(&apis, &resolved, &styles)? {
+            CheckResult::Failures => {
+                Ok(GenerateResult::Failures)
+            }
+            unexpected => {
+                Err(anyhow!("unexpectedly got {unexpected:?} from summarize()"))
+            }
+        };
+    }
 
     let mut num_updated = 0;
     let mut num_unchanged = 0;
@@ -153,7 +112,7 @@ fn do_generate(
                 fix_problems(
                     env,
                     problems,
-                    styles,
+                    &styles,
                     &mut num_updated,
                     &mut num_errors,
                 );
@@ -166,14 +125,14 @@ fn do_generate(
     fix_problems(
         env,
         general_problems,
-        styles,
+        &styles,
         &mut num_updated,
         &mut num_errors,
     );
 
     if num_errors > 0 {
         print_final_status(
-            styles,
+            &styles,
             total,
             num_updated,
             num_unchanged,
@@ -196,7 +155,7 @@ fn do_generate(
     let general_problems: Vec<_> = resolved.general_problems().collect();
     nproblems += general_problems.len();
     if !general_problems.is_empty() {
-        print_problems(general_problems, styles);
+        print_problems(general_problems, &styles);
     }
     for api in apis.iter_apis() {
         let ident = api.ident();
@@ -212,7 +171,7 @@ fn do_generate(
                      (this is a bug)",
                     ident, version
                 );
-                print_problems(problems, styles);
+                print_problems(problems, &styles);
             }
         }
     }
@@ -221,7 +180,7 @@ fn do_generate(
         bail!("found problems after successfully fixing everything");
     } else {
         print_final_status(
-            styles,
+            &styles,
             total,
             num_updated,
             num_unchanged,
@@ -229,6 +188,31 @@ fn do_generate(
         );
         Ok(GenerateResult::Success)
     }
+}
+
+fn print_final_status(
+    styles: &Styles,
+    ndocuments: usize,
+    num_updated: usize,
+    num_unchanged: usize,
+    num_errors: usize,
+) {
+    eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
+    let status_header = if num_errors == 0 {
+        headers::SUCCESS.style(styles.success_header)
+    } else {
+        headers::FAILURE.style(styles.failure_header)
+    };
+    eprintln!(
+        "{:>HEADER_WIDTH$} {} {}: {} {} made, {} unchanged, {} failed",
+        status_header,
+        ndocuments.style(styles.bold),
+        plural::documents(ndocuments),
+        num_updated.style(styles.bold),
+        plural::changes(num_updated),
+        num_unchanged.style(styles.bold),
+        num_errors.style(styles.bold),
+    );
 }
 
 fn fix_problems<'a, T>(
