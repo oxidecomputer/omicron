@@ -89,32 +89,6 @@ impl KeeperServerContext {
             log,
         )
         .await
-
-        //   let (response_tx, response_rx) = oneshot::channel();
-        //   self.generate_config_tx
-        //       .try_send(GenerateConfigRequest::GenerateConfig {
-        //           clickward,
-        //           log,
-        //           node_settings,
-        //           response: response_tx,
-        //       })
-        //       .map_err(|e| match e {
-        //           TrySendError::Full(_) => HttpError::for_unavail(
-        //               None,
-        //               "channel full: another config request is still running"
-        //                   .to_string(),
-        //           ),
-        //           TrySendError::Disconnected(_) => {
-        //               HttpError::for_internal_error(
-        //                   "long-running generate-config task died".to_string(),
-        //               )
-        //           }
-        //       })?;
-        //   response_rx.await.map_err(|e| {
-        //       HttpError::for_internal_error(format!(
-        //           "failure to receive response; long-running task died before it could respond: {e}"
-        //       ))
-        //   })?
     }
 
     pub fn clickward(&self) -> Clickward {
@@ -206,32 +180,6 @@ impl ServerContext {
             log,
         )
         .await
-
-        //  let (response_tx, response_rx) = oneshot::channel();
-        //  self.generate_config_tx
-        //      .try_send(GenerateConfigRequest::GenerateConfig {
-        //          clickward,
-        //          log,
-        //          node_settings,
-        //          response: response_tx,
-        //      })
-        //      .map_err(|e| match e {
-        //          TrySendError::Full(_) => HttpError::for_unavail(
-        //              None,
-        //              "channel full: another config request is still running"
-        //                  .to_string(),
-        //          ),
-        //          TrySendError::Disconnected(_) => {
-        //              HttpError::for_internal_error(
-        //                  "long-running generate-config task died".to_string(),
-        //              )
-        //          }
-        //      })?;
-        //  response_rx.await.map_err(|e| {
-        //      HttpError::for_internal_error(format!(
-        //          "failure to receive response; long-running task died before it could respond: {e}"
-        //      ))
-        //  })?
     }
 
     pub async fn init_db(&self, replicated: bool) -> Result<(), HttpError> {
@@ -383,7 +331,6 @@ fn generate_config_and_enable_svc(
     node_settings: NodeSettings,
 ) -> Result<GenerateConfigResult, HttpError> {
     let incoming_generation = node_settings.generation();
-    //let generation_rx = generation_tx.subscribe();
     let current_generation = *generation_tx.borrow();
 
     // If the incoming generation number is lower, then we have a problem.
@@ -417,9 +364,6 @@ fn generate_config_and_enable_svc(
     // We want to update the generation number only if the config file has been
     // generated successfully.
     generation_tx.send_replace(Some(incoming_generation));
-    //.map_err(|e| {
-    //    HttpError::for_internal_error(format!("failure to send request: {e}"))
-    //})?;
 
     // Once we have generated the client we can safely enable the clickhouse_server service
     Svcadm::enable_service(node_settings.fmri())?;
@@ -600,7 +544,7 @@ mod tests {
 
         assert_eq!(
             format!("{}", root_cause),
-            "first line of configuration file is malformed: <clickhouse>"
+            "first line of configuration file 'types/testutils/malformed_1.xml' is malformed: <clickhouse>"
         );
     }
 
@@ -615,7 +559,7 @@ mod tests {
 
         assert_eq!(
             format!("{}", root_cause),
-            "first line of configuration file is malformed: <!-- generation:bob -->; error = invalid digit found in string"
+            "first line of configuration file 'types/testutils/malformed_2.xml' is malformed: <!-- generation:bob -->; error = invalid digit found in string"
         );
     }
 
@@ -630,7 +574,7 @@ mod tests {
 
         assert_eq!(
             format!("{}", root_cause),
-           "first line of configuration file is malformed: <!-- generation:2 --> -->"
+           "first line of configuration file 'types/testutils/malformed_3.xml' is malformed: <!-- generation:2 --> -->"
         );
     }
 }
