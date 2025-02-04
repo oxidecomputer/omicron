@@ -3486,8 +3486,13 @@ impl ServiceManager {
     // will only change in the direction of `new_request`: zones will only be
     // removed if they ARE NOT part of `new_request`, and zones will only be
     // added if they ARE part of `new_request`.
-    // - Zones are not updated in-place: two zone configurations that differ
-    // in any way are treated as entirely distinct.
+    // - Zones are generally not updated in-place (i.e., two zone configurations
+    // that differ in any way are treated as entirely distinct), with an
+    // exception for backfilling the `filesystem_pool`, as long as the new
+    // request's filesystem pool matches the actual pool for that zones. This
+    // in-place update is allowed because changing only that property to match
+    // the runtime system does not require reconfiguring the zone or shutting it
+    // down and restarting it.
     // - This method does not record any information such that these services
     // are re-instantiated on boot.
     async fn ensure_all_omicron_zones(
