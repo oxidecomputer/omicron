@@ -13,7 +13,6 @@ pub use crate::api::internal::shared::AllowedSourceIps;
 pub use crate::api::internal::shared::SwitchLocation;
 use crate::update::ArtifactHash;
 use crate::update::ArtifactId;
-use anyhow::anyhow;
 use anyhow::Context;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
@@ -748,14 +747,10 @@ impl From<ByteCount> for i64 {
 // disallow negative values. (We could potentially use two's complement to
 // store values greater than that as negative values, but surely 2**63 is
 // enough.)
-//
-// TODO: This allows deserialization into a value that's out of range. That's
-// not correct. See <https://github.com/oxidecomputer/omicron/issues/6865>.
 #[derive(
     Copy,
     Clone,
     Debug,
-    Deserialize,
     Eq,
     Hash,
     JsonSchema,
@@ -765,6 +760,51 @@ impl From<ByteCount> for i64 {
     Serialize,
 )]
 pub struct Generation(u64);
+
+impl Generation {
+    // `as` is a little distasteful because it allows lossy conversion, but we
+    // know converting `i64::MAX` to `u64` will always succeed losslessly.
+    const MAX: Generation = Generation(i64::MAX as u64);
+
+    pub const fn new() -> Generation {
+        Generation(1)
+    }
+
+    pub const fn from_u32(value: u32) -> Generation {
+        // `as` is a little distasteful because it allows lossy conversion, but
+        // (a) we know converting `u32` to `u64` will always succeed
+        // losslessly, and (b) it allows to make this function `const`, unlike
+        // if we were to use `u64::from(value)`.
+        Generation(value as u64)
+    }
+
+    pub const fn next(&self) -> Generation {
+        // It should technically be an operational error if this wraps or even
+        // exceeds the value allowed by an i64.  But it seems unlikely enough to
+        // happen in practice that we can probably feel safe with this.
+        let next_gen = self.0 + 1;
+        assert!(
+            next_gen <= Generation::MAX.0,
+            "attempt to overflow generation number"
+        );
+        Generation(next_gen)
+    }
+}
+
+impl<'de> Deserialize<'de> for Generation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = u64::deserialize(deserializer)?;
+        Generation::try_from(value).map_err(|GenerationOverflowError(_)| {
+            serde::de::Error::invalid_value(
+                serde::de::Unexpected::Unsigned(value),
+                &"an integer between 0 and 9223372036854775807",
+            )
+        })
+    }
+}
 
 // We have to manually implement `Diffable` because this is newtype with private
 // data, and we want to see the diff on the newtype not the inner data.
@@ -784,33 +824,6 @@ impl<'a> Diffable<'a> for Generation {
     }
 }
 
-impl Generation {
-    pub const fn new() -> Generation {
-        Generation(1)
-    }
-
-    pub const fn from_u32(value: u32) -> Generation {
-        // `as` is a little distasteful because it allows lossy conversion, but
-        // (a) we know converting `u32` to `u64` will always succeed
-        // losslessly, and (b) it allows to make this function `const`, unlike
-        // if we were to use `u64::from(value)`.
-        Generation(value as u64)
-    }
-
-    pub const fn next(&self) -> Generation {
-        // It should technically be an operational error if this wraps or even
-        // exceeds the value allowed by an i64.  But it seems unlikely enough to
-        // happen in practice that we can probably feel safe with this.
-        let next_gen = self.0 + 1;
-        // `as` is a little distasteful because it allows lossy conversion, but
-        // (a) we know converting `i64::MAX` to `u64` will always succeed
-        // losslessly, and (b) it allows to make this function `const`, unlike
-        // if we were to use `u64::try_from(i64::MAX).unwrap()`.
-        assert!(next_gen <= i64::MAX as u64);
-        Generation(next_gen)
-    }
-}
-
 impl Display for Generation {
     fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
         f.write_str(&self.0.to_string())
@@ -820,8 +833,6 @@ impl Display for Generation {
 impl From<&Generation> for i64 {
     fn from(g: &Generation) -> Self {
         // We have already validated that the value is within range.
-        // TODO-robustness We need to ensure that we don't deserialize a value
-        // out of range here.
         i64::try_from(g.0).unwrap()
     }
 }
@@ -839,25 +850,42 @@ impl From<u32> for Generation {
 }
 
 impl TryFrom<i64> for Generation {
-    type Error = anyhow::Error;
+    type Error = GenerationNegativeError;
 
     fn try_from(value: i64) -> Result<Self, Self::Error> {
         Ok(Generation(
-            u64::try_from(value)
-                .map_err(|_| anyhow!("negative generation number"))?,
+            u64::try_from(value).map_err(|_| GenerationNegativeError(()))?,
         ))
     }
 }
 
 impl TryFrom<u64> for Generation {
-    type Error = anyhow::Error;
+    type Error = GenerationOverflowError;
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
-        i64::try_from(value)
-            .map_err(|_| anyhow!("generation number too large"))?;
+        i64::try_from(value).map_err(|_| GenerationOverflowError(()))?;
         Ok(Generation(value))
     }
 }
+
+impl FromStr for Generation {
+    type Err = std::num::ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Try to parse `s` as both an i64 and u64, returning the error from
+        // either.
+        let _ = i64::from_str(s)?;
+        Ok(Generation(u64::from_str(s)?))
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("negative generation number")]
+pub struct GenerationNegativeError(());
+
+#[derive(Debug, thiserror::Error)]
+#[error("generation number too large")]
+pub struct GenerationOverflowError(());
 
 /// An RFC-1035-compliant hostname.
 #[derive(
@@ -3192,6 +3220,7 @@ mod test {
     use serde::Deserialize;
     use serde::Serialize;
 
+    use super::Generation;
     use super::RouteDestination;
     use super::RouteTarget;
     use super::SemverVersion;
@@ -3512,6 +3541,51 @@ mod test {
             format!("{}", ByteCount::from_gibibytes_u32(1024)),
             "1 TiB".to_string()
         );
+    }
+
+    #[test]
+    fn test_generation_display_parse() {
+        assert_eq!(Generation::new().to_string(), "1");
+        assert_eq!(Generation::from_str("1").unwrap(), Generation::new());
+    }
+
+    #[test]
+    fn test_generation_serde() {
+        assert_eq!(serde_json::to_string(&Generation::new()).unwrap(), "1");
+        assert_eq!(
+            serde_json::from_str::<Generation>("1").unwrap(),
+            Generation::new()
+        );
+    }
+
+    #[test]
+    fn test_generation_from_int() {
+        for good_value in [0, Generation::MAX.0] {
+            Generation::try_from(good_value).unwrap();
+            serde_json::from_str::<Generation>(&good_value.to_string())
+                .unwrap();
+        }
+        for good_value in [0, i64::MAX] {
+            Generation::try_from(good_value).unwrap();
+            serde_json::from_str::<Generation>(&good_value.to_string())
+                .unwrap();
+        }
+        for bad_value in [Generation::MAX.0 + 1, u64::MAX] {
+            Generation::try_from(bad_value).unwrap_err();
+            serde_json::from_str::<Generation>(&bad_value.to_string())
+                .unwrap_err();
+        }
+        for bad_value in [-1, i64::MIN] {
+            Generation::try_from(bad_value).unwrap_err();
+            serde_json::from_str::<Generation>(&bad_value.to_string())
+                .unwrap_err();
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "attempt to overflow generation number")]
+    fn test_generation_overflow() {
+        Generation::MAX.next();
     }
 
     #[test]
