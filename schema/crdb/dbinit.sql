@@ -4971,6 +4971,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
     -- UUID of the webhook receiver (foreign key into
     -- `omicron.public.webhook_rx`)
     rx_id UUID NOT NULL,
+    -- true if this delivery attempt was triggered by a call to the resend API,
+    -- false if this is the initial delivery attempt.
+    is_redelivery BOOL NOT NULL,
+
     payload JSONB NOT NULL,
 
     --- Delivery attempt count. Starts at 0.
@@ -4992,6 +4996,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
         )
     )
 );
+
+-- Ensure that initial delivery attempts (nexus-dispatched) are unique to avoid
+-- duplicate work when an event is dispatched. For deliveries created by calls
+-- to the webhook event resend API, we don't enforce this constraint, to allow
+-- re-delivery to be triggered multiple times.
+CREATE UNIQUE INDEX IF NOT EXISTS one_webhook_event_dispatch_per_rx
+ON omicron.public.webhook_delivery (
+    event_id, rx_id
+)
+WHERE
+    is_redelivery = FALSE;
 
 -- Index for looking up all webhook messages dispatched to a receiver ID
 CREATE INDEX IF NOT EXISTS lookup_webhook_dispatched_to_rx

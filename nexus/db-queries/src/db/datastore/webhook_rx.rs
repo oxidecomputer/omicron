@@ -456,6 +456,7 @@ fn async_insert_error_to_txn(
         AsyncInsertError::DatabaseError(e) => TransactionError::Database(e),
     }
 }
+
 #[cfg(test)]
 mod test {
     use super::*;

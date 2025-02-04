@@ -2198,6 +2198,7 @@ table! {
         id -> Uuid,
         event_id -> Uuid,
         rx_id -> Uuid,
+        is_redelivery -> Bool,
         payload -> Jsonb,
         attempts -> Int2,
         time_created -> Timestamptz,

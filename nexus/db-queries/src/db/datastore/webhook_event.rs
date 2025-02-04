@@ -57,24 +57,10 @@ impl DataStore {
         let conn = self.pool_connection_authorized(&opctx).await?;
         self.transaction_retry_wrapper("webhook_event_dispatch_next")
             .transaction(&conn, |conn| async move {
-                // Select the next webhook event in need of dispatching.
-                //
-                // This performs a `SELECT ... FOR UPDATE SKIP LOCKED` on the
-                // `webhook_event` table, returning the oldest webhook event which has not
-                // yet been dispatched to receivers and which is not actively being
-                // dispatched in another transaction.
-                // NOTE: it would be kinda nice if this query could also select the
-                // webhook receivers subscribed to this event, but this requires
-                // a `FOR UPDATE OF webhook_event` clause to indicate that we only wish
-                // to lock the `webhook_event` row and not the receiver.
-                // Unfortunately, I don't believe Diesel supports this at present.
                 let Some(event) = event_dsl::webhook_event
                     .filter(event_dsl::time_dispatched.is_null())
                     .order_by(event_dsl::time_created.asc())
                     .limit(1)
-                    .for_update()
-                    // TODO(eliza): AGH SKIP LOCKED IS NOT IMPLEMENTED IN CRDB...
-                    // .skip_locked()
                     .select(WebhookEvent::as_select())
                     .get_result_async(&conn)
                     .await
@@ -124,7 +110,7 @@ impl DataStore {
                     );
                     match self
                         .webhook_event_insert_delivery_on_conn(
-                            &opctx.log, &event, &rx_id, &conn,
+                            &event, &rx_id, false, &conn
                         )
                         .await
                     {
@@ -165,49 +151,63 @@ impl DataStore {
 
     async fn webhook_event_insert_delivery_on_conn(
         &self,
-        log: &slog::Logger,
         event: &WebhookEvent,
         rx_id: &WebhookReceiverUuid,
+        is_redelivery: bool,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<WebhookDelivery, AsyncInsertError> {
-        loop {
-            let delivery: Option<WebhookDelivery> =
-                WebhookReceiver::insert_resource(
-                    rx_id.into_untyped_uuid(),
-                    diesel::insert_into(delivery_dsl::webhook_delivery)
-                        .values(WebhookDelivery::new(&event, rx_id))
-                        .on_conflict(delivery_dsl::id)
-                        .do_nothing(),
-                )
-                .insert_and_get_optional_result_async(conn)
-                .await?;
-            match delivery {
-                Some(delivery) => {
-                    // XXX(eliza): is `Debug` too noisy for this?
-                    slog::debug!(
-                        log,
-                        "dispatched webhook event to receiver";
-                        "event_id" => ?event.id,
-                        "event_class" => %event.event_class,
-                        "receiver_id" => ?rx_id,
-                    );
-                    return Ok(delivery);
-                }
-                // The `ON CONFLICT (id) DO NOTHING` clause triggers if there's
-                // already a delivery entry with this UUID --- indicating a UUID
-                // collision. With 128 bits of random UUID, the chances of this
-                // happening are incredibly unlikely, but let's handle it
-                // gracefully nonetheless by trying again with a new UUID...
-                None => {
-                    slog::warn!(
-                        &log,
-                        "webhook delivery UUID collision, retrying...";
-                        "event_id" => ?event.id,
-                        "event_class" => %event.event_class,
-                        "receiver_id" => ?rx_id,
-                    );
-                }
-            }
-        }
+        let delivery: WebhookDelivery = WebhookReceiver::insert_resource(
+            rx_id.into_untyped_uuid(),
+            diesel::insert_into(delivery_dsl::webhook_delivery)
+                .values(WebhookDelivery::new(&event, rx_id, is_redelivery)),
+        )
+        .insert_and_get_result_async(conn)
+        .await?;
+        Ok(delivery)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use crate::db::pub_test_utils::TestDatabase;
+    use omicron_test_utils::dev;
+
+    #[tokio::test]
+    async fn test_dispatched_deliveries_are_unique_per_rx() {
+        // Test setup
+        let logctx =
+            dev::test_setup_log("test_dispatched_deliveries_are_unique_per_rx");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let conn = db.pool_connection_for_tests().await;
+
+        let rx_id = WebhookReceiverUuid::new_v4();
+        let event_id = WebhookEventUuid::new_v4();
+        let event = datastore
+            .webhook_event_create(
+                &opctx,
+                event_id,
+                WebhookEventClass::TestFoo,
+                serde_json::json!({
+                    "answer": 42,
+                }),
+            )
+            .await
+            .expect("can't create ye event");
+
+        let delivery1 = datastore
+            .webhook_event_insert_delivery_on_conn(&event, &rx_id, false, conn)
+            .await
+            .expect("delivery 1 should insert");
+
+        let delivery2 = datastore
+            .webhook_event_insert_delivery_on_conn(&event, &rx_id, false, conn)
+            .await;
+        dbg!(delivery2).expect_err("unique constraint should be violated");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 }

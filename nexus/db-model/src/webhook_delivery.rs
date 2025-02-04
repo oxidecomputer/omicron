@@ -65,6 +65,10 @@ pub struct WebhookDelivery {
     /// `webhook_rx`).
     pub rx_id: DbTypedUuid<WebhookReceiverKind>,
 
+    /// True if this is an explicitly triggered re-delivery attempt, false if
+    /// this is an initial dispatch of the event.
+    pub is_redelivery: bool,
+
     /// The data payload as sent to this receiver.
     pub payload: serde_json::Value,
 
@@ -83,12 +87,17 @@ pub struct WebhookDelivery {
 }
 
 impl WebhookDelivery {
-    pub fn new(event: &WebhookEvent, rx_id: &WebhookReceiverUuid) -> Self {
+    pub fn new(
+        event: &WebhookEvent,
+        rx_id: &WebhookReceiverUuid,
+        is_redelivery: bool,
+    ) -> Self {
         Self {
             // N.B.: perhaps we ought to use timestamp-based UUIDs for these?
             id: WebhookDeliveryUuid::new_v4().into(),
             event_id: event.id,
             rx_id: (*rx_id).into(),
+            is_redelivery,
             payload: event.event.clone(),
             attempts: SqlU8::new(0),
             time_created: Utc::now(),

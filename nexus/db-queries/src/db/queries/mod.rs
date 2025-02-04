@@ -16,7 +16,6 @@ pub mod region_allocation;
 pub mod virtual_provisioning_collection_update;
 pub mod vpc;
 pub mod vpc_subnet;
-pub mod webhook_delivery;
 
 /// SQL used to enable full table scans for the duration of the current
 /// transaction.
