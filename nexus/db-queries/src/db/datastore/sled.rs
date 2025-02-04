@@ -29,6 +29,8 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use itertools::Either;
+use itertools::Itertools;
 use nexus_db_model::ApplySledFilterExt;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::SledPolicy;
@@ -46,6 +48,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
+use slog::Logger;
 use std::collections::HashSet;
 use std::fmt;
 use strum::IntoEnumIterator;
@@ -54,14 +57,60 @@ use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
 enum SledReservationError {
-    #[error("No reservation could be found")]
+    #[error(
+        "Could not find any valid sled on which this instance can be placed"
+    )]
     NotFound,
-    #[error("More than one sled was found with 'affinity = required'")]
+    #[error("This instance belongs to an affinity group that requires it be placed \
+             on more than one sled. Instances can only placed on a single sled, so \
+             this is impossible to satisfy - Consider stopping other instances in \
+             the affinity group.")]
     TooManyAffinityConstraints,
-    #[error("A sled that is required is also considered banned by anti-affinity rules")]
+    #[error(
+        "This instance belongs to an affinity group that requires it to be \
+             placed on a sled, but also belongs to an anti-affinity group that \
+             prevents it from being placed on that sled. These constraints are \
+             contradictory: Consider stopping instances in those \
+             affinity/anti-affinity groups, or changing group membership."
+    )]
     ConflictingAntiAndAffinityConstraints,
-    #[error("A sled required by an affinity group is not a valid target for other reasons")]
+    #[error("This instance must be placed on a specific sled due to affinity \
+             rules, but that placement is invalid for some other reason (e.g., \
+             the instance would not fit, or the sled sharing an instance in the \
+             affinity group is being expunged). Consider stopping other \
+             instances in the affinity group, or changing affinity group \
+             membership.")]
     RequiredAffinitySledNotValid,
+}
+
+impl From<SledReservationError> for external::Error {
+    fn from(err: SledReservationError) -> Self {
+        let msg = format!("Failed to place instance: {err}");
+        match err {
+            // "NotFound" can be resolved by adding more capacity
+            SledReservationError::NotFound
+            // "RequiredAffinitySledNotValid" is *usually* the result of a
+            // single sled filling up with several members of an Affinity group.
+            //
+            // It is also possible briefly when a sled with affinity groups is
+            // being expunged with running VMMs, but "insufficient capacity" is
+            // the much more common case.
+            //
+            // (Disambiguating these cases would require additional database
+            // queries, hence why this isn't being done right now)
+            | SledReservationError::RequiredAffinitySledNotValid => {
+                external::Error::insufficient_capacity(&msg, &msg)
+            },
+            // The following cases are constraint violations due to excessive
+            // affinity/anti-affinity groups -- even if additional capacity is
+            // added, they won't be fixed. Return a 400 error to signify to the
+            // caller that they're responsible for fixing these constraints.
+            SledReservationError::TooManyAffinityConstraints
+            | SledReservationError::ConflictingAntiAndAffinityConstraints => {
+                external::Error::invalid_request(&msg)
+            },
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -72,6 +121,166 @@ enum SledReservationTransactionError {
     Diesel(#[from] diesel::result::Error),
     #[error(transparent)]
     Reservation(#[from] SledReservationError),
+}
+
+// Chooses a sled for reservation with the supplied constraints.
+//
+// - "targets": All possible sleds which might be selected.
+// - "anti_affinity_sleds": All sleds which are anti-affine to
+// our requested reservation.
+// - "affinity_sleds": All sleds which are affine to our requested
+// reservation.
+//
+// We use the following logic to calculate a desirable sled, given a possible
+// set of "targets", and the information from affinity groups.
+//
+// # Rules vs Preferences
+//
+// Due to the flavors of "affinity policy", it's possible to bucket affinity
+// choices into two categories: "rules" and "preferences". "rules" are affinity
+// dispositions for or against sled placement that must be followed, and
+// "preferences" are affinity dispositions that should be followed for sled
+// selection, in order of "most preferential" to "least preferential".
+//
+// As example of a "rule" is "an anti-affinity group exists, containing a
+// target sled, with affinity_policy = 'fail'".
+//
+// An example of a "preference" is "an anti-affinity group exists, containing a
+// target sled, but the policy is 'allow'." We don't want to use it as a target,
+// but we will if there are no other choices.
+//
+// We apply rules before preferences to ensure they are always respected.
+// Furthermore, the evaluation of preferences is a target-seeking operation,
+// which identifies the distinct sets of targets, and searches them in
+// decreasing preference order.
+//
+// # Logic
+//
+// ## Background: Notation
+//
+// We use the following symbols for sets below:
+// - ∩: Intersection of two sets (A ∩ B is "everything that exists in A and
+// also exists in B").
+// - ∖: difference of two sets (A ∖ B is "everything that exists in A that does
+// not exist in B).
+//
+// We also use the following notation for brevity:
+// - AA,P=Fail: All sleds containing instances that are part of an anti-affinity
+//   group with policy = 'fail'.
+// - AA,P=Allow: Same as above, but with policy = 'allow'.
+// - A,P=Fail: All sleds containing instances that are part of an affinity group
+//   with policy = 'fail'.
+// - A,P=Allow: Same as above, but with policy = 'allow'.
+//
+// ## Affinity: Apply Rules
+//
+// - Targets := All viable sleds for instance placement
+// - Banned := AA,P=Fail
+// - Required := A,P=Fail
+// - if Required.len() > 1: Fail (too many constraints).
+// - if Required.len() == 1...
+//   - ... if the entry exists in the "Banned" set: Fail
+//     (contradicting constraints 'Banned' + 'Required')
+//   - ... if the entry does not exist in "Targets": Fail
+//     ('Required' constraint not satisfiable)
+//   - ... if the entry does not exist in "Banned": Use it.
+//
+// If we have not yet picked a target, we can filter the set of targets to
+// ignore "banned" sleds, and then apply preferences.
+//
+// - Targets := Targets ∖ Banned
+//
+// ## Affinity: Apply Preferences
+//
+// - Preferred := Targets ∩ A,P=Allow
+// - Unpreferred := Targets ∩ AA,P=Allow
+// - Both := Preferred ∩ Unpreferred
+// - Preferred := Preferred ∖ Both
+// - Unpreferred := Unpreferred ∖ Both
+// - If Preferred isn't empty, pick a target from it.
+// - Targets := Targets \ Unpreferred
+// - If Targets isn't empty, pick a target from it.
+// - If Unpreferred isn't empty, pick a target from it.
+// - Fail, no targets are available.
+fn pick_sled_reservation_target(
+    log: &Logger,
+    mut targets: HashSet<SledUuid>,
+    anti_affinity_sleds: Vec<(AffinityPolicy, Uuid)>,
+    affinity_sleds: Vec<(AffinityPolicy, Uuid)>,
+) -> Result<SledUuid, SledReservationError> {
+    let (banned, mut unpreferred): (HashSet<_>, HashSet<_>) =
+        anti_affinity_sleds.into_iter().partition_map(|(policy, id)| {
+            let id = SledUuid::from_untyped_uuid(id);
+            match policy {
+                AffinityPolicy::Fail => Either::Left(id),
+                AffinityPolicy::Allow => Either::Right(id),
+            }
+        });
+    let (required, mut preferred): (HashSet<_>, HashSet<_>) =
+        affinity_sleds.into_iter().partition_map(|(policy, id)| {
+            let id = SledUuid::from_untyped_uuid(id);
+            match policy {
+                AffinityPolicy::Fail => Either::Left(id),
+                AffinityPolicy::Allow => Either::Right(id),
+            }
+        });
+
+    if !banned.is_empty() {
+        info!(
+            log,
+            "anti-affinity policy prohibits placement on {} sleds", banned.len();
+            "banned" => ?banned,
+        );
+    }
+    if !required.is_empty() {
+        info!(
+            log,
+            "affinity policy requires placement on {} sleds", required.len();
+            "required" => ?required,
+        );
+    }
+
+    if required.len() > 1 {
+        return Err(SledReservationError::TooManyAffinityConstraints);
+    }
+    if let Some(required_id) = required.iter().next() {
+        // If we have a "required" sled, it must be chosen.
+        if banned.contains(&required_id) {
+            return Err(
+                SledReservationError::ConflictingAntiAndAffinityConstraints,
+            );
+        }
+        if !targets.contains(&required_id) {
+            return Err(SledReservationError::RequiredAffinitySledNotValid);
+        }
+        return Ok(*required_id);
+    }
+
+    // We have no "required" sleds, but might have preferences.
+    targets = targets.difference(&banned).cloned().collect();
+
+    // Only consider "preferred" sleds that are viable targets
+    preferred = targets.intersection(&preferred).cloned().collect();
+    // Only consider "unpreferred" sleds that are viable targets
+    unpreferred = targets.intersection(&unpreferred).cloned().collect();
+
+    // If a target is both preferred and unpreferred, it is removed
+    // from both sets.
+    let both = preferred.intersection(&unpreferred).cloned().collect();
+    preferred = preferred.difference(&both).cloned().collect();
+    unpreferred = unpreferred.difference(&both).cloned().collect();
+
+    if let Some(target) = preferred.iter().next() {
+        return Ok(*target);
+    }
+    targets = targets.difference(&unpreferred).cloned().collect();
+    if let Some(target) = targets.iter().next() {
+        return Ok(*target);
+    }
+    if let Some(target) = unpreferred.iter().next() {
+        return Ok(*target);
+    }
+    return Err(SledReservationError::NotFound);
 }
 
 impl DataStore {
@@ -231,18 +440,7 @@ impl DataStore {
             SledReservationTransactionError::Diesel(e) => {
                 public_error_from_diesel(e, ErrorHandler::Server)
             }
-            SledReservationTransactionError::Reservation(e) => match e {
-                SledReservationError::NotFound
-                | SledReservationError::TooManyAffinityConstraints
-                | SledReservationError::ConflictingAntiAndAffinityConstraints
-                | SledReservationError::RequiredAffinitySledNotValid => {
-                    return external::Error::insufficient_capacity(
-                        "No sleds can fit the requested instance",
-                        "No sled targets found that had enough \
-                                 capacity to fit the requested instance.",
-                    );
-                }
-            },
+            SledReservationTransactionError::Reservation(e) => e.into(),
         })
     }
 
@@ -367,177 +565,26 @@ impl DataStore {
                         instance_id,
                     ).get_results_async::<(AffinityPolicy, Uuid)>(&conn).await?;
 
-                    // We use the following logic to calculate a desirable sled,
-                    // given a possible set of "targets", and the information
-                    // from affinity groups.
-                    //
-                    // # Rules vs Preferences
-                    //
-                    // Due to the flavors "affinity policy", it's possible to bucket affinity
-                    // choices into two categories: "rules" and "preferences". "rules" are affinity
-                    // dispositions for or against sled placement that must be followed, and
-                    // "preferences" are affinity dispositions that should be followed for sled
-                    // selection, in order of "most preferential" to "least preferential".
-                    //
-                    // As example of a "rule" is "an anti-affinity group exists, containing a
-                    // target sled, with affinity_policy = 'fail'".
-                    //
-                    // An example of a "preference" is "an anti-affinity group exists, containing a
-                    // target sled, but the policy is 'allow'. We don't want to use it as a target,
-                    // but we will if there are no other choices."
-                    //
-                    // We apply rules before preferences to ensure they are always respected.
-                    // Furthermore, the evaluation of preferences is a target-seeking operation,
-                    // which identifies the distinct sets of targets, and searches them in
-                    // decreasing preference order.
-                    //
-                    // # Logic
-                    //
-                    // ## Background: Notation
-                    //
-                    // We use the following symbols for sets below:
-                    // - ∩: Intersection of two sets (A ∩ B is "everything that exists in A and
-                    // also exists in B").
-                    // - \: difference of two sets (A \ B is "everything that exists in A that does
-                    // not exist in B).
-                    //
-                    // We also use the following notation for brevity:
-                    // - AA,P=Fail: All sleds sharing an anti-affinity instance within a group with
-                    // policy = 'fail'.
-                    // - AA,P=Allow: Same as above, but with policy = 'allow'.
-                    // - A,P=Fail: All sleds sharing an affinity instance within a group with
-                    // policy = 'fail'.
-                    // - A,P=Allow: Same as above, but with policy = 'allow'.
-                    //
-                    // ## Affinity: Apply Rules
-                    //
-                    // - Targets := All viable sleds for instance placement
-                    // - Banned := AA,P=Fail
-                    // - Required := A,P=Fail
-                    // - if Required.len() > 1: Fail (too many constraints).
-                    // - if Required.len() == 1...
-                    //   - ... if the entry exists in the "Banned" set: Fail
-                    //     (contradicting constraints 'Banned' + 'Required')
-                    //   - ... if the entry does not exist in "Targets": Fail
-                    //     ('Required' constraint not satisfiable)
-                    //   - ... if the entry does not exist in "Banned": Use it.
-                    //
-                    // If we have not yet picked a target, we can filter the
-                    // set of targets to ignore "banned" sleds, and then apply
-                    // preferences.
-                    //
-                    // - Targets := Targets \ Banned
-                    //
-                    // ## Affinity: Apply Preferences
-                    //
-                    // - Preferred := Targets ∩ A,P=Allow
-                    // - Unpreferred := Targets ∩ AA,P=Allow
-                    // - Neither := Preferred ∩ Unpreferred
-                    // - Preferred := Preferred \ Neither
-                    // - Unpreferred := Unpreferred \ Neither
-                    // - If Preferred isn't empty, pick a target from it.
-                    // - Targets := Targets \ Unpreferred
-                    // - If Targets isn't empty, pick a target from it.
-                    // - If Unpreferred isn't empty, pick a target from it.
-                    // - Fail, no targets are available.
+                    let targets: HashSet<SledUuid> = sled_targets
+                        .into_iter()
+                        .map(|id| SledUuid::from_untyped_uuid(id))
+                        .collect();
 
-                    let mut targets: HashSet<_> = sled_targets.into_iter().collect();
-
-                    let banned = anti_affinity_sleds.iter().filter_map(|(policy, id)| {
-                        if *policy == AffinityPolicy::Fail {
-                            Some(*id)
-                        } else {
-                            None
-                        }
-                    }).collect::<HashSet<_>>();
-                    let required = affinity_sleds.iter().filter_map(|(policy, id)| {
-                        if *policy == AffinityPolicy::Fail {
-                            Some(*id)
-                        } else {
-                            None
-                        }
-                    }).collect::<HashSet<_>>();
-
-                    if !banned.is_empty() {
-                        info!(
-                            opctx.log,
-                            "affinity policy prohibits placement on {} sleds", banned.len();
-                            "banned" => ?banned,
-                        );
-                    }
-                    if !required.is_empty() {
-                        info!(
-                            opctx.log,
-                            "affinity policy requires placement on {} sleds", required.len();
-                            "required" => ?required,
-                        );
-                    }
-
-                    let sled_target = if required.len() > 1 {
-                        return Err(err.bail(SledReservationError::TooManyAffinityConstraints));
-                    } else if let Some(required_id) = required.iter().next() {
-                        // If we have a "required" sled, it must be chosen.
-
-                        if banned.contains(&required_id) {
-                            return Err(err.bail(SledReservationError::ConflictingAntiAndAffinityConstraints));
-                        }
-                        if !targets.contains(&required_id) {
-                            return Err(err.bail(SledReservationError::RequiredAffinitySledNotValid));
-                        }
-                        *required_id
-                    } else {
-                        // We have no "required" sleds, but might have preferences.
-
-                        targets = targets.difference(&banned).cloned().collect();
-
-                        let mut preferred = affinity_sleds.iter().filter_map(|(policy, id)| {
-                            if *policy == AffinityPolicy::Allow {
-                                Some(*id)
-                            } else {
-                                None
-                            }
-                        }).collect::<HashSet<_>>();
-                        let mut unpreferred = anti_affinity_sleds.iter().filter_map(|(policy, id)| {
-                            if *policy == AffinityPolicy::Allow {
-                                Some(*id)
-                            } else {
-                                None
-                            }
-                        }).collect::<HashSet<_>>();
-
-                        // Only consider "preferred" sleds that are viable targets
-                        preferred = targets.intersection(&preferred).cloned().collect();
-                        // Only consider "unpreferred" sleds that are viable targets
-                        unpreferred = targets.intersection(&unpreferred).cloned().collect();
-
-                        // If a target is both preferred and unpreferred, it is removed
-                        // from both sets.
-                        let both = preferred.intersection(&unpreferred).cloned().collect();
-                        preferred = preferred.difference(&both).cloned().collect();
-                        unpreferred = unpreferred.difference(&both).cloned().collect();
-
-                        if let Some(target) = preferred.iter().next() {
-                            *target
-                        } else {
-                            targets = targets.difference(&unpreferred).cloned().collect();
-                            if let Some(target) = targets.iter().next() {
-                                *target
-                            } else {
-                                if let Some(target) = unpreferred.iter().next() {
-                                    *target
-                                } else {
-                                    return Err(err.bail(SledReservationError::NotFound));
-                                }
-                            }
-                        }
-                    };
+                    let sled_target = pick_sled_reservation_target(
+                        &opctx.log,
+                        targets,
+                        anti_affinity_sleds,
+                        affinity_sleds,
+                    ).map_err(|e| {
+                        err.bail(e)
+                    })?;
 
                     // Create a SledResource record, associate it with the target
                     // sled.
                     let resource = SledResource::new_for_vmm(
                         propolis_id,
                         instance_id,
-                        SledUuid::from_untyped_uuid(sled_target),
+                        sled_target,
                         resources,
                     );
 
@@ -1082,6 +1129,8 @@ pub(in crate::db::datastore) mod test {
     use nexus_types::identity::Resource;
     use omicron_common::api::external;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::AffinityGroupUuid;
+    use omicron_uuid_kinds::AntiAffinityGroupUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
@@ -1451,20 +1500,16 @@ pub(in crate::db::datastore) mod test {
     // creating affinity groups, but makes testing easier.
     async fn add_instance_to_anti_affinity_group(
         datastore: &DataStore,
-        group_id: Uuid,
-        instance_id: Uuid,
+        group_id: AntiAffinityGroupUuid,
+        instance_id: InstanceUuid,
     ) {
         use db::model::AntiAffinityGroupInstanceMembership;
         use db::schema::anti_affinity_group_instance_membership::dsl as membership_dsl;
-        use omicron_uuid_kinds::AntiAffinityGroupUuid;
 
         diesel::insert_into(
             membership_dsl::anti_affinity_group_instance_membership,
         )
-        .values(AntiAffinityGroupInstanceMembership::new(
-            AntiAffinityGroupUuid::from_untyped_uuid(group_id),
-            InstanceUuid::from_untyped_uuid(instance_id),
-        ))
+        .values(AntiAffinityGroupInstanceMembership::new(group_id, instance_id))
         .on_conflict((membership_dsl::group_id, membership_dsl::instance_id))
         .do_nothing()
         .execute_async(&*datastore.pool_connection_for_tests().await.unwrap())
@@ -1503,18 +1548,14 @@ pub(in crate::db::datastore) mod test {
     // creating affinity groups, but makes testing easier.
     async fn add_instance_to_affinity_group(
         datastore: &DataStore,
-        group_id: Uuid,
-        instance_id: Uuid,
+        group_id: AffinityGroupUuid,
+        instance_id: InstanceUuid,
     ) {
         use db::model::AffinityGroupInstanceMembership;
         use db::schema::affinity_group_instance_membership::dsl as membership_dsl;
-        use omicron_uuid_kinds::AffinityGroupUuid;
 
         diesel::insert_into(membership_dsl::affinity_group_instance_membership)
-            .values(AffinityGroupInstanceMembership::new(
-                AffinityGroupUuid::from_untyped_uuid(group_id),
-                InstanceUuid::from_untyped_uuid(instance_id),
-            ))
+            .values(AffinityGroupInstanceMembership::new(group_id, instance_id))
             .on_conflict((
                 membership_dsl::group_id,
                 membership_dsl::instance_id,
@@ -1667,16 +1708,16 @@ pub(in crate::db::datastore) mod test {
                     Affinity::Positive => {
                         add_instance_to_affinity_group(
                             &datastore,
-                            *group_id,
-                            self.id.into_untyped_uuid(),
+                            AffinityGroupUuid::from_untyped_uuid(*group_id),
+                            self.id,
                         )
                         .await
                     }
                     Affinity::Negative => {
                         add_instance_to_anti_affinity_group(
                             &datastore,
-                            *group_id,
-                            self.id.into_untyped_uuid(),
+                            AntiAffinityGroupUuid::from_untyped_uuid(*group_id),
+                            self.id,
                         )
                         .await
                     }
