@@ -20,15 +20,21 @@ use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::external_api::views::SledState;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::SLED_PREFIX;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use std::iter;
 use std::mem;
+use std::net::Ipv6Addr;
+use underlay_ip_allocator::SledUnderlayIpAllocator;
 
 mod datasets;
 mod disks;
+mod underlay_ip_allocator;
 mod zones;
 
 pub use self::datasets::DatasetsEditError;
@@ -102,6 +108,8 @@ pub enum SledEditError {
          zpool ({zpool}) is not present in this sled's disks"
     )]
     ZoneOnNonexistentZpool { zone_id: OmicronZoneUuid, zpool: ZpoolName },
+    #[error("ran out of underlay IP addresses")]
+    OutOfUnderlayIps,
 }
 
 #[derive(Debug)]
@@ -118,32 +126,33 @@ enum InnerSledEditor {
 }
 
 impl SledEditor {
-    pub fn for_existing(
-        state: SledState,
+    pub fn for_existing_active(
+        subnet: Ipv6Subnet<SLED_PREFIX>,
         zones: BlueprintZonesConfig,
         disks: BlueprintPhysicalDisksConfig,
         datasets: BlueprintDatasetsConfig,
     ) -> Result<Self, SledInputError> {
-        match state {
-            SledState::Active => {
-                let inner = ActiveSledEditor::new(zones, disks, datasets)?;
-                Ok(Self(InnerSledEditor::Active(inner)))
-            }
-            SledState::Decommissioned => {
-                let inner = EditedSled {
-                    state,
-                    zones,
-                    disks,
-                    datasets,
-                    edit_counts: SledEditCounts::zeroes(),
-                };
-                Ok(Self(InnerSledEditor::Decommissioned(inner)))
-            }
-        }
+        let inner = ActiveSledEditor::new(subnet, zones, disks, datasets)?;
+        Ok(Self(InnerSledEditor::Active(inner)))
     }
 
-    pub fn for_new_active() -> Self {
-        Self(InnerSledEditor::Active(ActiveSledEditor::new_empty()))
+    pub fn for_existing_decommissioned(
+        zones: BlueprintZonesConfig,
+        disks: BlueprintPhysicalDisksConfig,
+        datasets: BlueprintDatasetsConfig,
+    ) -> Result<Self, SledInputError> {
+        let inner = EditedSled {
+            state: SledState::Decommissioned,
+            zones,
+            disks,
+            datasets,
+            edit_counts: SledEditCounts::zeroes(),
+        };
+        Ok(Self(InnerSledEditor::Decommissioned(inner)))
+    }
+
+    pub fn for_new_active(subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
+        Self(InnerSledEditor::Active(ActiveSledEditor::new_empty(subnet)))
     }
 
     pub fn finalize(self) -> EditedSled {
@@ -179,7 +188,9 @@ impl SledEditor {
                 // below, we'll be left in the active state with an empty sled
                 // editor), but omicron in general is not panic safe and aborts
                 // on panic. Plus `finalize()` should never panic.
-                let mut stolen = ActiveSledEditor::new_empty();
+                let mut stolen = ActiveSledEditor::new_empty(Ipv6Subnet::new(
+                    Ipv6Addr::LOCALHOST,
+                ));
                 mem::swap(editor, &mut stolen);
 
                 let mut finalized = stolen.finalize();
@@ -190,6 +201,12 @@ impl SledEditor {
             InnerSledEditor::Decommissioned(_) => (),
         }
         Ok(())
+    }
+
+    pub fn alloc_underlay_ip(&mut self) -> Result<Ipv6Addr, SledEditError> {
+        self.as_active_mut()?
+            .alloc_underlay_ip()
+            .ok_or(SledEditError::OutOfUnderlayIps)
     }
 
     pub fn disks(
@@ -283,6 +300,7 @@ impl SledEditor {
 
 #[derive(Debug)]
 struct ActiveSledEditor {
+    underlay_ip_allocator: SledUnderlayIpAllocator,
     zones: ZonesEditor,
     disks: DisksEditor,
     datasets: DatasetsEditor,
@@ -299,19 +317,40 @@ pub(crate) struct EditedSled {
 
 impl ActiveSledEditor {
     pub fn new(
+        subnet: Ipv6Subnet<SLED_PREFIX>,
         zones: BlueprintZonesConfig,
         disks: BlueprintPhysicalDisksConfig,
         datasets: BlueprintDatasetsConfig,
     ) -> Result<Self, SledInputError> {
+        let zones = ZonesEditor::from(zones);
+
+        // We never reuse underlay IPs within a sled, regardless of zone
+        // dispositions. If a zone has been fully removed from the blueprint
+        // some time after expungement, we may reuse its IP; reconfigurator must
+        // know that's safe prior to pruning the expunged zone.
+        let zone_ips =
+            zones.zones(BlueprintZoneFilter::All).map(|z| z.underlay_ip());
+
         Ok(Self {
-            zones: zones.into(),
+            underlay_ip_allocator: SledUnderlayIpAllocator::new(
+                subnet, zone_ips,
+            ),
+            zones,
             disks: disks.try_into()?,
             datasets: DatasetsEditor::new(datasets)?,
         })
     }
 
-    pub fn new_empty() -> Self {
+    pub fn new_empty(subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
+        // Creating the underlay IP allocator can only fail if we have a zone
+        // with an IP outside the sled subnet, but we don't have any zones at
+        // all, so this can't fail. Match explicitly to guard against this error
+        // turning into an enum and getting new variants we'd need to check.
+        let underlay_ip_allocator =
+            SledUnderlayIpAllocator::new(subnet, iter::empty());
+
         Self {
+            underlay_ip_allocator,
             zones: ZonesEditor::empty(),
             disks: DisksEditor::empty(),
             datasets: DatasetsEditor::empty(),
@@ -359,6 +398,10 @@ impl ActiveSledEditor {
             datasets: self.datasets.edit_counts(),
             zones: self.zones.edit_counts(),
         }
+    }
+
+    pub fn alloc_underlay_ip(&mut self) -> Option<Ipv6Addr> {
+        self.underlay_ip_allocator.alloc()
     }
 
     pub fn disks(
@@ -414,6 +457,11 @@ impl ActiveSledEditor {
     ) -> Result<(), SledEditError> {
         // Ensure we can construct the configs for the datasets for this zone.
         let datasets = ZoneDatasetConfigs::new(&self.disks, &zone)?;
+
+        // This zone's underlay IP should have come from us (via
+        // `alloc_underlay_ip()`), but in case it wasn't, ensure we don't hand
+        // out this IP again later.
+        self.underlay_ip_allocator.mark_as_allocated(zone.underlay_ip());
 
         // Actually add the zone and its datasets.
         self.zones.add_zone(zone)?;
