@@ -167,23 +167,6 @@ impl Populator for PopulateBuiltinUsers {
     }
 }
 
-/// Populates the built-in roles
-#[derive(Debug)]
-struct PopulateBuiltinRoles;
-impl Populator for PopulateBuiltinRoles {
-    fn populate<'a, 'b>(
-        &self,
-        opctx: &'a OpContext,
-        datastore: &'a DataStore,
-        _args: &'a PopulateArgs,
-    ) -> BoxFuture<'b, Result<(), Error>>
-    where
-        'a: 'b,
-    {
-        async { datastore.load_builtin_roles(opctx).await.map(|_| ()) }.boxed()
-    }
-}
-
 /// Populates the built-in role assignments
 #[derive(Debug)]
 struct PopulateBuiltinRoleAssignments;
@@ -334,9 +317,8 @@ impl Populator for PopulateRack {
     }
 }
 
-const ALL_POPULATORS: [&dyn Populator; 10] = [
+const ALL_POPULATORS: [&dyn Populator; 9] = [
     &PopulateBuiltinUsers {},
-    &PopulateBuiltinRoles {},
     &PopulateBuiltinRoleAssignments {},
     &PopulateBuiltinSilos {},
     &PopulateBuiltinProjects {},

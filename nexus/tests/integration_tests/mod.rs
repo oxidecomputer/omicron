@@ -37,7 +37,6 @@ mod projects;
 mod quotas;
 mod rack;
 mod role_assignments;
-mod roles_builtin;
 mod router_routes;
 mod saml;
 mod schema;
