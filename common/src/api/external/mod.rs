@@ -1033,7 +1033,6 @@ pub enum ResourceType {
     RouterRoute,
     Oximeter,
     MetricProducer,
-    RoleBuiltin,
     TufRepo,
     TufArtifact,
     SwitchPort,
