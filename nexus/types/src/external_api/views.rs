@@ -14,7 +14,7 @@ use chrono::Utc;
 use diffus::Diffus;
 use omicron_common::api::external::{
     AllowedSourceIps as ExternalAllowedSourceIps, ByteCount, Digest, Error,
-    IdentityMetadata, InstanceState, Name, ObjectIdentity, RoleName,
+    IdentityMetadata, InstanceState, Name, ObjectIdentity,
     SimpleIdentityOrName,
 };
 use oxnet::{Ipv4Net, Ipv6Net};
@@ -925,15 +925,6 @@ pub struct UserBuiltin {
     // intent in RFD 4?
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-}
-
-// ROLES
-
-/// View of a Role
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-pub struct Role {
-    pub name: RoleName,
-    pub description: String,
 }
 
 // SSH KEYS
