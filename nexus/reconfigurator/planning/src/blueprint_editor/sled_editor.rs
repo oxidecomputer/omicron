@@ -306,7 +306,7 @@ impl SledEditor {
         self.as_active_mut()?.ensure_datasets_for_running_zones(rng)
     }
 
-    // Apply fixes for omicron-7229: If any zones have a missing or incorrect
+    // Apply fixes for #7229: If any zones have a missing or incorrect
     // `filesystem_pool` property, correct it based on the inventory pools and
     // datasets.
     pub fn backfill_zone_filesystem_pools(

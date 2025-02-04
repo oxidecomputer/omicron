@@ -545,9 +545,9 @@ impl<'a> BlueprintBuilder<'a> {
                 format!("failed to construct SledEditor for sled {sled_id}")
             })?;
 
-            // Apply fixes for omicron-7229 to all active sleds: If any zones
-            // have a missing or incorrect `filesystem_pool` property, correct
-            // it based on the inventory pools and datasets.
+            // Apply fixes for #7229 to all active sleds: If any zones have a
+            // missing or incorrect `filesystem_pool` property, correct it based
+            // on the inventory pools and datasets.
             match state {
                 SledState::Active => {
                     let sled_inventory = inventory.sled_agents.get(sled_id);
