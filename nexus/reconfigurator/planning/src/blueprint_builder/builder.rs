@@ -4,10 +4,15 @@
 
 //! Low-level facility for generating Blueprints
 
+use crate::blueprint_editor::BlueprintResourceAllocator;
+use crate::blueprint_editor::BlueprintResourceAllocatorInputError;
 use crate::blueprint_editor::EditedSled;
+use crate::blueprint_editor::ExternalNetworkingChoice;
+use crate::blueprint_editor::ExternalNetworkingError;
+use crate::blueprint_editor::ExternalSnatNetworkingChoice;
+use crate::blueprint_editor::InternalDnsError;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
-use crate::ip_allocator::IpAllocator;
 use crate::planner::rng::PlannerRng;
 use crate::planner::zone_needs_expungement;
 use crate::planner::ZoneExpungeReason;
@@ -15,7 +20,6 @@ use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context as _;
 use clickhouse_admin_types::OXIMETER_CLUSTER;
-use ipnet::IpAdd;
 use nexus_inventory::now_db_precision;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -45,20 +49,15 @@ use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
-use omicron_common::address::get_sled_address;
-use omicron_common::address::get_switch_zone_address;
 use omicron_common::address::ReservedRackSubnet;
 use omicron_common::address::CLICKHOUSE_HTTP_PORT;
-use omicron_common::address::CP_SERVICES_RESERVED_ADDRESSES;
 use omicron_common::address::DNS_HTTP_PORT;
 use omicron_common::address::DNS_PORT;
 use omicron_common::address::NTP_PORT;
-use omicron_common::address::SLED_RESERVED_ADDRESSES;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
-use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -82,17 +81,10 @@ use std::net::SocketAddrV6;
 use thiserror::Error;
 
 use super::clickhouse::ClickhouseAllocator;
-use super::external_networking::ensure_input_networking_records_appear_in_parent_blueprint;
-use super::external_networking::BuilderExternalNetworking;
-use super::external_networking::ExternalNetworkingChoice;
-use super::external_networking::ExternalSnatNetworkingChoice;
-use super::internal_dns::DnsSubnetAllocator;
 
 /// Errors encountered while assembling blueprints
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("sled {sled_id}: ran out of available addresses for sled")]
-    OutOfAddresses { sled_id: SledUuid },
     #[error(
         "sled {sled_id}: no available zpools for additional {kind:?} zones"
     )]
@@ -101,14 +93,6 @@ pub enum Error {
     NoNexusZonesInParentBlueprint,
     #[error("no Boundary NTP zones exist in parent blueprint")]
     NoBoundaryNtpZonesInParentBlueprint,
-    #[error("no external DNS IP addresses are available")]
-    NoExternalDnsIpAvailable,
-    #[error("no external service IP addresses are available")]
-    NoExternalServiceIpAvailable,
-    #[error("no system MAC addresses are available")]
-    NoSystemMacAddressAvailable,
-    #[error("exhausted available OPTE IP addresses for service {kind:?}")]
-    ExhaustedOpteIps { kind: ZoneKind },
     #[error(
         "invariant violation: found decommissioned sled with \
          {num_zones} non-expunged zones: {sled_id}"
@@ -119,18 +103,18 @@ pub enum Error {
     },
     #[error("programming error in planner")]
     Planner(#[source] anyhow::Error),
-    #[error("no reserved subnets available for DNS")]
-    NoAvailableDnsSubnets,
-    #[error("can only have {INTERNAL_DNS_REDUNDANCY} internal DNS servers")]
-    TooManyDnsServers,
-    #[error("planner produced too many {kind:?} zones")]
-    TooManyZones { kind: ZoneKind },
     #[error("error editing sled {sled_id}")]
     SledEditError {
         sled_id: SledUuid,
         #[source]
         err: SledEditError,
     },
+    #[error("error constructing resource allocator")]
+    AllocatorInput(#[from] BlueprintResourceAllocatorInputError),
+    #[error("error allocating internal DNS subnet")]
+    AllocateInternalDnsSubnet(#[from] InternalDnsError),
+    #[error("error allocating external networking resources")]
+    AllocateExternalNetworking(#[from] ExternalNetworkingError),
 }
 
 /// Describes the result of an idempotent "ensure" operation
@@ -362,9 +346,14 @@ pub struct BlueprintBuilder<'a> {
 
     // These fields are used to allocate resources for sleds.
     input: &'a PlanningInput,
-    sled_ip_allocators: BTreeMap<SledUuid, IpAllocator>,
-    external_networking: OnceCell<BuilderExternalNetworking<'a>>,
-    internal_dns_subnets: OnceCell<DnsSubnetAllocator>,
+
+    // `allocators` contains logic for choosing new underlay IPs, external IPs,
+    // internal DNS subnets, etc. It's held in a `OnceCell` to delay its
+    // creation until it's first needed; the planner expunges zones before
+    // adding zones, so this delay allows us to reuse resources that just came
+    // free. (This is implicit and awkward; as we rework the builder we should
+    // rework this to make it more explicit.)
+    resource_allocator: OnceCell<BlueprintResourceAllocator>,
 
     // These fields will become part of the final blueprint.  See the
     // corresponding fields in `Blueprint`.
@@ -524,23 +513,47 @@ impl<'a> BlueprintBuilder<'a> {
                     generation: Generation::new(),
                     datasets: IdMap::new(),
                 });
-            let editor = SledEditor::for_existing(
-                state,
-                zones.clone(),
-                disks,
-                datasets.clone(),
-            )
+            let editor = match state {
+                SledState::Active => {
+                    let subnet = input
+                        .sled_lookup(SledFilter::Commissioned, *sled_id)
+                        .with_context(|| {
+                            format!(
+                                "failed to find sled details for \
+                                 active sled in parent blueprint {sled_id}"
+                            )
+                        })?
+                        .resources
+                        .subnet;
+                    SledEditor::for_existing_active(
+                        subnet,
+                        zones.clone(),
+                        disks,
+                        datasets.clone(),
+                    )
+                }
+                SledState::Decommissioned => {
+                    SledEditor::for_existing_decommissioned(
+                        zones.clone(),
+                        disks,
+                        datasets.clone(),
+                    )
+                }
+            }
             .with_context(|| {
                 format!("failed to construct SledEditor for sled {sled_id}")
             })?;
+
             sled_editors.insert(*sled_id, editor);
         }
 
         // Add new, empty `SledEditor`s for any commissioned sleds in our input
         // that weren't in the parent blueprint. (These are newly-added sleds.)
-        for sled_id in input.all_sled_ids(SledFilter::Commissioned) {
+        for (sled_id, details) in input.all_sleds(SledFilter::Commissioned) {
             if let Entry::Vacant(slot) = sled_editors.entry(sled_id) {
-                slot.insert(SledEditor::for_new_active());
+                slot.insert(SledEditor::for_new_active(
+                    details.resources.subnet,
+                ));
             }
         }
 
@@ -549,9 +562,7 @@ impl<'a> BlueprintBuilder<'a> {
             parent_blueprint,
             collection: inventory,
             input,
-            sled_ip_allocators: BTreeMap::new(),
-            external_networking: OnceCell::new(),
-            internal_dns_subnets: OnceCell::new(),
+            resource_allocator: OnceCell::new(),
             sled_editors,
             cockroachdb_setting_preserve_downgrade: parent_blueprint
                 .cockroachdb_setting_preserve_downgrade,
@@ -562,59 +573,33 @@ impl<'a> BlueprintBuilder<'a> {
         })
     }
 
-    // Helper method to create a `BuilderExternalNetworking` allocator at the
-    // point of first use. This is to work around some timing issues between the
-    // planner and the builder: `BuilderExternalNetworking` wants to know what
-    // resources are in use by running zones, but the planner constructs the
-    // `BlueprintBuilder` before it expunges zones. We want to wait to look at
-    // resources are in use until after that expungement happens; this
-    // implicitly does that by virtue of knowing that the planner won't try to
-    // allocate new external networking until after it's done expunging and has
-    // started to provision new zones.
-    //
-    // This is gross and fragile. We should clean up the planner/builder split
-    // soon.
-    fn external_networking(
+    fn resource_allocator(
         &mut self,
-    ) -> Result<&mut BuilderExternalNetworking<'a>, Error> {
-        self.external_networking
-            .get_or_try_init(|| {
-                // Check the planning input: there shouldn't be any external
-                // networking resources in the database (the source of `input`)
-                // that we don't know about from the parent blueprint.
-                ensure_input_networking_records_appear_in_parent_blueprint(
-                    self.parent_blueprint,
-                    self.input,
-                )?;
-
-                BuilderExternalNetworking::new(
-                    self.sled_editors.values().flat_map(|editor| {
-                        editor.zones(BlueprintZoneFilter::ShouldBeRunning)
-                    }),
-                    self.sled_editors.values().flat_map(|editor| {
-                        editor.zones(BlueprintZoneFilter::Expunged)
-                    }),
-                    self.input.service_ip_pool_ranges(),
-                )
-            })
-            .map_err(Error::Planner)?;
-        Ok(self.external_networking.get_mut().unwrap())
-    }
-
-    // See `external_networking`; this is a similar helper for DNS subnet
-    // allocation, with deferred creation for the same reasons.
-    fn internal_dns_subnets(
-        &mut self,
-    ) -> Result<&mut DnsSubnetAllocator, Error> {
-        self.internal_dns_subnets.get_or_try_init(|| {
-            DnsSubnetAllocator::new(
-                self.sled_editors.values().flat_map(|editor| {
-                    editor.zones(BlueprintZoneFilter::ShouldBeRunning)
-                }),
+    ) -> Result<&mut BlueprintResourceAllocator, Error> {
+        self.resource_allocator.get_or_try_init(|| {
+            // Check the planning input: there shouldn't be any external
+            // networking resources in the database (the source of `input`)
+            // that we don't know about from the parent blueprint.
+            //
+            // TODO-cleanup Should the planner do this instead? Move this check
+            // to blippy.
+            ensure_input_networking_records_appear_in_parent_blueprint(
+                self.parent_blueprint,
                 self.input,
             )
+            .map_err(Error::Planner)?;
+
+            let allocator = BlueprintResourceAllocator::new(
+                self.sled_editors
+                    .iter()
+                    .map(|(sled_id, editor)| (*sled_id, editor)),
+                self.input.service_ip_pool_ranges().to_vec(),
+                self.input.target_internal_dns_zone_count(),
+            )?;
+
+            Ok::<_, Error>(allocator)
         })?;
-        Ok(self.internal_dns_subnets.get_mut().unwrap())
+        Ok(self.resource_allocator.get_mut().expect("get_or_init succeeded"))
     }
 
     /// Iterates over the list of sled IDs for which we have zones.
@@ -1121,7 +1106,8 @@ impl<'a> BlueprintBuilder<'a> {
         let gz_address_index = self.next_internal_dns_gz_address_index(sled_id);
         let sled_subnet = self.sled_resources(sled_id)?.subnet;
         let rack_subnet = ReservedRackSubnet::from_subnet(sled_subnet);
-        let dns_subnet = self.internal_dns_subnets()?.alloc(rack_subnet)?;
+        let dns_subnet =
+            self.resource_allocator()?.next_internal_dns_subnet(rack_subnet)?;
         let address = dns_subnet.dns_address();
         let zpool = self.sled_select_zpool(sled_id, ZoneKind::InternalDns)?;
         let zone_type =
@@ -1153,7 +1139,7 @@ impl<'a> BlueprintBuilder<'a> {
             nic_ip,
             nic_subnet,
             nic_mac,
-        } = self.external_networking()?.for_new_external_dns()?;
+        } = self.resource_allocator()?.next_external_ip_external_dns()?;
         let nic = NetworkInterface {
             id: self.rng.sled_rng(sled_id).next_network_interface(),
             kind: NetworkInterfaceKind::Service { id: id.into_untyped_uuid() },
@@ -1357,7 +1343,7 @@ impl<'a> BlueprintBuilder<'a> {
             nic_ip,
             nic_subnet,
             nic_mac,
-        } = self.external_networking()?.for_new_nexus()?;
+        } = self.resource_allocator()?.next_external_ip_nexus()?;
         let external_ip = OmicronZoneExternalFloatingIp {
             id: self.rng.sled_rng(sled_id).next_external_ip(),
             ip: external_ip,
@@ -1641,7 +1627,7 @@ impl<'a> BlueprintBuilder<'a> {
             nic_ip,
             nic_subnet,
             nic_mac,
-        } = self.external_networking()?.for_new_boundary_ntp()?;
+        } = self.resource_allocator()?.next_external_ip_boundary_ntp()?;
         let external_ip = OmicronZoneExternalSnatIp {
             id: self.rng.sled_rng(sled_id).next_external_ip(),
             snat_cfg,
@@ -1723,45 +1709,14 @@ impl<'a> BlueprintBuilder<'a> {
     /// Returns a newly-allocated underlay address suitable for use by Omicron
     /// zones
     fn sled_alloc_ip(&mut self, sled_id: SledUuid) -> Result<Ipv6Addr, Error> {
-        let sled_subnet = self.sled_resources(sled_id)?.subnet;
-        let editor = self.sled_editors.get(&sled_id).ok_or_else(|| {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
-                "tried to allocate underlay IP for unknown sled {sled_id}"
+                "tried to allocate underlay IP on unknown sled {sled_id}"
             ))
         })?;
-        let allocator =
-            self.sled_ip_allocators.entry(sled_id).or_insert_with(|| {
-                let sled_subnet_addr = sled_subnet.net().prefix();
-                let minimum = sled_subnet_addr
-                    .saturating_add(u128::from(SLED_RESERVED_ADDRESSES));
-                let maximum = sled_subnet_addr
-                    .saturating_add(u128::from(CP_SERVICES_RESERVED_ADDRESSES));
-                assert!(sled_subnet.net().contains(minimum));
-                assert!(sled_subnet.net().contains(maximum));
-                let mut allocator = IpAllocator::new(minimum, maximum);
-
-                // We shouldn't need to explicitly reserve the sled's global
-                // zone and switch addresses because they should be out of our
-                // range, but we do so just to be sure.
-                let sled_gz_addr = *get_sled_address(sled_subnet).ip();
-                assert!(sled_subnet.net().contains(sled_gz_addr));
-                assert!(minimum > sled_gz_addr);
-                assert!(maximum > sled_gz_addr);
-                let switch_zone_addr = get_switch_zone_address(sled_subnet);
-                assert!(sled_subnet.net().contains(switch_zone_addr));
-                assert!(minimum > switch_zone_addr);
-                assert!(maximum > switch_zone_addr);
-
-                // Record each of the sled's zones' underlay IPs as
-                // allocated.
-                for z in editor.zones(BlueprintZoneFilter::All) {
-                    allocator.reserve(z.underlay_ip());
-                }
-
-                allocator
-            });
-
-        allocator.alloc().ok_or(Error::OutOfAddresses { sled_id })
+        editor
+            .alloc_underlay_ip()
+            .map_err(|err| Error::SledEditError { sled_id, err })
     }
 
     /// Selects a zpool for this zone type.
@@ -1857,12 +1812,173 @@ impl<'a> BlueprintBuilder<'a> {
     /// ordinarily only come from RSS.
     ///
     /// TODO-cleanup: Remove when external DNS addresses are in the policy.
-    pub(crate) fn add_external_dns_ip(
+    // This can't be `#[cfg(test)]` because it's used by the `ExampleSystem`
+    // helper (which itself is used by reconfigurator-cli and friends). We give
+    // it a scary name instead.
+    pub(crate) fn inject_untracked_external_dns_ip(
         &mut self,
         addr: IpAddr,
     ) -> Result<(), Error> {
-        self.external_networking()?.add_external_dns_ip(addr)
+        Ok(self.resource_allocator()?.inject_untracked_external_dns_ip(addr)?)
     }
+}
+
+// Helper to validate that the system hasn't gone off the rails. There should
+// never be any external networking resources in the planning input (which is
+// derived from the contents of CRDB) that we don't know about from the parent
+// blueprint. It's possible a given planning iteration could see such a state
+// there have been intermediate changes made by other Nexus instances; e.g.,
+//
+// 1. Nexus A generates a `PlanningInput` by reading from CRDB
+// 2. Nexus B executes on a target blueprint that removes IPs/NICs from
+//    CRDB
+// 3. Nexus B regenerates a new blueprint and prunes the zone(s) associated
+//    with the IPs/NICs from step 2
+// 4. Nexus B makes this new blueprint the target
+// 5. Nexus A attempts to run planning with its `PlanningInput` from step 1 but
+//    the target blueprint from step 4; this will fail the following checks
+//    because the input contains records that were removed in step 3
+//
+// We do not need to handle this class of error; it's a transient failure that
+// will clear itself up when Nexus A repeats its planning loop from the top and
+// generates a new `PlanningInput`.
+//
+// There may still be database records corresponding to _expunged_ zones, but
+// that's okay: it just means we haven't yet realized a blueprint where those
+// zones are expunged. And those should should still be in the blueprint (not
+// pruned) until their database records are cleaned up.
+//
+// It's also possible that there may be networking records in the database
+// assigned to zones that have been expunged, and our parent blueprint uses
+// those same records for new zones. This is also fine and expected, and is a
+// similar case to the previous paragraph: a zone with networking resources was
+// expunged, the database doesn't realize it yet, but can still move forward and
+// make planning decisions that reuse those resources for new zones.
+pub(super) fn ensure_input_networking_records_appear_in_parent_blueprint(
+    parent_blueprint: &Blueprint,
+    input: &PlanningInput,
+) -> anyhow::Result<()> {
+    use nexus_types::deployment::OmicronZoneExternalIp;
+    use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
+    use omicron_common::address::DNS_OPTE_IPV6_SUBNET;
+    use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
+    use omicron_common::address::NEXUS_OPTE_IPV6_SUBNET;
+    use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
+    use omicron_common::address::NTP_OPTE_IPV6_SUBNET;
+    use omicron_common::api::external::MacAddr;
+
+    let mut all_macs: HashSet<MacAddr> = HashSet::new();
+    let mut all_nexus_nic_ips: HashSet<IpAddr> = HashSet::new();
+    let mut all_boundary_ntp_nic_ips: HashSet<IpAddr> = HashSet::new();
+    let mut all_external_dns_nic_ips: HashSet<IpAddr> = HashSet::new();
+    let mut all_external_ips: HashSet<OmicronZoneExternalIp> = HashSet::new();
+
+    // Unlike the construction of the external IP allocator and existing IPs
+    // constructed above in `BuilderExternalNetworking::new()`, we do not
+    // check for duplicates here: we could very well see reuse of IPs
+    // between expunged zones or between expunged -> running zones.
+    for (_, z) in parent_blueprint.all_omicron_zones(BlueprintZoneFilter::All) {
+        let zone_type = &z.zone_type;
+        match zone_type {
+            BlueprintZoneType::BoundaryNtp(ntp) => {
+                all_boundary_ntp_nic_ips.insert(ntp.nic.ip);
+            }
+            BlueprintZoneType::Nexus(nexus) => {
+                all_nexus_nic_ips.insert(nexus.nic.ip);
+            }
+            BlueprintZoneType::ExternalDns(dns) => {
+                all_external_dns_nic_ips.insert(dns.nic.ip);
+            }
+            _ => (),
+        }
+
+        if let Some((external_ip, nic)) = zone_type.external_networking() {
+            // As above, ignore localhost (used by the test suite).
+            if !external_ip.ip().is_loopback() {
+                all_external_ips.insert(external_ip);
+            }
+            all_macs.insert(nic.mac);
+        }
+    }
+    for external_ip_entry in
+        input.network_resources().omicron_zone_external_ips()
+    {
+        // As above, ignore localhost (used by the test suite).
+        if external_ip_entry.ip.ip().is_loopback() {
+            continue;
+        }
+        if !all_external_ips.contains(&external_ip_entry.ip) {
+            bail!(
+                "planning input contains unexpected external IP \
+                 (IP not found in parent blueprint): {external_ip_entry:?}"
+            );
+        }
+    }
+    for nic_entry in input.network_resources().omicron_zone_nics() {
+        if !all_macs.contains(&nic_entry.nic.mac) {
+            bail!(
+                "planning input contains unexpected NIC \
+                 (MAC not found in parent blueprint): {nic_entry:?}"
+            );
+        }
+        match nic_entry.nic.ip {
+            IpAddr::V4(ip) if NEXUS_OPTE_IPV4_SUBNET.contains(ip) => {
+                if !all_nexus_nic_ips.contains(&ip.into()) {
+                    bail!(
+                        "planning input contains unexpected NIC \
+                         (IP not found in parent blueprint): {nic_entry:?}"
+                    );
+                }
+            }
+            IpAddr::V4(ip) if NTP_OPTE_IPV4_SUBNET.contains(ip) => {
+                if !all_boundary_ntp_nic_ips.contains(&ip.into()) {
+                    bail!(
+                        "planning input contains unexpected NIC \
+                         (IP not found in parent blueprint): {nic_entry:?}"
+                    );
+                }
+            }
+            IpAddr::V4(ip) if DNS_OPTE_IPV4_SUBNET.contains(ip) => {
+                if !all_external_dns_nic_ips.contains(&ip.into()) {
+                    bail!(
+                        "planning input contains unexpected NIC \
+                         (IP not found in parent blueprint): {nic_entry:?}"
+                    );
+                }
+            }
+            IpAddr::V6(ip) if NEXUS_OPTE_IPV6_SUBNET.contains(ip) => {
+                if !all_nexus_nic_ips.contains(&ip.into()) {
+                    bail!(
+                        "planning input contains unexpected NIC \
+                         (IP not found in parent blueprint): {nic_entry:?}"
+                    );
+                }
+            }
+            IpAddr::V6(ip) if NTP_OPTE_IPV6_SUBNET.contains(ip) => {
+                if !all_boundary_ntp_nic_ips.contains(&ip.into()) {
+                    bail!(
+                        "planning input contains unexpected NIC \
+                         (IP not found in parent blueprint): {nic_entry:?}"
+                    );
+                }
+            }
+            IpAddr::V6(ip) if DNS_OPTE_IPV6_SUBNET.contains(ip) => {
+                if !all_external_dns_nic_ips.contains(&ip.into()) {
+                    bail!(
+                        "planning input contains unexpected NIC \
+                         (IP not found in parent blueprint): {nic_entry:?}"
+                    );
+                }
+            }
+            _ => {
+                bail!(
+                    "planning input contains unexpected NIC \
+                    (IP not contained in known OPTE subnet): {nic_entry:?}"
+                )
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -2611,7 +2727,12 @@ pub mod test {
             let err = builder.sled_add_zone_nexus(sled_id).unwrap_err();
 
             assert!(
-                matches!(err, Error::NoExternalServiceIpAvailable),
+                matches!(
+                    err,
+                    Error::AllocateExternalNetworking(
+                        ExternalNetworkingError::NoExternalServiceIpAvailable
+                    )
+                ),
                 "unexpected error {err}"
             );
         }

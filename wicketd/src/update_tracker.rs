@@ -62,6 +62,7 @@ use tokio::task::JoinHandle;
 use tokio_util::io::StreamReader;
 use update_common::artifacts::ArtifactIdData;
 use update_common::artifacts::ArtifactsWithPlan;
+use update_common::artifacts::ControlPlaneZonesMode;
 use update_common::artifacts::UpdatePlan;
 use update_engine::events::ProgressUnits;
 use update_engine::AbortHandle;
@@ -356,7 +357,9 @@ impl UpdateTracker {
             stream,
             // We don't have a good file name here because file contents are
             // uploaded over stdin, so let ArtifactsWithPlan pick the name.
-            None, &self.log,
+            None,
+            ControlPlaneZonesMode::Composite,
+            &self.log,
         )
         .await
         .map_err(|error| error.to_http_error())?;

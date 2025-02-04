@@ -42,7 +42,7 @@ use crate::job::Jobs;
 /// to as "v8", "version 8", or "release 8" to customers). The use of semantic
 /// versioning is mostly to hedge for perhaps wanting something more granular in
 /// the future.
-const BASE_VERSION: Version = Version::new(12, 0, 0);
+const BASE_VERSION: Version = Version::new(13, 0, 0);
 
 const RETRY_ATTEMPTS: usize = 3;
 
@@ -189,11 +189,11 @@ async fn main() -> Result<()> {
         .context("failed to change working directory to workspace root")?;
 
     // Determine the target directory.
-    let target_dir = cargo_metadata::MetadataCommand::new()
+    let metadata = cargo_metadata::MetadataCommand::new()
         .no_deps()
         .exec()
-        .context("failed to get cargo metadata")?
-        .target_directory;
+        .context("failed to get cargo metadata")?;
+    let target_dir = metadata.target_directory;
 
     // We build everything in Omicron with $CARGO, but we need to use the rustup
     // proxy for Cargo when outside Omicron.
@@ -208,6 +208,9 @@ async fn main() -> Result<()> {
             .context("$CARGO is not valid UTF-8")?,
         None => rustup_cargo.clone(),
     };
+
+    // Read pins.toml.
+    let pins = omicron_pins::Pins::read_from_dir(&metadata.workspace_root)?;
 
     let permits = Arc::new(Semaphore::new(
         std::thread::available_parallelism()
@@ -270,34 +273,66 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Ensure the Helios checkout exists
-    if args.helios_dir.exists() {
+    // Ensure the Helios checkout exists. If the directory exists and is
+    // non-empty, check that the commit is correct.
+    if args.helios_dir.exists()
+        && fs::read_dir(&args.helios_dir).await?.next_entry().await?.is_some()
+    {
         if !args.ignore_helios_origin {
-            // check that our helios clone is up to date
-            Command::new(&args.git_bin)
-                .arg("-C")
-                .arg(&args.helios_dir)
-                .args(["fetch", "--no-write-fetch-head", "origin", "master"])
-                .ensure_success(&logger)
-                .await?;
-            let stdout = Command::new(&args.git_bin)
-                .arg("-C")
-                .arg(&args.helios_dir)
-                .args(["rev-parse", "HEAD", "origin/master"])
-                .ensure_stdout(&logger)
-                .await?;
-            let mut lines = stdout.lines();
-            let first =
-                lines.next().context("git-rev-parse output was empty")?;
-            if !lines.all(|line| line == first) {
-                error!(
-                    logger,
-                    "helios checkout at {0} is out-of-date; run \
-                    `git pull -C {0}`, or run omicron-releng with \
-                    --ignore-helios-origin or --helios-dir",
-                    shell_words::quote(args.helios_dir.as_str())
-                );
-                preflight_ok = false;
+            if let Some(helios) = &pins.helios {
+                let stdout = Command::new(&args.git_bin)
+                    .arg("-C")
+                    .arg(&args.helios_dir)
+                    .args(["rev-parse", "HEAD"])
+                    .ensure_stdout(&logger)
+                    .await?;
+                let line = stdout
+                    .lines()
+                    .next()
+                    .context("git-rev-parse output was empty")?;
+                if line != helios.commit {
+                    error!(
+                        logger,
+                        "helios checkout at {0} is not at pinned commit {1}; \
+                        checkout the correct commit, or run omicron-releng \
+                        with --ignore-helios-origin or --helios-dir",
+                        shell_words::quote(args.helios_dir.as_str()),
+                        shell_words::quote(&helios.commit),
+                    );
+                    preflight_ok = false;
+                }
+            } else {
+                // check that our helios clone is up to date
+                Command::new(&args.git_bin)
+                    .arg("-C")
+                    .arg(&args.helios_dir)
+                    .args([
+                        "fetch",
+                        "--no-write-fetch-head",
+                        "origin",
+                        "master",
+                    ])
+                    .ensure_success(&logger)
+                    .await?;
+                let stdout = Command::new(&args.git_bin)
+                    .arg("-C")
+                    .arg(&args.helios_dir)
+                    .args(["rev-parse", "HEAD", "origin/master"])
+                    .ensure_stdout(&logger)
+                    .await?;
+                let mut lines = stdout.lines();
+                let first =
+                    lines.next().context("git-rev-parse output was empty")?;
+                if !lines.all(|line| line == first) {
+                    error!(
+                        logger,
+                        "helios checkout at {0} is out-of-date; run \
+                        `git pull -C {0}`, or run omicron-releng with \
+                        --ignore-helios-origin or --helios-dir",
+                        shell_words::quote(args.helios_dir.as_str())
+                    );
+                    preflight_ok = false;
+                }
             }
         }
     } else {
@@ -307,14 +342,19 @@ async fn main() -> Result<()> {
             .arg(&args.helios_dir)
             .ensure_success(&logger)
             .await?;
+        if let Some(helios) = &pins.helios {
+            info!(
+                logger,
+                "checking out {} to {}", args.helios_dir, helios.commit,
+            );
+            Command::new(&args.git_bin)
+                .arg("-C")
+                .arg(&args.helios_dir)
+                .args(["checkout", &helios.commit])
+                .ensure_success(&logger)
+                .await?;
+        }
     }
-    // Record the branch and commit in the output
-    Command::new(&args.git_bin)
-        .arg("-C")
-        .arg(&args.helios_dir)
-        .args(["status", "--branch", "--porcelain=2"])
-        .ensure_success(&logger)
-        .await?;
 
     // Check that the omicron1 brand is installed
     if !Command::new("pkg")
@@ -362,6 +402,14 @@ async fn main() -> Result<()> {
     let tempdir = camino_tempfile::tempdir()
         .context("failed to create temporary directory")?;
     let mut jobs = Jobs::new(&logger, permits.clone(), &args.output_dir);
+
+    // Record the branch and commit of helios.git in the output
+    Command::new(&args.git_bin)
+        .arg("-C")
+        .arg(&args.helios_dir)
+        .args(["status", "--branch", "--porcelain=2"])
+        .ensure_success(&logger)
+        .await?;
 
     jobs.push_command(
         "helios-setup",
@@ -534,6 +582,14 @@ async fn main() -> Result<()> {
             )
             .env_remove("CARGO")
             .env_remove("RUSTUP_TOOLCHAIN");
+
+        if let Some(helios) = &pins.helios {
+            image_cmd = image_cmd.arg("-F").arg(format!(
+                "extra_packages+=\
+                /consolidation/oxide/omicron-release-incorporation@{}",
+                helios.incorporation
+            ));
+        }
 
         if !args.helios_local {
             image_cmd = image_cmd
