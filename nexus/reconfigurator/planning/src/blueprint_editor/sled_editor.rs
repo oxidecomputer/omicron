@@ -622,45 +622,47 @@ impl ActiveSledEditor {
                 }
             };
 
-            if zone.filesystem_pool.as_ref() != Some(&*expected_filesystem_pool)
+            // If the pool is already correct, we have nothing to do.
+            if zone.filesystem_pool.as_ref() == Some(&*expected_filesystem_pool)
             {
-                info!(
-                    log,
-                    "updating filesystem_pool for zone";
-                    "zone_id" => %zone.id,
-                    "zone_kind" => ?zone.zone_type.kind(),
-                    "current_filesystem_pool" => ?zone.filesystem_pool,
-                    "new_filesystem_zpool" => %expected_filesystem_pool,
-                );
+                continue;
+            }
 
-                // If we're _correcting_ a filesystem_pool rather than just
-                // filling it in, we also need to expunge the dataset from the
-                // incorrect value.
-                if let Some(old_filesystem) = zone.filesystem_dataset() {
-                    let (pool, kind) = old_filesystem.into_parts();
-                    match self.datasets.expunge(&pool.id(), &kind) {
-                        Ok(()) => (),
-                        // We're trying to get rid of a potentially-orphaned
-                        // dataset; it not existing is okay but unexpected! Log
-                        // a warning but don't fail.
-                        Err(
-                            err
-                            @ DatasetsEditError::ExpungeNonexistentDataset {
-                                ..
-                            },
-                        ) => {
-                            warn!(
-                                log,
-                                "unexpected failure trying to expunge dataset";
-                                InlineErrorChain::new(&err),
-                            );
-                        }
+            info!(
+                log,
+                "updating filesystem_pool for zone";
+                "zone_id" => %zone.id,
+                "zone_kind" => ?zone.zone_type.kind(),
+                "current_filesystem_pool" => ?zone.filesystem_pool,
+                "new_filesystem_zpool" => %expected_filesystem_pool,
+            );
+
+            // If we're _correcting_ a filesystem_pool rather than just
+            // filling it in, we also need to expunge the dataset from the
+            // incorrect value.
+            if let Some(old_filesystem) = zone.filesystem_dataset() {
+                let (pool, kind) = old_filesystem.into_parts();
+                match self.datasets.expunge(&pool.id(), &kind) {
+                    Ok(()) => (),
+                    // We're trying to get rid of a potentially-orphaned
+                    // dataset; it not existing is okay but unexpected! Log
+                    // a warning but don't fail.
+                    Err(
+                        err @ DatasetsEditError::ExpungeNonexistentDataset {
+                            ..
+                        },
+                    ) => {
+                        warn!(
+                            log,
+                            "unexpected failure trying to expunge dataset";
+                            InlineErrorChain::new(&err),
+                        );
                     }
                 }
-
-                zones_to_edit
-                    .insert(zone.id, expected_filesystem_pool.into_owned());
             }
+
+            zones_to_edit
+                .insert(zone.id, expected_filesystem_pool.into_owned());
         }
 
         for (zone_id, new_filesystem_zpool) in zones_to_edit {
