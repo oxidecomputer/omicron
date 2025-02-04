@@ -11,10 +11,10 @@ use clickhouse_admin_types::{
     SystemTimeSeriesSettings, TimeSeriesSettingsQuery,
 };
 use dropshot::{
-    ApiDescription, HttpError, HttpResponseCreated, HttpResponseOk,
-    HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
+    ApiDescription, ClientErrorStatusCode, HttpError, HttpResponseCreated,
+    HttpResponseOk, HttpResponseUpdatedNoContent, Path, Query, RequestContext,
+    TypedBody,
 };
-use http::StatusCode;
 use omicron_common::api::external::Generation;
 use std::sync::Arc;
 
@@ -59,7 +59,7 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
             None => {
                 return Err(HttpError::for_client_error(
                     Some(String::from("ObjectNotFound")),
-                    StatusCode::NOT_FOUND,
+                    ClientErrorStatusCode::NOT_FOUND,
                     "no generation number found".to_string(),
                 ))
             }
@@ -125,7 +125,7 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
             None => {
                 return Err(HttpError::for_client_error(
                     Some(String::from("ObjectNotFound")),
-                    StatusCode::NOT_FOUND,
+                    ClientErrorStatusCode::NOT_FOUND,
                     "no generation number found".to_string(),
                 ))
             }
