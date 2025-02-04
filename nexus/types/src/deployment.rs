@@ -1032,7 +1032,6 @@ pub struct BlueprintDatasetConfig {
     pub disposition: BlueprintDatasetDisposition,
 
     pub id: DatasetUuid,
-    #[daft(leaf)]
     pub pool: ZpoolName,
     pub kind: DatasetKind,
     pub address: Option<SocketAddrV6>,
