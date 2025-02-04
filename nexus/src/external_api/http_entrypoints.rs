@@ -53,7 +53,6 @@ use nexus_types::{
         shared::{BfdStatus, ProbeInfo},
     },
 };
-use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_id;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
@@ -96,6 +95,9 @@ use omicron_common::api::external::TufRepoGetResponse;
 use omicron_common::api::external::TufRepoInsertResponse;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
+use omicron_common::api::external::{
+    http_pagination::data_page_params_for, SwitchPortSettingsWithChecksum,
+};
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
@@ -2815,18 +2817,22 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_switch_port_settings_create(
         rqctx: RequestContext<ApiContext>,
         new_settings: TypedBody<params::SwitchPortSettingsCreate>,
-    ) -> Result<HttpResponseCreated<SwitchPortSettingsView>, HttpError> {
+    ) -> Result<HttpResponseCreated<SwitchPortSettingsWithChecksum>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
             let params = new_settings.into_inner();
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let result =
+            let (result, checksum) =
                 nexus.switch_port_settings_post(&opctx, params).await?;
 
             let settings: SwitchPortSettingsView = result.into();
-            Ok(HttpResponseCreated(settings))
+            Ok(HttpResponseCreated(SwitchPortSettingsWithChecksum {
+                value: settings,
+                checksum,
+            }))
         };
         apictx
             .context
@@ -2894,16 +2900,19 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn networking_switch_port_settings_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SwitchPortSettingsInfoSelector>,
-    ) -> Result<HttpResponseOk<SwitchPortSettingsView>, HttpError> {
+    ) -> Result<HttpResponseOk<SwitchPortSettingsWithChecksum>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
             let query = path_params.into_inner().port;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let settings =
+            let (settings, checksum) =
                 nexus.switch_port_settings_get(&opctx, &query).await?;
-            Ok(HttpResponseOk(settings.into()))
+            Ok(HttpResponseOk(SwitchPortSettingsWithChecksum {
+                value: settings.into(),
+                checksum,
+            }))
         };
         apictx
             .context
