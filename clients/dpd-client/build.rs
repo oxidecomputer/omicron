@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2024 Oxide Computer Company
+// Copyright 2025 Oxide Computer Company
 //
 // TODO: remove
 // This code is only required at the moment because the source repo
@@ -20,6 +20,7 @@ use quote::quote;
 use std::env;
 use std::fs;
 use std::path::Path;
+use typify::TypeSpaceImpl;
 
 const DENDRITE_ASIC_PACKAGE: PackageName =
     PackageName::new_const("dendrite-asic");
@@ -92,7 +93,61 @@ fn main() -> Result<()> {
                     slog::debug!(state.log, "client response"; "result" => ?result);
                 }
             })
-	    .with_derive("PartialEq")
+            .with_derive("PartialEq")
+            // NOTE: This should all go away when we can open-source the real
+            // `dpd-client` from the repo itself. These are used to ensure that
+            // we pick up things like the display implementations.
+            .with_replacement(
+                "ActiveCableMediaInterfaceId",
+                "transceiver_decode::ActiveCableMediaInterfaceId",
+                std::iter::once(TypeSpaceImpl::Display)
+            )
+            .with_replacement(
+                "ApplicationDescriptor", "transceiver_decode::ApplicationDescriptor",
+                std::iter::once(TypeSpaceImpl::Display)
+            )
+            .with_replacement(
+                "BaseTMediaInterfaceId", "transceiver_decode::BaseTMediaInterfaceId",
+                std::iter::once(TypeSpaceImpl::Display))
+            .with_replacement(
+                "CmisDatapath", "transceiver_decode::CmisDatapath",
+                std::iter::once(TypeSpaceImpl::Display))
+            .with_replacement(
+                "CmisDatapathState", "transceiver_decode::CmisDatapathState",
+                std::iter::once(TypeSpaceImpl::Display))
+            .with_replacement(
+                "CmisLaneStatus", "transceiver_decode::CmisLaneStatus",
+                std::iter::once(TypeSpaceImpl::Display))
+            .with_replacement(
+                "ConnectorType", "transceiver_decode::ConnectorType",
+                std::iter::once(TypeSpaceImpl::Display))
+            .with_replacement(
+                "ExtendedSpecificationComplianceCode", "transceiver_decode::ExtendedSpecificationComplianceCode",
+                std::iter::once(TypeSpaceImpl::Display))
+            .with_replacement(
+                "HostElectricalInterfaceId", "transceiver_decode::HostElectricalInterfaceId",
+                std::iter::once(TypeSpaceImpl::Display))
+            .with_replacement(
+                "Identifier", "transceiver_decode::Identifier",
+                std::iter::once(TypeSpaceImpl::Display))
+            .with_replacement(
+                "MediaType", "transceiver_decode::MediaType",
+                std::iter::once(TypeSpaceImpl::Display))
+            .with_replacement(
+                "MmfMediaInterfaceId", "transceiver_decode::MmfMediaInterfaceId",
+                std::iter::once(TypeSpaceImpl::Display))
+            .with_replacement(
+                "PassiveCopperMediaInterfaceId", "transceiver_decode::PassiveCopperMediaInterfaceId",
+                std::iter::once(TypeSpaceImpl::Display))
+            .with_replacement(
+                "Sff8636Datapath", "transceiver_decode::Sff8636Datapath",
+                std::iter::once(TypeSpaceImpl::Display))
+            .with_replacement(
+                "SffComplianceCode", "transceiver_decode::SffComplianceCode",
+                std::iter::once(TypeSpaceImpl::Display))
+            .with_replacement(
+                "SmfMediaInterfaceId", "transceiver_decode::SmfMediaInterfaceId",
+                std::iter::once(TypeSpaceImpl::Display))
     )
     .generate_tokens(&spec)
     .with_context(|| {

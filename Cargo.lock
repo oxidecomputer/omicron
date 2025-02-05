@@ -2622,6 +2622,8 @@ dependencies = [
  "serde_json",
  "slog",
  "toml 0.8.19",
+ "transceiver-decode",
+ "typify 0.3.0",
  "uuid",
 ]
 
@@ -12365,6 +12367,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c06d3da6113f116aaee68e4d601191614c9053067f9ab7f6edbcb161237daa54"
 dependencies = [
  "once_cell",
+]
+
+[[package]]
+name = "transceiver-decode"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/transceiver-control#9ff89d72aec7848552b595e44e1fdb508f82ddfa"
+dependencies = [
+ "schemars",
+ "serde",
+ "static_assertions",
+ "thiserror 2.0.11",
+ "transceiver-messages",
+]
+
+[[package]]
+name = "transceiver-messages"
+version = "0.1.1"
+source = "git+https://github.com/oxidecomputer/transceiver-control#9ff89d72aec7848552b595e44e1fdb508f82ddfa"
+dependencies = [
+ "bitflags 2.6.0",
+ "clap",
+ "hubpack",
+ "serde",
+ "thiserror 2.0.11",
 ]
 
 [[package]]
