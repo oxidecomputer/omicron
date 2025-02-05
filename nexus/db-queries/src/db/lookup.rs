@@ -308,27 +308,6 @@ impl<'a> LookupPath<'a> {
         )
     }
 
-    /// Select a resource of type RoleBuiltin, identified by its `name`
-    pub fn role_builtin_name(self, name: &str) -> RoleBuiltin<'a> {
-        let parts = name.split_once('.');
-        if let Some((resource_type, role_name)) = parts {
-            RoleBuiltin::PrimaryKey(
-                Root { lookup_root: self },
-                resource_type.to_string(),
-                role_name.to_string(),
-            )
-        } else {
-            let root = Root { lookup_root: self };
-            RoleBuiltin::Error(
-                root,
-                Error::ObjectNotFound {
-                    type_name: ResourceType::RoleBuiltin,
-                    lookup_type: LookupType::ByName(String::from(name)),
-                },
-            )
-        }
-    }
-
     /// Select a resource of type Silo, identified by its id
     pub fn silo_id(self, id: Uuid) -> Silo<'a> {
         Silo::PrimaryKey(Root { lookup_root: self }, id)
@@ -809,18 +788,6 @@ lookup_resource! {
     soft_deletes = false,
     primary_key_columns = [
         { column_name = "token", rust_type = String },
-    ]
-}
-
-lookup_resource! {
-    name = "RoleBuiltin",
-    ancestors = [],
-    children = [],
-    lookup_by_name = false,
-    soft_deletes = false,
-    primary_key_columns = [
-        { column_name = "resource_type", rust_type = String },
-        { column_name = "role_name", rust_type = String },
     ]
 }
 

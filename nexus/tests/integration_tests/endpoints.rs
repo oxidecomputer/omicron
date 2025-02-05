@@ -2056,19 +2056,6 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
         /* IAM */
 
         VerifyEndpoint {
-            url: "/v1/system/roles",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-        VerifyEndpoint {
-            url: "/v1/system/roles/fleet.admin",
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
             url: "/v1/system/users-builtin",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
