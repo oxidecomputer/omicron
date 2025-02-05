@@ -204,7 +204,13 @@ async fn svsc_create_subnet_undo(
         .await;
 
     match res {
-        Ok(_) | Err(external::Error::ObjectNotFound { .. }) => Ok(()),
+        Ok(_) | Err(external::Error::ObjectNotFound { .. }) => {
+            let _ = osagactx
+                .datastore()
+                .vpc_increment_rpw_version(&opctx, params.authz_vpc.id())
+                .await;
+            Ok(())
+        }
         Err(e) => Err(e.into()),
     }
 }

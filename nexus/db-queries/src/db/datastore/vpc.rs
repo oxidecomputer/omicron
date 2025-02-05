@@ -50,6 +50,7 @@ use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use futures::stream::{self, StreamExt};
 use ipnetwork::IpNetwork;
+use nexus_auth::authz::ApiResource;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V4;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V6;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_ID;
@@ -1013,50 +1014,169 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_subnet: &authz::VpcSubnet,
+        custom_router: Option<&authz::VpcRouter>,
         updates: VpcSubnetUpdate,
     ) -> UpdateResult<VpcSubnet> {
         opctx.authorize(authz::Action::Modify, authz_subnet).await?;
-        let name = updates.name.clone();
-        let time_modified = updates.time_modified;
-        let conn = self.pool_connection_authorized(opctx).await?;
-
-        use db::schema::vpc_subnet::dsl;
-        let out = diesel::update(dsl::vpc_subnet)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(authz_subnet.id()))
-            .set(updates)
-            .returning(VpcSubnet::as_returning())
-            .get_result_async(&*conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_subnet),
-                )
-            })?;
-
-        // Fix the presentation of the matching system route.
-        if let Some(new_name) = name {
-            use db::schema::router_route::dsl as rr_dsl;
-            diesel::update(rr_dsl::router_route)
-                .filter(rr_dsl::time_deleted.is_null())
-                .filter(
-                    rr_dsl::kind
-                        .eq(RouterRouteKind(ExternalRouteKind::VpcSubnet)),
-                )
-                .filter(rr_dsl::vpc_subnet_id.eq(Some(authz_subnet.id())))
-                .set(RouterRouteUpdate::vpc_subnet_rename(
-                    new_name,
-                    time_modified,
-                ))
-                .execute_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+        if let Some(authz_router) = custom_router {
+            opctx.authorize(authz::Action::Read, authz_router).await?;
         }
 
-        Ok(out)
+        let time_modified = updates.time_modified;
+        let err = OptionalError::new();
+
+        #[derive(Debug)]
+        enum SubnetError<'a> {
+            SubnetModify(DieselError),
+            SystemRoute(DieselError),
+            SubnetAttachNoRouter(&'a authz::VpcRouter),
+            SubnetAttachNoSubnet,
+            SubnetAttachRouterIsSystem,
+        }
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.transaction_retry_wrapper("vpc_subnet_update")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let updates = updates.clone();
+                async move {
+                    use db::schema::vpc_subnet::dsl;
+                    let name = updates.name.clone();
+
+                    // Update subnet metadata.
+                    // Do this conditionally to emit fewer queries in, e.g.,
+                    // the subnet create saga with an initial attachment.
+                    if updates.name.is_some() || updates.description.is_some() {
+                        if let Err(e) = diesel::update(dsl::vpc_subnet)
+                            .filter(dsl::time_deleted.is_null())
+                            .filter(dsl::id.eq(authz_subnet.id()))
+                            .set(updates)
+                            .returning(VpcSubnet::as_returning())
+                            .get_result_async(&conn)
+                            .await
+                        {
+                            return Err(err.bail_retryable_or_else(
+                                e,
+                                SubnetError::SubnetModify,
+                            ));
+                        }
+                    }
+
+                    // Fix the presentation of the matching system route.
+                    if let Some(new_name) = name {
+                        use db::schema::router_route::dsl as rr_dsl;
+                        if let Err(e) = diesel::update(rr_dsl::router_route)
+                            .filter(rr_dsl::time_deleted.is_null())
+                            .filter(rr_dsl::kind.eq(RouterRouteKind(
+                                ExternalRouteKind::VpcSubnet,
+                            )))
+                            .filter(
+                                rr_dsl::vpc_subnet_id
+                                    .eq(Some(authz_subnet.id())),
+                            )
+                            .set(RouterRouteUpdate::vpc_subnet_rename(
+                                new_name,
+                                time_modified,
+                            ))
+                            .execute_async(&conn)
+                            .await
+                        {
+                            return Err(err.bail_retryable_or_else(
+                                e,
+                                SubnetError::SystemRoute,
+                            ));
+                        }
+                    }
+
+                    // Apply subnet->custom router attachment/detachment.
+                    if let Some(authz_router) = custom_router {
+                        use db::schema::vpc_router::dsl as router_dsl;
+                        use db::schema::vpc_subnet::dsl as subnet_dsl;
+
+                        let query = VpcRouter::attach_resource(
+                            authz_router.id(),
+                            authz_subnet.id(),
+                            router_dsl::vpc_router.into_boxed().filter(
+                                router_dsl::kind.eq(VpcRouterKind::Custom),
+                            ),
+                            subnet_dsl::vpc_subnet.into_boxed(),
+                            u32::MAX,
+                            diesel::update(subnet_dsl::vpc_subnet).set((
+                                subnet_dsl::time_modified.eq(Utc::now()),
+                                subnet_dsl::custom_router_id
+                                    .eq(authz_router.id()),
+                            )),
+                        );
+
+                        query
+                            .attach_and_get_result_async(&conn)
+                            .await
+                            .map(|(_, resource)| resource)
+                            .map_err(|e| match e {
+                                AttachError::CollectionNotFound => {
+                                    err.bail(SubnetError::SubnetAttachNoRouter(
+                                        authz_router,
+                                    ))
+                                }
+                                AttachError::ResourceNotFound => {
+                                    err.bail(SubnetError::SubnetAttachNoSubnet)
+                                }
+                                // The only other failure reason can be an attempt to use a system router.
+                                AttachError::NoUpdate { .. } => err.bail(
+                                    SubnetError::SubnetAttachRouterIsSystem,
+                                ),
+                                AttachError::DatabaseError(e) => e,
+                            })
+                    } else {
+                        use db::schema::vpc_subnet::dsl;
+
+                        diesel::update(dsl::vpc_subnet)
+                            .filter(dsl::time_deleted.is_null())
+                            .filter(dsl::id.eq(authz_subnet.id()))
+                            .set(dsl::custom_router_id.eq(Option::<Uuid>::None))
+                            .returning(VpcSubnet::as_returning())
+                            .get_result_async(&conn)
+                            .await
+                            .map_err(|e| {
+                                err.bail_retryable_or_else(
+                                    e,
+                                    SubnetError::SubnetModify,
+                                )
+                            })
+                    }
+                }
+            })
+            .await
+            .map_err(|e| match err.take() {
+                Some(SubnetError::SubnetModify(e)) => public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_subnet),
+                ),
+                Some(SubnetError::SystemRoute(e)) => {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to modify nexus-managed system route",
+                        )
+                }
+                Some(SubnetError::SubnetAttachNoSubnet) => {
+                    Error::ObjectNotFound {
+                        type_name: ResourceType::VpcSubnet,
+                        lookup_type: authz_subnet.lookup_type().clone(),
+                    }
+                }
+                Some(SubnetError::SubnetAttachNoRouter(r)) => {
+                    Error::ObjectNotFound {
+                        type_name: ResourceType::VpcRouter,
+                        lookup_type: r.lookup_type().clone(),
+                    }
+                }
+                Some(SubnetError::SubnetAttachRouterIsSystem) => {
+                    Error::invalid_request(
+                        "cannot attach a system router to a VPC subnet",
+                    )
+                }
+                _ => public_error_from_diesel(e, ErrorHandler::Server),
+            })
     }
 
     pub async fn vpc_subnet_set_custom_router(
@@ -1065,49 +1185,17 @@ impl DataStore {
         authz_subnet: &authz::VpcSubnet,
         authz_router: &authz::VpcRouter,
     ) -> Result<VpcSubnet, Error> {
-        opctx.authorize(authz::Action::Modify, authz_subnet).await?;
-        opctx.authorize(authz::Action::Read, authz_router).await?;
-
-        use db::schema::vpc_router::dsl as router_dsl;
-        use db::schema::vpc_subnet::dsl as subnet_dsl;
-
-        let query = VpcRouter::attach_resource(
-            authz_router.id(),
-            authz_subnet.id(),
-            router_dsl::vpc_router
-                .into_boxed()
-                .filter(router_dsl::kind.eq(VpcRouterKind::Custom)),
-            subnet_dsl::vpc_subnet.into_boxed(),
-            u32::MAX,
-            diesel::update(subnet_dsl::vpc_subnet).set((
-                subnet_dsl::time_modified.eq(Utc::now()),
-                subnet_dsl::custom_router_id.eq(authz_router.id()),
-            )),
-        );
-
-        query
-            .attach_and_get_result_async(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
-            .await
-            .map(|(_, resource)| resource)
-            .map_err(|e| match e {
-                AttachError::CollectionNotFound => Error::not_found_by_id(
-                    ResourceType::VpcRouter,
-                    &authz_router.id(),
-                ),
-                AttachError::ResourceNotFound => Error::not_found_by_id(
-                    ResourceType::VpcSubnet,
-                    &authz_subnet.id(),
-                ),
-                // The only other failure reason can be an attempt to use a system router.
-                AttachError::NoUpdate { .. } => Error::invalid_request(
-                    "cannot attach a system router to a VPC subnet",
-                ),
-                AttachError::DatabaseError(e) => {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                }
-            })
+        self.vpc_update_subnet(
+            opctx,
+            authz_subnet,
+            Some(authz_router),
+            VpcSubnetUpdate {
+                name: None,
+                description: None,
+                time_modified: Utc::now(),
+            },
+        )
+        .await
     }
 
     pub async fn vpc_subnet_unset_custom_router(
@@ -1115,23 +1203,17 @@ impl DataStore {
         opctx: &OpContext,
         authz_subnet: &authz::VpcSubnet,
     ) -> Result<VpcSubnet, Error> {
-        opctx.authorize(authz::Action::Modify, authz_subnet).await?;
-
-        use db::schema::vpc_subnet::dsl;
-
-        diesel::update(dsl::vpc_subnet)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(authz_subnet.id()))
-            .set(dsl::custom_router_id.eq(Option::<Uuid>::None))
-            .returning(VpcSubnet::as_returning())
-            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_subnet),
-                )
-            })
+        self.vpc_update_subnet(
+            opctx,
+            authz_subnet,
+            None,
+            VpcSubnetUpdate {
+                name: None,
+                description: None,
+                time_modified: Utc::now(),
+            },
+        )
+        .await
     }
 
     pub async fn subnet_list_instance_network_interfaces(
@@ -3517,6 +3599,7 @@ mod tests {
             .vpc_update_subnet(
                 &opctx,
                 &authz_sub0,
+                None,
                 VpcSubnetUpdate {
                     name: Some(
                         "a-new-name".parse::<external::Name>().unwrap().into(),
@@ -3525,6 +3608,11 @@ mod tests {
                     time_modified: Utc::now(),
                 },
             )
+            .await
+            .unwrap();
+
+        datastore
+            .vpc_increment_rpw_version(&opctx, authz_vpc.id())
             .await
             .unwrap();
 
@@ -3552,6 +3640,7 @@ mod tests {
             .vpc_update_subnet(
                 &opctx,
                 &authz_sub1,
+                None,
                 VpcSubnetUpdate {
                     name: Some(
                         "default-v4".parse::<external::Name>().unwrap().into(),
@@ -3560,6 +3649,11 @@ mod tests {
                     time_modified: Utc::now(),
                 },
             )
+            .await
+            .unwrap();
+
+        datastore
+            .vpc_increment_rpw_version(&opctx, authz_vpc.id())
             .await
             .unwrap();
 

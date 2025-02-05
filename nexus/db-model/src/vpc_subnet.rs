@@ -109,7 +109,7 @@ impl From<VpcSubnet> for views::VpcSubnet {
     }
 }
 
-#[derive(AsChangeset)]
+#[derive(AsChangeset, Clone, Deserialize, Serialize, Debug)]
 #[diesel(table_name = vpc_subnet)]
 pub struct VpcSubnetUpdate {
     pub name: Option<Name>,

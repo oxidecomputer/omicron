@@ -79,34 +79,9 @@ impl super::Nexus {
                 .lookup_for(authz::Action::CreateChild)
                 .await?;
         let custom_router = match &params.custom_router {
-            Some(key @ NameOrId::Name(_)) => {
-                let (.., rtr) = self
-                    .vpc_router_lookup(
-                        opctx,
-                        params::RouterSelector {
-                            project: None,
-                            vpc: Some(NameOrId::Id(authz_vpc.id())),
-                            router: key.clone(),
-                        },
-                    )?
-                    .lookup_for(authz::Action::Read)
-                    .await?;
-                Some(rtr)
-            }
-            Some(key @ NameOrId::Id(_)) => {
-                let (.., rtr) = self
-                    .vpc_router_lookup(
-                        opctx,
-                        params::RouterSelector {
-                            project: None,
-                            vpc: None,
-                            router: key.clone(),
-                        },
-                    )?
-                    .lookup_for(authz::Action::Read)
-                    .await?;
-                Some(rtr)
-            }
+            Some(k) => Some(
+                self.vpc_router_lookup_for_attach(opctx, k, &authz_vpc).await?,
+            ),
             None => None,
         };
 
@@ -214,85 +189,36 @@ impl super::Nexus {
         let (.., authz_vpc, authz_subnet) =
             vpc_subnet_lookup.lookup_for(authz::Action::Modify).await?;
 
-        // Updating the custom router is a separate action.
-        self.vpc_subnet_update_custom_router(
-            opctx,
-            &authz_vpc,
-            &authz_subnet,
-            params.custom_router.as_ref(),
-        )
-        .await?;
+        let custom_router = match &params.custom_router {
+            Some(k) => Some(
+                self.vpc_router_lookup_for_attach(opctx, k, &authz_vpc).await?,
+            ),
+            None => None,
+        };
 
-        let out = self
-            .db_datastore
-            .vpc_update_subnet(&opctx, &authz_subnet, params.clone().into())
+        let saga_params = sagas::vpc_subnet_update::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            authz_vpc,
+            authz_subnet,
+            custom_router,
+            update: params.clone().into(),
+        };
+
+        let saga_outputs = self
+            .sagas
+            .saga_execute::<sagas::vpc_subnet_update::SagaVpcSubnetUpdate>(
+                saga_params,
+            )
             .await?;
+
+        let out = saga_outputs
+            .lookup_node_output::<VpcSubnet>("output")
+            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .internal_context("looking up output from ip attach saga")?;
 
         self.vpc_needed_notify_sleds();
 
         Ok(out)
-    }
-
-    async fn vpc_subnet_update_custom_router(
-        &self,
-        opctx: &OpContext,
-        authz_vpc: &authz::Vpc,
-        authz_subnet: &authz::VpcSubnet,
-        custom_router: Option<&NameOrId>,
-    ) -> UpdateResult<VpcSubnet> {
-        // Resolve the VPC router, if specified.
-        let router_lookup = match custom_router {
-            Some(key @ NameOrId::Name(_)) => self
-                .vpc_router_lookup(
-                    opctx,
-                    params::RouterSelector {
-                        project: None,
-                        vpc: Some(NameOrId::Id(authz_vpc.id())),
-                        router: key.clone(),
-                    },
-                )
-                .map(Some),
-            Some(key @ NameOrId::Id(_)) => self
-                .vpc_router_lookup(
-                    opctx,
-                    params::RouterSelector {
-                        project: None,
-                        vpc: None,
-                        router: key.clone(),
-                    },
-                )
-                .map(Some),
-            None => Ok(None),
-        }?;
-
-        let router_lookup = if let Some(l) = router_lookup {
-            let (.., rtr_authz_vpc, authz_router) =
-                l.lookup_for(authz::Action::Read).await?;
-
-            if authz_vpc.id() != rtr_authz_vpc.id() {
-                return Err(Error::invalid_request(
-                    "router and subnet must belong to the same VPC",
-                ));
-            }
-
-            Some(authz_router)
-        } else {
-            None
-        };
-
-        if let Some(authz_router) = router_lookup {
-            self.db_datastore
-                .vpc_subnet_set_custom_router(
-                    opctx,
-                    &authz_subnet,
-                    &authz_router,
-                )
-                .await
-        } else {
-            self.db_datastore
-                .vpc_subnet_unset_custom_router(opctx, &authz_subnet)
-                .await
-        }
     }
 
     pub(crate) async fn vpc_delete_subnet(
