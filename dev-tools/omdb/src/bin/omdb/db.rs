@@ -901,11 +901,10 @@ impl DbArgs {
         omdb: &Omdb,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
-        let command = self.command.clone();
-        let fetch_opts = self.fetch_opts.clone();
+        let fetch_opts = &self.fetch_opts;
         self.db_url_opts.with_datastore(omdb, log, |opctx, datastore| {
             async move {
-                match &command {
+                match &self.command {
                     DbCommands::Rack(RackArgs { command: RackCommands::List }) => {
                         cmd_db_rack_list(&opctx, &datastore, &fetch_opts).await
                     }

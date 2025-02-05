@@ -105,6 +105,9 @@ async fn test_omdb_usage_errors() {
         &["oxql", "--help"],
         // Mispelled argument
         &["oxql", "--summarizes"],
+        &["reconfigurator"],
+        &["reconfigurator", "export"],
+        &["reconfigurator", "archive"],
     ];
 
     for args in invocations {
