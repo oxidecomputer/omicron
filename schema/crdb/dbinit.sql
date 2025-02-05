@@ -4963,17 +4963,25 @@ ON omicron.public.webhook_event (
  * Webhook message dispatching and delivery attempts.
  */
 
+-- Describes why a webhook delivery was triggered
+CREATE TYPE IF NOT EXISTS omicron.public.webhook_delivery_trigger AS ENUM (
+    --  This delivery was triggered by the event being dispatched.
+    'dispatch',
+    -- This delivery was triggered by an explicit call to the webhook event
+    -- resend API.
+    'resend'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
-    -- UUID of this dispatch.
+    -- UUID of this delivery.
     id UUID PRIMARY KEY,
     --- UUID of the event (foreign key into `omicron.public.webhook_event`).
     event_id UUID NOT NULL,
     -- UUID of the webhook receiver (foreign key into
     -- `omicron.public.webhook_rx`)
     rx_id UUID NOT NULL,
-    -- true if this delivery attempt was triggered by a call to the resend API,
-    -- false if this is the initial delivery attempt.
-    is_redelivery BOOL NOT NULL,
+
+    trigger omicron.public.webhook_delivery_trigger NOT NULL,
 
     payload JSONB NOT NULL,
 
@@ -5006,7 +5014,7 @@ ON omicron.public.webhook_delivery (
     event_id, rx_id
 )
 WHERE
-    is_redelivery = FALSE;
+    trigger = 'dispatch';
 
 -- Index for looking up all webhook messages dispatched to a receiver ID
 CREATE INDEX IF NOT EXISTS lookup_webhook_dispatched_to_rx

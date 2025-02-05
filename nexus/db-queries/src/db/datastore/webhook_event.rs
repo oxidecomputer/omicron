@@ -11,6 +11,7 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::WebhookDelivery;
+use crate::db::model::WebhookDeliveryTrigger;
 use crate::db::model::WebhookEvent;
 use crate::db::model::WebhookEventClass;
 use crate::db::model::WebhookReceiver;
@@ -19,6 +20,8 @@ use crate::db::schema::webhook_delivery::dsl as delivery_dsl;
 use crate::db::schema::webhook_event::dsl as event_dsl;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use diesel::result::DatabaseErrorKind;
+use diesel::result::Error as DieselError;
 use diesel::result::OptionalExtension;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::WebhookDispatched;
@@ -110,7 +113,7 @@ impl DataStore {
                     );
                     match self
                         .webhook_event_insert_delivery_on_conn(
-                            &event, &rx_id, false, &conn
+                            &event, &rx_id, WebhookDeliveryTrigger::Dispatch, &conn
                         )
                         .await
                     {
@@ -153,25 +156,52 @@ impl DataStore {
         &self,
         event: &WebhookEvent,
         rx_id: &WebhookReceiverUuid,
-        is_redelivery: bool,
+        trigger: WebhookDeliveryTrigger,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<WebhookDelivery, AsyncInsertError> {
-        let delivery: WebhookDelivery = WebhookReceiver::insert_resource(
-            rx_id.into_untyped_uuid(),
-            diesel::insert_into(delivery_dsl::webhook_delivery)
-                .values(WebhookDelivery::new(&event, rx_id, is_redelivery)),
-        )
-        .insert_and_get_result_async(conn)
-        .await?;
-        Ok(delivery)
+    ) -> Result<Option<WebhookDelivery>, AsyncInsertError> {
+        let result: Result<WebhookDelivery, _> =
+            WebhookReceiver::insert_resource(
+                rx_id.into_untyped_uuid(),
+                diesel::insert_into(delivery_dsl::webhook_delivery)
+                    .values(WebhookDelivery::new(&event, rx_id, trigger)),
+            )
+            .insert_and_get_result_async(conn)
+            .await;
+        match result {
+            Ok(delivery) => Ok(Some(delivery)),
+
+            // If the UNIQUE constraint on the index
+            // "one_webhook_event_dispatch_per_rx" is violated, then that just
+            // means that a delivery has already been automatically dispatched
+            // to this receiver. That's fine --- the goal is to ensure that one
+            // exists, and if it already does, we don't need to do anything.
+            //
+            // Note this applies only to dispatched deliveries, not to
+            // explicitly resent deliveries, as multiple resends for an event
+            // may be created.
+            Err(AsyncInsertError::DatabaseError(
+                DieselError::DatabaseError(
+                    DatabaseErrorKind::UniqueViolation,
+                    info,
+                ),
+            )) if info.constraint_name()
+                == Some("one_webhook_event_dispatch_per_rx") =>
+            {
+                debug_assert_eq!(trigger, WebhookDeliveryTrigger::Dispatch);
+                Ok(None)
+            }
+
+            Err(e) => Err(e),
+        }
     }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-
     use crate::db::pub_test_utils::TestDatabase;
+    use nexus_types::external_api::params;
+    use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
 
     #[tokio::test]
@@ -181,9 +211,28 @@ mod test {
             dev::test_setup_log("test_dispatched_deliveries_are_unique_per_rx");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
-        let conn = db.pool_connection_for_tests().await;
+        // As webhook receivers are a collection that owns the delivery
+        // resource, we must create a "real" receiver before assigning
+        // deliveries to it.
+        let rx = datastore
+            .webhook_rx_create(
+                opctx,
+                params::WebhookCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "test-webhook".parse().unwrap(),
+                        description: String::new(),
+                    },
+                    endpoint: "http://webhooks.example.com".parse().unwrap(),
+                    secrets: vec!["my cool secret".to_string()],
+                    events: vec!["test.*".to_string()],
+                    disable_probes: false,
+                },
+            )
+            .await
+            .unwrap();
+        let rx_id = rx.rx.identity.id.into();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-        let rx_id = WebhookReceiverUuid::new_v4();
         let event_id = WebhookEventUuid::new_v4();
         let event = datastore
             .webhook_event_create(
@@ -197,15 +246,61 @@ mod test {
             .await
             .expect("can't create ye event");
 
-        let delivery1 = datastore
-            .webhook_event_insert_delivery_on_conn(&event, &rx_id, false, conn)
+        let dispatch1 = datastore
+            .webhook_event_insert_delivery_on_conn(
+                &event,
+                &rx_id,
+                WebhookDeliveryTrigger::Dispatch,
+                &*conn,
+            )
             .await
-            .expect("delivery 1 should insert");
+            .expect("dispatch 1 should insert");
+        assert!(
+            dispatch1.is_some(),
+            "the first dispatched delivery of an event should be created"
+        );
 
-        let delivery2 = datastore
-            .webhook_event_insert_delivery_on_conn(&event, &rx_id, false, conn)
-            .await;
-        dbg!(delivery2).expect_err("unique constraint should be violated");
+        let dispatch2 = datastore
+            .webhook_event_insert_delivery_on_conn(
+                &event,
+                &rx_id,
+                WebhookDeliveryTrigger::Dispatch,
+                &*conn,
+            )
+            .await
+            .expect("dispatch 2 insert should not fail");
+        assert_eq!(
+            dispatch2, None,
+            "dispatching an event a second time should do nothing"
+        );
+
+        let resend1 = datastore
+            .webhook_event_insert_delivery_on_conn(
+                &event,
+                &rx_id,
+                WebhookDeliveryTrigger::Resend,
+                &*conn,
+            )
+            .await
+            .expect("resend 1 insert should not fail");
+        assert!(
+            resend1.is_some(),
+            "resending an event should create a new delivery"
+        );
+
+        let resend2 = datastore
+            .webhook_event_insert_delivery_on_conn(
+                &event,
+                &rx_id,
+                WebhookDeliveryTrigger::Resend,
+                &*conn,
+            )
+            .await
+            .expect("resend  insert should not fail");
+        assert!(
+            resend2.is_some(),
+            "resending an event a second time should create a new delivery"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

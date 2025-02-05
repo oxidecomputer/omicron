@@ -7,6 +7,7 @@ use crate::schema::{webhook_delivery, webhook_delivery_attempt};
 use crate::serde_time_delta::optional_time_delta;
 use crate::typed_uuid::DbTypedUuid;
 use crate::SqlU8;
+use crate::WebhookDeliveryTrigger;
 use crate::WebhookEvent;
 use chrono::{DateTime, TimeDelta, Utc};
 use nexus_types::external_api::views;
@@ -65,9 +66,8 @@ pub struct WebhookDelivery {
     /// `webhook_rx`).
     pub rx_id: DbTypedUuid<WebhookReceiverKind>,
 
-    /// True if this is an explicitly triggered re-delivery attempt, false if
-    /// this is an initial dispatch of the event.
-    pub is_redelivery: bool,
+    /// Describes why this delivery was triggered.
+    pub trigger: WebhookDeliveryTrigger,
 
     /// The data payload as sent to this receiver.
     pub payload: serde_json::Value,
@@ -90,14 +90,14 @@ impl WebhookDelivery {
     pub fn new(
         event: &WebhookEvent,
         rx_id: &WebhookReceiverUuid,
-        is_redelivery: bool,
+        trigger: WebhookDeliveryTrigger,
     ) -> Self {
         Self {
             // N.B.: perhaps we ought to use timestamp-based UUIDs for these?
             id: WebhookDeliveryUuid::new_v4().into(),
             event_id: event.id,
             rx_id: (*rx_id).into(),
-            is_redelivery,
+            trigger,
             payload: event.event.clone(),
             attempts: SqlU8::new(0),
             time_created: Utc::now(),
