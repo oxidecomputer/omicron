@@ -34,7 +34,6 @@ impl GenerateResult {
     }
 }
 
-// XXX-dap this is mostly copy/paste from check_impl
 pub(crate) fn generate_impl(
     env: &Environment,
     blessed_source: &BlessedSource,
@@ -67,10 +66,8 @@ pub(crate) fn generate_impl(
     );
 
     if resolved.has_unfixable_problems() {
-        return match summarize(&apis, &resolved, &styles)? {
-            CheckResult::Failures => {
-                Ok(GenerateResult::Failures)
-            }
+        return match summarize(env, &apis, &resolved, &styles)? {
+            CheckResult::Failures => Ok(GenerateResult::Failures),
             unexpected => {
                 Err(anyhow!("unexpectedly got {unexpected:?} from summarize()"))
             }
@@ -155,7 +152,7 @@ pub(crate) fn generate_impl(
     let general_problems: Vec<_> = resolved.general_problems().collect();
     nproblems += general_problems.len();
     if !general_problems.is_empty() {
-        print_problems(general_problems, &styles);
+        print_problems(env, general_problems, &styles);
     }
     for api in apis.iter_apis() {
         let ident = api.ident();
@@ -171,7 +168,7 @@ pub(crate) fn generate_impl(
                      (this is a bug)",
                     ident, version
                 );
-                print_problems(problems, &styles);
+                print_problems(env, problems, &styles);
             }
         }
     }

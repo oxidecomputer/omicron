@@ -177,7 +177,10 @@ pub enum Problem<'a> {
          spec: {:?}.  This tool can update the local file for \
          you.", generated.spec_file_name().path()
     )]
-    LockstepStale { generated: &'a GeneratedApiSpecFile },
+    LockstepStale {
+        found: &'a LocalApiSpecFile,
+        generated: &'a GeneratedApiSpecFile,
+    },
 
     #[error(
         "No local spec file was found for locally-added API version.  \
@@ -194,8 +197,10 @@ pub enum Problem<'a> {
 
     #[error(
         "Spec generated from the current code does not match spec file(s) for \
-         locally-new API: {spec_file_names}.  This tool can update the \
-         local file(s) for you."
+         locally-new API: {}.  This tool can update the local file(s) for you.",
+        DisplayableVec(
+            spec_files.iter().map(|s| s.spec_file_name().to_string()).collect()
+        )
     )]
     // For versioned APIs, since the filename has its own hash in it, when the
     // local file is stale, it's not that the file contents will be wrong, but
@@ -210,7 +215,7 @@ pub enum Problem<'a> {
     // was somehow checked by this tool.  Maybe this library should define
     // constants like API_NAME_LATEST that are used in the client specs?
     LocalVersionStale {
-        spec_file_names: DisplayableVec<ApiSpecFileName>,
+        spec_files: Vec<&'a LocalApiSpecFile>,
         generated: &'a GeneratedApiSpecFile,
     },
 
@@ -248,7 +253,7 @@ impl<'a> Problem<'a> {
             }
             Problem::BlessedVersionBroken { .. } => None,
             Problem::LockstepMissingLocal { generated }
-            | Problem::LockstepStale { generated } => {
+            | Problem::LockstepStale { generated, .. } => {
                 Some(Fix::FixLockstepFile { generated })
             }
             Problem::LocalVersionMissingLocal { generated } => {
@@ -260,9 +265,11 @@ impl<'a> Problem<'a> {
             Problem::LocalVersionExtra { spec_file_names } => {
                 Some(Fix::DeleteFiles { files: spec_file_names })
             }
-            Problem::LocalVersionStale { spec_file_names, generated } => {
+            Problem::LocalVersionStale { spec_files, generated } => {
                 Some(Fix::FixVersionedFiles {
-                    old: spec_file_names.clone(),
+                    old: DisplayableVec(
+                        spec_files.iter().map(|s| s.spec_file_name()).collect(),
+                    ),
                     generated,
                 })
             }
@@ -282,7 +289,7 @@ pub enum Fix<'a> {
         generated: &'a GeneratedApiSpecFile,
     },
     FixVersionedFiles {
-        old: DisplayableVec<ApiSpecFileName>,
+        old: DisplayableVec<&'a ApiSpecFileName>,
         generated: &'a GeneratedApiSpecFile,
     },
     FixExtraFile {
@@ -677,7 +684,9 @@ fn resolve_api_lockstep<'a>(
 
     match local {
         Some(local_file) if local_file.contents() == generated.contents() => (),
-        Some(_) => problems.push(Problem::LockstepStale { generated }),
+        Some(found) => {
+            problems.push(Problem::LockstepStale { found, generated })
+        }
         None => problems.push(Problem::LockstepMissingLocal { generated }),
     };
 
@@ -772,9 +781,6 @@ fn resolve_api_version_local<'a>(
     let (matching, non_matching): (Vec<_>, Vec<_>) = local
         .iter()
         .partition(|local| local.contents() == generated.contents());
-    let spec_file_names = DisplayableVec(
-        non_matching.iter().map(|s| s.spec_file_name().clone()).collect(),
-    );
 
     if matching.is_empty() {
         // There was no matching spec.
@@ -784,13 +790,16 @@ fn resolve_api_version_local<'a>(
         } else {
             // There were non-matching specs.  This is your basic "stale" case.
             problems.push(Problem::LocalVersionStale {
-                spec_file_names,
+                spec_files: non_matching,
                 generated,
             });
         }
     } else if !non_matching.is_empty() {
         // There was a matching spec, but also some non-matching ones.
         // These are superfluous.  (It's not clear how this could happen.)
+        let spec_file_names = DisplayableVec(
+            non_matching.iter().map(|s| s.spec_file_name().clone()).collect(),
+        );
         problems.push(Problem::LocalVersionExtra { spec_file_names });
     }
 

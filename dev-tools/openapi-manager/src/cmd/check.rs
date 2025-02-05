@@ -6,14 +6,17 @@ use crate::{
     apis::{ManagedApi, ManagedApis},
     environment::{BlessedSource, GeneratedSource},
     output::{
-        display_api_spec_version, headers::*, plural, OutputOpts, Styles,
+        display_api_spec_version, headers::*, plural, write_diff, OutputOpts,
+        Styles,
     },
     resolved::{Problem, Resolution, Resolved},
-    spec::Environment,
+    spec::{CheckStale, Environment},
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
 };
 use anyhow::{bail, Result};
+use indent_write::io::IndentWriter;
 use owo_colors::OwoColorize;
+use similar::TextDiff;
 use std::process::ExitCode;
 
 #[derive(Clone, Copy, Debug)]
@@ -57,7 +60,7 @@ pub(crate) fn check_impl(
         Resolved::new(env, &apis, &blessed, &generated, &local_files);
 
     eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
-    summarize(&apis, &resolved, &styles)
+    summarize(env, &apis, &resolved, &styles)
 }
 
 // XXX-dap put somewhere where it can be re-used
@@ -87,6 +90,7 @@ pub fn print_warnings(
 /// Summarize the results of checking all supported API versions, plus other
 /// problems found during resolution
 pub fn summarize(
+    env: &Environment,
     apis: &ManagedApis,
     resolved: &Resolved,
     styles: &Styles,
@@ -120,7 +124,7 @@ pub fn summarize(
             } else {
                 num_fresh += 1;
             }
-            summarize_one(api, version, resolution, styles);
+            summarize_one(env, api, version, resolution, styles);
         }
     }
 
@@ -136,7 +140,7 @@ pub fn summarize(
         let (fixable, unfixable): (Vec<&Problem>, Vec<&Problem>) =
             general_problems.iter().partition(|p| p.is_fixable());
         num_failed += unfixable.len();
-        print_problems(general_problems, styles);
+        print_problems(env, general_problems, styles);
         fixable.len()
     } else {
         0
@@ -201,6 +205,7 @@ pub fn summarize(
 
 /// Summarize the "check" status of one supported API version
 fn summarize_one(
+    env: &Environment,
     api: &ManagedApi,
     version: &semver::Version,
     resolution: &Resolution<'_>,
@@ -228,12 +233,12 @@ fn summarize_one(
             display_api_spec_version(api, version, &styles),
         );
 
-        print_problems(problems, styles);
+        print_problems(env, problems, styles);
     }
 }
 
 /// Print a formatted list of Problems
-pub fn print_problems<'a, T>(problems: T, styles: &Styles)
+pub fn print_problems<'a, T>(env: &Environment, problems: T, styles: &Styles)
 where
     T: IntoIterator<Item = &'a Problem<'a>>,
 {
@@ -278,6 +283,60 @@ where
                         .subsequent_indent(&more_indent)
                 )
             );
+        }
+
+        // When possible, print a useful diff of changes.
+        let do_diff = match p {
+            Problem::LockstepStale { found, generated } => {
+                let diff = TextDiff::from_lines(
+                    found.contents(),
+                    generated.contents(),
+                );
+                let path1 =
+                    env.openapi_dir().join(found.spec_file_name().path());
+                let path2 =
+                    env.openapi_dir().join(generated.spec_file_name().path());
+                Some((diff, path1, path2))
+            }
+            Problem::ExtraFileStale {
+                api_ident,
+                path,
+                check_stale:
+                    CheckStale::Modified { full_path, actual, expected },
+            } => {
+                let diff = TextDiff::from_lines(actual, expected);
+                Some((diff, full_path.clone(), full_path.clone()))
+            }
+            Problem::LocalVersionStale { spec_files, generated }
+                if spec_files.len() == 1 =>
+            {
+                let diff = TextDiff::from_lines(
+                    spec_files[0].contents(),
+                    generated.contents(),
+                );
+                let path1 = env
+                    .openapi_dir()
+                    .join(spec_files[0].spec_file_name().path());
+                let path2 =
+                    env.openapi_dir().join(generated.spec_file_name().path());
+                Some((diff, path1, path2))
+            }
+            _ => None,
+        };
+
+        if let Some((diff, path1, path2)) = do_diff {
+            let indent = " ".repeat(HEADER_WIDTH + 1);
+            // We don't care about I/O errors here (just as we don't when using
+            // eprintln! above).
+            let _ = write_diff(
+                &diff,
+                &path1,
+                &path2,
+                styles,
+                // Add an indent to align diff with the status message.
+                &mut IndentWriter::new(&indent, std::io::stderr()),
+            );
+            eprintln!("");
         }
     }
 }

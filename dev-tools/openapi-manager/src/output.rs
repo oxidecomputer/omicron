@@ -62,7 +62,8 @@ impl Styles {
 // output.
 pub(crate) fn write_diff<'diff, 'old, 'new, 'bufs>(
     diff: &'diff TextDiff<'old, 'new, 'bufs, [u8]>,
-    full_path: &Utf8Path,
+    path1: &Utf8Path,
+    path2: &Utf8Path,
     styles: &Styles,
     out: &mut dyn io::Write,
 ) -> io::Result<()>
@@ -70,17 +71,10 @@ where
     'diff: 'old + 'new + 'bufs,
 {
     // The "a/" (/ courtesy full_path) and "b/" make it feel more like git diff.
-    writeln!(
-        out,
-        "{}",
-        format!("--- a{}", full_path).style(styles.diff_before)
-    )?;
-    writeln!(
-        out,
-        "{}",
-        format!("+++ b/generated/{}", full_path.file_name().unwrap())
-            .style(styles.diff_after)
-    )?;
+    let a = Utf8Path::new("a").join(path1);
+    writeln!(out, "{}", format!("--- {a}").style(styles.diff_before))?;
+    let b = Utf8Path::new("b").join(path2);
+    writeln!(out, "{}", format!("+++ {b}").style(styles.diff_after))?;
 
     let udiff = diff.unified_diff();
     for hunk in udiff.iter_hunks() {
