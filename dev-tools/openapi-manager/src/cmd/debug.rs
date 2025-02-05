@@ -5,7 +5,7 @@
 use crate::{
     apis::{ApiIdent, ManagedApis},
     environment::{BlessedSource, GeneratedSource},
-    output::Styles,
+    output::{OutputOpts, Styles},
     resolved::Resolved,
     spec::Environment,
     spec_files_generic::ApiSpecFile,
@@ -13,13 +13,17 @@ use crate::{
 use semver::Version;
 use std::{collections::BTreeMap, ops::Deref};
 
-pub(crate) fn dump_impl(
+pub(crate) fn debug_impl(
     env: &Environment,
     blessed_source: &BlessedSource,
     generated_source: &GeneratedSource,
+    output: &OutputOpts,
 ) -> anyhow::Result<()> {
     let apis = ManagedApis::all()?;
     let mut styles = Styles::default();
+    if output.use_color(supports_color::Stream::Stderr) {
+        styles.colorize();
+    }
 
     // Print information about local files.
     let local_files = env.local_source.load(&apis, &styles)?;
@@ -70,7 +74,7 @@ pub(crate) fn dump_impl(
                 for p in problems {
                     println!("    PROBLEM: {}\n", p);
                     if let Some(fix) = p.fix() {
-                        println!("        {}", fix);
+                        println!("        FIX: {}", fix);
                     }
                 }
             }

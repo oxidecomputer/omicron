@@ -10,6 +10,6 @@ pub mod dispatch;
 
 // subcommands
 mod check;
-mod dump;
+mod debug;
 mod generate;
 mod list;

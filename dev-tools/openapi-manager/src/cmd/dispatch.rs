@@ -13,7 +13,7 @@ use clap::{Args, Parser, Subcommand};
 
 use crate::{
     cmd::{
-        check::check_impl, dump::dump_impl, generate::generate_impl,
+        check::check_impl, debug::debug_impl, generate::generate_impl,
         list::list_impl,
     },
     environment::{BlessedSource, GeneratedSource},
@@ -37,7 +37,7 @@ pub struct App {
 impl App {
     pub fn exec(self) -> ExitCode {
         let result = match self.command {
-            Command::Dump(args) => args.exec(),
+            Command::Debug(args) => args.exec(&self.output_opts),
             Command::List(args) => args.exec(&self.output_opts),
             Command::Generate(args) => args.exec(&self.output_opts),
             Command::Check(args) => args.exec(&self.output_opts),
@@ -56,7 +56,7 @@ impl App {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Dump debug information about everything the tool knows
-    Dump(DumpArgs),
+    Debug(DebugArgs),
 
     /// List managed APIs.
     ///
@@ -137,7 +137,7 @@ pub struct LocalSourceArgs {
 }
 
 #[derive(Debug, Args)]
-pub struct DumpArgs {
+pub struct DebugArgs {
     #[clap(flatten)]
     local: LocalSourceArgs,
     #[clap(flatten)]
@@ -146,12 +146,12 @@ pub struct DumpArgs {
     generated: GeneratedSourceArgs,
 }
 
-impl DumpArgs {
-    fn exec(self) -> anyhow::Result<ExitCode> {
+impl DebugArgs {
+    fn exec(self, output: &OutputOpts) -> anyhow::Result<ExitCode> {
         let env = Environment::new(self.local.dir)?;
         let blessed_source = BlessedSource::try_from(self.blessed)?;
         let generated_source = GeneratedSource::from(self.generated);
-        dump_impl(&env, &blessed_source, &generated_source)?;
+        debug_impl(&env, &blessed_source, &generated_source, output)?;
         Ok(ExitCode::SUCCESS)
     }
 }
