@@ -61,25 +61,28 @@ enum SledReservationError {
         "Could not find any valid sled on which this instance can be placed"
     )]
     NotFound,
-    #[error("This instance belongs to an affinity group that requires it be placed \
-             on more than one sled. Instances can only placed on a single sled, so \
-             this is impossible to satisfy - Consider stopping other instances in \
-             the affinity group.")]
+    #[error(
+        "This instance belongs to an affinity group that requires it be placed \
+         on more than one sled. Instances can only placed on a single sled, so \
+         this is impossible to satisfy. Consider stopping other instances in \
+         the affinity group."
+    )]
     TooManyAffinityConstraints,
     #[error(
         "This instance belongs to an affinity group that requires it to be \
-             placed on a sled, but also belongs to an anti-affinity group that \
-             prevents it from being placed on that sled. These constraints are \
-             contradictory: Consider stopping instances in those \
-             affinity/anti-affinity groups, or changing group membership."
+         placed on a sled, but also belongs to an anti-affinity group that \
+         prevents it from being placed on that sled. These constraints are \
+         contradictory. Consider stopping instances in those \
+         affinity/anti-affinity groups, or changing group membership."
     )]
     ConflictingAntiAndAffinityConstraints,
-    #[error("This instance must be placed on a specific sled due to affinity \
-             rules, but that placement is invalid for some other reason (e.g., \
-             the instance would not fit, or the sled sharing an instance in the \
-             affinity group is being expunged). Consider stopping other \
-             instances in the affinity group, or changing affinity group \
-             membership.")]
+    #[error(
+        "This instance must be placed on a specific sled to co-locate it \
+         with another instance in its affinity group, but that sled cannot \
+         current accept this instance. Consider stopping other instances \
+         in this instance's affinity groups, or changing its affinity \
+         group membership."
+    )]
     RequiredAffinitySledNotValid,
 }
 
