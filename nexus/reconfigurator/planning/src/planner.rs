@@ -825,6 +825,7 @@ mod test {
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use slog_error_chain::InlineErrorChain;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
     use std::net::IpAddr;
@@ -1257,7 +1258,7 @@ mod test {
         {
             Ok(_) => panic!("unexpected success"),
             Err(err) => {
-                let err = format!("{err:#}");
+                let err = InlineErrorChain::new(&err).to_string();
                 assert!(
                     err.contains("can only have ")
                         && err.contains(" internal DNS servers"),
@@ -1492,7 +1493,7 @@ mod test {
                     .expect("can't parse external DNS IP address")
             });
         for addr in external_dns_ips {
-            blueprint_builder.add_external_dns_ip(addr).unwrap();
+            blueprint_builder.inject_untracked_external_dns_ip(addr).unwrap();
         }
 
         // Now we can add external DNS zones. We'll add two to the first
@@ -2131,6 +2132,16 @@ mod test {
             {
                 zone.disposition = BlueprintZoneDisposition::Expunged;
             }
+
+            // Similarly, a sled can only have gotten into the `Decommissioned`
+            // state via blueprints. If the database says the sled is
+            // decommissioned but the parent blueprint says it's still active,
+            // that's an invalid state that the planner will reject.
+            *blueprint1
+                .sled_state
+                .get_mut(sled_id)
+                .expect("found state in parent blueprint") =
+                SledState::Decommissioned;
 
             *sled_id
         };

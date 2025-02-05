@@ -426,7 +426,7 @@ async fn ssc_take_volume_lock_undo(
 
 async fn ssc_alloc_regions(
     sagactx: NexusActionContext,
-) -> Result<Vec<(db::model::Dataset, db::model::Region)>, ActionError> {
+) -> Result<Vec<(db::model::CrucibleDataset, db::model::Region)>, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let destination_volume_id =
@@ -483,7 +483,7 @@ async fn ssc_alloc_regions_undo(
     let log = osagactx.log();
 
     let region_ids = sagactx
-        .lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+        .lookup::<Vec<(db::model::CrucibleDataset, db::model::Region)>>(
             "datasets_and_regions",
         )?
         .into_iter()
@@ -496,7 +496,7 @@ async fn ssc_alloc_regions_undo(
 
 async fn ssc_regions_ensure(
     sagactx: NexusActionContext,
-) -> Result<String, ActionError> {
+) -> Result<VolumeConstructionRequest, ActionError> {
     let osagactx = sagactx.user_data();
     let log = osagactx.log();
     let destination_volume_id =
@@ -506,9 +506,10 @@ async fn ssc_regions_ensure(
         .nexus()
         .ensure_all_datasets_and_regions(
             &log,
-            sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-                "datasets_and_regions",
-            )?,
+            sagactx
+                .lookup::<Vec<(db::model::CrucibleDataset, db::model::Region)>>(
+                    "datasets_and_regions",
+                )?,
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -532,19 +533,11 @@ async fn ssc_regions_ensure(
                 target: datasets_and_regions
                     .iter()
                     .map(|(dataset, region)| {
-                        dataset
-                            .address_with_port(region.port_number)
-                            .ok_or_else(|| {
-                                ActionError::action_failed(
-                                    Error::internal_error(&format!(
-                                        "missing IP address for dataset {}",
-                                        dataset.id(),
-                                    )),
-                                )
-                            })
-                            .map(SocketAddr::V6)
+                        SocketAddr::V6(
+                            dataset.address_with_port(region.port_number),
+                        )
                     })
-                    .collect::<Result<Vec<_>, ActionError>>()?,
+                    .collect::<Vec<_>>(),
 
                 lossy: false,
                 flush_timeout: None,
@@ -580,12 +573,7 @@ async fn ssc_regions_ensure(
         read_only_parent: None,
     };
 
-    let volume_data = serde_json::to_string(&volume_construction_request)
-        .map_err(|e| {
-            ActionError::action_failed(Error::internal_error(&e.to_string()))
-        })?;
-
-    Ok(volume_data)
+    Ok(volume_construction_request)
 }
 
 async fn ssc_regions_ensure_undo(
@@ -598,9 +586,10 @@ async fn ssc_regions_ensure_undo(
         .nexus()
         .delete_crucible_regions(
             log,
-            sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-                "datasets_and_regions",
-            )?,
+            sagactx
+                .lookup::<Vec<(db::model::CrucibleDataset, db::model::Region)>>(
+                    "datasets_and_regions",
+                )?,
         )
         .await?;
     info!(log, "ssc_regions_ensure_undo: Deleted crucible regions");
@@ -615,14 +604,12 @@ async fn ssc_create_destination_volume_record(
     let destination_volume_id =
         sagactx.lookup::<VolumeUuid>("destination_volume_id")?;
 
-    let destination_volume_data = sagactx.lookup::<String>("regions_ensure")?;
-
-    let volume =
-        db::model::Volume::new(destination_volume_id, destination_volume_data);
+    let destination_volume_data =
+        sagactx.lookup::<VolumeConstructionRequest>("regions_ensure")?;
 
     osagactx
         .datastore()
-        .volume_create(volume)
+        .volume_create(destination_volume_id, destination_volume_data)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -1415,11 +1402,7 @@ async fn ssc_start_running_snapshot(
     let mut map: ReplaceSocketsMap = BTreeMap::new();
 
     for (dataset, region) in datasets_and_regions {
-        let Some(dataset_addr) = dataset.address() else {
-            return Err(ActionError::action_failed(Error::internal_error(
-                &format!("Missing IP address for dataset {}", dataset.id(),),
-            )));
-        };
+        let dataset_addr = dataset.address();
 
         // Start the snapshot running
         let (crucible_region, _, crucible_running_snapshot) = osagactx
@@ -1577,20 +1560,17 @@ async fn ssc_create_volume_record(
             ActionError::action_failed(Error::internal_error(&e.to_string()))
         })?;
 
-    // Create the volume record for this snapshot
-    let volume_data: String = serde_json::to_string(
-        &snapshot_volume_construction_request,
-    )
-    .map_err(|e| {
-        ActionError::action_failed(Error::internal_error(&e.to_string()))
-    })?;
-    info!(log, "snapshot volume construction request {}", volume_data);
-    let volume = db::model::Volume::new(volume_id, volume_data);
-
     // Insert volume record into the DB
+
+    info!(
+        log,
+        "snapshot volume construction request {:?}",
+        snapshot_volume_construction_request
+    );
+
     osagactx
         .datastore()
-        .volume_create(volume)
+        .volume_create(volume_id, snapshot_volume_construction_request)
         .await
         .map_err(ActionError::action_failed)?;
 

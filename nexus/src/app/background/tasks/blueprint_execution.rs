@@ -321,9 +321,11 @@ mod test {
             let SocketAddr::V6(addr) = server.addr() else {
                 panic!("Expected Ipv6 address. Got {}", server.addr());
             };
+            let bogus_repo_depot_port = 0;
             let update = SledUpdate::new(
                 sled_id.into_untyped_uuid(),
                 addr,
+                bogus_repo_depot_port,
                 SledBaseboard {
                     serial_number: i.to_string(),
                     part_number: "test".into(),

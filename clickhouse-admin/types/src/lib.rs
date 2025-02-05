@@ -26,10 +26,18 @@ use std::str::FromStr;
 
 mod config;
 pub use config::{
-    ClickhouseHost, KeeperConfig, KeeperConfigsForReplica, KeeperNodeConfig,
-    LogConfig, LogLevel, Macros, NodeType, RaftServerConfig,
-    RaftServerSettings, RaftServers, ReplicaConfig, ServerNodeConfig,
+    ClickhouseHost, GenerateConfigResult, KeeperConfig,
+    KeeperConfigsForReplica, KeeperNodeConfig, LogConfig, LogLevel, Macros,
+    NodeType, RaftServerConfig, RaftServerSettings, RaftServers, ReplicaConfig,
+    ServerNodeConfig,
 };
+
+pub const CLICKHOUSE_SERVER_CONFIG_DIR: &str =
+    "/opt/oxide/clickhouse_server/config.d";
+pub const CLICKHOUSE_SERVER_CONFIG_FILE: &str = "replica-server-config.xml";
+pub const CLICKHOUSE_KEEPER_CONFIG_DIR: &str = "/opt/oxide/clickhouse_keeper";
+pub const CLICKHOUSE_KEEPER_CONFIG_FILE: &str = "keeper_config.xml";
+pub const OXIMETER_CLUSTER: &str = "oximeter_cluster";
 
 // Used for schemars to be able to be used with camino:
 // See https://github.com/camino-rs/camino/issues/91#issuecomment-2027908513
@@ -38,8 +46,6 @@ pub fn path_schema(gen: &mut SchemaGenerator) -> Schema {
     schema.format = Some("Utf8PathBuf".to_owned());
     schema.into()
 }
-
-pub const OXIMETER_CLUSTER: &str = "oximeter_cluster";
 
 /// A unique ID for a ClickHouse Keeper
 #[derive(
@@ -91,6 +97,69 @@ pub struct ServerConfigurableSettings {
     pub settings: ServerSettings,
 }
 
+impl ServerConfigurableSettings {
+    /// Generate a configuration file for a replica server node
+    pub fn generate_xml_file(&self) -> Result<ReplicaConfig> {
+        let logger = LogConfig::new(
+            self.settings.datastore_path.clone(),
+            NodeType::Server,
+        );
+        let macros = Macros::new(self.settings.id);
+
+        let keepers: Vec<KeeperNodeConfig> = self
+            .settings
+            .keepers
+            .iter()
+            .map(|host| KeeperNodeConfig::new(host.clone()))
+            .collect();
+
+        let servers: Vec<ServerNodeConfig> = self
+            .settings
+            .remote_servers
+            .iter()
+            .map(|host| ServerNodeConfig::new(host.clone()))
+            .collect();
+
+        let config = ReplicaConfig::new(
+            logger,
+            macros,
+            self.listen_addr(),
+            servers.clone(),
+            keepers.clone(),
+            self.datastore_path(),
+            self.generation(),
+        );
+
+        match create_dir(self.settings.config_dir.clone()) {
+            Ok(_) => (),
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => (),
+            Err(e) => return Err(e.into()),
+        };
+
+        let path = self.settings.config_dir.join("replica-server-config.xml");
+        AtomicFile::new(
+            path.clone(),
+            atomicwrites::OverwriteBehavior::AllowOverwrite,
+        )
+        .write(|f| f.write_all(config.to_xml().as_bytes()))
+        .with_context(|| format!("failed to write to `{}`", path))?;
+
+        Ok(config)
+    }
+
+    pub fn generation(&self) -> Generation {
+        self.generation
+    }
+
+    fn listen_addr(&self) -> Ipv6Addr {
+        self.settings.listen_addr
+    }
+
+    fn datastore_path(&self) -> Utf8PathBuf {
+        self.settings.datastore_path.clone()
+    }
+}
+
 /// The top most type for configuring clickhouse-servers via
 /// clickhouse-admin-keeper-api
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -99,6 +168,65 @@ pub struct KeeperConfigurableSettings {
     pub generation: Generation,
     /// Configurable settings for a ClickHouse keeper node.
     pub settings: KeeperSettings,
+}
+
+impl KeeperConfigurableSettings {
+    /// Generate a configuration file for a keeper node
+    pub fn generate_xml_file(&self) -> Result<KeeperConfig> {
+        let logger = LogConfig::new(
+            self.settings.datastore_path.clone(),
+            NodeType::Keeper,
+        );
+
+        let raft_servers = self
+            .settings
+            .raft_servers
+            .iter()
+            .map(|settings| RaftServerConfig::new(settings.clone()))
+            .collect();
+        let raft_config = RaftServers::new(raft_servers);
+
+        let config = KeeperConfig::new(
+            logger,
+            self.listen_addr(),
+            self.id(),
+            self.datastore_path(),
+            raft_config,
+            self.generation(),
+        );
+
+        match create_dir(self.settings.config_dir.clone()) {
+            Ok(_) => (),
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => (),
+            Err(e) => return Err(e.into()),
+        };
+
+        let path = self.settings.config_dir.join("keeper_config.xml");
+        AtomicFile::new(
+            path.clone(),
+            atomicwrites::OverwriteBehavior::AllowOverwrite,
+        )
+        .write(|f| f.write_all(config.to_xml().as_bytes()))
+        .with_context(|| format!("failed to write to `{}`", path))?;
+
+        Ok(config)
+    }
+
+    pub fn generation(&self) -> Generation {
+        self.generation
+    }
+
+    fn listen_addr(&self) -> Ipv6Addr {
+        self.settings.listen_addr
+    }
+
+    fn id(&self) -> KeeperId {
+        self.settings.id
+    }
+
+    fn datastore_path(&self) -> Utf8PathBuf {
+        self.settings.datastore_path.clone()
+    }
 }
 
 /// Configurable settings for a ClickHouse replica server node.
@@ -139,50 +267,6 @@ impl ServerSettings {
             remote_servers,
         }
     }
-
-    /// Generate a configuration file for a replica server node
-    pub fn generate_xml_file(&self) -> Result<ReplicaConfig> {
-        let logger =
-            LogConfig::new(self.datastore_path.clone(), NodeType::Server);
-        let macros = Macros::new(self.id);
-
-        let keepers: Vec<KeeperNodeConfig> = self
-            .keepers
-            .iter()
-            .map(|host| KeeperNodeConfig::new(host.clone()))
-            .collect();
-
-        let servers: Vec<ServerNodeConfig> = self
-            .remote_servers
-            .iter()
-            .map(|host| ServerNodeConfig::new(host.clone()))
-            .collect();
-
-        let config = ReplicaConfig::new(
-            logger,
-            macros,
-            self.listen_addr,
-            servers.clone(),
-            keepers.clone(),
-            self.datastore_path.clone(),
-        );
-
-        match create_dir(self.config_dir.clone()) {
-            Ok(_) => (),
-            Err(e) if e.kind() == ErrorKind::AlreadyExists => (),
-            Err(e) => return Err(e.into()),
-        };
-
-        let path = self.config_dir.join("replica-server-config.xml");
-        AtomicFile::new(
-            path.clone(),
-            atomicwrites::OverwriteBehavior::AllowOverwrite,
-        )
-        .write(|f| f.write_all(config.to_xml().as_bytes()))
-        .with_context(|| format!("failed to write to `{}`", path))?;
-
-        Ok(config)
-    }
 }
 
 /// Configurable settings for a ClickHouse keeper node.
@@ -212,43 +296,6 @@ impl KeeperSettings {
         listen_addr: Ipv6Addr,
     ) -> Self {
         Self { config_dir, id, raft_servers, datastore_path, listen_addr }
-    }
-
-    /// Generate a configuration file for a keeper node
-    pub fn generate_xml_file(&self) -> Result<KeeperConfig> {
-        let logger =
-            LogConfig::new(self.datastore_path.clone(), NodeType::Keeper);
-
-        let raft_servers = self
-            .raft_servers
-            .iter()
-            .map(|settings| RaftServerConfig::new(settings.clone()))
-            .collect();
-        let raft_config = RaftServers::new(raft_servers);
-
-        let config = KeeperConfig::new(
-            logger,
-            self.listen_addr,
-            self.id,
-            self.datastore_path.clone(),
-            raft_config,
-        );
-
-        match create_dir(self.config_dir.clone()) {
-            Ok(_) => (),
-            Err(e) if e.kind() == ErrorKind::AlreadyExists => (),
-            Err(e) => return Err(e.into()),
-        };
-
-        let path = self.config_dir.join("keeper_config.xml");
-        AtomicFile::new(
-            path.clone(),
-            atomicwrites::OverwriteBehavior::AllowOverwrite,
-        )
-        .write(|f| f.write_all(config.to_xml().as_bytes()))
-        .with_context(|| format!("failed to write to `{}`", path))?;
-
-        Ok(config)
     }
 }
 
@@ -1240,6 +1287,7 @@ mod tests {
     use camino::Utf8PathBuf;
     use camino_tempfile::Builder;
     use chrono::{DateTime, Utc};
+    use omicron_common::api::external::Generation;
     use slog::{o, Drain};
     use slog_term::{FullFormat, PlainDecorator, TestStdoutWriter};
     use std::collections::BTreeMap;
@@ -1247,10 +1295,11 @@ mod tests {
     use std::str::FromStr;
 
     use crate::{
-        ClickhouseHost, DistributedDdlQueue, KeeperConf, KeeperId,
-        KeeperServerInfo, KeeperServerType, KeeperSettings, Lgif, LogLevel,
-        RaftConfig, RaftServerSettings, ServerId, ServerSettings,
-        SystemTimeSeries,
+        ClickhouseHost, DistributedDdlQueue, KeeperConf,
+        KeeperConfigurableSettings, KeeperId, KeeperServerInfo,
+        KeeperServerType, KeeperSettings, Lgif, LogLevel, RaftConfig,
+        RaftServerSettings, ServerConfigurableSettings, ServerId,
+        ServerSettings, SystemTimeSeries,
     };
 
     fn log() -> slog::Logger {
@@ -1287,13 +1336,18 @@ mod tests {
             },
         ];
 
-        let config = KeeperSettings::new(
+        let settings = KeeperSettings::new(
             Utf8PathBuf::from(config_dir.path()),
             KeeperId(1),
             keepers,
             Utf8PathBuf::from_str("./").unwrap(),
             Ipv6Addr::from_str("ff::08").unwrap(),
         );
+
+        let config = KeeperConfigurableSettings {
+            generation: Generation::new(),
+            settings,
+        };
 
         config.generate_xml_file().unwrap();
 
@@ -1327,7 +1381,7 @@ mod tests {
             ClickhouseHost::DomainName("ohai.com".to_string()),
         ];
 
-        let config = ServerSettings::new(
+        let settings = ServerSettings::new(
             Utf8PathBuf::from(config_dir.path()),
             ServerId(1),
             Utf8PathBuf::from_str("./").unwrap(),
@@ -1336,6 +1390,10 @@ mod tests {
             servers,
         );
 
+        let config = ServerConfigurableSettings {
+            settings,
+            generation: Generation::new(),
+        };
         config.generate_xml_file().unwrap();
 
         let expected_file = Utf8PathBuf::from_str("./testutils")

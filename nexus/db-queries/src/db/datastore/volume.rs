@@ -14,7 +14,7 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
 use crate::db::model::to_db_typed_uuid;
-use crate::db::model::Dataset;
+use crate::db::model::CrucibleDataset;
 use crate::db::model::Disk;
 use crate::db::model::DownstairsClientStopRequestNotification;
 use crate::db::model::DownstairsClientStoppedNotification;
@@ -186,7 +186,7 @@ enum ReplaceSnapshotError {
 pub struct FreedCrucibleResources {
     /// Regions that previously could not be deleted (often due to region
     /// snaphots) that were freed by a volume delete
-    pub datasets_and_regions: Vec<(Dataset, Region)>,
+    pub datasets_and_regions: Vec<(CrucibleDataset, Region)>,
 
     /// Previously soft-deleted volumes that can now be hard-deleted
     pub volumes: Vec<VolumeUuid>,
@@ -202,13 +202,14 @@ impl DataStore {
     async fn volume_create_in_txn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         err: OptionalError<VolumeCreationError>,
-        volume: Volume,
+        volume_id: VolumeUuid,
+        vcr: VolumeConstructionRequest,
         crucible_targets: CrucibleTargets,
     ) -> Result<Volume, diesel::result::Error> {
         use db::schema::volume::dsl;
 
         let maybe_volume: Option<Volume> = dsl::volume
-            .filter(dsl::id.eq(to_db_typed_uuid(volume.id())))
+            .filter(dsl::id.eq(to_db_typed_uuid(volume_id)))
             .select(Volume::as_select())
             .first_async(conn)
             .await
@@ -219,6 +220,11 @@ impl DataStore {
         if let Some(volume) = maybe_volume {
             return Ok(volume);
         }
+
+        let vcr_string = serde_json::to_string(&vcr)
+            .map_err(|e| err.bail(VolumeCreationError::SerdeError(e)))?;
+
+        let volume = Volume::new(volume_id, vcr_string);
 
         let volume: Volume = diesel::insert_into(dsl::volume)
             .values(volume.clone())
@@ -290,7 +296,7 @@ impl DataStore {
     ) -> Result<Option<Region>, diesel::result::Error> {
         let ip: db::model::Ipv6Addr = target.ip().into();
 
-        use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::crucible_dataset::dsl as dataset_dsl;
         use db::schema::region::dsl as region_dsl;
 
         let read_only = match region_type {
@@ -298,7 +304,7 @@ impl DataStore {
             RegionType::ReadOnly => true,
         };
 
-        dataset_dsl::dataset
+        dataset_dsl::crucible_dataset
             .inner_join(
                 region_dsl::region
                     .on(region_dsl::dataset_id.eq(dataset_dsl::id)),
@@ -363,19 +369,15 @@ impl DataStore {
         Ok(None)
     }
 
-    pub async fn volume_create(&self, volume: Volume) -> CreateResult<Volume> {
+    pub async fn volume_create(
+        &self,
+        volume_id: VolumeUuid,
+        vcr: VolumeConstructionRequest,
+    ) -> CreateResult<Volume> {
         // Grab all the targets that the volume construction request references.
         // Do this outside the transaction, as the data inside volume doesn't
         // change and this would simply add to the transaction time.
         let crucible_targets = {
-            let vcr: VolumeConstructionRequest =
-                serde_json::from_str(&volume.data()).map_err(|e| {
-                    Error::internal_error(&format!(
-                        "serde_json::from_str error in volume_create: {}",
-                        e
-                    ))
-                })?;
-
             let mut crucible_targets = CrucibleTargets::default();
             read_only_resources_associated_with_volume(
                 &vcr,
@@ -390,12 +392,14 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 let crucible_targets = crucible_targets.clone();
-                let volume = volume.clone();
+                let vcr = vcr.clone();
+
                 async move {
                     Self::volume_create_in_txn(
                         &conn,
                         err,
-                        volume,
+                        volume_id,
+                        vcr,
                         crucible_targets,
                     )
                     .await
@@ -1125,16 +1129,10 @@ impl DataStore {
         let vcr: sled_agent_client::VolumeConstructionRequest =
             serde_json::from_str(volume.data())?;
 
-        let randomized_vcr = serde_json::to_string(
-            &Self::randomize_ids(&vcr)
-                .map_err(|e| Error::internal_error(&e.to_string()))?,
-        )?;
+        let randomized_vcr = Self::randomize_ids(&vcr)
+            .map_err(|e| Error::internal_error(&e.to_string()))?;
 
-        self.volume_create(db::model::Volume::new(
-            VolumeUuid::new_v4(),
-            randomized_vcr,
-        ))
-        .await
+        self.volume_create(VolumeUuid::new_v4(), randomized_vcr).await
     }
 
     /// Find read/write regions for deleted volumes that do not have associated
@@ -1155,7 +1153,7 @@ impl DataStore {
     async fn find_deleted_volume_regions_in_txn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<FreedCrucibleResources, diesel::result::Error> {
-        use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::crucible_dataset::dsl as dataset_dsl;
         use db::schema::region::dsl as region_dsl;
         use db::schema::region_snapshot::dsl;
         use db::schema::volume::dsl as volume_dsl;
@@ -1169,7 +1167,7 @@ impl DataStore {
                 volume_dsl::volume.on(region_dsl::volume_id.eq(volume_dsl::id)),
             )
             .inner_join(
-                dataset_dsl::dataset
+                dataset_dsl::crucible_dataset
                     .on(region_dsl::dataset_id.eq(dataset_dsl::id)),
             )
             // where there either are no region snapshots, or the region
@@ -1182,7 +1180,7 @@ impl DataStore {
             .filter(dsl::deleting.eq(true).or(dsl::deleting.is_null()))
             // and return them (along with the volume so it can be hard deleted)
             .select((
-                Dataset::as_select(),
+                CrucibleDataset::as_select(),
                 Region::as_select(),
                 Option::<RegionSnapshot>::as_select(),
                 // Diesel can't express a difference between
@@ -1254,7 +1252,7 @@ impl DataStore {
             // will be deleted from the result of returning from this function.
             let allocated_rw_regions: HashSet<Uuid> =
                 Self::get_allocated_regions_query(volume_id)
-                    .get_results_async::<(Dataset, Region)>(conn)
+                    .get_results_async::<(CrucibleDataset, Region)>(conn)
                     .await?
                     .into_iter()
                     .filter_map(|(_, region)| {
@@ -1996,11 +1994,11 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
 
         let dataset = {
-            use db::schema::dataset::dsl;
+            use db::schema::crucible_dataset::dsl;
 
-            dsl::dataset
+            dsl::crucible_dataset
                 .filter(dsl::id.eq(to_db_typed_uuid(dataset_id)))
-                .select(Dataset::as_select())
+                .select(CrucibleDataset::as_select())
                 .first_async(&*conn)
                 .await
                 .map_err(|e| {
@@ -2017,14 +2015,12 @@ impl DataStore {
 
         let mut targets: Vec<SocketAddrV6> = vec![];
 
-        let Some(address) = dataset.address() else {
-            return Err(Error::internal_error(
-                "Crucible Dataset missing IP address",
-            ));
-        };
-
-        find_matching_rw_regions_in_volume(&vcr, address.ip(), &mut targets)
-            .map_err(|e| Error::internal_error(&e.to_string()))?;
+        find_matching_rw_regions_in_volume(
+            &vcr,
+            dataset.address().ip(),
+            &mut targets,
+        )
+        .map_err(|e| Error::internal_error(&e.to_string()))?;
 
         Ok(targets)
     }
@@ -2386,13 +2382,13 @@ pub enum CrucibleResources {
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct CrucibleResourcesV1 {
-    pub datasets_and_regions: Vec<(Dataset, Region)>,
-    pub datasets_and_snapshots: Vec<(Dataset, RegionSnapshot)>,
+    pub datasets_and_regions: Vec<(CrucibleDataset, Region)>,
+    pub datasets_and_snapshots: Vec<(CrucibleDataset, RegionSnapshot)>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct CrucibleResourcesV2 {
-    pub datasets_and_regions: Vec<(Dataset, Region)>,
+    pub datasets_and_regions: Vec<(CrucibleDataset, Region)>,
     pub snapshots_to_delete: Vec<RegionSnapshot>,
 }
 
@@ -2424,11 +2420,11 @@ where
 
 impl DataStore {
     /// For a CrucibleResources object, return the Regions to delete, as well as
-    /// the Dataset they belong to.
+    /// the CrucibleDataset they belong to.
     pub async fn regions_to_delete(
         &self,
         crucible_resources: &CrucibleResources,
-    ) -> LookupResult<Vec<(Dataset, Region)>> {
+    ) -> LookupResult<Vec<(CrucibleDataset, Region)>> {
         let conn = self.pool_connection_unauthorized().await?;
 
         match crucible_resources {
@@ -2441,7 +2437,7 @@ impl DataStore {
             }
 
             CrucibleResources::V3(crucible_resources) => {
-                use db::schema::dataset::dsl as dataset_dsl;
+                use db::schema::crucible_dataset::dsl as dataset_dsl;
                 use db::schema::region::dsl as region_dsl;
 
                 region_dsl::region
@@ -2450,11 +2446,11 @@ impl DataStore {
                             .eq_any(crucible_resources.regions.clone()),
                     )
                     .inner_join(
-                        dataset_dsl::dataset
+                        dataset_dsl::crucible_dataset
                             .on(region_dsl::dataset_id.eq(dataset_dsl::id)),
                     )
-                    .select((Dataset::as_select(), Region::as_select()))
-                    .get_results_async::<(Dataset, Region)>(&*conn)
+                    .select((CrucibleDataset::as_select(), Region::as_select()))
+                    .get_results_async::<(CrucibleDataset, Region)>(&*conn)
                     .await
                     .map_err(|e| {
                         public_error_from_diesel(e, ErrorHandler::Server)
@@ -2464,11 +2460,11 @@ impl DataStore {
     }
 
     /// For a CrucibleResources object, return the RegionSnapshots to delete, as
-    /// well as the Dataset they belong to.
+    /// well as the CrucibleDataset they belong to.
     pub async fn snapshots_to_delete(
         &self,
         crucible_resources: &CrucibleResources,
-    ) -> LookupResult<Vec<(Dataset, RegionSnapshot)>> {
+    ) -> LookupResult<Vec<(CrucibleDataset, RegionSnapshot)>> {
         let conn = self.pool_connection_unauthorized().await?;
 
         match crucible_resources {
@@ -2477,7 +2473,7 @@ impl DataStore {
             }
 
             CrucibleResources::V2(crucible_resources) => {
-                use db::schema::dataset::dsl;
+                use db::schema::crucible_dataset::dsl;
 
                 let mut result: Vec<_> = Vec::with_capacity(
                     crucible_resources.snapshots_to_delete.len(),
@@ -2486,9 +2482,9 @@ impl DataStore {
                 for snapshots_to_delete in
                     &crucible_resources.snapshots_to_delete
                 {
-                    let maybe_dataset = dsl::dataset
+                    let maybe_dataset = dsl::crucible_dataset
                         .filter(dsl::id.eq(snapshots_to_delete.dataset_id))
-                        .select(Dataset::as_select())
+                        .select(CrucibleDataset::as_select())
                         .first_async(&*conn)
                         .await
                         .optional()
@@ -2514,7 +2510,7 @@ impl DataStore {
             }
 
             CrucibleResources::V3(crucible_resources) => {
-                use db::schema::dataset::dsl as dataset_dsl;
+                use db::schema::crucible_dataset::dsl as dataset_dsl;
                 use db::schema::region_snapshot::dsl;
 
                 let mut datasets_and_snapshots = Vec::with_capacity(
@@ -2530,14 +2526,16 @@ impl DataStore {
                         .filter(dsl::region_id.eq(region_snapshots.region))
                         .filter(dsl::snapshot_id.eq(region_snapshots.snapshot))
                         .inner_join(
-                            dataset_dsl::dataset
+                            dataset_dsl::crucible_dataset
                                 .on(dsl::dataset_id.eq(dataset_dsl::id)),
                         )
                         .select((
-                            Dataset::as_select(),
+                            CrucibleDataset::as_select(),
                             RegionSnapshot::as_select(),
                         ))
-                        .first_async::<(Dataset, RegionSnapshot)>(&*conn)
+                        .first_async::<(CrucibleDataset, RegionSnapshot)>(
+                            &*conn,
+                        )
                         .await
                         .optional()
                         .map_err(|e| {
@@ -4060,16 +4058,15 @@ mod tests {
 
         let volume_id = VolumeUuid::new_v4();
         let _volume = datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: *volume_id.as_untyped_uuid(),
                     block_size: 512,
                     sub_volumes: vec![],
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -4233,9 +4230,9 @@ mod tests {
             .unwrap();
 
         let _volume = datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: *volume_id.as_untyped_uuid(),
                     block_size: 512,
                     sub_volumes: vec![VolumeConstructionRequest::Region {
@@ -4262,9 +4259,8 @@ mod tests {
                         },
                     }],
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -4521,9 +4517,9 @@ mod tests {
         let rop_id = Uuid::new_v4();
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: *volume_id.as_untyped_uuid(),
                     block_size: 512,
                     sub_volumes: vec![VolumeConstructionRequest::Region {
@@ -4573,9 +4569,8 @@ mod tests {
                             },
                         },
                     )),
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -4596,16 +4591,15 @@ mod tests {
         }
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_to_delete_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: *volume_to_delete_id.as_untyped_uuid(),
                     block_size: 512,
                     sub_volumes: vec![],
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -4980,9 +4974,9 @@ mod tests {
         // case where the needle is found
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: *volume_id.as_untyped_uuid(),
                     block_size: 512,
                     sub_volumes: vec![],
@@ -5010,9 +5004,8 @@ mod tests {
                             },
                         },
                     )),
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 

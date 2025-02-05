@@ -214,7 +214,7 @@ async fn srrs_set_saga_id_undo(
 
 async fn srrs_get_existing_datasets_and_regions(
     sagactx: NexusActionContext,
-) -> Result<Vec<(db::model::Dataset, db::model::Region)>, ActionError> {
+) -> Result<Vec<(db::model::CrucibleDataset, db::model::Region)>, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
@@ -244,7 +244,7 @@ async fn srrs_get_existing_datasets_and_regions(
 
 async fn srrs_alloc_new_region(
     sagactx: NexusActionContext,
-) -> Result<Vec<(db::model::Dataset, db::model::Region)>, ActionError> {
+) -> Result<Vec<(db::model::CrucibleDataset, db::model::Region)>, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
@@ -297,12 +297,14 @@ async fn srrs_alloc_new_region_undo(
 
     let maybe_dataset_and_region = find_only_new_region(
         log,
-        sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-            "existing_datasets_and_regions",
-        )?,
-        sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-            "new_datasets_and_regions",
-        )?,
+        sagactx
+            .lookup::<Vec<(db::model::CrucibleDataset, db::model::Region)>>(
+                "existing_datasets_and_regions",
+            )?,
+        sagactx
+            .lookup::<Vec<(db::model::CrucibleDataset, db::model::Region)>>(
+                "new_datasets_and_regions",
+            )?,
     );
 
     // It should be guaranteed that if srrs_alloc_new_region succeeded then it
@@ -322,18 +324,20 @@ async fn srrs_alloc_new_region_undo(
 
 async fn srrs_find_new_region(
     sagactx: NexusActionContext,
-) -> Result<(db::model::Dataset, db::model::Region), ActionError> {
+) -> Result<(db::model::CrucibleDataset, db::model::Region), ActionError> {
     let osagactx = sagactx.user_data();
     let log = osagactx.log();
 
     let maybe_dataset_and_region = find_only_new_region(
         log,
-        sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-            "existing_datasets_and_regions",
-        )?,
-        sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-            "new_datasets_and_regions",
-        )?,
+        sagactx
+            .lookup::<Vec<(db::model::CrucibleDataset, db::model::Region)>>(
+                "existing_datasets_and_regions",
+            )?,
+        sagactx
+            .lookup::<Vec<(db::model::CrucibleDataset, db::model::Region)>>(
+                "new_datasets_and_regions",
+            )?,
     );
 
     let Some(dataset_and_region) = maybe_dataset_and_region else {
@@ -351,7 +355,7 @@ async fn srrs_find_new_region(
 async fn srrs_new_region_ensure(
     sagactx: NexusActionContext,
 ) -> Result<
-    (nexus_db_model::Dataset, crucible_agent_client::types::Region),
+    (nexus_db_model::CrucibleDataset, crucible_agent_client::types::Region),
     ActionError,
 > {
     let osagactx = sagactx.user_data();
@@ -362,7 +366,7 @@ async fn srrs_new_region_ensure(
     // step occurs in the case that the ensure partially fails. Here this not
     // required, there's only one dataset and region.
     let new_dataset_and_region = sagactx
-        .lookup::<(db::model::Dataset, db::model::Region)>(
+        .lookup::<(db::model::CrucibleDataset, db::model::Region)>(
             "new_dataset_and_region",
         )?;
 
@@ -393,7 +397,7 @@ async fn srrs_new_region_ensure_undo(
     warn!(log, "srrs_new_region_ensure_undo: Deleting crucible regions");
 
     let new_dataset_and_region = sagactx
-        .lookup::<(db::model::Dataset, db::model::Region)>(
+        .lookup::<(db::model::CrucibleDataset, db::model::Region)>(
             "new_dataset_and_region",
         )?;
 
@@ -508,18 +512,13 @@ async fn srrs_replace_region_in_volume(
     let old_region_address =
         sagactx.lookup::<SocketAddrV6>("old_region_address")?;
 
-    let (new_dataset, ensured_region) = sagactx.lookup::<(
-        db::model::Dataset,
-        crucible_agent_client::types::Region,
-    )>(
-        "ensured_dataset_and_region",
-    )?;
+    let (new_dataset, ensured_region) =
+        sagactx.lookup::<(
+            db::model::CrucibleDataset,
+            crucible_agent_client::types::Region,
+        )>("ensured_dataset_and_region")?;
 
-    let Some(new_address) = new_dataset.address() else {
-        return Err(ActionError::action_failed(Error::internal_error(
-            "Dataset missing IP address",
-        )));
-    };
+    let new_address = new_dataset.address();
     let new_region_address =
         SocketAddrV6::new(*new_address.ip(), ensured_region.port_number, 0, 0);
 
@@ -608,16 +607,13 @@ async fn srrs_replace_region_in_volume_undo(
     let old_region_address =
         sagactx.lookup::<SocketAddrV6>("old_region_address")?;
 
-    let (new_dataset, ensured_region) = sagactx.lookup::<(
-        db::model::Dataset,
-        crucible_agent_client::types::Region,
-    )>(
-        "ensured_dataset_and_region",
-    )?;
+    let (new_dataset, ensured_region) =
+        sagactx.lookup::<(
+            db::model::CrucibleDataset,
+            crucible_agent_client::types::Region,
+        )>("ensured_dataset_and_region")?;
 
-    let Some(new_address) = new_dataset.address() else {
-        anyhow::bail!("Dataset missing IP address");
-    };
+    let new_address = new_dataset.address();
     let new_region_address =
         SocketAddrV6::new(*new_address.ip(), ensured_region.port_number, 0, 0);
 
@@ -704,16 +700,9 @@ async fn srrs_create_fake_volume(
         read_only_parent: None,
     };
 
-    let volume_data = serde_json::to_string(&volume_construction_request)
-        .map_err(|e| {
-            ActionError::action_failed(Error::internal_error(&e.to_string()))
-        })?;
-
-    let volume = db::model::Volume::new(new_volume_id, volume_data);
-
     osagactx
         .datastore()
-        .volume_create(volume)
+        .volume_create(new_volume_id, volume_construction_request)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -746,7 +735,7 @@ async fn srrs_update_request_record(
 
     let saga_id = sagactx.lookup::<Uuid>("saga_id")?;
     let new_dataset_and_region = sagactx
-        .lookup::<(db::model::Dataset, db::model::Region)>(
+        .lookup::<(db::model::CrucibleDataset, db::model::Region)>(
             "new_dataset_and_region",
         )?;
     let new_region_id = new_dataset_and_region.1.id();
@@ -782,7 +771,7 @@ pub(crate) mod test {
         app::sagas::test_helpers::test_opctx, app::RegionAllocationStrategy,
     };
     use chrono::Utc;
-    use nexus_db_model::Dataset;
+    use nexus_db_model::CrucibleDataset;
     use nexus_db_model::Region;
     use nexus_db_model::RegionReplacement;
     use nexus_db_model::RegionReplacementState;
@@ -793,7 +782,6 @@ pub(crate) mod test {
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::identity::Asset;
-    use omicron_common::api::internal::shared::DatasetKind;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::VolumeUuid;
     use sled_agent_client::VolumeConstructionRequest;
@@ -907,29 +895,25 @@ pub(crate) mod test {
         let log = &cptestctx.logctx.log;
 
         let datasets = vec![
-            Dataset::new(
+            CrucibleDataset::new(
                 DatasetUuid::new_v4(),
                 Uuid::new_v4(),
-                Some("[fd00:1122:3344:101::1]:12345".parse().unwrap()),
-                DatasetKind::Crucible,
+                "[fd00:1122:3344:101::1]:12345".parse().unwrap(),
             ),
-            Dataset::new(
+            CrucibleDataset::new(
                 DatasetUuid::new_v4(),
                 Uuid::new_v4(),
-                Some("[fd00:1122:3344:102::1]:12345".parse().unwrap()),
-                DatasetKind::Crucible,
+                "[fd00:1122:3344:102::1]:12345".parse().unwrap(),
             ),
-            Dataset::new(
+            CrucibleDataset::new(
                 DatasetUuid::new_v4(),
                 Uuid::new_v4(),
-                Some("[fd00:1122:3344:103::1]:12345".parse().unwrap()),
-                DatasetKind::Crucible,
+                "[fd00:1122:3344:103::1]:12345".parse().unwrap(),
             ),
-            Dataset::new(
+            CrucibleDataset::new(
                 DatasetUuid::new_v4(),
                 Uuid::new_v4(),
-                Some("[fd00:1122:3344:104::1]:12345".parse().unwrap()),
-                DatasetKind::Crucible,
+                "[fd00:1122:3344:104::1]:12345".parse().unwrap(),
             ),
         ];
 

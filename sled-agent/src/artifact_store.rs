@@ -20,7 +20,7 @@ use std::net::SocketAddrV6;
 use std::str::FromStr;
 use std::time::Duration;
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8PathBuf;
 use camino_tempfile::{NamedUtf8TempFile, Utf8TempPath};
 use dropshot::{
     Body, ConfigDropshot, FreeformBody, HttpError, HttpResponseOk, Path,
@@ -28,7 +28,6 @@ use dropshot::{
 };
 use futures::{Stream, TryStreamExt};
 use omicron_common::address::REPO_DEPOT_PORT;
-use omicron_common::disk::{DatasetKind, DatasetsConfig};
 use omicron_common::update::ArtifactHash;
 use repo_depot_api::*;
 use sha2::{Digest, Sha256};
@@ -37,7 +36,7 @@ use sled_storage::dataset::M2_ARTIFACT_DATASET;
 use sled_storage::error::Error as StorageError;
 use sled_storage::manager::StorageHandle;
 use slog::{error, info, Logger};
-use slog_error_chain::SlogInlineError;
+use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
 
@@ -444,25 +443,10 @@ pub(crate) trait DatasetsManager: Sync {
     ) -> Result<impl Iterator<Item = Utf8PathBuf> + '_, StorageError>;
 }
 
-/// Iterator `.filter().map()` common to `DatasetsManager` implementations.
-pub(crate) fn filter_dataset_mountpoints(
-    config: DatasetsConfig,
-    root: &Utf8Path,
-) -> impl Iterator<Item = Utf8PathBuf> + '_ {
-    config
-        .datasets
-        .into_values()
-        .filter(|dataset| *dataset.name.kind() == DatasetKind::Update)
-        .map(|dataset| dataset.name.mountpoint(root))
-}
-
 impl DatasetsManager for StorageHandle {
     async fn artifact_storage_paths(
         &self,
     ) -> Result<impl Iterator<Item = Utf8PathBuf> + '_, StorageError> {
-        // TODO: When datasets are managed by Reconfigurator (#6229),
-        // this should be changed to use `self.datasets_config_list()` and
-        // `filter_dataset_mountpoints`.
         Ok(self
             .get_latest_disks()
             .await
@@ -686,25 +670,33 @@ pub(crate) enum Error {
 impl From<Error> for HttpError {
     fn from(err: Error) -> HttpError {
         match err {
-            Error::AlreadyInProgress { .. } => HttpError::for_client_error(
-                None,
-                dropshot::ClientErrorStatusCode::CONFLICT,
-                err.to_string(),
-            ),
-            Error::Body(inner) => inner,
-            Error::DatasetConfig(_) | Error::NoUpdateDataset => {
-                HttpError::for_unavail(None, err.to_string())
-            }
-            Error::DepotCopy { .. }
-            | Error::File { .. }
-            | Error::FileRename { .. }
-            | Error::Join(_) => HttpError::for_internal_error(err.to_string()),
+            // 4xx errors
             Error::HashMismatch { .. } => {
                 HttpError::for_bad_request(None, err.to_string())
             }
             Error::NotFound { .. } => {
                 HttpError::for_not_found(None, err.to_string())
             }
+            Error::AlreadyInProgress { .. } => HttpError::for_client_error(
+                None,
+                dropshot::ClientErrorStatusCode::CONFLICT,
+                err.to_string(),
+            ),
+
+            // 5xx errors: ensure the error chain is logged
+            Error::Body(inner) => inner,
+            Error::DatasetConfig(_) | Error::NoUpdateDataset => {
+                HttpError::for_unavail(
+                    None,
+                    InlineErrorChain::new(&err).to_string(),
+                )
+            }
+            Error::DepotCopy { .. }
+            | Error::File { .. }
+            | Error::FileRename { .. }
+            | Error::Join(_) => HttpError::for_internal_error(
+                InlineErrorChain::new(&err).to_string(),
+            ),
         }
     }
 }
@@ -764,10 +756,14 @@ mod test {
             &self,
         ) -> Result<impl Iterator<Item = camino::Utf8PathBuf> + '_, StorageError>
         {
-            Ok(super::filter_dataset_mountpoints(
-                self.datasets.clone(),
-                self.mountpoint_root.path(),
-            ))
+            Ok(self
+                .datasets
+                .datasets
+                .values()
+                .filter(|dataset| *dataset.name.kind() == DatasetKind::Update)
+                .map(|dataset| {
+                    dataset.name.mountpoint(self.mountpoint_root.path())
+                }))
         }
     }
 

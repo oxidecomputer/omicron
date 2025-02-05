@@ -20,7 +20,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::net::Ipv6Addr;
-use std::net::SocketAddrV6;
 
 #[derive(
     Debug,
@@ -195,33 +194,29 @@ impl BlueprintZoneType {
 
     /// Returns the durable dataset associated with this zone, if any exists.
     pub fn durable_dataset(&self) -> Option<DurableDataset<'_>> {
-        let (dataset, kind, &address) = match self {
+        let (dataset, kind) = match self {
             BlueprintZoneType::Clickhouse(
-                blueprint_zone_type::Clickhouse { dataset, address },
-            ) => (dataset, DatasetKind::Clickhouse, address),
+                blueprint_zone_type::Clickhouse { dataset, .. },
+            ) => (dataset, DatasetKind::Clickhouse),
             BlueprintZoneType::ClickhouseKeeper(
-                blueprint_zone_type::ClickhouseKeeper { dataset, address },
-            ) => (dataset, DatasetKind::ClickhouseKeeper, address),
+                blueprint_zone_type::ClickhouseKeeper { dataset, .. },
+            ) => (dataset, DatasetKind::ClickhouseKeeper),
             BlueprintZoneType::ClickhouseServer(
-                blueprint_zone_type::ClickhouseServer { dataset, address },
-            ) => (dataset, DatasetKind::ClickhouseServer, address),
+                blueprint_zone_type::ClickhouseServer { dataset, .. },
+            ) => (dataset, DatasetKind::ClickhouseServer),
             BlueprintZoneType::CockroachDb(
-                blueprint_zone_type::CockroachDb { dataset, address },
-            ) => (dataset, DatasetKind::Cockroach, address),
+                blueprint_zone_type::CockroachDb { dataset, .. },
+            ) => (dataset, DatasetKind::Cockroach),
             BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
                 dataset,
-                address,
-            }) => (dataset, DatasetKind::Crucible, address),
+                ..
+            }) => (dataset, DatasetKind::Crucible),
             BlueprintZoneType::ExternalDns(
-                blueprint_zone_type::ExternalDns {
-                    dataset, http_address, ..
-                },
-            ) => (dataset, DatasetKind::ExternalDns, http_address),
+                blueprint_zone_type::ExternalDns { dataset, .. },
+            ) => (dataset, DatasetKind::ExternalDns),
             BlueprintZoneType::InternalDns(
-                blueprint_zone_type::InternalDns {
-                    dataset, http_address, ..
-                },
-            ) => (dataset, DatasetKind::InternalDns, http_address),
+                blueprint_zone_type::InternalDns { dataset, .. },
+            ) => (dataset, DatasetKind::InternalDns),
             // Transient-dataset-only zones
             BlueprintZoneType::BoundaryNtp(_)
             | BlueprintZoneType::CruciblePantry(_)
@@ -230,14 +225,13 @@ impl BlueprintZoneType {
             | BlueprintZoneType::Oximeter(_) => return None,
         };
 
-        Some(DurableDataset { dataset, kind, address })
+        Some(DurableDataset { dataset, kind })
     }
 }
 
 pub struct DurableDataset<'a> {
     pub dataset: &'a OmicronZoneDataset,
     pub kind: DatasetKind,
-    pub address: SocketAddrV6,
 }
 
 impl<'a> From<DurableDataset<'a>> for DatasetName {
