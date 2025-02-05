@@ -13,8 +13,7 @@ use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::{
     Error, SemverVersion, TufRepoInsertResponse, TufRepoInsertStatus,
 };
-use omicron_common::update::ArtifactId;
-use update_common::artifacts::ArtifactsWithPlan;
+use update_common::artifacts::{ArtifactsWithPlan, ControlPlaneZonesMode};
 
 mod common_sp_update;
 mod host_phase1_updater;
@@ -52,10 +51,15 @@ impl super::Nexus {
                 Error::internal_error("updates system not initialized")
             })?;
 
-        let artifacts_with_plan =
-            ArtifactsWithPlan::from_stream(body, Some(file_name), &self.log)
-                .await
-                .map_err(|error| error.to_http_error())?;
+        let artifacts_with_plan = ArtifactsWithPlan::from_stream(
+            body,
+            Some(file_name),
+            ControlPlaneZonesMode::Split,
+            &self.log,
+        )
+        .await
+        .map_err(|error| error.to_http_error())?;
+
         // Now store the artifacts in the database.
         let tuf_repo_description = TufRepoDescription::from_external(
             artifacts_with_plan.description().clone(),
@@ -112,18 +116,5 @@ impl super::Nexus {
             .map_err(HttpError::from)?;
 
         Ok(tuf_repo_description)
-    }
-
-    /// Downloads a file (currently not implemented).
-    pub(crate) async fn updates_download_artifact(
-        &self,
-        _opctx: &OpContext,
-        _artifact: ArtifactId,
-    ) -> Result<Vec<u8>, Error> {
-        // TODO: this is part of the TUF repo depot.
-        return Err(Error::internal_error(
-            "artifact download not implemented, \
-             will be part of TUF repo depot",
-        ));
     }
 }
