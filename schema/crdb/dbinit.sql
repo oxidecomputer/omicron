@@ -1849,8 +1849,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.router_route (
      * linked item. Today, these are 'vpc_subnet' rules and their parent subnets.
      * 'vpc_peering' routes may also fall into this category in future.
      *
-     * User-created/modifiable routes must have this field as NULL -- none of their fields
-     * are a fiction maintained by Nexus.
+     * User-created/modifiable routes must have this field as NULL.
      */
     CONSTRAINT non_null_vpc_subnet CHECK (
         (kind = 'vpc_subnet' AND vpc_subnet_id IS NOT NULL) OR

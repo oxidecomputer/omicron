@@ -1015,11 +1015,17 @@ impl DataStore {
         opctx: &OpContext,
         authz_subnet: &authz::VpcSubnet,
         custom_router: Option<&authz::VpcRouter>,
-        updates: VpcSubnetUpdate,
+        mut updates: VpcSubnetUpdate,
     ) -> UpdateResult<VpcSubnet> {
         opctx.authorize(authz::Action::Modify, authz_subnet).await?;
         if let Some(authz_router) = custom_router {
             opctx.authorize(authz::Action::Read, authz_router).await?;
+
+            // Leave untouched in update query, then attach new.
+            updates.custom_router_id = None;
+        } else {
+            // Explicit removal in update query.
+            updates.custom_router_id = Some(None);
         }
 
         let time_modified = updates.time_modified;
@@ -1043,24 +1049,24 @@ impl DataStore {
                     use db::schema::vpc_subnet::dsl;
                     let name = updates.name.clone();
 
-                    // Update subnet metadata.
-                    // Do this conditionally to emit fewer queries in, e.g.,
-                    // the subnet create saga with an initial attachment.
-                    if updates.name.is_some() || updates.description.is_some() {
-                        if let Err(e) = diesel::update(dsl::vpc_subnet)
-                            .filter(dsl::time_deleted.is_null())
-                            .filter(dsl::id.eq(authz_subnet.id()))
-                            .set(updates)
-                            .returning(VpcSubnet::as_returning())
-                            .get_result_async(&conn)
-                            .await
-                        {
+                    // Update subnet metadata, and unset subnet->custom router attachment
+                    // if required.
+                    let no_attach_res = match diesel::update(dsl::vpc_subnet)
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::id.eq(authz_subnet.id()))
+                        .set(updates)
+                        .returning(VpcSubnet::as_returning())
+                        .get_result_async(&conn)
+                        .await
+                    {
+                        Ok(o) => o,
+                        Err(e) => {
                             return Err(err.bail_retryable_or_else(
                                 e,
                                 SubnetError::SubnetModify,
-                            ));
+                            ))
                         }
-                    }
+                    };
 
                     // Fix the presentation of the matching system route.
                     if let Some(new_name) = name {
@@ -1128,21 +1134,7 @@ impl DataStore {
                                 AttachError::DatabaseError(e) => e,
                             })
                     } else {
-                        use db::schema::vpc_subnet::dsl;
-
-                        diesel::update(dsl::vpc_subnet)
-                            .filter(dsl::time_deleted.is_null())
-                            .filter(dsl::id.eq(authz_subnet.id()))
-                            .set(dsl::custom_router_id.eq(Option::<Uuid>::None))
-                            .returning(VpcSubnet::as_returning())
-                            .get_result_async(&conn)
-                            .await
-                            .map_err(|e| {
-                                err.bail_retryable_or_else(
-                                    e,
-                                    SubnetError::SubnetModify,
-                                )
-                            })
+                        Ok(no_attach_res)
                     }
                 }
             })
@@ -1193,6 +1185,8 @@ impl DataStore {
                 name: None,
                 description: None,
                 time_modified: Utc::now(),
+                // Filled by `vpc_update_subnet`.
+                custom_router_id: None,
             },
         )
         .await
@@ -1211,6 +1205,8 @@ impl DataStore {
                 name: None,
                 description: None,
                 time_modified: Utc::now(),
+                // Filled by `vpc_update_subnet`.
+                custom_router_id: None,
             },
         )
         .await
@@ -2275,7 +2271,7 @@ impl DataStore {
             })
     }
 
-    /// Fetch a VPC's system router by ID.
+    /// Fetch a VPC's system router by the VPC's ID.
     pub async fn vpc_get_system_router(
         &self,
         opctx: &OpContext,
@@ -3606,6 +3602,7 @@ mod tests {
                     ),
                     description: None,
                     time_modified: Utc::now(),
+                    custom_router_id: None,
                 },
             )
             .await
@@ -3647,6 +3644,7 @@ mod tests {
                     ),
                     description: None,
                     time_modified: Utc::now(),
+                    custom_router_id: None,
                 },
             )
             .await

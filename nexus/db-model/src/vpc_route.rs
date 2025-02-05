@@ -153,9 +153,10 @@ impl RouterRoute {
 
         // The destination and target are technically presentation-only --
         // these need to accurately track the state of subnet_id, which can
-        // cause messy reconciles.
-        // The route RPW will always rely on that linked subnet instead of
-        // these values (but should attempt a fixup if they fall out of sync).
+        // cause messy reconciles. Otherwise in the app layer we make sure one
+        // exists for each subnet and keep the fields synced on a best-effort
+        // basis. The route RPW will always rely on that linked subnet instead
+        // of these values.
         Self {
             identity,
             vpc_router_id: system_router_id,

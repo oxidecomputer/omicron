@@ -186,6 +186,7 @@ pub(crate) mod test {
                 name: Some(db::model::Name("defaulter".parse().unwrap())),
                 description: None,
                 time_modified: Utc::now(),
+                custom_router_id: None,
             },
         }
     }
