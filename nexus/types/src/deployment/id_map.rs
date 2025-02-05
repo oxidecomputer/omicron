@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use daft::BTreeMapDiff;
+use daft::Diffable;
 use derive_where::derive_where;
-use diffus::edit::Edit;
-use diffus::Diffable;
 use schemars::JsonSchema;
 use serde::de::Error as _;
 use serde::de::Visitor;
@@ -13,12 +13,13 @@ use serde::Serialize;
 use std::collections::btree_map;
 use std::collections::BTreeMap;
 use std::fmt;
+use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
 pub trait IdMappable:
-    JsonSchema + Serialize + for<'de> Deserialize<'de> + for<'a> Diffable<'a>
+    JsonSchema + Serialize + for<'de> Deserialize<'de> + Diffable
 {
     type Id: Ord
         + Copy
@@ -238,16 +239,14 @@ impl<'de, T: IdMappable> Deserialize<'de> for IdMap<T> {
     }
 }
 
-impl<'a, T: IdMappable + 'a> Diffable<'a> for IdMap<T> {
-    type Diff = BTreeMap<&'a T::Id, diffus::edit::map::Edit<'a, T>>;
+impl<T: IdMappable + Debug + Eq> Diffable for IdMap<T> {
+    type Diff<'daft>
+        = BTreeMapDiff<'daft, T::Id, T>
+    where
+        T: 'daft;
 
-    fn diff(&'a self, other: &'a Self) -> Edit<'a, Self> {
-        match self.inner.diff(&other.inner) {
-            Edit::Copy(_) => Edit::Copy(self),
-            Edit::Change { diff, .. } => {
-                Edit::Change { before: self, after: other, diff }
-            }
-        }
+    fn diff<'daft>(&'daft self, other: &'daft Self) -> Self::Diff<'daft> {
+        self.inner.diff(&other.inner)
     }
 }
 
@@ -391,7 +390,7 @@ impl<'a, T: IdMappable> OccupiedEntry<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use diffus::Diffus;
+    use daft::Diffable;
     use test_strategy::proptest;
     use test_strategy::Arbitrary;
 
@@ -404,7 +403,7 @@ mod tests {
         JsonSchema,
         Serialize,
         Deserialize,
-        Diffus,
+        Diffable,
     )]
     struct TestEntry {
         id: u8,

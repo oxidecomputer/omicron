@@ -1436,8 +1436,8 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
+ "daft",
  "derive_more",
- "diffus",
  "expectorate",
  "itertools 0.13.0",
  "omicron-common",
@@ -2055,6 +2055,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "daft"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/daft?branch=main#9e7b55349f61bded974cba9c1727a70a62586a37"
+dependencies = [
+ "daft-derive",
+ "newtype-uuid",
+ "oxnet",
+ "paste",
+ "uuid",
+]
+
+[[package]]
+name = "daft-derive"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/daft?branch=main#9e7b55349f61bded974cba9c1727a70a62586a37"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.96",
+]
+
+[[package]]
 name = "darling"
 version = "0.20.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2410,28 +2432,6 @@ name = "difflib"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6184e33543162437515c2e2b48714794e37845ec9851711914eec9d308f6ebe8"
-
-[[package]]
-name = "diffus"
-version = "0.10.0"
-source = "git+https://github.com/oxidecomputer/diffus?branch=oxide%2Fmain#e3cfd506a8be97e9740e94bc72e39b3b9c6bf3c2"
-dependencies = [
- "diffus-derive",
- "itertools 0.10.5",
- "newtype-uuid",
- "oxnet",
- "uuid",
-]
-
-[[package]]
-name = "diffus-derive"
-version = "0.10.0"
-source = "git+https://github.com/oxidecomputer/diffus?branch=oxide%2Fmain#e3cfd506a8be97e9740e94bc72e39b3b9c6bf3c2"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
 
 [[package]]
 name = "digest"
@@ -6125,8 +6125,8 @@ dependencies = [
  "anyhow",
  "chrono",
  "clickhouse-admin-types",
+ "daft",
  "debug-ignore",
- "diffus",
  "expectorate",
  "gateway-client",
  "illumos-utils",
@@ -6253,7 +6253,7 @@ dependencies = [
 name = "nexus-sled-agent-shared"
 version = "0.1.0"
 dependencies = [
- "diffus",
+ "daft",
  "illumos-utils",
  "omicron-common",
  "omicron-passwords",
@@ -6354,9 +6354,9 @@ dependencies = [
  "clap",
  "clickhouse-admin-types",
  "cookie",
+ "daft",
  "derive-where",
  "derive_more",
- "diffus",
  "dropshot 0.15.1",
  "futures",
  "gateway-client",
@@ -6793,7 +6793,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
- "diffus",
+ "daft",
  "dropshot 0.15.1",
  "expectorate",
  "futures",
@@ -7470,7 +7470,7 @@ dependencies = [
 name = "omicron-uuid-kinds"
 version = "0.1.0"
 dependencies = [
- "diffus",
+ "daft",
  "newtype-uuid",
  "paste",
  "proptest",
