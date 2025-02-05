@@ -6674,6 +6674,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-brand-metadata"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "semver 1.0.24",
+ "serde",
+ "serde_json",
+ "tar",
+]
+
+[[package]]
 name = "omicron-certificates"
 version = "0.1.0"
 dependencies = [
@@ -6702,6 +6713,7 @@ dependencies = [
  "clickward",
  "dropshot 0.15.1",
  "expectorate",
+ "flume",
  "http",
  "illumos-utils",
  "omicron-common",
@@ -7245,6 +7257,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-pins"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "cargo_metadata",
+ "fs-err",
+ "omicron-workspace-hack",
+ "serde",
+ "toml_edit 0.22.22",
+]
+
+[[package]]
 name = "omicron-releng"
 version = "0.1.0"
 dependencies = [
@@ -7258,6 +7283,7 @@ dependencies = [
  "futures",
  "hex",
  "omicron-common",
+ "omicron-pins",
  "omicron-workspace-hack",
  "omicron-zone-package",
  "once_cell",
@@ -7300,6 +7326,7 @@ dependencies = [
  "cfg-if",
  "chrono",
  "clap",
+ "clickhouse-admin-types",
  "crucible-agent-client",
  "derive_more",
  "display-error-chain",
@@ -7336,6 +7363,7 @@ dependencies = [
  "nexus-reconfigurator-blippy",
  "nexus-sled-agent-shared",
  "nexus-types",
+ "omicron-brand-metadata",
  "omicron-common",
  "omicron-ddm-admin-client",
  "omicron-test-utils",
@@ -7705,9 +7733,9 @@ dependencies = [
 
 [[package]]
 name = "openssl"
-version = "0.10.66"
+version = "0.10.70"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9529f4786b70a3e8c61e11179af17ab6188ad8d0ded78c5529441ed39d4bd9c1"
+checksum = "61cfb4e166a8bb8c9b55c500bc2308550148ece889be90f609377e58140f42c6"
 dependencies = [
  "bitflags 2.6.0",
  "cfg-if",
@@ -7737,9 +7765,9 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.104"
+version = "0.9.105"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45abf306cbf99debc8195b66b7346498d7b10c210de50418b5ccd7ceba08c741"
+checksum = "8b22d5b84be05a8d6947c7cb71f7c849aa0f112acd4bf51c2a7c1c988ac0a9dc"
 dependencies = [
  "cc",
  "libc",
@@ -12406,11 +12434,13 @@ dependencies = [
  "hex",
  "hubtools",
  "itertools 0.13.0",
+ "omicron-brand-metadata",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
  "parse-size",
  "rand",
+ "semver 1.0.24",
  "serde",
  "serde_json",
  "serde_path_to_error",
@@ -12752,15 +12782,19 @@ dependencies = [
  "debug-ignore",
  "display-error-chain",
  "dropshot 0.15.1",
+ "flate2",
+ "fs-err",
  "futures",
  "hex",
  "hubtools",
+ "omicron-brand-metadata",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
  "rand",
  "sha2",
  "slog",
+ "tar",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",

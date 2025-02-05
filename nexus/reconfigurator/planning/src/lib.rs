@@ -9,6 +9,5 @@
 pub mod blueprint_builder;
 pub mod blueprint_editor;
 pub mod example;
-mod ip_allocator;
 pub mod planner;
 pub mod system;
