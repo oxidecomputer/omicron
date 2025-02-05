@@ -17,7 +17,7 @@ use crate::external_api::views::SledState;
 use chrono::DateTime;
 use chrono::Utc;
 use clap::ValueEnum;
-use daft::Diff;
+use daft::Diffable;
 use ipnetwork::IpNetwork;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
@@ -376,7 +376,7 @@ impl CockroachDbSettings {
     Deserialize,
     Serialize,
     JsonSchema,
-    Diff,
+    Diffable,
 )]
 pub enum CockroachDbClusterVersion {
     #[display("22.1")]
@@ -409,7 +409,15 @@ impl CockroachDbClusterVersion {
 
 /// Whether to set `cluster.preserve_downgrade_option` and what to set it to.
 #[derive(
-    Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema, Diff,
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    Diffable,
 )]
 #[serde(tag = "action", content = "data", rename_all = "snake_case")]
 pub enum CockroachDbPreserveDowngrade {

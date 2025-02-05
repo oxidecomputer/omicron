@@ -18,7 +18,7 @@ use anyhow::Context;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
-use daft::{leaf, Diff};
+use daft::{leaf, Diffable};
 use dropshot::HttpError;
 pub use dropshot::PaginationOrder;
 pub use error::*;
@@ -224,7 +224,7 @@ impl<'a> TryFrom<&DataPageParams<'a, NameOrId>> for DataPageParams<'a, Uuid> {
 )]
 #[display("{0}")]
 #[serde(try_from = "String")]
-#[derive(Diff)]
+#[derive(Diffable)]
 pub struct Name(String);
 
 /// `Name::try_from(String)` is the primary method for constructing an Name
@@ -628,7 +628,7 @@ impl JsonSchema for RoleName {
     Eq,
     PartialOrd,
     Ord,
-    Diff,
+    Diffable,
 )]
 pub struct ByteCount(u64);
 
@@ -2121,7 +2121,7 @@ impl JsonSchema for MacAddr {
     Deserialize,
     Serialize,
     JsonSchema,
-    Diff,
+    Diffable,
 )]
 pub struct Vni(u32);
 

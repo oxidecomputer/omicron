@@ -18,7 +18,7 @@ use crate::inventory::Collection;
 pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
 use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
-use daft::Diff;
+use daft::Diffable;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -140,7 +140,7 @@ pub use blueprint_diff::BlueprintDiffSummary;
 // This is aimed at supporting add/remove sleds.  The plan is to grow this to
 // include more of the system as we support more use cases.
 #[derive(
-    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diff,
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
 pub struct Blueprint {
     /// unique identifier for this blueprint
@@ -534,7 +534,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
 ///
 /// Part of [`Blueprint`].
 #[derive(
-    Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diff,
+    Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
 pub struct BlueprintZonesConfig {
     /// Generation number of this configuration.
@@ -631,7 +631,7 @@ fn zone_sort_key<T: ZoneSortKey>(z: &T) -> impl Ord {
     JsonSchema,
     Deserialize,
     Serialize,
-    Diff,
+    Diffable,
 )]
 pub struct BlueprintZoneConfig {
     /// The disposition (desired state) of this zone recorded in the blueprint.
@@ -702,7 +702,7 @@ impl From<BlueprintZoneConfig> for OmicronZoneConfig {
     Deserialize,
     Serialize,
     EnumIter,
-    Diff,
+    Diffable,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum BlueprintZoneDisposition {
@@ -846,7 +846,7 @@ pub enum BlueprintDatasetFilter {
     Deserialize,
     Serialize,
     EnumIter,
-    Diff,
+    Diffable,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum BlueprintPhysicalDiskDisposition {
@@ -879,7 +879,7 @@ impl BlueprintPhysicalDiskDisposition {
 
 /// Information about an Omicron physical disk as recorded in a bluerprint.
 #[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Diff,
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Diffable,
 )]
 pub struct BlueprintPhysicalDiskConfig {
     pub disposition: BlueprintPhysicalDiskDisposition,
@@ -892,7 +892,7 @@ pub struct BlueprintPhysicalDiskConfig {
 ///
 /// Part of [`Blueprint`].
 #[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Diff,
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Diffable,
 )]
 pub struct BlueprintPhysicalDisksConfig {
     pub generation: Generation,
@@ -942,7 +942,7 @@ impl From<BlueprintPhysicalDisksConfig> for OmicronPhysicalDisksConfig {
 
 /// Information about Omicron datasets as recorded in a blueprint.
 #[derive(
-    Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diff,
+    Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
 pub struct BlueprintDatasetsConfig {
     pub generation: Generation,
@@ -986,7 +986,7 @@ impl IdMappable for BlueprintDatasetConfig {
     Deserialize,
     Serialize,
     EnumIter,
-    Diff,
+    Diffable,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum BlueprintDatasetDisposition {
@@ -1025,7 +1025,7 @@ impl BlueprintDatasetDisposition {
     JsonSchema,
     Deserialize,
     Serialize,
-    Diff,
+    Diffable,
 )]
 pub struct BlueprintDatasetConfig {
     // TODO: Display this in diffs - leave for now, for backwards compat

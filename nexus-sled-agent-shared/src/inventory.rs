@@ -6,7 +6,7 @@
 
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 
-use daft::Diff;
+use daft::Diffable;
 use omicron_common::{
     api::{
         external::{ByteCount, Generation},
@@ -184,7 +184,7 @@ impl OmicronZoneConfig {
     PartialOrd,
     Ord,
     Hash,
-    Diff,
+    Diffable,
 )]
 pub struct OmicronZoneDataset {
     pub pool_name: ZpoolName,

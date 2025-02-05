@@ -19,7 +19,7 @@ use std::ops::Deref;
 use std::ops::DerefMut;
 
 pub trait IdMappable:
-    JsonSchema + Serialize + for<'de> Deserialize<'de> + for<'a> Diffable<'a>
+    JsonSchema + Serialize + for<'de> Deserialize<'de> + Diffable
 {
     type Id: Ord
         + Copy
@@ -239,10 +239,13 @@ impl<'de, T: IdMappable> Deserialize<'de> for IdMap<T> {
     }
 }
 
-impl<'a, T: IdMappable + Debug + 'a> Diffable<'a> for IdMap<T> {
-    type Diff = BTreeMapDiff<'a, T::Id, T>;
+impl<T: IdMappable + Debug + Eq> Diffable for IdMap<T> {
+    type Diff<'daft>
+        = BTreeMapDiff<'daft, T::Id, T>
+    where
+        T: 'daft;
 
-    fn diff(&'a self, other: &'a Self) -> Self::Diff {
+    fn diff<'daft>(&'daft self, other: &'daft Self) -> Self::Diff<'daft> {
         self.inner.diff(&other.inner)
     }
 }
@@ -387,7 +390,7 @@ impl<'a, T: IdMappable> OccupiedEntry<'a, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use daft::Diff;
+    use daft::Diffable;
     use test_strategy::proptest;
     use test_strategy::Arbitrary;
 
@@ -400,7 +403,7 @@ mod tests {
         JsonSchema,
         Serialize,
         Deserialize,
-        Diff,
+        Diffable,
     )]
     struct TestEntry {
         id: u8,

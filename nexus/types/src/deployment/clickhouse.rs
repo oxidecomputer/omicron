@@ -5,7 +5,7 @@
 //! Types used in blueprints related to clickhouse configuration
 
 use clickhouse_admin_types::{KeeperId, ServerId};
-use daft::Diff;
+use daft::Diffable;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use schemars::JsonSchema;
@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 
 /// Global configuration for all clickhouse servers (replicas) and keepers
 #[derive(
-    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diff,
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
 pub struct ClickhouseClusterConfig {
     /// The last update to the clickhouse cluster configuration

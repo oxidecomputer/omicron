@@ -14,7 +14,7 @@ pub use newtype_uuid::{
     GenericUuid, ParseError, TagError, TypedUuid, TypedUuidKind, TypedUuidTag,
 };
 
-use daft::Diff;
+use daft::Diffable;
 #[cfg(feature = "schemars08")]
 use schemars::JsonSchema;
 
@@ -23,7 +23,7 @@ macro_rules! impl_typed_uuid_kind {
         $(
             paste::paste! {
                 #[cfg_attr(feature = "schemars08", derive(JsonSchema))]
-                #[derive(Debug, PartialEq, Eq, Diff)]
+                #[derive(Debug, PartialEq, Eq, Diffable)]
                 pub enum [< $kind Kind>] {}
 
                 impl TypedUuidKind for [< $kind Kind >] {
