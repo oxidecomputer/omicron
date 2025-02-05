@@ -5,11 +5,7 @@
 // XXX-dap delete me
 
 use crate::apis::{ApiBoundary, Versions};
-use crate::resolved::OverwriteStatus;
-pub(crate) use crate::resolved::{CheckStale, CheckStatus};
-pub(crate) use crate::validation::DocumentSummary;
-use anyhow::{Result};
-use camino::{Utf8Path, Utf8PathBuf};
+use anyhow::Result;
 use dropshot::{ApiDescription, ApiDescriptionBuildErrors, StubContext};
 use openapi_manager_types::ValidationContext;
 use openapiv3::OpenAPI;
@@ -191,74 +187,4 @@ pub struct ApiSpec {
 
     /// Extra validation to perform on the OpenAPI spec, if any.
     pub extra_validation: Option<fn(&OpenAPI, ValidationContext<'_>)>,
-}
-
-#[derive(Debug)]
-#[must_use]
-pub(crate) struct SpecOverwriteStatus {
-    pub(crate) summary: DocumentSummary,
-    openapi_doc: OverwriteStatus,
-    extra_files: Vec<(Utf8PathBuf, OverwriteStatus)>,
-}
-
-impl SpecOverwriteStatus {
-    pub(crate) fn updated_count(&self) -> usize {
-        self.iter()
-            .filter(|(_, status)| matches!(status, OverwriteStatus::Updated))
-            .count()
-    }
-
-    fn iter(
-        &self,
-    ) -> impl Iterator<Item = (ApiSpecFileWhich<'_>, &OverwriteStatus)> {
-        std::iter::once((ApiSpecFileWhich::Openapi, &self.openapi_doc)).chain(
-            self.extra_files.iter().map(|(file_name, status)| {
-                (ApiSpecFileWhich::Extra(file_name), status)
-            }),
-        )
-    }
-}
-
-pub(crate) use crate::environment::Environment;
-
-// XXX-dap move this to validation.rs and call that check.rs?
-// XXX-dap actually: it seems like we might want to put this into Resolution
-#[derive(Debug)]
-#[must_use]
-pub(crate) struct SpecCheckStatus {
-    pub(crate) summary: DocumentSummary,
-    pub(crate) openapi_doc: CheckStatus,
-    pub(crate) extra_files: Vec<(Utf8PathBuf, CheckStatus)>,
-}
-
-impl SpecCheckStatus {
-    pub(crate) fn total_errors(&self) -> usize {
-        self.iter_errors().count()
-    }
-
-    pub(crate) fn extra_files_len(&self) -> usize {
-        self.extra_files.len()
-    }
-
-    pub(crate) fn iter_errors(
-        &self,
-    ) -> impl Iterator<Item = (ApiSpecFileWhich<'_>, &CheckStale)> {
-        std::iter::once((ApiSpecFileWhich::Openapi, &self.openapi_doc))
-            .chain(self.extra_files.iter().map(|(file_name, status)| {
-                (ApiSpecFileWhich::Extra(file_name), status)
-            }))
-            .filter_map(|(spec_file, status)| {
-                if let CheckStatus::Stale(e) = status {
-                    Some((spec_file, e))
-                } else {
-                    None
-                }
-            })
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum ApiSpecFileWhich<'a> {
-    Openapi,
-    Extra(&'a Utf8Path),
 }

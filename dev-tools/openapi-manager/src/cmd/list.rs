@@ -5,6 +5,7 @@
 use std::io::Write;
 
 use indent_write::io::IndentWriter;
+use openapiv3::OpenAPI;
 use owo_colors::OwoColorize;
 
 use crate::{
@@ -77,16 +78,16 @@ pub(crate) fn list_impl(
             for v in api.iter_versions_semver() {
                 match api.generate_openapi_doc(v) {
                     Ok(openapi) => {
-                        let num_paths = openapi.paths.paths.len();
-                        let num_schemas = openapi.components.map_or_else(
+                        let summary = DocumentSummary::new(&openapi);
+                        let num_schemas = summary.schema_count.map_or_else(
                             || "(data missing)".to_owned(),
-                            |c| c.schemas.len().to_string(),
+                            |c| c.to_string(),
                         );
                         writeln!(
                             &mut out,
                             "{continued_indent} {}: {} paths, {} schemas",
                             format!("v{}", v).style(styles.header),
-                            num_paths.style(styles.bold),
+                            summary.path_count.style(styles.bold),
                             num_schemas.style(styles.bold),
                         )?;
                     }
@@ -132,4 +133,23 @@ pub(crate) fn list_impl(
     }
 
     Ok(())
+}
+
+#[derive(Debug)]
+struct DocumentSummary {
+    path_count: usize,
+    // None if data is missing.
+    schema_count: Option<usize>,
+}
+
+impl DocumentSummary {
+    fn new(doc: &OpenAPI) -> Self {
+        Self {
+            path_count: doc.paths.paths.len(),
+            schema_count: doc
+                .components
+                .as_ref()
+                .map_or(None, |c| Some(c.schemas.len())),
+        }
+    }
 }

@@ -4,10 +4,9 @@
 
 use crate::{
     apis::{ApiIdent, ManagedApis},
-    environment::{BlessedSource, GeneratedSource},
+    environment::{BlessedSource, Environment, GeneratedSource},
     output::{OutputOpts, Styles},
     resolved::Resolved,
-    spec::Environment,
     spec_files_generic::ApiSpecFile,
 };
 use semver::Version;

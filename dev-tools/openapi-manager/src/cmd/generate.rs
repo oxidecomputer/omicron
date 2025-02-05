@@ -5,14 +5,13 @@
 use crate::{
     apis::ManagedApis,
     cmd::check::{print_problems, print_warnings, summarize, CheckResult},
-    environment::{BlessedSource, GeneratedSource},
+    environment::{BlessedSource, Environment, GeneratedSource},
     output::{
         display_api_spec_version,
         headers::{self, *},
         plural, OutputOpts, Styles,
     },
     resolved::{Problem, Resolved},
-    spec::Environment,
     FAILURE_EXIT_CODE,
 };
 use anyhow::{anyhow, bail, Result};

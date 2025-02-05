@@ -9,7 +9,7 @@ use crate::apis::ManagedApi;
 use crate::apis::ManagedApis;
 use crate::compatibility::api_compatible;
 use crate::compatibility::OpenApiCompatibilityError;
-use crate::spec::Environment;
+use crate::environment::Environment;
 use crate::spec_files_blessed::BlessedApiSpecFile;
 use crate::spec_files_blessed::BlessedFiles;
 use crate::spec_files_generated::GeneratedApiSpecFile;
@@ -74,6 +74,10 @@ pub enum Note {
 /// Describes the result of resolving the blessed spec(s), generated spec(s),
 /// and local spec files for a particular API
 pub struct Resolution<'a> {
+    #[allow(dead_code)]
+    // This field is not currently used, but it's logically very significant.
+    // The set of problems that can appear in `problems` depends on this `kind`.
+    // It's clearer to have this here and may also be useful in the future.
     kind: ResolutionKind,
     problems: Vec<Problem<'a>>,
 }

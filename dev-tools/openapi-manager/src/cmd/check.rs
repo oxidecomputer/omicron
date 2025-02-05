@@ -4,13 +4,12 @@
 
 use crate::{
     apis::{ManagedApi, ManagedApis},
-    environment::{BlessedSource, GeneratedSource},
+    environment::{BlessedSource, Environment, GeneratedSource},
     output::{
         display_api_spec_version, headers::*, plural, write_diff, OutputOpts,
         Styles,
     },
-    resolved::{Problem, Resolution, Resolved},
-    spec::{CheckStale, Environment},
+    resolved::{CheckStale, Problem, Resolution, Resolved},
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
 };
 use anyhow::{bail, Result};
@@ -299,10 +298,9 @@ where
                 Some((diff, path1, path2))
             }
             Problem::ExtraFileStale {
-                api_ident,
-                path,
                 check_stale:
                     CheckStale::Modified { full_path, actual, expected },
+                ..
             } => {
                 let diff = TextDiff::from_lines(actual, expected);
                 Some((diff, full_path.clone(), full_path.clone()))

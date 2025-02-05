@@ -47,26 +47,6 @@ pub fn validate_generated_openapi_document(
 
 #[derive(Debug)]
 #[must_use]
-pub(crate) struct DocumentSummary {
-    pub(crate) path_count: usize,
-    // None if data is missing.
-    pub(crate) schema_count: Option<usize>,
-}
-
-impl DocumentSummary {
-    pub(crate) fn new(doc: &OpenAPI) -> Self {
-        Self {
-            path_count: doc.paths.paths.len(),
-            schema_count: doc
-                .components
-                .as_ref()
-                .map_or(None, |c| Some(c.schemas.len())),
-        }
-    }
-}
-
-#[derive(Debug)]
-#[must_use]
 pub struct ValidationResult {
     // Extra files recorded by the validation context.
     // XXX-dap remove pub when I remove spec.rs

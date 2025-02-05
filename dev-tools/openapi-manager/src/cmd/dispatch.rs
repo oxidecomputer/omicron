@@ -16,10 +16,9 @@ use crate::{
         check::check_impl, debug::debug_impl, generate::generate_impl,
         list::list_impl,
     },
-    environment::{BlessedSource, GeneratedSource},
+    environment::{BlessedSource, Environment, GeneratedSource},
     git::GitRevision,
     output::OutputOpts,
-    spec::Environment,
 };
 
 /// Manage OpenAPI specifications.
