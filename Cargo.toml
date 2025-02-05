@@ -365,7 +365,7 @@ crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "c9
 # NOTE: See above!
 csv = "1.3.0"
 curve25519-dalek = "4"
-daft = { path = "../daft/daft", features = ["newtype-uuid1", "oxnet01", "uuid1"] }
+daft = { git = "https://github.com/oxidecomputer/daft", branch = "main", features = ["newtype-uuid1", "oxnet01", "uuid1"] }
 datatest-stable = "0.2.9"
 display-error-chain = "0.2.2"
 omicron-ddm-admin-client = { path = "clients/ddm-admin-client" }

@@ -2057,6 +2057,7 @@ dependencies = [
 [[package]]
 name = "daft"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/daft?branch=main#9e7b55349f61bded974cba9c1727a70a62586a37"
 dependencies = [
  "daft-derive",
  "newtype-uuid",
@@ -2068,6 +2069,7 @@ dependencies = [
 [[package]]
 name = "daft-derive"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/daft?branch=main#9e7b55349f61bded974cba9c1727a70a62586a37"
 dependencies = [
  "proc-macro2",
  "quote",
