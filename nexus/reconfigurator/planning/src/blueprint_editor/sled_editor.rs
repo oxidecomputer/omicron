@@ -270,8 +270,7 @@ impl SledEditor {
         disk: BlueprintPhysicalDiskConfig,
         rng: &mut SledPlannerRng,
     ) -> Result<(), SledEditError> {
-        self.as_active_mut()?.ensure_disk(disk, rng);
-        Ok(())
+        self.as_active_mut()?.ensure_disk(disk, rng)
     }
 
     pub fn expunge_disk(
@@ -279,6 +278,14 @@ impl SledEditor {
         disk_id: &PhysicalDiskUuid,
     ) -> Result<(), SledEditError> {
         self.as_active_mut()?.expunge_disk(disk_id)
+    }
+
+    pub fn decommission_disk(
+        &mut self,
+        disk_id: &PhysicalDiskUuid,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.decommission_disk(disk_id)?;
+        Ok(())
     }
 
     pub fn add_zone(

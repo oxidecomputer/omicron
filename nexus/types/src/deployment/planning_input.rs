@@ -1073,7 +1073,7 @@ impl PlanningInputBuilder {
             .get_mut(&sled_id)
             .ok_or(PlanningInputBuildError::SledNotFound(*sled_id))?;
         sled_details.policy = SledPolicy::Expunged;
-        for (_, (sled_disk, _)) in sled_details.resources.zpools.iter_mut() {
+        for (_, sled_disk) in sled_details.resources.zpools.iter_mut() {
             sled_disk.policy = PhysicalDiskPolicy::Expunged;
         }
         Ok(())

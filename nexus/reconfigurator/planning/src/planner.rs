@@ -1853,8 +1853,7 @@ mod test {
                 .iter_mut()
                 .next()
                 .unwrap()
-                .1
-                 .0;
+                .1;
             expunged_disk.policy = PhysicalDiskPolicy::Expunged;
             expunged_disk.disk_id
         };
@@ -1987,12 +1986,12 @@ mod test {
         let (_, disks_config) =
             blueprint4.blueprint_disks.first_key_value().unwrap();
 
-        // The disks generation goes from 3 -> 4
+        // The disks generation goes from 4 -> 5
         assert_eq!(disks_config.generation, Generation::from_u32(5));
         // We should still have 10 disks
         assert_eq!(disks_config.disks.len(), 10);
-        // One disk should have its disposition set to `Expunged` and it's state
-        // set to 'Decommissioned'.
+        // All disks should have their disposition set to `Expunged` and their
+        // state set to 'Decommissioned'.
         for disk in &disks_config.disks {
             assert_eq!(
                 disk.disposition,
@@ -2345,7 +2344,7 @@ mod test {
             // (otherwise the planner will rightfully fail to generate a new
             // blueprint, because we're feeding it invalid inputs).
             for mut zone in
-                &mut blueprint1.blueprint_zones.get_mut(sled_id).unwrap().zones
+                &mut blueprint1.blueprint_zones.get_mut(&sled_id).unwrap().zones
             {
                 zone.disposition = BlueprintZoneDisposition::Expunged;
             }
@@ -2356,11 +2355,11 @@ mod test {
             // that's an invalid state that the planner will reject.
             *blueprint1
                 .sled_state
-                .get_mut(sled_id)
+                .get_mut(&sled_id)
                 .expect("found state in parent blueprint") =
                 SledState::Decommissioned;
 
-            *sled_id
+            sled_id
         };
         // Actually expunge the sled (the work that was deferred during iteration above)
         builder.expunge_sled(&expunged_sled_id).unwrap();

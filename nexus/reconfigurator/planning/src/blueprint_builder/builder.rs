@@ -2184,165 +2184,6 @@ pub mod test {
     /// Checks various conditions that should be true for all blueprints
     #[track_caller]
     pub fn verify_blueprint(blueprint: &Blueprint) {
-<<<<<<< HEAD
-        // There should be no duplicate underlay IPs.
-        let mut underlay_ips: BTreeMap<Ipv6Addr, &BlueprintZoneConfig> =
-            BTreeMap::new();
-        for (_, zone) in
-            blueprint.all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
-        {
-            if let Some(previous) =
-                underlay_ips.insert(zone.underlay_ip(), zone)
-            {
-                panic!(
-                    "found duplicate underlay IP {} in zones {} and {}\
-                    \n\n\
-                    blueprint: {}",
-                    zone.underlay_ip(),
-                    zone.id,
-                    previous.id,
-                    blueprint.display(),
-                );
-            }
-        }
-
-        // There should be no duplicate external IPs.
-        //
-        // Checking this is slightly complicated due to SNAT IPs, so we'll
-        // delegate to an `ExternalIpAllocator`, which already contains the
-        // logic for dup checking. (`mark_ip_used` fails if the IP is _already_
-        // marked as used.)
-        //
-        // We create this with an empty set of service IP pool ranges; those are
-        // used for allocation, which we don't do, and aren't needed for
-        // duplicate checking.
-        let mut ip_allocator = ExternalIpAllocator::new(&[]);
-        for (external_ip, _nic) in blueprint
-            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
-            .filter_map(|(_, zone)| zone.zone_type.external_networking())
-        {
-            ip_allocator
-                .mark_ip_used(&external_ip)
-                .expect("no duplicate external IPs in running zones");
-        }
-
-        // On any given zpool, we should have at most one zone of any given
-        // kind.
-        //
-        // TODO: we may want a similar check for non-durable datasets?
-        let mut kinds_by_zpool: BTreeMap<
-            ZpoolUuid,
-            BTreeMap<ZoneKind, OmicronZoneUuid>,
-        > = BTreeMap::new();
-        for (_, zone) in blueprint.all_omicron_zones(BlueprintZoneFilter::All) {
-            if let Some(dataset) = zone.zone_type.durable_dataset() {
-                let kind = zone.zone_type.kind();
-                if let Some(previous) = kinds_by_zpool
-                    .entry(dataset.dataset.pool_name.id())
-                    .or_default()
-                    .insert(kind, zone.id)
-                {
-                    panic!(
-                        "zpool {} has two zones of kind {kind:?}: {} and {}\
-                            \n\n\
-                            blueprint: {}",
-                        dataset.dataset.pool_name,
-                        zone.id,
-                        previous,
-                        blueprint.display(),
-                    );
-                }
-            }
-        }
-
-        // All InService disks should have debug and zone root datasets.
-        for (sled_id, disk_config) in &blueprint.blueprint_disks {
-            for disk in &disk_config.disks {
-                if disk.disposition
-                    == BlueprintPhysicalDiskDisposition::InService
-                {
-                    eprintln!(
-                        "checking datasets for sled {sled_id} disk {}",
-                        disk.id
-                    );
-                    let zpool = ZpoolName::new_external(disk.pool_id);
-                    let datasets = datasets_for_sled(&blueprint, *sled_id);
-
-                    let dataset =
-                        find_dataset(&datasets, &zpool, DatasetKind::Debug);
-                    assert_eq!(
-                        dataset.disposition,
-                        BlueprintDatasetDisposition::InService
-                    );
-                    let dataset = find_dataset(
-                        &datasets,
-                        &zpool,
-                        DatasetKind::TransientZoneRoot,
-                    );
-                    assert_eq!(
-                        dataset.disposition,
-                        BlueprintDatasetDisposition::InService
-                    );
-                }
-            }
-        }
-
-        // All zones should have dataset records.
-        for (sled_id, zone_config) in
-            blueprint.all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
-        {
-            match blueprint.sled_state.get(&sled_id) {
-                // Decommissioned sleds don't keep dataset state around.
-                //
-                // Normally we wouldn't observe zones from decommissioned sleds
-                // anyway, but that's the responsibility of the Planner, not the
-                // BlueprintBuilder.
-                None | Some(SledState::Decommissioned) => continue,
-                Some(SledState::Active) => (),
-            }
-            let datasets = datasets_for_sled(&blueprint, sled_id);
-
-            let (zpool, kind) =
-                zone_config.filesystem_dataset().unwrap().into_parts();
-            let dataset = find_dataset(&datasets, &zpool, kind);
-            assert_eq!(
-                dataset.disposition,
-                BlueprintDatasetDisposition::InService
-            );
-
-            if let Some(durable_dataset) =
-                zone_config.zone_type.durable_dataset()
-            {
-                let zpool = &durable_dataset.dataset.pool_name;
-                let dataset =
-                    find_dataset(&datasets, &zpool, durable_dataset.kind);
-                assert_eq!(
-                    dataset.disposition,
-                    BlueprintDatasetDisposition::InService
-                );
-            }
-        }
-
-        // All datasets should be on zpools that have disk records.
-        for (sled_id, datasets) in &blueprint.blueprint_datasets {
-            let sled_disk_zpools = blueprint
-                .blueprint_disks
-                .get(&sled_id)
-                .expect("no disks for sled")
-                .disks
-                .iter()
-                .map(|disk| disk.pool_id)
-                .collect::<BTreeSet<_>>();
-
-            for dataset in datasets.datasets.values().filter(|dataset| {
-                dataset.disposition.matches(BlueprintDatasetFilter::InService)
-            }) {
-                assert!(
-                    sled_disk_zpools.contains(&dataset.pool.id()),
-                    "sled {sled_id} has dataset {dataset:?}, \
-                     which references a zpool without an associated disk",
-                );
-            }
         let blippy_report =
             Blippy::new(blueprint).into_report(BlippyReportSortKey::Kind);
         if !blippy_report.notes().is_empty() {
@@ -2512,21 +2353,20 @@ pub mod test {
                                 },
                             ),
                         ..
-                    },
-                ) = &z
-                {
-                    let ip = address.ip();
-                    assert!(new_sled_details
-                        .resources
-                        .subnet
-                        .net()
-                        .contains(*ip));
-                    Some(dataset.pool_name.clone())
-                } else {
-                    None
-                }
-            })
-            .collect::<BTreeSet<_>>();
+                    } = &z
+                    {
+                        let ip = address.ip();
+                        assert!(new_sled_details
+                            .resources
+                            .subnet
+                            .net()
+                            .contains(*ip));
+                        Some(dataset.pool_name.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<BTreeSet<_>>();
         assert_eq!(
             crucible_pool_names,
             new_sled_details
