@@ -1554,7 +1554,7 @@ impl ClickhouseClusterConfigDiffTables {
 
 /// Wrapper to allow a [`BlueprintDiff`] to be displayed.
 ///
-/// Returned by [`BlueprintDiff::display()`].
+/// Returned by [`BlueprintDiffSummary::display()`].
 #[derive(Debug)]
 #[must_use = "this struct does nothing unless displayed"]
 pub struct BlueprintDiffDisplay<'diff> {
