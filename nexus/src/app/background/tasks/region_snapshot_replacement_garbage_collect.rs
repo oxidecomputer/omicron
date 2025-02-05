@@ -86,9 +86,10 @@ impl RegionSnapshotReplacementGarbageCollect {
 
         for request in requests {
             let request_id = request.id;
+            let replacement = request.replacement_type();
 
             let result =
-                self.send_garbage_collect_request(opctx, request.clone()).await;
+                self.send_garbage_collect_request(opctx, request).await;
 
             match result {
                 Ok(()) => {
@@ -97,7 +98,7 @@ impl RegionSnapshotReplacementGarbageCollect {
                         ok for {request_id}"
                     );
 
-                    info!(&log, "{s}");
+                    info!(&log, "{s}"; replacement);
                     status.garbage_collect_requested.push(s);
                 }
 
@@ -106,7 +107,7 @@ impl RegionSnapshotReplacementGarbageCollect {
                         "sending region snapshot replacement garbage collect \
                         request failed: {e}",
                     );
-                    error!(&log, "{s}");
+                    error!(&log, "{s}"; replacement);
                     status.errors.push(s);
                 }
             }

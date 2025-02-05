@@ -100,6 +100,38 @@ pub enum ReadOnlyTargetReplacement {
     },
 }
 
+impl slog::KV for ReadOnlyTargetReplacement {
+    fn serialize(
+        &self,
+        _record: &slog::Record<'_>,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        match &self {
+            ReadOnlyTargetReplacement::RegionSnapshot {
+                dataset_id,
+                region_id,
+                snapshot_id,
+            } => {
+                serializer.emit_str("type".into(), "region_snapshot")?;
+                serializer
+                    .emit_str("dataset_id".into(), &dataset_id.to_string())?;
+                serializer
+                    .emit_str("region_id".into(), &region_id.to_string())?;
+                serializer
+                    .emit_str("snapshot_id".into(), &snapshot_id.to_string())?;
+            }
+
+            ReadOnlyTargetReplacement::ReadOnlyRegion { region_id } => {
+                serializer.emit_str("type".into(), "region_snapshot")?;
+                serializer
+                    .emit_str("region_id".into(), &region_id.to_string())?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
 /// Database representation of a RegionSnapshot replacement request.
 ///
 /// This record stores the data related to the operations required for Nexus to

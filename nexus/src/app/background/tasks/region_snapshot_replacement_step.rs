@@ -133,15 +133,15 @@ impl RegionSnapshotReplacementFindAffected {
             match result {
                 Ok(()) => {
                     let s = format!(
-                        "region snapshot replacement step garbage \
-                    collect request ok for {request_id}"
+                        "region snapshot replacement step garbage collect \
+                        request ok for {request_id}"
                     );
 
                     info!(
                         &log,
                         "{s}";
-                        "request.volume_id" => %request.volume_id(),
-                        "request.old_snapshot_volume_id" => ?request.old_snapshot_volume_id(),
+                        "volume_id" => %request.volume_id(),
+                        "old_snapshot_volume_id" => ?request.old_snapshot_volume_id(),
                     );
                     status.step_garbage_collect_invoked_ok.push(s);
                 }
@@ -154,8 +154,8 @@ impl RegionSnapshotReplacementFindAffected {
                     error!(
                         &log,
                         "{s}";
-                        "request.volume_id" => %request.volume_id(),
-                        "request.old_snapshot_volume_id" => ?request.old_snapshot_volume_id(),
+                        "volume_id" => %request.volume_id(),
+                        "old_snapshot_volume_id" => ?request.old_snapshot_volume_id(),
                     );
                     status.errors.push(s);
                 }
@@ -202,6 +202,8 @@ impl RegionSnapshotReplacementFindAffected {
         };
 
         for request in requests {
+            let replacement = request.replacement_type();
+
             // Find all volumes that reference the replaced read-only target
             let target_addr =
                 match self.datastore.read_only_target_addr(&request).await {
@@ -216,7 +218,7 @@ impl RegionSnapshotReplacementFindAffected {
                             "read-only target for {} not found",
                             request.id,
                         );
-                        info!(&log, "{s}");
+                        info!(&log, "{s}"; replacement);
 
                         continue;
                     }
@@ -225,9 +227,13 @@ impl RegionSnapshotReplacementFindAffected {
                         let s = format!(
                             "error querying for read-only target address: {e}",
                         );
-                        error!(&log, "{s}"; "request_id" => %request.id);
+                        error!(
+                            &log,
+                            "{s}";
+                            "request_id" => %request.id,
+                            replacement,
+                        );
                         status.errors.push(s);
-
                         continue;
                     }
                 };
@@ -248,6 +254,7 @@ impl RegionSnapshotReplacementFindAffected {
                         log,
                         "{s}";
                         "request id" => ?request.id,
+                        replacement
                     );
                     status.errors.push(s);
 
@@ -302,6 +309,7 @@ impl RegionSnapshotReplacementFindAffected {
                         it";
                         "request id" => ?request.id,
                         "volume id" => ?volume.id(),
+                        &replacement,
                     );
 
                     continue;
@@ -324,6 +332,7 @@ impl RegionSnapshotReplacementFindAffected {
                                 "{s}";
                                 "request id" => ?request.id,
                                 "volume id" => ?volume.id(),
+                                &replacement
                             );
                             status.step_records_created_ok.push(s);
                         }
@@ -334,19 +343,12 @@ impl RegionSnapshotReplacementFindAffected {
                                 "step already exists for volume id";
                                 "request id" => ?request.id,
                                 "volume id" => ?volume.id(),
+                                &replacement
                             );
                         }
                     },
 
                     Err(e) => {
-                        let s = format!("error creating step request: {e}");
-                        warn!(
-                            log,
-                            "{s}";
-                            "request id" => ?request.id,
-                            "volume id" => ?volume.id(),
-                        );
-
                         match e {
                             Error::Conflict { message }
                                 if message.external_message()
@@ -359,6 +361,17 @@ impl RegionSnapshotReplacementFindAffected {
                             }
 
                             _ => {
+                                let s =
+                                    format!("error creating step request: {e}");
+
+                                error!(
+                                    log,
+                                    "{s}";
+                                    "request id" => ?request.id,
+                                    "volume id" => ?volume.id(),
+                                    &replacement
+                                );
+
                                 status.errors.push(s);
                             }
                         }

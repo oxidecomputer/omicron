@@ -19,6 +19,7 @@ use crate::app::sagas::NexusSaga;
 use crate::app::RegionAllocationStrategy;
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use nexus_db_model::ReadOnlyTargetReplacement;
 use nexus_db_model::RegionSnapshotReplacement;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -86,6 +87,12 @@ impl RegionSnapshotReplacementDetector {
         };
 
         for region_snapshot in region_snapshots_to_be_replaced {
+            let replacement = ReadOnlyTargetReplacement::RegionSnapshot {
+                dataset_id: region_snapshot.dataset_id,
+                region_id: region_snapshot.region_id,
+                snapshot_id: region_snapshot.snapshot_id,
+            };
+
             // If no request exists yet, create one.
             let existing_request = match self
                 .datastore
@@ -101,13 +108,7 @@ impl RegionSnapshotReplacementDetector {
                     let s =
                         format!("error looking up replacement request: {e}");
 
-                    error!(
-                        &log,
-                        "{s}";
-                        "snapshot_id" => %region_snapshot.snapshot_id,
-                        "region_id" => %region_snapshot.region_id,
-                        "dataset_id" => %region_snapshot.dataset_id,
-                    );
+                    error!(&log, "{s}"; replacement);
                     status.errors.push(s);
                     continue;
                 }
@@ -128,13 +129,7 @@ impl RegionSnapshotReplacementDetector {
                             {request_id}"
                         );
 
-                        info!(
-                            &log,
-                            "{s}";
-                            "snapshot_id" => %region_snapshot.snapshot_id,
-                            "region_id" => %region_snapshot.region_id,
-                            "dataset_id" => %region_snapshot.dataset_id,
-                        );
+                        info!(&log, "{s}"; replacement);
                         status.requests_created_ok.push(s);
                     }
 
@@ -155,14 +150,7 @@ impl RegionSnapshotReplacementDetector {
                                     "error creating replacement request: {e}"
                                 );
 
-                                error!(
-                                    &log,
-                                    "{s}";
-                                    "snapshot_id" => %region_snapshot.snapshot_id,
-                                    "region_id" => %region_snapshot.region_id,
-                                    "dataset_id" => %region_snapshot.dataset_id,
-                                );
-
+                                error!(&log, "{s}"; replacement);
                                 status.errors.push(s);
                             }
                         }
@@ -201,6 +189,7 @@ impl RegionSnapshotReplacementDetector {
 
         for request in requests {
             let request_id = request.id;
+            let replacement = request.replacement_type();
 
             // If the region snapshot or read-only region is gone, then there
             // are no more references in any volume, and the whole region
@@ -218,6 +207,7 @@ impl RegionSnapshotReplacementDetector {
                             &log,
                             "{s}";
                             "request_id" => %request_id,
+                            replacement
                         );
                         status.errors.push(s);
                         continue;
@@ -237,17 +227,18 @@ impl RegionSnapshotReplacementDetector {
                             "region snapshot replacement {request_id} \
                                 completed ok"
                         );
-                        info!(&log, "{s}");
+                        info!(&log, "{s}"; replacement);
                         status.requests_completed_ok.push(s);
                     }
 
                     Err(e) => {
                         let s = format!(
-                            "query to set region snapshot request state \
-                                to complete failed: {e}"
+                            "query to set region snapshot request {request_id} \
+                            state to complete failed: {e}"
                         );
 
-                        error!(&log, "{s}"; "request.id" => %request_id);
+                        error!(&log, "{s}"; replacement);
+
                         status.errors.push(s);
                     }
                 }
@@ -258,7 +249,7 @@ impl RegionSnapshotReplacementDetector {
             let result = self
                 .send_start_request(
                     authn::saga::Serialized::for_opctx(opctx),
-                    request.clone(),
+                    request,
                 )
                 .await;
 
@@ -269,7 +260,7 @@ impl RegionSnapshotReplacementDetector {
                         {request_id}"
                     );
 
-                    info!(&log, "{s}");
+                    info!(&log, "{s}"; replacement);
                     status.start_invoked_ok.push(s);
                 }
 
@@ -279,7 +270,7 @@ impl RegionSnapshotReplacementDetector {
                         {request_id} failed: {e}",
                     );
 
-                    error!(&log, "{s}");
+                    error!(&log, "{s}"; replacement);
                     status.errors.push(s);
                 }
             }

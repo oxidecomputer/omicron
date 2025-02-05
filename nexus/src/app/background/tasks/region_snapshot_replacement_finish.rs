@@ -122,6 +122,7 @@ impl RegionSnapshotReplacementFinishDetector {
                             &log,
                             "read-only target still exists";
                             "request_id" => %request_id,
+                            request.replacement_type()
                         );
                         continue;
                     }
@@ -134,11 +135,14 @@ impl RegionSnapshotReplacementFinishDetector {
                             &log,
                             "{s}";
                             "request_id" => %request_id,
+                            request.replacement_type()
                         );
                         status.errors.push(s);
                         continue;
                     }
                 }
+
+                let replacement = request.replacement_type();
 
                 match self.send_finish_request(opctx, request).await {
                     Ok(()) => {
@@ -147,7 +151,7 @@ impl RegionSnapshotReplacementFinishDetector {
                             {request_id}"
                         );
 
-                        info!(&log, "{s}");
+                        info!(&log, "{s}"; replacement);
                         status.finish_invoked_ok.push(s);
                     }
 
@@ -156,7 +160,7 @@ impl RegionSnapshotReplacementFinishDetector {
                             "invoking region snapshot replacement finish for \
                             {request_id} failed: {e}",
                         );
-                        error!(&log, "{s}");
+                        error!(&log, "{s}"; replacement);
                         status.errors.push(s);
                     }
                 }
