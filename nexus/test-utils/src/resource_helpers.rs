@@ -616,7 +616,7 @@ pub async fn create_anti_affinity_group(
         &params::AntiAffinityGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: group_name.parse().unwrap(),
-                description: String::from("affinity group description"),
+                description: String::from("anti-affinity group description"),
             },
             policy: AffinityPolicy::Fail,
             failure_domain: FailureDomain::Sled,

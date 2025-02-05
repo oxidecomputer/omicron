@@ -10,9 +10,11 @@ use diesel::sql_types;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 
-/// For an instance, look up all anti-affinity groups, and return
-/// a list of sleds with other instances in that anti-affinity group
-/// already reserved.
+/// For an instance, look up all anti-affinity groups it belongs to.
+/// For all those groups, find all instances with reservations, and look
+/// up their sleds.
+/// Return all the sleds on which those instances were found, along with
+/// policy information about the corresponding group.
 pub fn lookup_anti_affinity_sleds_query(
     instance_id: InstanceUuid,
 ) -> TypedSqlQuery<(AffinityPolicyEnum, sql_types::Uuid)> {
@@ -48,8 +50,11 @@ pub fn lookup_anti_affinity_sleds_query(
      .query()
 }
 
-/// For an instance, look up all affinity groups, and return a list of sleds
-/// with other instances in that affinity group already reserved.
+/// For an instance, look up all affinity groups it belongs to.
+/// For all those groups, find all instances with reservations, and look
+/// up their sleds.
+/// Return all the sleds on which those instances were found, along with
+/// policy information about the corresponding group.
 pub fn lookup_affinity_sleds_query(
     instance_id: InstanceUuid,
 ) -> TypedSqlQuery<(AffinityPolicyEnum, sql_types::Uuid)> {
