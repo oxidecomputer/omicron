@@ -5,26 +5,46 @@
 //! Support for editing the blueprint details of a single sled.
 
 use crate::blueprint_builder::SledEditCounts;
-use crate::planner::PlannerRng;
+use crate::planner::SledPlannerRng;
 use illumos_utils::zpool::ZpoolName;
+use itertools::Either;
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::external_api::views::SledState;
+use nexus_types::inventory::Dataset;
+use nexus_types::inventory::Zpool;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::SLED_PREFIX;
+use omicron_common::disk::DatasetKind;
+use omicron_common::disk::DatasetName;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::ZpoolUuid;
+use slog::info;
+use slog::warn;
+use slog::Logger;
+use slog_error_chain::InlineErrorChain;
+use std::borrow::Cow;
+use std::collections::BTreeMap;
+use std::iter;
+use std::mem;
+use std::net::Ipv6Addr;
+use underlay_ip_allocator::SledUnderlayIpAllocator;
 
 mod datasets;
 mod disks;
+mod underlay_ip_allocator;
 mod zones;
-
-pub(crate) use self::datasets::DatasetIdsBackfillFromDb;
 
 pub use self::datasets::DatasetsEditError;
 pub use self::datasets::MultipleDatasetsOfKind;
@@ -50,6 +70,32 @@ pub enum SledInputError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SledEditError {
+    #[error("editing a decommissioned sled is not allowed")]
+    EditDecommissioned,
+    #[error(
+        "sled is not decommissionable: \
+         disk {disk_id} (zpool {zpool_id}) is in service"
+    )]
+    NonDecommissionableDiskInService {
+        disk_id: PhysicalDiskUuid,
+        zpool_id: ZpoolUuid,
+    },
+    #[error(
+        "sled is not decommissionable: \
+         dataset {dataset_id} (kind {kind:?}) is in service"
+    )]
+    NonDecommissionableDatasetInService {
+        dataset_id: DatasetUuid,
+        kind: DatasetKind,
+    },
+    #[error(
+        "sled is not decommissionable: \
+         zone {zone_id} (kind {kind:?}) is not expunged"
+    )]
+    NonDecommissionableZoneNotExpunged {
+        zone_id: OmicronZoneUuid,
+        kind: ZoneKind,
+    },
     #[error("failed to edit disks")]
     EditDisks(#[from] DisksEditError),
     #[error("failed to edit datasets")]
@@ -71,11 +117,216 @@ pub enum SledEditError {
          zpool ({zpool}) is not present in this sled's disks"
     )]
     ZoneOnNonexistentZpool { zone_id: OmicronZoneUuid, zpool: ZpoolName },
+    #[error("ran out of underlay IP addresses")]
+    OutOfUnderlayIps,
 }
 
 #[derive(Debug)]
-pub(crate) struct SledEditor {
-    state: SledState,
+pub(crate) struct SledEditor(InnerSledEditor);
+
+#[derive(Debug)]
+enum InnerSledEditor {
+    // Internally, `SledEditor` has a variant for each variant of `SledState`,
+    // as the operations allowed in different states are substantially different
+    // (i.e., an active sled allows any edit; a decommissioned sled allows
+    // none).
+    Active(ActiveSledEditor),
+    Decommissioned(EditedSled),
+}
+
+impl SledEditor {
+    pub fn for_existing_active(
+        subnet: Ipv6Subnet<SLED_PREFIX>,
+        zones: BlueprintZonesConfig,
+        disks: BlueprintPhysicalDisksConfig,
+        datasets: BlueprintDatasetsConfig,
+    ) -> Result<Self, SledInputError> {
+        let inner = ActiveSledEditor::new(subnet, zones, disks, datasets)?;
+        Ok(Self(InnerSledEditor::Active(inner)))
+    }
+
+    pub fn for_existing_decommissioned(
+        zones: BlueprintZonesConfig,
+        disks: BlueprintPhysicalDisksConfig,
+        datasets: BlueprintDatasetsConfig,
+    ) -> Result<Self, SledInputError> {
+        let inner = EditedSled {
+            state: SledState::Decommissioned,
+            zones,
+            disks,
+            datasets,
+            edit_counts: SledEditCounts::zeroes(),
+        };
+        Ok(Self(InnerSledEditor::Decommissioned(inner)))
+    }
+
+    pub fn for_new_active(subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
+        Self(InnerSledEditor::Active(ActiveSledEditor::new_empty(subnet)))
+    }
+
+    pub fn finalize(self) -> EditedSled {
+        match self.0 {
+            InnerSledEditor::Active(editor) => editor.finalize(),
+            InnerSledEditor::Decommissioned(edited) => edited,
+        }
+    }
+
+    pub fn edit_counts(&self) -> SledEditCounts {
+        match &self.0 {
+            InnerSledEditor::Active(editor) => editor.edit_counts(),
+            InnerSledEditor::Decommissioned(edited) => edited.edit_counts,
+        }
+    }
+
+    pub fn decommission(&mut self) -> Result<(), SledEditError> {
+        match &mut self.0 {
+            InnerSledEditor::Active(editor) => {
+                // Decommissioning a sled is a one-way trip that has many
+                // preconditions. We can't check all of them here (e.g., we
+                // should kick the sled out of trust quorum before
+                // decommissioning, which is entirely outside the realm of
+                // `SledEditor`. But we can do some basic checks: all of the
+                // disks, datasets, and zones for this sled should be expunged.
+                editor.validate_decommisionable()?;
+
+                // We can't take ownership of `editor` from the `&mut self`
+                // reference we have, and we need ownership to call
+                // `finalize()`. Steal the contents via `mem::swap()` with an
+                // empty editor. This isn't panic safe (i.e., if we panic
+                // between the `mem::swap()` and the reassignment to `self.0`
+                // below, we'll be left in the active state with an empty sled
+                // editor), but omicron in general is not panic safe and aborts
+                // on panic. Plus `finalize()` should never panic.
+                let mut stolen = ActiveSledEditor::new_empty(Ipv6Subnet::new(
+                    Ipv6Addr::LOCALHOST,
+                ));
+                mem::swap(editor, &mut stolen);
+
+                let mut finalized = stolen.finalize();
+                finalized.state = SledState::Decommissioned;
+                self.0 = InnerSledEditor::Decommissioned(finalized);
+            }
+            // If we're already decommissioned, there's nothing to do.
+            InnerSledEditor::Decommissioned(_) => (),
+        }
+        Ok(())
+    }
+
+    pub fn alloc_underlay_ip(&mut self) -> Result<Ipv6Addr, SledEditError> {
+        self.as_active_mut()?
+            .alloc_underlay_ip()
+            .ok_or(SledEditError::OutOfUnderlayIps)
+    }
+
+    pub fn disks(
+        &self,
+        filter: DiskFilter,
+    ) -> impl Iterator<Item = &BlueprintPhysicalDiskConfig> {
+        match &self.0 {
+            InnerSledEditor::Active(editor) => {
+                Either::Left(editor.disks(filter))
+            }
+            InnerSledEditor::Decommissioned(edited) => Either::Right(
+                edited
+                    .disks
+                    .disks
+                    .iter()
+                    .filter(move |disk| disk.disposition.matches(filter)),
+            ),
+        }
+    }
+
+    pub fn zones(
+        &self,
+        filter: BlueprintZoneFilter,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
+        match &self.0 {
+            InnerSledEditor::Active(editor) => {
+                Either::Left(editor.zones(filter))
+            }
+            InnerSledEditor::Decommissioned(edited) => Either::Right(
+                edited
+                    .zones
+                    .zones
+                    .iter()
+                    .filter(move |zone| zone.disposition.matches(filter)),
+            ),
+        }
+    }
+
+    fn as_active_mut(
+        &mut self,
+    ) -> Result<&mut ActiveSledEditor, SledEditError> {
+        match &mut self.0 {
+            InnerSledEditor::Active(editor) => Ok(editor),
+            InnerSledEditor::Decommissioned(_) => {
+                Err(SledEditError::EditDecommissioned)
+            }
+        }
+    }
+
+    pub fn ensure_disk(
+        &mut self,
+        disk: BlueprintPhysicalDiskConfig,
+        rng: &mut SledPlannerRng,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.ensure_disk(disk, rng);
+        Ok(())
+    }
+
+    pub fn expunge_disk(
+        &mut self,
+        disk_id: &PhysicalDiskUuid,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.expunge_disk(disk_id)
+    }
+
+    pub fn add_zone(
+        &mut self,
+        zone: BlueprintZoneConfig,
+        rng: &mut SledPlannerRng,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.add_zone(zone, rng)
+    }
+
+    pub fn expunge_zone(
+        &mut self,
+        zone_id: &OmicronZoneUuid,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.expunge_zone(zone_id)
+    }
+
+    /// Backwards compatibility / test helper: If we're given a blueprint that
+    /// has zones but wasn't created via `SledEditor`, it might not have
+    /// datasets for all its zones. This method backfills them.
+    pub fn ensure_datasets_for_running_zones(
+        &mut self,
+        rng: &mut SledPlannerRng,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.ensure_datasets_for_running_zones(rng)
+    }
+
+    // Apply fixes for #7229: If any zones have a missing or incorrect
+    // `filesystem_pool` property, correct it based on the inventory pools and
+    // datasets.
+    pub fn backfill_zone_filesystem_pools(
+        &mut self,
+        inventory_zpools: &[Zpool],
+        inventory_datasets: &[Dataset],
+        log: &Logger,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.backfill_zone_filesystem_pools(
+            inventory_zpools,
+            inventory_datasets,
+            log,
+        );
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct ActiveSledEditor {
+    underlay_ip_allocator: SledUnderlayIpAllocator,
     zones: ZonesEditor,
     disks: DisksEditor,
     datasets: DatasetsEditor,
@@ -90,31 +341,45 @@ pub(crate) struct EditedSled {
     pub edit_counts: SledEditCounts,
 }
 
-impl SledEditor {
+impl ActiveSledEditor {
     pub fn new(
-        state: SledState,
+        subnet: Ipv6Subnet<SLED_PREFIX>,
         zones: BlueprintZonesConfig,
         disks: BlueprintPhysicalDisksConfig,
         datasets: BlueprintDatasetsConfig,
-        preexisting_dataset_ids: DatasetIdsBackfillFromDb,
     ) -> Result<Self, SledInputError> {
+        let zones = ZonesEditor::from(zones);
+
+        // We never reuse underlay IPs within a sled, regardless of zone
+        // dispositions. If a zone has been fully removed from the blueprint
+        // some time after expungement, we may reuse its IP; reconfigurator must
+        // know that's safe prior to pruning the expunged zone.
+        let zone_ips =
+            zones.zones(BlueprintZoneFilter::All).map(|z| z.underlay_ip());
+
         Ok(Self {
-            state,
-            zones: zones.try_into()?,
+            underlay_ip_allocator: SledUnderlayIpAllocator::new(
+                subnet, zone_ips,
+            ),
+            zones,
             disks: disks.try_into()?,
-            datasets: DatasetsEditor::new(datasets, preexisting_dataset_ids)?,
+            datasets: DatasetsEditor::new(datasets)?,
         })
     }
 
-    pub fn new_empty(
-        state: SledState,
-        preexisting_dataset_ids: DatasetIdsBackfillFromDb,
-    ) -> Self {
+    pub fn new_empty(subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
+        // Creating the underlay IP allocator can only fail if we have a zone
+        // with an IP outside the sled subnet, but we don't have any zones at
+        // all, so this can't fail. Match explicitly to guard against this error
+        // turning into an enum and getting new variants we'd need to check.
+        let underlay_ip_allocator =
+            SledUnderlayIpAllocator::new(subnet, iter::empty());
+
         Self {
-            state,
+            underlay_ip_allocator,
             zones: ZonesEditor::empty(),
             disks: DisksEditor::empty(),
-            datasets: DatasetsEditor::empty(preexisting_dataset_ids),
+            datasets: DatasetsEditor::empty(),
         }
     }
 
@@ -123,7 +388,7 @@ impl SledEditor {
         let (datasets, datasets_counts) = self.datasets.finalize();
         let (zones, zones_counts) = self.zones.finalize();
         EditedSled {
-            state: self.state,
+            state: SledState::Active,
             zones,
             disks,
             datasets,
@@ -135,6 +400,24 @@ impl SledEditor {
         }
     }
 
+    fn validate_decommisionable(&self) -> Result<(), SledEditError> {
+        // ... and all zones are expunged.
+        if let Some(zone) = self.zones(BlueprintZoneFilter::All).find(|zone| {
+            match zone.disposition {
+                BlueprintZoneDisposition::InService
+                | BlueprintZoneDisposition::Quiesced => true,
+                BlueprintZoneDisposition::Expunged => false,
+            }
+        }) {
+            return Err(SledEditError::NonDecommissionableZoneNotExpunged {
+                zone_id: zone.id,
+                kind: zone.zone_type.kind(),
+            });
+        }
+
+        Ok(())
+    }
+
     pub fn edit_counts(&self) -> SledEditCounts {
         SledEditCounts {
             disks: self.disks.edit_counts(),
@@ -143,8 +426,8 @@ impl SledEditor {
         }
     }
 
-    pub fn set_state(&mut self, new_state: SledState) {
-        self.state = new_state;
+    pub fn alloc_underlay_ip(&mut self) -> Option<Ipv6Addr> {
+        self.underlay_ip_allocator.alloc()
     }
 
     pub fn disks(
@@ -164,7 +447,7 @@ impl SledEditor {
     pub fn ensure_disk(
         &mut self,
         disk: BlueprintPhysicalDiskConfig,
-        rng: &mut PlannerRng,
+        rng: &mut SledPlannerRng,
     ) -> Result<(), SledEditError> {
         let zpool = ZpoolName::new_external(disk.pool_id);
 
@@ -206,10 +489,15 @@ impl SledEditor {
     pub fn add_zone(
         &mut self,
         zone: BlueprintZoneConfig,
-        rng: &mut PlannerRng,
+        rng: &mut SledPlannerRng,
     ) -> Result<(), SledEditError> {
         // Ensure we can construct the configs for the datasets for this zone.
         let datasets = ZoneDatasetConfigs::new(&self.disks, &zone)?;
+
+        // This zone's underlay IP should have come from us (via
+        // `alloc_underlay_ip()`), but in case it wasn't, ensure we don't hand
+        // out this IP again later.
+        self.underlay_ip_allocator.mark_as_allocated(zone.underlay_ip());
 
         // Actually add the zone and its datasets.
         self.zones.add_zone(zone)?;
@@ -239,7 +527,7 @@ impl SledEditor {
         }
 
         if let Some(dataset) = config.filesystem_dataset() {
-            self.datasets.expunge(&dataset.pool().id(), dataset.dataset())?;
+            self.datasets.expunge(&dataset.pool().id(), dataset.kind())?;
         }
         if let Some(dataset) = config.zone_type.durable_dataset() {
             self.datasets
@@ -254,13 +542,142 @@ impl SledEditor {
     /// datasets for all its zones. This method backfills them.
     pub fn ensure_datasets_for_running_zones(
         &mut self,
-        rng: &mut PlannerRng,
+        rng: &mut SledPlannerRng,
     ) -> Result<(), SledEditError> {
         for zone in self.zones.zones(BlueprintZoneFilter::ShouldBeRunning) {
             ZoneDatasetConfigs::new(&self.disks, zone)?
                 .ensure_in_service(&mut self.datasets, rng);
         }
         Ok(())
+    }
+
+    pub fn backfill_zone_filesystem_pools(
+        &mut self,
+        inventory_zpools: &[Zpool],
+        inventory_datasets: &[Dataset],
+        log: &Logger,
+    ) {
+        let mut zones_to_edit: BTreeMap<OmicronZoneUuid, ZpoolName> =
+            BTreeMap::new();
+
+        for zone in self.zones.zones(BlueprintZoneFilter::ShouldBeRunning) {
+            let expected_filesystem_pool = if let Some(pool) =
+                zone.zone_type.durable_zpool()
+            {
+                // Easy case: if this zone type has a durable dataset, its
+                // filesystem_pool must be on the same zpool.
+                Cow::Borrowed(pool)
+            } else {
+                // Hard case: this zone type has no durable dataset, so if
+                // its `filesystem_pool` is `None` in sled-agent's ledger,
+                // sled-agent chooses a random zpool each time it launches
+                // the zone. Look at the provided inventory collection and
+                // attempt to find that zpool. This could be fail in two
+                // ways:
+                //
+                // 1. We might not have an inventory collection for this
+                //    sled (in which case, we just skip this zone; we'll
+                //    have to backfill it during some future planning run
+                //    where we do have one)
+                // 2. sled-agent might have restarted the zone since the
+                //    inventory collection was taken and chosen a
+                //    _different_ zpool. We have no way of detecting this
+                //    now, but must be willing to overwrite a non-`None`
+                //    `filesystem_pool` value to correct ourselves if we've
+                //    hit this case (without knowing it!) in a past planner
+                //    run.
+                //
+                // We have a list of dataset names from inventory; we could
+                // try to parse those back into `DatasetName`s, but it's
+                // more straightforward to construct what this zone's
+                // `DatasetName` _would_ be (for any given zpool on the
+                // sled) and see if it's present in the inventory list. This
+                // is certainly less efficient than parsing the dataset name
+                // string, but we only have 10 zpools per sled, so shouldn't
+                // be too bad in practice.
+                let mut found_zpool = None;
+                let kind = DatasetKind::TransientZone {
+                    name: illumos_utils::zone::zone_name(
+                        zone.zone_type.kind().zone_prefix(),
+                        Some(zone.id),
+                    ),
+                };
+
+                for inv_zpool in inventory_zpools {
+                    let zpool = ZpoolName::new_external(inv_zpool.id);
+                    let dataset_name = DatasetName::new(zpool, kind.clone());
+                    let dataset_name_string = dataset_name.full_name();
+                    if inventory_datasets
+                        .iter()
+                        .any(|d| d.name == dataset_name_string)
+                    {
+                        found_zpool = Some(dataset_name.pool().clone());
+                        break;
+                    }
+                }
+
+                match found_zpool {
+                    Some(zpool) => Cow::Owned(zpool),
+                    None => {
+                        warn!(
+                            log,
+                            "could not determine expected \
+                             `filesystem_pool` for zone";
+                            "zone_id" => %zone.id,
+                            "zone_kind" => ?zone.zone_type.kind(),
+                            "current_filesystem_pool" => ?zone.filesystem_pool,
+                        );
+                        continue;
+                    }
+                }
+            };
+
+            // If the pool is already correct, we have nothing to do.
+            if zone.filesystem_pool.as_ref() == Some(&*expected_filesystem_pool)
+            {
+                continue;
+            }
+
+            info!(
+                log,
+                "updating filesystem_pool for zone";
+                "zone_id" => %zone.id,
+                "zone_kind" => ?zone.zone_type.kind(),
+                "current_filesystem_pool" => ?zone.filesystem_pool,
+                "new_filesystem_zpool" => %expected_filesystem_pool,
+            );
+
+            // If we're _correcting_ a filesystem_pool rather than just
+            // filling it in, we also need to expunge the dataset from the
+            // incorrect value.
+            if let Some(old_filesystem) = zone.filesystem_dataset() {
+                let (pool, kind) = old_filesystem.into_parts();
+                match self.datasets.expunge(&pool.id(), &kind) {
+                    Ok(()) => (),
+                    // We're trying to get rid of a potentially-orphaned
+                    // dataset; it not existing is okay but unexpected! Log
+                    // a warning but don't fail.
+                    Err(
+                        err @ DatasetsEditError::ExpungeNonexistentDataset {
+                            ..
+                        },
+                    ) => {
+                        warn!(
+                            log,
+                            "unexpected failure trying to expunge dataset";
+                            InlineErrorChain::new(&err),
+                        );
+                    }
+                }
+            }
+
+            zones_to_edit
+                .insert(zone.id, expected_filesystem_pool.into_owned());
+        }
+
+        for (zone_id, new_filesystem_zpool) in zones_to_edit {
+            self.zones.backfill_filesystem_pool(zone_id, new_filesystem_zpool);
+        }
     }
 }
 
@@ -327,7 +744,7 @@ impl ZoneDatasetConfigs {
     fn ensure_in_service(
         self,
         datasets: &mut DatasetsEditor,
-        rng: &mut PlannerRng,
+        rng: &mut SledPlannerRng,
     ) {
         if let Some(dataset) = self.filesystem {
             datasets.ensure_in_service(dataset, rng);

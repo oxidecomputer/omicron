@@ -18,7 +18,7 @@ target_os=$1
 # NOTE: This version should be in sync with the recommended version in
 # .config/nextest.toml. (Maybe build an automated way to pull the recommended
 # version in the future.)
-NEXTEST_VERSION='0.9.78'
+NEXTEST_VERSION='0.9.86'
 
 cargo --version
 rustc --version
@@ -69,7 +69,8 @@ banner ls-apis
     source ./tools/include/force-git-over-https.sh;
     ptime -m cargo xtask ls-apis apis &&
         ptime -m cargo xtask ls-apis deployment-units &&
-        ptime -m cargo xtask ls-apis servers
+        ptime -m cargo xtask ls-apis servers &&
+        ptime -m cargo xtask ls-apis check
 )
 
 #

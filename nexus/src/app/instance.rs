@@ -63,8 +63,7 @@ use propolis_client::support::WebSocketStream;
 use sagas::instance_common::ExternalIpAttach;
 use sagas::instance_start;
 use sagas::instance_update;
-use sled_agent_client::types::BootOrderEntry;
-use sled_agent_client::types::BootSettings;
+use sled_agent_client::types::InstanceBootSettings;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::InstanceProperties;
 use sled_agent_client::types::VmmPutStateBody;
@@ -101,6 +100,7 @@ impl From<SledAgentInstanceError> for omicron_common::api::external::Error {
 
 impl From<SledAgentInstanceError> for dropshot::HttpError {
     fn from(value: SledAgentInstanceError) -> Self {
+        use dropshot::ErrorStatusCode;
         use dropshot::HttpError;
         use progenitor_client::Error as ClientError;
         // See RFD 486 §6.3:
@@ -118,9 +118,9 @@ impl From<SledAgentInstanceError> for dropshot::HttpError {
                 // See https://github.com/oxidecomputer/dropshot/issues/693
                 let mut error = HttpError::for_internal_error(e.to_string());
                 error.status_code = if e.is_timeout() {
-                    http::StatusCode::GATEWAY_TIMEOUT
+                    ErrorStatusCode::GATEWAY_TIMEOUT
                 } else {
-                    http::StatusCode::BAD_GATEWAY
+                    ErrorStatusCode::BAD_GATEWAY
                 };
                 error
             }
@@ -1053,8 +1053,6 @@ impl super::Nexus {
             )
             .await?;
 
-        let mut boot_disk_name = None;
-
         let mut disk_reqs = vec![];
         for disk in &disks {
             // Disks that are attached to an instance should always have a slot
@@ -1079,7 +1077,7 @@ impl super::Nexus {
             let volume = self
                 .db_datastore
                 .volume_checkout(
-                    disk.volume_id,
+                    disk.volume_id(),
                     match operation {
                         InstanceRegisterReason::Start { vmm_id } =>
                             db::datastore::VolumeCheckoutReason::InstanceStart { vmm_id },
@@ -1089,58 +1087,22 @@ impl super::Nexus {
                 )
                 .await?;
 
-            // Propolis wants the name of the boot disk rather than ID, because we send names
-            // rather than IDs in the disk requsts as assembled below.
-            if db_instance.boot_disk_id == Some(disk.id()) {
-                boot_disk_name = Some(disk.name().to_string());
-            }
-
-            disk_reqs.push(sled_agent_client::types::DiskRequest {
+            disk_reqs.push(sled_agent_client::types::InstanceDisk {
+                disk_id: disk.id(),
                 name: disk.name().to_string(),
-                slot: sled_agent_client::types::Slot(slot.0),
+                slot: slot.0,
                 read_only: false,
-                device: "nvme".to_string(),
-                volume_construction_request: serde_json::from_str(
-                    &volume.data(),
-                )
-                .map_err(Error::from)?,
+                vcr_json: volume.data().to_owned(),
             });
         }
 
-        let boot_settings = if let Some(boot_disk_name) = boot_disk_name {
-            Some(BootSettings {
-                order: vec![BootOrderEntry { name: boot_disk_name }],
-            })
-        } else {
-            if let Some(instance_boot_disk_id) =
-                db_instance.boot_disk_id.as_ref()
-            {
-                // This should never occur: when setting the boot disk we ensure it is
-                // attached, and when detaching a disk we ensure it is not the boot
-                // disk. If this error is seen, the instance somehow had a boot disk
-                // that was not attached anyway.
-                //
-                // When Propolis accepts an ID rather than name, and we don't need to
-                // look up a name when assembling the Propolis request, we might as well
-                // remove this check; we can just pass the ID and rely on Propolis' own
-                // check that the boot disk is attached.
-                if boot_disk_name.is_none() {
-                    error!(self.log, "instance boot disk is not attached";
-                       "boot_disk_id" => ?instance_boot_disk_id,
-                       "instance id" => %db_instance.id());
-
-                    return Err(InstanceStateChangeError::Other(
-                        Error::internal_error(&format!(
-                            "instance {} has boot disk {:?} but it is not attached",
-                            db_instance.id(),
-                            db_instance.boot_disk_id.as_ref(),
-                        )),
-                    ));
-                }
-            }
-
-            None
-        };
+        // The routines that maintain an instance's boot options are supposed to
+        // guarantee that the boot disk ID, if present, is the ID of an attached
+        // disk. If this invariant isn't upheld, Propolis will catch the failure
+        // when it processes its received VM configuration.
+        let boot_settings = db_instance
+            .boot_disk_id
+            .map(|id| InstanceBootSettings { order: vec![id] });
 
         let nics = self
             .db_datastore

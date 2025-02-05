@@ -745,12 +745,12 @@ mod tests {
         let count = stats.collections.datum.value() as usize;
 
         assert!(count != 0);
-        assert_eq!(
-            count,
-            collection_count.load(Ordering::SeqCst),
+        let server_count = collection_count.load(Ordering::SeqCst);
+        assert!(
+            count == server_count || count + 1 == server_count,
             "number of collections reported by the collection \
-            task differs from the number reported by the empty \
-            producer server itself"
+            task ({count}) differs from the number reported by the empty \
+            producer server itself ({server_count})"
         );
         assert!(stats.failed_collections.is_empty());
         logctx.cleanup_successful();
@@ -892,12 +892,19 @@ mod tests {
 
         assert_eq!(stats.collections.datum.value(), 0);
         assert!(count != 0);
-        assert_eq!(
-            count,
-            collection_count.load(Ordering::SeqCst),
+
+        // The server may have handled a request that we've not yet recorded on
+        // our collection task side, so we allow the server count to be greater
+        // than our own. But since the collection task is single-threaded, it
+        // cannot ever be more than _one_ greater than our count, since we
+        // should increment that counter before making another request to the
+        // server.
+        let server_count = collection_count.load(Ordering::SeqCst);
+        assert!(
+            count == server_count || count + 1 == server_count,
             "number of collections reported by the collection \
-            task differs from the number reported by the always-ded \
-            producer server itself"
+            task ({count}) differs from the number reported by the always-ded \
+            producer server itself ({server_count})"
         );
         assert_eq!(stats.failed_collections.len(), 1);
         logctx.cleanup_successful();

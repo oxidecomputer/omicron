@@ -1309,18 +1309,44 @@ impl DataStore {
         opctx: &OpContext,
         authz_instance: &authz::Instance,
     ) -> DeleteResult {
-        opctx.authorize(authz::Action::Delete, authz_instance).await?;
-
         // This is subject to change, but for now we're going to say that an
         // instance must be "stopped" or "failed" in order to delete it.  The
         // delete operation sets "time_deleted" (just like with other objects)
         // and also sets the state to "destroyed".
+        self.project_delete_instance_in_states(
+            &opctx,
+            authz_instance,
+            &[InstanceState::NoVmm, InstanceState::Failed],
+        )
+        .await
+    }
+
+    /// Delete the provided `authz_instance`, as long as it is in one of the
+    /// provided set of [`InstanceState`]s.
+    ///
+    /// A.K.A. "[`project_delete_instance`], hard mode". Typically, instances
+    /// may only be deleted if they are in the [`InstanceState::NoVmm`] or
+    /// `[`InstanceState::Failed`] states. This method exists separately in
+    /// order to allow an unwinding `instance-create` saga to delete the
+    /// instance record without transiently moving it to
+    /// [`InstanceState::Failed`], in which it becomes eligible for automatic
+    /// restart.
+    ///
+    /// In general, callers should use [`project_delete_instance`] instead,
+    /// unless you really know what you're doing.
+    ///
+    /// [`project_delete_instance`]: Self::project_delete_instance
+    pub async fn project_delete_instance_in_states(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        ok_to_delete_instance_states: &'static [InstanceState],
+    ) -> DeleteResult {
         use db::schema::{disk, instance};
 
-        let stopped = InstanceState::NoVmm;
-        let failed = InstanceState::Failed;
+        opctx.authorize(authz::Action::Delete, authz_instance).await?;
+
         let destroyed = InstanceState::Destroyed;
-        let ok_to_delete_instance_states = vec![stopped, failed];
 
         let detached_label = api::external::DiskState::Detached.label();
         let ok_to_detach_disk_states =
@@ -1560,7 +1586,6 @@ impl DataStore {
     /// using [`DataStore::instance_updater_unlock`], or use
     /// [`DataStore::instance_commit_update`] to release the lock and write back
     /// a new [`InstanceRuntimeState`] in a single atomic query.
-
     ///
     /// This method is idempotent: if the instance is already locked by the same
     /// saga, it will succeed, as though the lock was acquired.

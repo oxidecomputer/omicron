@@ -19,12 +19,7 @@ use crate::params::OmicronZoneTypeExt;
 use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::StorageMonitorHandle;
-use crate::support_bundle::queries::{
-    dladm_info, ipadm_info, zoneadm_info, SupportBundleCmdError,
-    SupportBundleCmdOutput,
-};
 use crate::support_bundle::storage::SupportBundleManager;
-use crate::updates::{ConfigUpdates, UpdateManager};
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
 use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
@@ -45,14 +40,11 @@ use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
-use omicron_common::api::internal::nexus::SledVmmState;
+use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
 use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, HostPortConfig, RackNetworkConfig,
     ResolvedVpcFirewallRule, ResolvedVpcRouteSet, ResolvedVpcRouteState,
     SledIdentifiers, VirtualNetworkInterfaceHost,
-};
-use omicron_common::api::{
-    internal::nexus::DiskRuntimeState, internal::nexus::UpdateArtifactId,
 };
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
@@ -76,6 +68,7 @@ use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     PriorityOrder, StorageLimit, ZoneBundleMetadata,
 };
+use sled_diagnostics::{SledDiagnosticsCmdError, SledDiagnosticsCmdOutput};
 use sled_hardware::{underlay, HardwareManager};
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_hardware_types::Baseboard;
@@ -196,6 +189,9 @@ impl From<Error> for omicron_common::api::external::Error {
 // Provide a more specific HTTP error for some sled agent errors.
 impl From<Error> for dropshot::HttpError {
     fn from(err: Error) -> Self {
+        use dropshot::ClientErrorStatusCode;
+        use dropshot::ErrorStatusCode;
+
         const NO_SUCH_INSTANCE: &str = "NO_SUCH_INSTANCE";
         const INSTANCE_CHANNEL_FULL: &str = "INSTANCE_CHANNEL_FULL";
         match err {
@@ -213,25 +209,32 @@ impl From<Error> for dropshot::HttpError {
                         )
                     }
                     crate::instance::Error::Propolis(propolis_error) => {
-                        // Work around dropshot#693: HttpError::for_status
-                        // only accepts client errors and asserts on server
-                        // errors, so convert server errors by hand.
-                        match propolis_error.status() {
-                                None => HttpError::for_internal_error(
-                                    propolis_error.to_string(),
-                                ),
-
-                                Some(status_code) if status_code.is_client_error() => {
-                                    HttpError::for_status(None, status_code)
-                                },
-
-                                Some(status_code) => match status_code {
-                                    http::status::StatusCode::SERVICE_UNAVAILABLE =>
-                                        HttpError::for_unavail(None, propolis_error.to_string()),
-                                    _ =>
-                                        HttpError::for_internal_error(propolis_error.to_string()),
-                                }
+                        if let Some(status_code) =
+                            propolis_error.status().and_then(|status| {
+                                ErrorStatusCode::try_from(status).ok()
+                            })
+                        {
+                            if let Ok(status_code) =
+                                status_code.as_client_error()
+                            {
+                                return HttpError::for_client_error_with_status(
+                                    None,
+                                    status_code,
+                                );
                             }
+
+                            if status_code
+                                == ErrorStatusCode::SERVICE_UNAVAILABLE
+                            {
+                                return HttpError::for_unavail(
+                                    None,
+                                    propolis_error.to_string(),
+                                );
+                            }
+                        }
+                        HttpError::for_internal_error(
+                            propolis_error.to_string(),
+                        )
                     }
                     crate::instance::Error::Transition(omicron_error) => {
                         // Preserve the status associated with the wrapped
@@ -242,7 +245,7 @@ impl From<Error> for dropshot::HttpError {
                     crate::instance::Error::Terminating => {
                         HttpError::for_client_error(
                             Some(NO_SUCH_INSTANCE.to_string()),
-                            http::StatusCode::GONE,
+                            ClientErrorStatusCode::GONE,
                             instance_error.to_string(),
                         )
                     }
@@ -270,12 +273,16 @@ impl From<Error> for dropshot::HttpError {
                 BundleError::InstanceTerminating => {
                     HttpError::for_client_error(
                         Some(NO_SUCH_INSTANCE.to_string()),
-                        http::StatusCode::GONE,
+                        ClientErrorStatusCode::GONE,
                         inner.to_string(),
                     )
                 }
                 _ => HttpError::for_internal_error(err.to_string()),
             },
+            Error::Services(err) => {
+                let err = omicron_common::api::external::Error::from(err);
+                err.into()
+            }
             e => HttpError::for_internal_error(e.to_string()),
         }
     }
@@ -338,9 +345,6 @@ struct SledAgentInner {
 
     // Component of Sled Agent responsible for monitoring hardware.
     hardware: HardwareManager,
-
-    // Component of Sled Agent responsible for managing updates.
-    updates: UpdateManager,
 
     // Component of Sled Agent responsible for managing OPTE ports.
     port_manager: PortManager,
@@ -516,11 +520,6 @@ impl SledAgent {
             metrics_manager.request_queue(),
         )?;
 
-        let update_config = ConfigUpdates {
-            zone_artifact_path: Utf8PathBuf::from("/opt/oxide"),
-        };
-        let updates = UpdateManager::new(update_config);
-
         let svc_config =
             services::Config::new(identifiers, config.sidecar_revision.clone());
 
@@ -578,11 +577,16 @@ impl SledAgent {
             )
             .await?;
 
+        let repo_depot = ArtifactStore::new(&log, storage_manager.clone())
+            .start(sled_address, &config.dropshot)
+            .await?;
+
         // Spawn a background task for managing notifications to nexus
         // about this sled-agent.
         let nexus_notifier_input = NexusNotifierInput {
             sled_id: request.body.id,
             sled_address: get_sled_address(request.body.subnet),
+            repo_depot_port: repo_depot.local_addr().port(),
             nexus_client: nexus_client.clone(),
             hardware: long_running_task_handles.hardware_manager.clone(),
             vmm_reservoir_manager: vmm_reservoir_manager.clone(),
@@ -604,10 +608,6 @@ impl SledAgent {
             log.new(o!("component" => "ProbeManager")),
         );
 
-        let repo_depot = ArtifactStore::new(&log, storage_manager.clone())
-            .start(sled_address, &config.dropshot)
-            .await?;
-
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
                 id: request.body.id,
@@ -620,7 +620,6 @@ impl SledAgent {
                 instances,
                 probes,
                 hardware: long_running_task_handles.hardware_manager.clone(),
-                updates,
                 port_manager,
                 services,
                 nexus_client,
@@ -965,12 +964,21 @@ impl SledAgent {
                 continue;
             };
 
-            // First, ensure the dataset exists
-            let dataset_id = zone.id.into_untyped_uuid();
-            self.inner
-                .storage
-                .upsert_filesystem(dataset_id, dataset_name)
-                .await?;
+            // NOTE: This code will be deprecated by https://github.com/oxidecomputer/omicron/pull/7160
+            //
+            // However, we need to ensure that all blueprints have datasets
+            // within them before we can remove this back-fill.
+            //
+            // Therefore, we do something hairy here: We ensure the filesystem
+            // exists, but don't specify any dataset UUID value.
+            //
+            // This means that:
+            // - If the dataset exists and has a UUID, this will be a no-op
+            // - If the dataset doesn't exist, it'll be created without its
+            // oxide:uuid zfs property set
+            // - If a subsequent call to "datasets_ensure" tries to set a UUID,
+            // it should be able to get set (once).
+            self.inner.storage.upsert_filesystem(None, dataset_name).await?;
         }
 
         self.inner
@@ -1108,20 +1116,6 @@ impl SledAgent {
         _target: DiskStateRequested,
     ) -> Result<DiskRuntimeState, Error> {
         todo!("Disk attachment not yet implemented");
-    }
-
-    /// Downloads and applies an artifact.
-    // TODO: This is being split into "download" (i.e. store an artifact in the
-    // artifact store) and "apply" (perform an update using an artifact).
-    pub async fn update_artifact(
-        &self,
-        artifact: UpdateArtifactId,
-    ) -> Result<(), Error> {
-        self.inner
-            .updates
-            .download_artifact(artifact, &self.inner.nexus_client)
-            .await?;
-        Ok(())
     }
 
     pub fn artifact_store(&self) -> &ArtifactStore<StorageHandle> {
@@ -1367,20 +1361,38 @@ impl SledAgent {
 
     pub(crate) async fn support_zoneadm_info(
         &self,
-    ) -> Result<SupportBundleCmdOutput, SupportBundleCmdError> {
-        zoneadm_info().await
+    ) -> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
+        sled_diagnostics::zoneadm_info().await
     }
 
     pub(crate) async fn support_ipadm_info(
         &self,
-    ) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
-        ipadm_info().await
+    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+        sled_diagnostics::ipadm_info().await
     }
 
     pub(crate) async fn support_dladm_info(
         &self,
-    ) -> Vec<Result<SupportBundleCmdOutput, SupportBundleCmdError>> {
-        dladm_info().await
+    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+        sled_diagnostics::dladm_info().await
+    }
+
+    pub(crate) async fn support_pargs_info(
+        &self,
+    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+        sled_diagnostics::pargs_oxide_processes(&self.log).await
+    }
+
+    pub(crate) async fn support_pstack_info(
+        &self,
+    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+        sled_diagnostics::pstack_oxide_processes(&self.log).await
+    }
+
+    pub(crate) async fn support_pfiles_info(
+        &self,
+    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+        sled_diagnostics::pfiles_oxide_processes(&self.log).await
     }
 }
 

@@ -73,7 +73,7 @@ impl Context {
     }
 }
 
-fn rss_config() -> Result<RackInitializeRequest> {
+pub fn rss_config() -> Result<RackInitializeRequest> {
     let path = "/opt/oxide/sled-agent/pkg/config-rss.toml";
     let content =
         std::fs::read_to_string(&path).unwrap_or(RSS_CONFIG_STR.to_string());

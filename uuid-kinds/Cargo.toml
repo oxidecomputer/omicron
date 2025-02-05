@@ -12,13 +12,16 @@ workspace = true
 # within omicron.
 
 [dependencies]
+daft.workspace = true
 newtype-uuid.workspace = true
-schemars = { workspace = true, optional = true }
 paste.workspace = true
+proptest = { workspace = true, optional = true }
+schemars = { workspace = true, optional = true }
 
 [features]
 default = ["std"]
 serde = ["newtype-uuid/serde"]
 schemars08 = ["newtype-uuid/schemars08", "schemars", "std"]
 std = ["newtype-uuid/std"]
+testing = ["newtype-uuid/proptest1"]
 uuid-v4 = ["newtype-uuid/v4"]

@@ -188,7 +188,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled (
     sled_state omicron.public.sled_state NOT NULL,
 
     /* Generation number owned and incremented by the sled-agent */
-    sled_agent_gen INT8 NOT NULL DEFAULT 1
+    sled_agent_gen INT8 NOT NULL DEFAULT 1,
+
+    /* The bound port of the Repo Depot API server, running on the same IP as
+       the sled agent server. */
+    repo_depot_port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL
 );
 
 -- Add an index that ensures a given physical sled (identified by serial and
@@ -557,9 +561,15 @@ CREATE TYPE IF NOT EXISTS omicron.public.dataset_kind AS ENUM (
 );
 
 /*
- * A dataset of allocated space within a zpool.
+ * Table tracking the contact information and size used by datasets associated
+ * with Crucible zones.
+ *
+ * This is a Reconfigurator rendezvous table: it reflects resources that
+ * Reconfigurator has ensured exist. It is always possible that a resource
+ * chosen from this table could be deleted after it's selected, but any
+ * non-deleted row in this table is guaranteed to have been created.
  */
-CREATE TABLE IF NOT EXISTS omicron.public.dataset (
+CREATE TABLE IF NOT EXISTS omicron.public.crucible_dataset (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -570,56 +580,36 @@ CREATE TABLE IF NOT EXISTS omicron.public.dataset (
     /* FK into the Pool table */
     pool_id UUID NOT NULL,
 
-    /* Contact information for the dataset */
-    ip INET,
-    port INT4 CHECK (port BETWEEN 0 AND 65535),
+    /*
+     * Contact information for the dataset: socket address of the Crucible
+     * agent service that owns this dataset
+     */
+    ip INET NOT NULL,
+    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
 
-    kind omicron.public.dataset_kind NOT NULL,
-
-    /* An upper bound on the amount of space that might be in-use */
-    size_used INT,
-
-    /* Only valid if kind = zone -- the name of this zone */
-    zone_name TEXT,
-
-    quota INT8,
-    reservation INT8,
-    compression TEXT,
-
-    /* Crucible must make use of 'size_used'; other datasets manage their own storage */
-    CONSTRAINT size_used_column_set_for_crucible CHECK (
-      (kind != 'crucible') OR
-      (kind = 'crucible' AND size_used IS NOT NULL)
-    ),
-
-    CONSTRAINT ip_and_port_set_for_crucible CHECK (
-      (kind != 'crucible') OR
-      (kind = 'crucible' AND ip IS NOT NULL and port IS NOT NULL)
-    ),
-
-    CONSTRAINT zone_name_for_zone_kind CHECK (
-      (kind != 'zone') OR
-      (kind = 'zone' AND zone_name IS NOT NULL)
-    )
+    /*
+     * An upper bound on the amount of space that might be in-use
+     *
+     * This field is owned by Nexus. When a new row is inserted during the
+     * Reconfigurator rendezvous process, this field is set to 0. Reconfigurator
+     * otherwise ignores this field. It's updated by Nexus as region allocations
+     * and deletions are performed using this dataset.
+     */
+    size_used INT NOT NULL
 );
 
-/* Create an index on the size usage for Crucible's allocation */
-CREATE INDEX IF NOT EXISTS lookup_dataset_by_size_used_crucible on omicron.public.dataset (
-    size_used
-) WHERE size_used IS NOT NULL AND time_deleted IS NULL AND kind = 'crucible';
-
-/* Create an index on the size usage for any dataset */
-CREATE INDEX IF NOT EXISTS lookup_dataset_by_size_used on omicron.public.dataset (
-    size_used
-) WHERE size_used IS NOT NULL AND time_deleted IS NULL;
+/* Create an index on the size usage for any Crucible dataset */
+CREATE INDEX IF NOT EXISTS lookup_crucible_dataset_by_size_used ON
+    omicron.public.crucible_dataset (size_used)
+  WHERE time_deleted IS NULL;
 
 /* Create an index on the zpool id */
-CREATE INDEX IF NOT EXISTS lookup_dataset_by_zpool on omicron.public.dataset (
-    pool_id,
-    id
-) WHERE pool_id IS NOT NULL AND time_deleted IS NULL;
+CREATE INDEX IF NOT EXISTS lookup_crucible_dataset_by_zpool ON
+    omicron.public.crucible_dataset (pool_id, id)
+  WHERE time_deleted IS NULL;
 
-CREATE INDEX IF NOT EXISTS lookup_dataset_by_ip on omicron.public.dataset (ip);
+CREATE INDEX IF NOT EXISTS lookup_crucible_dataset_by_ip ON
+  omicron.public.crucible_dataset (ip);
 
 /*
  * A region of space allocated to Crucible Downstairs, within a dataset.
@@ -2321,12 +2311,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
 
+    -- TODO: Repos fetched over HTTP will not have a SHA256 hash; this is an
+    -- implementation detail of our ZIP archives.
     sha256 STRING(64) NOT NULL,
 
     -- The version of the targets.json role that was used to generate the repo.
     targets_role_version INT NOT NULL,
 
     -- The valid_until time for the repo.
+    -- TODO: Figure out timestamp validity policy for uploaded repos vs those
+    -- fetched over HTTP; my (iliana's) current presumption is that we will make
+    -- this NULL for uploaded ZIP archives of repos.
     valid_until TIMESTAMPTZ NOT NULL,
 
     -- The system version described in the TUF repo.
@@ -2352,6 +2347,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo (
 -- In the future, this may also be used to describe artifacts that are fetched
 -- from a remote TUF repo, but that requires some additional design work.
 CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
+    id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
     version STRING(63) NOT NULL,
     -- This used to be an enum but is now a string, because it can represent
@@ -2368,29 +2364,76 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
     -- The length of the artifact, in bytes.
     artifact_size INT8 NOT NULL,
 
-    PRIMARY KEY (name, version, kind)
+    CONSTRAINT unique_name_version_kind UNIQUE (name, version, kind)
 );
 
 -- Reflects that a particular artifact was provided by a particular TUF repo.
 -- This is a many-many mapping.
 CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo_artifact (
     tuf_repo_id UUID NOT NULL,
-    tuf_artifact_name STRING(63) NOT NULL,
-    tuf_artifact_version STRING(63) NOT NULL,
-    tuf_artifact_kind STRING(63) NOT NULL,
+    tuf_artifact_id UUID NOT NULL,
 
-    /*
-    For the primary key, this definition uses the natural key rather than a
-    smaller surrogate key (UUID). That's because with CockroachDB the most
-    important factor in selecting a primary key is the ability to distribute
-    well. In this case, the first element of the primary key is the tuf_repo_id,
-    which is a random UUID.
+    PRIMARY KEY (tuf_repo_id, tuf_artifact_id)
+);
 
-    For more, see https://www.cockroachlabs.com/blog/how-to-choose-a-primary-key/.
-    */
-    PRIMARY KEY (
-        tuf_repo_id, tuf_artifact_name, tuf_artifact_version, tuf_artifact_kind
-    )
+/*******************************************************************/
+
+/*
+ * Support Bundles
+ */
+
+
+CREATE TYPE IF NOT EXISTS omicron.public.support_bundle_state AS ENUM (
+  -- The bundle is currently being created.
+  --
+  -- It might have storage that is partially allocated on a sled.
+  'collecting',
+
+  -- The bundle has been collected successfully, and has storage on
+  -- a particular sled.
+  'active',
+
+  -- The user has explicitly requested that a bundle be destroyed.
+  -- We must ensure that storage backing that bundle is gone before
+  -- it is automatically deleted.
+  'destroying',
+
+  -- The support bundle is failing.
+  -- This happens when Nexus is expunged partway through collection.
+  --
+  -- A different Nexus must ensure that storage is gone before the
+  -- bundle can be marked "failed".
+  'failing',
+
+  -- The bundle has finished failing.
+  --
+  -- The only action that can be taken on this bundle is to delete it.
+  'failed'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.support_bundle (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    reason_for_creation TEXT NOT NULL,
+    reason_for_failure TEXT,
+    state omicron.public.support_bundle_state NOT NULL,
+    zpool_id UUID NOT NULL,
+    dataset_id UUID NOT NULL,
+
+    -- The Nexus which is in charge of collecting the support bundle,
+    -- and later managing its storage.
+    assigned_nexus UUID
+);
+
+-- The "UNIQUE" part of this index helps enforce that we allow one support bundle
+-- per debug dataset. This constraint can be removed, if the query responsible
+-- for allocation changes to allocate more intelligently.
+CREATE UNIQUE INDEX IF NOT EXISTS one_bundle_per_dataset ON omicron.public.support_bundle (
+    dataset_id
+);
+
+CREATE INDEX IF NOT EXISTS lookup_bundle_by_nexus ON omicron.public.support_bundle (
+    assigned_nexus
 );
 
 /*******************************************************************/
@@ -3972,6 +4015,76 @@ CREATE TABLE IF NOT EXISTS omicron.public.cockroachdb_zone_id_to_node_id (
     PRIMARY KEY (omicron_zone_id, crdb_node_id)
 );
 
+/*
+ * List of debug datasets available for use (e.g., by support bundles).
+ *
+ * This is a Reconfigurator rendezvous table: it reflects resources that
+ * Reconfigurator has ensured exist. It is always possible that a resource
+ * chosen from this table could be deleted after it's selected, but any
+ * non-deleted row in this table is guaranteed to have been created.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.rendezvous_debug_dataset (
+    /* ID of the dataset in a blueprint */
+    id UUID PRIMARY KEY,
+
+    /* Time this dataset was added to the table */
+    time_created TIMESTAMPTZ NOT NULL,
+
+    /*
+     * If not NULL, indicates this dataset has been expunged in a blueprint.
+     * Multiple Nexus instances operate concurrently, and it's possible any
+     * given Nexus is operating on an old blueprint. We need to avoid a Nexus
+     * operating on an old blueprint from inserting a dataset that has already
+     * been expunged and removed from this table by a later blueprint, so
+     * instead of hard deleting, we tombstone rows via this column.
+     *
+     * Hard deletion of tombstoned datasets will require some care with respect
+     * to the problem above. For now we keep tombstoned datasets around forever.
+     */
+    time_tombstoned TIMESTAMPTZ,
+
+    /* ID of the zpool on which this dataset is placed */
+    pool_id UUID NOT NULL,
+
+    /*
+     * ID of the target blueprint the Reconfigurator reconciliation RPW was
+     * acting on when this row was created.
+     *
+     * In practice, this will often be the same blueprint ID in which this
+     * dataset was added, but it's not guaranteed to be (it could be any
+     * descendent blueprint in which this dataset is still in service).
+     */
+    blueprint_id_when_created UUID NOT NULL,
+
+    /*
+     * ID of the target blueprint the Reconfigurator reconciliation RPW was
+     * acting on when this row was tombstoned.
+     *
+     * In practice, this will often be the same blueprint ID in which this
+     * dataset was expunged, but it's not guaranteed to be (it could be any
+     * descendent blueprint in which this dataset is expunged and not yet
+     * pruned).
+     */
+    blueprint_id_when_tombstoned UUID,
+
+    /*
+     * Either both `*_tombstoned` columns should be set (if this row has been
+     * tombstoned) or neither should (if it has not).
+     */
+    CONSTRAINT tombstoned_consistency CHECK (
+        (time_tombstoned IS NULL
+            AND blueprint_id_when_tombstoned IS NULL)
+        OR
+        (time_tombstoned IS NOT NULL
+            AND blueprint_id_when_tombstoned IS NOT NULL)
+    )
+);
+
+/* Add an index which lets us find usable debug datasets */
+CREATE INDEX IF NOT EXISTS lookup_usable_rendezvous_debug_dataset
+    ON omicron.public.rendezvous_debug_dataset (id)
+    WHERE time_tombstoned IS NULL;
+
 /*******************************************************************/
 
 /*
@@ -4428,7 +4541,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.region_snapshot_replacement_state AS EN
   'replacement_done',
   'deleting_old_volume',
   'running',
-  'complete'
+  'complete',
+  'completing'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.region_snapshot_replacement (
@@ -4446,7 +4560,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.region_snapshot_replacement (
 
     replacement_state omicron.public.region_snapshot_replacement_state NOT NULL,
 
-    operating_saga_id UUID
+    operating_saga_id UUID,
+
+    new_region_volume_id UUID
 );
 
 CREATE INDEX IF NOT EXISTS lookup_region_snapshot_replacement_by_state on omicron.public.region_snapshot_replacement (replacement_state);
@@ -4695,7 +4811,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '116.0.0', NULL)
+    (TRUE, NOW(), NOW(), '122.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

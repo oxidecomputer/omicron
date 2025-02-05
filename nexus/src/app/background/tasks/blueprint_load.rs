@@ -197,17 +197,17 @@ mod test {
         Blueprint, BlueprintTarget, CockroachDbPreserveDowngrade,
     };
     use omicron_common::api::external::Generation;
+    use omicron_uuid_kinds::BlueprintUuid;
     use serde::Deserialize;
     use std::collections::BTreeMap;
-    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
     fn create_blueprint(
-        parent_blueprint_id: Uuid,
+        parent_blueprint_id: BlueprintUuid,
     ) -> (BlueprintTarget, Blueprint) {
-        let id = Uuid::new_v4();
+        let id = BlueprintUuid::new_v4();
         (
             BlueprintTarget {
                 target_id: id,
@@ -237,7 +237,7 @@ mod test {
     #[derive(Deserialize)]
     #[allow(unused)]
     struct TargetUpdate {
-        pub target_id: Uuid,
+        pub target_id: BlueprintUuid,
         pub time_created: chrono::DateTime<chrono::Utc>,
         pub time_found: Option<chrono::DateTime<chrono::Utc>>,
         pub status: String,

@@ -6,6 +6,7 @@ use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zone::Zones;
+use illumos_utils::zpool::ZpoolOrRamdisk;
 use nexus_client::types::{
     BackgroundTasksActivateRequest, ProbeExternalIp, ProbeInfo,
 };
@@ -126,10 +127,16 @@ impl ProbeManager {
             .zones
             .iter()
             .filter_map(|(id, probe)| {
-                let Some(probe_pool) = probe.root_zpool() else {
-                    // No known pool for this probe
-                    info!(self.inner.log, "use_only_these_disks: Cannot read filesystem pool"; "id" => ?id);
-                    return None;
+                let probe_pool = match probe.root_zpool() {
+                    ZpoolOrRamdisk::Zpool(zpool_name) => zpool_name,
+                    ZpoolOrRamdisk::Ramdisk => {
+                        info!(
+                            self.inner.log,
+                            "use_only_these_disks: removing probe on ramdisk";
+                            "id" => ?id,
+                        );
+                        return None;
+                    }
                 };
 
                 if !u2_set.contains(probe_pool) {

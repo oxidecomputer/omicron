@@ -10,6 +10,8 @@ use chrono::DateTime;
 use chrono::Utc;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::VolumeKind;
+use omicron_uuid_kinds::VolumeUuid;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -28,6 +30,7 @@ impl_enum_type!(
     ReplacementDone => b"replacement_done"
     DeletingOldVolume => b"deleting_old_volume"
     Running => b"running"
+    Completing => b"completing"
     Complete => b"complete"
 );
 
@@ -46,6 +49,7 @@ impl std::str::FromStr for RegionSnapshotReplacementState {
                 Ok(RegionSnapshotReplacementState::DeletingOldVolume)
             }
             "running" => Ok(RegionSnapshotReplacementState::Running),
+            "completing" => Ok(RegionSnapshotReplacementState::Completing),
             "complete" => Ok(RegionSnapshotReplacementState::Complete),
             _ => Err(format!("unrecognized value {} for enum", s)),
         }
@@ -79,9 +83,14 @@ impl std::str::FromStr for RegionSnapshotReplacementState {
 ///          |                        |
 ///          v                        ---
 ///                                   ---
-///       Running                     |
-///                                   | set in region snapshot replacement
-///          |                        | finish background task
+///       Running  <--                |
+///                  |                |
+///          |       |                |
+///          v       |                |
+///                  |                | responsibility of region snapshot
+///     Completing --                 | replacement finish saga
+///                                   |
+///          |                        |
 ///          v                        |
 ///                                   |
 ///      Complete                     ---
@@ -126,13 +135,19 @@ pub struct RegionSnapshotReplacement {
     pub old_snapshot_id: Uuid,
 
     /// A synthetic volume that only is used to later delete the old snapshot
-    pub old_snapshot_volume_id: Option<Uuid>,
+    pub old_snapshot_volume_id: Option<DbTypedUuid<VolumeKind>>,
 
     pub new_region_id: Option<Uuid>,
 
     pub replacement_state: RegionSnapshotReplacementState,
 
     pub operating_saga_id: Option<Uuid>,
+
+    /// In order for the newly created region not to be deleted inadvertently,
+    /// an additional reference count bump is required. This volume should live
+    /// as long as this request so that all necessary replacements can be
+    /// completed.
+    pub new_region_volume_id: Option<DbTypedUuid<VolumeKind>>,
 }
 
 impl RegionSnapshotReplacement {
@@ -157,8 +172,17 @@ impl RegionSnapshotReplacement {
             old_snapshot_id,
             old_snapshot_volume_id: None,
             new_region_id: None,
+            new_region_volume_id: None,
             replacement_state: RegionSnapshotReplacementState::Requested,
             operating_saga_id: None,
         }
+    }
+
+    pub fn old_snapshot_volume_id(&self) -> Option<VolumeUuid> {
+        self.old_snapshot_volume_id.map(|v| v.into())
+    }
+
+    pub fn new_region_volume_id(&self) -> Option<VolumeUuid> {
+        self.new_region_volume_id.map(|v| v.into())
     }
 }

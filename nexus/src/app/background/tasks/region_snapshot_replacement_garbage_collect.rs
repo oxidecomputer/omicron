@@ -15,7 +15,7 @@ use futures::FutureExt;
 use nexus_db_model::RegionSnapshotReplacement;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
+use nexus_types::internal_api::background::*;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -34,7 +34,7 @@ impl RegionSnapshotReplacementGarbageCollect {
         opctx: &OpContext,
         request: RegionSnapshotReplacement,
     ) -> Result<(), omicron_common::api::external::Error> {
-        let Some(old_snapshot_volume_id) = request.old_snapshot_volume_id
+        let Some(old_snapshot_volume_id) = request.old_snapshot_volume_id()
         else {
             // This state is illegal!
             let s = format!(
@@ -155,6 +155,8 @@ mod test {
     use nexus_db_model::RegionSnapshotReplacementState;
     use nexus_test_utils_macros::nexus_test;
     use omicron_uuid_kinds::DatasetUuid;
+    use omicron_uuid_kinds::VolumeUuid;
+    use sled_agent_client::VolumeConstructionRequest;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -195,15 +197,28 @@ mod test {
         );
         request.replacement_state =
             RegionSnapshotReplacementState::ReplacementDone;
-        request.old_snapshot_volume_id = Some(Uuid::new_v4());
+        request.old_snapshot_volume_id = Some(VolumeUuid::new_v4().into());
 
         let request_1_id = request.id;
 
+        let volume_id = VolumeUuid::new_v4();
+
+        datastore
+            .volume_create(
+                volume_id,
+                VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(), // not required to match!
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                },
+            )
+            .await
+            .unwrap();
+
         datastore
             .insert_region_snapshot_replacement_request_with_volume_id(
-                &opctx,
-                request,
-                Uuid::new_v4(),
+                &opctx, request, volume_id,
             )
             .await
             .unwrap();
@@ -215,15 +230,28 @@ mod test {
         );
         request.replacement_state =
             RegionSnapshotReplacementState::ReplacementDone;
-        request.old_snapshot_volume_id = Some(Uuid::new_v4());
+        request.old_snapshot_volume_id = Some(VolumeUuid::new_v4().into());
 
         let request_2_id = request.id;
 
+        let volume_id = VolumeUuid::new_v4();
+
+        datastore
+            .volume_create(
+                volume_id,
+                VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(), // not required to match!
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                },
+            )
+            .await
+            .unwrap();
+
         datastore
             .insert_region_snapshot_replacement_request_with_volume_id(
-                &opctx,
-                request,
-                Uuid::new_v4(),
+                &opctx, request, volume_id,
             )
             .await
             .unwrap();

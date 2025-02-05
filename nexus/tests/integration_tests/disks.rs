@@ -42,10 +42,11 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
-use omicron_common::api::external::{ByteCount, SimpleIdentity as _};
+use omicron_common::api::external::{ByteCount, SimpleIdentityOrName as _};
 use omicron_nexus::app::{MAX_DISK_SIZE_BYTES, MIN_DISK_SIZE_BYTES};
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
+use omicron_uuid_kinds::VolumeUuid;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use oximeter::types::Datum;
 use oximeter::types::Measurement;
@@ -769,10 +770,9 @@ async fn test_disk_region_creation_failure(
     .await
     .unwrap();
 
-    // After the failed allocation, the disk should be Faulted
+    // After the failed allocation, the disk creation should have unwound
     let disks = disks_list(&client, &disks_url).await;
-    assert_eq!(disks.len(), 1);
-    assert_eq!(disks[0].state, DiskState::Faulted);
+    assert_eq!(disks.len(), 0);
 }
 
 // Tests that invalid block sizes are rejected
@@ -1004,9 +1004,9 @@ async fn test_disk_backed_by_multiple_region_sets(
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
     // Create another three zpools, all 10 gibibytes, each with one dataset
-    test.add_zpool_with_dataset(cptestctx.first_sled()).await;
-    test.add_zpool_with_dataset(cptestctx.first_sled()).await;
-    test.add_zpool_with_dataset(cptestctx.first_sled()).await;
+    test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
+    test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
+    test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
 
     create_project_and_pool(client).await;
 
@@ -1338,12 +1338,9 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
         &disk_test.zpools().nth(2).expect("Expected at least three zpools");
     let dataset = &zpool.datasets[0];
     cptestctx
-        .sled_agent
-        .sled_agent
+        .first_sled_agent()
         .get_crucible_dataset(zpool.id, dataset.id)
-        .await
-        .set_region_deletion_error(true)
-        .await;
+        .set_region_deletion_error(true);
 
     // Delete the disk - expect this to fail
     NexusRequest::new(
@@ -1376,12 +1373,9 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
 
     // Set the third agent to respond normally
     cptestctx
-        .sled_agent
-        .sled_agent
+        .first_sled_agent()
         .get_crucible_dataset(zpool.id, dataset.id)
-        .await
-        .set_region_deletion_error(false)
-        .await;
+        .set_region_deletion_error(false);
 
     // Request disk delete again
     NexusRequest::new(
@@ -1718,7 +1712,7 @@ async fn test_multiple_disks_multiple_zpools(
 
     // Create six 10 GB zpools, each with one dataset
     let _test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(6)
         .build()
         .await;
@@ -2073,7 +2067,7 @@ async fn test_single_region_allocate(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
     // Allocate a single 1 GB region
-    let volume_id = Uuid::new_v4();
+    let volume_id = VolumeUuid::new_v4();
 
     let datasets_and_regions = datastore
         .arbitrary_region_allocate(
@@ -2142,7 +2136,7 @@ async fn test_region_allocation_strategy_random_is_idempotent(
 
     // Create four 10 GiB zpools, each with one dataset.
     let _test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -2165,7 +2159,7 @@ async fn test_region_allocation_strategy_random_is_idempotent(
         .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
 
     let allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
     assert_eq!(allocated_regions.len(), REGION_REDUNDANCY_THRESHOLD);
 
     // Call `disk_region_allocate` again
@@ -2183,7 +2177,7 @@ async fn test_region_allocation_strategy_random_is_idempotent(
     let datasets_and_regions = datastore
         .disk_region_allocate(
             &opctx,
-            db_disk.volume_id,
+            db_disk.volume_id(),
             &params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(
                     region.block_size().to_bytes() as u32,
@@ -2212,7 +2206,7 @@ async fn test_region_allocation_strategy_random_is_idempotent_arbitrary(
 
     // Create four 10 GiB zpools, each with one dataset.
     let _test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -2221,7 +2215,7 @@ async fn test_region_allocation_strategy_random_is_idempotent_arbitrary(
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
     // Call region allocation in isolation
-    let volume_id = Uuid::new_v4();
+    let volume_id = VolumeUuid::new_v4();
 
     let datasets_and_regions = datastore
         .arbitrary_region_allocate(
@@ -2278,7 +2272,7 @@ async fn test_single_region_allocate_for_replace(
     // We add one more then the "three" default to meet `region_allocate`'s
     // redundancy requirements.
     let _test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -2301,7 +2295,7 @@ async fn test_single_region_allocate_for_replace(
         .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
 
     let allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
     assert_eq!(allocated_regions.len(), REGION_REDUNDANCY_THRESHOLD);
 
     // Allocate one more single 1 GB region to replace one of the disk's regions
@@ -2322,7 +2316,7 @@ async fn test_single_region_allocate_for_replace(
     let datasets_and_regions = datastore
         .arbitrary_region_allocate(
             &opctx,
-            RegionAllocationFor::DiskVolume { volume_id: db_disk.volume_id },
+            RegionAllocationFor::DiskVolume { volume_id: db_disk.volume_id() },
             RegionAllocationParameters::FromDiskSource {
                 disk_source: &params::DiskSource::Blank {
                     block_size: params::BlockSize::try_from(
@@ -2344,7 +2338,7 @@ async fn test_single_region_allocate_for_replace(
 
     // There should be `one_more` regions for this disk's volume id.
     let allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
     assert_eq!(allocated_regions.len(), one_more);
 
     // Each region should be on a different pool
@@ -2388,7 +2382,7 @@ async fn test_single_region_allocate_for_replace_not_enough_zpools(
         .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
 
     let allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
     assert_eq!(allocated_regions.len(), REGION_REDUNDANCY_THRESHOLD);
 
     // Allocate one more single 1 GB region to replace one of the disk's regions
@@ -2410,7 +2404,7 @@ async fn test_single_region_allocate_for_replace_not_enough_zpools(
     let result = datastore
         .arbitrary_region_allocate(
             &opctx,
-            RegionAllocationFor::DiskVolume { volume_id: db_disk.volume_id },
+            RegionAllocationFor::DiskVolume { volume_id: db_disk.volume_id() },
             RegionAllocationParameters::FromDiskSource {
                 disk_source: &params::DiskSource::Blank {
                     block_size: params::BlockSize::try_from(
@@ -2431,7 +2425,7 @@ async fn test_single_region_allocate_for_replace_not_enough_zpools(
     let datasets_and_regions = datastore
         .arbitrary_region_allocate(
             &opctx,
-            RegionAllocationFor::DiskVolume { volume_id: db_disk.volume_id },
+            RegionAllocationFor::DiskVolume { volume_id: db_disk.volume_id() },
             RegionAllocationParameters::FromDiskSource {
                 disk_source: &params::DiskSource::Blank {
                     block_size: params::BlockSize::try_from(
@@ -2479,7 +2473,7 @@ async fn test_no_halt_disk_delete_one_region_on_expunged_agent(
     let zpool = disk_test.zpools().next().expect("Expected at least one zpool");
     let dataset = &zpool.datasets[0];
 
-    cptestctx.sled_agent.sled_agent.drop_dataset(zpool.id, dataset.id).await;
+    cptestctx.first_sled_agent().drop_dataset(zpool.id, dataset.id);
 
     // Spawn a task that tries to delete the disk
     let disk_url = get_disk_url(DISK_NAME);
@@ -2526,7 +2520,7 @@ async fn test_no_halt_disk_delete_one_region_on_expunged_agent(
     // Nexus should hard delete the region records in this case.
 
     let datasets_and_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
 
     assert!(datasets_and_regions.is_empty());
 }
@@ -2559,7 +2553,7 @@ async fn test_disk_expunge(cptestctx: &ControlPlaneTestContext) {
         .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
 
     let allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
     assert_eq!(allocated_regions.len(), REGION_REDUNDANCY_THRESHOLD);
 
     // Expunge the sled
@@ -2578,7 +2572,7 @@ async fn test_disk_expunge(cptestctx: &ControlPlaneTestContext) {
 
     // All three regions should be returned
     let expunged_regions = datastore
-        .find_regions_on_expunged_physical_disks(&opctx)
+        .find_read_write_regions_on_expunged_physical_disks(&opctx)
         .await
         .unwrap();
 

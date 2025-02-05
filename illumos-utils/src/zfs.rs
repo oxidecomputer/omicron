@@ -5,14 +5,18 @@
 //! Utilities for poking at ZFS.
 
 use crate::{execute, PFEXEC};
+use anyhow::anyhow;
+use anyhow::bail;
 use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
+use itertools::Itertools;
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DiskIdentity;
+use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
+use std::collections::BTreeMap;
 use std::fmt;
-use std::str::FromStr;
 
 // These locations in the ramdisk must only be used by the switch zone.
 //
@@ -61,12 +65,9 @@ pub struct DestroyDatasetError {
 }
 
 #[derive(thiserror::Error, Debug)]
-enum EnsureFilesystemErrorRaw {
+enum EnsureDatasetErrorRaw {
     #[error("ZFS execution error: {0}")]
     Execution(#[from] crate::ExecutionError),
-
-    #[error("Filesystem does not exist, and formatting was not requested")]
-    NotFoundNotFormatted,
 
     #[error("Unexpected output from ZFS commands: {0}")]
     Output(String),
@@ -78,27 +79,21 @@ enum EnsureFilesystemErrorRaw {
     MountOverlayFsFailed(crate::ExecutionError),
 }
 
-/// Error returned by [`Zfs::ensure_filesystem`].
+/// Error returned by [`Zfs::ensure_dataset`].
 #[derive(thiserror::Error, Debug)]
-#[error(
-    "Failed to ensure filesystem '{name}' exists at '{mountpoint:?}': {err}"
-)]
-pub struct EnsureFilesystemError {
+#[error("Failed to ensure filesystem '{name}': {err}")]
+pub struct EnsureDatasetError {
     name: String,
-    mountpoint: Mountpoint,
     #[source]
-    err: EnsureFilesystemErrorRaw,
+    err: EnsureDatasetErrorRaw,
 }
 
 /// Error returned by [`Zfs::set_oxide_value`]
 #[derive(thiserror::Error, Debug)]
-#[error(
-    "Failed to set value '{name}={value}' on filesystem {filesystem}: {err}"
-)]
+#[error("Failed to set values '{values}' on filesystem {filesystem}: {err}")]
 pub struct SetValueError {
     filesystem: String,
-    name: String,
-    value: String,
+    values: String,
     err: crate::ExecutionError,
 }
 
@@ -236,56 +231,131 @@ pub struct DatasetProperties {
 }
 
 impl DatasetProperties {
-    // care about.
-    const ZFS_LIST_STR: &'static str =
+    const ZFS_GET_PROPS: &'static str =
         "oxide:uuid,name,avail,used,quota,reservation,compression";
 }
 
-// An inner parsing function, so that the FromStr implementation can always emit
-// the string 's' that failed to parse in the error message.
-fn dataset_properties_parse(
-    s: &str,
-) -> Result<DatasetProperties, anyhow::Error> {
-    let mut iter = s.split_whitespace();
+impl TryFrom<&DatasetProperties> for SharedDatasetConfig {
+    type Error = anyhow::Error;
 
-    let id = match iter.next().context("Missing UUID")? {
-        "-" => None,
-        anything_else => Some(anything_else.parse::<DatasetUuid>()?),
-    };
-
-    let name = iter.next().context("Missing 'name'")?.to_string();
-    let avail =
-        iter.next().context("Missing 'avail'")?.parse::<u64>()?.try_into()?;
-    let used =
-        iter.next().context("Missing 'used'")?.parse::<u64>()?.try_into()?;
-    let quota = match iter.next().context("Missing 'quota'")?.parse::<u64>()? {
-        0 => None,
-        q => Some(q.try_into()?),
-    };
-    let reservation =
-        match iter.next().context("Missing 'reservation'")?.parse::<u64>()? {
-            0 => None,
-            r => Some(r.try_into()?),
-        };
-    let compression = iter.next().context("Missing 'compression'")?.to_string();
-
-    Ok(DatasetProperties {
-        id,
-        name,
-        avail,
-        used,
-        quota,
-        reservation,
-        compression,
-    })
+    fn try_from(
+        props: &DatasetProperties,
+    ) -> Result<SharedDatasetConfig, Self::Error> {
+        Ok(SharedDatasetConfig {
+            compression: props.compression.parse()?,
+            quota: props.quota,
+            reservation: props.reservation,
+        })
+    }
 }
 
-impl FromStr for DatasetProperties {
-    type Err = anyhow::Error;
+impl DatasetProperties {
+    /// Parses dataset properties, assuming that the caller is providing the
+    /// output of the following command as stdout:
+    ///
+    /// zfs get \
+    ///     [maybe depth arguments] \
+    ///     -Hpo name,property,value,source $ZFS_GET_PROPS $DATASETS
+    fn parse_many(
+        stdout: &str,
+    ) -> Result<Vec<DatasetProperties>, anyhow::Error> {
+        let name_prop_val_source_list = stdout.trim().split('\n');
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        dataset_properties_parse(s)
-            .with_context(|| format!("Failed to parse: {s}"))
+        let mut datasets: BTreeMap<&str, BTreeMap<&str, _>> = BTreeMap::new();
+        for name_prop_val_source in name_prop_val_source_list {
+            // "-H" indicates that these columns are tab-separated;
+            // each column may internally have whitespace.
+            let mut iter = name_prop_val_source.split('\t');
+
+            let (name, prop, val, source) = (
+                iter.next().context("Missing 'name'")?,
+                iter.next().context("Missing 'property'")?,
+                iter.next().context("Missing 'value'")?,
+                iter.next().context("Missing 'source'")?,
+            );
+            if let Some(extra) = iter.next() {
+                bail!("Unexpected column data: '{extra}'");
+            }
+
+            let props = datasets.entry(name).or_default();
+            props.insert(prop, (val, source));
+        }
+
+        datasets
+            .into_iter()
+            .map(|(dataset_name, props)| {
+                let id = props
+                    .get("oxide:uuid")
+                    .filter(|(prop, source)| {
+                        // Dataset UUIDs are properties that are optionally attached to
+                        // datasets. However, some datasets are nested - to avoid them
+                        // from propagating, we explicitly ignore this value if it is
+                        // inherited.
+                        //
+                        // This can be the case for the "zone" filesystem root, which
+                        // can propagate this property to a child zone without it set.
+                        !source.starts_with("inherited") && *prop != "-"
+                    })
+                    .map(|(prop, _source)| {
+                        prop.parse::<DatasetUuid>()
+                            .context("Failed to parse UUID")
+                    })
+                    .transpose()?;
+                let name = dataset_name.to_string();
+                let avail = props
+                    .get("available")
+                    .map(|(prop, _source)| prop)
+                    .ok_or(anyhow!("Missing 'available'"))?
+                    .parse::<u64>()
+                    .context("Failed to parse 'available'")?
+                    .try_into()?;
+                let used = props
+                    .get("used")
+                    .map(|(prop, _source)| prop)
+                    .ok_or(anyhow!("Missing 'used'"))?
+                    .parse::<u64>()
+                    .context("Failed to parse 'used'")?
+                    .try_into()?;
+
+                // The values of "quota" and "reservation" can be either "-" or
+                // "0" when they are not actually set. To be cautious, we treat
+                // both of these values as "the value has not been set
+                // explicitly". As a result, setting either of these values
+                // explicitly to zero is indistinguishable from setting them
+                // with a value of "none".
+                let quota = props
+                    .get("quota")
+                    .filter(|(prop, _source)| *prop != "-" && *prop != "0")
+                    .map(|(prop, _source)| {
+                        prop.parse::<u64>().context("Failed to parse 'quota'")
+                    })
+                    .transpose()?
+                    .and_then(|v| ByteCount::try_from(v).ok());
+                let reservation = props
+                    .get("reservation")
+                    .filter(|(prop, _source)| *prop != "-" && *prop != "0")
+                    .map(|(prop, _source)| {
+                        prop.parse::<u64>()
+                            .context("Failed to parse 'reservation'")
+                    })
+                    .transpose()?
+                    .and_then(|v| ByteCount::try_from(v).ok());
+                let compression = props
+                    .get("compression")
+                    .map(|(prop, _source)| prop.to_string())
+                    .ok_or_else(|| anyhow!("Missing 'compression'"))?;
+
+                Ok(DatasetProperties {
+                    id,
+                    name,
+                    avail,
+                    used,
+                    quota,
+                    reservation,
+                    compression,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()
     }
 }
 
@@ -311,7 +381,83 @@ impl fmt::Display for PropertySource {
     }
 }
 
-#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
+#[derive(Copy, Clone, Debug)]
+pub enum WhichDatasets {
+    SelfOnly,
+    SelfAndChildren,
+}
+
+fn build_zfs_set_key_value_pairs(
+    size_details: Option<SizeDetails>,
+    dataset_id: Option<DatasetUuid>,
+) -> Vec<(&'static str, String)> {
+    let mut props = Vec::new();
+    if let Some(SizeDetails { quota, reservation, compression }) = size_details
+    {
+        let quota = quota
+            .map(|q| q.to_bytes().to_string())
+            .unwrap_or_else(|| String::from("none"));
+        props.push(("quota", quota));
+
+        let reservation = reservation
+            .map(|r| r.to_bytes().to_string())
+            .unwrap_or_else(|| String::from("none"));
+        props.push(("reservation", reservation));
+
+        let compression = compression.to_string();
+        props.push(("compression", compression));
+    }
+
+    if let Some(id) = dataset_id {
+        props.push(("oxide:uuid", id.to_string()));
+    }
+
+    props
+}
+
+/// Arguments to [Zfs::ensure_dataset].
+pub struct DatasetEnsureArgs<'a> {
+    /// The full path of the ZFS dataset.
+    pub name: &'a str,
+
+    /// The expected mountpoint of this filesystem.
+    /// If the filesystem already exists, and is not mounted here, an error is
+    /// returned.
+    pub mountpoint: Mountpoint,
+
+    /// Identifies whether or not this filesystem should be
+    /// used in a zone. Only used when creating a new filesystem - ignored
+    /// if the filesystem already exists.
+    pub zoned: bool,
+
+    /// Ensures a filesystem as an encryption root.
+    ///
+    /// For new filesystems, this supplies the key, and all datasets within this
+    /// root are implicitly encrypted. For existing filesystems, ensures that
+    /// they are mounted (and that keys are loaded), but does not verify the
+    /// input details.
+    pub encryption_details: Option<EncryptionDetails>,
+
+    /// Optional properties that can be set for the dataset regarding
+    /// space usage.
+    ///
+    /// Can be used to change settings on new or existing datasets.
+    pub size_details: Option<SizeDetails>,
+
+    /// An optional UUID of the dataset.
+    ///
+    /// If provided, this is set as the value "oxide:uuid" through "zfs set".
+    ///
+    /// Can be used to change settings on new or existing datasets.
+    pub id: Option<DatasetUuid>,
+
+    /// ZFS options passed to "zfs create" with the "-o" flag.
+    ///
+    /// Only used when the filesystem is being created.
+    /// Each string in this optional Vec should have the format "key=value".
+    pub additional_options: Option<Vec<String>>,
+}
+
 impl Zfs {
     /// Lists all datasets within a pool or existing dataset.
     ///
@@ -335,6 +481,9 @@ impl Zfs {
     }
 
     /// Get information about datasets within a list of zpools / datasets.
+    /// Returns properties for all input datasets, and optionally, for
+    /// their children (depending on the value of [WhichDatasets] is provided
+    /// as input).
     ///
     /// This function is similar to [Zfs::list_datasets], but provides a more
     /// substantial results about the datasets found.
@@ -342,28 +491,34 @@ impl Zfs {
     /// Sorts results and de-duplicates them by name.
     pub fn get_dataset_properties(
         datasets: &[String],
+        which: WhichDatasets,
     ) -> Result<Vec<DatasetProperties>, anyhow::Error> {
         let mut command = std::process::Command::new(ZFS);
-        let cmd = command.args(&["list", "-d", "1", "-rHpo"]);
+        let cmd = command.arg("get");
+        match which {
+            WhichDatasets::SelfOnly => (),
+            WhichDatasets::SelfAndChildren => {
+                cmd.args(&["-d", "1"]);
+            }
+        }
+        cmd.args(&["-Hpo", "name,property,value,source"]);
 
         // Note: this is tightly coupled with the layout of DatasetProperties
-        cmd.arg(DatasetProperties::ZFS_LIST_STR);
+        cmd.arg(DatasetProperties::ZFS_GET_PROPS);
         cmd.args(datasets);
 
-        let output = execute(cmd).with_context(|| {
-            format!("Failed to get dataset properties for {datasets:?}")
+        // We are intentionally ignoring the output status of this command.
+        //
+        // If one or more dataset doesn't exist, we can still read stdout to
+        // see about the ones that do exist.
+        let output = cmd.output().map_err(|err| {
+            anyhow!(
+                "Failed to get dataset properties for {datasets:?}: {err:?}"
+            )
         })?;
         let stdout = String::from_utf8(output.stdout)?;
-        let mut datasets = stdout
-            .trim()
-            .split('\n')
-            .map(|row| row.parse::<DatasetProperties>())
-            .collect::<Result<Vec<_>, _>>()?;
 
-        datasets.sort_by(|d1, d2| d1.name.partial_cmp(&d2.name).unwrap());
-        datasets.dedup_by(|d1, d2| d1.name.eq(&d2.name));
-
-        Ok(datasets)
+        DatasetProperties::parse_many(&stdout)
     }
 
     /// Return the name of a dataset for a ZFS object.
@@ -398,52 +553,30 @@ impl Zfs {
         Ok(())
     }
 
-    /// Creates a new ZFS filesystem unless one already exists.
+    /// Creates a new ZFS dataset unless one already exists.
     ///
-    /// - `name`: the full path to the zfs dataset
-    /// - `mountpoint`: The expected mountpoint of this filesystem.
-    /// If the filesystem already exists, and is not mounted here, and error is
-    /// returned.
-    /// - `zoned`: identifies whether or not this filesystem should be
-    /// used in a zone. Only used when creating a new filesystem - ignored
-    /// if the filesystem already exists.
-    /// - `do_format`: if "false", prevents a new filesystem from being created,
-    /// and returns an error if it is not found.
-    /// - `encryption_details`: Ensures a filesystem as an encryption root.
-    /// For new filesystems, this supplies the key, and all datasets within this
-    /// root are implicitly encrypted. For existing filesystems, ensures that
-    /// they are mounted (and that keys are loaded), but does not verify the
-    /// input details.
-    /// - `size_details`: If supplied, sets size-related information. These
-    /// values are set on both new filesystem creation as well as when loading
-    /// existing filesystems.
-    /// - `additional_options`: Additional ZFS options, which are only set when
-    /// creating new filesystems.
-    #[allow(clippy::too_many_arguments)]
-    pub fn ensure_filesystem(
-        name: &str,
-        mountpoint: Mountpoint,
-        zoned: bool,
-        do_format: bool,
-        encryption_details: Option<EncryptionDetails>,
-        size_details: Option<SizeDetails>,
-        additional_options: Option<Vec<String>>,
-    ) -> Result<(), EnsureFilesystemError> {
+    /// Refer to [DatasetEnsureArgs] for details on the supplied arguments.
+    pub fn ensure_dataset(
+        DatasetEnsureArgs {
+            name,
+            mountpoint,
+            zoned,
+            encryption_details,
+            size_details,
+            id,
+            additional_options,
+        }: DatasetEnsureArgs,
+    ) -> Result<(), EnsureDatasetError> {
         let (exists, mounted) = Self::dataset_exists(name, &mountpoint)?;
+
+        let props = build_zfs_set_key_value_pairs(size_details, id);
         if exists {
-            if let Some(SizeDetails { quota, reservation, compression }) =
-                size_details
-            {
-                // apply quota and compression mode (in case they've changed across
-                // sled-agent versions since creation)
-                Self::apply_properties(
-                    name,
-                    &mountpoint,
-                    quota,
-                    reservation,
-                    compression,
-                )?;
-            }
+            Self::set_values(name, props.as_slice()).map_err(|err| {
+                EnsureDatasetError {
+                    name: name.to_string(),
+                    err: err.err.into(),
+                }
+            })?;
 
             if encryption_details.is_none() {
                 // If the dataset exists, we're done. Unencrypted datasets are
@@ -455,16 +588,8 @@ impl Zfs {
                     return Ok(());
                 }
                 // We need to load the encryption key and mount the filesystem
-                return Self::mount_encrypted_dataset(name, &mountpoint);
+                return Self::mount_encrypted_dataset(name);
             }
-        }
-
-        if !do_format {
-            return Err(EnsureFilesystemError {
-                name: name.to_string(),
-                mountpoint,
-                err: EnsureFilesystemErrorRaw::NotFoundNotFormatted,
-            });
         }
 
         // If it doesn't exist, make it.
@@ -496,9 +621,8 @@ impl Zfs {
 
         cmd.args(&["-o", &format!("mountpoint={}", mountpoint), name]);
 
-        execute(cmd).map_err(|err| EnsureFilesystemError {
+        execute(cmd).map_err(|err| EnsureDatasetError {
             name: name.to_string(),
-            mountpoint: mountpoint.clone(),
             err: err.into(),
         })?;
 
@@ -509,99 +633,35 @@ impl Zfs {
             let user = whoami::username();
             let mount = format!("{mountpoint}");
             let cmd = command.args(["chown", "-R", &user, &mount]);
-            execute(cmd).map_err(|err| EnsureFilesystemError {
+            execute(cmd).map_err(|err| EnsureDatasetError {
                 name: name.to_string(),
-                mountpoint: mountpoint.clone(),
                 err: err.into(),
             })?;
         }
 
-        if let Some(SizeDetails { quota, reservation, compression }) =
-            size_details
-        {
-            // Apply any quota and compression mode.
-            Self::apply_properties(
-                name,
-                &mountpoint,
-                quota,
-                reservation,
-                compression,
-            )?;
-        }
+        Self::set_values(name, props.as_slice()).map_err(|err| {
+            EnsureDatasetError { name: name.to_string(), err: err.err.into() }
+        })?;
 
         Ok(())
     }
 
-    /// Applies the following properties to the filesystem.
-    ///
-    /// If any of the options are not supplied, a default "none" or "off"
-    /// value is supplied.
-    fn apply_properties(
-        name: &str,
-        mountpoint: &Mountpoint,
-        quota: Option<ByteCount>,
-        reservation: Option<ByteCount>,
-        compression: CompressionAlgorithm,
-    ) -> Result<(), EnsureFilesystemError> {
-        let quota = quota
-            .map(|q| q.to_bytes().to_string())
-            .unwrap_or_else(|| String::from("none"));
-        let reservation = reservation
-            .map(|r| r.to_bytes().to_string())
-            .unwrap_or_else(|| String::from("none"));
-        let compression = compression.to_string();
-
-        if let Err(err) = Self::set_value(name, "quota", &quota) {
-            return Err(EnsureFilesystemError {
-                name: name.to_string(),
-                mountpoint: mountpoint.clone(),
-                // Take the execution error from the SetValueError
-                err: err.err.into(),
-            });
-        }
-        if let Err(err) = Self::set_value(name, "reservation", &reservation) {
-            return Err(EnsureFilesystemError {
-                name: name.to_string(),
-                mountpoint: mountpoint.clone(),
-                // Take the execution error from the SetValueError
-                err: err.err.into(),
-            });
-        }
-        if let Err(err) = Self::set_value(name, "compression", &compression) {
-            return Err(EnsureFilesystemError {
-                name: name.to_string(),
-                mountpoint: mountpoint.clone(),
-                // Take the execution error from the SetValueError
-                err: err.err.into(),
-            });
-        }
-        Ok(())
-    }
-
-    fn mount_encrypted_dataset(
-        name: &str,
-        mountpoint: &Mountpoint,
-    ) -> Result<(), EnsureFilesystemError> {
+    fn mount_encrypted_dataset(name: &str) -> Result<(), EnsureDatasetError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "mount", "-l", name]);
-        execute(cmd).map_err(|err| EnsureFilesystemError {
+        execute(cmd).map_err(|err| EnsureDatasetError {
             name: name.to_string(),
-            mountpoint: mountpoint.clone(),
-            err: EnsureFilesystemErrorRaw::MountEncryptedFsFailed(err),
+            err: EnsureDatasetErrorRaw::MountEncryptedFsFailed(err),
         })?;
         Ok(())
     }
 
-    pub fn mount_overlay_dataset(
-        name: &str,
-        mountpoint: &Mountpoint,
-    ) -> Result<(), EnsureFilesystemError> {
+    pub fn mount_overlay_dataset(name: &str) -> Result<(), EnsureDatasetError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "mount", "-O", name]);
-        execute(cmd).map_err(|err| EnsureFilesystemError {
+        execute(cmd).map_err(|err| EnsureDatasetError {
             name: name.to_string(),
-            mountpoint: mountpoint.clone(),
-            err: EnsureFilesystemErrorRaw::MountOverlayFsFailed(err),
+            err: EnsureDatasetErrorRaw::MountOverlayFsFailed(err),
         })?;
         Ok(())
     }
@@ -611,7 +671,7 @@ impl Zfs {
     fn dataset_exists(
         name: &str,
         mountpoint: &Mountpoint,
-    ) -> Result<(bool, bool), EnsureFilesystemError> {
+    ) -> Result<(bool, bool), EnsureDatasetError> {
         let mut command = std::process::Command::new(ZFS);
         let cmd = command.args(&[
             "list",
@@ -624,10 +684,9 @@ impl Zfs {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let values: Vec<&str> = stdout.trim().split('\t').collect();
             if &values[..3] != &[name, "filesystem", &mountpoint.to_string()] {
-                return Err(EnsureFilesystemError {
+                return Err(EnsureDatasetError {
                     name: name.to_string(),
-                    mountpoint: mountpoint.clone(),
-                    err: EnsureFilesystemErrorRaw::Output(stdout.to_string()),
+                    err: EnsureDatasetErrorRaw::Output(stdout.to_string()),
                 });
             }
             let mounted = values[3] == "yes";
@@ -651,13 +710,29 @@ impl Zfs {
         name: &str,
         value: &str,
     ) -> Result<(), SetValueError> {
+        Self::set_values(filesystem_name, &[(name, value)])
+    }
+
+    fn set_values<K: std::fmt::Display, V: std::fmt::Display>(
+        filesystem_name: &str,
+        name_values: &[(K, V)],
+    ) -> Result<(), SetValueError> {
+        if name_values.is_empty() {
+            return Ok(());
+        }
+
         let mut command = std::process::Command::new(PFEXEC);
-        let value_arg = format!("{}={}", name, value);
-        let cmd = command.args(&[ZFS, "set", &value_arg, filesystem_name]);
+        let cmd = command.args(&[ZFS, "set"]);
+        for (name, value) in name_values {
+            cmd.arg(format!("{name}={value}"));
+        }
+        cmd.arg(filesystem_name);
         execute(cmd).map_err(|err| SetValueError {
             filesystem: filesystem_name.to_string(),
-            name: name.to_string(),
-            value: value.to_string(),
+            values: name_values
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .join(","),
             err,
         })?;
         Ok(())
@@ -745,10 +820,7 @@ impl Zfs {
             err,
         })
     }
-}
 
-// These methods don't work with mockall, so they exist in a separate impl block
-impl Zfs {
     /// Calls "zfs get" to acquire multiple values
     ///
     /// - `names`: The properties being acquired
@@ -859,42 +931,68 @@ mod test {
 
     #[test]
     fn parse_dataset_props() {
-        let input =
-            "-       dataset_name        1234   5678   0       0       off";
-        let props = DatasetProperties::from_str(&input)
+        let input = "dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tused\t5678\t-\n\
+             dataset_name\tname\tI_AM_IGNORED\t-\n\
+             dataset_name\tcompression\toff\tinherited from parent";
+        let props = DatasetProperties::parse_many(&input)
             .expect("Should have parsed data");
+        assert_eq!(props.len(), 1);
 
-        assert_eq!(props.id, None);
-        assert_eq!(props.name, "dataset_name");
-        assert_eq!(props.avail.to_bytes(), 1234);
-        assert_eq!(props.used.to_bytes(), 5678);
-        assert_eq!(props.quota, None);
-        assert_eq!(props.reservation, None);
-        assert_eq!(props.compression, "off");
+        assert_eq!(props[0].id, None);
+        assert_eq!(props[0].name, "dataset_name");
+        assert_eq!(props[0].avail.to_bytes(), 1234);
+        assert_eq!(props[0].used.to_bytes(), 5678);
+        assert_eq!(props[0].quota, None);
+        assert_eq!(props[0].reservation, None);
+        assert_eq!(props[0].compression, "off");
+    }
+
+    #[test]
+    fn parse_dataset_too_many_columns() {
+        let input = "dataset_name\tavailable\t1234\t-\tEXTRA\n\
+             dataset_name\tused\t5678\t-\n\
+             dataset_name\tname\tI_AM_IGNORED\t-\n\
+             dataset_name\tcompression\toff\tinherited from parent";
+        let err = DatasetProperties::parse_many(&input)
+            .expect_err("Should have parsed data");
+        assert!(
+            err.to_string().contains("Unexpected column data: 'EXTRA'"),
+            "{err}"
+        );
     }
 
     #[test]
     fn parse_dataset_props_with_optionals() {
-        let input = "d4e1e554-7b98-4413-809e-4a42561c3d0c       dataset_name        1234   5678   111       222       off";
-        let props = DatasetProperties::from_str(&input)
+        let input =
+            "dataset_name\toxide:uuid\td4e1e554-7b98-4413-809e-4a42561c3d0c\tlocal\n\
+             dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tused\t5678\t-\n\
+             dataset_name\tquota\t111\t-\n\
+             dataset_name\treservation\t222\t-\n\
+             dataset_name\tcompression\toff\tinherited from parent";
+        let props = DatasetProperties::parse_many(&input)
             .expect("Should have parsed data");
-
+        assert_eq!(props.len(), 1);
         assert_eq!(
-            props.id,
+            props[0].id,
             Some("d4e1e554-7b98-4413-809e-4a42561c3d0c".parse().unwrap())
         );
-        assert_eq!(props.name, "dataset_name");
-        assert_eq!(props.avail.to_bytes(), 1234);
-        assert_eq!(props.used.to_bytes(), 5678);
-        assert_eq!(props.quota.map(|q| q.to_bytes()), Some(111));
-        assert_eq!(props.reservation.map(|r| r.to_bytes()), Some(222));
-        assert_eq!(props.compression, "off");
+        assert_eq!(props[0].name, "dataset_name");
+        assert_eq!(props[0].avail.to_bytes(), 1234);
+        assert_eq!(props[0].used.to_bytes(), 5678);
+        assert_eq!(props[0].quota.map(|q| q.to_bytes()), Some(111));
+        assert_eq!(props[0].reservation.map(|r| r.to_bytes()), Some(222));
+        assert_eq!(props[0].compression, "off");
     }
 
     #[test]
     fn parse_dataset_bad_uuid() {
-        let input = "bad       dataset_name        1234   5678   111       222       off";
-        let err = DatasetProperties::from_str(&input)
+        let input = "dataset_name\toxide:uuid\tbad\t-\n\
+             dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tused\t5678\t-";
+
+        let err = DatasetProperties::parse_many(&input)
             .expect_err("Should have failed to parse");
         assert!(
             format!("{err:#}").contains("error parsing UUID (dataset)"),
@@ -904,8 +1002,9 @@ mod test {
 
     #[test]
     fn parse_dataset_bad_avail() {
-        let input = "-       dataset_name        BADAVAIL   5678   111       222       off";
-        let err = DatasetProperties::from_str(&input)
+        let input = "dataset_name\tavailable\tBADAVAIL\t-\n\
+             dataset_name\tused\t5678\t-";
+        let err = DatasetProperties::parse_many(&input)
             .expect_err("Should have failed to parse");
         assert!(
             format!("{err:#}").contains("invalid digit found in string"),
@@ -915,8 +1014,9 @@ mod test {
 
     #[test]
     fn parse_dataset_bad_usage() {
-        let input = "-       dataset_name        1234   BADUSAGE   111       222       off";
-        let err = DatasetProperties::from_str(&input)
+        let input = "dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tused\tBADUSAGE\t-";
+        let err = DatasetProperties::parse_many(&input)
             .expect_err("Should have failed to parse");
         assert!(
             format!("{err:#}").contains("invalid digit found in string"),
@@ -926,8 +1026,10 @@ mod test {
 
     #[test]
     fn parse_dataset_bad_quota() {
-        let input = "-       dataset_name        1234   5678   BADQUOTA      222       off";
-        let err = DatasetProperties::from_str(&input)
+        let input = "dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tused\t5678\t-\n\
+             dataset_name\tquota\tBADQUOTA\t-";
+        let err = DatasetProperties::parse_many(&input)
             .expect_err("Should have failed to parse");
         assert!(
             format!("{err:#}").contains("invalid digit found in string"),
@@ -937,8 +1039,11 @@ mod test {
 
     #[test]
     fn parse_dataset_bad_reservation() {
-        let input = "-       dataset_name        1234   5678   111      BADRES       off";
-        let err = DatasetProperties::from_str(&input)
+        let input = "dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tused\t5678\t-\n\
+             dataset_name\tquota\t111\t-\n\
+             dataset_name\treservation\tBADRES\t-";
+        let err = DatasetProperties::parse_many(&input)
             .expect_err("Should have failed to parse");
         assert!(
             format!("{err:#}").contains("invalid digit found in string"),
@@ -949,24 +1054,102 @@ mod test {
     #[test]
     fn parse_dataset_missing_fields() {
         let expect_missing = |input: &str, what: &str| {
-            let err = DatasetProperties::from_str(input)
+            let err = DatasetProperties::parse_many(input)
                 .expect_err("Should have failed to parse");
             let err = format!("{err:#}");
             assert!(err.contains(&format!("Missing {what}")), "{err}");
         };
 
         expect_missing(
-            "-       dataset_name        1234   5678   111      222",
-            "'compression'",
+            "dataset_name\tused\t5678\t-\n\
+             dataset_name\tquota\t111\t-\n\
+             dataset_name\treservation\t222\t-\n\
+             dataset_name\tcompression\toff\tinherited",
+            "'available'",
         );
         expect_missing(
-            "-       dataset_name        1234   5678   111",
-            "'reservation'",
+            "dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tquota\t111\t-\n\
+             dataset_name\treservation\t222\t-\n\
+             dataset_name\tcompression\toff\tinherited",
+            "'used'",
         );
-        expect_missing("-       dataset_name        1234   5678", "'quota'");
-        expect_missing("-       dataset_name        1234", "'used'");
-        expect_missing("-       dataset_name", "'avail'");
-        expect_missing("-", "'name'");
-        expect_missing("", "UUID");
+        expect_missing(
+            "dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tused\t5678\t-\n\
+             dataset_name\tquota\t111\t-\n\
+             dataset_name\treservation\t222\t-",
+            "'compression'",
+        );
+    }
+
+    #[test]
+    fn parse_dataset_uuid_ignored_if_inherited() {
+        let input =
+            "dataset_name\toxide:uuid\tb8698ede-60c2-4e16-b792-d28c165cfd12\tinherited from parent\n\
+             dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tused\t5678\t-\n\
+             dataset_name\tcompression\toff\t-";
+        let props = DatasetProperties::parse_many(&input)
+            .expect("Should have parsed data");
+        assert_eq!(props.len(), 1);
+        assert_eq!(props[0].id, None);
+    }
+
+    #[test]
+    fn parse_dataset_uuid_ignored_if_dash() {
+        let input = "dataset_name\toxide:uuid\t-\t-\n\
+             dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tused\t5678\t-\n\
+             dataset_name\tcompression\toff\t-";
+        let props = DatasetProperties::parse_many(&input)
+            .expect("Should have parsed data");
+        assert_eq!(props.len(), 1);
+        assert_eq!(props[0].id, None);
+    }
+
+    #[test]
+    fn parse_quota_ignored_if_default() {
+        let input = "dataset_name\tquota\t0\tdefault\n\
+             dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tused\t5678\t-\n\
+             dataset_name\tcompression\toff\t-";
+        let props = DatasetProperties::parse_many(&input)
+            .expect("Should have parsed data");
+        assert_eq!(props.len(), 1);
+        assert_eq!(props[0].quota, None);
+    }
+
+    #[test]
+    fn parse_reservation_ignored_if_default() {
+        let input = "dataset_name\treservation\t0\tdefault\n\
+             dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tused\t5678\t-\n\
+             dataset_name\tcompression\toff\t-";
+        let props = DatasetProperties::parse_many(&input)
+            .expect("Should have parsed data");
+        assert_eq!(props.len(), 1);
+        assert_eq!(props[0].reservation, None);
+    }
+
+    #[test]
+    fn parse_sorts_and_dedups() {
+        let input = "foo\tavailable\t111\t-\n\
+             foo\tused\t111\t-\n\
+             foo\tcompression\toff\t-\n\
+             foo\tavailable\t111\t-\n\
+             foo\tused\t111\t-\n\
+             foo\tcompression\toff\t-\n\
+             bar\tavailable\t222\t-\n\
+             bar\tused\t222\t-\n\
+             bar\tcompression\toff\t-";
+
+        let props = DatasetProperties::parse_many(&input)
+            .expect("Should have parsed data");
+        assert_eq!(props.len(), 2);
+        assert_eq!(props[0].name, "bar");
+        assert_eq!(props[0].used, 222.into());
+        assert_eq!(props[1].name, "foo");
+        assert_eq!(props[1].used, 111.into());
     }
 }

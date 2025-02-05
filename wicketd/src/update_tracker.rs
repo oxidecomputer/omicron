@@ -62,6 +62,7 @@ use tokio::task::JoinHandle;
 use tokio_util::io::StreamReader;
 use update_common::artifacts::ArtifactIdData;
 use update_common::artifacts::ArtifactsWithPlan;
+use update_common::artifacts::ControlPlaneZonesMode;
 use update_common::artifacts::UpdatePlan;
 use update_engine::events::ProgressUnits;
 use update_engine::AbortHandle;
@@ -356,7 +357,9 @@ impl UpdateTracker {
             stream,
             // We don't have a good file name here because file contents are
             // uploaded over stdin, so let ArtifactsWithPlan pick the name.
-            None, &self.log,
+            None,
+            ControlPlaneZonesMode::Composite,
+            &self.log,
         )
         .await
         .map_err(|error| error.to_http_error())?;
@@ -442,7 +445,7 @@ struct RealSpawnUpdateDriver<'tr> {
 }
 
 #[async_trait::async_trait]
-impl<'tr> SpawnUpdateDriver for RealSpawnUpdateDriver<'tr> {
+impl SpawnUpdateDriver for RealSpawnUpdateDriver<'_> {
     type Setup = watch::Receiver<UploadTrampolinePhase2ToMgsStatus>;
 
     async fn setup(&mut self, plan: &UpdatePlan) -> Self::Setup {
@@ -1755,7 +1758,7 @@ struct UpdateContext {
 }
 
 impl UpdateContext {
-    async fn process_installinator_reports<'engine>(
+    async fn process_installinator_reports(
         &self,
         cx: &StepContext,
         mut ipr_receiver: watch::Receiver<EventReport<InstallinatorSpec>>,
@@ -2035,7 +2038,7 @@ impl UpdateContext {
         &'a self,
         available_artifacts: &'a Vec<ArtifactIdData>,
         caboose: Option<&SpComponentCaboose>,
-    ) -> Result<&ArtifactIdData, UpdateTerminalError> {
+    ) -> Result<&'a ArtifactIdData, UpdateTerminalError> {
         let cmpa = match self
             .mgs_client
             .sp_rot_cmpa_get(
@@ -2913,7 +2916,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                             // Both the active and pending slots should be valid after this spot
                             if let Some(error) = stage0_error {
                                 return Err(SpComponentUpdateTerminalError::RotBootloaderError {
-                                    error: anyhow!(format!("{error:?}")) 
+                                    error: anyhow!(format!("{error:?}"))
                                 });
                             }
                             if let Some(error) = stage0next_error {

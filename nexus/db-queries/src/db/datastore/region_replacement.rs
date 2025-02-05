@@ -10,6 +10,7 @@ use crate::db;
 use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::model::Region;
 use crate::db::model::RegionReplacement;
 use crate::db::model::RegionReplacementState;
@@ -27,6 +28,7 @@ use diesel::prelude::*;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::DownstairsRegionKind;
 use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::VolumeUuid;
 use uuid::Uuid;
 
 impl DataStore {
@@ -37,6 +39,13 @@ impl DataStore {
         opctx: &OpContext,
         region: &Region,
     ) -> Result<Uuid, Error> {
+        if region.read_only() {
+            return Err(Error::invalid_request(format!(
+                "region {} is read-only",
+                region.id(),
+            )));
+        }
+
         let request = RegionReplacement::for_region(region);
         let request_id = request.id;
 
@@ -52,19 +61,22 @@ impl DataStore {
         opctx: &OpContext,
         request: RegionReplacement,
     ) -> Result<(), Error> {
+        let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
 
         self.transaction_retry_wrapper("insert_region_replacement_request")
             .transaction(&conn, |conn| {
                 let request = request.clone();
+                let err = err.clone();
                 async move {
                     use db::schema::region_replacement::dsl;
 
-                    Self::volume_repair_insert_query(
-                        request.volume_id,
+                    Self::volume_repair_insert_in_txn(
+                        &conn,
+                        err,
+                        request.volume_id(),
                         request.id,
                     )
-                    .execute_async(&conn)
                     .await?;
 
                     diesel::insert_into(dsl::region_replacement)
@@ -76,7 +88,13 @@ impl DataStore {
                 }
             })
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    err
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
     }
 
     pub async fn get_region_replacement_request_by_id(
@@ -271,7 +289,7 @@ impl DataStore {
         region_replacement_id: Uuid,
         operating_saga_id: Uuid,
         new_region_id: Uuid,
-        old_region_volume_id: Uuid,
+        old_region_volume_id: VolumeUuid,
     ) -> Result<(), Error> {
         use db::schema::region_replacement::dsl;
         let updated = diesel::update(dsl::region_replacement)
@@ -282,7 +300,8 @@ impl DataStore {
             )
             .set((
                 dsl::replacement_state.eq(RegionReplacementState::Running),
-                dsl::old_region_volume_id.eq(Some(old_region_volume_id)),
+                dsl::old_region_volume_id
+                    .eq(Some(to_db_typed_uuid(old_region_volume_id))),
                 dsl::new_region_id.eq(Some(new_region_id)),
                 dsl::operating_saga_id.eq(Option::<Uuid>::None),
             ))
@@ -300,7 +319,7 @@ impl DataStore {
                         && record.replacement_state
                             == RegionReplacementState::Running
                         && record.new_region_id == Some(new_region_id)
-                        && record.old_region_volume_id
+                        && record.old_region_volume_id()
                             == Some(old_region_volume_id)
                     {
                         Ok(())
@@ -679,9 +698,10 @@ impl DataStore {
         self.transaction_retry_wrapper("set_region_replacement_complete")
             .transaction(&conn, |conn| {
                 let err = err.clone();
+                let request_volume_id = request.volume_id();
                 async move {
                     Self::volume_repair_delete_query(
-                        request.volume_id,
+                        request_volume_id,
                         request.id,
                     )
                     .execute_async(&conn)
@@ -753,9 +773,10 @@ impl DataStore {
         self.transaction_retry_wrapper("set_region_replacement_complete_from_requested")
             .transaction(&conn, |conn| {
                 let err = err.clone();
+                let request_volume_id = request.volume_id();
                 async move {
                     Self::volume_repair_delete_query(
-                        request.volume_id,
+                        request_volume_id,
                         request.id,
                     )
                     .execute_async(&conn)
@@ -908,6 +929,8 @@ mod test {
 
     use crate::db::pub_test_utils::TestDatabase;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::VolumeUuid;
+    use sled_agent_client::VolumeConstructionRequest;
 
     #[tokio::test]
     async fn test_one_replacement_per_volume() {
@@ -917,7 +940,20 @@ mod test {
 
         let region_1_id = Uuid::new_v4();
         let region_2_id = Uuid::new_v4();
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
+
+        datastore
+            .volume_create(
+                volume_id,
+                VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(),
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                },
+            )
+            .await
+            .unwrap();
 
         let request_1 = RegionReplacement::new(region_1_id, volume_id);
         let request_2 = RegionReplacement::new(region_2_id, volume_id);
@@ -948,7 +984,20 @@ mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let region_id = Uuid::new_v4();
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
+
+        datastore
+            .volume_create(
+                volume_id,
+                VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(),
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                },
+            )
+            .await
+            .unwrap();
 
         let request = {
             let mut request = RegionReplacement::new(region_id, volume_id);
@@ -1040,7 +1089,20 @@ mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let region_id = Uuid::new_v4();
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
+
+        datastore
+            .volume_create(
+                volume_id,
+                VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(),
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                },
+            )
+            .await
+            .unwrap();
 
         let request = {
             let mut request = RegionReplacement::new(region_id, volume_id);

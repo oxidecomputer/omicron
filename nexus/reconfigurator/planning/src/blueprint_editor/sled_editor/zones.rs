@@ -3,7 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::blueprint_builder::EditCounts;
+use illumos_utils::zpool::ZpoolName;
 use nexus_sled_agent_shared::inventory::ZoneKind;
+use nexus_types::deployment::id_map::Entry;
+use nexus_types::deployment::id_map::IdMap;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
@@ -11,8 +14,6 @@ use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use std::collections::btree_map::Entry;
-use std::collections::BTreeMap;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ZonesEditError {
@@ -38,7 +39,7 @@ pub struct DuplicateZoneId {
 #[derive(Debug)]
 pub(super) struct ZonesEditor {
     generation: Generation,
-    zones: BTreeMap<OmicronZoneUuid, BlueprintZoneConfig>,
+    zones: IdMap<BlueprintZoneConfig>,
     counts: EditCounts,
 }
 
@@ -46,7 +47,7 @@ impl ZonesEditor {
     pub fn empty() -> Self {
         Self {
             generation: Generation::new(),
-            zones: BTreeMap::new(),
+            zones: IdMap::new(),
             counts: EditCounts::zeroes(),
         }
     }
@@ -56,11 +57,7 @@ impl ZonesEditor {
         if self.counts.has_nonzero_counts() {
             generation = generation.next();
         }
-        let mut config = BlueprintZonesConfig {
-            generation,
-            zones: self.zones.into_values().collect(),
-        };
-        config.sort();
+        let config = BlueprintZonesConfig { generation, zones: self.zones };
         (config, self.counts)
     }
 
@@ -73,7 +70,7 @@ impl ZonesEditor {
         filter: BlueprintZoneFilter,
     ) -> impl Iterator<Item = &BlueprintZoneConfig> {
         self.zones
-            .values()
+            .iter()
             .filter(move |config| config.disposition.matches(filter))
     }
 
@@ -99,19 +96,45 @@ impl ZonesEditor {
         }
     }
 
+    /// Temporary method to backfill `filesystem_pool` properties for existing
+    /// zones.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called with a nonexistent zone_id. This is not meant to be a
+    /// general-purpose method and should be removed entirely once all deployed
+    /// systems have this property backfilled successfully.
+    pub(super) fn backfill_filesystem_pool(
+        &mut self,
+        zone_id: OmicronZoneUuid,
+        filesystem_pool: ZpoolName,
+    ) {
+        let Some(mut zone) = self.zones.get_mut(&zone_id) else {
+            panic!(
+                "backfill_filesystem_pool called with \
+                 nonexistent zone id {zone_id}"
+            );
+        };
+
+        if zone.filesystem_pool.as_ref() != Some(&filesystem_pool) {
+            zone.filesystem_pool = Some(filesystem_pool);
+            self.counts.updated += 1;
+        }
+    }
+
     /// Expunge a zone, returning `true` if the zone was expunged and `false` if
     /// the zone was already expunged, along with the updated zone config.
     pub fn expunge(
         &mut self,
         zone_id: &OmicronZoneUuid,
     ) -> Result<(bool, &BlueprintZoneConfig), ZonesEditError> {
-        let config = self.zones.get_mut(zone_id).ok_or_else(|| {
+        let mut config = self.zones.get_mut(zone_id).ok_or_else(|| {
             ZonesEditError::ExpungeNonexistentZone { id: *zone_id }
         })?;
 
-        let did_expunge = Self::expunge_impl(config, &mut self.counts);
+        let did_expunge = Self::expunge_impl(&mut config, &mut self.counts);
 
-        Ok((did_expunge, &*config))
+        Ok((did_expunge, config.into_ref()))
     }
 
     fn expunge_impl(
@@ -133,7 +156,7 @@ impl ZonesEditor {
     }
 
     pub fn expunge_all_on_zpool(&mut self, zpool: &ZpoolUuid) {
-        for config in self.zones.values_mut() {
+        for mut config in self.zones.iter_mut() {
             // Expunge this zone if its filesystem or durable dataset are on
             // this zpool. (If it has both, they should be on the _same_ zpool,
             // but that's not strictly required by this method - we'll expunge a
@@ -147,35 +170,18 @@ impl ZonesEditor {
                 .durable_zpool()
                 .map_or(false, |pool| pool.id() == *zpool);
             if fs_is_on_zpool || dd_is_on_zpool {
-                Self::expunge_impl(config, &mut self.counts);
+                Self::expunge_impl(&mut config, &mut self.counts);
             }
         }
     }
 }
 
-impl TryFrom<BlueprintZonesConfig> for ZonesEditor {
-    type Error = DuplicateZoneId;
-
-    fn try_from(config: BlueprintZonesConfig) -> Result<Self, Self::Error> {
-        let mut zones = BTreeMap::new();
-        for zone in config.zones {
-            match zones.entry(zone.id) {
-                Entry::Vacant(slot) => {
-                    slot.insert(zone);
-                }
-                Entry::Occupied(prev) => {
-                    return Err(DuplicateZoneId {
-                        id: zone.id,
-                        kind1: zone.zone_type.kind(),
-                        kind2: prev.get().zone_type.kind(),
-                    });
-                }
-            }
-        }
-        Ok(Self {
+impl From<BlueprintZonesConfig> for ZonesEditor {
+    fn from(config: BlueprintZonesConfig) -> Self {
+        Self {
             generation: config.generation,
-            zones,
+            zones: config.zones,
             counts: EditCounts::zeroes(),
-        })
+        }
     }
 }

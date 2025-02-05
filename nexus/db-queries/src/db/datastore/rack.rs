@@ -18,7 +18,7 @@ use crate::db::error::ErrorHandler;
 use crate::db::error::MaybeRetryable::*;
 use crate::db::identity::Asset;
 use crate::db::lookup::LookupPath;
-use crate::db::model::Dataset;
+use crate::db::model::CrucibleDataset;
 use crate::db::model::IncompleteExternalIp;
 use crate::db::model::PhysicalDisk;
 use crate::db::model::Rack;
@@ -26,7 +26,6 @@ use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
 use crate::db::TransactionError;
-use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -81,7 +80,7 @@ pub struct RackInit {
     pub blueprint: Blueprint,
     pub physical_disks: Vec<PhysicalDisk>,
     pub zpools: Vec<Zpool>,
-    pub datasets: Vec<Dataset>,
+    pub datasets: Vec<CrucibleDataset>,
     pub service_ip_pool_ranges: Vec<IpRange>,
     pub internal_dns: InitialDnsGroup,
     pub external_dns: InitialDnsGroup,
@@ -676,11 +675,9 @@ impl DataStore {
 
         // This method uses nested transactions, which are not supported
         // with retryable transactions.
-        #[allow(clippy::disallowed_methods)]
-        let rack = self
-            .pool_connection_authorized(opctx)
-            .await?
-            .transaction_async(|conn| {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let rack = self.transaction_non_retry_wrapper("rack_set_initialized")
+            .transaction(&conn, |conn| {
                 let err = err.clone();
                 let log = log.clone();
                 let authz_service_pool = authz_service_pool.clone();
@@ -752,7 +749,7 @@ impl DataStore {
                     }
 
                     // Insert the RSS-generated blueprint.
-                    Self::blueprint_insert_on_connection(
+                    self.blueprint_insert_on_connection(
                         &conn, opctx, &blueprint,
                     )
                     .await
@@ -836,11 +833,11 @@ impl DataStore {
                     info!(log, "Inserted zpools");
 
                     for dataset in datasets {
-                        use db::schema::dataset::dsl;
+                        use db::schema::crucible_dataset::dsl;
                         let zpool_id = dataset.pool_id;
                         Zpool::insert_resource(
                             zpool_id,
-                            diesel::insert_into(dsl::dataset)
+                            diesel::insert_into(dsl::crucible_dataset)
                                 .values(dataset.clone())
                                 .on_conflict(dsl::id)
                                 .do_update()
@@ -849,7 +846,6 @@ impl DataStore {
                                     dsl::pool_id.eq(excluded(dsl::pool_id)),
                                     dsl::ip.eq(excluded(dsl::ip)),
                                     dsl::port.eq(excluded(dsl::port)),
-                                    dsl::kind.eq(excluded(dsl::kind)),
                                 )),
                         )
                         .insert_and_get_result_async(&conn)
@@ -1041,7 +1037,7 @@ mod test {
     use omicron_common::api::internal::shared::SourceNatConfig;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
-    use omicron_uuid_kinds::{ExternalIpUuid, OmicronZoneUuid};
+    use omicron_uuid_kinds::{BlueprintUuid, ExternalIpUuid, OmicronZoneUuid};
     use omicron_uuid_kinds::{GenericUuid, ZpoolUuid};
     use omicron_uuid_kinds::{SledUuid, TypedUuid};
     use oxnet::IpNet;
@@ -1057,7 +1053,7 @@ mod test {
                 rack_id: Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap(),
                 rack_subnet: nexus_test_utils::RACK_SUBNET.parse().unwrap(),
                 blueprint: Blueprint {
-                    id: Uuid::new_v4(),
+                    id: BlueprintUuid::new_v4(),
                     blueprint_zones: BTreeMap::new(),
                     blueprint_disks: BTreeMap::new(),
                     blueprint_datasets: BTreeMap::new(),
@@ -1240,9 +1236,11 @@ mod test {
 
     async fn create_test_sled(db: &DataStore, sled_id: Uuid) -> Sled {
         let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
+        let repo_depot_port = 0;
         let sled_update = SledUpdate::new(
             sled_id,
             addr,
+            repo_depot_port,
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id(),
@@ -1291,7 +1289,7 @@ mod test {
 
     fn_to_get_all!(external_ip, ExternalIp);
     fn_to_get_all!(ip_pool_range, IpPoolRange);
-    fn_to_get_all!(dataset, Dataset);
+    fn_to_get_all!(crucible_dataset, CrucibleDataset);
 
     fn random_zpool() -> ZpoolName {
         ZpoolName::new_external(ZpoolUuid::new_v4())
@@ -1376,7 +1374,7 @@ mod test {
             SledUuid::from_untyped_uuid(sled1.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
-                zones: vec![
+                zones: [
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: external_dns_id,
@@ -1440,14 +1438,16 @@ mod test {
                             },
                         ),
                     },
-                ],
+                ]
+                .into_iter()
+                .collect(),
             },
         );
         blueprint_zones.insert(
             SledUuid::from_untyped_uuid(sled2.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
-                zones: vec![
+                zones: [
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: nexus_id,
@@ -1514,14 +1514,16 @@ mod test {
                             },
                         ),
                     },
-                ],
+                ]
+                .into_iter()
+                .collect(),
             },
         );
         blueprint_zones.insert(
             SledUuid::from_untyped_uuid(sled3.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
-                zones: vec![BlueprintZoneConfig {
+                zones: [BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: ntp3_id,
                     filesystem_pool: Some(random_zpool()),
@@ -1530,14 +1532,13 @@ mod test {
                             address: "[::1]:80".parse().unwrap(),
                         },
                     ),
-                }],
+                }]
+                .into_iter()
+                .collect(),
             },
         );
-        for zone_config in blueprint_zones.values_mut() {
-            zone_config.sort();
-        }
         let blueprint = Blueprint {
-            id: Uuid::new_v4(),
+            id: BlueprintUuid::new_v4(),
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
@@ -1655,7 +1656,7 @@ mod test {
         );
         assert_eq!(ntp2_external_ip.ip.ip(), ntp2_ip);
 
-        let observed_datasets = get_all_datasets(&datastore).await;
+        let observed_datasets = get_all_crucible_datasets(&datastore).await;
         assert!(observed_datasets.is_empty());
 
         db.terminate().await;
@@ -1701,7 +1702,7 @@ mod test {
             SledUuid::from_untyped_uuid(sled.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
-                zones: vec![
+                zones: [
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: nexus_id1,
@@ -1766,7 +1767,9 @@ mod test {
                             },
                         ),
                     },
-                ],
+                ]
+                .into_iter()
+                .collect(),
             },
         );
 
@@ -1794,11 +1797,8 @@ mod test {
             HashMap::from([("api.sys".to_string(), external_records.clone())]),
         );
 
-        for zone_config in blueprint_zones.values_mut() {
-            zone_config.sort();
-        }
         let blueprint = Blueprint {
-            id: Uuid::new_v4(),
+            id: BlueprintUuid::new_v4(),
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
@@ -1911,7 +1911,7 @@ mod test {
         assert_eq!(observed_ip_pool_ranges.len(), 1);
         assert_eq!(observed_ip_pool_ranges[0].ip_pool_id, svc_pool.id());
 
-        let observed_datasets = get_all_datasets(&datastore).await;
+        let observed_datasets = get_all_crucible_datasets(&datastore).await;
         assert!(observed_datasets.is_empty());
 
         // Verify the internal and external DNS configurations.
@@ -1974,7 +1974,7 @@ mod test {
             SledUuid::from_untyped_uuid(sled.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
-                zones: vec![BlueprintZoneConfig {
+                zones: [BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: nexus_id,
                     filesystem_pool: Some(random_zpool()),
@@ -2003,14 +2003,13 @@ mod test {
                             },
                         },
                     ),
-                }],
+                }]
+                .into_iter()
+                .collect(),
             },
         );
-        for zone_config in blueprint_zones.values_mut() {
-            zone_config.sort();
-        }
         let blueprint = Blueprint {
-            id: Uuid::new_v4(),
+            id: BlueprintUuid::new_v4(),
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
@@ -2039,7 +2038,7 @@ mod test {
             "Invalid Request: Requested external IP address not available"
         );
 
-        assert!(get_all_datasets(&datastore).await.is_empty());
+        assert!(get_all_crucible_datasets(&datastore).await.is_empty());
         assert!(get_all_external_ips(&datastore).await.is_empty());
 
         db.terminate().await;
@@ -2083,7 +2082,7 @@ mod test {
             SledUuid::from_untyped_uuid(sled.id()),
             BlueprintZonesConfig {
                 generation: Generation::new().next(),
-                zones: vec![
+                zones: [
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
                         id: external_dns_id,
@@ -2145,15 +2144,14 @@ mod test {
                             },
                         ),
                     },
-                ],
+                ]
+                .into_iter()
+                .collect(),
             },
         );
 
-        for zone_config in blueprint_zones.values_mut() {
-            zone_config.sort();
-        }
         let blueprint = Blueprint {
-            id: Uuid::new_v4(),
+            id: BlueprintUuid::new_v4(),
             sled_state: sled_states_active(blueprint_zones.keys().copied()),
             blueprint_zones,
             blueprint_disks: BTreeMap::new(),
@@ -2187,7 +2185,7 @@ mod test {
             "Invalid Request: Requested external IP address not available",
         );
 
-        assert!(get_all_datasets(&datastore).await.is_empty());
+        assert!(get_all_crucible_datasets(&datastore).await.is_empty());
         assert!(get_all_external_ips(&datastore).await.is_empty());
 
         db.terminate().await;

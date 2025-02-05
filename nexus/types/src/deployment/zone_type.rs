@@ -9,6 +9,7 @@
 //! that is not needed by sled-agent.
 
 use super::OmicronZoneExternalIp;
+use daft::Diffable;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -19,9 +20,19 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::net::Ipv6Addr;
-use std::net::SocketAddrV6;
 
-#[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+#[derive(
+    Debug,
+    Clone,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    JsonSchema,
+    Deserialize,
+    Serialize,
+    Diffable,
+)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum BlueprintZoneType {
     BoundaryNtp(blueprint_zone_type::BoundaryNtp),
@@ -183,33 +194,29 @@ impl BlueprintZoneType {
 
     /// Returns the durable dataset associated with this zone, if any exists.
     pub fn durable_dataset(&self) -> Option<DurableDataset<'_>> {
-        let (dataset, kind, &address) = match self {
+        let (dataset, kind) = match self {
             BlueprintZoneType::Clickhouse(
-                blueprint_zone_type::Clickhouse { dataset, address },
-            ) => (dataset, DatasetKind::Clickhouse, address),
+                blueprint_zone_type::Clickhouse { dataset, .. },
+            ) => (dataset, DatasetKind::Clickhouse),
             BlueprintZoneType::ClickhouseKeeper(
-                blueprint_zone_type::ClickhouseKeeper { dataset, address },
-            ) => (dataset, DatasetKind::ClickhouseKeeper, address),
+                blueprint_zone_type::ClickhouseKeeper { dataset, .. },
+            ) => (dataset, DatasetKind::ClickhouseKeeper),
             BlueprintZoneType::ClickhouseServer(
-                blueprint_zone_type::ClickhouseServer { dataset, address },
-            ) => (dataset, DatasetKind::ClickhouseServer, address),
+                blueprint_zone_type::ClickhouseServer { dataset, .. },
+            ) => (dataset, DatasetKind::ClickhouseServer),
             BlueprintZoneType::CockroachDb(
-                blueprint_zone_type::CockroachDb { dataset, address },
-            ) => (dataset, DatasetKind::Cockroach, address),
+                blueprint_zone_type::CockroachDb { dataset, .. },
+            ) => (dataset, DatasetKind::Cockroach),
             BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
                 dataset,
-                address,
-            }) => (dataset, DatasetKind::Crucible, address),
+                ..
+            }) => (dataset, DatasetKind::Crucible),
             BlueprintZoneType::ExternalDns(
-                blueprint_zone_type::ExternalDns {
-                    dataset, http_address, ..
-                },
-            ) => (dataset, DatasetKind::ExternalDns, http_address),
+                blueprint_zone_type::ExternalDns { dataset, .. },
+            ) => (dataset, DatasetKind::ExternalDns),
             BlueprintZoneType::InternalDns(
-                blueprint_zone_type::InternalDns {
-                    dataset, http_address, ..
-                },
-            ) => (dataset, DatasetKind::InternalDns, http_address),
+                blueprint_zone_type::InternalDns { dataset, .. },
+            ) => (dataset, DatasetKind::InternalDns),
             // Transient-dataset-only zones
             BlueprintZoneType::BoundaryNtp(_)
             | BlueprintZoneType::CruciblePantry(_)
@@ -218,14 +225,13 @@ impl BlueprintZoneType {
             | BlueprintZoneType::Oximeter(_) => return None,
         };
 
-        Some(DurableDataset { dataset, kind, address })
+        Some(DurableDataset { dataset, kind })
     }
 }
 
 pub struct DurableDataset<'a> {
     pub dataset: &'a OmicronZoneDataset,
     pub kind: DatasetKind,
-    pub address: SocketAddrV6,
 }
 
 impl<'a> From<DurableDataset<'a>> for DatasetName {
@@ -325,6 +331,7 @@ pub mod blueprint_zone_type {
     use crate::deployment::OmicronZoneExternalFloatingAddr;
     use crate::deployment::OmicronZoneExternalFloatingIp;
     use crate::deployment::OmicronZoneExternalSnatIp;
+    use daft::Diffable;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use omicron_common::api::internal::shared::NetworkInterface;
     use schemars::JsonSchema;
@@ -335,7 +342,16 @@ pub mod blueprint_zone_type {
     use std::net::SocketAddrV6;
 
     #[derive(
-        Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
+        Debug,
+        Clone,
+        Eq,
+        PartialEq,
+        Ord,
+        PartialOrd,
+        JsonSchema,
+        Deserialize,
+        Serialize,
+        Diffable,
     )]
     pub struct BoundaryNtp {
         pub address: SocketAddrV6,
@@ -349,7 +365,16 @@ pub mod blueprint_zone_type {
 
     /// Used in single-node clickhouse setups
     #[derive(
-        Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
+        Debug,
+        Clone,
+        Eq,
+        PartialEq,
+        Ord,
+        PartialOrd,
+        JsonSchema,
+        Deserialize,
+        Serialize,
+        Diffable,
     )]
     pub struct Clickhouse {
         pub address: SocketAddrV6,
@@ -357,7 +382,16 @@ pub mod blueprint_zone_type {
     }
 
     #[derive(
-        Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
+        Debug,
+        Clone,
+        Eq,
+        PartialEq,
+        Ord,
+        PartialOrd,
+        JsonSchema,
+        Deserialize,
+        Serialize,
+        Diffable,
     )]
     pub struct ClickhouseKeeper {
         pub address: SocketAddrV6,
@@ -366,7 +400,16 @@ pub mod blueprint_zone_type {
 
     /// Used in replicated clickhouse setups
     #[derive(
-        Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
+        Debug,
+        Clone,
+        Eq,
+        PartialEq,
+        Ord,
+        PartialOrd,
+        JsonSchema,
+        Deserialize,
+        Serialize,
+        Diffable,
     )]
     pub struct ClickhouseServer {
         pub address: SocketAddrV6,
@@ -374,7 +417,16 @@ pub mod blueprint_zone_type {
     }
 
     #[derive(
-        Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
+        Debug,
+        Clone,
+        Eq,
+        PartialEq,
+        Ord,
+        PartialOrd,
+        JsonSchema,
+        Deserialize,
+        Serialize,
+        Diffable,
     )]
     pub struct CockroachDb {
         pub address: SocketAddrV6,
@@ -382,7 +434,16 @@ pub mod blueprint_zone_type {
     }
 
     #[derive(
-        Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
+        Debug,
+        Clone,
+        Eq,
+        PartialEq,
+        Ord,
+        PartialOrd,
+        JsonSchema,
+        Deserialize,
+        Serialize,
+        Diffable,
     )]
     pub struct Crucible {
         pub address: SocketAddrV6,
@@ -390,14 +451,32 @@ pub mod blueprint_zone_type {
     }
 
     #[derive(
-        Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
+        Debug,
+        Clone,
+        Eq,
+        PartialEq,
+        Ord,
+        PartialOrd,
+        JsonSchema,
+        Deserialize,
+        Serialize,
+        Diffable,
     )]
     pub struct CruciblePantry {
         pub address: SocketAddrV6,
     }
 
     #[derive(
-        Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
+        Debug,
+        Clone,
+        Eq,
+        PartialEq,
+        Ord,
+        PartialOrd,
+        JsonSchema,
+        Deserialize,
+        Serialize,
+        Diffable,
     )]
     pub struct ExternalDns {
         pub dataset: OmicronZoneDataset,
@@ -410,7 +489,16 @@ pub mod blueprint_zone_type {
     }
 
     #[derive(
-        Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
+        Debug,
+        Clone,
+        Eq,
+        PartialEq,
+        Ord,
+        PartialOrd,
+        JsonSchema,
+        Deserialize,
+        Serialize,
+        Diffable,
     )]
     pub struct InternalDns {
         pub dataset: OmicronZoneDataset,
@@ -430,14 +518,32 @@ pub mod blueprint_zone_type {
     }
 
     #[derive(
-        Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
+        Debug,
+        Clone,
+        Eq,
+        PartialEq,
+        Ord,
+        PartialOrd,
+        JsonSchema,
+        Deserialize,
+        Serialize,
+        Diffable,
     )]
     pub struct InternalNtp {
         pub address: SocketAddrV6,
     }
 
     #[derive(
-        Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
+        Debug,
+        Clone,
+        Eq,
+        PartialEq,
+        Ord,
+        PartialOrd,
+        JsonSchema,
+        Deserialize,
+        Serialize,
+        Diffable,
     )]
     pub struct Nexus {
         /// The address at which the internal nexus server is reachable.
@@ -453,7 +559,16 @@ pub mod blueprint_zone_type {
     }
 
     #[derive(
-        Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
+        Debug,
+        Clone,
+        Eq,
+        PartialEq,
+        Ord,
+        PartialOrd,
+        JsonSchema,
+        Deserialize,
+        Serialize,
+        Diffable,
     )]
     pub struct Oximeter {
         pub address: SocketAddrV6,

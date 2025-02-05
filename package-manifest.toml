@@ -125,6 +125,7 @@ source.paths = [
   { from = "smf/nexus/{{rack-topology}}", to = "/var/svc/manifest/site/nexus" },
   { from = "out/console-assets", to = "/var/nexus/static" },
   { from = "schema/crdb", to = "/var/nexus/schema/crdb" },
+  { from = "tools/dtrace/nexus", to = "/opt/oxide/dtrace/nexus" },
 ]
 output.type = "zone"
 setup_hint = """
@@ -165,7 +166,8 @@ source.packages = [
   "internal-dns-cli.tar.gz",
   "omicron-clickhouse-admin.tar.gz",
   "zone-setup.tar.gz",
-  "zone-network-install.tar.gz"
+  "zone-network-install.tar.gz",
+  "clickana.tar.gz"
 ]
 output.type = "zone"
 
@@ -196,7 +198,8 @@ source.packages = [
   "internal-dns-cli.tar.gz",
   "omicron-clickhouse-admin.tar.gz",
   "zone-setup.tar.gz",
-  "zone-network-install.tar.gz"
+  "zone-network-install.tar.gz",
+  "clickana.tar.gz"
 ]
 output.type = "zone"
 
@@ -207,7 +210,6 @@ source.type = "local"
 source.paths = [
   { from = "out/clickhouse", to = "/opt/oxide/clickhouse_server" },
   { from = "smf/clickhouse_server/manifest.xml", to = "/var/svc/manifest/site/clickhouse_server/manifest.xml" },
-  { from = "smf/clickhouse_server/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse_server.sh" },
   { from = "smf/clickhouse-admin-server", to = "/var/svc/manifest/site/clickhouse-admin-server" },
 ]
 output.type = "zone"
@@ -237,7 +239,6 @@ source.type = "local"
 source.paths = [
   { from = "out/clickhouse", to = "/opt/oxide/clickhouse_keeper" },
   { from = "smf/clickhouse_keeper/manifest.xml", to = "/var/svc/manifest/site/clickhouse_keeper/manifest.xml" },
-  { from = "smf/clickhouse_keeper/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse_keeper.sh" },
   { from = "smf/clickhouse-admin-keeper", to = "/var/svc/manifest/site/clickhouse-admin-keeper" },
 ]
 output.type = "zone"
@@ -578,10 +579,10 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "5a41b826171c7d2a8412fa833377ab1df25ee8ec"
+source.commit = "86a2ce1f9f13912a5fe652472de765ec5fc22e76"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "bcccfb03a68e46bb958410faf6f619e25f5ec9ccc65c503aeb87bb7ad456e517"
+source.sha256 = "ff41d5fb504982536445c34fb62ddccc78d40d5806326fe0d01094f4dc4ba58f"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -590,10 +591,10 @@ service_name = "crucible_pantry_prebuilt"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "5a41b826171c7d2a8412fa833377ab1df25ee8ec"
+source.commit = "86a2ce1f9f13912a5fe652472de765ec5fc22e76"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "96326422f79413fe31bb1c7df6173b2991b463cabc5b1fb4182db703500c8882"
+source.sha256 = "70b9423e0851afe9411957cd5ac515add0cd52dbe98a50f31c8c85ac7a43299c"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -607,10 +608,10 @@ service_name = "crucible_dtrace"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "5a41b826171c7d2a8412fa833377ab1df25ee8ec"
+source.commit = "86a2ce1f9f13912a5fe652472de765ec5fc22e76"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-dtrace.sha256.txt
-source.sha256 = "d35ed81a1e58ec66b621938f4b57513c1a3eb0b66e21834e000e0ace9624b462"
+source.sha256 = "580e0ccb93c24835ada62b40a054042ab301fce3e1c26cd6b29611a60829f545"
 output.type = "tarball"
 
 # Refer to
@@ -621,10 +622,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "220a6f367c18f2452dbc4fa9086f3fe73b961739"
+source.commit = "99251f841debbe9aaceb4a407a984190c63dead5"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "964bf262677496118f8cea95c257d0a57c76ddca70733217b0666657b53bd6e6"
+source.sha256 = "53721913ee25b2c649cd845c542fb1ebf86d3e61c68af4002fcfad60050c9e54"
 output.type = "zone"
 
 [package.mg-ddm-gz]
@@ -679,8 +680,8 @@ output.intermediate_only = true
 service_name = "lldp"
 source.type = "prebuilt"
 source.repo = "lldp"
-source.commit = "188f0f6d4c066f1515bd707050407cedd790fcf1"
-source.sha256 = "132d0760be5208f60b58bcaed98fa6384b09f41dd5febf51970f5cbf46138ecf"
+source.commit = "ce952e61f444119a2a9fe0d5c5c3db96daf70d96"
+source.sha256 = "0404deaa0c70a34890cb13766925508feb58deefff5eb27376c7f1ea7af45824"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -794,7 +795,7 @@ output.intermediate_only = true
 
 # To package and install the asic variant of the switch, do:
 #
-# $ cargo run --release --bin omicron-package -- -t default target create -i standard -m gimlet -s asic
+# $ cargo run --release --bin omicron-package -- -t default target create -p dev -m gimlet -s asic
 # $ cargo run --release --bin omicron-package -- package
 # $ pfexec ./target/release/omicron-package install
 [package.switch-asic]
@@ -822,7 +823,7 @@ output.type = "zone"
 
 # To package and install the stub variant of the switch, do the following:
 #
-# $ cargo run --release --bin omicron-package -- -t default target create -i standard -m <gimlet|gimlet-standalone|non-gimlet> -s stub
+# $ cargo run --release --bin omicron-package -- -t default target create -p dev -m <gimlet|gimlet-standalone|non-gimlet> -s stub
 # $ cargo run --release --bin omicron-package -- package
 # $ pfexec ./target/release/omicron-package install
 [package.switch-stub]
@@ -848,7 +849,7 @@ output.type = "zone"
 
 # To package and install the softnpu variant of the switch, do the following:
 #
-# $ cargo run --release --bin omicron-package -- -t default target create -i standard -m <gimlet|gimlet-standalone|non-gimlet> -s softnpu
+# $ cargo run --release --bin omicron-package -- -t default target create -p dev -m <gimlet|gimlet-standalone|non-gimlet>
 # $ cargo run --release --bin omicron-package -- package
 # $ pfexec ./target/release/omicron-package install
 [package.switch-softnpu]
@@ -923,3 +924,54 @@ service_name = "probe"
 source.type = "composite"
 source.packages = ["thundermuffin.tar.gz"]
 output.type = "zone"
+
+[package.clickana]
+service_name = "clickana"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["clickana"]
+source.rust.release = true
+output.type = "zone"
+output.intermediate_only = true
+
+# Target configuration
+# --------------------
+#
+# This section defines "targets" built by Omicron. A target is a map of keys and
+# values that are used to filter out packages (via `only_for_targets`) and for
+# other purposes.
+#
+# For what the individual keys mean, see the definition for `TargetCommand` in
+# `package/src/lib.rs`.
+
+# A preset for the host image built during release.
+[target.preset.host]
+image = "standard"
+machine = "gimlet"
+switch = "asic"
+rack-topology = "multi-sled"
+clickhouse-topology = "single-node"
+
+# A preset for the recovery image built during release.
+[target.preset.recovery]
+image = "trampoline"
+# The trampoline image doesn't execute sled-agent and doesn't contain the switch
+# zone, so neither "machine" nor "switch" are defined.
+rack-topology = "single-sled"
+clickhouse-topology = "single-node"
+
+# A preset for development.
+[target.preset.dev]
+image = "standard"
+machine = "non-gimlet"
+switch = "softnpu"
+rack-topology = "single-sled"
+clickhouse-topology = "single-node"
+
+# A preset for the `a4x2` testbed environment.
+[target.preset.a4x2]
+image = "standard"
+machine = "non-gimlet"
+switch = "softnpu"
+rack-topology = "multi-sled"
+clickhouse-topology = "single-node"

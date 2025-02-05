@@ -181,6 +181,12 @@ impl FromStr for ZpoolInfo {
 /// Wraps commands for interacting with ZFS pools.
 pub struct Zpool {}
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum ZpoolOrRamdisk {
+    Zpool(ZpoolName),
+    Ramdisk,
+}
+
 /// A path which exists within a pool.
 ///
 /// By storing these types together, it's possible to answer
@@ -190,7 +196,7 @@ pub struct Zpool {}
 // Rather Not.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct PathInPool {
-    pub pool: Option<ZpoolName>,
+    pub pool: ZpoolOrRamdisk,
     pub path: Utf8PathBuf,
 }
 

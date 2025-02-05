@@ -37,6 +37,7 @@ pub(crate) use self::omicron_zone_placement::DiscretionaryOmicronZone;
 use self::omicron_zone_placement::OmicronZonePlacement;
 use self::omicron_zone_placement::OmicronZonePlacementSledState;
 pub use self::rng::PlannerRng;
+pub use self::rng::SledPlannerRng;
 
 mod omicron_zone_placement;
 pub(crate) mod rng;
@@ -162,8 +163,7 @@ impl<'a> Planner<'a> {
             let num_instances_assigned = 0;
 
             if all_zones_expunged && num_instances_assigned == 0 {
-                self.blueprint
-                    .set_sled_state(sled_id, SledState::Decommissioned)?;
+                self.blueprint.set_sled_decommissioned(sled_id)?;
             }
         }
 
@@ -812,7 +812,8 @@ mod test {
     use expectorate::assert_contents;
     use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_types::deployment::blueprint_zone_type;
-    use nexus_types::deployment::BlueprintDiff;
+    use nexus_types::deployment::BlueprintDatasetDisposition;
+    use nexus_types::deployment::BlueprintDiffSummary;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneFilter;
@@ -829,12 +830,14 @@ mod test {
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external::Generation;
+    use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DiskIdentity;
     use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use slog_error_chain::InlineErrorChain;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
     use std::net::IpAddr;
@@ -878,21 +881,21 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint2.diff_since_blueprint(&blueprint1);
-        println!("1 -> 2 (expected no changes):\n{}", diff.display());
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 0);
-        assert_eq!(diff.zones.added.len(), 0);
-        assert_eq!(diff.zones.removed.len(), 0);
-        assert_eq!(diff.zones.modified.len(), 0);
-        assert_eq!(diff.zones.errors.len(), 0);
-        assert_eq!(diff.physical_disks.added.len(), 0);
-        assert_eq!(diff.physical_disks.removed.len(), 0);
-        assert_eq!(diff.datasets.added.len(), 0);
-        assert_eq!(diff.datasets.removed.len(), 0);
-        assert_eq!(diff.datasets.modified.len(), 0);
-        assert_eq!(diff.datasets.unchanged.len(), 3);
+        let summary = blueprint2.diff_since_blueprint(&blueprint1);
+        println!("1 -> 2 (expected no changes):\n{}", summary.display());
+        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.sleds_modified.len(), 0);
+        assert_eq!(summary.sleds_unchanged.len(), 3);
+        assert_eq!(summary.total_zones_added(), 0);
+        assert_eq!(summary.total_zones_removed(), 0);
+        assert_eq!(summary.total_zones_modified(), 0);
+        assert_eq!(summary.total_disks_added(), 0);
+        assert_eq!(summary.total_disks_removed(), 0);
+        assert_eq!(summary.total_disks_modified(), 0);
+        assert_eq!(summary.total_datasets_added(), 0);
+        assert_eq!(summary.total_datasets_removed(), 0);
+        assert_eq!(summary.total_datasets_modified(), 0);
         verify_blueprint(&blueprint2);
 
         // Now add a new sled.
@@ -915,29 +918,34 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint3.diff_since_blueprint(&blueprint2);
+        let summary = blueprint3.diff_since_blueprint(&blueprint2);
         println!(
             "2 -> 3 (expect new NTP zone on new sled):\n{}",
-            diff.display()
+            summary.display()
         );
         assert_contents(
             "tests/output/planner_basic_add_sled_2_3.txt",
-            &diff.display().to_string(),
+            &summary.display().to_string(),
         );
-        assert_eq!(diff.sleds_added.len(), 1);
-        assert_eq!(diff.physical_disks.added.len(), 1);
-        assert_eq!(diff.datasets.added.len(), 1);
-        let sled_id = *diff.sleds_added.first().unwrap();
-        let sled_zones = diff.zones.added.get(&sled_id).unwrap();
+
+        assert_eq!(summary.sleds_added.len(), 1);
+        assert_eq!(summary.total_disks_added(), 10);
+        assert_eq!(summary.total_datasets_added(), 21);
+        let sled_id = *summary.sleds_added.first().unwrap();
+        let sled_zones =
+            summary.diff.blueprint_zones.added.get(&sled_id).unwrap();
         // We have defined elsewhere that the first generation contains no
         // zones.  So the first one with zones must be newer.  See
         // OmicronZonesConfig::INITIAL_GENERATION.
-        assert!(sled_zones.generation_after.unwrap() > Generation::new());
+        assert!(sled_zones.generation > Generation::new());
         assert_eq!(sled_id, new_sled_id);
         assert_eq!(sled_zones.zones.len(), 1);
-        assert!(matches!(sled_zones.zones[0].kind(), ZoneKind::InternalNtp));
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 0);
+        assert!(matches!(
+            sled_zones.zones.first().unwrap().kind(),
+            ZoneKind::InternalNtp
+        ));
+        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.sleds_modified.len(), 0);
         verify_blueprint(&blueprint3);
 
         // Check that with no change in inventory, the planner makes no changes.
@@ -954,11 +962,11 @@ mod test {
         .with_rng(PlannerRng::from_seed((TEST_NAME, "bp4")))
         .plan()
         .expect("failed to plan");
-        let diff = blueprint4.diff_since_blueprint(&blueprint3);
-        println!("3 -> 4 (expected no changes):\n{}", diff.display());
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 0);
+        let summary = blueprint4.diff_since_blueprint(&blueprint3);
+        println!("3 -> 4 (expected no changes):\n{}", summary.display());
+        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.sleds_modified.len(), 0);
         verify_blueprint(&blueprint4);
 
         // Now update the inventory to have the requested NTP zone.
@@ -994,29 +1002,29 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint5.diff_since_blueprint(&blueprint3);
-        println!("3 -> 5 (expect Crucible zones):\n{}", diff.display());
+        let summary = blueprint5.diff_since_blueprint(&blueprint3);
+        println!("3 -> 5 (expect Crucible zones):\n{}", summary.display());
         assert_contents(
             "tests/output/planner_basic_add_sled_3_5.txt",
-            &diff.display().to_string(),
+            &summary.display().to_string(),
         );
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 1);
-        let sled_id = diff.sleds_modified.first().unwrap();
+        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.sleds_modified.len(), 1);
+        let sled_id = summary.sleds_modified.first().unwrap();
         assert_eq!(*sled_id, new_sled_id);
         // No removed or modified zones on this sled
-        assert!(!diff.zones.removed.contains_key(sled_id));
-        assert!(!diff.zones.modified.contains_key(sled_id));
+        let zones_cfg_diff = summary.zones_on_modified_sled(sled_id).unwrap();
+        assert!(zones_cfg_diff.zones.removed.is_empty());
+        assert!(zones_cfg_diff.zones.modified.is_empty());
         // 10 crucible zones addeed
-        let zones_added = diff.zones.added.get(sled_id).unwrap();
         assert_eq!(
-            zones_added.generation_after.unwrap(),
-            zones_added.generation_before.unwrap().next()
+            *zones_cfg_diff.generation.after,
+            zones_cfg_diff.generation.before.next()
         );
 
-        assert_eq!(zones_added.zones.len(), 10);
-        for zone in &zones_added.zones {
+        assert_eq!(zones_cfg_diff.zones.added.len(), 10);
+        for zone in zones_cfg_diff.zones.added.values() {
             if zone.kind() != ZoneKind::Crucible {
                 panic!("unexpectedly added a non-Crucible zone: {zone:?}");
             }
@@ -1089,28 +1097,31 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint2.diff_since_blueprint(&blueprint1);
-        println!("1 -> 2 (added additional Nexus zones):\n{}", diff.display());
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 1);
-        let changed_sled_id = diff.sleds_modified.first().unwrap();
+        let summary = blueprint2.diff_since_blueprint(&blueprint1);
+        println!(
+            "1 -> 2 (added additional Nexus zones):\n{}",
+            summary.display()
+        );
+        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.sleds_modified.len(), 1);
+        let changed_sled_id = summary.sleds_modified.first().unwrap();
 
         assert_eq!(*changed_sled_id, sled_id);
-        assert_eq!(diff.zones.removed.len(), 0);
-        assert_eq!(diff.zones.modified.len(), 0);
-        assert_eq!(diff.physical_disks.added.len(), 0);
-        assert_eq!(diff.physical_disks.removed.len(), 0);
-        assert_eq!(diff.datasets.added.len(), 1);
-        assert_eq!(diff.datasets.modified.len(), 0);
-        assert_eq!(diff.datasets.removed.len(), 0);
-
-        let zones_added = diff.zones.added.get(changed_sled_id).unwrap();
         assert_eq!(
-            zones_added.zones.len(),
-            input.target_nexus_zone_count() - 1
+            summary
+                .datasets_on_modified_sled(&sled_id)
+                .unwrap()
+                .datasets
+                .added
+                .len(),
+            4
         );
-        for zone in &zones_added.zones {
+
+        let zones_added =
+            &summary.zones_on_modified_sled(&sled_id).unwrap().zones.added;
+        assert_eq!(zones_added.len(), input.target_nexus_zone_count() - 1);
+        for (_, zone) in zones_added {
             if zone.kind() != ZoneKind::Nexus {
                 panic!("unexpectedly added a non-Nexus zone: {zone:?}");
             }
@@ -1167,20 +1178,29 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint2.diff_since_blueprint(&blueprint1);
-        println!("1 -> 2 (added additional Nexus zones):\n{}", diff.display());
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 3);
+        let summary = blueprint2.diff_since_blueprint(&blueprint1);
+        println!(
+            "1 -> 2 (added additional Nexus zones):\n{}",
+            summary.display()
+        );
+        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.sleds_modified.len(), 3);
 
         // All 3 sleds should get additional Nexus zones. We expect a total of
         // 11 new Nexus zones, which should be spread evenly across the three
         // sleds (two should get 4 and one should get 3).
         let mut total_new_nexus_zones = 0;
-        for sled_id in diff.sleds_modified {
-            assert!(!diff.zones.removed.contains_key(&sled_id));
-            assert!(!diff.zones.modified.contains_key(&sled_id));
-            let zones_added = &diff.zones.added.get(&sled_id).unwrap().zones;
+        for sled_id in &summary.sleds_modified {
+            assert!(!summary
+                .diff
+                .blueprint_zones
+                .removed
+                .contains_key(sled_id));
+            let zones_cfg_diff =
+                summary.zones_on_modified_sled(sled_id).unwrap();
+            assert!(zones_cfg_diff.zones.modified.is_empty());
+            let zones_added = &zones_cfg_diff.zones.added;
             match zones_added.len() {
                 n @ (3 | 4) => {
                     total_new_nexus_zones += n;
@@ -1189,7 +1209,7 @@ mod test {
                     panic!("unexpected number of zones added to {sled_id}: {n}")
                 }
             }
-            for zone in zones_added {
+            for (_, zone) in zones_added {
                 if zone.kind() != ZoneKind::Nexus {
                     panic!("unexpectedly added a non-Nexus zone: {zone:?}");
                 }
@@ -1250,7 +1270,7 @@ mod test {
         {
             Ok(_) => panic!("unexpected success"),
             Err(err) => {
-                let err = format!("{err:#}");
+                let err = InlineErrorChain::new(&err).to_string();
                 assert!(
                     err.contains("can only have ")
                         && err.contains(" internal DNS servers"),
@@ -1263,6 +1283,21 @@ mod test {
         // zones back in their places.
         for (_sled_id, zones) in blueprint1.blueprint_zones.iter_mut().take(2) {
             zones.zones.retain(|z| !z.zone_type.is_internal_dns());
+        }
+        for (_, dataset_config) in
+            blueprint1.blueprint_datasets.iter_mut().take(2)
+        {
+            dataset_config.datasets.retain(|dataset| {
+                // This is gross; once zone configs know explicit dataset IDs,
+                // we should retain by ID instead.
+                match &dataset.kind {
+                    DatasetKind::InternalDns => false,
+                    DatasetKind::TransientZone { name } => {
+                        !name.starts_with("oxz_internal_dns")
+                    }
+                    _ => true,
+                }
+            });
         }
 
         let blueprint2 = Planner::new_based_on(
@@ -1277,37 +1312,38 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        let summary = blueprint2.diff_since_blueprint(&blueprint1);
         println!(
             "1 -> 2 (added additional internal DNS zones):\n{}",
-            diff.display()
+            summary.display()
         );
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 2);
+        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.sleds_modified.len(), 2);
 
         // 2 sleds should each get 1 additional internal DNS zone.
         let mut total_new_zones = 0;
-        for sled_id in diff.sleds_modified {
-            assert!(!diff.zones.removed.contains_key(&sled_id));
-            assert!(!diff.zones.modified.contains_key(&sled_id));
-            if let Some(zones_added) = &diff.zones.added.get(&sled_id) {
-                let zones = &zones_added.zones;
-                match zones.len() {
-                    n @ 1 => {
-                        total_new_zones += n;
-                    }
-                    n => {
-                        panic!("unexpected number of zones added to {sled_id}: {n}")
-                    }
+        for sled_id in &summary.sleds_modified {
+            let zones_diff =
+                &summary.zones_on_modified_sled(&sled_id).unwrap().zones;
+            assert!(zones_diff.removed.is_empty());
+            assert!(zones_diff.modified.is_empty());
+            let zones_added = &zones_diff.added;
+            match zones_added.len() {
+                0 => {}
+                n @ 1 => {
+                    total_new_zones += n;
                 }
-                for zone in zones {
-                    assert_eq!(
-                        zone.kind(),
-                        ZoneKind::InternalDns,
-                        "unexpectedly added a non-internal-DNS zone: {zone:?}"
-                    );
+                n => {
+                    panic!("unexpected number of zones added to {sled_id}: {n}")
                 }
+            }
+            for (_, zone) in zones_added {
+                assert_eq!(
+                    zone.kind(),
+                    ZoneKind::InternalDns,
+                    "unexpectedly added a non-internal-DNS zone: {zone:?}"
+                );
             }
         }
         assert_eq!(total_new_zones, 2);
@@ -1397,7 +1433,7 @@ mod test {
         let new_zone = blueprint3
             .blueprint_zones
             .values()
-            .flat_map(|c| &c.zones)
+            .flat_map(|c| c.zones.iter())
             .find(|zone| {
                 zone.disposition == BlueprintZoneDisposition::InService
                     && zone
@@ -1469,7 +1505,7 @@ mod test {
                     .expect("can't parse external DNS IP address")
             });
         for addr in external_dns_ips {
-            blueprint_builder.add_external_dns_ip(addr).unwrap();
+            blueprint_builder.inject_untracked_external_dns_ip(addr).unwrap();
         }
 
         // Now we can add external DNS zones. We'll add two to the first
@@ -1635,13 +1671,13 @@ mod test {
         for _ in 0..NEW_IN_SERVICE_DISKS {
             sled_details.resources.zpools.insert(
                 ZpoolUuid::from(zpool_rng.next()),
-                (new_sled_disk(PhysicalDiskPolicy::InService), vec![]),
+                new_sled_disk(PhysicalDiskPolicy::InService),
             );
         }
         for _ in 0..NEW_EXPUNGED_DISKS {
             sled_details.resources.zpools.insert(
                 ZpoolUuid::from(zpool_rng.next()),
-                (new_sled_disk(PhysicalDiskPolicy::Expunged), vec![]),
+                new_sled_disk(PhysicalDiskPolicy::Expunged),
             );
         }
 
@@ -1659,22 +1695,24 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint2.diff_since_blueprint(&blueprint1);
-        println!("1 -> 2 (some new disks, one expunged):\n{}", diff.display());
-        assert_eq!(diff.sleds_modified.len(), 1);
-        let sled_id = diff.sleds_modified.first().unwrap();
+        let summary = blueprint2.diff_since_blueprint(&blueprint1);
+        println!(
+            "1 -> 2 (some new disks, one expunged):\n{}",
+            summary.display()
+        );
+        assert_eq!(summary.sleds_modified.len(), 1);
 
         // We should be adding a Crucible zone for each new in-service disk.
-        assert_eq!(
-            diff.zones.added.get(sled_id).unwrap().zones.len(),
-            NEW_IN_SERVICE_DISKS
-        );
-        assert!(!diff.zones.removed.contains_key(sled_id));
-        assert_eq!(diff.physical_disks.added.len(), 1);
-        assert_eq!(diff.physical_disks.removed.len(), 0);
-        assert_eq!(diff.datasets.added.len(), 1);
-        assert_eq!(diff.datasets.modified.len(), 0);
-        assert_eq!(diff.datasets.removed.len(), 0);
+        assert_eq!(summary.total_zones_added(), NEW_IN_SERVICE_DISKS);
+        assert_eq!(summary.total_zones_removed(), 0);
+        assert_eq!(summary.total_disks_added(), NEW_IN_SERVICE_DISKS);
+        assert_eq!(summary.total_disks_removed(), 0);
+
+        // 1 Zone, Crucible, Transient Crucible Zone, and Debug dataset created
+        // per disk.
+        assert_eq!(summary.total_datasets_added(), NEW_IN_SERVICE_DISKS * 4);
+        assert_eq!(summary.total_datasets_removed(), 0);
+        assert_eq!(summary.total_datasets_modified(), 0);
 
         // Test a no-op planning iteration.
         assert_planning_makes_no_changes(
@@ -1706,22 +1744,27 @@ mod test {
         builder.policy_mut().target_internal_dns_zone_count = 1;
 
         // Manually update the blueprint to report an abnormal "Debug dataset"
-        let (_sled_id, datasets_config) =
-            blueprint1.blueprint_datasets.iter_mut().next().unwrap();
-        let (_dataset_id, dataset_config) = datasets_config
-            .datasets
-            .iter_mut()
-            .find(|(_, config)| {
-                matches!(config.kind, omicron_common::disk::DatasetKind::Debug)
-            })
-            .expect("No debug dataset found");
+        {
+            let (_sled_id, datasets_config) =
+                blueprint1.blueprint_datasets.iter_mut().next().unwrap();
+            let mut dataset_config = datasets_config
+                .datasets
+                .iter_mut()
+                .find(|config| {
+                    matches!(
+                        config.kind,
+                        omicron_common::disk::DatasetKind::Debug
+                    )
+                })
+                .expect("No debug dataset found");
 
-        // These values are out-of-sync with what the blueprint will typically
-        // enforce.
-        dataset_config.quota = None;
-        dataset_config.reservation = Some(
-            omicron_common::api::external::ByteCount::from_gibibytes_u32(1),
-        );
+            // These values are out-of-sync with what the blueprint will typically
+            // enforce.
+            dataset_config.quota = None;
+            dataset_config.reservation = Some(
+                omicron_common::api::external::ByteCount::from_gibibytes_u32(1),
+            );
+        }
 
         let input = builder.build();
 
@@ -1737,25 +1780,26 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint2.diff_since_blueprint(&blueprint1);
-        println!("1 -> 2 (modify a dataset):\n{}", diff.display());
+        let summary = blueprint2.diff_since_blueprint(&blueprint1);
+        println!("1 -> 2 (modify a dataset):\n{}", summary.display());
         assert_contents(
             "tests/output/planner_dataset_settings_modified_in_place_1_2.txt",
-            &diff.display().to_string(),
+            &summary.display().to_string(),
         );
 
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 1);
+        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.sleds_modified.len(), 1);
 
-        assert_eq!(diff.zones.added.len(), 0);
-        assert_eq!(diff.zones.removed.len(), 0);
-        assert_eq!(diff.zones.modified.len(), 0);
-        assert_eq!(diff.physical_disks.added.len(), 0);
-        assert_eq!(diff.physical_disks.removed.len(), 0);
-        assert_eq!(diff.datasets.added.len(), 0);
-        assert_eq!(diff.datasets.removed.len(), 0);
-        assert_eq!(diff.datasets.modified.len(), 1);
+        assert_eq!(summary.total_zones_added(), 0);
+        assert_eq!(summary.total_zones_removed(), 0);
+        assert_eq!(summary.total_zones_modified(), 0);
+        assert_eq!(summary.total_disks_added(), 0);
+        assert_eq!(summary.total_disks_removed(), 0);
+        assert_eq!(summary.total_disks_modified(), 0);
+        assert_eq!(summary.total_datasets_added(), 0);
+        assert_eq!(summary.total_datasets_removed(), 0);
+        assert_eq!(summary.total_datasets_modified(), 1);
 
         logctx.cleanup_successful();
     }
@@ -1999,7 +2043,7 @@ mod test {
             }
         }
         let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
-        let (_, (disk, _datasets)) = sled_details
+        let (_, disk) = sled_details
             .resources
             .zpools
             .iter_mut()
@@ -2023,36 +2067,74 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint2.diff_since_blueprint(&blueprint1);
-        println!("1 -> 2 (expunge a disk):\n{}", diff.display());
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 1);
+        let summary = blueprint2.diff_since_blueprint(&blueprint1);
+        println!("1 -> 2 (expunge a disk):\n{}", summary.display());
+        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.sleds_modified.len(), 1);
 
         // We should be removing a single zone, associated with the Crucible
         // using that device.
-        assert_eq!(diff.zones.added.len(), 0);
-        assert_eq!(diff.zones.removed.len(), 0);
-        assert_eq!(diff.zones.modified.len(), 1);
-        assert_eq!(diff.physical_disks.added.len(), 0);
-        assert_eq!(diff.physical_disks.removed.len(), 0);
-        assert_eq!(diff.datasets.added.len(), 0);
+        assert_eq!(summary.total_zones_added(), 0);
+        assert_eq!(summary.total_zones_removed(), 0);
+        assert_eq!(summary.total_zones_modified(), 1);
+        assert_eq!(summary.total_disks_added(), 0);
+        assert_eq!(summary.total_disks_removed(), 1);
+        assert_eq!(summary.total_datasets_added(), 0);
         // NOTE: Expunging a disk doesn't immediately delete datasets; see the
         // "decommissioned_disk_cleaner" background task for more context.
-        assert_eq!(diff.datasets.removed.len(), 0);
-        assert_eq!(diff.datasets.modified.len(), 0);
+        assert_eq!(summary.total_datasets_removed(), 0);
+
+        // The disposition has changed from `InService` to `Expunged` for the 4
+        // datasets on this sled.
+        assert_eq!(summary.total_datasets_modified(), 4);
+        // We don't know the expected name, other than the fact it's a crucible zone
+        let test_transient_zone_kind = DatasetKind::TransientZone {
+            name: "some-crucible-zone-name".to_string(),
+        };
+        let mut expected_kinds = BTreeSet::from_iter([
+            DatasetKind::Crucible,
+            DatasetKind::Debug,
+            DatasetKind::TransientZoneRoot,
+            test_transient_zone_kind.clone(),
+        ]);
+        for (_, sled_with_modified_datasets) in
+            &summary.diff.blueprint_datasets.modified
+        {
+            for (_, modified) in &sled_with_modified_datasets.datasets.modified
+            {
+                assert_eq!(
+                    *modified.disposition.before,
+                    BlueprintDatasetDisposition::InService
+                );
+                assert_eq!(
+                    *modified.disposition.after,
+                    BlueprintDatasetDisposition::Expunged
+                );
+                if let DatasetKind::TransientZone { name } =
+                    &modified.kind.before
+                {
+                    assert!(name.starts_with("oxz_crucible"));
+                    assert!(expected_kinds.remove(&test_transient_zone_kind));
+                } else {
+                    assert!(expected_kinds.remove(&modified.kind.before));
+                }
+            }
+        }
+        assert!(expected_kinds.is_empty());
 
         let (_zone_id, modified_zones) =
-            diff.zones.modified.iter().next().unwrap();
-        assert_eq!(modified_zones.zones.len(), 1);
-        let modified_zone = &modified_zones.zones.first().unwrap().zone;
+            summary.diff.blueprint_zones.modified.iter().next().unwrap();
+        assert_eq!(modified_zones.zones.modified.len(), 1);
+        let (_, modified_zone) =
+            &modified_zones.zones.modified.first_key_value().unwrap();
         assert!(
-            matches!(modified_zone.kind(), ZoneKind::Crucible),
+            matches!(modified_zone.zone_type.before.kind(), ZoneKind::Crucible),
             "Expected the modified zone to be a Crucible zone, but it was: {:?}",
-            modified_zone.kind()
+            modified_zone.zone_type.before.kind()
         );
         assert_eq!(
-            modified_zone.disposition(),
+            *modified_zone.disposition.after,
             BlueprintZoneDisposition::Expunged,
             "Should have expunged this zone"
         );
@@ -2131,7 +2213,7 @@ mod test {
         // For that pool, find the physical disk behind it, and mark it
         // expunged.
         let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
-        let (disk, _datasets) = sled_details
+        let disk = sled_details
             .resources
             .zpools
             .get_mut(&pool_to_expunge.id())
@@ -2152,30 +2234,33 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint2.diff_since_blueprint(&blueprint1);
-        println!("1 -> 2 (expunge a disk):\n{}", diff.display());
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 1);
+        let summary = blueprint2.diff_since_blueprint(&blueprint1);
+        println!("1 -> 2 (expunge a disk):\n{}", summary.display());
+        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.sleds_modified.len(), 1);
 
         // We should be removing all zones using this zpool. Because we're
         // removing the NTP zone, we should add a new one.
-        assert_eq!(diff.zones.added.len(), 1);
-        assert_eq!(diff.zones.removed.len(), 0);
-        assert_eq!(diff.zones.modified.len(), 1);
+        assert_eq!(summary.total_zones_added(), 1);
+        assert_eq!(summary.total_zones_removed(), 0);
+        assert_eq!(summary.total_zones_modified(), 6);
 
-        let (_zone_id, added_zones) = diff.zones.added.iter().next().unwrap();
-        assert_eq!(added_zones.zones.len(), 1);
-        for zone in &added_zones.zones {
+        let (_zone_id, zones_on_a_modified_sled) =
+            summary.diff.blueprint_zones.modified.iter().next().unwrap();
+        let added_zones = &zones_on_a_modified_sled.zones.added;
+        assert_eq!(added_zones.len(), 1);
+        for (_, zone) in added_zones {
             assert_eq!(zone.kind(), ZoneKind::InternalNtp);
         }
 
-        let (_zone_id, modified_zones) =
-            diff.zones.modified.iter().next().unwrap();
-        assert_eq!(modified_zones.zones.len(), zones_using_zpool);
-        for modified_zone in &modified_zones.zones {
+        assert_eq!(
+            zones_on_a_modified_sled.zones.modified.len(),
+            zones_using_zpool
+        );
+        for (_, modified_zone) in &zones_on_a_modified_sled.zones.modified {
             assert_eq!(
-                modified_zone.zone.disposition(),
+                *modified_zone.disposition.after,
                 BlueprintZoneDisposition::Expunged,
                 "Should have expunged this zone"
             );
@@ -2259,13 +2344,23 @@ mod test {
             // expunged, so lie and pretend like that already happened
             // (otherwise the planner will rightfully fail to generate a new
             // blueprint, because we're feeding it invalid inputs).
-            for zone in
-                &mut blueprint1.blueprint_zones.get_mut(&sled_id).unwrap().zones
+            for mut zone in
+                &mut blueprint1.blueprint_zones.get_mut(sled_id).unwrap().zones
             {
                 zone.disposition = BlueprintZoneDisposition::Expunged;
             }
 
-            sled_id
+            // Similarly, a sled can only have gotten into the `Decommissioned`
+            // state via blueprints. If the database says the sled is
+            // decommissioned but the parent blueprint says it's still active,
+            // that's an invalid state that the planner will reject.
+            *blueprint1
+                .sled_state
+                .get_mut(sled_id)
+                .expect("found state in parent blueprint") =
+                SledState::Decommissioned;
+
+            *sled_id
         };
         // Actually expunge the sled (the work that was deferred during iteration above)
         builder.expunge_sled(&expunged_sled_id).unwrap();
@@ -2308,14 +2403,14 @@ mod test {
             &blueprint2.display().to_string(),
         );
 
-        let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        let summary = blueprint2.diff_since_blueprint(&blueprint1);
         println!(
             "1 -> 2 (added additional Nexus zones, take 2 sleds out of service):\n{}",
-            diff.display()
+            summary.display()
         );
         assert_contents(
             "tests/output/planner_nonprovisionable_1_2.txt",
-            &diff.display().to_string(),
+            &summary.display().to_string(),
         );
 
         // The expunged and decommissioned sleds should have had all zones be
@@ -2326,16 +2421,18 @@ mod test {
         // cleanup, and we aren't performing garbage collection on zones or
         // sleds at the moment.
 
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
+        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.sleds_modified.len(), 4);
+        assert_eq!(summary.sleds_unchanged.len(), 1);
 
-        assert_all_zones_expunged(&diff, expunged_sled_id, "expunged sled");
+        assert_all_zones_expunged(&summary, expunged_sled_id, "expunged sled");
 
         // Only 2 of the 3 remaining sleds (not the non-provisionable sled)
         // should get additional Nexus zones. We expect a total of 6 new Nexus
         // zones, which should be split evenly between the two sleds, while the
         // non-provisionable sled should be unchanged.
-        let mut remaining_modified_sleds = diff.sleds_modified.clone();
+        let mut remaining_modified_sleds = summary.sleds_modified.clone();
         remaining_modified_sleds.remove(&expunged_sled_id);
         remaining_modified_sleds.remove(&decommissioned_sled_id);
 
@@ -2345,10 +2442,11 @@ mod test {
             assert!(sled_id != nonprovisionable_sled_id);
             assert!(sled_id != expunged_sled_id);
             assert!(sled_id != decommissioned_sled_id);
-            assert!(!diff.zones.removed.contains_key(&sled_id));
-            assert!(!diff.zones.modified.contains_key(&sled_id));
-            let zones = &diff.zones.added.get(&sled_id).unwrap().zones;
-            for zone in zones {
+            let zones_on_modified_sled =
+                &summary.zones_on_modified_sled(&sled_id).unwrap().zones;
+            assert!(zones_on_modified_sled.removed.is_empty());
+            let zones = &zones_on_modified_sled.added;
+            for (_, zone) in zones {
                 if ZoneKind::Nexus != zone.kind() {
                     panic!("unexpectedly added a non-Nexus zone: {zone:?}");
                 };
@@ -2393,7 +2491,7 @@ mod test {
             .unwrap()
             .zones;
 
-        zones.retain_mut(|zone| {
+        zones.retain(|zone| {
             if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 internal_address,
                 ..
@@ -2455,13 +2553,18 @@ mod test {
     }
 
     #[track_caller]
-    fn assert_all_zones_expunged(
-        diff: &BlueprintDiff,
+    fn assert_all_zones_expunged<'a>(
+        summary: &'a BlueprintDiffSummary<'a>,
         expunged_sled_id: SledUuid,
         desc: &str,
     ) {
         assert!(
-            !diff.zones.added.contains_key(&expunged_sled_id),
+            summary
+                .diff
+                .blueprint_zones
+                .added
+                .get(&expunged_sled_id)
+                .map_or(true, |zones| zones.zones.is_empty()),
             "for {desc}, no zones should have been added to blueprint"
         );
 
@@ -2471,26 +2574,31 @@ mod test {
         // process that isn't currently defined.
 
         assert!(
-            !diff.zones.removed.contains_key(&expunged_sled_id),
+            summary
+                .diff
+                .blueprint_zones
+                .removed
+                .get(&expunged_sled_id)
+                .map_or(true, |zones| zones.zones.is_empty()),
             "for {desc}, no zones should have been removed from blueprint"
         );
 
         // Run through all the common zones and ensure that all of them
         // have been marked expunged.
         let modified_zones =
-            diff.zones.modified.get(&expunged_sled_id).unwrap();
+            summary.zones_on_modified_sled(&expunged_sled_id).unwrap();
         assert_eq!(
-            modified_zones.generation_before.next(),
-            modified_zones.generation_after,
+            modified_zones.generation.before.next(),
+            *modified_zones.generation.after,
             "for {desc}, generation should have been bumped"
         );
 
-        for modified_zone in &modified_zones.zones {
+        for (_, modified_zone) in &modified_zones.zones.modified {
             assert_eq!(
-                modified_zone.zone.disposition(),
+                *modified_zone.disposition.after,
                 BlueprintZoneDisposition::Expunged,
                 "for {desc}, zone {} should have been marked expunged",
-                modified_zone.zone.id()
+                modified_zone.id.after
             );
         }
     }
@@ -2575,16 +2683,16 @@ mod test {
         // collect zones, so we should still have the sled's expunged zones
         // (even though the sled itself is no longer present in the list of
         // commissioned sleds).
-        let diff = blueprint3.diff_since_blueprint(&blueprint2);
+        let summary = blueprint3.diff_since_blueprint(&blueprint2);
         println!(
             "2 -> 3 (decommissioned {expunged_sled_id}):\n{}",
-            diff.display()
+            summary.display()
         );
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 0);
+        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.sleds_modified.len(), 0);
         assert_eq!(
-            diff.sleds_unchanged.len(),
+            summary.sleds_unchanged.len(),
             ExampleSystemBuilder::DEFAULT_N_SLEDS
         );
 
@@ -2621,16 +2729,16 @@ mod test {
         .plan()
         .expect("succeeded in planner");
 
-        let diff = blueprint4.diff_since_blueprint(&blueprint3);
+        let summary = blueprint4.diff_since_blueprint(&blueprint3);
         println!(
             "3 -> 4 (removed from input {expunged_sled_id}):\n{}",
-            diff.display()
+            summary.display()
         );
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 0);
+        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.sleds_modified.len(), 0);
         assert_eq!(
-            diff.sleds_unchanged.len(),
+            summary.sleds_unchanged.len(),
             ExampleSystemBuilder::DEFAULT_N_SLEDS
         );
 
@@ -3071,13 +3179,6 @@ mod test {
         assert_contents(
             "tests/output/planner_deploy_all_keeper_nodes_3_4.txt",
             &diff.display().to_string(),
-        );
-
-        let coll_diff = blueprint4.diff_since_collection(&collection);
-        println!("coll_diff = {coll_diff:#?}");
-        assert_contents(
-            "tests/output/planner_deploy_all_keeper_nodes_4_collection.txt",
-            &coll_diff.display().to_string(),
         );
 
         let bp3_config = blueprint3.clickhouse_cluster_config.as_ref().unwrap();
