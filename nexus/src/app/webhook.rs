@@ -9,7 +9,9 @@ use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::WebhookEvent;
 use nexus_db_queries::db::model::WebhookEventClass;
 use nexus_db_queries::db::model::WebhookReceiverConfig;
+use nexus_db_queries::db::model::WebhookRxSecret;
 use nexus_types::external_api::params;
+use nexus_types::external_api::views;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
@@ -65,5 +67,29 @@ impl super::Nexus {
         self.background_tasks.task_webhook_dispatcher.activate();
 
         Ok(event)
+    }
+
+    pub async fn webhook_receiver_secret_add(
+        &self,
+        opctx: &OpContext,
+        id: WebhookReceiverUuid,
+        secret: String,
+    ) -> Result<views::WebhookSecretId, Error> {
+        let (authz_rx, _) = LookupPath::new(opctx, &self.datastore())
+            .webhook_receiver_id(id)
+            .fetch()
+            .await?;
+        let secret = WebhookRxSecret::new(authz_rx.id(), secret);
+        let WebhookRxSecret { signature_id, .. } = self
+            .datastore()
+            .webhook_rx_secret_create(opctx, &authz_rx, secret)
+            .await?;
+        slog::info!(
+            &opctx.log,
+            "added secret to webhook receiver";
+            "rx_id" => ?authz_rx.id(),
+            "secret_id" => ?signature_id,
+        );
+        Ok(views::WebhookSecretId { id: signature_id.to_string() })
     }
 }

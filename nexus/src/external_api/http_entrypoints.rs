@@ -7099,21 +7099,25 @@ impl NexusExternalApi for NexusExternalApiImpl {
     /// Add a secret to a webhook.
     async fn webhook_secrets_add(
         rqctx: RequestContext<Self::Context>,
-        _path_params: Path<params::WebhookPath>,
-        _params: TypedBody<params::WebhookSecret>,
+        path_params: Path<params::WebhookPath>,
+        params: TypedBody<params::WebhookSecret>,
     ) -> Result<HttpResponseCreated<views::WebhookSecretId>, HttpError> {
         let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
+        let handler =
+            async {
+                let nexus = &apictx.context.nexus;
 
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-
-            Err(nexus
-                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
-                .await
-                .into())
-        };
+                let params::WebhookPath { webhook_id } =
+                    path_params.into_inner();
+                let params::WebhookSecret { secret } = params.into_inner();
+                let opctx =
+                    crate::context::op_context_for_external_api(&rqctx).await?;
+                let secret = nexus.webhook_receiver_secret_add(&opctx,
+                    omicron_uuid_kinds::WebhookReceiverUuid::from_untyped_uuid(
+                        webhook_id,
+                    ),secret).await?;
+                Ok(HttpResponseCreated(secret))
+            };
         apictx
             .context
             .external_latencies

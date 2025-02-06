@@ -410,6 +410,26 @@ impl DataStore {
             })
     }
 
+    pub async fn webhook_rx_secret_create(
+        &self,
+        opctx: &OpContext,
+        authz_rx: &authz::WebhookReceiver,
+        secret: WebhookRxSecret,
+    ) -> CreateResult<WebhookRxSecret> {
+        opctx.authorize(authz::Action::CreateChild, authz_rx).await?;
+        let conn = self.pool_connection_authorized(&opctx).await?;
+        let secret = self.add_secret_on_conn(secret, &conn).await.map_err(
+            |e| match e {
+                TransactionError::CustomError(e) => e,
+                TransactionError::Database(e) => public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_rx),
+                ),
+            },
+        )?;
+        Ok(secret)
+    }
+
     async fn add_secret_on_conn(
         &self,
         secret: WebhookRxSecret,
