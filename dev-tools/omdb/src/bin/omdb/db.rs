@@ -93,6 +93,7 @@ use nexus_db_model::UpstairsRepairNotification;
 use nexus_db_model::UpstairsRepairProgress;
 use nexus_db_model::Vmm;
 use nexus_db_model::Volume;
+use nexus_db_model::VolumeRepair;
 use nexus_db_model::VpcSubnet;
 use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
@@ -836,10 +837,18 @@ enum VolumeCommands {
     Info(VolumeInfoArgs),
     /// Summarize current volumes
     List,
+    /// What is holding the lock?
+    LockHolder(VolumeLockHolderArgs),
 }
 
 #[derive(Debug, Args, Clone)]
 struct VolumeInfoArgs {
+    /// The UUID of the volume
+    uuid: Uuid,
+}
+
+#[derive(Debug, Args, Clone)]
+struct VolumeLockHolderArgs {
     /// The UUID of the volume
     uuid: Uuid,
 }
@@ -1129,11 +1138,14 @@ impl DbArgs {
                         command: ValidateCommands::ValidateRegionSnapshots,
                     }) => cmd_db_validate_region_snapshots(&datastore).await,
                     DbCommands::Volumes(VolumeArgs {
-                        command: VolumeCommands::Info(uuid),
-                    }) => cmd_db_volume_info(&datastore, uuid).await,
+                        command: VolumeCommands::Info(args),
+                    }) => cmd_db_volume_info(&datastore, args).await,
                     DbCommands::Volumes(VolumeArgs {
                         command: VolumeCommands::List,
                     }) => cmd_db_volume_list(&datastore, &fetch_opts).await,
+                    DbCommands::Volumes(VolumeArgs {
+                        command: VolumeCommands::LockHolder(args),
+                    }) => cmd_db_volume_lock_holder(&datastore, args).await,
 
                     DbCommands::Vmm(VmmArgs { command: VmmCommands::Info(args) }) => {
                         cmd_db_vmm_info(&opctx, &datastore, &fetch_opts, &args)
@@ -2323,6 +2335,102 @@ fn print_vcr(vcr: VolumeConstructionRequest, pad: usize) {
             println!("{indent}Unsupported volume type");
         }
     }
+}
+
+/// What is holding the volume lock?
+async fn cmd_db_volume_lock_holder(
+    datastore: &DataStore,
+    args: &VolumeLockHolderArgs,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct HolderRow {
+        volume_id: String,
+        lock_id: String,
+        holder_type: String,
+    }
+
+    let mut rows = vec![];
+
+    let volume_id = VolumeUuid::from_untyped_uuid(args.uuid);
+
+    let maybe_volume_repair_record = datastore
+        .pool_connection_for_tests()
+        .await?
+        .transaction_async(|conn| async move {
+            use db::schema::volume_repair::dsl;
+
+            conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+            dsl::volume_repair
+                .filter(dsl::volume_id.eq(to_db_typed_uuid(volume_id)))
+                .select(VolumeRepair::as_select())
+                .first_async(&conn)
+                .await
+        })
+        .await
+        .optional()?;
+
+    if let Some(volume_repair_record) = maybe_volume_repair_record {
+        let conn = datastore.pool_connection_for_tests().await?;
+
+        let is_region_replacement = {
+            use db::schema::region_replacement::dsl;
+
+            dsl::region_replacement
+                .filter(dsl::id.eq(volume_repair_record.repair_id))
+                .select(RegionReplacement::as_select())
+                .load_async(&*conn)
+                .await
+                .optional()?
+                .is_some()
+        };
+
+        let is_region_snapshot_replacement = {
+            use db::schema::region_snapshot_replacement::dsl;
+
+            dsl::region_snapshot_replacement
+                .filter(dsl::id.eq(volume_repair_record.repair_id))
+                .select(RegionSnapshotReplacement::as_select())
+                .load_async(&*conn)
+                .await
+                .optional()?
+                .is_some()
+        };
+
+        let holder_type = if is_region_replacement {
+            String::from("region replacement")
+        } else if is_region_snapshot_replacement {
+            String::from("region snapshot replacement")
+        } else {
+            // It's possible that the `snapshot_create` saga has taken the lock,
+            // but there's no way to know what that lock id is as it is randomly
+            // generated during the saga.
+            //
+            // TODO with a better interface for querying sagas, one could:
+            //
+            // - scan for all the currently running `snapshot_create` sagas
+            // - deserialize the output (if it's there) of the "lock_id" nodes
+            // - match against that
+            //
+            String::from("unknown (could be snapshot?)")
+        };
+
+        rows.push(HolderRow {
+            volume_id: volume_id.to_string(),
+            lock_id: volume_repair_record.repair_id.to_string(),
+            holder_type,
+        });
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
 }
 
 /// List all regions still missing ports
