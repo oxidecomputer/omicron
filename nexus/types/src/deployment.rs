@@ -250,6 +250,21 @@ impl Blueprint {
         })
     }
 
+    /// Iterate over the [`BlueprintPhysicalDiskConfig`] instances in the
+    /// blueprint that match the provided filter, along with the associated
+    /// sled id.
+    pub fn all_omicron_disks(
+        &self,
+        filter: DiskFilter,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintPhysicalDiskConfig)> {
+        self.blueprint_disks
+            .iter()
+            .flat_map(move |(sled_id, disks)| {
+                disks.disks.iter().map(|disk| (*sled_id, disk))
+            })
+            .filter(move |(_, d)| d.disposition.matches(filter))
+    }
+
     /// Iterate over the [`BlueprintDatasetsConfig`] instances in the blueprint.
     pub fn all_omicron_datasets(
         &self,
