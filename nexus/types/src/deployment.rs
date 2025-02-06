@@ -322,11 +322,20 @@ impl BpTableData for &BlueprintPhysicalDisksConfig {
     }
 
     fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
-        let sorted_disk_ids: BTreeSet<DiskIdentity> =
-            self.disks.iter().map(|d| d.identity.clone()).collect();
+        let mut disks: Vec<_> = self.disks.iter().cloned().collect();
+        disks.sort_unstable_by_key(|d| d.identity.clone());
 
-        sorted_disk_ids.into_iter().map(move |d| {
-            BpTableRow::from_strings(state, vec![d.vendor, d.model, d.serial])
+        disks.into_iter().map(move |d| {
+            BpTableRow::from_strings(
+                state,
+                vec![
+                    d.identity.vendor,
+                    d.identity.model,
+                    d.identity.serial,
+                    d.disposition.to_string(),
+                    d.state.to_string(),
+                ],
+            )
         })
     }
 }
@@ -887,6 +896,17 @@ impl BlueprintPhysicalDiskDisposition {
                 DiskFilter::InService => false,
                 DiskFilter::ExpungedButNotDecommissioned => true,
             },
+        }
+    }
+}
+
+impl fmt::Display for BlueprintPhysicalDiskDisposition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            // Neither `write!(f, "...")` nor `f.write_str("...")` obey fill
+            // and alignment (used above), but this does.
+            BlueprintPhysicalDiskDisposition::InService => "in service".fmt(f),
+            BlueprintPhysicalDiskDisposition::Expunged => "expunged".fmt(f),
         }
     }
 }

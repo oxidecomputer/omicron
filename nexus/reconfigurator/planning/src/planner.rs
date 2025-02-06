@@ -2611,15 +2611,18 @@ mod test {
         let (collection, input, blueprint1) = example(&logctx.log, TEST_NAME);
 
         // Expunge one of the sleds.
+        //
+        // We expunge a sled via planning input using the builder so that disks
+        // are properly taken into account.
         let mut builder = input.into_builder();
         let expunged_sled_id = {
             let mut iter = builder.sleds_mut().iter_mut();
-            let (sled_id, details) = iter.next().expect("at least one sled");
-            details.policy = SledPolicy::Expunged;
+            let (sled_id, _) = iter.next().expect("at least one sled");
             *sled_id
         };
-
+        builder.expunge_sled(&expunged_sled_id).expect("sled is expungable");
         let input = builder.build();
+
         let mut blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint1,

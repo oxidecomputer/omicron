@@ -331,7 +331,7 @@ impl BpTableSchema for BpPhysicalDisksTableSchema {
     }
 
     fn column_names(&self) -> &'static [&'static str] {
-        &["vendor", "model", "serial"]
+        &["vendor", "model", "serial", "disposition", "state"]
     }
 }
 
