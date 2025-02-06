@@ -58,17 +58,6 @@ stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
 =============================================
-EXECUTING COMMAND: omdb ["db", "reconfigurator-save", "<TMP_PATH_REDACTED>"]
-termination: Exited(0)
----------------------------------------------
-stdout:
----------------------------------------------
-stderr:
-note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
-note: database schema version matches expected (<redacted database version>)
-assembling reconfigurator state ... done
-wrote <TMP_PATH_REDACTED>
-=============================================
 EXECUTING COMMAND: omdb ["db", "sleds"]
 termination: Exited(0)
 ---------------------------------------------
@@ -1560,4 +1549,15 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["reconfigurator", "export", "<TMP_PATH_REDACTED>"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+assembling reconfigurator state ... done
+wrote <TMP_PATH_REDACTED>
 =============================================

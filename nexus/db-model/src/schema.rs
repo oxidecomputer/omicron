@@ -1178,6 +1178,7 @@ table! {
         vpc_router_id -> Uuid,
         target -> Text,
         destination -> Text,
+        vpc_subnet_id -> Nullable<Uuid>,
     }
 }
 

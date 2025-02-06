@@ -118,22 +118,25 @@ impl DisksEditor {
     pub fn expunge(
         &mut self,
         disk_id: &PhysicalDiskUuid,
-    ) -> Result<ZpoolUuid, DisksEditError> {
+    ) -> Result<(bool, ZpoolUuid), DisksEditError> {
         let config = self.disks.get_mut(disk_id).ok_or_else(|| {
             DisksEditError::ExpungeNonexistentDisk { id: *disk_id }
         })?;
 
+        let did_expunge: bool;
         match config.disposition {
             BlueprintPhysicalDiskDisposition::InService => {
                 config.disposition = BlueprintPhysicalDiskDisposition::Expunged;
                 self.counts.expunged += 1;
+                did_expunge = true;
             }
             BlueprintPhysicalDiskDisposition::Expunged => {
                 // expunge is idempotent; do nothing
+                did_expunge = false;
             }
         }
 
-        Ok(config.pool_id)
+        Ok((did_expunge, config.pool_id))
     }
 
     pub fn decommission(

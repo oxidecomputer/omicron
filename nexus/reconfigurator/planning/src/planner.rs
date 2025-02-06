@@ -11,19 +11,22 @@ use crate::blueprint_builder::Ensure;
 use crate::blueprint_builder::EnsureMultiple;
 use crate::blueprint_builder::Error;
 use crate::blueprint_builder::Operation;
+use crate::blueprint_editor::DisksEditError;
+use crate::blueprint_editor::SledEditError;
 use crate::planner::omicron_zone_placement::PlacementError;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::CockroachDbSettings;
+use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::ZpoolFilter;
+use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
@@ -180,13 +183,7 @@ impl<'a> Planner<'a> {
             self.input.all_sleds(SledFilter::Commissioned)
         {
             commissioned_sled_ids.insert(sled_id);
-
-            // Expunge any disks that need it
-            self.blueprint
-                .sled_expunge_disks(sled_id, &sled_details.resources)?;
-
-            // Perform the expungement, for any zones that might need it.
-            self.blueprint.expunge_zones_for_sled(sled_id, sled_details)?;
+            self.do_plan_expunge_for_commissioned_sled(sled_id, sled_details)?;
         }
 
         // Check for any decommissioned sleds (i.e., sleds for which our
@@ -211,6 +208,87 @@ impl<'a> Planner<'a> {
                         },
                     );
                 }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn do_plan_expunge_for_commissioned_sled(
+        &mut self,
+        sled_id: SledUuid,
+        sled_details: &SledDetails,
+    ) -> Result<(), Error> {
+        match sled_details.policy {
+            SledPolicy::InService { .. } => {
+                // Sled is still in service, but have any of its disks been
+                // expunged? If so, expunge them in the blueprint (which
+                // whill chain to expunging any datasets and zones that were
+                // using them).
+                //
+                // We don't use a more specific disk filter here because we
+                // want to look at _only_ the policy: if the operator has
+                // said a disk should be expunged, we'll expunge it from the
+                // blueprint regardless of its overall state.
+                for (_, disk) in sled_details
+                    .resources
+                    .all_disks(DiskFilter::All)
+                    .filter(|(_, disk)| match disk.policy {
+                        PhysicalDiskPolicy::InService => false,
+                        PhysicalDiskPolicy::Expunged => true,
+                    })
+                {
+                    match self.blueprint.expunge_disk(sled_id, disk.disk_id) {
+                        Ok(()) => (),
+                        Err(Error::SledEditError {
+                            err:
+                                SledEditError::EditDisks(
+                                    DisksEditError::ExpungeNonexistentDisk {
+                                        ..
+                                    },
+                                ),
+                            ..
+                        }) => {
+                            // While it should be rare, it's possible there's an
+                            // expunged disk present in the planning input that
+                            // isn't in the blueprint at all (e.g., a disk could
+                            // have been added and then expunged since our
+                            // parent blueprint was created). We don't want to
+                            // fail in this case, but will issue a warning.
+                            warn!(
+                                self.log,
+                                "planning input contained expunged disk not \
+                                 present in parent blueprint";
+                                "sled_id" => %sled_id,
+                                "disk" => ?disk,
+                            );
+                        }
+                        Err(err) => return Err(err),
+                    }
+                }
+
+                // Expunge any multinode clickhouse zones if the policy says
+                // they shouldn't exist.
+                if !self.input.clickhouse_cluster_enabled() {
+                    self.blueprint.expunge_all_multinode_clickhouse(
+                        sled_id,
+                        ZoneExpungeReason::ClickhouseClusterDisabled,
+                    )?;
+                }
+
+                // Similarly, expunge any singlenode clickhouse if the policy
+                // says they should exist.
+                if !self.input.clickhouse_single_node_enabled() {
+                    self.blueprint.expunge_all_singlenode_clickhouse(
+                        sled_id,
+                        ZoneExpungeReason::ClickhouseSingleNodeDisabled,
+                    )?;
+                }
+            }
+            // Has the sled been expunged? If so, expunge everything on this
+            // sled from the blueprint.
+            SledPolicy::Expunged => {
+                self.blueprint.expunge_sled(sled_id)?;
             }
         }
 
@@ -708,87 +786,12 @@ impl<'a> Planner<'a> {
     }
 }
 
-/// Returns `Some(reason)` if the sled needs its zones to be expunged,
-/// based on the policy and state.
-fn sled_needs_all_zones_expunged(
-    state: SledState,
-    policy: SledPolicy,
-) -> Option<ZoneExpungeReason> {
-    match state {
-        SledState::Active => {}
-        SledState::Decommissioned => {
-            // A decommissioned sled that still has resources attached to it is
-            // an illegal state, but representable. If we see a sled in this
-            // state, we should still expunge all zones in it, but parent code
-            // should warn on it.
-            return Some(ZoneExpungeReason::SledDecommissioned);
-        }
-    }
-
-    match policy {
-        SledPolicy::InService { .. } => None,
-        SledPolicy::Expunged => Some(ZoneExpungeReason::SledExpunged),
-    }
-}
-
-pub(crate) fn zone_needs_expungement(
-    sled_details: &SledDetails,
-    zone_config: &BlueprintZoneConfig,
-    input: &PlanningInput,
-) -> Option<ZoneExpungeReason> {
-    // Should we expunge the zone because the sled is gone?
-    if let Some(reason) =
-        sled_needs_all_zones_expunged(sled_details.state, sled_details.policy)
-    {
-        return Some(reason);
-    }
-
-    // Should we expunge the zone because durable storage is gone?
-    if let Some(durable_storage_zpool) = zone_config.zone_type.durable_zpool() {
-        let zpool_id = durable_storage_zpool.id();
-        if !sled_details.resources.zpool_is_provisionable(&zpool_id) {
-            return Some(ZoneExpungeReason::DiskExpunged);
-        }
-    };
-
-    // Should we expunge the zone because transient storage is gone?
-    if let Some(ref filesystem_zpool) = zone_config.filesystem_pool {
-        let zpool_id = filesystem_zpool.id();
-        if !sled_details.resources.zpool_is_provisionable(&zpool_id) {
-            return Some(ZoneExpungeReason::DiskExpunged);
-        }
-    };
-
-    // Should we expunge the zone because clickhouse clusters are no longer
-    // enabled via policy?
-    if !input.clickhouse_cluster_enabled() {
-        if zone_config.zone_type.is_clickhouse_keeper()
-            || zone_config.zone_type.is_clickhouse_server()
-        {
-            return Some(ZoneExpungeReason::ClickhouseClusterDisabled);
-        }
-    }
-
-    // Should we expunge the zone because single-node clickhouse is no longer
-    // enabled via policy?
-    if !input.clickhouse_single_node_enabled() {
-        if zone_config.zone_type.is_clickhouse() {
-            return Some(ZoneExpungeReason::ClickhouseSingleNodeDisabled);
-        }
-    }
-
-    None
-}
-
 /// The reason a sled's zones need to be expunged.
 ///
 /// This is used only for introspection and logging -- it's not part of the
 /// logical flow.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub(crate) enum ZoneExpungeReason {
-    DiskExpunged,
-    SledDecommissioned,
-    SledExpunged,
     ClickhouseClusterDisabled,
     ClickhouseSingleNodeDisabled,
 }

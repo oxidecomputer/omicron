@@ -1839,7 +1839,22 @@ CREATE TABLE IF NOT EXISTS omicron.public.router_route (
     vpc_router_id UUID NOT NULL,
     kind omicron.public.router_route_kind NOT NULL,
     target STRING(128) NOT NULL,
-    destination STRING(128) NOT NULL
+    destination STRING(128) NOT NULL,
+
+    /* FK to the `vpc_subnet` table. See constraints below */
+    vpc_subnet_id UUID,
+
+    /*
+     * Only nullable if this is rule is not, in-fact, virtual and tightly coupled to a
+     * linked item. Today, these are 'vpc_subnet' rules and their parent subnets.
+     * 'vpc_peering' routes may also fall into this category in future.
+     *
+     * User-created/modifiable routes must have this field as NULL.
+     */
+    CONSTRAINT non_null_vpc_subnet CHECK (
+        (kind = 'vpc_subnet' AND vpc_subnet_id IS NOT NULL) OR
+        (kind != 'vpc_subnet' AND vpc_subnet_id IS NULL)
+    )
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_route_by_router ON omicron.public.router_route (
@@ -1847,6 +1862,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_route_by_router ON omicron.public.route
     name
 ) WHERE
     time_deleted IS NULL;
+
+-- Enforce uniqueness of 'vpc_subnet' routes on parent (and help add/delete).
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_subnet_route_by_id ON omicron.public.router_route (
+    vpc_subnet_id
+) WHERE
+    time_deleted IS NULL AND kind = 'vpc_subnet';
 
 CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway (
     id UUID PRIMARY KEY,
@@ -4811,7 +4832,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '122.0.0', NULL)
+    (TRUE, NOW(), NOW(), '123.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
