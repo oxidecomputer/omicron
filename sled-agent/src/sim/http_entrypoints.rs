@@ -27,7 +27,6 @@ use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::{Inventory, OmicronZonesConfig};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::SledVmmState;
-use omicron_common::api::internal::nexus::UpdateArtifactId;
 use omicron_common::api::internal::shared::ExternalIpGatewayMap;
 use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
@@ -170,21 +169,6 @@ impl SledAgentApi for SledAgentSimImpl {
             )
             .await?,
         ))
-    }
-
-    async fn update_artifact(
-        rqctx: RequestContext<Self::Context>,
-        artifact: TypedBody<UpdateArtifactId>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let sa = rqctx.context();
-        sa.updates()
-            .download_artifact(
-                artifact.into_inner(),
-                rqctx.context().nexus_client.as_ref(),
-            )
-            .await
-            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
-        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn artifact_list(

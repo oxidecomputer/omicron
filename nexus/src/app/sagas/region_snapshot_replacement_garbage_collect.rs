@@ -215,7 +215,6 @@ pub(crate) mod test {
     };
     use nexus_db_model::RegionSnapshotReplacement;
     use nexus_db_model::RegionSnapshotReplacementState;
-    use nexus_db_model::Volume;
     use nexus_db_queries::authn::saga::Serialized;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
@@ -270,11 +269,8 @@ pub(crate) mod test {
             read_only_parent: None,
         };
 
-        let volume_data =
-            serde_json::to_string(&volume_construction_request).unwrap();
-
         datastore
-            .volume_create(Volume::new(old_snapshot_volume_id, volume_data))
+            .volume_create(old_snapshot_volume_id, volume_construction_request)
             .await
             .unwrap();
 
@@ -290,16 +286,15 @@ pub(crate) mod test {
         let volume_id = VolumeUuid::new_v4();
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: Uuid::new_v4(),
                     block_size: 512,
                     sub_volumes: vec![], // nothing needed here
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 

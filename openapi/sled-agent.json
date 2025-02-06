@@ -1327,32 +1327,6 @@
         }
       }
     },
-    "/update": {
-      "post": {
-        "operationId": "update_artifact",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateArtifactId"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/v2p": {
       "get": {
         "summary": "List v2p mappings present on sled",
@@ -4388,24 +4362,6 @@
           "net"
         ]
       },
-      "KnownArtifactKind": {
-        "description": "Kinds of update artifacts, as used by Nexus to determine what updates are available and by sled-agent to determine how to apply an update when asked.",
-        "type": "string",
-        "enum": [
-          "gimlet_sp",
-          "gimlet_rot",
-          "gimlet_rot_bootloader",
-          "host",
-          "trampoline",
-          "control_plane",
-          "psc_sp",
-          "psc_rot",
-          "psc_rot_bootloader",
-          "switch_sp",
-          "switch_rot",
-          "switch_rot_bootloader"
-        ]
-      },
       "L4PortRange": {
         "example": "22",
         "title": "A range of IP ports",
@@ -5618,10 +5574,6 @@
           "version"
         ]
       },
-      "SemverVersion": {
-        "type": "string",
-        "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
-      },
       "SledDiagnosticsQueryOutput": {
         "oneOf": [
           {
@@ -6040,37 +5992,6 @@
       "TypedUuidForZpoolKind": {
         "type": "string",
         "format": "uuid"
-      },
-      "UpdateArtifactId": {
-        "description": "An identifier for a single update artifact.",
-        "type": "object",
-        "properties": {
-          "kind": {
-            "description": "The kind of update artifact this is.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/KnownArtifactKind"
-              }
-            ]
-          },
-          "name": {
-            "description": "The artifact's name.",
-            "type": "string"
-          },
-          "version": {
-            "description": "The artifact's version.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SemverVersion"
-              }
-            ]
-          }
-        },
-        "required": [
-          "kind",
-          "name",
-          "version"
-        ]
       },
       "UplinkAddressConfig": {
         "type": "object",

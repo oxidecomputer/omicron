@@ -387,16 +387,15 @@ mod test {
         let volume_id = VolumeUuid::new_v4();
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: Uuid::new_v4(), // not required to match!
                     block_size: 512,
                     sub_volumes: vec![], // nothing needed here
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -492,16 +491,15 @@ mod test {
         let volume_id = VolumeUuid::new_v4();
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: Uuid::new_v4(),
                     block_size: 512,
                     sub_volumes: vec![],
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -676,9 +674,9 @@ mod test {
         let volume_id = VolumeUuid::new_v4();
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: Uuid::new_v4(), // not required to match!
                     block_size: 512,
                     sub_volumes: vec![],
@@ -702,9 +700,8 @@ mod test {
                             },
                         },
                     )),
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 

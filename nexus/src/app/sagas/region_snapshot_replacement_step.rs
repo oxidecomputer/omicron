@@ -294,16 +294,9 @@ async fn rssrs_create_fake_volume(
         read_only_parent: None,
     };
 
-    let volume_data = serde_json::to_string(&volume_construction_request)
-        .map_err(|e| {
-            ActionError::action_failed(Error::internal_error(&e.to_string()))
-        })?;
-
-    let volume = db::model::Volume::new(new_volume_id, volume_data);
-
     osagactx
         .datastore()
-        .volume_create(volume)
+        .volume_create(new_volume_id, volume_construction_request)
         .await
         .map_err(ActionError::action_failed)?;
 

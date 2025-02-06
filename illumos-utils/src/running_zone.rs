@@ -13,7 +13,7 @@ use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
 use crate::svc::wait_for_service;
 use crate::zone::AddressRequest;
-use crate::zpool::{PathInPool, ZpoolName};
+use crate::zpool::{PathInPool, ZpoolOrRamdisk};
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
 use ipnetwork::IpNetwork;
@@ -338,6 +338,7 @@ mod zenter {
 }
 
 /// Represents a running zone.
+#[derive(Debug)]
 pub struct RunningZone {
     // The `zoneid_t` for the zone, while it's running, or `None` if not.
     id: Option<i32>,
@@ -358,8 +359,8 @@ impl RunningZone {
     }
 
     /// Returns the zpool on which the filesystem path has been placed.
-    pub fn root_zpool(&self) -> Option<&ZpoolName> {
-        self.inner.zonepath.pool.as_ref()
+    pub fn root_zpool(&self) -> &ZpoolOrRamdisk {
+        &self.inner.zonepath.pool
     }
 
     /// Return the name of a bootstrap VNIC in the zone, if any.
@@ -911,6 +912,7 @@ pub enum InstallZoneError {
     IncompleteBuilder,
 }
 
+#[derive(Debug)]
 pub struct InstalledZone {
     log: Logger,
 

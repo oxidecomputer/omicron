@@ -1570,16 +1570,15 @@ mod test {
         let volume_id = VolumeUuid::new_v4();
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: Uuid::new_v4(), // not required to match!
                     block_size: 512,
                     sub_volumes: vec![], // nothing needed here
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -1630,16 +1629,15 @@ mod test {
         let volume_id = VolumeUuid::new_v4();
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: Uuid::new_v4(), // not required to match!
                     block_size: 512,
                     sub_volumes: vec![], // nothing needed here
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -1680,16 +1678,15 @@ mod test {
         let volume_id = VolumeUuid::new_v4();
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: Uuid::new_v4(), // not required to match!
                     block_size: 512,
                     sub_volumes: vec![], // nothing needed here
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -1731,16 +1728,15 @@ mod test {
         let step_volume_id = VolumeUuid::new_v4();
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 step_volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: Uuid::new_v4(), // not required to match!
                     block_size: 512,
                     sub_volumes: vec![], // nothing needed here
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -1778,16 +1774,15 @@ mod test {
         let step_volume_id = VolumeUuid::new_v4();
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 step_volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: Uuid::new_v4(), // not required to match!
                     block_size: 512,
                     sub_volumes: vec![], // nothing needed here
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -1828,16 +1823,15 @@ mod test {
         let step_volume_id = VolumeUuid::new_v4();
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 step_volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: Uuid::new_v4(), // not required to match!
                     block_size: 512,
                     sub_volumes: vec![], // nothing needed here
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -1894,16 +1888,15 @@ mod test {
         let volume_id = VolumeUuid::new_v4();
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: Uuid::new_v4(), // not required to match!
                     block_size: 512,
                     sub_volumes: vec![], // nothing needed here
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -2004,16 +1997,15 @@ mod test {
         let volume_id = VolumeUuid::new_v4();
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: Uuid::new_v4(), // not required to match!
                     block_size: 512,
                     sub_volumes: vec![], // nothing needed here
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -2044,16 +2036,15 @@ mod test {
         let step_volume_id = VolumeUuid::new_v4();
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 step_volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: Uuid::new_v4(), // not required to match!
                     block_size: 512,
                     sub_volumes: vec![], // nothing needed here
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -2071,16 +2062,15 @@ mod test {
         let step_volume_id = VolumeUuid::new_v4();
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 step_volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: Uuid::new_v4(), // not required to match!
                     block_size: 512,
                     sub_volumes: vec![], // nothing needed here
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -2126,30 +2116,28 @@ mod test {
         let old_snapshot_volume_id = VolumeUuid::new_v4();
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: Uuid::new_v4(), // not required to match!
                     block_size: 512,
                     sub_volumes: vec![], // nothing needed here
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 old_snapshot_volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: Uuid::new_v4(), // not required to match!
                     block_size: 512,
                     sub_volumes: vec![], // nothing needed here
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -2203,16 +2191,15 @@ mod test {
         let volume_id = VolumeUuid::new_v4();
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: Uuid::new_v4(),
                     block_size: 512,
                     sub_volumes: vec![],
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
