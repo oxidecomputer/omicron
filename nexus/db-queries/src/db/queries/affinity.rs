@@ -42,10 +42,9 @@ pub fn lookup_anti_affinity_sleds_query(
          )
          SELECT DISTINCT policy,sled_id
          FROM other_instances_by_policy
-         JOIN sled_resource
+         JOIN sled_resource_vmm
          ON
-            sled_resource.instance_id = other_instances_by_policy.instance_id AND
-            sled_resource.kind = 'instance'")
+            sled_resource_vmm.instance_id = other_instances_by_policy.instance_id")
      .bind::<sql_types::Uuid, _>(instance_id.into_untyped_uuid())
      .bind::<sql_types::Uuid, _>(instance_id.into_untyped_uuid())
      .query()
@@ -92,10 +91,9 @@ pub fn lookup_affinity_sleds_query(
          )
          SELECT DISTINCT policy,sled_id
          FROM other_instances_by_policy
-         JOIN sled_resource
+         JOIN sled_resource_vmm
          ON
-            sled_resource.instance_id = other_instances_by_policy.instance_id AND
-            sled_resource.kind = 'instance'",
+            sled_resource_vmm.instance_id = other_instances_by_policy.instance_id",
         )
         .bind::<sql_types::Uuid, _>(instance_id.into_untyped_uuid())
         .bind::<sql_types::Uuid, _>(instance_id.into_untyped_uuid())
@@ -271,12 +269,12 @@ mod test {
         Ok(())
     }
 
-    async fn make_instance_sled_resource(
+    async fn make_sled_resource_vmm(
         sled_id: SledUuid,
         instance_id: InstanceUuid,
         conn: &async_bb8_diesel::Connection<crate::db::pool::DbConnection>,
     ) -> anyhow::Result<()> {
-        let resource = model::SledResource::new_for_vmm(
+        let resource = model::SledResourceVmm::new(
             PropolisUuid::new_v4(),
             instance_id,
             sled_id,
@@ -290,8 +288,8 @@ mod test {
                 ),
             ),
         );
-        use crate::db::schema::sled_resource::dsl;
-        diesel::insert_into(dsl::sled_resource)
+        use crate::db::schema::sled_resource_vmm::dsl;
+        diesel::insert_into(dsl::sled_resource_vmm)
             .values(resource)
             .execute_async(conn)
             .await
@@ -348,7 +346,7 @@ mod test {
         .await
         .unwrap();
 
-        make_instance_sled_resource(sled_id, other_instance_id, &conn)
+        make_sled_resource_vmm(sled_id, other_instance_id, &conn)
             .await
             .unwrap();
 
@@ -504,7 +502,7 @@ mod test {
         .await
         .unwrap();
 
-        make_instance_sled_resource(sled_id, other_instance_id, &conn)
+        make_sled_resource_vmm(sled_id, other_instance_id, &conn)
             .await
             .unwrap();
 

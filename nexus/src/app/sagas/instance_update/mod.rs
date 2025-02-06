@@ -1876,8 +1876,7 @@ mod test {
              virtual provisioning records if none exist!",
         );
         assert!(
-            !test_helpers::no_sled_resource_instance_records_exist(cptestctx)
-                .await,
+            !test_helpers::no_sled_resource_vmm_records_exist(cptestctx).await,
             "we can't assert that a destroyed VMM instance update deallocates \
              sled resource records if none exist!"
         );
@@ -1936,8 +1935,7 @@ mod test {
         );
         assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx).await);
         assert!(
-            test_helpers::no_sled_resource_instance_records_exist(cptestctx)
-                .await
+            test_helpers::no_sled_resource_vmm_records_exist(cptestctx).await
         );
     }
 
@@ -2818,7 +2816,7 @@ mod test {
             &self,
             cptestctx: &ControlPlaneTestContext,
         ) -> bool {
-            test_helpers::sled_resources_exist_for_vmm(
+            test_helpers::sled_resource_vmms_exist_for_vmm(
                 cptestctx,
                 PropolisUuid::from_untyped_uuid(self.src_vmm_id()),
             )
@@ -2829,7 +2827,7 @@ mod test {
             &self,
             cptestctx: &ControlPlaneTestContext,
         ) -> bool {
-            test_helpers::sled_resources_exist_for_vmm(
+            test_helpers::sled_resource_vmms_exist_for_vmm(
                 cptestctx,
                 PropolisUuid::from_untyped_uuid(self.target_vmm_id()),
             )

@@ -462,18 +462,17 @@ pub async fn count_virtual_provisioning_collection_records_using_instances(
         .unwrap()
 }
 
-pub async fn no_sled_resource_instance_records_exist(
+pub async fn no_sled_resource_vmm_records_exist(
     cptestctx: &ControlPlaneTestContext,
 ) -> bool {
-    use nexus_db_queries::db::model::SledResource;
-    use nexus_db_queries::db::model::SledResourceKind;
-    use nexus_db_queries::db::schema::sled_resource::dsl;
+    use nexus_db_queries::db::model::SledResourceVmm;
+    use nexus_db_queries::db::schema::sled_resource_vmm::dsl;
 
     let datastore = cptestctx.server.server_context().nexus.datastore();
     let conn = datastore.pool_connection_for_tests().await.unwrap();
 
     datastore
-        .transaction_retry_wrapper("no_sled_resource_instance_records_exist")
+        .transaction_retry_wrapper("no_sled_resource_vmm_records_exist")
         .transaction(&conn, |conn| async move {
             conn.batch_execute_async(
                 nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
@@ -481,10 +480,9 @@ pub async fn no_sled_resource_instance_records_exist(
             .await
             .unwrap();
 
-            Ok(dsl::sled_resource
-                .filter(dsl::kind.eq(SledResourceKind::Instance))
-                .select(SledResource::as_select())
-                .get_results_async::<SledResource>(&conn)
+            Ok(dsl::sled_resource_vmm
+                .select(SledResourceVmm::as_select())
+                .get_results_async::<SledResourceVmm>(&conn)
                 .await
                 .unwrap()
                 .is_empty())
@@ -493,21 +491,19 @@ pub async fn no_sled_resource_instance_records_exist(
         .unwrap()
 }
 
-pub async fn sled_resources_exist_for_vmm(
+pub async fn sled_resource_vmms_exist_for_vmm(
     cptestctx: &ControlPlaneTestContext,
     vmm_id: PropolisUuid,
 ) -> bool {
-    use nexus_db_queries::db::model::SledResource;
-    use nexus_db_queries::db::model::SledResourceKind;
-    use nexus_db_queries::db::schema::sled_resource::dsl;
+    use nexus_db_queries::db::model::SledResourceVmm;
+    use nexus_db_queries::db::schema::sled_resource_vmm::dsl;
 
     let datastore = cptestctx.server.server_context().nexus.datastore();
     let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-    let results = dsl::sled_resource
-        .filter(dsl::kind.eq(SledResourceKind::Instance))
+    let results = dsl::sled_resource_vmm
         .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
-        .select(SledResource::as_select())
+        .select(SledResourceVmm::as_select())
         .load_async(&*conn)
         .await
         .unwrap();

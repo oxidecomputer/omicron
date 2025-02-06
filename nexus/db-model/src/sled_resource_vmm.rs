@@ -2,22 +2,22 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::schema::sled_resource;
+use crate::schema::sled_resource_vmm;
 use crate::typed_uuid::DbTypedUuid;
-use crate::{ByteCount, SledResourceKind, SqlU32};
-use omicron_uuid_kinds::GenericUuid;
+use crate::{ByteCount, SqlU32};
 use omicron_uuid_kinds::InstanceKind;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PropolisKind;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
-use uuid::Uuid;
 
 type DbInstanceUuid = DbTypedUuid<InstanceKind>;
+type DbPropolisUuid = DbTypedUuid<PropolisKind>;
 type DbSledUuid = DbTypedUuid<SledKind>;
 
 #[derive(Clone, Selectable, Queryable, Insertable, Debug)]
-#[diesel(table_name = sled_resource)]
+#[diesel(table_name = sled_resource_vmm)]
 pub struct Resources {
     pub hardware_threads: SqlU32,
     pub rss_ram: ByteCount,
@@ -34,32 +34,30 @@ impl Resources {
     }
 }
 
-/// Describes sled resource usage by services
+/// Describes sled resource usage by a VMM
 #[derive(Clone, Selectable, Queryable, Insertable, Debug)]
-#[diesel(table_name = sled_resource)]
-pub struct SledResource {
-    pub id: Uuid,
+#[diesel(table_name = sled_resource_vmm)]
+pub struct SledResourceVmm {
+    pub id: DbPropolisUuid,
     pub sled_id: DbSledUuid,
 
     #[diesel(embed)]
     pub resources: Resources,
 
-    pub kind: SledResourceKind,
     pub instance_id: Option<DbInstanceUuid>,
 }
 
-impl SledResource {
-    pub fn new_for_vmm(
+impl SledResourceVmm {
+    pub fn new(
         id: PropolisUuid,
         instance_id: InstanceUuid,
         sled_id: SledUuid,
         resources: Resources,
     ) -> Self {
         Self {
-            id: id.into_untyped_uuid(),
+            id: id.into(),
             instance_id: Some(instance_id.into()),
             sled_id: sled_id.into(),
-            kind: SledResourceKind::Instance,
             resources,
         }
     }

@@ -1320,8 +1320,7 @@ pub mod test {
         assert!(no_network_interface_records_exist(datastore).await);
         assert!(no_external_ip_records_exist(datastore).await);
         assert!(
-            test_helpers::no_sled_resource_instance_records_exist(cptestctx)
-                .await
+            test_helpers::no_sled_resource_vmm_records_exist(cptestctx).await
         );
         assert!(
             test_helpers::no_virtual_provisioning_resource_records_exist(

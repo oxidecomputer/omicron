@@ -9,7 +9,7 @@ use std::net::{IpAddr, Ipv6Addr};
 use crate::Nexus;
 use nexus_db_model::{
     ByteCount, ExternalIp, InstanceState, IpAttachState, Ipv4NatEntry,
-    SledReservationConstraints, SledResource, VmmState,
+    SledReservationConstraints, SledResourceVmm, VmmState,
 };
 use nexus_db_queries::authz;
 use nexus_db_queries::db::lookup::LookupPath;
@@ -43,7 +43,7 @@ pub async fn reserve_vmm_resources(
     ncpus: u32,
     guest_memory: ByteCount,
     constraints: SledReservationConstraints,
-) -> Result<SledResource, ActionError> {
+) -> Result<SledResourceVmm, ActionError> {
     // ALLOCATION POLICY
     //
     // NOTE: This policy can - and should! - be changed.

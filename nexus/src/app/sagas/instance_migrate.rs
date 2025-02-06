@@ -203,10 +203,7 @@ async fn sim_release_sled_resources(
     let osagactx = sagactx.user_data();
     let propolis_id = sagactx.lookup::<PropolisUuid>("dst_propolis_id")?;
 
-    osagactx
-        .nexus()
-        .delete_sled_reservation(propolis_id.into_untyped_uuid())
-        .await?;
+    osagactx.nexus().delete_sled_reservation(propolis_id).await?;
     Ok(())
 }
 

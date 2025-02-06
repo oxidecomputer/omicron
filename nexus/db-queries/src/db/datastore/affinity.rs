@@ -476,7 +476,7 @@ impl DataStore {
                 use db::schema::affinity_group::dsl as group_dsl;
                 use db::schema::affinity_group_instance_membership::dsl as membership_dsl;
                 use db::schema::instance::dsl as instance_dsl;
-                use db::schema::sled_resource::dsl as resource_dsl;
+                use db::schema::sled_resource_vmm::dsl as resource_dsl;
 
                 async move {
                     // Check that the group exists
@@ -527,7 +527,7 @@ impl DataStore {
                         })?;
                     let has_reservation: bool = diesel::select(
                             diesel::dsl::exists(
-                                resource_dsl::sled_resource
+                                resource_dsl::sled_resource_vmm
                                     .filter(resource_dsl::instance_id.eq(instance_id.into_untyped_uuid()))
                             )
                         ).get_result_async(&conn)
@@ -605,7 +605,7 @@ impl DataStore {
                 use db::schema::anti_affinity_group::dsl as group_dsl;
                 use db::schema::anti_affinity_group_instance_membership::dsl as membership_dsl;
                 use db::schema::instance::dsl as instance_dsl;
-                use db::schema::sled_resource::dsl as resource_dsl;
+                use db::schema::sled_resource_vmm::dsl as resource_dsl;
 
                 async move {
                     // Check that the group exists
@@ -647,7 +647,7 @@ impl DataStore {
                         })?;
                     let has_reservation: bool = diesel::select(
                             diesel::dsl::exists(
-                                resource_dsl::sled_resource
+                                resource_dsl::sled_resource_vmm
                                     .filter(resource_dsl::instance_id.eq(instance_id.into_untyped_uuid()))
                             )
                         ).get_result_async(&conn)
@@ -878,7 +878,7 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::Instance;
     use nexus_db_model::Resources;
-    use nexus_db_model::SledResource;
+    use nexus_db_model::SledResourceVmm;
     use nexus_types::external_api::params;
     use omicron_common::api::external::{
         self, ByteCount, DataPageParams, IdentityMetadataCreateParams,
@@ -1023,9 +1023,9 @@ mod tests {
         datastore: &DataStore,
         instance: InstanceUuid,
     ) {
-        use db::schema::sled_resource::dsl;
-        diesel::insert_into(dsl::sled_resource)
-            .values(SledResource::new_for_vmm(
+        use db::schema::sled_resource_vmm::dsl;
+        diesel::insert_into(dsl::sled_resource_vmm)
+            .values(SledResourceVmm::new(
                 PropolisUuid::new_v4(),
                 instance,
                 SledUuid::new_v4(),
@@ -1046,8 +1046,8 @@ mod tests {
         datastore: &DataStore,
         instance: InstanceUuid,
     ) {
-        use db::schema::sled_resource::dsl;
-        diesel::delete(dsl::sled_resource)
+        use db::schema::sled_resource_vmm::dsl;
+        diesel::delete(dsl::sled_resource_vmm)
             .filter(dsl::instance_id.eq(instance.into_untyped_uuid()))
             .execute_async(
                 &*datastore.pool_connection_for_tests().await.unwrap(),
