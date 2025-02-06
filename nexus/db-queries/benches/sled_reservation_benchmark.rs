@@ -82,7 +82,7 @@ fn sled_baseboard_for_test() -> SledBaseboard {
 fn sled_system_hardware_for_test() -> SledSystemHardware {
     SledSystemHardware {
         is_scrimlet: false,
-        usable_hardware_threads: 4,
+        usable_hardware_threads: 32,
         usable_physical_ram: ByteCount::try_from(1 << 40).unwrap(),
         reservoir_size: ByteCount::try_from(1 << 39).unwrap(),
     }
