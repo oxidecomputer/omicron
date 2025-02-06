@@ -609,7 +609,6 @@ async fn check_from_previous_propolis_step(
             // This state is unexpected because we should have already
             // returned `DriveCheck::Wait` above.
             | VmmState::Migrating => {
-
                 return Err(ActionError::action_failed(format!(
                     "vmm {step_vmm_id} propolis is {state}",
                 )));
@@ -929,21 +928,25 @@ async fn srrd_drive_region_replacement_prepare(
                         );
 
                         match &state {
-                            VmmState::Running | VmmState::Rebooting => {
-                                // Propolis server is ok to receive the volume
-                                // replacement request.
+                            VmmState::Running
+                            | VmmState::Rebooting
+                            | VmmState::Starting => {
+                                // Propolis server is expected to be there
+                                // (eventually, in the case of "Starting"), and
+                                // is ok to receive the volume replacement
+                                // request.
                             }
 
-                            VmmState::Starting
-                            | VmmState::Stopping
+                            VmmState::Stopping
                             | VmmState::Stopped
                             | VmmState::Migrating
                             | VmmState::Failed
                             | VmmState::Destroyed
                             | VmmState::SagaUnwound
                             | VmmState::Creating => {
-                                // Propolis server is not ok to receive volume
-                                // replacement requests, bail out
+                                // Propolis server is not expected to be there,
+                                // or is not ok to receive volume replacement
+                                // requests, bail out
                                 return Err(ActionError::action_failed(format!(
                                     "vmm {} propolis not in a state to receive request",
                                     vmm.id,
