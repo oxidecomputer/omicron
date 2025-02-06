@@ -155,20 +155,18 @@ async fn delete_reservation(
 // to perform shared tasks such as creating contention for reservations.
 
 struct TestHarness {
-    log: Logger,
     db: TestDatabase,
-    sleds: Vec<Sled>,
 }
 
 impl TestHarness {
     async fn new(log: &Logger, sled_count: usize) -> Self {
         let db = TestDatabase::new_with_datastore(log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
-        let (authz_project, _project) =
+        let (_authz_project, _project) =
             create_project(&opctx, &datastore).await;
-        let sleds = create_sleds(&datastore, sled_count).await;
+        create_sleds(&datastore, sled_count).await;
 
-        Self { log: log.clone(), db, sleds }
+        Self { db }
     }
 
     async fn create_reservation(&self) -> PropolisUuid {
@@ -185,17 +183,17 @@ impl TestHarness {
     // reservation, destroy reservation" in a loop.
     fn create_contention(&self, count: usize) -> ContendingTasks {
         let mut tasks = tokio::task::JoinSet::new();
-        let should_exit = Arc::new(AtomicBool::new(false));
+        let is_terminating = Arc::new(AtomicBool::new(false));
 
         for _ in 0..count {
             tasks.spawn({
-                let should_exit = should_exit.clone();
+                let is_terminating = is_terminating.clone();
                 let opctx =
                     self.db.opctx().child(std::collections::BTreeMap::new());
                 let datastore = self.db.datastore().clone();
                 async move {
                     loop {
-                        if should_exit.load(Ordering::SeqCst) {
+                        if is_terminating.load(Ordering::SeqCst) {
                             return;
                         }
 
@@ -207,7 +205,7 @@ impl TestHarness {
             });
         }
 
-        ContendingTasks { tasks, should_exit }
+        ContendingTasks { tasks, is_terminating }
     }
 
     async fn terminate(self) {
@@ -221,12 +219,12 @@ impl TestHarness {
 #[must_use]
 struct ContendingTasks {
     tasks: tokio::task::JoinSet<()>,
-    should_exit: Arc<AtomicBool>,
+    is_terminating: Arc<AtomicBool>,
 }
 
 impl ContendingTasks {
     async fn terminate(self) {
-        self.should_exit.store(true, Ordering::SeqCst);
+        self.is_terminating.store(true, Ordering::SeqCst);
         self.tasks.join_all().await;
     }
 }
@@ -239,9 +237,13 @@ impl ContendingTasks {
 
 #[derive(Copy, Clone)]
 struct TestParams {
+    // Number of VMMs to provision from the task-under-test
     vmms: usize,
     contending_tasks: usize,
 }
+
+const VMM_PARAMS: [usize; 3] = [1, 10, 100];
+const TASK_PARAMS: [usize; 3] = [0, 1, 2];
 
 /////////////////////////////////////////////////////////////////
 //
@@ -261,21 +263,49 @@ async fn bench_reservation(
     const SLED_COUNT: usize = 4;
     let harness = TestHarness::new(&log, SLED_COUNT).await;
     let tasks = harness.create_contention(params.contending_tasks);
+    let mut vmm_ids = Vec::with_capacity(params.vmms);
 
-    let start = Instant::now();
-    for _ in 0..iterations {
-        let mut vmm_ids = Vec::with_capacity(params.vmms);
-        black_box({
-            for _ in 0..params.vmms {
-                vmm_ids.push(harness.create_reservation().await);
-            }
+    let duration = {
+        let mut total_duration = Duration::ZERO;
+        for _ in 0..iterations {
+            let start = Instant::now();
 
+            // Clippy: We don't want to move this block outside of "black_box", even though it
+            // isn't returning anything. That would defeat the whole point of using "black_box",
+            // which is to avoid profiling code that is optimized based on the surrounding
+            // benchmark function.
+            #[allow(clippy::unit_arg)]
+            black_box({
+                // Create all the requested vmms.
+                //
+                // Note that all prior reservations will remain in the DB as we continue
+                // provisioning the "next" VMM.
+                for _ in 0..params.vmms {
+                    vmm_ids.push(harness.create_reservation().await);
+                }
+            });
+            let iter_duration = start.elapsed();
+
+            // Return the "average time to provision a single VMM".
+            //
+            // This normalizes the results, regardless of how many VMMs we are provisioning.
+            //
+            // Note that we expect additional contention to create more work, but it's difficult to
+            // normalize "how much work is being created by contention".
+            total_duration += std::time::Duration::from_nanos(
+                u64::try_from(iter_duration.as_nanos() / params.vmms as u128)
+                    .expect("This benchmark is taking hundreds of years to run, maybe optimize it")
+            );
+
+            // Clean up all our VMMs.
+            //
+            // We don't really care how long this takes, so we omit it from the tracking time.
             for vmm_id in vmm_ids.drain(..) {
                 harness.delete_reservation(vmm_id).await;
             }
-        });
-    }
-    let duration = start.elapsed();
+        }
+        total_duration
+    };
 
     tasks.terminate().await;
     harness.terminate().await;
@@ -310,19 +340,15 @@ fn sled_reservation_benchmark(c: &mut Criterion) {
     rt.block_on(setup_db(&logctx.log));
 
     let mut group = c.benchmark_group("vmm-reservation");
-    for vmms in [1, 10, 100] {
-        for contending_tasks in [0, 1, 2] {
+    for vmms in VMM_PARAMS {
+        for contending_tasks in TASK_PARAMS {
             let params = TestParams { vmms, contending_tasks };
-            let name = format!(
-                "{vmms}-vmms-{contending_tasks}-other-tasks"
-            );
+            let name = format!("{vmms}-vmms-{contending_tasks}-other-tasks");
 
             group.bench_function(&name, |b| {
                 b.to_async(&rt).iter_custom(|iters| {
                     let log = logctx.log.clone();
-                    async move {
-                        bench_reservation(&log, params, iters).await
-                    }
+                    async move { bench_reservation(&log, params, iters).await }
                 })
             });
         }
