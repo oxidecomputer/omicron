@@ -6,19 +6,19 @@ to:   blueprint fe13be30-94c2-4fa6-aad5-ae3c5028f6bb
   sled c52410de-5fea-4e77-b162-756d103523b3 (active):
 
     physical disks at generation 2:
-    ----------------------------------------------------------------------
-    vendor        model        serial                                     
-    ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-3b6e2ade-57fc-4f9d-85c3-38fca27f1df6
-    fake-vendor   fake-model   serial-5192ef62-5a12-4a0c-829d-a409da87909c
-    fake-vendor   fake-model   serial-8778bcc5-dddf-4345-9fdf-5c46a36497b0
-    fake-vendor   fake-model   serial-9134de8d-9ba8-4ddc-9e84-eb00ec616b53
-    fake-vendor   fake-model   serial-96569b61-9e0c-4ee7-bd11-a5e0c541ca99
-    fake-vendor   fake-model   serial-ba90170e-7399-4260-910a-376254a8a9bf
-    fake-vendor   fake-model   serial-bc649720-926b-48f2-a62a-efdcff96b49e
-    fake-vendor   fake-model   serial-d55da288-4f35-4e92-97b0-29a5e6009109
-    fake-vendor   fake-model   serial-f83302fc-785c-4ab3-bcca-0d040b3c3062
-    fake-vendor   fake-model   serial-f843fb62-0f04-4c7d-a56f-62531104dc77
+    ---------------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition   state 
+    ---------------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-3b6e2ade-57fc-4f9d-85c3-38fca27f1df6   in service    active
+    fake-vendor   fake-model   serial-5192ef62-5a12-4a0c-829d-a409da87909c   in service    active
+    fake-vendor   fake-model   serial-8778bcc5-dddf-4345-9fdf-5c46a36497b0   in service    active
+    fake-vendor   fake-model   serial-9134de8d-9ba8-4ddc-9e84-eb00ec616b53   in service    active
+    fake-vendor   fake-model   serial-96569b61-9e0c-4ee7-bd11-a5e0c541ca99   in service    active
+    fake-vendor   fake-model   serial-ba90170e-7399-4260-910a-376254a8a9bf   in service    active
+    fake-vendor   fake-model   serial-bc649720-926b-48f2-a62a-efdcff96b49e   in service    active
+    fake-vendor   fake-model   serial-d55da288-4f35-4e92-97b0-29a5e6009109   in service    active
+    fake-vendor   fake-model   serial-f83302fc-785c-4ab3-bcca-0d040b3c3062   in service    active
+    fake-vendor   fake-model   serial-f843fb62-0f04-4c7d-a56f-62531104dc77   in service    active
 
 
     datasets generation 2 -> 3:
