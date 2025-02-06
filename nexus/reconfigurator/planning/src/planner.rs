@@ -2081,7 +2081,7 @@ mod test {
         assert_eq!(summary.total_zones_removed(), 0);
         assert_eq!(summary.total_zones_modified(), 1);
         assert_eq!(summary.total_disks_added(), 0);
-        assert_eq!(summary.total_disks_removed(), 1);
+        assert_eq!(summary.total_disks_removed(), 0);
         assert_eq!(summary.total_datasets_added(), 0);
         // NOTE: Expunging a disk doesn't immediately delete datasets; see the
         // "decommissioned_disk_cleaner" background task for more context.
