@@ -25,6 +25,27 @@ use typify::TypeSpaceImpl;
 const DENDRITE_ASIC_PACKAGE: PackageName =
     PackageName::new_const("dendrite-asic");
 
+// List of types we replace with the existing type of the same name from the
+// `transceiver_decode` crate.
+const REPLACEMENTS: &[&'static str] = &[
+    "ActiveCableMediaInterfaceId",
+    "ApplicationDescriptor",
+    "BaseTMediaInterfaceId",
+    "CmisDatapath",
+    "CmisDatapathState",
+    "CmisLaneStatus",
+    "ConnectorType",
+    "ExtendedSpecificationComplianceCode",
+    "HostElectricalInterfaceId",
+    "Identifier",
+    "MediaType",
+    "MmfMediaInterfaceId",
+    "PassiveCopperMediaInterfaceId",
+    "Sff8636Datapath",
+    "SffComplianceCode",
+    "SmfMediaInterfaceId",
+];
+
 fn main() -> Result<()> {
     // Find the current dendrite repo commit from our package manifest.
     let manifest = fs::read_to_string("../../package-manifest.toml")
@@ -76,83 +97,37 @@ fn main() -> Result<()> {
         })?
     };
 
-    let code = progenitor::Generator::new(
-        progenitor::GenerationSettings::new()
-            .with_inner_type(quote!{ ClientState })
-            .with_pre_hook(quote! {
-                |state: &crate::ClientState, request: &reqwest::Request| {
-                    slog::debug!(state.log, "client request";
-                        "method" => %request.method(),
-                        "uri" => %request.url(),
-                        "body" => ?&request.body(),
-                    );
-                }
-            })
-            .with_post_hook(quote! {
-                |state: &crate::ClientState, result: &Result<_, _>| {
-                    slog::debug!(state.log, "client response"; "result" => ?result);
-                }
-            })
-            .with_derive("PartialEq")
-            // NOTE: This should all go away when we can open-source the real
-            // `dpd-client` from the repo itself. These are used to ensure that
-            // we pick up things like the display implementations.
-            .with_replacement(
-                "ActiveCableMediaInterfaceId",
-                "transceiver_decode::ActiveCableMediaInterfaceId",
-                std::iter::once(TypeSpaceImpl::Display)
-            )
-            .with_replacement(
-                "ApplicationDescriptor", "transceiver_decode::ApplicationDescriptor",
-                std::iter::once(TypeSpaceImpl::Display)
-            )
-            .with_replacement(
-                "BaseTMediaInterfaceId", "transceiver_decode::BaseTMediaInterfaceId",
-                std::iter::once(TypeSpaceImpl::Display))
-            .with_replacement(
-                "CmisDatapath", "transceiver_decode::CmisDatapath",
-                std::iter::once(TypeSpaceImpl::Display))
-            .with_replacement(
-                "CmisDatapathState", "transceiver_decode::CmisDatapathState",
-                std::iter::once(TypeSpaceImpl::Display))
-            .with_replacement(
-                "CmisLaneStatus", "transceiver_decode::CmisLaneStatus",
-                std::iter::once(TypeSpaceImpl::Display))
-            .with_replacement(
-                "ConnectorType", "transceiver_decode::ConnectorType",
-                std::iter::once(TypeSpaceImpl::Display))
-            .with_replacement(
-                "ExtendedSpecificationComplianceCode", "transceiver_decode::ExtendedSpecificationComplianceCode",
-                std::iter::once(TypeSpaceImpl::Display))
-            .with_replacement(
-                "HostElectricalInterfaceId", "transceiver_decode::HostElectricalInterfaceId",
-                std::iter::once(TypeSpaceImpl::Display))
-            .with_replacement(
-                "Identifier", "transceiver_decode::Identifier",
-                std::iter::once(TypeSpaceImpl::Display))
-            .with_replacement(
-                "MediaType", "transceiver_decode::MediaType",
-                std::iter::once(TypeSpaceImpl::Display))
-            .with_replacement(
-                "MmfMediaInterfaceId", "transceiver_decode::MmfMediaInterfaceId",
-                std::iter::once(TypeSpaceImpl::Display))
-            .with_replacement(
-                "PassiveCopperMediaInterfaceId", "transceiver_decode::PassiveCopperMediaInterfaceId",
-                std::iter::once(TypeSpaceImpl::Display))
-            .with_replacement(
-                "Sff8636Datapath", "transceiver_decode::Sff8636Datapath",
-                std::iter::once(TypeSpaceImpl::Display))
-            .with_replacement(
-                "SffComplianceCode", "transceiver_decode::SffComplianceCode",
-                std::iter::once(TypeSpaceImpl::Display))
-            .with_replacement(
-                "SmfMediaInterfaceId", "transceiver_decode::SmfMediaInterfaceId",
-                std::iter::once(TypeSpaceImpl::Display))
-    )
-    .generate_tokens(&spec)
-    .with_context(|| {
-        format!("failed to generate progenitor client from {local_path}")
-    })?;
+    let mut settings = progenitor::GenerationSettings::new();
+    settings
+        .with_inner_type(quote! { ClientState })
+        .with_pre_hook(quote! {
+            |state: &crate::ClientState, request: &reqwest::Request| {
+                slog::debug!(state.log, "client request";
+                    "method" => %request.method(),
+                    "uri" => %request.url(),
+                    "body" => ?&request.body(),
+                );
+            }
+        })
+        .with_post_hook(quote! {
+            |state: &crate::ClientState, result: &Result<_, _>| {
+                slog::debug!(state.log, "client response"; "result" => ?result);
+            }
+        })
+        .with_derive("PartialEq");
+    for repl in REPLACEMENTS {
+        settings.with_replacement(
+            repl,
+            format!("::transceiver_decode::{repl}"),
+            std::iter::once(TypeSpaceImpl::Display),
+        );
+    }
+
+    let code = progenitor::Generator::new(&settings)
+        .generate_tokens(&spec)
+        .with_context(|| {
+            format!("failed to generate progenitor client from {local_path}")
+        })?;
 
     let content = rustfmt_wrapper::rustfmt(code).with_context(|| {
         format!("rustfmt failed on progenitor code from {local_path}")
