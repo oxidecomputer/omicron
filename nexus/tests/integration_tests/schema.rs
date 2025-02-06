@@ -1555,7 +1555,7 @@ fn after_107_0_0(client: &Client) -> BoxFuture<'_, ()> {
     })
 }
 
-fn before_123_0_0(client: &Client) -> BoxFuture<'_, ()> {
+fn before_124_0_0(client: &Client) -> BoxFuture<'_, ()> {
     Box::pin(async {
         // Insert a region snapshot replacement record
         let request_id: Uuid =
@@ -1599,7 +1599,7 @@ fn before_123_0_0(client: &Client) -> BoxFuture<'_, ()> {
     })
 }
 
-fn after_123_0_0(client: &Client) -> BoxFuture<'_, ()> {
+fn after_124_0_0(client: &Client) -> BoxFuture<'_, ()> {
     Box::pin(async {
         let rows = client
             .query(
@@ -1667,8 +1667,8 @@ fn get_migration_checks() -> BTreeMap<SemverVersion, DataMigrationFns> {
     );
 
     map.insert(
-        SemverVersion::new(123, 0, 0),
-        DataMigrationFns { before: Some(before_123_0_0), after: after_123_0_0 },
+        SemverVersion::new(124, 0, 0),
+        DataMigrationFns { before: Some(before_124_0_0), after: after_124_0_0 },
     );
 
     map
