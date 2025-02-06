@@ -39,4 +39,6 @@ pub struct WebhookEvent {
 
     /// The event's data payload.
     pub event: serde_json::Value,
+
+    pub num_dispatched: i64,
 }

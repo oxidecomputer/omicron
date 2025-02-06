@@ -2190,6 +2190,7 @@ table! {
         time_dispatched -> Nullable<Timestamptz>,
         event_class -> crate::WebhookEventClassEnum,
         event -> Jsonb,
+        num_dispatched -> Int8,
     }
 }
 

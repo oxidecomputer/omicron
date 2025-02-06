@@ -460,15 +460,18 @@ pub struct WebhookDispatcherStatus {
     /// The webhook events dispatched on this activation.
     pub dispatched: Vec<WebhookDispatched>,
 
-    /// Any error that occurred during activation.
-    pub error: Option<String>,
+    /// Webhook events which did not have receivers.
+    pub no_receivers: Vec<WebhookEventUuid>,
+
+    /// Any errors that occurred during activation.
+    pub errors: Vec<String>,
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct WebhookDispatched {
     pub event_id: WebhookEventUuid,
+    pub subscribed: usize,
     pub dispatched: usize,
-    pub receivers_gone: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

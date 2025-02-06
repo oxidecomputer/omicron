@@ -348,17 +348,16 @@ impl DataStore {
 
     /// List all webhook receivers whose event class subscription globs match
     /// the provided `event_class`.
-    pub(crate) async fn webhook_rx_list_subscribed_to_event_on_conn(
+    pub async fn webhook_rx_list_subscribed_to_event(
         &self,
+        opctx: &OpContext,
         event_class: WebhookEventClass,
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<
-        Vec<(WebhookReceiver, WebhookRxSubscription)>,
-        diesel::result::Error,
-    > {
+    ) -> Result<Vec<(WebhookReceiver, WebhookRxSubscription)>, Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
         Self::rx_list_subscribed_query(event_class)
-            .load_async::<(WebhookReceiver, WebhookRxSubscription)>(conn)
+            .load_async::<(WebhookReceiver, WebhookRxSubscription)>(&*conn)
             .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     fn rx_list_subscribed_query(
@@ -554,18 +553,13 @@ mod test {
 
         async fn check_event(
             datastore: &DataStore,
+            opctx: &OpContext,
             all_rxs: &Vec<WebhookReceiverConfig>,
             event_class: WebhookEventClass,
             matches: &[&WebhookReceiverConfig],
         ) {
             let subscribed = datastore
-                .webhook_rx_list_subscribed_to_event_on_conn(
-                    event_class,
-                    &datastore
-                        .pool_connection_for_tests()
-                        .await
-                        .expect("can't get ye pool connection for tests!"),
-                )
+                .webhook_rx_list_subscribed_to_event(opctx, event_class)
                 .await
                 .unwrap()
                 .into_iter()
@@ -605,6 +599,7 @@ mod test {
 
         check_event(
             datastore,
+            opctx,
             &all_rxs,
             WebhookEventClass::TestFoo,
             &[&test_star, &test_starstar],
@@ -612,6 +607,7 @@ mod test {
         .await;
         check_event(
             datastore,
+            opctx,
             &all_rxs,
             WebhookEventClass::TestFooBar,
             &[&test_starstar, &test_foo_star],
@@ -619,6 +615,7 @@ mod test {
         .await;
         check_event(
             datastore,
+            opctx,
             &all_rxs,
             WebhookEventClass::TestFooBaz,
             &[
@@ -631,6 +628,7 @@ mod test {
         .await;
         check_event(
             datastore,
+            opctx,
             &all_rxs,
             WebhookEventClass::TestQuuxBar,
             &[&test_starstar, &test_quux_star, &test_quux_starstar],
@@ -638,6 +636,7 @@ mod test {
         .await;
         check_event(
             datastore,
+            opctx,
             &all_rxs,
             WebhookEventClass::TestQuuxBarBaz,
             &[&test_starstar, &test_quux_starstar, &test_starstar_baz],

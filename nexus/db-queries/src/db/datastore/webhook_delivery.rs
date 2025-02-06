@@ -12,6 +12,7 @@ use crate::db::model::SqlU8;
 use crate::db::model::WebhookDelivery;
 use crate::db::model::WebhookDeliveryAttempt;
 use crate::db::model::WebhookEventClass;
+use crate::db::pagination::paginated;
 use crate::db::schema::webhook_delivery::dsl;
 use crate::db::schema::webhook_delivery_attempt::dsl as attempt_dsl;
 use crate::db::schema::webhook_event::dsl as event_dsl;
@@ -22,9 +23,12 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::TimeDelta;
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
+use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, WebhookReceiverUuid};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum DeliveryAttemptState {
@@ -34,6 +38,41 @@ pub enum DeliveryAttemptState {
 }
 
 impl DataStore {
+    pub async fn webhook_delivery_create_batch(
+        &self,
+        opctx: &OpContext,
+        deliveries: Vec<WebhookDelivery>,
+    ) -> CreateResult<usize> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        diesel::insert_into(dsl::webhook_delivery)
+            .values(deliveries)
+            // N.B. that this is intended to ignore conflicts on the
+            // "one_webhook_event_dispatch_per_rx" index, but ON CONFLICT ... DO
+            // NOTHING can't be used with the names of indices, only actual
+            // UNIQUE CONSTRAINTs. So we just do a blanket ON CONFLICT DO
+            // NOTHING, which is fine, becausse the only other uniqueness
+            // constraint is the UUID primary key, and we kind of assume UUID
+            // collisions don't happen. Oh well.
+            .on_conflict_do_nothing()
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn webhook_rx_delivery_list(
+        &self,
+        opctx: &OpContext,
+        rx_id: &WebhookReceiverUuid,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<WebhookDelivery> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        paginated(dsl::webhook_delivery, dsl::id, pagparams)
+            .filter(dsl::rx_id.eq(rx_id.into_untyped_uuid()))
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     pub async fn webhook_rx_delivery_list_ready(
         &self,
         opctx: &OpContext,
@@ -205,5 +244,137 @@ impl DataStore {
         Err(Error::internal_error(
             "couldn't update delivery for some other reason i didn't think of here..."
         ))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::db::model::WebhookDeliveryTrigger;
+    use crate::db::pagination::Paginator;
+    use crate::db::pub_test_utils::TestDatabase;
+    use nexus_types::external_api::params;
+    use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_test_utils::dev;
+    use omicron_uuid_kinds::WebhookEventUuid;
+
+    #[tokio::test]
+    async fn test_dispatched_deliveries_are_unique_per_rx() {
+        // Test setup
+        let logctx =
+            dev::test_setup_log("test_dispatched_deliveries_are_unique_per_rx");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        // As webhook receivers are a collection that owns the delivery
+        // resource, we must create a "real" receiver before assigning
+        // deliveries to it.
+        let rx = datastore
+            .webhook_rx_create(
+                opctx,
+                params::WebhookCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "test-webhook".parse().unwrap(),
+                        description: String::new(),
+                    },
+                    endpoint: "http://webhooks.example.com".parse().unwrap(),
+                    secrets: vec!["my cool secret".to_string()],
+                    events: vec!["test.*".to_string()],
+                    disable_probes: false,
+                },
+            )
+            .await
+            .unwrap();
+        let rx_id = rx.rx.identity.id.into();
+        let event_id = WebhookEventUuid::new_v4();
+        let event = datastore
+            .webhook_event_create(
+                &opctx,
+                event_id,
+                WebhookEventClass::TestFoo,
+                serde_json::json!({
+                    "answer": 42,
+                }),
+            )
+            .await
+            .expect("can't create ye event");
+
+        let dispatch1 = WebhookDelivery::new(
+            &event,
+            &rx_id,
+            WebhookDeliveryTrigger::Dispatch,
+        );
+        let inserted = datastore
+            .webhook_delivery_create_batch(&opctx, vec![dispatch1.clone()])
+            .await
+            .expect("dispatch 1 should insert");
+        assert_eq!(inserted, 1, "first dispatched delivery should be created");
+
+        let dispatch2 = WebhookDelivery::new(
+            &event,
+            &rx_id,
+            WebhookDeliveryTrigger::Dispatch,
+        );
+        let inserted = datastore
+            .webhook_delivery_create_batch(opctx, vec![dispatch2.clone()])
+            .await
+            .expect("dispatch 2 insert should not fail");
+        assert_eq!(
+            inserted, 0,
+            "dispatching an event a second time should do nothing"
+        );
+
+        let resend1 = WebhookDelivery::new(
+            &event,
+            &rx_id,
+            WebhookDeliveryTrigger::Resend,
+        );
+        let inserted = datastore
+            .webhook_delivery_create_batch(opctx, vec![resend1.clone()])
+            .await
+            .expect("resend 1 insert should not fail");
+        assert_eq!(
+            inserted, 1,
+            "resending an event should create a new delivery"
+        );
+
+        let resend2 = WebhookDelivery::new(
+            &event,
+            &rx_id,
+            WebhookDeliveryTrigger::Resend,
+        );
+        let inserted = datastore
+            .webhook_delivery_create_batch(opctx, vec![resend2.clone()])
+            .await
+            .expect("resend 2 insert should not fail");
+        assert_eq!(
+            inserted, 1,
+            "resending an event a second time should create a new delivery"
+        );
+
+        let mut all_deliveries = std::collections::HashSet::new();
+        let mut paginator =
+            Paginator::new(crate::db::datastore::SQL_BATCH_SIZE);
+        while let Some(p) = paginator.next() {
+            let deliveries = datastore
+                .webhook_rx_delivery_list(
+                    &opctx,
+                    &rx_id,
+                    &p.current_pagparams(),
+                )
+                .await
+                .unwrap();
+            paginator = p.found_batch(&deliveries, &|d: &WebhookDelivery| {
+                d.id.into_untyped_uuid()
+            });
+            all_deliveries.extend(deliveries.into_iter().map(|d| d.id));
+        }
+
+        assert!(all_deliveries.contains(&dispatch1.id));
+        assert!(!all_deliveries.contains(&dispatch2.id));
+        assert!(all_deliveries.contains(&resend1.id));
+        assert!(all_deliveries.contains(&resend2.id));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 }

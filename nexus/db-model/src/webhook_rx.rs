@@ -113,16 +113,6 @@ impl DatastoreCollectionConfig<WebhookRxEventGlob> for WebhookReceiver {
     type CollectionIdColumn = webhook_rx_event_glob::dsl::rx_id;
 }
 
-impl DatastoreCollectionConfig<WebhookDelivery> for WebhookReceiver {
-    type CollectionId = Uuid;
-    type GenerationNumberColumn = webhook_receiver::dsl::rcgen;
-    type CollectionTimeDeletedColumn = webhook_receiver::dsl::time_deleted;
-    type CollectionIdColumn = webhook_delivery::dsl::rx_id;
-}
-
-// TODO(eliza): should deliveries/delivery attempts also be treated as children
-// of a webhook receiver?
-
 #[derive(
     Clone, Debug, Queryable, Selectable, Insertable, Serialize, Deserialize,
 )]
