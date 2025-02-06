@@ -37,7 +37,6 @@ use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::DatasetsManagementResult;
 use omicron_common::disk::DisksManagementResult;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
-use omicron_common::update::ArtifactHash;
 use range_requests::RequestContextEx;
 use sled_agent_api::*;
 use sled_agent_types::boot_disk::BootDiskOsWriteStatus;
@@ -171,24 +170,46 @@ impl SledAgentApi for SledAgentSimImpl {
         ))
     }
 
+    async fn artifact_config_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ArtifactConfig>, HttpError> {
+        match rqctx.context().artifact_store().get_config() {
+            Some(config) => Ok(HttpResponseOk(config)),
+            None => Err(HttpError::for_not_found(
+                None,
+                "No artifact configuration present".to_string(),
+            )),
+        }
+    }
+
+    async fn artifact_config_put(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<ArtifactConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        rqctx.context().artifact_store().put_config(body.into_inner())?;
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
     async fn artifact_list(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<BTreeMap<ArtifactHash, usize>>, HttpError> {
+    ) -> Result<HttpResponseOk<ArtifactListResponse>, HttpError> {
         Ok(HttpResponseOk(rqctx.context().artifact_store().list().await?))
     }
 
     async fn artifact_copy_from_depot(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<ArtifactPathParam>,
+        query_params: Query<ArtifactQueryParam>,
         body: TypedBody<ArtifactCopyFromDepotBody>,
     ) -> Result<HttpResponseAccepted<ArtifactCopyFromDepotResponse>, HttpError>
     {
         let sha256 = path_params.into_inner().sha256;
+        let generation = query_params.into_inner().generation;
         let depot_base_url = body.into_inner().depot_base_url;
         rqctx
             .context()
             .artifact_store()
-            .copy_from_depot(sha256, &depot_base_url)
+            .copy_from_depot(sha256, generation, &depot_base_url)
             .await?;
         Ok(HttpResponseAccepted(ArtifactCopyFromDepotResponse {}))
     }
@@ -196,21 +217,18 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn artifact_put(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<ArtifactPathParam>,
+        query_params: Query<ArtifactQueryParam>,
         body: StreamingBody,
     ) -> Result<HttpResponseOk<ArtifactPutResponse>, HttpError> {
         let sha256 = path_params.into_inner().sha256;
+        let generation = query_params.into_inner().generation;
         Ok(HttpResponseOk(
-            rqctx.context().artifact_store().put_body(sha256, body).await?,
+            rqctx
+                .context()
+                .artifact_store()
+                .put_body(sha256, generation, body)
+                .await?,
         ))
-    }
-
-    async fn artifact_delete(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<ArtifactPathParam>,
-    ) -> Result<HttpResponseDeleted, HttpError> {
-        let sha256 = path_params.into_inner().sha256;
-        rqctx.context().artifact_store().delete(sha256).await?;
-        Ok(HttpResponseDeleted())
     }
 
     async fn vmm_issue_disk_snapshot_request(

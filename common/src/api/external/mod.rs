@@ -748,16 +748,7 @@ impl From<ByteCount> for i64 {
 // store values greater than that as negative values, but surely 2**63 is
 // enough.)
 #[derive(
-    Copy,
-    Clone,
-    Debug,
-    Eq,
-    Hash,
-    JsonSchema,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Serialize,
+    Copy, Clone, Debug, Eq, Hash, JsonSchema, Ord, PartialEq, PartialOrd,
 )]
 pub struct Generation(u64);
 
@@ -805,6 +796,17 @@ impl<'de> Deserialize<'de> for Generation {
                 &"an integer between 0 and 9223372036854775807",
             )
         })
+    }
+}
+
+// This is the equivalent of applying `#[serde(transparent)]`, but that has a
+// side effect of changing the JsonSchema derive to no longer emit a schema.
+impl Serialize for Generation {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.serialize(serializer)
     }
 }
 
