@@ -67,6 +67,8 @@ impl super::Nexus {
         }
     }
 
+    /// Lookup a (custom) router for attaching to a VPC subnet, when
+    /// we have already determined which VPC the subnet exists within.
     pub(crate) async fn vpc_router_lookup_for_attach(
         &self,
         opctx: &OpContext,
@@ -96,7 +98,8 @@ impl super::Nexus {
 
         if vpc.id() != authz_vpc.id() {
             return Err(Error::invalid_request(
-                "router and subnet must belong to the same VPC",
+                "a router can only be attached to a subnet when both \
+                belong to the same VPC",
             ));
         }
 

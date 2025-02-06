@@ -26,7 +26,12 @@ use uuid::Uuid;
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub subnet_create: params::VpcSubnetCreate,
-    pub ipv6_blocks: Vec<Ipv6Net>,
+    /// We create at most one IPv6 block in the subnet, but have a retry loop
+    /// in case of collisions when randomly generating a block. Our random
+    /// choices are fixed ahead of saga start for idempotency.
+    ///
+    /// This field must contain at least one entry, or we'll fail with a 500.
+    pub potential_ipv6_blocks: Vec<Ipv6Net>,
     pub authz_vpc: authz::Vpc,
     pub authz_system_router: authz::VpcRouter,
     pub custom_router: Option<authz::VpcRouter>,
@@ -105,11 +110,11 @@ async fn svsc_create_subnet(
     let subnet_id = sagactx.lookup::<Uuid>("subnet_id")?;
     let vpc_id = params.authz_vpc.id();
 
-    let num_retries = params.ipv6_blocks.len();
+    let num_retries = params.potential_ipv6_blocks.len();
     let retryable = num_retries > 1;
 
     let mut result = None;
-    for ipv6_block in params.ipv6_blocks {
+    for ipv6_block in params.potential_ipv6_blocks {
         let subnet = db::model::VpcSubnet::new(
             subnet_id,
             vpc_id,
@@ -397,7 +402,7 @@ pub(crate) mod test {
                 ipv6_block: None,
                 custom_router: None,
             },
-            ipv6_blocks: vec![ipv6_block],
+            potential_ipv6_blocks: vec![ipv6_block],
             authz_vpc,
             authz_system_router,
             custom_router: None,

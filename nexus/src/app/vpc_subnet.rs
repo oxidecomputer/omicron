@@ -114,7 +114,8 @@ impl super::Nexus {
         // TODO-robustness: We'd really prefer to allocate deterministically.
         // See <https://github.com/oxidecomputer/omicron/issues/685> for
         // details.
-        let ipv6_blocks = if let Some(ipv6_block) = params.ipv6_block {
+        let potential_ipv6_blocks = if let Some(ipv6_block) = params.ipv6_block
+        {
             if !ipv6_block.is_vpc_subnet(&db_vpc.ipv6_prefix) {
                 return Err(external::Error::invalid_request(&format!(
                     "VPC Subnet IPv6 address range '{}' is not valid for \
@@ -145,7 +146,7 @@ impl super::Nexus {
         let saga_params = sagas::vpc_subnet_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             subnet_create: params.clone(),
-            ipv6_blocks,
+            potential_ipv6_blocks,
             custom_router,
             authz_vpc,
             authz_system_router,

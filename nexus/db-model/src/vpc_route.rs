@@ -178,16 +178,18 @@ impl RouterRoute {
         name: &Name,
         route_id: Uuid,
     ) -> external::Name {
-        let forbidden_names = ["default-v4", "default-v6"];
-        if forbidden_names.contains(&name.as_str()) {
+        const FORBIDDEN_NAMES: [&str; 2] = ["default-v4", "default-v6"];
+        if FORBIDDEN_NAMES.contains(&name.as_str()) {
             // unwrap safety: a uuid is not by itself a valid name
             // so prepend it with another string.
-            // - length constraint is <63 chars,
+            // - length constraint is <= 63 chars,
             // - a UUID is 36 chars including hyphens,
-            // - "{name}-" is 11 chars
+            // - "{name}-" is max 11 chars
             // - "conflict-" is 9 chars
             //   = 56 chars
-            format!("conflict-{name}-{route_id}").parse().unwrap()
+            format!("conflict-{name}-{route_id}")
+                .parse()
+                .expect("all entries in 'FORBIDDEN_NAMES' are 10 chars long")
         } else {
             name.0.clone()
         }
