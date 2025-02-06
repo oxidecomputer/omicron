@@ -125,13 +125,17 @@ impl fmt::Display for BpGeneration {
 pub enum BpTableColumn {
     Value(String),
     Diff { before: String, after: String },
-    // A special nomenclature for when we are diffing a collection with a
-    // blueprint but the before value doesn't exist in the collection, because
-    // collections don't have such a field.
-    CollectionNotPresentDiff { after: String },
 }
 
 impl BpTableColumn {
+    pub fn new(before: String, after: String) -> BpTableColumn {
+        if before != after {
+            BpTableColumn::Diff { before, after }
+        } else {
+            BpTableColumn::Value(before)
+        }
+    }
+
     pub fn value(s: String) -> BpTableColumn {
         BpTableColumn::Value(s)
     }
@@ -152,10 +156,6 @@ impl BpTableColumn {
                 // other values for the same column are already longer than the
                 // the before or after values + 2.
                 usize::max(before.len(), after.len()) + 2
-            }
-            BpTableColumn::CollectionNotPresentDiff { after } => {
-                usize::max(NOT_PRESENT_IN_COLLECTION_PARENS.len(), after.len())
-                    + 4
             }
         }
     }
@@ -282,12 +282,6 @@ impl fmt::Display for BpTable {
                         // modify `BpTableColumn::len` to reflect this.
                         (format!("{REMOVED_PREFIX} {before}"), true)
                     }
-                    BpTableColumn::CollectionNotPresentDiff { .. } => (
-                        // If we remove the prefix and space, we'll need to also
-                        // modify `BpTableColumn::len` to reflect this.
-                        NOT_PRESENT_IN_COLLECTION_PARENS.to_string(),
-                        true,
-                    ),
                 };
                 multiline_row |= needs_multiline;
 
@@ -312,9 +306,6 @@ impl fmt::Display for BpTable {
                             // If we remove the prefix and space, we'll need to also
                             // modify `BpTableColumn::len` to reflect this.
                             format!("{ADDED_PREFIX} {after}")
-                        }
-                        BpTableColumn::CollectionNotPresentDiff { after } => {
-                            after.to_string()
                         }
                     };
                     if i == 0 {

@@ -17,7 +17,7 @@ use anyhow::Context;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
-use diffus::{edit, Diffable, Diffus};
+use daft::{leaf, Diffable};
 use dropshot::HttpError;
 pub use dropshot::PaginationOrder;
 pub use error::*;
@@ -223,7 +223,7 @@ impl<'a> TryFrom<&DataPageParams<'a, NameOrId>> for DataPageParams<'a, Uuid> {
 )]
 #[display("{0}")]
 #[serde(try_from = "String")]
-#[derive(Diffus)]
+#[derive(Diffable)]
 pub struct Name(String);
 
 /// `Name::try_from(String)` is the primary method for constructing an Name
@@ -627,7 +627,7 @@ impl JsonSchema for RoleName {
     Eq,
     PartialOrd,
     Ord,
-    Diffus,
+    Diffable,
 )]
 pub struct ByteCount(u64);
 
@@ -761,6 +761,8 @@ impl From<ByteCount> for i64 {
 )]
 pub struct Generation(u64);
 
+leaf!(Generation);
+
 impl Generation {
     // `as` is a little distasteful because it allows lossy conversion, but we
     // know converting `i64::MAX` to `u64` will always succeed losslessly.
@@ -803,24 +805,6 @@ impl<'de> Deserialize<'de> for Generation {
                 &"an integer between 0 and 9223372036854775807",
             )
         })
-    }
-}
-
-// We have to manually implement `Diffable` because this is newtype with private
-// data, and we want to see the diff on the newtype not the inner data.
-impl<'a> Diffable<'a> for Generation {
-    type Diff = (&'a Generation, &'a Generation);
-
-    fn diff(&'a self, other: &'a Self) -> edit::Edit<'a, Self> {
-        if self == other {
-            edit::Edit::Copy(self)
-        } else {
-            edit::Edit::Change {
-                before: self,
-                after: other,
-                diff: (self, other),
-            }
-        }
     }
 }
 
@@ -2000,20 +1984,7 @@ impl JsonSchema for L4PortRange {
 )]
 pub struct MacAddr(pub macaddr::MacAddr6);
 
-impl<'a> Diffable<'a> for MacAddr {
-    type Diff = (&'a Self, &'a Self);
-    fn diff(&'a self, other: &'a Self) -> edit::Edit<'a, Self> {
-        if self == other {
-            edit::Edit::Copy(self)
-        } else {
-            edit::Edit::Change {
-                before: self,
-                after: other,
-                diff: (self, other),
-            }
-        }
-    }
-}
+leaf!(MacAddr);
 
 impl MacAddr {
     // Guest MAC addresses begin with the Oxide OUI A8:40:25. Further, guest
@@ -2178,7 +2149,7 @@ impl JsonSchema for MacAddr {
     Deserialize,
     Serialize,
     JsonSchema,
-    Diffus,
+    Diffable,
 )]
 pub struct Vni(u32);
 
