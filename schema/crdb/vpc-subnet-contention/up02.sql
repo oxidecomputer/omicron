@@ -1,6 +1,6 @@
 set local disallow_full_table_scans = off;
 
--- Remove all exisiting VPC Subnet routes.
+-- Remove all existing VPC Subnet routes.
 -- These are fully managed by nexus, so no user state is at
 -- risk of being lost.
 DELETE FROM omicron.public.router_route
@@ -27,8 +27,9 @@ SELECT
 FROM
     (omicron.public.vpc_subnet JOIN omicron.public.vpc
         ON vpc_subnet.vpc_id = vpc.id) JOIN omicron.public.vpc_router
-            ON vpc_router.vpc_id = vpc.id
+            ON (vpc_router.vpc_id = vpc.id AND vpc_router.id = vpc.system_router_id)
 WHERE
+    vpc_router.kind = 'system' AND
     vpc_subnet.name != 'default-v4' AND vpc_subnet.name != 'default-v6'
 ON CONFLICT DO NOTHING;
 
@@ -55,9 +56,10 @@ SELECT
 FROM
     (omicron.public.vpc_subnet JOIN omicron.public.vpc
         ON vpc_subnet.vpc_id = vpc.id) JOIN omicron.public.vpc_router
-            ON vpc_router.vpc_id = vpc.id
+            ON (vpc_router.vpc_id = vpc.id AND vpc_router.id = vpc.system_router_id)
 WHERE
-    vpc_subnet.name = 'default-v4' OR vpc_subnet.name = 'default-v6'
+    vpc_router.kind = 'system' AND
+    (vpc_subnet.name = 'default-v4' OR vpc_subnet.name = 'default-v6')
 ON CONFLICT DO NOTHING;
 
 -- Replace IDs of fixed_data VPC Subnet routes for the services VPC.
