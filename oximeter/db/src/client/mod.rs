@@ -737,30 +737,19 @@ impl Client {
 
         // Decide how to conform the on-disk version with this version of
         // Oximeter.
-        if version < expected_version {
-            info!(self.log, "wiping and re-initializing oximeter schema");
-            // If the on-storage version is less than the constant embedded into
-            // this binary, the DB is out-of-date. Drop it, and re-populate it
-            // later.
+        if version == 0 {
+            info!(self.log, "initializing oximeter schema");
+            // If the version is 0 the database does not exist.
+            // Create and populate it.
             if !replicated {
-                self.wipe_single_node_db().await?;
                 self.init_single_node_db().await?;
             } else {
-                // It's important to only wipe the node we are initialising.
-                // When adding a new node to an existing cluster, ClickHouse
-                // does not automatically copy the schema. This means we need
-                // to initialise the database on that node as well, while the
-                // other nodes already have the database and schema initialised
-                // and tables populated with data.
-                // If we were to wipe the database from the entire cluster,
-                // every time we add a new node we'd delete all data and
-                // restart the DB initialisation process for every single node.
-                self.wipe_single_node_db().await?;
                 self.init_replicated_db().await?;
             }
-        } else if version > expected_version {
+        } else if version != expected_version {
             // If the on-storage version is greater than the constant embedded
-            // into this binary, we may have downgraded.
+            // into this binary, we may have downgraded. If it's less, a schema
+            // upgrade may not have been successful.
             return Err(Error::DatabaseVersionMismatch {
                 expected: crate::model::OXIMETER_VERSION,
                 found: version,
@@ -1644,9 +1633,9 @@ mod tests {
                 }),
             ),
             (
-                "test_database_version_wipes_old_version_replicated",
+                "test_database_version_will_not_upgrade_replicated",
                 Box::new(move |db, client| {
-                    Box::pin(test_database_version_wipes_old_version_impl(db, client))
+                    Box::pin(test_database_version_will_not_upgrade_impl(db, client))
                 }),
             ),
             (
@@ -3455,18 +3444,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_database_version_wipes_old_version() {
-        let logctx = test_setup_log("test_database_version_wipes_old_version");
+    async fn test_database_version_will_not_upgrade() {
+        let logctx = test_setup_log("test_database_version_will_not_upgrade");
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
         let client = Client::new(db.native_address().into(), &logctx.log);
         // NOTE: We don't init the DB, because the test explicitly tests that.
-        test_database_version_wipes_old_version_impl(&db, client).await;
+        test_database_version_will_not_upgrade_impl(&db, client).await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
 
-    async fn test_database_version_wipes_old_version_impl(
+    async fn test_database_version_will_not_upgrade_impl(
         db: &ClickHouseDeployment,
         client: Client,
     ) {
@@ -3477,21 +3466,12 @@ mod tests {
             .await
             .expect("Failed to initialize timeseries database");
 
-        // Insert data here so we can remove it later.
-        //
-        // The values here don't matter much, we just want to check that
-        // the database data gets dropped later.
-        assert_eq!(0, get_schema_count(&client, None).await);
-        let sample = oximeter_test_utils::make_sample();
-        client.insert_samples(&[sample.clone()]).await.unwrap();
-        assert_eq!(1, get_schema_count(&client, None).await);
-
-        // If we try to upgrade to a newer version, we'll drop old data.
+        // If we try to upgrade to a newer version, we expect a failure when
+        // re-initilaising the client.
         client
             .initialize_db_with_version(replicated, model::OXIMETER_VERSION + 1)
             .await
-            .expect("Should have initialized database successfully");
-        assert_eq!(0, get_schema_count(&client, None).await);
+            .expect_err("Should have failed, upgrades are not supported");
     }
 
     #[tokio::test]
