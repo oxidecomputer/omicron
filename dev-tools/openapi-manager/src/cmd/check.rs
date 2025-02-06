@@ -16,6 +16,7 @@ use anyhow::{bail, Result};
 use indent_write::io::IndentWriter;
 use owo_colors::OwoColorize;
 use similar::TextDiff;
+use slog_error_chain::InlineErrorChain;
 use std::process::ExitCode;
 
 #[derive(Clone, Copy, Debug)]
@@ -255,7 +256,7 @@ where
         eprintln!(
             "{}",
             textwrap::fill(
-                &p.to_string(),
+                &InlineErrorChain::new(&p).to_string(),
                 textwrap::Options::with_termwidth()
                     .initial_indent(&first_indent)
                     .subsequent_indent(&more_indent)

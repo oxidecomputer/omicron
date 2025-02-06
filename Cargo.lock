@@ -7699,6 +7699,7 @@ dependencies = [
  "serde_json",
  "similar",
  "sled-agent-api",
+ "slog-error-chain",
  "supports-color",
  "textwrap",
  "thiserror 1.0.69",
