@@ -1010,7 +1010,7 @@ struct MigrationContext<'a> {
     pool_and_conn: Mutex<BTreeMap<SemverVersion, PoolAndConnection>>,
 }
 
-impl<'a> MigrationContext<'a> {
+impl MigrationContext<'_> {
     // Populates a pool and connection.
     //
     // Typically called as a part of a "before" function, to set up a connection
