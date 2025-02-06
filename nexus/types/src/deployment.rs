@@ -1014,6 +1014,17 @@ impl BlueprintDatasetDisposition {
     }
 }
 
+impl fmt::Display for BlueprintDatasetDisposition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            // Neither `write!(f, "...")` nor `f.write_str("...")` obey fill
+            // and alignment (used above), but this does.
+            BlueprintDatasetDisposition::InService => "in service".fmt(f),
+            BlueprintDatasetDisposition::Expunged => "expunged".fmt(f),
+        }
+    }
+}
+
 /// Information about a dataset as recorded in a blueprint
 #[derive(
     Debug,
@@ -1028,9 +1039,7 @@ impl BlueprintDatasetDisposition {
     Diffable,
 )]
 pub struct BlueprintDatasetConfig {
-    // TODO: Display this in diffs - leave for now, for backwards compat
     pub disposition: BlueprintDatasetDisposition,
-
     pub id: DatasetUuid,
     pub pool: ZpoolName,
     pub kind: DatasetKind,
@@ -1063,6 +1072,7 @@ impl BlueprintDatasetConfig {
         vec![
             DatasetName::new(self.pool.clone(), self.kind.clone()).full_name(),
             self.id.to_string(),
+            self.disposition.to_string(),
             unwrap_or_none(&self.quota),
             unwrap_or_none(&self.reservation),
             self.compression.to_string(),
