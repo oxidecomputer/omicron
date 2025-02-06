@@ -412,7 +412,7 @@ gateway-test-utils = { path = "gateway-test-utils" }
 gateway-types = { path = "gateway-types" }
 gethostname = "0.5.0"
 glob = "0.3.2"
-guppy = "0.17.8"
+guppy = "0.17.12"
 headers = "0.4.0"
 heck = "0.5"
 hex = "0.4.3"
