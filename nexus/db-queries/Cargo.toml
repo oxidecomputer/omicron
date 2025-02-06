@@ -34,6 +34,7 @@ pq-sys = "*"
 qorb = { workspace = true, features = [ "qtop" ] }
 rand.workspace = true
 ref-cast.workspace = true
+regex.workspace = true
 schemars.workspace = true
 semver.workspace = true
 serde.workspace = true

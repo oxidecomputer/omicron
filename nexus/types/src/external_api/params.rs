@@ -28,6 +28,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::{net::IpAddr, str::FromStr};
+use url::Url;
 use uuid::Uuid;
 
 macro_rules! path_param {
@@ -92,6 +93,7 @@ path_param!(CertificatePath, certificate, "certificate");
 
 id_path_param!(SupportBundlePath, support_bundle, "support bundle");
 id_path_param!(GroupPath, group_id, "group");
+id_path_param!(WebhookPath, webhook_id, "webhook");
 
 // TODO: The hardware resources should be represented by its UUID or a hardware
 // ID that can be used to deterministically generate the UUID.
@@ -2299,4 +2301,77 @@ pub struct DeviceAccessTokenRequest {
     pub grant_type: String,
     pub device_code: String,
     pub client_id: Uuid,
+}
+
+// Webhooks
+
+/// Query params for listing webhook event classes.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct EventClassFilter {
+    /// An optional glob pattern for filtering event class names.
+    pub filter: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct EventClassPage {
+    /// The last webhook event class returned by a previous page.
+    pub last_seen: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct EventClassSelector {
+    /// The name of the event class.
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    /// The URL that webhook notification requests should be sent to
+    pub endpoint: Url,
+
+    /// A non-empty list of secret keys used to sign webhook payloads.
+    pub secrets: Vec<String>,
+
+    /// A list of webhook event classes to subscribe to.
+    ///
+    /// If this list is empty or is not included in the request body, the
+    /// webhook will not be subscribed to any events.
+    #[serde(default)]
+    pub events: Vec<String>,
+
+    /// If `true`, liveness probe requests will not be sent to this webhook receiver.
+    #[serde(default)]
+    pub disable_probes: bool,
+}
+
+/// Parameters to update a webhook configuration.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+
+    /// The URL that webhook notification requests should be sent to
+    pub endpoint: Url,
+
+    /// A list of webhook event classes to subscribe to.
+    ///
+    /// If this list is empty, the webhook will not be subscribed to any events.
+    pub events: Vec<String>,
+
+    /// If `true`, liveness probe requests will not be sent to this webhook receiver.
+    pub disable_probes: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookSecret {
+    pub secret: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct WebhookDeliveryPath {
+    pub webhook_id: Uuid,
+    pub event_id: Uuid,
 }

@@ -419,6 +419,10 @@ pub struct BackgroundTaskConfig {
         RegionSnapshotReplacementFinishConfig,
     /// configuration for TUF artifact replication task
     pub tuf_artifact_replication: TufArtifactReplicationConfig,
+    /// configuration for webhook dispatcher task
+    pub webhook_dispatcher: WebhookDispatcherConfig,
+    /// configuration for webhook deliverator task
+    pub webhook_deliverator: WebhookDeliveratorConfig,
 }
 
 #[serde_as]
@@ -735,6 +739,30 @@ pub struct TufArtifactReplicationConfig {
     pub min_sled_replication: usize,
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct WebhookDispatcherConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct WebhookDeliveratorConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// duration after which another Nexus' lease on a delivery attempt is
+    /// considered expired.
+    ///
+    /// this is tuneable to allow testing lease expiration without having to
+    /// wait a long time.
+    #[serde(default = "WebhookDeliveratorConfig::default_lease_timeout_secs")]
+    pub lease_timeout_secs: u64,
+}
+
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PackageConfig {
@@ -803,6 +831,12 @@ impl std::fmt::Display for SchemeName {
             SchemeName::SessionCookie => "session_cookie",
             SchemeName::AccessToken => "access_token",
         })
+    }
+}
+
+impl WebhookDeliveratorConfig {
+    const fn default_lease_timeout_secs() -> u64 {
+        60 // one minute
     }
 }
 
@@ -993,6 +1027,9 @@ mod test {
             region_snapshot_replacement_finish.period_secs = 30
             tuf_artifact_replication.period_secs = 300
             tuf_artifact_replication.min_sled_replication = 3
+            webhook_dispatcher.period_secs = 42
+            webhook_deliverator.period_secs = 43
+            webhook_deliverator.lease_timeout_secs = 44
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1194,6 +1231,13 @@ mod test {
                                 period_secs: Duration::from_secs(300),
                                 min_sled_replication: 3,
                             },
+                        webhook_dispatcher: WebhookDispatcherConfig {
+                            period_secs: Duration::from_secs(42),
+                        },
+                        webhook_deliverator: WebhookDeliveratorConfig {
+                            period_secs: Duration::from_secs(43),
+                            lease_timeout_secs: 44,
+                        }
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -1279,6 +1323,8 @@ mod test {
             region_snapshot_replacement_finish.period_secs = 30
             tuf_artifact_replication.period_secs = 300
             tuf_artifact_replication.min_sled_replication = 3
+            webhook_dispatcher.period_secs = 42
+            webhook_deliverator.period_secs = 43
             [default_region_allocation_strategy]
             type = "random"
             "##,

@@ -6402,6 +6402,7 @@ dependencies = [
  "test-strategy",
  "thiserror 1.0.69",
  "update-engine",
+ "url",
  "uuid",
 ]
 
@@ -7041,6 +7042,7 @@ dependencies = [
  "hickory-resolver",
  "http",
  "http-body-util",
+ "httpmock",
  "httptest",
  "hubtools",
  "hyper",
@@ -7053,6 +7055,7 @@ dependencies = [
  "itertools 0.13.0",
  "lldpd-client",
  "macaddr",
+ "maplit",
  "mg-admin-client",
  "nexus-auth",
  "nexus-client",
@@ -7620,6 +7623,7 @@ dependencies = [
  "toml_edit 0.22.22",
  "tracing",
  "unicode-xid",
+ "url",
  "usdt",
  "usdt-impl",
  "uuid",
@@ -10398,6 +10402,7 @@ dependencies = [
  "schemars_derive",
  "serde",
  "serde_json",
+ "url",
  "uuid",
 ]
 
@@ -12865,6 +12870,7 @@ dependencies = [
  "form_urlencoded",
  "idna",
  "percent-encoding",
+ "serde",
 ]
 
 [[package]]

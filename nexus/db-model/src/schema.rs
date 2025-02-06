@@ -2129,3 +2129,103 @@ table! {
         region_snapshot_snapshot_id -> Nullable<Uuid>,
     }
 }
+
+table! {
+    webhook_receiver (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        endpoint -> Text,
+        probes_enabled -> Bool,
+        rcgen -> Int8,
+    }
+}
+
+table! {
+    webhook_rx_secret (rx_id, signature_id) {
+        rx_id -> Uuid,
+        signature_id -> Uuid,
+        secret -> Text,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
+    webhook_rx_subscription (rx_id, event_class) {
+        rx_id -> Uuid,
+        event_class -> crate::WebhookEventClassEnum,
+        glob -> Nullable<Text>,
+        time_created -> Timestamptz,
+    }
+}
+
+table! {
+    webhook_rx_event_glob (rx_id, glob) {
+        rx_id -> Uuid,
+        glob -> Text,
+        regex -> Text,
+        schema_version -> Text,
+        time_created -> Timestamptz,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(
+    webhook_receiver,
+    webhook_rx_secret,
+    webhook_rx_subscription,
+    webhook_rx_event_glob
+);
+joinable!(webhook_rx_subscription -> webhook_receiver (rx_id));
+joinable!(webhook_rx_secret -> webhook_receiver (rx_id));
+joinable!(webhook_rx_event_glob -> webhook_receiver (rx_id));
+
+table! {
+    webhook_event (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_dispatched -> Nullable<Timestamptz>,
+        event_class -> crate::WebhookEventClassEnum,
+        event -> Jsonb,
+    }
+}
+
+table! {
+    webhook_delivery (id) {
+        id -> Uuid,
+        event_id -> Uuid,
+        rx_id -> Uuid,
+        trigger -> crate::WebhookDeliveryTriggerEnum,
+        payload -> Jsonb,
+        attempts -> Int2,
+        time_created -> Timestamptz,
+        time_completed -> Nullable<Timestamptz>,
+        deliverator_id -> Nullable<Uuid>,
+        time_delivery_started -> Nullable<Timestamptz>
+    }
+}
+
+allow_tables_to_appear_in_same_query!(webhook_receiver, webhook_delivery);
+joinable!(webhook_delivery -> webhook_receiver (rx_id));
+allow_tables_to_appear_in_same_query!(webhook_delivery, webhook_event);
+joinable!(webhook_delivery -> webhook_event (event_id));
+
+table! {
+    webhook_delivery_attempt (delivery_id, attempt) {
+        delivery_id -> Uuid,
+        attempt -> Int2,
+        result -> crate::WebhookDeliveryResultEnum,
+        response_status -> Nullable<Int2>,
+        response_duration -> Nullable<Interval>,
+        time_created -> Timestamptz,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(
+    webhook_delivery,
+    webhook_delivery_attempt
+);
+joinable!(webhook_delivery_attempt -> webhook_delivery (delivery_id));
