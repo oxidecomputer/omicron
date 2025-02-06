@@ -13,9 +13,9 @@ use chrono::DateTime;
 use chrono::Utc;
 use daft::Diffable;
 use omicron_common::api::external::{
-    AllowedSourceIps as ExternalAllowedSourceIps, ByteCount, Digest, Error,
-    IdentityMetadata, InstanceState, Name, ObjectIdentity, RoleName,
-    SimpleIdentityOrName,
+    AffinityPolicy, AllowedSourceIps as ExternalAllowedSourceIps, ByteCount,
+    Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
+    ObjectIdentity, RoleName, SimpleIdentityOrName,
 };
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
@@ -110,6 +110,24 @@ impl SimpleIdentityOrName for SiloUtilization {
     fn name(&self) -> &Name {
         &self.silo_name
     }
+}
+
+// AFFINITY GROUPS
+
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AffinityGroup {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    pub policy: AffinityPolicy,
+    pub failure_domain: FailureDomain,
+}
+
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AntiAffinityGroup {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    pub policy: AffinityPolicy,
+    pub failure_domain: FailureDomain,
 }
 
 // IDENTITY PROVIDER
