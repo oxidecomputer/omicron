@@ -27,7 +27,6 @@ use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::AsyncSimpleConnection;
-use camino::Utf8PathBuf;
 use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
@@ -144,6 +143,7 @@ use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Display;
+use std::future::Future;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
@@ -269,6 +269,23 @@ impl DbUrlOptions {
         check_schema_version(&datastore).await;
         Ok(datastore)
     }
+
+    pub async fn with_datastore<F, Fut, T>(
+        &self,
+        omdb: &Omdb,
+        log: &slog::Logger,
+        f: F,
+    ) -> anyhow::Result<T>
+    where
+        F: FnOnce(OpContext, Arc<DataStore>) -> Fut,
+        Fut: Future<Output = anyhow::Result<T>>,
+    {
+        let datastore = self.connect(omdb, log).await?;
+        let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+        let result = f(opctx, datastore.clone()).await;
+        datastore.terminate().await;
+        result
+    }
 }
 
 #[derive(Debug, Args, Clone)]
@@ -307,8 +324,6 @@ enum DbCommands {
     Inventory(InventoryArgs),
     /// Print information about physical disks
     PhysicalDisks(PhysicalDisksArgs),
-    /// Save the current Reconfigurator inputs to a file
-    ReconfiguratorSave(ReconfiguratorSaveArgs),
     /// Print information about regions
     Region(RegionArgs),
     /// Query for information about region replacements, optionally manually
@@ -544,12 +559,6 @@ struct PhysicalDisksArgs {
     /// Show disks that match the given filter
     #[clap(short = 'F', long, value_enum)]
     filter: Option<DiskFilter>,
-}
-
-#[derive(Debug, Args, Clone)]
-struct ReconfiguratorSaveArgs {
-    /// where to save the output
-    output_file: Utf8PathBuf,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -892,12 +901,9 @@ impl DbArgs {
         omdb: &Omdb,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
-        let datastore = self.db_url_opts.connect(omdb, log).await?;
-        let opctx = OpContext::for_tests(log.clone(), datastore.clone());
-        let res = {
-            let command = self.command.clone();
-            let fetch_opts = self.fetch_opts.clone();
-            let datastore = datastore.clone();
+        let command = self.command.clone();
+        let fetch_opts = self.fetch_opts.clone();
+        self.db_url_opts.with_datastore(omdb, log, |opctx, datastore| {
             async move {
                 match &command {
                     DbCommands::Rack(RackArgs { command: RackCommands::List }) => {
@@ -941,14 +947,6 @@ impl DbArgs {
                             &datastore,
                             &fetch_opts,
                             args,
-                        )
-                        .await
-                    }
-                    DbCommands::ReconfiguratorSave(reconfig_save_args) => {
-                        cmd_db_reconfigurator_save(
-                            &opctx,
-                            &datastore,
-                            reconfig_save_args,
                         )
                         .await
                     }
@@ -1147,9 +1145,7 @@ impl DbArgs {
                     }
                 }
             }
-        }.await;
-        datastore.terminate().await;
-        res
+        }).await
     }
 }
 
@@ -5924,35 +5920,6 @@ impl LongStringFormatter {
         // wide, so return it as-is
         s.into()
     }
-}
-
-// Reconfigurator
-
-/// Packages up database state that's used as input to the Reconfigurator
-/// planner into a file so that it can be loaded into `reconfigurator-cli`
-async fn cmd_db_reconfigurator_save(
-    opctx: &OpContext,
-    datastore: &DataStore,
-    reconfig_save_args: &ReconfiguratorSaveArgs,
-) -> Result<(), anyhow::Error> {
-    // See Nexus::blueprint_planning_context().
-    eprint!("assembling reconfigurator state ... ");
-    let state = nexus_reconfigurator_preparation::reconfigurator_state_load(
-        opctx, datastore,
-    )
-    .await?;
-    eprintln!("done");
-
-    let output_path = &reconfig_save_args.output_file;
-    let file = std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&output_path)
-        .with_context(|| format!("open {:?}", output_path))?;
-    serde_json::to_writer_pretty(&file, &state)
-        .with_context(|| format!("write {:?}", output_path))?;
-    eprintln!("wrote {}", output_path);
-    Ok(())
 }
 
 // Migrations
