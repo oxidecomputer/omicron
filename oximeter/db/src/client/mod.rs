@@ -3465,7 +3465,7 @@ mod tests {
             .expect("Failed to initialize timeseries database");
 
         // If we try to upgrade to a newer version, we expect a failure when
-        // re-initilaising the client.
+        // reinitialising the client.
         client
             .initialize_db_with_version(replicated, model::OXIMETER_VERSION + 1)
             .await
