@@ -402,7 +402,7 @@ pub async fn run_replacement_tasks_to_completion(
                 Ok(())
             }
         },
-        &Duration::from_secs(1),
+        &Duration::from_millis(500),
         &Duration::from_secs(60),
     )
     .await
