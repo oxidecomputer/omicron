@@ -267,21 +267,25 @@ fn pick_sled_reservation_target(
     // Only consider "unpreferred" sleds that are viable targets
     unpreferred = targets.intersection(&unpreferred).cloned().collect();
 
-    // If a target is both preferred and unpreferred, it is removed
-    // from both sets.
+    // If a target is both preferred and unpreferred, it is not considered
+    // a part of either set.
     let both = preferred.intersection(&unpreferred).cloned().collect();
-    preferred = preferred.difference(&both).cloned().collect();
-    unpreferred = unpreferred.difference(&both).cloned().collect();
 
-    if let Some(target) = preferred.iter().next() {
-        return Ok(*target);
+    // Grab a preferred target (which isn't also unpreferred) if one exists.
+    if let Some(target) = preferred.difference(&both).cloned().next() {
+        return Ok(target);
     }
+    unpreferred = unpreferred.difference(&both).cloned().collect();
     targets = targets.difference(&unpreferred).cloned().collect();
-    if let Some(target) = targets.iter().next() {
-        return Ok(*target);
+
+    // Grab a target which not in the unpreferred set, if one exists.
+    if let Some(target) = targets.iter().cloned().next() {
+        return Ok(target);
     }
-    if let Some(target) = unpreferred.iter().next() {
-        return Ok(*target);
+
+    // Grab a target from the unpreferred set, if one exists.
+    if let Some(target) = unpreferred.iter().cloned().next() {
+        return Ok(target);
     }
     return Err(SledReservationError::NotFound);
 }
