@@ -155,7 +155,8 @@ impl ZonesEditor {
         }
     }
 
-    pub fn expunge_all_on_zpool(&mut self, zpool: &ZpoolUuid) {
+    pub fn expunge_all_on_zpool(&mut self, zpool: &ZpoolUuid) -> usize {
+        let mut nexpunged = 0;
         for mut config in self.zones.iter_mut() {
             // Expunge this zone if its filesystem or durable dataset are on
             // this zpool. (If it has both, they should be on the _same_ zpool,
@@ -170,9 +171,12 @@ impl ZonesEditor {
                 .durable_zpool()
                 .map_or(false, |pool| pool.id() == *zpool);
             if fs_is_on_zpool || dd_is_on_zpool {
-                Self::expunge_impl(&mut config, &mut self.counts);
+                if Self::expunge_impl(&mut config, &mut self.counts) {
+                    nexpunged += 1;
+                }
             }
         }
+        nexpunged
     }
 }
 
