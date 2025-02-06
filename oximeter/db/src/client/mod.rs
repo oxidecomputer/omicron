@@ -714,10 +714,8 @@ impl Client {
     /// Validates that the schema used by the DB matches the version used by
     /// the executable using it.
     ///
-    /// This function will **wipe** metrics data if the version stored within
-    /// the DB is less than the schema version of Oximeter.
-    /// If the version in the DB is newer than what is known to Oximeter, an
-    /// error is returned.
+    /// If the version in the DB is newer or older than what is known to Oximeter,
+    /// an error is returned.
     ///
     /// If you would like to non-destructively upgrade the database, then either
     /// the included binary `clickhouse-schema-updater` or the method
