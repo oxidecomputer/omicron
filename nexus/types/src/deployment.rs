@@ -1227,6 +1227,11 @@ impl From<&crate::inventory::Dataset> for CollectionDatasetIdentifier {
 pub struct UnstableReconfiguratorState {
     pub planning_input: PlanningInput,
     pub collections: Vec<Collection>,
+    // When collected from a deployed system, `target_blueprint` will always be
+    // `Some(_)`. `UnstableReconfiguratorState` is also used by
+    // `reconfigurator-cli`, which allows construction of states that do not
+    // represent a fully-deployed system (and maybe no blueprints at all, hence
+    // no target blueprint).
     pub target_blueprint: Option<BlueprintTarget>,
     pub blueprints: Vec<Blueprint>,
     pub internal_dns: BTreeMap<Generation, DnsConfigParams>,
