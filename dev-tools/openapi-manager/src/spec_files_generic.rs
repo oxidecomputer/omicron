@@ -180,6 +180,13 @@ impl ApiSpecFileName {
             }
         }
     }
+
+    pub fn hash(&self) -> Option<&str> {
+        match &self.kind {
+            ApiSpecFileNameKind::Lockstep => None,
+            ApiSpecFileNameKind::Versioned { hash, .. } => Some(hash),
+        }
+    }
 }
 
 /// Describes how this API's specification file is named

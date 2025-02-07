@@ -695,31 +695,46 @@ fn resolve_api_version_blessed<'a>(
     // If not, someone has made an incompatible change to the API
     // *implementation*, such that the implementation no longer faithfully
     // implements this older, supported version.
-    match api_compatible(blessed.openapi(), generated.openapi()) {
-        Ok(compatibility_issues) if !compatibility_issues.is_empty() => {
-            problems.push(Problem::BlessedVersionBroken {
-                compatibility_issues: DisplayableVec(compatibility_issues),
-            });
-        }
-        Ok(_) => (),
-        Err(error) => {
-            // XXX-dap make this a real Problem?
-            panic!("failed to check OpenAPI compatibility: {error:#}");
-        }
+    let issues = api_compatible(blessed.openapi(), generated.openapi());
+    if !issues.is_empty() {
+        problems.push(Problem::BlessedVersionBroken {
+            compatibility_issues: DisplayableVec(issues),
+        });
     }
 
     // Now, there should be at least one local spec that exactly matches the
     // blessed one.
-    // XXX-dap this could just check hashes, once we implement that and if we're
-    // sure that it will be robust.
     let (matching, non_matching): (Vec<_>, Vec<_>) =
-        local.iter().partition(|local| local.contents() == blessed.contents());
+        local.iter().partition(|local| {
+            // It should be enough to compare the hashes, since we should have
+            // already validated that the hashes are correct for the contents.
+            // But while it's cheap enough to do, we may as well compare the
+            // contents, too, and make sure we haven't messed something up.
+            let contents_match = local.contents() == blessed.contents();
+            let local_hash = local.spec_file_name().hash().expect(
+                "this should be a versioned file so it should have a hash",
+            );
+            let blessed_hash = blessed.spec_file_name().hash().expect(
+                "this should be a versioned file so it should have a hash",
+            );
+            let hashes_match = local_hash == blessed_hash;
+            // If the hashes are equal, the contents should be equal, and vice
+            // versa.
+            assert_eq!(hashes_match, contents_match);
+            hashes_match
+        });
     if matching.is_empty() {
-        // XXX-dap it would be weird if there were _more_ than one matching one.
         problems.push(Problem::BlessedVersionMissingLocal {
             spec_file_name: blessed.spec_file_name().clone(),
         })
+    } else {
+        // The specs are identified by, among other things, their hash.  Thus,
+        // to have two matching specs (i.e., having the same contents), we'd
+        // have to have a hash collision.  This is conceivable but unlikely
+        // enough that this is more likely a logic bug.
+        assert_eq!(matching.len(), 1);
     }
+
     // There shouldn't be any local specs that match the same version but don't
     // match the same contents.
     if !non_matching.is_empty() {
