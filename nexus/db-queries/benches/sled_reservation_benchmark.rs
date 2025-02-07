@@ -4,6 +4,8 @@
 
 //! Benchmarks creating sled reservations
 
+use anyhow::Context;
+use anyhow::Result;
 use criterion::black_box;
 use criterion::{criterion_group, criterion_main, Criterion};
 use nexus_db_model::ByteCount;
@@ -122,7 +124,7 @@ fn small_resource_request() -> Resources {
     )
 }
 
-async fn create_reservation(opctx: &OpContext, db: &DataStore) -> PropolisUuid {
+async fn create_reservation(opctx: &OpContext, db: &DataStore) -> Result<PropolisUuid> {
     let instance_id = InstanceUuid::new_v4();
     let vmm_id = PropolisUuid::new_v4();
     db.sled_reservation_create(
@@ -133,18 +135,19 @@ async fn create_reservation(opctx: &OpContext, db: &DataStore) -> PropolisUuid {
         SledReservationConstraintBuilder::new().build(),
     )
     .await
-    .expect("Failed to create reservation");
-    vmm_id
+    .context("Failed to create reservation")?;
+    Ok(vmm_id)
 }
 
 async fn delete_reservation(
     opctx: &OpContext,
     db: &DataStore,
     vmm_id: PropolisUuid,
-) {
+) -> Result<()> {
     db.sled_reservation_delete(&opctx, vmm_id)
         .await
-        .expect("Failed to delete reservation");
+        .context("Failed to delete reservation")?;
+    Ok(())
 }
 
 /////////////////////////////////////////////////////////////////
@@ -169,18 +172,11 @@ impl TestHarness {
         Self { db }
     }
 
-    async fn create_reservation(&self) -> PropolisUuid {
-        let (opctx, datastore) = (self.db.opctx(), self.db.datastore());
-        create_reservation(opctx, datastore).await
-    }
-
-    async fn delete_reservation(&self, vmm_id: PropolisUuid) {
-        let (opctx, datastore) = (self.db.opctx(), self.db.datastore());
-        delete_reservation(opctx, datastore, vmm_id).await
-    }
-
     // Spin up a number of background tasks which perform the work of "create
     // reservation, destroy reservation" in a loop.
+    //
+    // TODO: Have all of these tasks call "bench_one_iter", and return
+    // the total latency. Then divide by the number of workers.
     fn create_contention(&self, count: usize) -> ContendingTasks {
         let mut tasks = tokio::task::JoinSet::new();
         let is_terminating = Arc::new(AtomicBool::new(false));
@@ -197,9 +193,12 @@ impl TestHarness {
                             return;
                         }
 
-                        let vmm_id =
-                            create_reservation(&opctx, &datastore).await;
-                        delete_reservation(&opctx, &datastore, vmm_id).await;
+                        let vmm_id = create_reservation(&opctx, &datastore)
+                            .await
+                            .expect("Task causing contention failed to reserve");
+                        delete_reservation(&opctx, &datastore, vmm_id)
+                            .await
+                            .expect("Task causing contention failed to delete");
                     }
                 }
             });
@@ -237,13 +236,13 @@ impl ContendingTasks {
 
 #[derive(Copy, Clone)]
 struct TestParams {
-    // Number of VMMs to provision from the task-under-test
+    // Number of vmms to provision from the task-under-test
     vmms: usize,
-    contending_tasks: usize,
+    tasks: usize,
 }
 
 const VMM_PARAMS: [usize; 3] = [1, 10, 100];
-const TASK_PARAMS: [usize; 3] = [0, 1, 2];
+const TASK_PARAMS: [usize; 3] = [1, 2, 3];
 
 /////////////////////////////////////////////////////////////////
 //
@@ -255,6 +254,63 @@ const TASK_PARAMS: [usize; 3] = [0, 1, 2];
 // cargo bench -p nexus-db-queries
 // ```
 
+// Average a duration over a divisor.
+//
+// For example, if we reserve 100 vmms, you can use "100" as the divisor
+// to get the "average duration to provision a vmm".
+fn average_duration(duration: Duration, divisor: usize) -> Duration {
+    assert_ne!(divisor, 0, "Don't divide by zero please");
+
+    Duration::from_nanos(
+        u64::try_from(duration.as_nanos() / divisor as u128)
+            .expect("This benchmark is taking hundreds of years to run, maybe optimize it")
+    )
+}
+
+// Reserves "params.vmms" vmms, and later deletes their reservations.
+//
+// Returns the average time to provision a single vmm.
+async fn reserve_vmms_and_return_average_duration(
+    params: &TestParams,
+    opctx: &OpContext,
+    db: &DataStore,
+) -> Duration {
+    let mut vmm_ids = Vec::with_capacity(params.vmms);
+    let start = Instant::now();
+
+    // Clippy: We don't want to move this block outside of "black_box", even though it
+    // isn't returning anything. That would defeat the whole point of using "black_box",
+    // which is to avoid profiling code that is optimized based on the surrounding
+    // benchmark function.
+    #[allow(clippy::unit_arg)]
+    black_box({
+        // Create all the requested vmms.
+        //
+        // Note that all prior reservations will remain in the DB as we continue
+        // provisioning the "next" vmm.
+        for _ in 0..params.vmms {
+            vmm_ids.push(create_reservation(opctx, db).await.expect("Failed to provision vmm"));
+        }
+    });
+
+    // Return the "average time to provision a single vmm".
+    //
+    // This normalizes the results, regardless of how many vmms we are provisioning.
+    //
+    // Note that we expect additional contention to create more work, but it's difficult to
+    // normalize "how much work is being created by contention".
+    let duration = average_duration(start.elapsed(), params.vmms);
+
+    // Clean up all our vmms.
+    //
+    // We don't really care how long this takes, so we omit it from the tracking time.
+    for vmm_id in vmm_ids.drain(..) {
+        delete_reservation(opctx, db,vmm_id).await.expect("Failed to delete vmm");
+    }
+
+    duration
+}
+
 async fn bench_reservation(
     log: &Logger,
     params: TestParams,
@@ -262,47 +318,52 @@ async fn bench_reservation(
 ) -> Duration {
     const SLED_COUNT: usize = 4;
     let harness = TestHarness::new(&log, SLED_COUNT).await;
-    let tasks = harness.create_contention(params.contending_tasks);
-    let mut vmm_ids = Vec::with_capacity(params.vmms);
+    let tasks = harness.create_contention(params.tasks);
 
     let duration = {
         let mut total_duration = Duration::ZERO;
+
+        // Each iteration is an "attempt" at the test.
         for _ in 0..iterations {
-            let start = Instant::now();
-
-            // Clippy: We don't want to move this block outside of "black_box", even though it
-            // isn't returning anything. That would defeat the whole point of using "black_box",
-            // which is to avoid profiling code that is optimized based on the surrounding
-            // benchmark function.
-            #[allow(clippy::unit_arg)]
-            black_box({
-                // Create all the requested vmms.
-                //
-                // Note that all prior reservations will remain in the DB as we continue
-                // provisioning the "next" VMM.
-                for _ in 0..params.vmms {
-                    vmm_ids.push(harness.create_reservation().await);
-                }
-            });
-            let iter_duration = start.elapsed();
-
-            // Return the "average time to provision a single VMM".
-            //
-            // This normalizes the results, regardless of how many VMMs we are provisioning.
-            //
-            // Note that we expect additional contention to create more work, but it's difficult to
-            // normalize "how much work is being created by contention".
-            total_duration += std::time::Duration::from_nanos(
-                u64::try_from(iter_duration.as_nanos() / params.vmms as u128)
-                    .expect("This benchmark is taking hundreds of years to run, maybe optimize it")
-            );
-
-            // Clean up all our VMMs.
-            //
-            // We don't really care how long this takes, so we omit it from the tracking time.
-            for vmm_id in vmm_ids.drain(..) {
-                harness.delete_reservation(vmm_id).await;
+            // Within each attempt, we spawn the tasks requested.
+            let mut set = tokio::task::JoinSet::new();
+            for _ in 0..params.tasks {
+                set.spawn({
+                    let opctx = harness.db.opctx().child(std::collections::BTreeMap::new());
+                    let db = harness.db.datastore().clone();
+                    async move {
+                        reserve_vmms_and_return_average_duration(&params, &opctx, &db).await
+                    }
+                });
             }
+
+            // The sum of "average time to provision a single vmm" across all tasks.
+            let all_tasks_duration = set.join_all().await.into_iter().fold(Duration::ZERO, |acc, x| acc + x);
+
+            // The normalized "time to provision a single vmm", across both:
+            // - The number of vmms reserved by each task, and
+            // - The number of tasks
+            //
+            // As an example, if we provision 10 vmms, and have 5 tasks, and we assume
+            // that VM provisioning time is exactly one second (contention has no impact, somehow):
+            //
+            // - Each task would take 10 seconds (10 vmms * 1 second), but would return an average
+            //   duration of "1 second".
+            // - Across all tasks, we'd see an "all_tasks_duration" of 5 seconds
+            //   (1 second average * 5 tasks).
+            // - So, we'd increment our "total_duration" by "1 second per vmm", which has been
+            //   normalized cross both the tasks and quantities of vmms.
+            //
+            // Why bother doing this?
+            //
+            // When we perform this normalization, we can vary the "total vmms provisioned" as well
+            // as "total tasks" significantly, but easily compare test durations with one another.
+            //
+            // For example: if the total number of vmms has no impact on the next provisioning
+            // request, we should see similar durations for "100 vmms reserved" vs "1 vmm
+            // reserved". However, if more vmms actually make reservation times slower, we'll see
+            // the "100 vmm" case take longer than the "1 vmm" case. The same goes for tasks:
+            total_duration += average_duration(all_tasks_duration, params.tasks);
         }
         total_duration
     };
@@ -341,9 +402,9 @@ fn sled_reservation_benchmark(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("vmm-reservation");
     for vmms in VMM_PARAMS {
-        for contending_tasks in TASK_PARAMS {
-            let params = TestParams { vmms, contending_tasks };
-            let name = format!("{vmms}-vmms-{contending_tasks}-other-tasks");
+        for tasks in TASK_PARAMS {
+            let params = TestParams { vmms, tasks };
+            let name = format!("{vmms}-vmms-{tasks}-tasks");
 
             group.bench_function(&name, |b| {
                 b.to_async(&rt).iter_custom(|iters| {
