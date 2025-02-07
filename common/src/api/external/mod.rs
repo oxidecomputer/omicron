@@ -863,6 +863,17 @@ impl FromStr for Generation {
     }
 }
 
+impl slog::Value for Generation {
+    fn serialize(
+        &self,
+        _rec: &slog::Record,
+        key: slog::Key,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        serializer.emit_u64(key, self.0)
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 #[error("negative generation number")]
 pub struct GenerationNegativeError(());
