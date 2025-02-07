@@ -63,25 +63,45 @@ pub enum Command {
     /// disk. To compare against files on disk, use the `check` command.
     List(ListArgs),
 
-    /// Generate APIs.
+    /// Generate latest OpenAPI documents and validate the results.
     Generate(GenerateArgs),
 
-    /// Check that APIs are up-to-date.
+    /// Check that OpenAPI documents are up-to-date and valid.
     Check(CheckArgs),
 }
 
 // XXX-dap TODO-doc, examples
 #[derive(Debug, Args)]
 struct BlessedSourceArgs {
+    /// Loads blessed OpenAPI documents from path PATH in the given Git
+    /// REVISION.
+    ///
+    /// The REVISION is not used as-is; instead, the tool always looks at the
+    /// merge-base between HEAD and REVISION.  So if you provide main:openapi,
+    /// then it will look at the merge-base of HEAD and "main", in directory
+    /// "openapi" in that commit.
+    ///
+    /// The default behavior is equivalent to `--blessed-from-git=main:openapi`.
+    /// Specifying this option is mainly useful if your branch's parent branch
+    /// is *not* `main`.
+    #[clap(
+        long,
+        env("OPENAPI_MGR_BLESSED_FROM_GIT"),
+        value_name("REVISION:PATH")
+    )]
+    blessed_from_git: Option<String>,
+
+    /// Loads blessed OpenAPI documents from a local directory (instead of the
+    /// default, from Git).
+    ///
+    /// This is intended for testing and debugging this tool.
     #[clap(
         long,
         conflicts_with("blessed_from_git"),
-        env("OPENAPI_MGR_BLESSED_FROM_DIR")
+        env("OPENAPI_MGR_BLESSED_FROM_DIR"),
+        value_name("DIRECTORY")
     )]
     blessed_from_dir: Option<Utf8PathBuf>,
-
-    #[clap(long, env("OPENAPI_MGR_BLESSED_FROM_GIT"))]
-    blessed_from_git: Option<String>,
 }
 
 impl TryFrom<BlessedSourceArgs> for BlessedSource {
@@ -111,9 +131,11 @@ impl TryFrom<BlessedSourceArgs> for BlessedSource {
 
 #[derive(Debug, Args)]
 pub struct GeneratedSourceArgs {
-    /// if specified, use files in this directory instead of generating OpenAPI
-    /// documents from the API implementation itself (for testing)
-    #[clap(long)]
+    /// Instead of generating OpenAPI documents directly from the API
+    /// implementation, load OpenAPI documents from this directory.
+    ///
+    ///
+    #[clap(long, value_name("DIRECTORY"))]
     generated_from_dir: Option<Utf8PathBuf>,
 }
 
@@ -130,8 +152,8 @@ impl From<GeneratedSourceArgs> for GeneratedSource {
 
 #[derive(Debug, Args)]
 pub struct LocalSourceArgs {
-    /// local directory where this workspace's OpenAPI documents are stored
-    #[clap(long, env("OPENAPI_MGR_DIR"))]
+    /// Loads this workspace's OpenAPI documents from local path DIRECTORY.
+    #[clap(long, env("OPENAPI_MGR_DIR"), value_name("DIRECTORY"))]
     dir: Option<Utf8PathBuf>,
 }
 

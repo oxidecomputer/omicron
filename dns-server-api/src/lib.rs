@@ -122,7 +122,6 @@ api_versions!([
 //
 // Then you could use `VERSION_ADD_FOOBAR` as the version in which endpoints
 // were added or removed.
-// XXX-dap define a FILE_VERSION_LATEST so clients can use this?
 
 #[dropshot::api_description]
 pub trait DnsServerApi {

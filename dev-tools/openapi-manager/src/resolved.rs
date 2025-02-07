@@ -395,9 +395,6 @@ impl<'a> Fix<'a> {
     }
 }
 
-// XXX-dap enum of safeties?  and each thing can have a set of safeties that
-// enable the fix?
-
 /// Resolve differences between blessed spec(s), the generated spec, and any
 /// local spec files for a given API
 pub struct Resolved<'a> {
