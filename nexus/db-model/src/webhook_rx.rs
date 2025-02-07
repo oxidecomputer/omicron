@@ -17,8 +17,7 @@ use db_macros::{Asset, Resource};
 use nexus_types::external_api::views;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{
-    GenericUuid, WebhookReceiverKind, WebhookReceiverUuid, WebhookSecretKind,
-    WebhookSecretUuid,
+    GenericUuid, WebhookReceiverKind, WebhookReceiverUuid, WebhookSecretUuid,
 };
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;

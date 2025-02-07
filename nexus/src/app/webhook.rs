@@ -91,7 +91,7 @@ impl super::Nexus {
             .datastore()
             .webhook_rx_secret_create(opctx, &authz_rx, secret)
             .await?;
-        let secret_id = identity.id();
+        let secret_id = identity.id;
         slog::info!(
             &opctx.log,
             "added secret to webhook receiver";

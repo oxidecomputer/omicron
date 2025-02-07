@@ -27,7 +27,6 @@ use omicron_uuid_kinds::TufArtifactKind;
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::WebhookReceiverUuid;
-use omicron_uuid_kinds::WebhookSecretUuid;
 use uuid::Uuid;
 
 /// Look up an API resource in the database
