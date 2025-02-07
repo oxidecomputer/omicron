@@ -1070,7 +1070,7 @@ pub struct WebhookSecrets {
 /// The public ID of a secret key assigned to a webhook.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookSecretId {
-    pub id: String,
+    pub id: Uuid,
 }
 
 /// A delivery attempt for a webhook event.

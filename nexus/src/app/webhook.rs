@@ -4,12 +4,13 @@
 
 //! Webhooks
 
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::WebhookEvent;
 use nexus_db_queries::db::model::WebhookEventClass;
 use nexus_db_queries::db::model::WebhookReceiverConfig;
-use nexus_db_queries::db::model::WebhookRxSecret;
+use nexus_db_queries::db::model::WebhookSecret;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use omicron_common::api::external::CreateResult;
@@ -19,15 +20,22 @@ use omicron_uuid_kinds::WebhookEventUuid;
 use omicron_uuid_kinds::WebhookReceiverUuid;
 
 impl super::Nexus {
+    pub fn webhook_receiver_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        webhook_selector: params::WebhookPath,
+    ) -> LookupResult<lookup::WebhookReceiver<'a>> {
+        Ok(LookupPath::new(opctx, self.datastore()).webhook_receiver_id(
+            WebhookReceiverUuid::from_untyped_uuid(webhook_selector.id),
+        ))
+    }
+
     pub async fn webhook_receiver_config_fetch(
         &self,
         opctx: &OpContext,
-        id: WebhookReceiverUuid,
+        rx: lookup::WebhookReceiver<'a>,
     ) -> LookupResult<WebhookReceiverConfig> {
-        let (authz_rx, rx) = LookupPath::new(opctx, &self.datastore())
-            .webhook_receiver_id(id)
-            .fetch()
-            .await?;
+        let (authz_rx, rx) = rx.fetch().await?;
         let (events, secrets) =
             self.datastore().webhook_rx_config_fetch(opctx, &authz_rx).await?;
         Ok(WebhookReceiverConfig { rx, secrets, events })
@@ -72,15 +80,12 @@ impl super::Nexus {
     pub async fn webhook_receiver_secret_add(
         &self,
         opctx: &OpContext,
-        id: WebhookReceiverUuid,
+        rx: lookup::WebhookReceiver<'_>,
         secret: String,
     ) -> Result<views::WebhookSecretId, Error> {
-        let (authz_rx, _) = LookupPath::new(opctx, &self.datastore())
-            .webhook_receiver_id(id)
-            .fetch()
-            .await?;
-        let secret = WebhookRxSecret::new(authz_rx.id(), secret);
-        let WebhookRxSecret { signature_id, .. } = self
+        let authz_rx = rx.lookup_for(authz::Action::CreateChild).await?;
+        let secret = WebhookSecret::new(authz_rx.id(), secret);
+        let WebhookSecret { id, .. } = self
             .datastore()
             .webhook_rx_secret_create(opctx, &authz_rx, secret)
             .await?;
@@ -88,8 +93,8 @@ impl super::Nexus {
             &opctx.log,
             "added secret to webhook receiver";
             "rx_id" => ?authz_rx.id(),
-            "secret_id" => ?signature_id,
+            "secret_id" => ?id,
         );
-        Ok(views::WebhookSecretId { id: signature_id.to_string() })
+        Ok(views::WebhookSecretId { id: id.into_untyped_uuid() })
     }
 }

@@ -19,15 +19,15 @@ use crate::db::model::WebhookReceiver;
 use crate::db::model::WebhookReceiverConfig;
 use crate::db::model::WebhookReceiverIdentity;
 use crate::db::model::WebhookRxEventGlob;
-use crate::db::model::WebhookRxSecret;
 use crate::db::model::WebhookRxSubscription;
+use crate::db::model::WebhookSecret;
 use crate::db::model::WebhookSubscriptionKind;
 use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
 use crate::db::schema::webhook_receiver::dsl as rx_dsl;
 use crate::db::schema::webhook_rx_event_glob::dsl as glob_dsl;
-use crate::db::schema::webhook_rx_secret::dsl as secret_dsl;
 use crate::db::schema::webhook_rx_subscription::dsl as subscription_dsl;
+use crate::db::schema::webhook_secret::dsl as secret_dsl;
 use crate::db::TransactionError;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -108,7 +108,7 @@ impl DataStore {
                     for secret in secret_keys {
                         let secret = self
                             .add_secret_on_conn(
-                                WebhookRxSecret::new(id, secret),
+                                WebhookSecret::new(id, secret),
                                 &conn,
                             )
                             .await
@@ -141,8 +141,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_rx: &authz::WebhookReceiver,
-    ) -> Result<(Vec<WebhookSubscriptionKind>, Vec<WebhookRxSecret>), Error>
-    {
+    ) -> Result<(Vec<WebhookSubscriptionKind>, Vec<WebhookSecret>), Error> {
         opctx.authorize(authz::Action::ListChildren, authz_rx).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
         let subscriptions =
@@ -385,7 +384,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_rx: &authz::WebhookReceiver,
-    ) -> ListResultVec<WebhookRxSecret> {
+    ) -> ListResultVec<WebhookSecret> {
         opctx.authorize(authz::Action::ListChildren, authz_rx).await?;
         let conn = self.pool_connection_authorized(&opctx).await?;
         self.webhook_rx_secret_list_on_conn(authz_rx, &conn).await
@@ -395,11 +394,11 @@ impl DataStore {
         &self,
         authz_rx: &authz::WebhookReceiver,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> ListResultVec<WebhookRxSecret> {
-        secret_dsl::webhook_rx_secret
+    ) -> ListResultVec<WebhookSecret> {
+        secret_dsl::webhook_secret
             .filter(secret_dsl::rx_id.eq(authz_rx.id().into_untyped_uuid()))
             .filter(secret_dsl::time_deleted.is_null())
-            .select(WebhookRxSecret::as_select())
+            .select(WebhookSecret::as_select())
             .load_async(conn)
             .await
             .map_err(|e| {
@@ -414,8 +413,8 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_rx: &authz::WebhookReceiver,
-        secret: WebhookRxSecret,
-    ) -> CreateResult<WebhookRxSecret> {
+        secret: WebhookSecret,
+    ) -> CreateResult<WebhookSecret> {
         opctx.authorize(authz::Action::CreateChild, authz_rx).await?;
         let conn = self.pool_connection_authorized(&opctx).await?;
         let secret = self.add_secret_on_conn(secret, &conn).await.map_err(
@@ -432,13 +431,13 @@ impl DataStore {
 
     async fn add_secret_on_conn(
         &self,
-        secret: WebhookRxSecret,
+        secret: WebhookSecret,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<WebhookRxSecret, TransactionError<Error>> {
+    ) -> Result<WebhookSecret, TransactionError<Error>> {
         let rx_id = secret.rx_id;
-        let secret: WebhookRxSecret = WebhookReceiver::insert_resource(
+        let secret: WebhookSecret = WebhookReceiver::insert_resource(
             rx_id.into_untyped_uuid(),
-            diesel::insert_into(secret_dsl::webhook_rx_secret).values(secret),
+            diesel::insert_into(secret_dsl::webhook_secret).values(secret),
         )
         .insert_and_get_result_async(conn)
         .await

@@ -7103,21 +7103,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
         params: TypedBody<params::WebhookSecret>,
     ) -> Result<HttpResponseCreated<views::WebhookSecretId>, HttpError> {
         let apictx = rqctx.context();
-        let handler =
-            async {
-                let nexus = &apictx.context.nexus;
-
-                let params::WebhookPath { webhook_id } =
-                    path_params.into_inner();
-                let params::WebhookSecret { secret } = params.into_inner();
-                let opctx =
-                    crate::context::op_context_for_external_api(&rqctx).await?;
-                let secret = nexus.webhook_receiver_secret_add(&opctx,
-                    omicron_uuid_kinds::WebhookReceiverUuid::from_untyped_uuid(
-                        webhook_id,
-                    ),secret).await?;
-                Ok(HttpResponseCreated(secret))
-            };
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let params::WebhookSecret { secret } = params.into_inner();
+            let webhook_selector = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let secret =
+                nexus.webhook_receiver_secret_add(&opctx, rx, secret).await?;
+            Ok(HttpResponseCreated(secret))
+        };
         apictx
             .context
             .external_latencies

@@ -10,7 +10,7 @@ The individual transactions in this upgrade do the following:
 ** `up01.sql` creates the `omicron.public.webhook_rx` table, which stores
 the receiver endpoints that receive webhook events.
 ** *Receiver secrets*:
-*** `up02.sql` creates the `omicron.public.webhook_rx_secret` table, which
+*** `up02.sql` creates the `omicron.public.webhook_secret` table, which
 associates webhook receivers with secret keys and their IDs.
 *** `up03.sql` creates the `lookup_webhook_secrets_by_rx` index on that table,
 for looking up all secrets associated with a receiver.

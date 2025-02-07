@@ -1050,3 +1050,11 @@ authz_resource! {
     polar_snippet = FleetChild,
 
 }
+
+authz_resource! {
+    name = "WebhookSecret",
+    parent = "WebhookReceiver",
+    primary_key = { uuid_kind = WebhookSecretKind },
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}

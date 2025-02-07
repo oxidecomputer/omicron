@@ -2366,10 +2366,18 @@ pub struct WebhookUpdate {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookSecret {
+pub struct WebhookSecretCreate {
     pub secret: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookSecretSelector {
+    /// ID of the webhook receiver.
+    pub webhook_id: Uuid,
+    /// ID of the secret.
+    pub secret_id: Uuid,
+
+}
 #[derive(Deserialize, JsonSchema)]
 pub struct WebhookDeliveryPath {
     pub webhook_id: Uuid,

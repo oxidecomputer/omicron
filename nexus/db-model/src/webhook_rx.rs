@@ -4,21 +4,20 @@
 
 use crate::collection::DatastoreCollectionConfig;
 use crate::schema::{
-    webhook_delivery, webhook_receiver, webhook_rx_event_glob,
-    webhook_rx_secret, webhook_rx_subscription,
+    webhook_receiver, webhook_rx_event_glob, webhook_rx_subscription,
+    webhook_secret,
 };
 use crate::schema_versions;
 use crate::typed_uuid::DbTypedUuid;
 use crate::EventClassParseError;
 use crate::Generation;
-use crate::WebhookDelivery;
 use crate::WebhookEventClass;
 use chrono::{DateTime, Utc};
-use db_macros::Resource;
+use db_macros::{Asset, Resource};
 use nexus_types::external_api::views;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{
-    WebhookReceiverKind, WebhookReceiverUuid, WebhookSecretKind,
+    GenericUuid, WebhookReceiverKind, WebhookReceiverUuid, WebhookSecretKind,
     WebhookSecretUuid,
 };
 use serde::{Deserialize, Serialize};
@@ -30,7 +29,7 @@ use uuid::Uuid;
 #[derive(Clone, Debug)]
 pub struct WebhookReceiverConfig {
     pub rx: WebhookReceiver,
-    pub secrets: Vec<WebhookRxSecret>,
+    pub secrets: Vec<WebhookSecret>,
     pub events: Vec<WebhookSubscriptionKind>,
 }
 
@@ -41,8 +40,8 @@ impl TryFrom<WebhookReceiverConfig> for views::Webhook {
     ) -> Result<views::Webhook, Self::Error> {
         let secrets = secrets
             .iter()
-            .map(|WebhookRxSecret { signature_id, .. }| {
-                views::WebhookSecretId { id: signature_id.to_string() }
+            .map(|WebhookSecret { identity, .. }| views::WebhookSecretId {
+                id: identity.id.into_untyped_uuid(),
             })
             .collect();
         let events = events
@@ -92,11 +91,11 @@ pub struct WebhookReceiver {
     pub rcgen: Generation,
 }
 
-impl DatastoreCollectionConfig<WebhookRxSecret> for WebhookReceiver {
+impl DatastoreCollectionConfig<WebhookSecret> for WebhookReceiver {
     type CollectionId = Uuid;
     type GenerationNumberColumn = webhook_receiver::dsl::rcgen;
     type CollectionTimeDeletedColumn = webhook_receiver::dsl::time_deleted;
-    type CollectionIdColumn = webhook_rx_secret::dsl::rx_id;
+    type CollectionIdColumn = webhook_secret::dsl::rx_id;
 }
 
 impl DatastoreCollectionConfig<WebhookRxSubscription> for WebhookReceiver {
@@ -114,24 +113,32 @@ impl DatastoreCollectionConfig<WebhookRxEventGlob> for WebhookReceiver {
 }
 
 #[derive(
-    Clone, Debug, Queryable, Selectable, Insertable, Serialize, Deserialize,
+    Clone,
+    Debug,
+    Queryable,
+    Selectable,
+    Insertable,
+    Serialize,
+    Deserialize,
+    Asset,
 )]
-#[diesel(table_name = webhook_rx_secret)]
-pub struct WebhookRxSecret {
-    pub rx_id: DbTypedUuid<WebhookReceiverKind>,
-    pub signature_id: DbTypedUuid<WebhookSecretKind>,
+#[asset(uuid_kind = WebhookSecretKind)]
+#[diesel(table_name = webhook_secret)]
+pub struct WebhookSecret {
+    #[diesel(embed)]
+    pub identity: WebhookSecretIdentity,
+    #[diesel(column_name = rx_id)]
+    pub webhook_receiver_id: DbTypedUuid<WebhookReceiverKind>,
     pub secret: String,
-    pub time_created: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
 }
 
-impl WebhookRxSecret {
+impl WebhookSecret {
     pub fn new(rx_id: WebhookReceiverUuid, secret: String) -> Self {
         Self {
-            rx_id: rx_id.into(),
-            signature_id: WebhookSecretUuid::new_v4().into(),
+            identity: WebhookSecretIdentity::new(WebhookSecretUuid::new_v4()),
+            webhook_receiver_id: rx_id.into(),
             secret,
-            time_created: Utc::now(),
             time_deleted: None,
         }
     }

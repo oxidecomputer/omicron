@@ -27,6 +27,7 @@ use omicron_uuid_kinds::TufArtifactKind;
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::WebhookReceiverUuid;
+use omicron_uuid_kinds::WebhookSecretUuid;
 use uuid::Uuid;
 
 /// Look up an API resource in the database
@@ -961,11 +962,22 @@ lookup_resource! {
 lookup_resource! {
     name = "WebhookReceiver",
     ancestors = [],
-    children = [],
+    children = ["WebhookSecret"],
     lookup_by_name = false,
     soft_deletes = true,
     primary_key_columns = [
         { column_name = "id", uuid_kind = WebhookReceiverKind }
+    ]
+}
+
+lookup_resource! {
+    name = "WebhookSecret",
+    ancestors = ["WebhookReceiver"],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [
+        { column_name = "id", uuid_kind = WebhookSecretKind }
     ]
 }
 

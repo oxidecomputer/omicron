@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS omicron.public.webhook_rx_secret (
+CREATE TABLE IF NOT EXISTS omicron.public.webhook_secret (
     -- UUID of the webhook receiver (foreign key into
     -- `omicron.public.webhook_rx`)
     rx_id UUID NOT NULL,

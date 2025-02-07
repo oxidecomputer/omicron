@@ -2145,11 +2145,12 @@ table! {
 }
 
 table! {
-    webhook_rx_secret (rx_id, signature_id) {
-        rx_id -> Uuid,
-        signature_id -> Uuid,
-        secret -> Text,
+    webhook_secret (id) {
+        id -> Uuid,
         time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        rx_id -> Uuid,
+        secret -> Text,
         time_deleted -> Nullable<Timestamptz>,
     }
 }
@@ -2175,12 +2176,12 @@ table! {
 
 allow_tables_to_appear_in_same_query!(
     webhook_receiver,
-    webhook_rx_secret,
+    webhook_secret,
     webhook_rx_subscription,
     webhook_rx_event_glob
 );
 joinable!(webhook_rx_subscription -> webhook_receiver (rx_id));
-joinable!(webhook_rx_secret -> webhook_receiver (rx_id));
+joinable!(webhook_secret -> webhook_receiver (rx_id));
 joinable!(webhook_rx_event_glob -> webhook_receiver (rx_id));
 
 table! {

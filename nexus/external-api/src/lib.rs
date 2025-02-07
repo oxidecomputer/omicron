@@ -3340,7 +3340,18 @@ pub trait NexusExternalApi {
     async fn webhook_secrets_add(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::WebhookPath>,
-        params: TypedBody<params::WebhookSecret>,
+        params: TypedBody<params::WebhookSecretCreate>,
+    ) -> Result<HttpResponseCreated<views::WebhookSecretId>, HttpError>;
+
+    /// Delete a secret associated with a webhook receiver by ID.
+    #[endpoint {
+        method = DELETE,
+        path = "/experimental/v1/webhooks/{webhook_id}/secrets/{secret_id}",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_secrets_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookSecretSelector>,
     ) -> Result<HttpResponseCreated<views::WebhookSecretId>, HttpError>;
 
     /// List delivery attempts to a webhook receiver.
