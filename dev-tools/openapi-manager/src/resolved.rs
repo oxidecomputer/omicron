@@ -19,16 +19,17 @@ use crate::spec_files_generated::GeneratedFiles;
 use crate::spec_files_generic::ApiSpecFileName;
 use crate::spec_files_local::LocalApiSpecFile;
 use crate::spec_files_local::LocalFiles;
-use crate::validation::validate_generated_openapi_document;
+use crate::validation::overwrite_file;
+use crate::validation::validate;
+use crate::validation::CheckStale;
+use crate::validation::CheckStatus;
 use anyhow::Context;
-use atomicwrites::AtomicFile;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::fmt::Display;
-use std::io::Write;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -820,100 +821,4 @@ fn validate_generated(
             }
         }
     }
-}
-
-fn validate(
-    env: &Environment,
-    api: &ManagedApi,
-    generated: &GeneratedApiSpecFile,
-) -> anyhow::Result<Vec<(Utf8PathBuf, CheckStatus)>> {
-    let openapi = generated.openapi();
-    let validation_result = validate_generated_openapi_document(api, &openapi)?;
-    let extra_files = validation_result
-        .extra_files
-        .into_iter()
-        .map(|(path, contents)| {
-            let full_path = env.workspace_root.join(&path);
-            let status = check_file(full_path, contents)?;
-            Ok((path, status))
-        })
-        .collect::<anyhow::Result<_>>()?;
-    Ok(extra_files)
-}
-
-/// Check a file against expected contents.
-fn check_file(
-    full_path: Utf8PathBuf,
-    contents: Vec<u8>,
-) -> anyhow::Result<CheckStatus> {
-    let existing_contents =
-        read_opt(&full_path).context("failed to read contents on disk")?;
-
-    match existing_contents {
-        Some(existing_contents) if existing_contents == contents => {
-            Ok(CheckStatus::Fresh)
-        }
-        Some(existing_contents) => {
-            Ok(CheckStatus::Stale(CheckStale::Modified {
-                full_path,
-                actual: existing_contents,
-                expected: contents,
-            }))
-        }
-        None => Ok(CheckStatus::Stale(CheckStale::New { expected: contents })),
-    }
-}
-
-fn read_opt(path: &Utf8Path) -> std::io::Result<Option<Vec<u8>>> {
-    match fs_err::read(path) {
-        Ok(contents) => Ok(Some(contents)),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(err) => return Err(err),
-    }
-}
-
-#[derive(Debug)]
-#[must_use]
-pub(crate) enum CheckStatus {
-    Fresh,
-    Stale(CheckStale),
-}
-
-#[derive(Debug)]
-#[must_use]
-pub(crate) enum CheckStale {
-    Modified { full_path: Utf8PathBuf, actual: Vec<u8>, expected: Vec<u8> },
-    New { expected: Vec<u8> },
-}
-
-#[derive(Debug)]
-#[must_use]
-pub(crate) enum OverwriteStatus {
-    Updated,
-    Unchanged,
-}
-
-/// Overwrite a file with new contents, if the contents are different.
-///
-/// The file is left unchanged if the contents are the same. That's to avoid
-/// mtime-based recompilations.
-fn overwrite_file(
-    path: &Utf8Path,
-    contents: &[u8],
-) -> anyhow::Result<OverwriteStatus> {
-    // Only overwrite the file if the contents are actually different.
-    let existing_contents =
-        read_opt(path).context("failed to read contents on disk")?;
-
-    // None means the file doesn't exist, in which case we always want to write
-    // the new contents.
-    if existing_contents.as_deref() == Some(contents) {
-        return Ok(OverwriteStatus::Unchanged);
-    }
-
-    AtomicFile::new(path, atomicwrites::OverwriteBehavior::AllowOverwrite)
-        .write(|f| f.write_all(contents))
-        .with_context(|| format!("failed to write to `{}`", path))?;
-
-    Ok(OverwriteStatus::Updated)
 }

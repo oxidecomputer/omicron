@@ -4,7 +4,8 @@
 
 use crate::apis::{ManagedApi, ManagedApis};
 use crate::environment::Environment;
-use crate::resolved::{CheckStale, Problem, Resolution, Resolved};
+use crate::resolved::{Problem, Resolution, Resolved};
+use crate::validation::CheckStale;
 use anyhow::bail;
 use camino::Utf8Path;
 use clap::{Args, ColorChoice};
@@ -111,10 +112,7 @@ where
     Ok(())
 }
 
-pub(crate) fn display_api_spec(
-    api: &ManagedApi,
-    styles: &Styles,
-) -> String {
+pub(crate) fn display_api_spec(api: &ManagedApi, styles: &Styles) -> String {
     let versions: Vec<_> = api.iter_versions_semver().collect();
     let latest_version = versions.last().expect("must be at least one version");
     if api.is_versioned() {
