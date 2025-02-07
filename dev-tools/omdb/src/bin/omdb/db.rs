@@ -2889,6 +2889,7 @@ async fn cmd_db_sagas_list(
             if let Some(after) = fetch_opts.after {
                 dsl::saga
                     .filter(dsl::time_created.gt(after))
+                    .order_by(dsl::time_created)
                     .load_async(&conn)
                     .await
             } else {
@@ -2897,6 +2898,7 @@ async fn cmd_db_sagas_list(
                     dsl::time_created,
                     &first_page::<dsl::time_created>(fetch_opts.fetch_limit),
                 )
+                .order_by(dsl::time_created)
                 .load_async(&conn)
                 .await
             }
