@@ -36,6 +36,10 @@ pub struct Input {
     ancestors: Vec<String>,
     /// unordered list of resources that are direct children of this resource
     /// (e.g., for a Project, these would include "Instance" and "Disk")
+    // N.B. that this is no longer used by the the parent's resource codegen,
+    // but it may be again in future.  Therefore, continue parsing it so that
+    // the resource definitions don't change, but allow it to be unused.
+    #[allow(dead_code)]
     children: Vec<String>,
     /// whether lookup by name is supported (usually within the parent collection)
     lookup_by_name: bool,
