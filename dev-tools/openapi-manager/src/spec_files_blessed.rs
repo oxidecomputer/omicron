@@ -80,7 +80,8 @@ impl BlessedFiles {
             // Read the contents.
             let contents = git_show_file(commit, &directory.join(&f))?;
             if parts.len() == 1 {
-                if let Some(file_name) = api_files.lockstep_file_name(parts[0])
+                if let Some(file_name) =
+                    api_files.lockstep_file_name(parts[0], true)
                 {
                     api_files.load_contents(file_name, contents);
                 }

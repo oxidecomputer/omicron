@@ -35,7 +35,7 @@ impl LocalFiles {
         dir: &Utf8Path,
         apis: &ManagedApis,
     ) -> anyhow::Result<LocalFiles> {
-        let api_files = walk_local_directory(dir, apis)?;
+        let api_files = walk_local_directory(dir, apis, false)?;
         Ok(Self::from(api_files))
     }
 }
@@ -56,6 +56,7 @@ NewtypeFrom! { () pub struct LocalApiSpecFile(ApiSpecFile); }
 pub fn walk_local_directory<'a>(
     dir: &'_ Utf8Path,
     apis: &'a ManagedApis,
+    misconfigurations_okay: bool,
 ) -> anyhow::Result<ApiSpecFilesBuilder<'a>> {
     let mut api_files = ApiSpecFilesBuilder::new(apis);
     let entry_iter =
@@ -74,8 +75,8 @@ pub fn walk_local_directory<'a>(
         if file_type.is_file() {
             match fs_err::read(path) {
                 Ok(contents) => {
-                    if let Some(file_name) =
-                        api_files.lockstep_file_name(file_name)
+                    if let Some(file_name) = api_files
+                        .lockstep_file_name(file_name, misconfigurations_okay)
                     {
                         api_files.load_contents(file_name, contents);
                     }

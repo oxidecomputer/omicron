@@ -285,20 +285,36 @@ impl<'a> ApiSpecFilesBuilder<'a> {
     pub fn lockstep_file_name(
         &mut self,
         basename: &str,
+        misconfigurations_okay: bool,
     ) -> Option<ApiSpecFileName> {
         match ApiSpecFileName::new_lockstep(&self.apis, basename) {
             Err(
                 warning @ (BadLockstepFileName::NoSuchApi
-                | BadLockstepFileName::MissingJsonSuffix),
-            ) => {
-                // These problems are not fatal.  They might just reflect an
-                // extra file here (like an editor swap file or the like).
+                | BadLockstepFileName::NotLockstep),
+            ) if misconfigurations_okay => {
+                // When we're looking at the blessed files, the caller provides
+                // `misconfigurations_okay: true` and we treat these as
+                // warnings because the configuration for an API may have
+                // changed between the blessed files and the local changes.
+                //
+                // - NoSuchApi: somebody is deleting an API locally
+                // - NotLockstep: somebody is converting a lockstep API to a
+                //   versioned one
                 let warning = anyhow!(warning)
                     .context(format!("skipping file {:?}", basename));
                 self.load_warning(warning);
                 None
             }
-            Err(error @ BadLockstepFileName::NotLockstep) => {
+            Err(warning @ BadLockstepFileName::MissingJsonSuffix) => {
+                // Even if the caller didn't provide `problems_okay: true`, it's
+                // not a big deal to have an extra file here.  This could be an
+                // editor swap file or something.
+                let warning = anyhow!(warning)
+                    .context(format!("skipping file {:?}", basename));
+                self.load_warning(warning);
+                None
+            }
+            Err(error) => {
                 self.load_error(
                     anyhow!(error).context(format!("file {:?}", basename)),
                 );
