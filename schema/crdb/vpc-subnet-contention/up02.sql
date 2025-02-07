@@ -29,7 +29,7 @@ FROM
         ON vpc_subnet.vpc_id = vpc.id) JOIN omicron.public.vpc_router
             ON (vpc_router.vpc_id = vpc.id AND vpc_router.id = vpc.system_router_id)
 WHERE
-    vpc_router.kind = 'system' AND
+    vpc_router.kind = 'system' AND vpc_subnet.time_deleted IS NULL AND
     vpc_subnet.name != 'default-v4' AND vpc_subnet.name != 'default-v6'
 ON CONFLICT DO NOTHING;
 
@@ -58,7 +58,7 @@ FROM
         ON vpc_subnet.vpc_id = vpc.id) JOIN omicron.public.vpc_router
             ON (vpc_router.vpc_id = vpc.id AND vpc_router.id = vpc.system_router_id)
 WHERE
-    vpc_router.kind = 'system' AND
+    vpc_router.kind = 'system' AND vpc_subnet.time_deleted IS NULL AND
     (vpc_subnet.name = 'default-v4' OR vpc_subnet.name = 'default-v6')
 ON CONFLICT DO NOTHING;
 

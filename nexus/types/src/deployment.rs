@@ -949,14 +949,29 @@ pub struct BlueprintDatasetsConfig {
     pub datasets: IdMap<BlueprintDatasetConfig>,
 }
 
-impl From<BlueprintDatasetsConfig> for DatasetsConfig {
-    fn from(config: BlueprintDatasetsConfig) -> Self {
-        Self {
-            generation: config.generation,
-            datasets: config
+impl BlueprintDatasetsConfig {
+    /// Converts [Self] into [DatasetsConfig].
+    ///
+    /// [DatasetsConfig] is a format of the dataset configuration that can be
+    /// passed to Sled Agents for deployment.
+    ///
+    /// This function is effectively a [std::convert::From] implementation, but
+    /// is named slightly more explicitly, as it filters the blueprint
+    /// configuration to only consider in-service datasets.
+    pub fn into_in_service_datasets(self) -> DatasetsConfig {
+        DatasetsConfig {
+            generation: self.generation,
+            datasets: self
                 .datasets
                 .into_iter()
-                .map(|d| (d.id, d.into()))
+                .filter_map(|d| {
+                    if d.disposition.matches(BlueprintDatasetFilter::InService)
+                    {
+                        Some((d.id, d.into()))
+                    } else {
+                        None
+                    }
+                })
                 .collect(),
         }
     }
@@ -1014,6 +1029,17 @@ impl BlueprintDatasetDisposition {
     }
 }
 
+impl fmt::Display for BlueprintDatasetDisposition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            // Neither `write!(f, "...")` nor `f.write_str("...")` obey fill
+            // and alignment (used above), but this does.
+            BlueprintDatasetDisposition::InService => "in service".fmt(f),
+            BlueprintDatasetDisposition::Expunged => "expunged".fmt(f),
+        }
+    }
+}
+
 /// Information about a dataset as recorded in a blueprint
 #[derive(
     Debug,
@@ -1028,9 +1054,7 @@ impl BlueprintDatasetDisposition {
     Diffable,
 )]
 pub struct BlueprintDatasetConfig {
-    // TODO: Display this in diffs - leave for now, for backwards compat
     pub disposition: BlueprintDatasetDisposition,
-
     pub id: DatasetUuid,
     pub pool: ZpoolName,
     pub kind: DatasetKind,
@@ -1063,6 +1087,7 @@ impl BlueprintDatasetConfig {
         vec![
             DatasetName::new(self.pool.clone(), self.kind.clone()).full_name(),
             self.id.to_string(),
+            self.disposition.to_string(),
             unwrap_or_none(&self.quota),
             unwrap_or_none(&self.reservation),
             self.compression.to_string(),
@@ -1103,7 +1128,9 @@ pub struct BlueprintMetadata {
 }
 
 /// Describes what blueprint, if any, the system is currently working toward
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
 pub struct BlueprintTarget {
     /// id of the blueprint that the system is trying to make real
     pub target_id: BlueprintUuid,
@@ -1157,6 +1184,12 @@ impl From<&crate::inventory::Dataset> for CollectionDatasetIdentifier {
 pub struct UnstableReconfiguratorState {
     pub planning_input: PlanningInput,
     pub collections: Vec<Collection>,
+    // When collected from a deployed system, `target_blueprint` will always be
+    // `Some(_)`. `UnstableReconfiguratorState` is also used by
+    // `reconfigurator-cli`, which allows construction of states that do not
+    // represent a fully-deployed system (and maybe no blueprints at all, hence
+    // no target blueprint).
+    pub target_blueprint: Option<BlueprintTarget>,
     pub blueprints: Vec<Blueprint>,
     pub internal_dns: BTreeMap<Generation, DnsConfigParams>,
     pub external_dns: BTreeMap<Generation, DnsConfigParams>,
