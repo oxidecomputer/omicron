@@ -4,12 +4,12 @@
 
 use crate::{
     apis::ManagedApis,
-    cmd::check::{print_problems, print_warnings, summarize, CheckResult},
     environment::{BlessedSource, Environment, GeneratedSource},
     output::{
-        display_api_spec_version,
+        display_api_spec_version, display_load_problems, display_resolution,
+        display_resolution_problems,
         headers::{self, *},
-        plural, OutputOpts, Styles,
+        plural, CheckResult, OutputOpts, Styles,
     },
     resolved::{Problem, Resolved},
     FAILURE_EXIT_CODE,
@@ -46,11 +46,11 @@ pub(crate) fn generate_impl(
 
     let apis = ManagedApis::all()?;
     let generated = generated_source.load(&apis, &styles)?;
-    print_warnings(&generated.warnings, &generated.errors)?;
+    display_load_problems(&generated.warnings, &generated.errors)?;
     let local_files = env.local_source.load(&apis, &styles)?;
-    print_warnings(&local_files.warnings, &local_files.errors)?;
+    display_load_problems(&local_files.warnings, &local_files.errors)?;
     let blessed = blessed_source.load(&apis, &styles)?;
-    print_warnings(&blessed.warnings, &blessed.errors)?;
+    display_load_problems(&blessed.warnings, &blessed.errors)?;
 
     let resolved =
         Resolved::new(env, &apis, &blessed, &generated, &local_files);
@@ -65,7 +65,7 @@ pub(crate) fn generate_impl(
     );
 
     if resolved.has_unfixable_problems() {
-        return match summarize(env, &apis, &resolved, &styles)? {
+        return match display_resolution(env, &apis, &resolved, &styles)? {
             CheckResult::Failures => Ok(GenerateResult::Failures),
             unexpected => {
                 Err(anyhow!("unexpectedly got {unexpected:?} from summarize()"))
@@ -145,13 +145,13 @@ pub(crate) fn generate_impl(
         "{:>HEADER_WIDTH$} all local files",
         "Rechecking".style(styles.success_header),
     );
-    print_warnings(&local_files.warnings, &local_files.errors)?;
+    display_load_problems(&local_files.warnings, &local_files.errors)?;
     let resolved =
         Resolved::new(env, &apis, &blessed, &generated, &local_files);
     let general_problems: Vec<_> = resolved.general_problems().collect();
     nproblems += general_problems.len();
     if !general_problems.is_empty() {
-        print_problems(env, general_problems, &styles);
+        display_resolution_problems(env, general_problems, &styles);
     }
     for api in apis.iter_apis() {
         let ident = api.ident();
@@ -167,7 +167,7 @@ pub(crate) fn generate_impl(
                      (this is a bug)",
                     ident, version
                 );
-                print_problems(env, problems, &styles);
+                display_resolution_problems(env, problems, &styles);
             }
         }
     }

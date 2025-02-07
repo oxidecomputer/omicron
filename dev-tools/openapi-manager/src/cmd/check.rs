@@ -3,28 +3,16 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    apis::{ManagedApi, ManagedApis},
+    apis::ManagedApis,
     environment::{BlessedSource, Environment, GeneratedSource},
     output::{
-        display_api_spec_version, headers::*, plural, write_diff, OutputOpts,
-        Styles,
+        display_load_problems, display_resolution, headers::*, CheckResult,
+        OutputOpts, Styles,
     },
-    resolved::{CheckStale, Problem, Resolution, Resolved},
+    resolved::Resolved,
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
 };
-use anyhow::{bail, Result};
-use indent_write::io::IndentWriter;
-use owo_colors::OwoColorize;
-use similar::TextDiff;
-use slog_error_chain::InlineErrorChain;
 use std::process::ExitCode;
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum CheckResult {
-    Success,
-    NeedsUpdate,
-    Failures,
-}
 
 impl CheckResult {
     pub(crate) fn to_exit_code(self) -> ExitCode {
@@ -41,7 +29,7 @@ pub(crate) fn check_impl(
     blessed_source: &BlessedSource,
     generated_source: &GeneratedSource,
     output: &OutputOpts,
-) -> Result<CheckResult> {
+) -> anyhow::Result<CheckResult> {
     let mut styles = Styles::default();
     if output.use_color(supports_color::Stream::Stderr) {
         styles.colorize();
@@ -50,292 +38,15 @@ pub(crate) fn check_impl(
     eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
     let apis = ManagedApis::all()?;
     let generated = generated_source.load(&apis, &styles)?;
-    print_warnings(&generated.warnings, &generated.errors)?;
+    display_load_problems(&generated.warnings, &generated.errors)?;
     let local_files = env.local_source.load(&apis, &styles)?;
-    print_warnings(&local_files.warnings, &local_files.errors)?;
+    display_load_problems(&local_files.warnings, &local_files.errors)?;
     let blessed = blessed_source.load(&apis, &styles)?;
-    print_warnings(&blessed.warnings, &blessed.errors)?;
+    display_load_problems(&blessed.warnings, &blessed.errors)?;
 
     let resolved =
         Resolved::new(env, &apis, &blessed, &generated, &local_files);
 
     eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
-    summarize(env, &apis, &resolved, &styles)
-}
-
-// XXX-dap put somewhere where it can be re-used
-pub fn print_warnings(
-    warnings: &[anyhow::Error],
-    errors: &[anyhow::Error],
-) -> anyhow::Result<()> {
-    for w in warnings {
-        println!("    warn: {:#}", w);
-    }
-
-    for e in errors {
-        println!("    error: {:#}", e);
-    }
-
-    if !errors.is_empty() {
-        bail!(
-            "bailing out after error{} above",
-            if errors.len() != 1 { "s" } else { "" }
-        );
-    }
-
-    Ok(())
-}
-
-// XXX-dap put somewhere where it can be re-used
-/// Summarize the results of checking all supported API versions, plus other
-/// problems found during resolution
-pub fn summarize(
-    env: &Environment,
-    apis: &ManagedApis,
-    resolved: &Resolved,
-    styles: &Styles,
-) -> anyhow::Result<CheckResult> {
-    let total = resolved.nexpected_documents();
-
-    eprintln!(
-        "{:>HEADER_WIDTH$} {} OpenAPI {}...",
-        CHECKING.style(styles.success_header),
-        total.style(styles.bold),
-        plural::documents(total),
-    );
-
-    let mut num_fresh = 0;
-    let mut num_stale = 0;
-    let mut num_failed = 0;
-
-    // Print problems associated with a supported API version
-    // (i.e., one of the expected OpenAPI documents).
-    for api in apis.iter_apis() {
-        let ident = api.ident();
-
-        for version in api.iter_versions_semver() {
-            let resolution = resolved
-                .resolution_for_api_version(ident, version)
-                .expect("resolution for all supported API versions");
-            if resolution.has_errors() {
-                num_failed += 1;
-            } else if resolution.has_problems() {
-                num_stale += 1;
-            } else {
-                num_fresh += 1;
-            }
-            summarize_one(env, api, version, resolution, styles);
-        }
-    }
-
-    // Print problems not associated with any supported version, if any.
-    let general_problems: Vec<_> = resolved.general_problems().collect();
-    let num_general_problems = if !general_problems.is_empty() {
-        eprintln!(
-            "\n{:>HEADER_WIDTH$} problems not associated with a specific \
-             supported API version:",
-            "Other".style(styles.warning_header),
-        );
-
-        let (fixable, unfixable): (Vec<&Problem>, Vec<&Problem>) =
-            general_problems.iter().partition(|p| p.is_fixable());
-        num_failed += unfixable.len();
-        print_problems(env, general_problems, styles);
-        fixable.len()
-    } else {
-        0
-    };
-
-    // Print informational notes, if any.
-    for n in resolved.notes() {
-        let initial_indent =
-            format!("{:>HEADER_WIDTH$} ", "Note".style(styles.warning_header));
-        let more_indent = " ".repeat(HEADER_WIDTH + " ".len());
-        eprintln!(
-            "\n{}\n",
-            textwrap::fill(
-                &n.to_string(),
-                textwrap::Options::with_termwidth()
-                    .initial_indent(&initial_indent)
-                    .subsequent_indent(&more_indent)
-            )
-        );
-    }
-
-    // Print a summary line.
-    let status_header = if num_failed > 0 {
-        FAILURE.style(styles.failure_header)
-    } else if num_stale > 0 {
-        STALE.style(styles.warning_header)
-    } else {
-        SUCCESS.style(styles.success_header)
-    };
-
-    eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
-    eprintln!(
-        "{:>HEADER_WIDTH$} {} {} checked: {} fresh, {} stale, {} failed, \
-         {} other {}",
-        status_header,
-        total.style(styles.bold),
-        plural::documents(total),
-        num_fresh.style(styles.bold),
-        num_stale.style(styles.bold),
-        num_failed.style(styles.bold),
-        num_general_problems.style(styles.bold),
-        plural::problems(num_general_problems),
-    );
-    if num_failed > 0 {
-        eprintln!(
-            "{:>HEADER_WIDTH$} (fix failures, then run {} to update)",
-            "",
-            "cargo xtask openapi generate".style(styles.bold)
-        );
-        Ok(CheckResult::Failures)
-    } else if num_stale > 0 {
-        eprintln!(
-            "{:>HEADER_WIDTH$} (run {} to update)",
-            "",
-            "cargo xtask openapi generate".style(styles.bold)
-        );
-        Ok(CheckResult::NeedsUpdate)
-    } else {
-        Ok(CheckResult::Success)
-    }
-}
-
-/// Summarize the "check" status of one supported API version
-fn summarize_one(
-    env: &Environment,
-    api: &ManagedApi,
-    version: &semver::Version,
-    resolution: &Resolution<'_>,
-    styles: &Styles,
-) {
-    let problems: Vec<_> = resolution.problems().collect();
-    if problems.is_empty() {
-        // Success case: file is up-to-date.
-        // XXX-dap this used to print a summary and "extra"
-        eprintln!(
-            "{:>HEADER_WIDTH$} {}",
-            FRESH.style(styles.success_header),
-            display_api_spec_version(api, version, &styles),
-        );
-    } else {
-        // There were one or more problems, some of which may be unfixable.
-        eprintln!(
-            "{:>HEADER_WIDTH$} {}",
-            if resolution.has_errors() {
-                FAILURE.style(styles.failure_header)
-            } else {
-                assert!(resolution.has_problems());
-                STALE.style(styles.warning_header)
-            },
-            display_api_spec_version(api, version, &styles),
-        );
-
-        print_problems(env, problems, styles);
-    }
-}
-
-/// Print a formatted list of Problems
-pub fn print_problems<'a, T>(env: &Environment, problems: T, styles: &Styles)
-where
-    T: IntoIterator<Item = &'a Problem<'a>>,
-{
-    for p in problems.into_iter() {
-        let subheader_width = HEADER_WIDTH + 4;
-        let first_indent = format!(
-            "{:>subheader_width$}: ",
-            if p.is_fixable() {
-                "problem".style(styles.warning_header)
-            } else {
-                "error".style(styles.failure_header)
-            }
-        );
-        let more_indent = " ".repeat(subheader_width + 2);
-        eprintln!(
-            "{}",
-            textwrap::fill(
-                &InlineErrorChain::new(&p).to_string(),
-                textwrap::Options::with_termwidth()
-                    .initial_indent(&first_indent)
-                    .subsequent_indent(&more_indent)
-            )
-        );
-
-        let Some(fix) = p.fix() else {
-            continue;
-        };
-
-        let first_indent = format!(
-            "{:>subheader_width$}: ",
-            "fix".style(styles.warning_header)
-        );
-        let fix_str = fix.to_string();
-        let steps = fix_str.trim_end().split("\n");
-        for s in steps {
-            eprintln!(
-                "{}",
-                textwrap::fill(
-                    &format!("will {}", s),
-                    textwrap::Options::with_termwidth()
-                        .initial_indent(&first_indent)
-                        .subsequent_indent(&more_indent)
-                )
-            );
-        }
-
-        // When possible, print a useful diff of changes.
-        let do_diff = match p {
-            Problem::LockstepStale { found, generated } => {
-                let diff = TextDiff::from_lines(
-                    found.contents(),
-                    generated.contents(),
-                );
-                let path1 =
-                    env.openapi_dir().join(found.spec_file_name().path());
-                let path2 =
-                    env.openapi_dir().join(generated.spec_file_name().path());
-                Some((diff, path1, path2))
-            }
-            Problem::ExtraFileStale {
-                check_stale:
-                    CheckStale::Modified { full_path, actual, expected },
-                ..
-            } => {
-                let diff = TextDiff::from_lines(actual, expected);
-                Some((diff, full_path.clone(), full_path.clone()))
-            }
-            Problem::LocalVersionStale { spec_files, generated }
-                if spec_files.len() == 1 =>
-            {
-                let diff = TextDiff::from_lines(
-                    spec_files[0].contents(),
-                    generated.contents(),
-                );
-                let path1 = env
-                    .openapi_dir()
-                    .join(spec_files[0].spec_file_name().path());
-                let path2 =
-                    env.openapi_dir().join(generated.spec_file_name().path());
-                Some((diff, path1, path2))
-            }
-            _ => None,
-        };
-
-        if let Some((diff, path1, path2)) = do_diff {
-            let indent = " ".repeat(HEADER_WIDTH + 1);
-            // We don't care about I/O errors here (just as we don't when using
-            // eprintln! above).
-            let _ = write_diff(
-                &diff,
-                &path1,
-                &path2,
-                styles,
-                // Add an indent to align diff with the status message.
-                &mut IndentWriter::new(&indent, std::io::stderr()),
-            );
-            eprintln!("");
-        }
-    }
+    display_resolution(env, &apis, &resolved, &styles)
 }
