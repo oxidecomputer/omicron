@@ -124,12 +124,14 @@ impl<'a> Planner<'a> {
         // 4. All disks associated with the sled have been marked expunged. This
         //    happens implicitly when a sled is expunged, so is covered by our
         //    first check.
+        //
+        // Note that we must check both the planning input, and the parent
+        // blueprint to tell if a sled is decommissioned because we carry
+        // decommissioned sleds forward and do not prune them from the blueprint
+        // right away.
         for (sled_id, sled_details) in
             self.input.all_sleds(SledFilter::Commissioned)
         {
-            // Decommission any disks that need it
-            self.blueprint.sled_decommision_disks(sled_id, sled_details)?;
-
             // Check 1: look for sleds that are expunged.
             match (sled_details.policy, sled_details.state) {
                 // If the sled is still in service, don't decommission it.
@@ -150,6 +152,18 @@ impl<'a> Planner<'a> {
                 // to check the rest of the criteria.
                 (SledPolicy::Expunged, SledState::Active) => (),
             }
+
+            // Check that the sled isn't already decommissioned in the parent blueprint, if it exists.
+            if let Some(sled_state) =
+                self.blueprint.parent_blueprint().sled_state.get(&sled_id)
+            {
+                if *sled_state == SledState::Decommissioned {
+                    continue;
+                }
+            }
+
+            // Decommission any disks that need it
+            self.blueprint.sled_decommision_disks(sled_id, sled_details)?;
 
             // Check 2: have all this sled's zones been expunged? It's possible
             // we ourselves have made this change, which is fine.
@@ -1377,10 +1391,10 @@ mod test {
         // IP no longer being associated with a running zone, and a new Nexus
         // zone being added to one of the two remaining sleds.
         let mut builder = input.into_builder();
-        let (sled_id, details) =
+        let (sled_id, _) =
             builder.sleds_mut().iter_mut().next().expect("no sleds");
         let sled_id = *sled_id;
-        details.policy = SledPolicy::Expunged;
+        builder.expunge_sled(&sled_id).unwrap();
         let input = builder.build();
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
@@ -3488,8 +3502,7 @@ mod test {
 
         // Expunge a keeper zone
         let mut builder = input.into_builder();
-        builder.sleds_mut().get_mut(&sled_id).unwrap().policy =
-            SledPolicy::Expunged;
+        builder.expunge_sled(&sled_id).unwrap();
         let input = builder.build();
 
         let blueprint4 = Planner::new_based_on(

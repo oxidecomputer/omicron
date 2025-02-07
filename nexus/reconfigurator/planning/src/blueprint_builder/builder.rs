@@ -648,6 +648,10 @@ impl<'a> BlueprintBuilder<'a> {
         })
     }
 
+    pub fn parent_blueprint(&self) -> &Blueprint {
+        &self.parent_blueprint
+    }
+
     fn resource_allocator(
         &mut self,
     ) -> Result<&mut BlueprintResourceAllocator, Error> {
