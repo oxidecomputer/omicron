@@ -193,7 +193,6 @@ impl ApiSpecFileName {
 #[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
 enum ApiSpecFileNameKind {
     Lockstep,
-    // XXX-dap hash should be validated
     Versioned { version: semver::Version, hash: String },
 }
 
@@ -225,7 +224,6 @@ enum BadVersionedFileName {
 pub struct ApiSpecFile {
     name: ApiSpecFileName,
     contents: DebugIgnore<OpenAPI>,
-    // XXX-dap do we have to store two whole copies of this?
     contents_buf: DebugIgnore<Vec<u8>>,
     version: semver::Version,
 }

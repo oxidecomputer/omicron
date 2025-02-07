@@ -283,6 +283,7 @@ pub enum Versions {
 
 impl Versions {
     /// Constructor for a lockstep API
+    #[allow(dead_code)] // XXX-dap-last-step
     pub fn new_lockstep(version: semver::Version) -> Versions {
         Versions::Lockstep { version }
     }

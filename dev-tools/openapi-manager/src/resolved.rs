@@ -806,9 +806,6 @@ fn validate_generated(
             });
         }
         Ok(extra_files) => {
-            // XXX-dap it would be nice if the data model accounted for the fact
-            // that these extra files exist (so that we could report that we
-            // checked them).
             for (path, status) in extra_files {
                 match status {
                     CheckStatus::Fresh => (),
