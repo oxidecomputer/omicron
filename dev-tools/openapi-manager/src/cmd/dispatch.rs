@@ -2,15 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// XXX-dap do we now need a "diff" command to see what's changed between
-// versions?
-
-use std::process::ExitCode;
-
-use anyhow::Result;
-use camino::Utf8PathBuf;
-use clap::{Args, Parser, Subcommand};
-
 use crate::{
     cmd::{
         check::check_impl, debug::debug_impl, generate::generate_impl,
@@ -20,6 +11,10 @@ use crate::{
     git::GitRevision,
     output::OutputOpts,
 };
+use anyhow::Result;
+use camino::Utf8PathBuf;
+use clap::{Args, Parser, Subcommand};
+use std::process::ExitCode;
 
 /// Manage OpenAPI specifications.
 ///
@@ -70,7 +65,6 @@ pub enum Command {
     Check(CheckArgs),
 }
 
-// XXX-dap TODO-doc, examples
 #[derive(Debug, Args)]
 struct BlessedSourceArgs {
     /// Loads blessed OpenAPI documents from path PATH in the given Git
@@ -108,8 +102,6 @@ impl TryFrom<BlessedSourceArgs> for BlessedSource {
     type Error = anyhow::Error;
 
     fn try_from(b: BlessedSourceArgs) -> Result<Self, Self::Error> {
-        // XXX-dap test this
-        // clap should not allow both of these to be set.
         assert!(b.blessed_from_dir.is_none() || b.blessed_from_git.is_none());
 
         if let Some(local_directory) = b.blessed_from_dir {

@@ -60,7 +60,6 @@ pub enum Note {
     /// This is not an error because we do expect to EOL old API specs.  There's
     /// not currently a way for this tool to know if the EOL'ing is correct or
     /// not, so we at least highlight it to the user.
-    // XXX-dap consider this an error if they don't pass a --allow-removed?
     #[error(
         "API {api_ident} version {version}: formerly blessed version has been \
          removed.  This version will no longer be supported!  This will break \
@@ -126,14 +125,14 @@ pub enum Problem<'a> {
     // This kind of problem is not associated with any *supported* version of an
     // API.  (All the others are.)
     #[error(
-        "One or more local spec files were found that do not correspond to a \
-         supported version of this API: {spec_file_names}.  This is unusual, \
+        "A local spec file was found that does not correspond to a \
+         supported version of this API: {spec_file_name}.  This is unusual, \
          but it could happen if you created this version of the API in this \
          branch, then later changed it (maybe because you merged with upstream \
          and had to adjust the version number for your changes).  In that \
          case, this tool can remove the unused file for you."
     )]
-    LocalSpecFilesOrphaned { spec_file_names: DisplayableVec<ApiSpecFileName> },
+    LocalSpecFileOrphaned { spec_file_name: ApiSpecFileName },
 
     // All other problems are associated with specific supported versions of an
     // API.
@@ -146,8 +145,6 @@ pub enum Problem<'a> {
     )]
     BlessedVersionMissingLocal { spec_file_name: ApiSpecFileName },
 
-    // XXX-dap where is the error that means "the blessed file does not match
-    // the corresponding local file"
     #[error(
         "Found extra local file for blessed version that does not match the \
          blessed (upstream) spec file: {spec_file_names}.  This can happen if \
@@ -211,13 +208,6 @@ pub enum Problem<'a> {
     // rather that there will be one or more _incorrect_ files and the correct
     // one will be missing.  The fix will be to remove all the incorrect ones
     // and add the correct one.
-    // XXX-dap this is going to be really annoying in that when iterating on
-    // local changes, you will have to update the clients to point at the new
-    // hashes all the time.  We could stop putting the checksum into the
-    // filenames?  But then you could easily forget to update the client if you
-    // bumped your local version.  Really, it'd be nice if the client filename
-    // was somehow checked by this tool.  Maybe this library should define
-    // constants like API_NAME_LATEST that are used in the client specs?
     LocalVersionStale {
         spec_files: Vec<&'a LocalApiSpecFile>,
         generated: &'a GeneratedApiSpecFile,
@@ -248,12 +238,14 @@ impl<'a> Problem<'a> {
 
     pub fn fix(&'a self) -> Option<Fix<'a>> {
         match self {
-            Problem::LocalSpecFilesOrphaned { spec_file_names } => {
-                Some(Fix::DeleteFiles { files: spec_file_names })
+            Problem::LocalSpecFileOrphaned { spec_file_name } => {
+                Some(Fix::DeleteFiles {
+                    files: DisplayableVec(vec![spec_file_name.clone()]),
+                })
             }
             Problem::BlessedVersionMissingLocal { .. } => None,
             Problem::BlessedVersionExtraLocalSpec { spec_file_names } => {
-                Some(Fix::DeleteFiles { files: spec_file_names })
+                Some(Fix::DeleteFiles { files: spec_file_names.clone() })
             }
             Problem::BlessedVersionBroken { .. } => None,
             Problem::LockstepMissingLocal { generated }
@@ -267,7 +259,7 @@ impl<'a> Problem<'a> {
                 })
             }
             Problem::LocalVersionExtra { spec_file_names } => {
-                Some(Fix::DeleteFiles { files: spec_file_names })
+                Some(Fix::DeleteFiles { files: spec_file_names.clone() })
             }
             Problem::LocalVersionStale { spec_files, generated } => {
                 Some(Fix::FixVersionedFiles {
@@ -287,7 +279,7 @@ impl<'a> Problem<'a> {
 
 pub enum Fix<'a> {
     DeleteFiles {
-        files: &'a DisplayableVec<ApiSpecFileName>,
+        files: DisplayableVec<ApiSpecFileName>,
     },
     FixLockstepFile {
         generated: &'a GeneratedApiSpecFile,
@@ -309,7 +301,6 @@ impl<'a> Display for Fix<'a> {
                 writeln!(f, "delete files: {files}")?;
             }
             Fix::FixLockstepFile { generated } => {
-                // XXX-dap add diff
                 writeln!(
                     f,
                     "rewrite lockstep file {} from generated",
@@ -327,7 +318,6 @@ impl<'a> Display for Fix<'a> {
                 )?;
             }
             Fix::FixExtraFile { path, check_stale } => {
-                // XXX-dap add diff
                 let label = match check_stale {
                     CheckStale::Modified { .. } => "rewrite",
                     CheckStale::New { .. } => "write new",
@@ -450,11 +440,8 @@ impl<'a> Resolved<'a> {
         // a (fixable) problem.
         let non_version_problems =
             resolve_orphaned_local_specs(&supported_versions_by_api, local)
-                .map(|spec_file_name| Problem::LocalSpecFilesOrphaned {
-                    // XXX-dap is this just one or many?
-                    spec_file_names: DisplayableVec(vec![
-                        spec_file_name.clone()
-                    ]),
+                .map(|spec_file_name| Problem::LocalSpecFileOrphaned {
+                    spec_file_name: spec_file_name.clone(),
                 })
                 .collect();
 
