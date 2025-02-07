@@ -54,6 +54,7 @@ mod mgs;
 mod nexus;
 mod oximeter;
 mod oxql;
+mod reconfigurator;
 mod sled_agent;
 
 #[tokio::main]
@@ -72,6 +73,9 @@ async fn main() -> Result<(), anyhow::Error> {
         OmdbCommands::Nexus(nexus) => nexus.run_cmd(&args, &log).await,
         OmdbCommands::Oximeter(oximeter) => oximeter.run_cmd(&args, &log).await,
         OmdbCommands::Oxql(oxql) => oxql.run_cmd(&args, &log).await,
+        OmdbCommands::Reconfigurator(reconfig) => {
+            reconfig.run_cmd(&args, &log).await
+        }
         OmdbCommands::SledAgent(sled) => sled.run_cmd(&args, &log).await,
         OmdbCommands::CrucibleAgent(crucible) => crucible.run_cmd(&args).await,
     }
@@ -286,6 +290,8 @@ enum OmdbCommands {
     Oximeter(oximeter::OximeterArgs),
     /// Enter the Oximeter Query Language shell for interactive querying.
     Oxql(oxql::OxqlArgs),
+    /// Interact with the Reconfigurator system
+    Reconfigurator(reconfigurator::ReconfiguratorArgs),
     /// Debug a specific Sled
     SledAgent(sled_agent::SledAgentArgs),
 }

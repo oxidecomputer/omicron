@@ -487,9 +487,9 @@ checksum = "8b75356056920673b02621b35afd0f7dda9306d03c79a30f5c56c44cf256e3de"
 
 [[package]]
 name = "async-trait"
-version = "0.1.85"
+version = "0.1.86"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f934833b4b7233644e5848f235df3f57ed8c80f1528a26c3dfa13d2147fa056"
+checksum = "644dd749086bf3771a2fbc5f256fdb982d53f011c7d5d560304eafeecebce79d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1060,6 +1060,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "cargo_metadata"
+version = "0.19.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8769706aad5d996120af43197bf46ef6ad0fda35216b4505f926a365a232d924"
+dependencies = [
+ "camino",
+ "cargo-platform",
+ "semver 1.0.24",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.11",
+]
+
+[[package]]
 name = "cargo_toml"
 version = "0.20.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1138,9 +1152,9 @@ dependencies = [
 
 [[package]]
 name = "cfg-expr"
-version = "0.17.0"
+version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0890061c4d3223e7267f3bad2ec40b997d64faac1c2815a4a9d95018e2b9e9c"
+checksum = "8d4ba6e40bd1184518716a6e1a781bf9160e286d219ccdb8ab2612e74cfe4789"
 dependencies = [
  "smallvec 1.13.2",
  "target-lexicon",
@@ -1436,8 +1450,8 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
+ "daft",
  "derive_more",
- "diffus",
  "expectorate",
  "itertools 0.13.0",
  "omicron-common",
@@ -2055,6 +2069,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "daft"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/daft?branch=main#9e7b55349f61bded974cba9c1727a70a62586a37"
+dependencies = [
+ "daft-derive",
+ "newtype-uuid",
+ "oxnet",
+ "paste",
+ "uuid",
+]
+
+[[package]]
+name = "daft-derive"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/daft?branch=main#9e7b55349f61bded974cba9c1727a70a62586a37"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.96",
+]
+
+[[package]]
 name = "darling"
 version = "0.20.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2412,28 +2448,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6184e33543162437515c2e2b48714794e37845ec9851711914eec9d308f6ebe8"
 
 [[package]]
-name = "diffus"
-version = "0.10.0"
-source = "git+https://github.com/oxidecomputer/diffus?branch=oxide%2Fmain#e3cfd506a8be97e9740e94bc72e39b3b9c6bf3c2"
-dependencies = [
- "diffus-derive",
- "itertools 0.10.5",
- "newtype-uuid",
- "oxnet",
- "uuid",
-]
-
-[[package]]
-name = "diffus-derive"
-version = "0.10.0"
-source = "git+https://github.com/oxidecomputer/diffus?branch=oxide%2Fmain#e3cfd506a8be97e9740e94bc72e39b3b9c6bf3c2"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2622,6 +2636,8 @@ dependencies = [
  "serde_json",
  "slog",
  "toml 0.8.19",
+ "transceiver-decode",
+ "typify 0.3.0",
  "uuid",
 ]
 
@@ -3658,13 +3674,13 @@ dependencies = [
 
 [[package]]
 name = "guppy"
-version = "0.17.8"
+version = "0.17.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf47f1dcacf93614a4181e308b8341f5bf5d4f7ae2f67cc5a078df8e7023ea63"
+checksum = "5a70d0754232d1c2fd4819914085dc06cccbe2f2377905cdd2e668ca77df6e72"
 dependencies = [
  "ahash",
  "camino",
- "cargo_metadata",
+ "cargo_metadata 0.19.1",
  "cfg-if",
  "debug-ignore",
  "fixedbitset",
@@ -6125,8 +6141,8 @@ dependencies = [
  "anyhow",
  "chrono",
  "clickhouse-admin-types",
+ "daft",
  "debug-ignore",
- "diffus",
  "expectorate",
  "gateway-client",
  "illumos-utils",
@@ -6253,7 +6269,7 @@ dependencies = [
 name = "nexus-sled-agent-shared"
 version = "0.1.0"
 dependencies = [
- "diffus",
+ "daft",
  "illumos-utils",
  "omicron-common",
  "omicron-passwords",
@@ -6354,9 +6370,9 @@ dependencies = [
  "clap",
  "clickhouse-admin-types",
  "cookie",
+ "daft",
  "derive-where",
  "derive_more",
- "diffus",
  "dropshot 0.15.1",
  "futures",
  "gateway-client",
@@ -6713,6 +6729,7 @@ dependencies = [
  "clickward",
  "dropshot 0.15.1",
  "expectorate",
+ "flume",
  "http",
  "illumos-utils",
  "omicron-common",
@@ -6792,7 +6809,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
- "diffus",
+ "daft",
  "dropshot 0.15.1",
  "expectorate",
  "futures",
@@ -6972,7 +6989,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
- "cargo_metadata",
+ "cargo_metadata 0.18.1",
  "clap",
  "expectorate",
  "newtype_derive",
@@ -7207,7 +7224,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
- "cargo_metadata",
+ "cargo_metadata 0.18.1",
  "clap",
  "expectorate",
  "futures",
@@ -7256,19 +7273,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-pins"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "cargo_metadata 0.18.1",
+ "fs-err",
+ "omicron-workspace-hack",
+ "serde",
+ "toml_edit 0.22.22",
+]
+
+[[package]]
 name = "omicron-releng"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
  "camino-tempfile",
- "cargo_metadata",
+ "cargo_metadata 0.18.1",
  "chrono",
  "clap",
  "fs-err",
  "futures",
  "hex",
  "omicron-common",
+ "omicron-pins",
  "omicron-workspace-hack",
  "omicron-zone-package",
  "once_cell",
@@ -7311,6 +7342,7 @@ dependencies = [
  "cfg-if",
  "chrono",
  "clap",
+ "clickhouse-admin-types",
  "crucible-agent-client",
  "derive_more",
  "display-error-chain",
@@ -7454,7 +7486,7 @@ dependencies = [
 name = "omicron-uuid-kinds"
 version = "0.1.0"
 dependencies = [
- "diffus",
+ "daft",
  "newtype-uuid",
  "paste",
  "proptest",
@@ -7717,9 +7749,9 @@ dependencies = [
 
 [[package]]
 name = "openssl"
-version = "0.10.66"
+version = "0.10.70"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9529f4786b70a3e8c61e11179af17ab6188ad8d0ded78c5529441ed39d4bd9c1"
+checksum = "61cfb4e166a8bb8c9b55c500bc2308550148ece889be90f609377e58140f42c6"
 dependencies = [
  "bitflags 2.6.0",
  "cfg-if",
@@ -7749,9 +7781,9 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.104"
+version = "0.9.105"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45abf306cbf99debc8195b66b7346498d7b10c210de50418b5ccd7ceba08c741"
+checksum = "8b22d5b84be05a8d6947c7cb71f7c849aa0f112acd4bf51c2a7c1c988ac0a9dc"
 dependencies = [
  "cc",
  "libc",
@@ -8429,9 +8461,9 @@ dependencies = [
 
 [[package]]
 name = "pathdiff"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d61c5ce1153ab5b689d0c074c4e7fc613e942dfb7dd9eea5ab202d2ad91fe361"
+checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
 dependencies = [
  "camino",
 ]
@@ -11711,9 +11743,9 @@ checksum = "61c41af27dd6d1e27b1b16b489db798443478cef1f06a660c96db617ba5de3b1"
 
 [[package]]
 name = "target-spec"
-version = "3.2.2"
+version = "3.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c5743abbf7bc7d5296ae61368b50cd218ac09432281cb5d48b97308d5c27909"
+checksum = "da00bc76fdc8b7ed7163b7cf728179277b26985c177510b69cc320f30b5a517f"
 dependencies = [
  "cfg-expr",
  "guppy-workspace-hack",
@@ -12352,6 +12384,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "transceiver-decode"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/transceiver-control#9ff89d72aec7848552b595e44e1fdb508f82ddfa"
+dependencies = [
+ "schemars",
+ "serde",
+ "static_assertions",
+ "thiserror 2.0.11",
+ "transceiver-messages",
+]
+
+[[package]]
+name = "transceiver-messages"
+version = "0.1.1"
+source = "git+https://github.com/oxidecomputer/transceiver-control#9ff89d72aec7848552b595e44e1fdb508f82ddfa"
+dependencies = [
+ "bitflags 2.6.0",
+ "clap",
+ "hubpack",
+ "serde",
+ "thiserror 2.0.11",
+]
+
+[[package]]
 name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12964,7 +13020,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2990d9ea5967266ea0ccf413a4aa5c42a93dbcfda9cb49a97de6931726b12566"
 dependencies = [
  "anyhow",
- "cargo_metadata",
+ "cargo_metadata 0.18.1",
  "cfg-if",
  "git2",
  "regex",
@@ -13729,7 +13785,7 @@ dependencies = [
  "anyhow",
  "camino",
  "camino-tempfile",
- "cargo_metadata",
+ "cargo_metadata 0.18.1",
  "cargo_toml",
  "clap",
  "fs-err",

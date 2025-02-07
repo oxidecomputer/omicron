@@ -413,7 +413,10 @@ async fn test_vpc_routers_attach_to_subnet(
         StatusCode::BAD_REQUEST,
     )
     .await;
-    assert_eq!(err.message, "router and subnet must belong to the same VPC");
+    assert_eq!(
+        err.message,
+        "a router can only be attached to a subnet when both belong to the same VPC"
+    );
 
     // Detach (and double detach) should succeed without issue.
     let subnet3 = set_custom_router(client, subnet3_name, VPC_NAME, None).await;

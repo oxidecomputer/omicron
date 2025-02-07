@@ -210,7 +210,6 @@ source.type = "local"
 source.paths = [
   { from = "out/clickhouse", to = "/opt/oxide/clickhouse_server" },
   { from = "smf/clickhouse_server/manifest.xml", to = "/var/svc/manifest/site/clickhouse_server/manifest.xml" },
-  { from = "smf/clickhouse_server/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse_server.sh" },
   { from = "smf/clickhouse-admin-server", to = "/var/svc/manifest/site/clickhouse-admin-server" },
 ]
 output.type = "zone"
@@ -240,7 +239,6 @@ source.type = "local"
 source.paths = [
   { from = "out/clickhouse", to = "/opt/oxide/clickhouse_keeper" },
   { from = "smf/clickhouse_keeper/manifest.xml", to = "/var/svc/manifest/site/clickhouse_keeper/manifest.xml" },
-  { from = "smf/clickhouse_keeper/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse_keeper.sh" },
   { from = "smf/clickhouse-admin-keeper", to = "/var/svc/manifest/site/clickhouse-admin-keeper" },
 ]
 output.type = "zone"
@@ -722,8 +720,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "758019d1c014266728dc311c5df57fd32c32f8f5"
-source.sha256 = "ec224377f31e7f20f80e46495d47ee521278cd2ef67b1bcb8bc328a55f0d9fe1"
+source.commit = "caf4bee7f1647b4f971199a5268885337ff1691a"
+source.sha256 = "0b6f1960e3475036c39b0df14015d968f96dfd198295f7e58ffdc8e2e8618afb"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -749,8 +747,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "758019d1c014266728dc311c5df57fd32c32f8f5"
-source.sha256 = "f38cf04f248135c8cc27f2b6f789e3e2ae189debeeae53b15f6c0bc46da6df1a"
+source.commit = "caf4bee7f1647b4f971199a5268885337ff1691a"
+source.sha256 = "a966c3c609b35e136b4807530218fb8e7a0a72673e604c47adc9bb4582d5cadf"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -769,8 +767,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "758019d1c014266728dc311c5df57fd32c32f8f5"
-source.sha256 = "7aa2be1eb895608316b8219aad6b306a626f1e115928437596e26f5c0610f50e"
+source.commit = "caf4bee7f1647b4f971199a5268885337ff1691a"
+source.sha256 = "06d63410222134ece052d15732c709e3a43853563b88398176ef04e66b004b12"
 output.type = "zone"
 output.intermediate_only = true
 
