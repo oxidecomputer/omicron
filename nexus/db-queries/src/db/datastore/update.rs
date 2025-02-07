@@ -312,15 +312,16 @@ async fn insert_impl(
             "new_artifacts" => ?new_artifacts,
         );
 
+        // If we are about to insert new artifacts, we need to bump the
+        // generation number.
+        if !new_artifacts.is_empty() {
+            increment_generation(&log, &conn).await?;
+        }
         // Insert new artifacts into the database.
         diesel::insert_into(dsl::tuf_artifact)
             .values(new_artifacts)
             .execute_async(&conn)
             .await?;
-
-        // If we inserted any new artifacts, we need to bump the generation
-        // number.
-        increment_generation(&log, &conn).await?;
 
         all_artifacts
     };

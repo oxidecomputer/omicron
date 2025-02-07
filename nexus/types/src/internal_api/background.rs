@@ -4,6 +4,7 @@
 
 use chrono::DateTime;
 use chrono::Utc;
+use omicron_common::api::external::Generation;
 use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
@@ -243,6 +244,7 @@ impl SupportBundleCollectionReport {
 /// The status of a `tuf_artifact_replication` background task activation
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct TufArtifactReplicationStatus {
+    pub generation: Generation,
     pub last_run_counters: TufArtifactReplicationCounters,
     pub lifetime_counters: TufArtifactReplicationCounters,
     pub request_debug_ringbuf: Arc<VecDeque<TufArtifactReplicationRequest>>,
@@ -254,7 +256,6 @@ impl TufArtifactReplicationStatus {
         self.last_run_counters.list_err == 0
             && self.last_run_counters.put_err == 0
             && self.last_run_counters.copy_err == 0
-            && self.last_run_counters.delete_err == 0
     }
 }
 
@@ -269,19 +270,25 @@ impl TufArtifactReplicationStatus {
     derive_more::AddAssign,
 )]
 pub struct TufArtifactReplicationCounters {
+    pub put_config_ok: usize,
+    pub put_config_err: usize,
     pub list_ok: usize,
     pub list_err: usize,
     pub put_ok: usize,
     pub put_err: usize,
     pub copy_ok: usize,
     pub copy_err: usize,
-    pub delete_ok: usize,
-    pub delete_err: usize,
 }
 
 impl TufArtifactReplicationCounters {
     pub fn inc(&mut self, request: &TufArtifactReplicationRequest) {
         match (&request.operation, &request.error) {
+            (TufArtifactReplicationOperation::PutConfig { .. }, Some(_)) => {
+                self.put_config_err += 1
+            }
+            (TufArtifactReplicationOperation::PutConfig { .. }, None) => {
+                self.put_config_ok += 1
+            }
             (TufArtifactReplicationOperation::List, Some(_)) => {
                 self.list_err += 1
             }
@@ -298,27 +305,21 @@ impl TufArtifactReplicationCounters {
             (TufArtifactReplicationOperation::Copy { .. }, None) => {
                 self.copy_ok += 1
             }
-            (TufArtifactReplicationOperation::Delete { .. }, Some(_)) => {
-                self.delete_err += 1
-            }
-            (TufArtifactReplicationOperation::Delete { .. }, None) => {
-                self.delete_ok += 1
-            }
         }
     }
 
     pub fn ok(&self) -> usize {
-        self.list_ok
+        self.put_config_ok
+            .saturating_add(self.list_ok)
             .saturating_add(self.put_ok)
             .saturating_add(self.copy_ok)
-            .saturating_add(self.delete_ok)
     }
 
     pub fn err(&self) -> usize {
-        self.list_err
+        self.put_config_err
+            .saturating_add(self.list_err)
             .saturating_add(self.put_err)
             .saturating_add(self.copy_err)
-            .saturating_add(self.delete_err)
     }
 
     pub fn sum(&self) -> usize {
@@ -343,10 +344,10 @@ pub struct TufArtifactReplicationRequest {
 )]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum TufArtifactReplicationOperation {
+    PutConfig { generation: Generation },
     List,
     Put { hash: ArtifactHash },
     Copy { hash: ArtifactHash, source_sled: SledUuid },
-    Delete { hash: ArtifactHash },
 }
 
 /// The status of an `blueprint_rendezvous` background task activation.
