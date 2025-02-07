@@ -13,6 +13,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::execution::*;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::SledState;
 use nexus_types::identity::Asset;
@@ -173,6 +174,7 @@ pub async fn realize_blueprint_with_overrides(
         &engine.for_component(ExecutionComponent::PhysicalDisks),
         &opctx,
         datastore,
+        blueprint,
     );
 
     register_deploy_clickhouse_cluster_nodes_step(
@@ -508,17 +510,21 @@ fn register_decommission_expunged_disks_step<'a>(
     registrar: &ComponentRegistrar<'_, 'a>,
     opctx: &'a OpContext,
     datastore: &'a DataStore,
+    blueprint: &'a Blueprint,
 ) {
-    // This depends on the "deploy_disks" call earlier -- disk expungement is a
-    // statement of policy, but we need to be assured that the Sled Agent has
-    // stopped using that disk before we can mark its state as decommissioned.
     registrar
         .new_step(
             ExecutionStepId::Remove,
             "Decommission expunged disks",
             move |_cx| async move {
                 let res = omicron_physical_disks::decommission_expunged_disks(
-                    &opctx, datastore,
+                    &opctx,
+                    datastore,
+                    blueprint
+                        .all_omicron_disks(
+                            DiskFilter::ExpungedButNotDecommissioned,
+                        )
+                        .map(|(sled_id, config)| (sled_id, config.id)),
                 )
                 .await
                 .map_err(merge_anyhow_list);

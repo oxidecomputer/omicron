@@ -13,6 +13,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::info;
 use slog::o;
@@ -104,12 +105,35 @@ pub(crate) async fn deploy_disks(
 pub(crate) async fn decommission_expunged_disks(
     opctx: &OpContext,
     datastore: &DataStore,
+    expunged_disks: impl Iterator<Item = (SledUuid, PhysicalDiskUuid)>,
 ) -> Result<(), Vec<anyhow::Error>> {
-    datastore
-        .physical_disk_decommission_all_expunged(&opctx)
-        .await
-        .map_err(|e| vec![anyhow!(e)])?;
-    Ok(())
+    let errors: Vec<anyhow::Error> = stream::iter(expunged_disks)
+        .filter_map(|(sled_id, disk_id)| async move {
+            let log = opctx.log.new(slog::o!(
+                "sled_id" => sled_id.to_string(),
+                "disk_id" => disk_id.to_string(),
+            ));
+
+            match datastore.physical_disk_decommission(&opctx, disk_id).await {
+                Err(error) => {
+                    warn!(log, "failed to decommission expunged disk";
+                "error" => #%error);
+                    Some(anyhow!(error))
+                }
+                Ok(()) => {
+                    info!(log, "successfully decommissioned expunged disk");
+                    None
+                }
+            }
+        })
+        .collect()
+        .await;
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
 }
 
 #[cfg(test)]
@@ -567,7 +591,13 @@ mod test {
         assert_eq!(d.disk_state, PhysicalDiskState::Active);
         assert_eq!(d.disk_policy, PhysicalDiskPolicy::InService);
 
-        super::decommission_expunged_disks(&opctx, &datastore).await.unwrap();
+        super::decommission_expunged_disks(
+            &opctx,
+            &datastore,
+            [(sled_id, disk_to_decommission)].into_iter(),
+        )
+        .await
+        .unwrap();
 
         // After decommissioning, we see the expunged disk become
         // decommissioned. The other disk remains in-service.
