@@ -13,12 +13,11 @@ pub use crate::api::internal::shared::AllowedSourceIps;
 pub use crate::api::internal::shared::SwitchLocation;
 use crate::update::ArtifactHash;
 use crate::update::ArtifactId;
-use anyhow::anyhow;
 use anyhow::Context;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
-use diffus::{edit, Diffable, Diffus};
+use daft::{leaf, Diffable};
 use dropshot::HttpError;
 pub use dropshot::PaginationOrder;
 pub use error::*;
@@ -77,13 +76,25 @@ pub trait ObjectIdentity {
 }
 
 /// Exists for types that don't properly implement `ObjectIdentity` but
-/// still need to be paginated by name or id.
+/// still need to be paginated by id.
 pub trait SimpleIdentity {
+    fn id(&self) -> Uuid;
+}
+
+impl<T: ObjectIdentity> SimpleIdentity for T {
+    fn id(&self) -> Uuid {
+        self.identity().id
+    }
+}
+
+/// Exists for types that don't properly implement `ObjectIdentity` but
+/// still need to be paginated by name or id.
+pub trait SimpleIdentityOrName {
     fn id(&self) -> Uuid;
     fn name(&self) -> &Name;
 }
 
-impl<T: ObjectIdentity> SimpleIdentity for T {
+impl<T: ObjectIdentity> SimpleIdentityOrName for T {
     fn id(&self) -> Uuid {
         self.identity().id
     }
@@ -212,7 +223,7 @@ impl<'a> TryFrom<&DataPageParams<'a, NameOrId>> for DataPageParams<'a, Uuid> {
 )]
 #[display("{0}")]
 #[serde(try_from = "String")]
-#[derive(Diffus)]
+#[derive(Diffable)]
 pub struct Name(String);
 
 /// `Name::try_from(String)` is the primary method for constructing an Name
@@ -616,7 +627,7 @@ impl JsonSchema for RoleName {
     Eq,
     PartialOrd,
     Ord,
-    Diffus,
+    Diffable,
 )]
 pub struct ByteCount(u64);
 
@@ -736,14 +747,10 @@ impl From<ByteCount> for i64 {
 // disallow negative values. (We could potentially use two's complement to
 // store values greater than that as negative values, but surely 2**63 is
 // enough.)
-//
-// TODO: This allows deserialization into a value that's out of range. That's
-// not correct. See <https://github.com/oxidecomputer/omicron/issues/6865>.
 #[derive(
     Copy,
     Clone,
     Debug,
-    Deserialize,
     Eq,
     Hash,
     JsonSchema,
@@ -751,11 +758,16 @@ impl From<ByteCount> for i64 {
     PartialEq,
     PartialOrd,
     Serialize,
-    Diffus,
 )]
 pub struct Generation(u64);
 
+leaf!(Generation);
+
 impl Generation {
+    // `as` is a little distasteful because it allows lossy conversion, but we
+    // know converting `i64::MAX` to `u64` will always succeed losslessly.
+    const MAX: Generation = Generation(i64::MAX as u64);
+
     pub const fn new() -> Generation {
         Generation(1)
     }
@@ -773,12 +785,26 @@ impl Generation {
         // exceeds the value allowed by an i64.  But it seems unlikely enough to
         // happen in practice that we can probably feel safe with this.
         let next_gen = self.0 + 1;
-        // `as` is a little distasteful because it allows lossy conversion, but
-        // (a) we know converting `i64::MAX` to `u64` will always succeed
-        // losslessly, and (b) it allows to make this function `const`, unlike
-        // if we were to use `u64::try_from(i64::MAX).unwrap()`.
-        assert!(next_gen <= i64::MAX as u64);
+        assert!(
+            next_gen <= Generation::MAX.0,
+            "attempt to overflow generation number"
+        );
         Generation(next_gen)
+    }
+}
+
+impl<'de> Deserialize<'de> for Generation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = u64::deserialize(deserializer)?;
+        Generation::try_from(value).map_err(|GenerationOverflowError(_)| {
+            serde::de::Error::invalid_value(
+                serde::de::Unexpected::Unsigned(value),
+                &"an integer between 0 and 9223372036854775807",
+            )
+        })
     }
 }
 
@@ -791,8 +817,6 @@ impl Display for Generation {
 impl From<&Generation> for i64 {
     fn from(g: &Generation) -> Self {
         // We have already validated that the value is within range.
-        // TODO-robustness We need to ensure that we don't deserialize a value
-        // out of range here.
         i64::try_from(g.0).unwrap()
     }
 }
@@ -810,25 +834,42 @@ impl From<u32> for Generation {
 }
 
 impl TryFrom<i64> for Generation {
-    type Error = anyhow::Error;
+    type Error = GenerationNegativeError;
 
     fn try_from(value: i64) -> Result<Self, Self::Error> {
         Ok(Generation(
-            u64::try_from(value)
-                .map_err(|_| anyhow!("negative generation number"))?,
+            u64::try_from(value).map_err(|_| GenerationNegativeError(()))?,
         ))
     }
 }
 
 impl TryFrom<u64> for Generation {
-    type Error = anyhow::Error;
+    type Error = GenerationOverflowError;
 
     fn try_from(value: u64) -> Result<Self, Self::Error> {
-        i64::try_from(value)
-            .map_err(|_| anyhow!("generation number too large"))?;
+        i64::try_from(value).map_err(|_| GenerationOverflowError(()))?;
         Ok(Generation(value))
     }
 }
+
+impl FromStr for Generation {
+    type Err = std::num::ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Try to parse `s` as both an i64 and u64, returning the error from
+        // either.
+        let _ = i64::from_str(s)?;
+        Ok(Generation(u64::from_str(s)?))
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("negative generation number")]
+pub struct GenerationNegativeError(());
+
+#[derive(Debug, thiserror::Error)]
+#[error("generation number too large")]
+pub struct GenerationOverflowError(());
 
 /// An RFC-1035-compliant hostname.
 #[derive(
@@ -979,6 +1020,7 @@ pub enum ResourceType {
     Instance,
     LoopbackAddress,
     SwitchPortSettings,
+    SupportBundle,
     IpPool,
     IpPoolResource,
     InstanceNetworkInterface,
@@ -1014,6 +1056,7 @@ pub enum ResourceType {
     FloatingIp,
     Probe,
     ProbeNetworkInterface,
+    LldpLinkConfig,
 }
 
 // IDENTITY METADATA
@@ -1941,16 +1984,7 @@ impl JsonSchema for L4PortRange {
 )]
 pub struct MacAddr(pub macaddr::MacAddr6);
 
-impl<'a> Diffable<'a> for MacAddr {
-    type Diff = (&'a Self, &'a Self);
-    fn diff(&'a self, other: &'a Self) -> edit::Edit<'a, Self> {
-        if self == other {
-            edit::Edit::Copy(self)
-        } else {
-            edit::Edit::Change((self, other))
-        }
-    }
-}
+leaf!(MacAddr);
 
 impl MacAddr {
     // Guest MAC addresses begin with the Oxide OUI A8:40:25. Further, guest
@@ -2115,7 +2149,7 @@ impl JsonSchema for MacAddr {
     Deserialize,
     Serialize,
     JsonSchema,
-    Diffus,
+    Diffable,
 )]
 pub struct Vni(u32);
 
@@ -2571,6 +2605,50 @@ pub struct LldpLinkConfig {
 
     /// The LLDP management IP TLV.
     pub management_ip: Option<oxnet::IpNet>,
+}
+
+/// Information about LLDP advertisements from other network entities directly
+/// connected to a switch port.  This structure contains both metadata about
+/// when and where the neighbor was seen, as well as the specific information
+/// the neighbor was advertising.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct LldpNeighbor {
+    // Unique ID assigned to this neighbor - only used for pagination
+    #[serde(skip)]
+    pub id: Uuid,
+
+    /// The port on which the neighbor was seen
+    pub local_port: String,
+
+    /// Initial sighting of this LldpNeighbor
+    pub first_seen: DateTime<Utc>,
+
+    /// Most recent sighting of this LldpNeighbor
+    pub last_seen: DateTime<Utc>,
+
+    /// The LLDP link name advertised by the neighbor
+    pub link_name: String,
+
+    /// The LLDP link description advertised by the neighbor
+    pub link_description: Option<String>,
+
+    /// The LLDP chassis identifier advertised by the neighbor
+    pub chassis_id: String,
+
+    /// The LLDP system name advertised by the neighbor
+    pub system_name: Option<String>,
+
+    /// The LLDP system description advertised by the neighbor
+    pub system_description: Option<String>,
+
+    /// The LLDP management IP(s) advertised by the neighbor
+    pub management_ip: Vec<oxnet::IpNet>,
+}
+
+impl SimpleIdentity for LldpNeighbor {
+    fn id(&self) -> Uuid {
+        self.id
+    }
 }
 
 /// Per-port tx-eq overrides.  This can be used to fine-tune the transceiver
@@ -3113,6 +3191,7 @@ mod test {
     use serde::Deserialize;
     use serde::Serialize;
 
+    use super::Generation;
     use super::RouteDestination;
     use super::RouteTarget;
     use super::SemverVersion;
@@ -3433,6 +3512,51 @@ mod test {
             format!("{}", ByteCount::from_gibibytes_u32(1024)),
             "1 TiB".to_string()
         );
+    }
+
+    #[test]
+    fn test_generation_display_parse() {
+        assert_eq!(Generation::new().to_string(), "1");
+        assert_eq!(Generation::from_str("1").unwrap(), Generation::new());
+    }
+
+    #[test]
+    fn test_generation_serde() {
+        assert_eq!(serde_json::to_string(&Generation::new()).unwrap(), "1");
+        assert_eq!(
+            serde_json::from_str::<Generation>("1").unwrap(),
+            Generation::new()
+        );
+    }
+
+    #[test]
+    fn test_generation_from_int() {
+        for good_value in [0, Generation::MAX.0] {
+            Generation::try_from(good_value).unwrap();
+            serde_json::from_str::<Generation>(&good_value.to_string())
+                .unwrap();
+        }
+        for good_value in [0, i64::MAX] {
+            Generation::try_from(good_value).unwrap();
+            serde_json::from_str::<Generation>(&good_value.to_string())
+                .unwrap();
+        }
+        for bad_value in [Generation::MAX.0 + 1, u64::MAX] {
+            Generation::try_from(bad_value).unwrap_err();
+            serde_json::from_str::<Generation>(&bad_value.to_string())
+                .unwrap_err();
+        }
+        for bad_value in [-1, i64::MIN] {
+            Generation::try_from(bad_value).unwrap_err();
+            serde_json::from_str::<Generation>(&bad_value.to_string())
+                .unwrap_err();
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "attempt to overflow generation number")]
+    fn test_generation_overflow() {
+        Generation::MAX.next();
     }
 
     #[test]

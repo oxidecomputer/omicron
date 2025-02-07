@@ -105,6 +105,9 @@ async fn test_omdb_usage_errors() {
         &["oxql", "--help"],
         // Mispelled argument
         &["oxql", "--summarizes"],
+        &["reconfigurator"],
+        &["reconfigurator", "export"],
+        &["reconfigurator", "archive"],
     ];
 
     for args in invocations {
@@ -114,7 +117,7 @@ async fn test_omdb_usage_errors() {
     assert_contents("tests/usage_errors.out", &output);
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 1)]
 async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     clear_omdb_env();
 
@@ -135,7 +138,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
 
     let tmpdir = camino_tempfile::tempdir()
         .expect("failed to create temporary directory");
-    let tmppath = tmpdir.path().join("reconfigurator-save.out");
+    let tmppath = tmpdir.path().join("reconfigurator-export.out");
     let initial_blueprint_id = cptestctx.initial_blueprint_id.to_string();
 
     // Get the CockroachDB metadata from the blueprint so we can redact it
@@ -160,7 +163,6 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &["db", "dns", "diff", "external", "2"],
         &["db", "dns", "names", "external", "2"],
         &["db", "instances"],
-        &["db", "reconfigurator-save", tmppath.as_str()],
         &["db", "sleds"],
         &["db", "sleds", "-F", "discretionary"],
         &["mgs", "inventory"],
@@ -199,6 +201,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
             &initial_blueprint_id,
             "current-target",
         ],
+        &["reconfigurator", "export", tmppath.as_str()],
         // We can't easily test the sled agent output because that's only
         // provided by a real sled agent, which is not available in the
         // ControlPlaneTestContext.
@@ -218,6 +221,14 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     if initial_blueprint.cockroachdb_setting_preserve_downgrade.is_set() {
         redactor.extra_variable_length("cockroachdb_version", &crdb_version);
     }
+
+    // The `tuf_artifact_replication` task's output depends on how
+    // many sleds happened to register with Nexus before its first
+    // execution. These redactions work around the issue described in
+    // https://github.com/oxidecomputer/omicron/issues/7417.
+    redactor
+        .field("list ok:", r"\d+")
+        .section(&["task: \"tuf_artifact_replication\"", "request ringbuf:"]);
 
     for args in invocations {
         println!("running commands with args: {:?}", args);
@@ -306,7 +317,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
 /// (1) no URL is specified in either place because that's covered by the usage
 /// test above, nor (2) the URL is specified only in the environment because
 /// that's covered by the success tests above.
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 1)]
 async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     clear_omdb_env();
 

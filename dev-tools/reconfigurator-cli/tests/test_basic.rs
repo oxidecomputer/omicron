@@ -22,6 +22,7 @@ use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
 use omicron_test_utils::dev::test_cmds::Redactor;
 use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::debug;
 use std::io::BufReader;
@@ -82,6 +83,30 @@ fn test_example() {
     let stdout_text = Redactor::default().uuids(false).do_redact(&stdout_text);
     assert_contents("tests/output/cmd-example-stdout", &stdout_text);
     assert_contents("tests/output/cmd-example-stderr", &stderr_text);
+}
+
+// Run tests to expunge an external DNS zone, plan (which should add it again),
+// then expunge the newly-added zone.
+#[test]
+fn test_expunge_newly_added_external_dns() {
+    let (exit_status, stdout_text, stderr_text) = run_cli(
+        "tests/input/cmds-expunge-newly-added.txt",
+        &["--seed", "test_expunge_newly_added_external_dns"],
+    );
+    assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
+
+    // The example system uses a fixed seed, which means that UUIDs are
+    // deterministic. Some of the test commands also use those UUIDs, and it's
+    // convenient for everyone if they aren't redacted.
+    let stdout_text = Redactor::default().uuids(false).do_redact(&stdout_text);
+    assert_contents(
+        "tests/output/cmd-expunge-newly-added-stdout",
+        &stdout_text,
+    );
+    assert_contents(
+        "tests/output/cmd-expunge-newly-added-stderr",
+        &stderr_text,
+    );
 }
 
 type ControlPlaneTestContext =
@@ -246,7 +271,7 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to import new blueprint");
 
     let found_blueprint = nexus_client
-        .blueprint_view(&new_blueprint.id)
+        .blueprint_view(new_blueprint.id.as_untyped_uuid())
         .await
         .expect("failed to find imported blueprint in Nexus")
         .into_inner();

@@ -16,11 +16,15 @@ mod server;
 mod simulatable;
 mod sled_agent;
 mod storage;
+mod upstairs;
 
 pub use crate::updates::ConfigUpdates;
 pub use config::{
     Baseboard, Config, ConfigHardware, ConfigStorage, ConfigZpool, SimMode,
-    TEST_HARDWARE_THREADS, TEST_RESERVOIR_RAM,
+    ZpoolConfig, TEST_HARDWARE_THREADS, TEST_RESERVOIR_RAM,
 };
 pub use server::{run_standalone_server, RssArgs, Server};
 pub use sled_agent::SledAgent;
+pub use storage::PantryServer;
+pub(crate) use storage::Storage;
+pub use upstairs::SimulatedUpstairs;

@@ -6,6 +6,8 @@
 
 use std::net::IpAddr;
 
+use super::params::RelativeUri;
+use anyhow::Context;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::Name;
@@ -417,7 +419,9 @@ mod test {
     }
 }
 
-#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, JsonSchema, Serialize, Deserialize, Eq, PartialEq,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SupportBundleState {
     /// Support Bundle still actively being collected.
@@ -477,4 +481,32 @@ pub enum ProbeExternalIpKind {
     Snat,
     Floating,
     Ephemeral,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RelayState {
+    pub redirect_uri: Option<RelativeUri>,
+}
+
+impl RelayState {
+    pub fn to_encoded(&self) -> Result<String, anyhow::Error> {
+        Ok(base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            serde_json::to_string(&self).context("encoding relay state")?,
+        ))
+    }
+
+    pub fn from_encoded(encoded: String) -> Result<Self, anyhow::Error> {
+        serde_json::from_str(
+            &String::from_utf8(
+                base64::Engine::decode(
+                    &base64::engine::general_purpose::STANDARD,
+                    encoded,
+                )
+                .context("base64 decoding relay state")?,
+            )
+            .context("creating relay state string")?,
+        )
+        .context("json from relay state string")
+    }
 }

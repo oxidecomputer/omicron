@@ -88,7 +88,8 @@ impl NexusSaga for SagaRegionSnapshotReplacementFinish {
 
         builder.append(set_saga_id_action());
 
-        if let Some(new_region_volume_id) = params.request.new_region_volume_id
+        if let Some(new_region_volume_id) =
+            params.request.new_region_volume_id()
         {
             let subsaga_params = volume_delete::Params {
                 serialized_authn: params.serialized_authn.clone(),

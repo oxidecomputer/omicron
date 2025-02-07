@@ -118,6 +118,7 @@ async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
     let sled_uuid = Uuid::new_v4();
     let sa = SledAgentInfo {
         sa_address: "[fd00:1122:3344:0100::1]:8080".parse().unwrap(),
+        repo_depot_port: 8081,
         role: SledRole::Gimlet,
         baseboard,
         usable_hardware_threads: 32,
@@ -211,6 +212,7 @@ async fn test_sled_add(cptestctx: &ControlPlaneTestContext) {
         .sled_upsert(SledUpdate::new(
             sled_id.into_untyped_uuid(),
             "[::1]:0".parse().unwrap(),
+            0,
             SledBaseboard {
                 serial_number: baseboard.serial.clone(),
                 part_number: baseboard.part.clone(),

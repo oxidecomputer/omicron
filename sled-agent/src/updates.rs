@@ -4,50 +4,30 @@
 
 //! Management of per-sled updates
 
-use crate::nexus::NexusClient;
 use bootstrap_agent_api::Component;
 use camino::{Utf8Path, Utf8PathBuf};
-use camino_tempfile::NamedUtf8TempFile;
-use futures::{TryFutureExt, TryStreamExt};
-use omicron_common::api::internal::nexus::{
-    KnownArtifactKind, UpdateArtifactId,
-};
+use omicron_brand_metadata::Metadata;
+use omicron_common::api::external::SemverVersion;
 use serde::{Deserialize, Serialize};
-use std::io::Read;
-use tokio::io::AsyncWriteExt;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("I/O Error: {message}: {err}")]
+    #[error("I/O Error: while accessing {path}")]
     Io {
-        message: String,
+        path: Utf8PathBuf,
         #[source]
         err: std::io::Error,
     },
 
-    #[error("Utf-8 error converting path: {0}")]
-    FromPathBuf(#[from] camino::FromPathBufError),
+    #[error("failed to read zone version from {path}")]
+    ZoneVersion {
+        path: Utf8PathBuf,
+        #[source]
+        err: std::io::Error,
+    },
 
-    #[error(
-        "sled-agent only supports applying zones, found artifact ID {}/{} with kind {}",
-        .0.name, .0.version, .0.kind
-    )]
-    UnsupportedKind(UpdateArtifactId),
-
-    #[error("Version not found in artifact {}", 0)]
-    VersionNotFound(Utf8PathBuf),
-
-    #[error("Cannot parse json: {0}")]
-    Json(#[from] serde_json::Error),
-
-    #[error("Malformed version in artifact {path}: {why}")]
-    VersionMalformed { path: Utf8PathBuf, why: String },
-
-    #[error("Cannot parse semver in {path}: {err}")]
+    #[error("Cannot parse semver in {path}")]
     Semver { path: Utf8PathBuf, err: semver::Error },
-
-    #[error("Failed request to Nexus: {0}")]
-    Response(nexus_client::Error<nexus_client::types::Error>),
 }
 
 fn default_zone_artifact_path() -> Utf8PathBuf {
@@ -67,16 +47,8 @@ impl Default for ConfigUpdates {
     }
 }
 
-// Helper functions for returning errors
-fn version_malformed_err(path: &Utf8Path, key: &str) -> Error {
-    Error::VersionMalformed {
-        path: path.to_path_buf(),
-        why: format!("Missing '{key}'"),
-    }
-}
-
 fn io_err(path: &Utf8Path, err: std::io::Error) -> Error {
-    Error::Io { message: format!("Cannot access {path}"), err }
+    Error::Io { path: path.into(), err }
 }
 
 pub struct UpdateManager {
@@ -88,125 +60,24 @@ impl UpdateManager {
         Self { config }
     }
 
-    pub async fn download_artifact(
-        &self,
-        artifact: UpdateArtifactId,
-        nexus: &NexusClient,
-    ) -> Result<(), Error> {
-        match artifact.kind {
-            // TODO This is a demo for tests, for now.
-            KnownArtifactKind::ControlPlane => {
-                let directory = &self.config.zone_artifact_path.as_path();
-                tokio::fs::create_dir_all(&directory).await.map_err(|err| {
-                    Error::Io {
-                        message: format!("creating directory {directory:?}"),
-                        err,
-                    }
-                })?;
-
-                // We download the file to a temporary file. We then rename it to
-                // "<artifact-name>" after it has successfully downloaded, to
-                // signify that it is ready for usage.
-                let (file, temp_path) = NamedUtf8TempFile::new_in(&directory)
-                    .map_err(|err| Error::Io {
-                        message: "create temp file".to_string(),
-                        err,
-                    })?
-                    .into_parts();
-                let mut file = tokio::fs::File::from_std(file);
-
-                // Fetch the artifact and write to the file in its entirety,
-                // replacing it if it exists.
-
-                let response = nexus
-                    .cpapi_artifact_download(
-                        &KnownArtifactKind::ControlPlane.to_string(),
-                        &artifact.name,
-                        &artifact.version.clone().into(),
-                    )
-                    .await
-                    .map_err(Error::Response)?;
-
-                let mut stream = response.into_inner_stream();
-                while let Some(chunk) = stream
-                    .try_next()
-                    .await
-                    .map_err(|e| Error::Response(e.into()))?
-                {
-                    file.write_all(&chunk)
-                        .map_err(|err| Error::Io {
-                            message: "write_all".to_string(),
-                            err,
-                        })
-                        .await?;
-                }
-                file.flush().await.map_err(|err| Error::Io {
-                    message: "flush temp file".to_string(),
-                    err,
-                })?;
-                drop(file);
-
-                // Move the file to its final path.
-                let destination = directory.join(artifact.name);
-                temp_path.persist(&destination).map_err(|err| Error::Io {
-                    message: format!(
-                        "renaming {:?} to {destination:?}",
-                        err.path
-                    ),
-                    err: err.error,
-                })?;
-
-                Ok(())
-            }
-            _ => Err(Error::UnsupportedKind(artifact)),
-        }
-    }
-
     // Gets the component version information from a single zone artifact.
     async fn component_get_zone_version(
         &self,
         path: &Utf8Path,
     ) -> Result<Component, Error> {
-        // Decode the zone image
         let file =
             std::fs::File::open(path).map_err(|err| io_err(path, err))?;
         let gzr = flate2::read::GzDecoder::new(file);
         let mut component_reader = tar::Archive::new(gzr);
-        let entries =
-            component_reader.entries().map_err(|err| io_err(path, err))?;
-
-        // Look for the JSON file which contains the package information
-        for entry in entries {
-            let mut entry = entry.map_err(|err| io_err(path, err))?;
-            let entry_path = entry.path().map_err(|err| io_err(path, err))?;
-            if entry_path == Utf8Path::new("oxide.json") {
-                let mut contents = String::new();
-                entry
-                    .read_to_string(&mut contents)
-                    .map_err(|err| io_err(path, err))?;
-                let json: serde_json::Value =
-                    serde_json::from_str(contents.as_str())?;
-
-                // Parse keys from the JSON file
-                let serde_json::Value::String(pkg) = &json["pkg"] else {
-                    return Err(version_malformed_err(path, "pkg"));
-                };
-                let serde_json::Value::String(version) = &json["version"]
-                else {
-                    return Err(version_malformed_err(path, "version"));
-                };
-
-                // Extract the name and semver version
-                let name = pkg.to_string();
-                let version = omicron_common::api::external::SemverVersion(
-                    semver::Version::parse(version).map_err(|err| {
-                        Error::Semver { path: path.to_path_buf(), err }
-                    })?,
-                );
-                return Ok(crate::updates::Component { name, version });
-            }
-        }
-        Err(Error::VersionNotFound(path.to_path_buf()))
+        let metadata = Metadata::read_from_tar(&mut component_reader)
+            .map_err(|err| Error::ZoneVersion { path: path.into(), err })?;
+        let info = metadata
+            .layer_info()
+            .map_err(|err| Error::ZoneVersion { path: path.into(), err })?;
+        Ok(Component {
+            name: info.pkg.clone(),
+            version: SemverVersion(info.version.clone()),
+        })
     }
 
     pub async fn components_get(&self) -> Result<Vec<Component>, Error> {
@@ -251,72 +122,11 @@ impl UpdateManager {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::fakes::nexus::FakeNexusServer;
-    use crate::nexus::NexusClient;
+    use camino_tempfile::NamedUtf8TempFile;
     use flate2::write::GzEncoder;
-    use omicron_common::api::external::{Error, SemverVersion};
-    use omicron_common::api::internal::nexus::UpdateArtifactId;
-    use omicron_test_utils::dev::test_setup_log;
+    use omicron_common::api::external::SemverVersion;
     use std::io::Write;
     use tar::Builder;
-
-    #[tokio::test]
-    async fn test_write_artifact_to_filesystem() {
-        let logctx = test_setup_log("test_write_artifact_to_filesystem");
-        let log = &logctx.log;
-        // The (completely fabricated) artifact we'd like to download.
-        let expected_name = "test_artifact";
-        const EXPECTED_CONTENTS: &'static str = "test_artifact contents";
-        let artifact = UpdateArtifactId {
-            name: expected_name.to_string(),
-            version: "0.0.0".parse().unwrap(),
-            kind: KnownArtifactKind::ControlPlane,
-        };
-
-        let tempdir =
-            camino_tempfile::tempdir().expect("Failed to make tempdir");
-        let expected_path = tempdir.path().join(expected_name);
-
-        // Remove the file if it already exists.
-        let _ = tokio::fs::remove_file(&expected_path).await;
-
-        // Let's pretend this is an artifact Nexus can actually give us.
-        struct NexusServer {}
-        impl FakeNexusServer for NexusServer {
-            fn cpapi_artifact_download(
-                &self,
-                artifact_id: UpdateArtifactId,
-            ) -> Result<Vec<u8>, Error> {
-                assert_eq!(artifact_id.name, "test_artifact");
-                assert_eq!(artifact_id.version.to_string(), "0.0.0");
-                assert_eq!(artifact_id.kind.to_string(), "control_plane");
-
-                Ok(EXPECTED_CONTENTS.as_bytes().to_vec())
-            }
-        }
-
-        let nexus_server = crate::fakes::nexus::start_test_server(
-            log.clone(),
-            Box::new(NexusServer {}),
-        );
-        let nexus_client = NexusClient::new(
-            &format!("http://{}", nexus_server.local_addr()),
-            log.clone(),
-        );
-
-        let config =
-            ConfigUpdates { zone_artifact_path: tempdir.path().into() };
-        let updates = UpdateManager { config };
-        // This should download the file to our local filesystem.
-        updates.download_artifact(artifact, &nexus_client).await.unwrap();
-
-        // Confirm the download succeeded.
-        assert!(expected_path.exists());
-        let contents = tokio::fs::read(&expected_path).await.unwrap();
-        assert_eq!(std::str::from_utf8(&contents).unwrap(), EXPECTED_CONTENTS);
-
-        logctx.cleanup_successful();
-    }
 
     #[tokio::test]
     async fn test_query_no_components() {

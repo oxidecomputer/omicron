@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{Dataset, Generation};
+use super::{CrucibleDataset, Generation};
 use crate::collection::DatastoreCollectionConfig;
-use crate::schema::{dataset, zpool};
+use crate::schema::{crucible_dataset, zpool};
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
@@ -47,9 +47,9 @@ impl Zpool {
     }
 }
 
-impl DatastoreCollectionConfig<Dataset> for Zpool {
+impl DatastoreCollectionConfig<CrucibleDataset> for Zpool {
     type CollectionId = Uuid;
     type GenerationNumberColumn = zpool::dsl::rcgen;
     type CollectionTimeDeletedColumn = zpool::dsl::time_deleted;
-    type CollectionIdColumn = dataset::dsl::pool_id;
+    type CollectionIdColumn = crucible_dataset::dsl::pool_id;
 }

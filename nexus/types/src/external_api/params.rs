@@ -601,7 +601,7 @@ pub struct DerEncodedKeyPair {
 
 struct X509CertVisitor;
 
-impl<'de> Visitor<'de> for X509CertVisitor {
+impl Visitor<'_> for X509CertVisitor {
     type Value = String;
 
     fn expecting(
@@ -646,7 +646,7 @@ where
 
 struct KeyVisitor;
 
-impl<'de> Visitor<'de> for KeyVisitor {
+impl Visitor<'_> for KeyVisitor {
     type Value = String;
 
     fn expecting(
@@ -2018,6 +2018,19 @@ pub struct SwitchPortPageSelector {
 pub struct SwitchPortApplySettings {
     /// A name or id to use when applying switch port settings.
     pub port_settings: NameOrId,
+}
+
+/// Select an LLDP endpoint by rack/switch/port
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct LldpPortPathSelector {
+    /// A rack id to use when selecting switch ports.
+    pub rack_id: Uuid,
+
+    /// A switch location to use when selecting switch ports.
+    pub switch_location: Name,
+
+    /// A name to use when selecting switch ports.
+    pub port: Name,
 }
 
 // IMAGES

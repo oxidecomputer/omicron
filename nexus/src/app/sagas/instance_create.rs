@@ -11,7 +11,6 @@ use crate::app::{
 };
 use crate::external_api::params;
 use nexus_db_model::{ExternalIp, NetworkInterfaceKind};
-use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::queries::network_interface::InsertError as InsertNicError;
 use nexus_db_queries::{authn, authz, db};
@@ -977,60 +976,53 @@ async fn sic_delete_instance_record(
         &sagactx,
         &params.serialized_authn,
     );
-    let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
-    let instance_name = sagactx
-        .lookup::<db::model::Instance>("instance_record")?
-        .name()
-        .clone()
-        .into();
 
-    // We currently only support deleting an instance if it is stopped or
-    // failed, so update the state accordingly to allow deletion.
-    // TODO-correctness TODO-security It's not correct to re-resolve the
-    // instance name now.  See oxidecomputer/omicron#1536.
+    let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
+
     let result = LookupPath::new(&opctx, &datastore)
-        .project_id(params.project_id)
-        .instance_name(&instance_name)
+        .instance_id(instance_id.into_untyped_uuid())
         .fetch()
         .await;
-
-    // Although, as mentioned in the comment above, we should not be doing the
-    // lookup by name here, we do want this operation to be idempotent.
-    //
-    // As such, if the instance has already been deleted, we should return with
-    // a no-op.
-    let (authz_instance, db_instance) = match result {
-        Ok((.., authz_instance, db_instance)) => (authz_instance, db_instance),
+    // This action must be idempotent, so that an unwinding saga doesn't get
+    // stuck if it executes twice. Therefore, if the instance has already been
+    // deleted, we should return with a no-op, rather than an error.
+    let authz_instance = match result {
+        Ok((.., authz_instance, _)) => authz_instance,
         Err(err) => match err {
             Error::ObjectNotFound { .. } => return Ok(()),
             _ => return Err(err.into()),
         },
     };
 
-    let runtime_state = db::model::InstanceRuntimeState {
-        nexus_state: db::model::InstanceState::Failed,
-        // Must update the generation, or the database query will fail.
-        //
-        // The runtime state of the instance record is only changed as a result
-        // of the successful completion of the saga, or in this action during
-        // saga unwinding. So we're guaranteed that the cached generation in the
-        // saga log is the most recent in the database.
-        gen: db::model::Generation::from(db_instance.runtime_state.gen.next()),
-        ..db_instance.runtime_state
-    };
-
-    let updated =
-        datastore.instance_update_runtime(&instance_id, &runtime_state).await?;
-
-    if !updated {
-        warn!(
-            osagactx.log(),
-            "failed to update instance runtime state from creating to failed",
-        );
-    }
-
     // Actually delete the record.
-    datastore.project_delete_instance(&opctx, &authz_instance).await?;
+    //
+    // Note that we override the list of states in which deleting the instance
+    // is allowed. Typically, instances may only be deleted when they are
+    // `NoVmm` or `Failed`. Here, however, the instance is in the `Creating`
+    // state, as we are in the process of creating it.
+    //
+    // We would like to avoid transiently changing it to `NoVmm` or `Failed`,
+    // as this would create a temporary period of time during which an instance
+    // whose instance-create saga failed could be restarted. In particular,
+    // marking the instance as `Failed` makes it eligible for auto-restart, so
+    // if the `instance_reincarnation` background task queries for reincarnable
+    // instances during that period, it could attempt to restart the instance,
+    // preventing this saga from unwinding successfully.
+    //
+    // Therefore, we override the set of states in which the instance it is
+    // deleted, which is okay to do because we will only attempt to delete a
+    // `Creating` instance when unwinding an instance-create saga.
+    datastore
+        .project_delete_instance_in_states(
+            &opctx,
+            &authz_instance,
+            &[
+                db::model::InstanceState::NoVmm,
+                db::model::InstanceState::Failed,
+                db::model::InstanceState::Creating,
+            ],
+        )
+        .await?;
 
     Ok(())
 }
@@ -1320,7 +1312,7 @@ pub mod test {
     pub(crate) async fn verify_clean_slate(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let sled_agent = &cptestctx.sled_agent.sled_agent;
+        let sled_agent = cptestctx.first_sled_agent();
         let datastore = cptestctx.server.server_context().nexus.datastore();
 
         // Check that no partial artifacts of instance creation exist
@@ -1346,7 +1338,7 @@ pub mod test {
         assert!(disk_is_detached(datastore).await);
         assert!(no_instances_or_disks_on_sled(&sled_agent).await);
 
-        let v2p_mappings = &*sled_agent.v2p_mappings.lock().await;
+        let v2p_mappings = &*sled_agent.v2p_mappings.lock().unwrap();
         assert!(v2p_mappings.is_empty());
     }
 

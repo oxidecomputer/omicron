@@ -1490,7 +1490,6 @@ mod test {
     };
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PropolisUuid;
-    use omicron_uuid_kinds::SledUuid;
     use std::sync::Arc;
     use std::sync::Mutex;
     use uuid::Uuid;
@@ -1944,36 +1943,34 @@ mod test {
 
     // === migration source completed tests ===
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_migration_source_completed_succeeds(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
         MigrationOutcome::default()
             .source(MigrationState::Completed, VmmState::Stopping)
-            .setup_test(cptestctx, &other_sleds)
+            .setup_test(cptestctx)
             .await
             .run_saga_basic_usage_succeeds_test(cptestctx)
             .await;
     }
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_migration_source_completed_actions_succeed_idempotently(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
 
         MigrationOutcome::default()
             .source(MigrationState::Completed, VmmState::Stopping)
-            .setup_test(cptestctx, &other_sleds)
+            .setup_test(cptestctx)
             .await
             .run_actions_succeed_idempotently_test(cptestctx)
             .await;
     }
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_migration_source_completed_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
@@ -1985,37 +1982,35 @@ mod test {
 
     // === migration target completed tests ===
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_migration_target_completed_succeeds(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
 
         MigrationOutcome::default()
             .target(MigrationState::Completed, VmmState::Running)
-            .setup_test(cptestctx, &other_sleds)
+            .setup_test(cptestctx)
             .await
             .run_saga_basic_usage_succeeds_test(cptestctx)
             .await;
     }
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_migration_target_completed_actions_succeed_idempotently(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
 
         MigrationOutcome::default()
             .target(MigrationState::Completed, VmmState::Running)
-            .setup_test(cptestctx, &other_sleds)
+            .setup_test(cptestctx)
             .await
             .run_actions_succeed_idempotently_test(cptestctx)
             .await;
     }
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_migration_target_completed_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
@@ -2027,39 +2022,37 @@ mod test {
 
     // === migration completed and source destroyed tests ===
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_migration_completed_source_destroyed_succeeds(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
 
         MigrationOutcome::default()
             .target(MigrationState::Completed, VmmState::Running)
             .source(MigrationState::Completed, VmmState::Destroyed)
-            .setup_test(cptestctx, &other_sleds)
+            .setup_test(cptestctx)
             .await
             .run_saga_basic_usage_succeeds_test(cptestctx)
             .await;
     }
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_migration_completed_source_destroyed_actions_succeed_idempotently(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
 
         MigrationOutcome::default()
             .target(MigrationState::Completed, VmmState::Running)
             .source(MigrationState::Completed, VmmState::Destroyed)
-            .setup_test(cptestctx, &other_sleds)
+            .setup_test(cptestctx)
             .await
             .run_actions_succeed_idempotently_test(cptestctx)
             .await;
     }
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_migration_completed_source_destroyed_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
@@ -2072,39 +2065,37 @@ mod test {
 
     // === migration failed, target not destroyed ===
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_migration_target_failed_succeeds(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
 
         MigrationOutcome::default()
             .target(MigrationState::Failed, VmmState::Failed)
             .source(MigrationState::Failed, VmmState::Running)
-            .setup_test(cptestctx, &other_sleds)
+            .setup_test(cptestctx)
             .await
             .run_saga_basic_usage_succeeds_test(cptestctx)
             .await;
     }
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_migration_target_failed_actions_succeed_idempotently(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
 
         MigrationOutcome::default()
             .target(MigrationState::Failed, VmmState::Failed)
             .source(MigrationState::Failed, VmmState::Running)
-            .setup_test(cptestctx, &other_sleds)
+            .setup_test(cptestctx)
             .await
             .run_actions_succeed_idempotently_test(cptestctx)
             .await;
     }
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_migration_target_failed_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
@@ -2117,39 +2108,37 @@ mod test {
 
     // === migration failed, migration target destroyed tests ===
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_migration_target_failed_destroyed_succeeds(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
 
         MigrationOutcome::default()
             .target(MigrationState::Failed, VmmState::Destroyed)
             .source(MigrationState::Failed, VmmState::Running)
-            .setup_test(cptestctx, &other_sleds)
+            .setup_test(cptestctx)
             .await
             .run_saga_basic_usage_succeeds_test(cptestctx)
             .await;
     }
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_migration_target_failed_destroyed_actions_succeed_idempotently(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
 
         MigrationOutcome::default()
             .target(MigrationState::Failed, VmmState::Destroyed)
             .source(MigrationState::Failed, VmmState::Running)
-            .setup_test(cptestctx, &other_sleds)
+            .setup_test(cptestctx)
             .await
             .run_actions_succeed_idempotently_test(cptestctx)
             .await;
     }
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_migration_target_failed_destroyed_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
@@ -2162,39 +2151,37 @@ mod test {
 
     // === migration failed, migration source destroyed tests ===
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_migration_source_failed_destroyed_succeeds(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
 
         MigrationOutcome::default()
             .target(MigrationState::InProgress, VmmState::Running)
             .source(MigrationState::Failed, VmmState::Destroyed)
-            .setup_test(cptestctx, &other_sleds)
+            .setup_test(cptestctx)
             .await
             .run_saga_basic_usage_succeeds_test(cptestctx)
             .await;
     }
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_migration_source_failed_destroyed_actions_succeed_idempotently(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
 
         MigrationOutcome::default()
             .target(MigrationState::InProgress, VmmState::Running)
             .source(MigrationState::Failed, VmmState::Destroyed)
-            .setup_test(cptestctx, &other_sleds)
+            .setup_test(cptestctx)
             .await
             .run_actions_succeed_idempotently_test(cptestctx)
             .await;
     }
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_migration_source_failed_destroyed_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
@@ -2207,39 +2194,37 @@ mod test {
 
     // === migration failed, source and target both destroyed ===
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_migration_failed_everyone_died_succeeds(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
 
         MigrationOutcome::default()
             .target(MigrationState::Failed, VmmState::Destroyed)
             .source(MigrationState::Failed, VmmState::Destroyed)
-            .setup_test(cptestctx, &other_sleds)
+            .setup_test(cptestctx)
             .await
             .run_saga_basic_usage_succeeds_test(cptestctx)
             .await;
     }
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_migration_failed_everyone_died_actions_succeed_idempotently(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
 
         MigrationOutcome::default()
             .target(MigrationState::Failed, VmmState::Destroyed)
             .source(MigrationState::Failed, VmmState::Destroyed)
-            .setup_test(cptestctx, &other_sleds)
+            .setup_test(cptestctx)
             .await
             .run_actions_succeed_idempotently_test(cptestctx)
             .await;
     }
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_migration_failed_everyone_died_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
@@ -2252,39 +2237,37 @@ mod test {
 
     // === migration completed, but then the target was destroyed ===
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_migration_completed_but_target_destroyed_succeeds(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
 
         MigrationOutcome::default()
             .target(MigrationState::Completed, VmmState::Destroyed)
             .source(MigrationState::Completed, VmmState::Stopping)
-            .setup_test(cptestctx, &other_sleds)
+            .setup_test(cptestctx)
             .await
             .run_saga_basic_usage_succeeds_test(cptestctx)
             .await;
     }
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_migration_completed_but_target_destroyed_actions_succeed_idempotently(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
-        let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
 
         MigrationOutcome::default()
             .target(MigrationState::Completed, VmmState::Destroyed)
             .source(MigrationState::Completed, VmmState::Stopping)
-            .setup_test(cptestctx, &other_sleds)
+            .setup_test(cptestctx)
             .await
             .run_actions_succeed_idempotently_test(cptestctx)
             .await;
     }
 
-    #[nexus_test(server = crate::Server)]
+    #[nexus_test(server = crate::Server, extra_sled_agents = 1)]
     async fn test_migration_completed_but_target_destroyed_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
@@ -2320,9 +2303,8 @@ mod test {
         async fn setup_test(
             self,
             cptestctx: &ControlPlaneTestContext,
-            other_sleds: &[(SledUuid, omicron_sled_agent::sim::Server)],
         ) -> MigrationTest {
-            MigrationTest::setup(self, cptestctx, other_sleds).await
+            MigrationTest::setup(self, cptestctx).await
         }
 
         async fn run_unwinding_test(
@@ -2330,7 +2312,6 @@ mod test {
             cptestctx: &ControlPlaneTestContext,
         ) {
             let nexus = &cptestctx.server.server_context().nexus;
-            let other_sleds = test_helpers::add_sleds(cptestctx, 1).await;
             let _project_id =
                 setup_test_project(&cptestctx.external_client).await;
             let opctx = test_helpers::test_opctx(&cptestctx);
@@ -2348,7 +2329,6 @@ mod test {
                 nexus,
                 || {
                     let parent_saga_id = parent_saga_id.clone();
-                    let other_sleds = &other_sleds;
                     let opctx = &opctx;
                     Box::pin(async move {
                         // Since the unwinding test will test unwinding from each
@@ -2358,7 +2338,7 @@ mod test {
                         // we're just testing the unwinding behavior of the trivial
                         // two-node start saga.
                         let start_saga_params = self
-                            .setup_test(cptestctx, other_sleds)
+                            .setup_test(cptestctx)
                             .await
                             .start_saga_params();
                         let real_params = make_real_params(
@@ -2418,7 +2398,6 @@ mod test {
         async fn setup(
             outcome: MigrationOutcome,
             cptestctx: &ControlPlaneTestContext,
-            other_sleds: &[(SledUuid, omicron_sled_agent::sim::Server)],
         ) -> Self {
             use crate::app::sagas::instance_migrate;
 
@@ -2462,8 +2441,9 @@ mod test {
             );
 
             let vmm = state.vmm().as_ref().unwrap();
-            let dst_sled_id =
-                test_helpers::select_first_alternate_sled(vmm, other_sleds);
+            let dst_sled_id = cptestctx
+                .find_sled_agent(vmm.sled_id)
+                .expect("need at least one other sled");
             let params = instance_migrate::Params {
                 serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
                 instance: state.instance().clone(),

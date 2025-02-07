@@ -67,6 +67,45 @@ impl super::Nexus {
         }
     }
 
+    /// Lookup a (custom) router for attaching to a VPC subnet, when
+    /// we have already determined which VPC the subnet exists within.
+    pub(crate) async fn vpc_router_lookup_for_attach(
+        &self,
+        opctx: &OpContext,
+        router: &NameOrId,
+        authz_vpc: &authz::Vpc,
+    ) -> LookupResult<authz::VpcRouter> {
+        let (.., vpc, rtr) = (match router {
+            key @ NameOrId::Name(_) => self.vpc_router_lookup(
+                opctx,
+                params::RouterSelector {
+                    project: None,
+                    vpc: Some(NameOrId::Id(authz_vpc.id())),
+                    router: key.clone(),
+                },
+            )?,
+            key @ NameOrId::Id(_) => self.vpc_router_lookup(
+                opctx,
+                params::RouterSelector {
+                    project: None,
+                    vpc: None,
+                    router: key.clone(),
+                },
+            )?,
+        })
+        .lookup_for(authz::Action::Read)
+        .await?;
+
+        if vpc.id() != authz_vpc.id() {
+            return Err(Error::invalid_request(
+                "a router can only be attached to a subnet when both \
+                belong to the same VPC",
+            ));
+        }
+
+        Ok(rtr)
+    }
+
     pub(crate) async fn vpc_create_router(
         &self,
         opctx: &OpContext,

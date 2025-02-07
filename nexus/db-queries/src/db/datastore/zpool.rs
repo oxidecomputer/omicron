@@ -15,6 +15,7 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
 use crate::db::model::PhysicalDisk;
+use crate::db::model::PhysicalDiskPolicy;
 use crate::db::model::PhysicalDiskState;
 use crate::db::model::Sled;
 use crate::db::model::Zpool;
@@ -31,9 +32,11 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use uuid::Uuid;
 
@@ -207,13 +210,13 @@ impl DataStore {
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let now = Utc::now();
-        use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::crucible_dataset::dsl as dataset_dsl;
         use db::schema::zpool::dsl as zpool_dsl;
 
         let zpool_id = *zpool_id.as_untyped_uuid();
 
         // Get the IDs of all datasets to-be-deleted
-        let dataset_ids: Vec<Uuid> = dataset_dsl::dataset
+        let dataset_ids: Vec<Uuid> = dataset_dsl::crucible_dataset
             .filter(dataset_dsl::time_deleted.is_null())
             .filter(dataset_dsl::pool_id.eq(zpool_id))
             .select(dataset_dsl::id)
@@ -249,7 +252,7 @@ impl DataStore {
         }
 
         // Ensure the datasets are deleted
-        diesel::update(dataset_dsl::dataset)
+        diesel::update(dataset_dsl::crucible_dataset)
             .filter(dataset_dsl::time_deleted.is_null())
             .filter(dataset_dsl::pool_id.eq(zpool_id))
             .set(dataset_dsl::time_deleted.eq(now))
@@ -269,5 +272,42 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(())
+    }
+
+    pub async fn zpool_get_sled_if_in_service(
+        &self,
+        opctx: &OpContext,
+        id: ZpoolUuid,
+    ) -> LookupResult<SledUuid> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        use db::schema::physical_disk::dsl as physical_disk_dsl;
+        use db::schema::zpool::dsl as zpool_dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let id = zpool_dsl::zpool
+            .filter(zpool_dsl::id.eq(id.into_untyped_uuid()))
+            .filter(zpool_dsl::time_deleted.is_null())
+            .inner_join(
+                physical_disk_dsl::physical_disk
+                    .on(zpool_dsl::physical_disk_id.eq(physical_disk_dsl::id)),
+            )
+            .filter(
+                physical_disk_dsl::disk_policy
+                    .eq(PhysicalDiskPolicy::InService),
+            )
+            .select(zpool_dsl::sled_id)
+            .first_async::<Uuid>(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Zpool,
+                        LookupType::by_id(id.into_untyped_uuid()),
+                    ),
+                )
+            })?;
+
+        Ok(SledUuid::from_untyped_uuid(id))
     }
 }

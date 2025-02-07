@@ -43,8 +43,16 @@ pub enum DataType {
 
 impl DataType {
     /// True if this is a numeric scalar type.
-    pub fn is_numeric(&self) -> bool {
+    pub const fn is_numeric(&self) -> bool {
         matches!(self, DataType::Integer | DataType::Double)
+    }
+
+    /// Return true if this is a distribution data type.
+    pub const fn is_distribution(&self) -> bool {
+        matches!(
+            self,
+            DataType::IntegerDistribution | DataType::DoubleDistribution
+        )
     }
 }
 
@@ -106,6 +114,12 @@ pub enum MetricType {
     Delta,
     /// The value represents an accumulation between two points in time.
     Cumulative,
+}
+impl MetricType {
+    /// Return true if this is cumulative.
+    pub const fn is_cumulative(&self) -> bool {
+        matches!(self, MetricType::Cumulative)
+    }
 }
 
 impl fmt::Display for MetricType {
@@ -209,7 +223,7 @@ pub struct Point<'a> {
     pub values: Vec<(Datum<'a>, MetricType)>,
 }
 
-impl<'a> fmt::Display for Point<'a> {
+impl fmt::Display for Point<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         const TIMESTAMP_FMT: &str = "%Y-%m-%d %H:%M:%S.%f";
         match &self.start_time {
@@ -231,7 +245,7 @@ impl<'a> fmt::Display for Point<'a> {
     }
 }
 
-impl<'a> Point<'a> {
+impl Point<'_> {
     /// Return the dimensionality of this point.
     pub fn dimensionality(&self) -> usize {
         self.values.len()
@@ -249,7 +263,7 @@ pub enum Datum<'a> {
     DoubleDistribution(Option<&'a Distribution<f64>>),
 }
 
-impl<'a> fmt::Display for Datum<'a> {
+impl fmt::Display for Datum<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Datum::Boolean(Some(inner)) => write!(f, "{}", inner),

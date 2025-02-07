@@ -11,11 +11,11 @@ use crate::identity::AssetIdentityMetadata;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
-use diffus::Diffus;
+use daft::Diffable;
 use omicron_common::api::external::{
     AllowedSourceIps as ExternalAllowedSourceIps, ByteCount, Digest, Error,
     IdentityMetadata, InstanceState, Name, ObjectIdentity, RoleName,
-    SimpleIdentity,
+    SimpleIdentityOrName,
 };
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
@@ -103,7 +103,7 @@ pub struct SiloUtilization {
 // but we can't derive ObjectIdentity because this isn't a typical asset.
 // Instead we implement this new simple identity trait which is used under the
 // hood by the pagination code.
-impl SimpleIdentity for SiloUtilization {
+impl SimpleIdentityOrName for SiloUtilization {
     fn id(&self) -> Uuid {
         self.silo_id
     }
@@ -705,7 +705,7 @@ impl fmt::Display for SledPolicy {
     PartialEq,
     Eq,
     EnumIter,
-    Diffus,
+    Diffable,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum SledState {

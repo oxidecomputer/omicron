@@ -405,7 +405,7 @@ impl ExampleSystemBuilder {
         // pick addresses in the TEST-NET-2 (RFC 5737) range.
         for i in 0..self.external_dns_count.0 {
             builder
-                .add_external_dns_ip(IpAddr::V4(Ipv4Addr::new(
+                .inject_untracked_external_dns_ip(IpAddr::V4(Ipv4Addr::new(
                     198,
                     51,
                     100,
@@ -461,7 +461,7 @@ impl ExampleSystemBuilder {
             let Some(zones) = blueprint.blueprint_zones.get(&sled_id) else {
                 continue;
             };
-            for (_, zone) in zones.zones.iter() {
+            for zone in zones.zones.iter() {
                 let service_id = zone.id;
                 if let Some((external_ip, nic)) =
                     zone.zone_type.external_networking()
@@ -497,27 +497,6 @@ impl ExampleSystemBuilder {
                 .unwrap();
         }
 
-        // Ensure that our "input" contains the datasets we would have
-        // provisioned.
-        //
-        // This mimics them existing within the database.
-        let input_sleds = input_builder.sleds_mut();
-        for (sled_id, bp_datasets_config) in &blueprint.blueprint_datasets {
-            let sled = input_sleds.get_mut(sled_id).unwrap();
-            for (_, bp_dataset) in &bp_datasets_config.datasets {
-                let (_, datasets) = sled
-                    .resources
-                    .zpools
-                    .get_mut(&bp_dataset.pool.id())
-                    .unwrap();
-                let bp_config: omicron_common::disk::DatasetConfig =
-                    bp_dataset.clone().try_into().unwrap();
-                if !datasets.contains(&bp_config) {
-                    datasets.push(bp_config);
-                }
-            }
-        }
-
         // We just ensured that a handful of datasets should exist in
         // the blueprint, but they don't yet exist in the SystemDescription.
         //
@@ -526,7 +505,7 @@ impl ExampleSystemBuilder {
         for (sled_id, datasets) in &blueprint.blueprint_datasets {
             let sled = system.get_sled_mut(*sled_id).unwrap();
 
-            for dataset_config in datasets.datasets.values() {
+            for dataset_config in datasets.datasets.iter() {
                 let config = dataset_config.clone().try_into().unwrap();
                 sled.add_synthetic_dataset(config);
             }

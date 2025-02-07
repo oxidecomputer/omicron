@@ -29,13 +29,17 @@ pub struct Note {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
-    /// Indicator of a serious problem that means the blueprint is invalid.
+    /// Indicates an issue with a blueprint that should be corrected by a future
+    /// planning run.
+    BackwardsCompatibility,
+    /// Indicates a serious problem that means the blueprint is invalid.
     Fatal,
 }
 
 impl fmt::Display for Severity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Severity::BackwardsCompatibility => write!(f, "BACKCOMPAT"),
             Severity::Fatal => write!(f, "FATAL"),
         }
     }
@@ -82,6 +86,23 @@ impl Kind {
             Kind::Sled { kind, .. } => Subkind::Sled(kind),
         }
     }
+}
+
+/// Various ways the multiple maps in a blueprint can be inconsistent.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum MultimapInconsistency {
+    /// A sled is present in `blueprint_zones` but not `sled_state`.
+    PresentInZonesNotState,
+    /// A sled is present in `blueprint_zones` but not `blueprint_disks`.
+    PresentInZonesNotDisks,
+    /// A sled is present in `blueprint_zones` but not `blueprint_datasets`.
+    PresentInZonesNotDatasets,
+    /// A sled is present in `sled_state` but not `blueprint_zones`.
+    PresentInStateNotZones,
+    /// A sled is present in `blueprint_disks` but not `blueprint_zones`.
+    PresentInDisksNotZones,
+    /// A sled is present in `blueprint_datasets` but not `blueprint_zones`.
+    PresentInDatasetsNotZones,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -149,6 +170,8 @@ pub enum SledKind {
     ZpoolMissingZoneRootDataset { zpool: ZpoolUuid },
     /// A zone's filesystem dataset is missing from `blueprint_datasets`.
     ZoneMissingFilesystemDataset { zone: BlueprintZoneConfig },
+    /// A zone's filesystem pool value is missing from `blueprint_datasets`.
+    ZoneMissingFilesystemPool { zone: BlueprintZoneConfig },
     /// A zone's durable dataset is missing from `blueprint_datasets`.
     ZoneMissingDurableDataset { zone: BlueprintZoneConfig },
     /// A zone's durable dataset and transient root dataset are on different
@@ -181,6 +204,8 @@ pub enum SledKind {
         dataset: BlueprintDatasetConfig,
         address: SocketAddrV6,
     },
+    /// The multiple maps of the blueprint have inconsistent contents.
+    MultimapInconsistency(MultimapInconsistency),
 }
 
 impl fmt::Display for SledKind {
@@ -309,6 +334,15 @@ impl fmt::Display for SledKind {
                     zone.id,
                 )
             }
+            SledKind::ZoneMissingFilesystemPool { zone } => {
+                write!(
+                    f,
+                    "in-service zone's filesytem pool property is missing: \
+                     {:?} {}",
+                    zone.zone_type.kind(),
+                    zone.id,
+                )
+            }
             SledKind::ZoneMissingDurableDataset { zone } => {
                 write!(
                     f,
@@ -380,6 +414,33 @@ impl fmt::Display for SledKind {
                     "non-Crucible dataset ({:?} {}) has an address: {} \
                      (only Crucible datasets should have addresses)",
                     dataset.kind, dataset.id, address,
+                )
+            }
+            SledKind::MultimapInconsistency(map_kind) => {
+                let (present, missing) = match map_kind {
+                    MultimapInconsistency::PresentInZonesNotState => {
+                        ("blueprint_zones", "sled_state")
+                    }
+                    MultimapInconsistency::PresentInZonesNotDisks => {
+                        ("blueprint_zones", "blueprint_disks")
+                    }
+                    MultimapInconsistency::PresentInZonesNotDatasets => {
+                        ("blueprint_zones", "blueprint_datasets")
+                    }
+                    MultimapInconsistency::PresentInStateNotZones => {
+                        ("sled_state", "blueprint_zones")
+                    }
+                    MultimapInconsistency::PresentInDisksNotZones => {
+                        ("blueprint_disks", "blueprint_zones")
+                    }
+                    MultimapInconsistency::PresentInDatasetsNotZones => {
+                        ("blueprint_datasets", "blueprint_zones")
+                    }
+                };
+                write!(
+                    f,
+                    "blueprint map inconsistency: \
+                     sled is present in {present} but missing from {missing}"
                 )
             }
         }

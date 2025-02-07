@@ -12,18 +12,20 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::error::{public_error_from_diesel, ErrorHandler};
 use crate::db::model::SemverVersion;
+use crate::db::pagination::paginated;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use nexus_db_model::{ArtifactHash, TufArtifact, TufRepo, TufRepoDescription};
 use omicron_common::api::external::{
-    self, CreateResult, LookupResult, LookupType, ResourceType,
-    TufRepoInsertStatus,
+    self, CreateResult, DataPageParams, ListResultVec, LookupResult,
+    LookupType, ResourceType, TufRepoInsertStatus,
 };
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
 use swrite::{swrite, SWrite};
+use uuid::Uuid;
 
 /// The return value of [`DataStore::update_tuf_repo_insert`].
 ///
@@ -50,15 +52,8 @@ async fn artifacts_for_repo(
     use db::schema::tuf_artifact::dsl as tuf_artifact_dsl;
     use db::schema::tuf_repo_artifact::dsl as tuf_repo_artifact_dsl;
 
-    let join_on_dsl = tuf_artifact_dsl::name
-        .eq(tuf_repo_artifact_dsl::tuf_artifact_name)
-        .and(
-            tuf_artifact_dsl::version
-                .eq(tuf_repo_artifact_dsl::tuf_artifact_version),
-        )
-        .and(
-            tuf_artifact_dsl::kind.eq(tuf_repo_artifact_dsl::tuf_artifact_kind),
-        );
+    let join_on_dsl =
+        tuf_artifact_dsl::id.eq(tuf_repo_artifact_dsl::tuf_artifact_id);
     // Don't bother paginating because each repo should only have a few (under
     // 20) artifacts.
     tuf_repo_artifact_dsl::tuf_repo_artifact
@@ -147,6 +142,23 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         Ok(TufRepoDescription { repo, artifacts })
     }
+
+    /// Returns the list of all TUF repo artifacts known to the system.
+    pub async fn update_tuf_artifact_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<TufArtifact> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        use db::schema::tuf_artifact::dsl;
+
+        paginated(dsl::tuf_artifact, dsl::id, pagparams)
+            .select(TufArtifact::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
 }
 
 // This is a separate method mostly to make rustfmt not bail out on long lines
@@ -215,9 +227,9 @@ async fn insert_impl(
         for artifact in desc.artifacts.clone() {
             filter_dsl = filter_dsl.or_filter(
                 dsl::name
-                    .eq(artifact.id.name)
-                    .and(dsl::version.eq(artifact.id.version))
-                    .and(dsl::kind.eq(artifact.id.kind)),
+                    .eq(artifact.name)
+                    .and(dsl::version.eq(artifact.version))
+                    .and(dsl::kind.eq(artifact.kind)),
             );
         }
 
@@ -233,7 +245,7 @@ async fn insert_impl(
 
         let results_by_id = results
             .iter()
-            .map(|artifact| (&artifact.id, artifact))
+            .map(|artifact| (artifact.nvk(), artifact))
             .collect::<HashMap<_, _>>();
 
         // uploaded_and_existing contains non-matching artifacts in pairs of
@@ -244,7 +256,7 @@ async fn insert_impl(
 
         for uploaded_artifact in desc.artifacts.clone() {
             let Some(&existing_artifact) =
-                results_by_id.get(&uploaded_artifact.id)
+                results_by_id.get(&uploaded_artifact.nvk())
             else {
                 // This is a new artifact.
                 new_artifacts.push(uploaded_artifact.clone());
@@ -301,9 +313,7 @@ async fn insert_impl(
             );
             values.push((
                 dsl::tuf_repo_id.eq(desc.repo.id),
-                dsl::tuf_artifact_name.eq(artifact.id.name),
-                dsl::tuf_artifact_version.eq(artifact.id.version),
-                dsl::tuf_artifact_kind.eq(artifact.id.kind),
+                dsl::tuf_artifact_id.eq(artifact.id),
             ));
         }
 

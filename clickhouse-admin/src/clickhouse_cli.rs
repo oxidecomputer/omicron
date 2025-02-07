@@ -55,10 +55,12 @@ impl From<ClickhouseCliError> for HttpError {
             | ClickhouseCliError::ExecutionError(_) => {
                 let message = InlineErrorChain::new(&err).to_string();
                 HttpError {
-                    status_code: http::StatusCode::INTERNAL_SERVER_ERROR,
+                    status_code:
+                        dropshot::ErrorStatusCode::INTERNAL_SERVER_ERROR,
                     error_code: Some(String::from("Internal")),
                     external_message: message.clone(),
                     internal_message: message,
+                    headers: None,
                 }
             }
         }
@@ -93,8 +95,9 @@ impl ClickhouseCli {
     pub fn new(
         binary_path: Utf8PathBuf,
         listen_address: SocketAddrV6,
-        log: Logger,
+        log: &Logger,
     ) -> Self {
+        let log = log.new(slog::o!("component" => "ClickhouseCli"));
         Self { binary_path, listen_address, log }
     }
 

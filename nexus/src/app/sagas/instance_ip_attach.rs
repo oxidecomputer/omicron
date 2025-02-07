@@ -338,7 +338,7 @@ pub(crate) mod test {
         create_project,
     };
     use nexus_test_utils_macros::nexus_test;
-    use omicron_common::api::external::SimpleIdentity;
+    use omicron_common::api::external::SimpleIdentityOrName;
     use sled_agent_types::instance::InstanceExternalIpBody;
 
     type ControlPlaneTestContext =
@@ -404,7 +404,7 @@ pub(crate) mod test {
         let client = &cptestctx.external_client;
         let apictx = &cptestctx.server.server_context();
         let nexus = &apictx.nexus;
-        let sled_agent = &cptestctx.sled_agent.sled_agent;
+        let sled_agent = cptestctx.first_sled_agent();
 
         let opctx = test_helpers::test_opctx(cptestctx);
         let datastore = &nexus.db_datastore;
@@ -435,14 +435,16 @@ pub(crate) mod test {
                 &instance_id,
             )
             .await;
-        let mut eips = sled_agent.external_ips.lock().await;
-        let my_eips = eips.entry(vmm_id).or_default();
-        assert!(my_eips
-            .iter()
-            .any(|v| matches!(v, InstanceExternalIpBody::Floating(_))));
-        assert!(my_eips
-            .iter()
-            .any(|v| matches!(v, InstanceExternalIpBody::Ephemeral(_))));
+        {
+            let mut eips = sled_agent.external_ips.lock().unwrap();
+            let my_eips = eips.entry(vmm_id).or_default();
+            assert!(my_eips
+                .iter()
+                .any(|v| matches!(v, InstanceExternalIpBody::Floating(_))));
+            assert!(my_eips
+                .iter()
+                .any(|v| matches!(v, InstanceExternalIpBody::Ephemeral(_))));
+        }
 
         // DB has records for SNAT plus the new IPs.
         let db_eips = datastore
@@ -461,7 +463,7 @@ pub(crate) mod test {
     ) {
         use nexus_db_queries::db::schema::external_ip::dsl;
 
-        let sled_agent = &cptestctx.sled_agent.sled_agent;
+        let sled_agent = cptestctx.first_sled_agent();
         let datastore = cptestctx.server.server_context().nexus.datastore();
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();
@@ -497,7 +499,7 @@ pub(crate) mod test {
                 &instance_id,
             )
             .await;
-        let mut eips = sled_agent.external_ips.lock().await;
+        let mut eips = sled_agent.external_ips.lock().unwrap();
         let my_eips = eips.entry(vmm_id).or_default();
         assert!(my_eips.is_empty());
     }

@@ -7,8 +7,6 @@
 use super::params::{OximeterInfo, RackInitializationRequest};
 use crate::context::ApiContext;
 use dropshot::ApiDescription;
-use dropshot::Body;
-use dropshot::FreeformBody;
 use dropshot::HttpError;
 use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseDeleted;
@@ -54,7 +52,6 @@ use omicron_common::api::internal::nexus::RepairFinishInfo;
 use omicron_common::api::internal::nexus::RepairProgress;
 use omicron_common::api::internal::nexus::RepairStartInfo;
 use omicron_common::api::internal::nexus::SledVmmState;
-use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use std::collections::BTreeMap;
@@ -364,22 +361,6 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .internal_latencies
             .instrument_dropshot_handler(&request_context, handler)
             .await
-    }
-
-    async fn cpapi_artifact_download(
-        request_context: RequestContext<Self::Context>,
-        path_params: Path<ArtifactId>,
-    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
-        let context = &request_context.context().context;
-        let nexus = &context.nexus;
-        let opctx =
-            crate::context::op_context_for_internal_api(&request_context).await;
-        // TODO: return 404 if the error we get here says that the record isn't found
-        let body = nexus
-            .updates_download_artifact(&opctx, path_params.into_inner())
-            .await?;
-
-        Ok(HttpResponseOk(Body::from(body).into()))
     }
 
     async fn cpapi_upstairs_repair_start(
@@ -701,7 +682,9 @@ impl NexusInternalApi for NexusInternalApiImpl {
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 blueprints,
-                &|_, blueprint: &BlueprintMetadata| blueprint.id,
+                &|_, blueprint: &BlueprintMetadata| {
+                    blueprint.id.into_untyped_uuid()
+                },
             )?))
         };
 

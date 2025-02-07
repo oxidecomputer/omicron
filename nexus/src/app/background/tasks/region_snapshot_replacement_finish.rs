@@ -196,8 +196,11 @@ mod test {
     use nexus_db_model::RegionSnapshotReplacementStep;
     use nexus_db_model::RegionSnapshotReplacementStepState;
     use nexus_db_queries::db::datastore::region_snapshot_replacement;
+    use nexus_db_queries::db::datastore::NewRegionVolumeId;
+    use nexus_db_queries::db::datastore::OldSnapshotVolumeId;
     use nexus_test_utils_macros::nexus_test;
     use omicron_uuid_kinds::DatasetUuid;
+    use omicron_uuid_kinds::VolumeUuid;
     use sled_agent_client::VolumeConstructionRequest;
     use uuid::Uuid;
 
@@ -239,19 +242,18 @@ mod test {
 
         let request_id = request.id;
 
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: Uuid::new_v4(), // not required to match!
                     block_size: 512,
                     sub_volumes: vec![], // nothing needed here
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -277,8 +279,8 @@ mod test {
             .unwrap();
 
         let new_region_id = Uuid::new_v4();
-        let new_region_volume_id = Uuid::new_v4();
-        let old_snapshot_volume_id = Uuid::new_v4();
+        let new_region_volume_id = VolumeUuid::new_v4();
+        let old_snapshot_volume_id = VolumeUuid::new_v4();
 
         datastore
             .set_region_snapshot_replacement_replacement_done(
@@ -286,8 +288,8 @@ mod test {
                 request_id,
                 operating_saga_id,
                 new_region_id,
-                new_region_volume_id,
-                old_snapshot_volume_id,
+                NewRegionVolumeId(new_region_volume_id),
+                OldSnapshotVolumeId(old_snapshot_volume_id),
             )
             .await
             .unwrap();
@@ -314,18 +316,17 @@ mod test {
 
         let operating_saga_id = Uuid::new_v4();
 
-        let step_volume_id = Uuid::new_v4();
+        let step_volume_id = VolumeUuid::new_v4();
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 step_volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: Uuid::new_v4(), // not required to match!
                     block_size: 512,
                     sub_volumes: vec![], // nothing needed here
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -335,18 +336,17 @@ mod test {
         step_1.operating_saga_id = Some(operating_saga_id);
         let step_1_id = step_1.id;
 
-        let step_volume_id = Uuid::new_v4();
+        let step_volume_id = VolumeUuid::new_v4();
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 step_volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: Uuid::new_v4(), // not required to match!
                     block_size: 512,
                     sub_volumes: vec![], // nothing needed here
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 

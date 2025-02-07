@@ -13,6 +13,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use oximeter::FieldType;
 use oximeter::FieldValue;
+use oxql_types::point::DataType;
 use regex::Regex;
 use std::borrow::Borrow;
 use std::fmt;
@@ -35,6 +36,20 @@ pub enum Literal {
 }
 
 impl Literal {
+    // Return the name of this literal's type as a string.
+    pub(crate) fn type_name(&self) -> &'static str {
+        match self {
+            Literal::Integer(_) => "Integer",
+            Literal::Double(_) => "Double",
+            Literal::String(_) => "String",
+            Literal::Boolean(_) => "Boolean",
+            Literal::Uuid(_) => "Uuid",
+            Literal::Duration(_) => "Duration",
+            Literal::Timestamp(_) => "Timestamp",
+            Literal::IpAddr(_) => "IpAddr",
+        }
+    }
+
     // Format the literal as a safe, typed string for ClickHouse.
     pub(crate) fn as_db_safe_string(&self) -> String {
         match self {
@@ -90,6 +105,22 @@ impl Literal {
             Literal::Duration(_) => false,
             Literal::Timestamp(_) => false,
             Literal::IpAddr(_) => matches!(field_type, FieldType::IpAddr),
+        }
+    }
+
+    // Return true if this literal can be compared to a datum of the provided
+    // type.
+    pub(crate) fn is_compatible_with_datum(&self, data_type: DataType) -> bool {
+        match (self, data_type) {
+            (Literal::Integer(_), DataType::Integer)
+            | (Literal::Double(_), DataType::Double)
+            | (Literal::String(_), DataType::String)
+            | (Literal::Boolean(_), DataType::Boolean)
+            | (Literal::Duration(_), DataType::Integer)
+            | (Literal::Duration(_), DataType::Double)
+            | (Literal::Timestamp(_), DataType::Integer)
+            | (Literal::Timestamp(_), DataType::Double) => true,
+            (_, _) => false,
         }
     }
 

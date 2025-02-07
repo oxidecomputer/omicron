@@ -5,14 +5,18 @@
 //! Tests that Nexus properly manages and cleans up Crucible resources
 //! associated with Volumes
 
+use crate::integration_tests::sleds::sleds_list;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::ExpressionMethods;
+use diesel::QueryDsl;
+use diesel::SelectableHelper;
 use dropshot::test_util::ClientTestContext;
 use http::method::Method;
 use http::StatusCode;
 use nexus_config::RegionAllocationStrategy;
 use nexus_db_model::to_db_typed_uuid;
+use nexus_db_model::CrucibleDataset;
 use nexus_db_model::RegionSnapshotReplacement;
 use nexus_db_model::RegionSnapshotReplacementState;
 use nexus_db_model::Volume;
@@ -56,13 +60,14 @@ use omicron_common::api::internal;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_uuid_kinds::DatasetUuid;
-use omicron_uuid_kinds::DownstairsKind;
-use omicron_uuid_kinds::DownstairsRegionKind;
+use omicron_uuid_kinds::DownstairsRegionUuid;
+use omicron_uuid_kinds::DownstairsUuid;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::TypedUuid;
-use omicron_uuid_kinds::UpstairsKind;
-use omicron_uuid_kinds::UpstairsRepairKind;
-use omicron_uuid_kinds::UpstairsSessionKind;
+use omicron_uuid_kinds::UpstairsRepairUuid;
+use omicron_uuid_kinds::UpstairsSessionUuid;
+use omicron_uuid_kinds::UpstairsUuid;
+use omicron_uuid_kinds::VolumeUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use rand::prelude::SliceRandom;
 use rand::{rngs::StdRng, SeedableRng};
 use sled_agent_client::{CrucibleOpts, VolumeConstructionRequest};
@@ -1349,14 +1354,14 @@ async fn test_delete_image_order_6(cptestctx: &ControlPlaneTestContext) {
 // A test function to create a volume with the provided read only parent.
 async fn create_volume(
     datastore: &Arc<DataStore>,
-    volume_id: Uuid,
+    volume_id: VolumeUuid,
     rop_option: Option<VolumeConstructionRequest>,
 ) {
     let block_size = 512;
 
     // Make the SubVolume
     let sub_volume = VolumeConstructionRequest::File {
-        id: volume_id,
+        id: *volume_id.as_untyped_uuid(),
         block_size,
         path: "/lol".to_string(),
     };
@@ -1369,16 +1374,15 @@ async fn create_volume(
 
     // Create the volume from the parts above and insert into the database.
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
-                id: volume_id,
+            VolumeConstructionRequest::Volume {
+                id: *volume_id.as_untyped_uuid(),
                 block_size,
                 sub_volumes,
                 read_only_parent: rop,
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 }
@@ -1392,8 +1396,8 @@ async fn test_volume_remove_read_only_parent_base(
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
-    let volume_id = Uuid::new_v4();
-    let t_vid = Uuid::new_v4();
+    let volume_id = VolumeUuid::new_v4();
+    let t_vid = VolumeUuid::new_v4();
     let block_size = 512;
 
     // Make our read_only_parent
@@ -1506,8 +1510,8 @@ async fn test_volume_remove_read_only_parent_no_parent(
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
-    let volume_id = Uuid::new_v4();
-    let t_vid = Uuid::new_v4();
+    let volume_id = VolumeUuid::new_v4();
+    let t_vid = VolumeUuid::new_v4();
     create_volume(&datastore, volume_id, None).await;
 
     // We will get Ok(false) back from this operation.
@@ -1524,19 +1528,18 @@ async fn test_volume_remove_read_only_parent_volume_not_volume(
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
-    let volume_id = Uuid::new_v4();
-    let t_vid = Uuid::new_v4();
+    let volume_id = VolumeUuid::new_v4();
+    let t_vid = VolumeUuid::new_v4();
 
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::File {
-                id: volume_id,
+            VolumeConstructionRequest::File {
+                id: *volume_id.as_untyped_uuid(),
                 block_size: 512,
                 path: "/lol".to_string(),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -1553,8 +1556,8 @@ async fn test_volume_remove_read_only_parent_bad_volume(
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
-    let volume_id = Uuid::new_v4();
-    let t_vid = Uuid::new_v4();
+    let volume_id = VolumeUuid::new_v4();
+    let t_vid = VolumeUuid::new_v4();
 
     // Nothing should be removed, but we also don't return error.
     let removed = datastore.volume_remove_rop(volume_id, t_vid).await.unwrap();
@@ -1568,7 +1571,7 @@ async fn test_volume_remove_read_only_parent_volume_deleted(
     // Test the removal of a read_only_parent from a deleted volume.
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
-    let volume_id = Uuid::new_v4();
+    let volume_id = VolumeUuid::new_v4();
     let block_size = 512;
 
     // Make our read_only_parent
@@ -1583,7 +1586,7 @@ async fn test_volume_remove_read_only_parent_volume_deleted(
     // Soft delete the volume
     let _cr = datastore.soft_delete_volume(volume_id).await.unwrap();
 
-    let t_vid = Uuid::new_v4();
+    let t_vid = VolumeUuid::new_v4();
     // Nothing should be removed, but we also don't return error.
     let removed = datastore.volume_remove_rop(volume_id, t_vid).await.unwrap();
     assert!(!removed);
@@ -1596,7 +1599,7 @@ async fn test_volume_remove_rop_saga(cptestctx: &ControlPlaneTestContext) {
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
-    let volume_id = Uuid::new_v4();
+    let volume_id = VolumeUuid::new_v4();
     let block_size = 512;
 
     // Make our read_only_parent
@@ -1659,7 +1662,7 @@ async fn test_volume_remove_rop_saga_twice(
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
-    let volume_id = Uuid::new_v4();
+    let volume_id = VolumeUuid::new_v4();
     let block_size = 512;
 
     // Make our read_only_parent
@@ -1731,7 +1734,7 @@ async fn test_volume_remove_rop_saga_no_volume(
     cptestctx: &ControlPlaneTestContext,
 ) {
     // Test calling the saga on a volume that does not exist.
-    let volume_id = Uuid::new_v4();
+    let volume_id = VolumeUuid::new_v4();
 
     println!("Non-existant volume: {:?}", volume_id);
     let int_client = &cptestctx.internal_client;
@@ -1756,19 +1759,18 @@ async fn test_volume_remove_rop_saga_volume_not_volume(
     // Test saga removal of a read only volume for a volume that is not
     // of a type to have a read only parent.
     let nexus = &cptestctx.server.server_context().nexus;
-    let volume_id = Uuid::new_v4();
+    let volume_id = VolumeUuid::new_v4();
     let datastore = nexus.datastore();
 
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::File {
-                id: volume_id,
+            VolumeConstructionRequest::File {
+                id: *volume_id.as_untyped_uuid(),
                 block_size: 512,
                 path: "/lol".to_string(),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -1796,7 +1798,7 @@ async fn test_volume_remove_rop_saga_deleted_volume(
     // takes no action on that deleted volume.
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
-    let volume_id = Uuid::new_v4();
+    let volume_id = VolumeUuid::new_v4();
     let block_size = 512;
 
     // Make our read_only_parent
@@ -1857,13 +1859,13 @@ async fn test_volume_checkout(cptestctx: &ControlPlaneTestContext) {
     // database when the volume type is Volume with sub_volume Region.
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
-    let volume_id = Uuid::new_v4();
+    let volume_id = VolumeUuid::new_v4();
     let block_size = 512;
 
     // Create a sub_vol with generation 1.
     let subvol = create_region(block_size, 1, Uuid::new_v4());
     let volume_construction_request = VolumeConstructionRequest::Volume {
-        id: volume_id,
+        id: *volume_id.as_untyped_uuid(),
         block_size,
         sub_volumes: vec![subvol],
         read_only_parent: None,
@@ -1871,10 +1873,7 @@ async fn test_volume_checkout(cptestctx: &ControlPlaneTestContext) {
 
     // Take our VCR from above and insert into the database.
     datastore
-        .volume_create(nexus_db_model::Volume::new(
-            volume_id,
-            serde_json::to_string(&volume_construction_request).unwrap(),
-        ))
+        .volume_create(volume_id, volume_construction_request)
         .await
         .unwrap();
 
@@ -1908,17 +1907,17 @@ async fn test_volume_checkout_updates_nothing(
     // not contain a sub_volume with a generation field.
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
-    let volume_id = Uuid::new_v4();
+    let volume_id = VolumeUuid::new_v4();
     let block_size = 512;
 
     // Build our sub_vol and VCR from parts.
     let subvol = VolumeConstructionRequest::File {
-        id: volume_id,
+        id: *volume_id.as_untyped_uuid(),
         block_size,
         path: "/lol".to_string(),
     };
     let volume_construction_request = VolumeConstructionRequest::Volume {
-        id: volume_id,
+        id: *volume_id.as_untyped_uuid(),
         block_size,
         sub_volumes: vec![subvol],
         read_only_parent: None,
@@ -1926,10 +1925,7 @@ async fn test_volume_checkout_updates_nothing(
 
     // Take our VCR from above and insert into the database.
     datastore
-        .volume_create(nexus_db_model::Volume::new(
-            volume_id,
-            serde_json::to_string(&volume_construction_request).unwrap(),
-        ))
+        .volume_create(volume_id, volume_construction_request)
         .await
         .unwrap();
 
@@ -1961,7 +1957,7 @@ async fn test_volume_checkout_updates_multiple_gen(
     // type Region.
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
-    let volume_id = Uuid::new_v4();
+    let volume_id = VolumeUuid::new_v4();
     let block_size = 512;
 
     // Create two regions.
@@ -1970,7 +1966,7 @@ async fn test_volume_checkout_updates_multiple_gen(
 
     // Make the volume with our two regions as sub_volumes
     let volume_construction_request = VolumeConstructionRequest::Volume {
-        id: volume_id,
+        id: *volume_id.as_untyped_uuid(),
         block_size,
         sub_volumes: vec![subvol_one, subvol_two],
         read_only_parent: None,
@@ -1978,10 +1974,7 @@ async fn test_volume_checkout_updates_multiple_gen(
 
     // Insert the volume into the database.
     datastore
-        .volume_create(nexus_db_model::Volume::new(
-            volume_id,
-            serde_json::to_string(&volume_construction_request).unwrap(),
-        ))
+        .volume_create(volume_id, volume_construction_request)
         .await
         .unwrap();
 
@@ -2027,7 +2020,7 @@ async fn test_volume_checkout_updates_sparse_multiple_gen(
     // problem
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
-    let volume_id = Uuid::new_v4();
+    let volume_id = VolumeUuid::new_v4();
     let block_size = 512;
 
     // Create three sub_vols.
@@ -2041,7 +2034,7 @@ async fn test_volume_checkout_updates_sparse_multiple_gen(
 
     // Make the volume with our three regions as sub_volumes
     let volume_construction_request = VolumeConstructionRequest::Volume {
-        id: volume_id,
+        id: *volume_id.as_untyped_uuid(),
         block_size,
         sub_volumes: vec![subvol_one, subvol_two, subvol_three],
         read_only_parent: None,
@@ -2049,10 +2042,7 @@ async fn test_volume_checkout_updates_sparse_multiple_gen(
 
     // Insert the volume into the database.
     datastore
-        .volume_create(nexus_db_model::Volume::new(
-            volume_id,
-            serde_json::to_string(&volume_construction_request).unwrap(),
-        ))
+        .volume_create(volume_id, volume_construction_request)
         .await
         .unwrap();
 
@@ -2088,7 +2078,7 @@ async fn test_volume_checkout_updates_sparse_mid_multiple_gen(
     // middle of the sub_volumes won't be a problem
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
-    let volume_id = Uuid::new_v4();
+    let volume_id = VolumeUuid::new_v4();
     let block_size = 512;
 
     // Create three sub_vols.
@@ -2102,7 +2092,7 @@ async fn test_volume_checkout_updates_sparse_mid_multiple_gen(
 
     // Make the volume with our three sub_volumes
     let volume_construction_request = VolumeConstructionRequest::Volume {
-        id: volume_id,
+        id: *volume_id.as_untyped_uuid(),
         block_size,
         sub_volumes: vec![subvol_one, subvol_two, subvol_three],
         read_only_parent: None,
@@ -2110,10 +2100,7 @@ async fn test_volume_checkout_updates_sparse_mid_multiple_gen(
 
     // Insert the volume into the database.
     datastore
-        .volume_create(nexus_db_model::Volume::new(
-            volume_id,
-            serde_json::to_string(&volume_construction_request).unwrap(),
-        ))
+        .volume_create(volume_id, volume_construction_request)
         .await
         .unwrap();
 
@@ -2147,7 +2134,7 @@ async fn test_volume_checkout_randomize_ids_only_read_only(
     // non-read-only Regions
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
-    let volume_id = Uuid::new_v4();
+    let volume_id = VolumeUuid::new_v4();
     let block_size = 512;
 
     // Create three sub_vols.
@@ -2157,7 +2144,7 @@ async fn test_volume_checkout_randomize_ids_only_read_only(
 
     // Make the volume with our three sub_volumes
     let volume_construction_request = VolumeConstructionRequest::Volume {
-        id: volume_id,
+        id: *volume_id.as_untyped_uuid(),
         block_size,
         sub_volumes: vec![subvol_one, subvol_two, subvol_three],
         read_only_parent: None,
@@ -2165,10 +2152,7 @@ async fn test_volume_checkout_randomize_ids_only_read_only(
 
     // Insert the volume into the database.
     datastore
-        .volume_create(nexus_db_model::Volume::new(
-            volume_id,
-            serde_json::to_string(&volume_construction_request).unwrap(),
-        ))
+        .volume_create(volume_id, volume_construction_request)
         .await
         .unwrap();
 
@@ -2192,7 +2176,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
 
     // Four zpools, one dataset each
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -2267,12 +2251,12 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
             .unwrap();
     }
 
-    let volume_id = Uuid::new_v4();
+    let volume_id = VolumeUuid::new_v4();
     let volume = datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
-                id: volume_id,
+            VolumeConstructionRequest::Volume {
+                id: *volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
                 read_only_parent: Some(Box::new(
@@ -2299,9 +2283,8 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
                         },
                     },
                 )),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -2335,7 +2318,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
             .unwrap();
 
         assert_eq!(usage.len(), 1);
-        assert_eq!(usage[0].volume_id, volume_id);
+        assert_eq!(usage[0].volume_id(), volume_id);
     }
 
     // Soft delete the volume, and validate that the volume's region_snapshots
@@ -2388,12 +2371,12 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
             .unwrap();
     }
 
-    let volume_id = Uuid::new_v4();
+    let volume_id = VolumeUuid::new_v4();
     let volume = datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
-                id: volume_id,
+            VolumeConstructionRequest::Volume {
+                id: *volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
                 read_only_parent: Some(Box::new(
@@ -2420,9 +2403,8 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
                         },
                     },
                 )),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -2473,7 +2455,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
             .unwrap();
 
         assert_eq!(usage.len(), 1);
-        assert_eq!(usage[0].volume_id, volume_id);
+        assert_eq!(usage[0].volume_id(), volume_id);
     }
 
     // Soft delete the volume, and validate that only three region_snapshot
@@ -2526,12 +2508,9 @@ async fn test_disk_create_saga_unwinds_correctly(
     let zpool = &disk_test.zpools().nth(2).expect("Expected three zpools");
     let dataset = &zpool.datasets[0];
     cptestctx
-        .sled_agent
-        .sled_agent
+        .first_sled_agent()
         .get_crucible_dataset(zpool.id, dataset.id)
-        .await
-        .set_region_creation_error(true)
-        .await;
+        .set_region_creation_error(true);
 
     let disk_size = ByteCount::from_gibibytes_u32(2);
     let base_disk = params::DiskCreate {
@@ -2596,12 +2575,9 @@ async fn test_snapshot_create_saga_unwinds_correctly(
         &disk_test.zpools().nth(2).expect("Expected at least three zpools");
     let dataset = &zpool.datasets[0];
     cptestctx
-        .sled_agent
-        .sled_agent
+        .first_sled_agent()
         .get_crucible_dataset(zpool.id, dataset.id)
-        .await
-        .set_region_creation_error(true)
-        .await;
+        .set_region_creation_error(true);
 
     // Create a snapshot
     let snapshot_create = params::SnapshotCreate {
@@ -2715,17 +2691,16 @@ async fn test_volume_hard_delete_idempotent(
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
-    let volume_id = Uuid::new_v4();
+    let volume_id = VolumeUuid::new_v4();
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::File {
-                id: volume_id,
+            VolumeConstructionRequest::File {
+                id: *volume_id.as_untyped_uuid(),
                 block_size: 512,
                 path: "/lol".to_string(),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -2742,10 +2717,10 @@ async fn test_upstairs_repair_notify_idempotent(
 ) {
     let int_client = &cptestctx.internal_client;
 
-    let upstairs_id: TypedUuid<UpstairsKind> = TypedUuid::new_v4();
-    let session_id: TypedUuid<UpstairsSessionKind> = TypedUuid::new_v4();
-    let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
-    let region_id: TypedUuid<DownstairsRegionKind> = TypedUuid::new_v4();
+    let upstairs_id = UpstairsUuid::new_v4();
+    let session_id = UpstairsSessionUuid::new_v4();
+    let repair_id = UpstairsRepairUuid::new_v4();
+    let region_id = DownstairsRegionUuid::new_v4();
 
     // Send the same start request.
     let notify_url = format!("/crucible/0/upstairs/{upstairs_id}/repair-start");
@@ -2826,10 +2801,10 @@ async fn test_upstairs_repair_notify_different_finish_status(
 ) {
     let int_client = &cptestctx.internal_client;
 
-    let upstairs_id: TypedUuid<UpstairsKind> = TypedUuid::new_v4();
-    let session_id: TypedUuid<UpstairsSessionKind> = TypedUuid::new_v4();
-    let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
-    let region_id: TypedUuid<DownstairsRegionKind> = TypedUuid::new_v4();
+    let upstairs_id = UpstairsUuid::new_v4();
+    let session_id = UpstairsSessionUuid::new_v4();
+    let repair_id = UpstairsRepairUuid::new_v4();
+    let region_id = DownstairsRegionUuid::new_v4();
 
     let notify_url =
         format!("/crucible/0/upstairs/{upstairs_id}/repair-finish");
@@ -2886,10 +2861,10 @@ async fn test_upstairs_repair_same_upstairs_retry(
 ) {
     let int_client = &cptestctx.internal_client;
 
-    let upstairs_id: TypedUuid<UpstairsKind> = TypedUuid::new_v4();
-    let session_id: TypedUuid<UpstairsSessionKind> = TypedUuid::new_v4();
-    let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
-    let region_id: TypedUuid<DownstairsRegionKind> = TypedUuid::new_v4();
+    let upstairs_id = UpstairsUuid::new_v4();
+    let session_id = UpstairsSessionUuid::new_v4();
+    let repair_id = UpstairsRepairUuid::new_v4();
+    let region_id = DownstairsRegionUuid::new_v4();
 
     // Simulate one failed repair
 
@@ -2943,7 +2918,7 @@ async fn test_upstairs_repair_same_upstairs_retry(
 
     // Simulate the same Upstairs restarting the repair, which passes this time
 
-    let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
+    let repair_id = UpstairsRepairUuid::new_v4();
 
     int_client
         .make_request(
@@ -2996,10 +2971,10 @@ async fn test_upstairs_repair_different_upstairs_retry(
 ) {
     let int_client = &cptestctx.internal_client;
 
-    let upstairs_id: TypedUuid<UpstairsKind> = TypedUuid::new_v4();
-    let session_id: TypedUuid<UpstairsSessionKind> = TypedUuid::new_v4();
-    let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
-    let region_id: TypedUuid<DownstairsRegionKind> = TypedUuid::new_v4();
+    let upstairs_id = UpstairsUuid::new_v4();
+    let session_id = UpstairsSessionUuid::new_v4();
+    let repair_id = UpstairsRepairUuid::new_v4();
+    let region_id = DownstairsRegionUuid::new_v4();
 
     // Simulate one failed repair by one Upstairs
 
@@ -3053,8 +3028,8 @@ async fn test_upstairs_repair_different_upstairs_retry(
 
     // Simulate a different Upstairs session restarting the repair, which passes this time
 
-    let session_id: TypedUuid<UpstairsSessionKind> = TypedUuid::new_v4();
-    let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
+    let session_id = UpstairsSessionUuid::new_v4();
+    let repair_id = UpstairsRepairUuid::new_v4();
 
     int_client
         .make_request(
@@ -3107,10 +3082,10 @@ async fn test_upstairs_repair_different_upstairs_retry_interrupted(
 ) {
     let int_client = &cptestctx.internal_client;
 
-    let upstairs_id: TypedUuid<UpstairsKind> = TypedUuid::new_v4();
-    let session_id: TypedUuid<UpstairsSessionKind> = TypedUuid::new_v4();
-    let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
-    let region_id: TypedUuid<DownstairsRegionKind> = TypedUuid::new_v4();
+    let upstairs_id = UpstairsUuid::new_v4();
+    let session_id = UpstairsSessionUuid::new_v4();
+    let repair_id = UpstairsRepairUuid::new_v4();
+    let region_id = DownstairsRegionUuid::new_v4();
 
     // Simulate one failed repair by one Upstairs, which was interrupted (which
     // leads to no finish message).
@@ -3144,8 +3119,8 @@ async fn test_upstairs_repair_different_upstairs_retry_interrupted(
     // Simulate a different Upstairs session restarting the interrupted repair,
     // which passes this time
 
-    let session_id: TypedUuid<UpstairsSessionKind> = TypedUuid::new_v4();
-    let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
+    let session_id = UpstairsSessionUuid::new_v4();
+    let repair_id = UpstairsRepairUuid::new_v4();
 
     int_client
         .make_request(
@@ -3198,10 +3173,10 @@ async fn test_upstairs_repair_repair_id_and_type_conflict(
 ) {
     let int_client = &cptestctx.internal_client;
 
-    let upstairs_id: TypedUuid<UpstairsKind> = TypedUuid::new_v4();
-    let session_id: TypedUuid<UpstairsSessionKind> = TypedUuid::new_v4();
-    let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
-    let region_id: TypedUuid<DownstairsRegionKind> = TypedUuid::new_v4();
+    let upstairs_id = UpstairsUuid::new_v4();
+    let session_id = UpstairsSessionUuid::new_v4();
+    let repair_id = UpstairsRepairUuid::new_v4();
+    let region_id = DownstairsRegionUuid::new_v4();
 
     let notify_start_url =
         format!("/crucible/0/upstairs/{upstairs_id}/repair-start");
@@ -3257,10 +3232,10 @@ async fn test_upstairs_repair_submit_progress(
 ) {
     let int_client = &cptestctx.internal_client;
 
-    let upstairs_id: TypedUuid<UpstairsKind> = TypedUuid::new_v4();
-    let session_id: TypedUuid<UpstairsSessionKind> = TypedUuid::new_v4();
-    let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
-    let region_id: TypedUuid<DownstairsRegionKind> = TypedUuid::new_v4();
+    let upstairs_id = UpstairsUuid::new_v4();
+    let session_id = UpstairsSessionUuid::new_v4();
+    let repair_id = UpstairsRepairUuid::new_v4();
+    let region_id = DownstairsRegionUuid::new_v4();
 
     // A repair must be started before progress can be submitted
 
@@ -3316,8 +3291,8 @@ async fn test_upstairs_repair_reject_submit_progress_when_no_repair(
 ) {
     let int_client = &cptestctx.internal_client;
 
-    let upstairs_id: TypedUuid<UpstairsKind> = TypedUuid::new_v4();
-    let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
+    let upstairs_id = UpstairsUuid::new_v4();
+    let repair_id = UpstairsRepairUuid::new_v4();
 
     let progress_url = format!(
         "/crucible/0/upstairs/{upstairs_id}/repair/{repair_id}/progress"
@@ -3346,8 +3321,8 @@ async fn test_upstairs_notify_downstairs_client_stop_request(
 ) {
     let int_client = &cptestctx.internal_client;
 
-    let upstairs_id: TypedUuid<UpstairsKind> = TypedUuid::new_v4();
-    let downstairs_id: TypedUuid<DownstairsKind> = TypedUuid::new_v4();
+    let upstairs_id = UpstairsUuid::new_v4();
+    let downstairs_id = DownstairsUuid::new_v4();
 
     let stop_request_url = format!(
         "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stop-request"
@@ -3424,8 +3399,8 @@ async fn test_upstairs_notify_downstairs_client_stops(
 ) {
     let int_client = &cptestctx.internal_client;
 
-    let upstairs_id: TypedUuid<UpstairsKind> = TypedUuid::new_v4();
-    let downstairs_id: TypedUuid<DownstairsKind> = TypedUuid::new_v4();
+    let upstairs_id = UpstairsUuid::new_v4();
+    let downstairs_id = DownstairsUuid::new_v4();
 
     let stopped_url = format!(
         "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stopped"
@@ -3539,12 +3514,12 @@ async fn test_cte_returns_regions(cptestctx: &ControlPlaneTestContext) {
         .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
 
     let allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
 
     assert_eq!(allocated_regions.len(), 3);
 
     let resources_to_clean_up =
-        datastore.soft_delete_volume(db_disk.volume_id).await.unwrap();
+        datastore.soft_delete_volume(db_disk.volume_id()).await.unwrap();
 
     let datasets_and_regions_to_clean =
         datastore.regions_to_delete(&resources_to_clean_up).await.unwrap();
@@ -3569,8 +3544,8 @@ struct TestReadOnlyRegionReferenceUsage {
     region: db::model::Region,
     region_address: SocketAddrV6,
 
-    first_volume_id: Uuid,
-    second_volume_id: Uuid,
+    first_volume_id: VolumeUuid,
+    second_volume_id: VolumeUuid,
 
     last_resources_to_delete: Option<CrucibleResources>,
 }
@@ -3587,15 +3562,15 @@ impl TestReadOnlyRegionReferenceUsage {
         );
 
         DiskTestBuilder::new(&cptestctx)
-            .on_specific_sled(cptestctx.first_sled())
+            .on_specific_sled(cptestctx.first_sled_id())
             .with_zpool_count(4)
             .build()
             .await;
 
         create_project_and_pool(client).await;
 
-        let first_volume_id = Uuid::new_v4();
-        let second_volume_id = Uuid::new_v4();
+        let first_volume_id = VolumeUuid::new_v4();
+        let second_volume_id = VolumeUuid::new_v4();
         let snapshot_id = Uuid::new_v4();
 
         let datasets_and_regions = datastore
@@ -3648,10 +3623,10 @@ impl TestReadOnlyRegionReferenceUsage {
 
     pub async fn create_first_volume(&self) {
         self.datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 self.first_volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
-                    id: self.first_volume_id,
+                VolumeConstructionRequest::Volume {
+                    id: *self.first_volume_id.as_untyped_uuid(),
                     block_size: 512,
                     sub_volumes: vec![VolumeConstructionRequest::Region {
                         block_size: 512,
@@ -3672,9 +3647,8 @@ impl TestReadOnlyRegionReferenceUsage {
                         },
                     }],
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
     }
@@ -3691,7 +3665,7 @@ impl TestReadOnlyRegionReferenceUsage {
             .unwrap();
 
         assert_eq!(usage.len(), 1);
-        assert_eq!(usage[0].volume_id, self.first_volume_id);
+        assert_eq!(usage[0].volume_id(), self.first_volume_id);
     }
 
     pub async fn validate_only_second_volume_referenced(&self) {
@@ -3706,7 +3680,7 @@ impl TestReadOnlyRegionReferenceUsage {
             .unwrap();
 
         assert_eq!(usage.len(), 1);
-        assert_eq!(usage[0].volume_id, self.second_volume_id);
+        assert_eq!(usage[0].volume_id(), self.second_volume_id);
     }
 
     pub async fn delete_first_volume(&mut self) {
@@ -3776,10 +3750,10 @@ impl TestReadOnlyRegionReferenceUsage {
 
     pub async fn create_first_volume_region_in_rop(&self) {
         self.datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 self.first_volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
-                    id: self.first_volume_id,
+                VolumeConstructionRequest::Volume {
+                    id: *self.first_volume_id.as_untyped_uuid(),
                     block_size: 512,
                     sub_volumes: vec![],
                     read_only_parent: Some(Box::new(
@@ -3802,19 +3776,18 @@ impl TestReadOnlyRegionReferenceUsage {
                             },
                         },
                     )),
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
     }
 
     pub async fn create_second_volume(&self) {
         self.datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 self.second_volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
-                    id: self.second_volume_id,
+                VolumeConstructionRequest::Volume {
+                    id: *self.second_volume_id.as_untyped_uuid(),
                     block_size: 512,
                     sub_volumes: vec![VolumeConstructionRequest::Region {
                         block_size: 512,
@@ -3835,19 +3808,18 @@ impl TestReadOnlyRegionReferenceUsage {
                         },
                     }],
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
     }
 
     pub async fn create_second_volume_region_in_rop(&self) {
         self.datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 self.second_volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
-                    id: self.second_volume_id,
+                VolumeConstructionRequest::Volume {
+                    id: *self.second_volume_id.as_untyped_uuid(),
                     block_size: 512,
                     sub_volumes: vec![],
                     read_only_parent: Some(Box::new(
@@ -3870,9 +3842,8 @@ impl TestReadOnlyRegionReferenceUsage {
                             },
                         },
                     )),
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
     }
@@ -3889,8 +3860,8 @@ impl TestReadOnlyRegionReferenceUsage {
             .unwrap();
 
         assert_eq!(usage.len(), 2);
-        assert!(usage.iter().any(|r| r.volume_id == self.first_volume_id));
-        assert!(usage.iter().any(|r| r.volume_id == self.second_volume_id));
+        assert!(usage.iter().any(|r| r.volume_id() == self.first_volume_id));
+        assert!(usage.iter().any(|r| r.volume_id() == self.second_volume_id));
     }
 }
 
@@ -4075,7 +4046,7 @@ async fn test_read_only_region_reference_sanity_rop_multi(
 ///
 /// 5) clean up all the objects, and expect the crucible resources are properly
 ///    cleaned up
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_read_only_region_reference_counting(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -4087,11 +4058,11 @@ async fn test_read_only_region_reference_counting(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Four zpools are required for region replacement or region snapshot
-    // replacement
+    // Create one zpool on each of the 4 sleds. This is required for region
+    // replacement or region snapshot replacement
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
-        .with_zpool_count(4)
+        .on_all_sleds()
+        .with_zpool_count(1)
         .build()
         .await;
 
@@ -4120,7 +4091,7 @@ async fn test_read_only_region_reference_counting(
         .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
 
     let allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
 
     assert_eq!(allocated_regions.len(), 3);
 
@@ -4150,14 +4121,16 @@ async fn test_read_only_region_reference_counting(
         });
 
     let allocated_regions =
-        datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_snapshot.volume_id()).await.unwrap();
 
     assert_eq!(allocated_regions.len(), 1);
     let (_, read_only_region) = &allocated_regions[0];
     assert!(read_only_region.read_only());
 
-    let db_read_only_dataset =
-        datastore.dataset_get(read_only_region.dataset_id()).await.unwrap();
+    let db_read_only_dataset = datastore
+        .crucible_dataset_get(read_only_region.dataset_id())
+        .await
+        .unwrap();
 
     // The disk-from-snap VCR should also reference that read-only region
 
@@ -4183,7 +4156,7 @@ async fn test_read_only_region_reference_counting(
         .await
         .unwrap()
         .iter()
-        .any(|volume| volume.id() == db_disk_from_snapshot.volume_id));
+        .any(|volume| volume.id() == db_disk_from_snapshot.volume_id()));
 
     // Expect that there are two read-only region references now: one in the
     // snapshot volume, and one in the disk-from-snap volume.
@@ -4198,10 +4171,10 @@ async fn test_read_only_region_reference_counting(
         .unwrap();
 
     assert_eq!(usage.len(), 2);
-    assert!(usage.iter().any(|r| r.volume_id == db_snapshot.volume_id));
+    assert!(usage.iter().any(|r| r.volume_id() == db_snapshot.volume_id()));
     assert!(usage
         .iter()
-        .any(|r| r.volume_id == db_disk_from_snapshot.volume_id));
+        .any(|r| r.volume_id() == db_disk_from_snapshot.volume_id()));
 
     // Deleting the snapshot should _not_ cause the region to get deleted from
     // CRDB
@@ -4219,23 +4192,35 @@ async fn test_read_only_region_reference_counting(
     // or cause Nexus to send delete commands to the appropriate Crucible
     // agent.
 
-    assert_eq!(
-        cptestctx
+    let mut region_found = false;
+    let mut region_still_state_crated = false;
+
+    for sled_agent in cptestctx.all_sled_agents() {
+        let zpool_id =
+            ZpoolUuid::from_untyped_uuid(db_read_only_dataset.pool_id);
+        if !sled_agent.sled_agent.has_zpool(zpool_id) {
+            continue;
+        }
+
+        if let Some(region) = sled_agent
             .sled_agent
-            .sled_agent
-            .get_crucible_dataset(
-                TypedUuid::from_untyped_uuid(db_read_only_dataset.pool_id),
-                db_read_only_dataset.id(),
-            )
-            .await
+            .get_crucible_dataset(zpool_id, db_read_only_dataset.id())
             .get(crucible_agent_client::types::RegionId(
-                read_only_region.id().to_string()
+                read_only_region.id().to_string(),
             ))
-            .await
-            .unwrap()
-            .state,
-        crucible_agent_client::types::State::Created
-    );
+        {
+            region_found = true;
+
+            if region.state == crucible_agent_client::types::State::Created {
+                region_still_state_crated = true;
+            }
+
+            break;
+        }
+    }
+
+    assert!(region_found);
+    assert!(region_still_state_crated);
 
     // Expect that there is one read-only region reference now, and that's from
     // disk-from-snap
@@ -4250,7 +4235,7 @@ async fn test_read_only_region_reference_counting(
         .unwrap();
 
     assert_eq!(usage.len(), 1);
-    assert_eq!(usage[0].volume_id, db_disk_from_snapshot.volume_id);
+    assert_eq!(usage[0].volume_id(), db_disk_from_snapshot.volume_id());
 
     // Delete the disk, and expect that does not alter the volume usage records
 
@@ -4270,7 +4255,7 @@ async fn test_read_only_region_reference_counting(
         .unwrap();
 
     assert_eq!(usage.len(), 1);
-    assert_eq!(usage[0].volume_id, db_disk_from_snapshot.volume_id);
+    assert_eq!(usage[0].volume_id(), db_disk_from_snapshot.volume_id());
 
     // Delete the disk from snapshot, verify everything is cleaned up
 
@@ -4291,23 +4276,35 @@ async fn test_read_only_region_reference_counting(
 
     assert!(usage.is_empty());
 
-    assert_eq!(
-        cptestctx
+    let mut region_found = false;
+    let mut region_destroyed = false;
+
+    for sled_agent in cptestctx.all_sled_agents() {
+        let zpool_id =
+            ZpoolUuid::from_untyped_uuid(db_read_only_dataset.pool_id);
+        if !sled_agent.sled_agent.has_zpool(zpool_id) {
+            continue;
+        }
+
+        if let Some(region) = sled_agent
             .sled_agent
-            .sled_agent
-            .get_crucible_dataset(
-                TypedUuid::from_untyped_uuid(db_read_only_dataset.pool_id),
-                db_read_only_dataset.id(),
-            )
-            .await
+            .get_crucible_dataset(zpool_id, db_read_only_dataset.id())
             .get(crucible_agent_client::types::RegionId(
-                read_only_region.id().to_string()
+                read_only_region.id().to_string(),
             ))
-            .await
-            .unwrap()
-            .state,
-        crucible_agent_client::types::State::Destroyed
-    );
+        {
+            region_found = true;
+
+            if region.state == crucible_agent_client::types::State::Destroyed {
+                region_destroyed = true;
+            }
+
+            break;
+        }
+    }
+
+    assert!(region_found);
+    assert!(region_destroyed);
 
     // Assert everything was cleaned up
     assert!(disk_test.crucible_resources_deleted().await);
@@ -4315,7 +4312,7 @@ async fn test_read_only_region_reference_counting(
 
 /// Assert that a snapshot of a volume with a read-only region is properly
 /// reference counted.
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_read_only_region_reference_counting_layers(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -4327,11 +4324,11 @@ async fn test_read_only_region_reference_counting_layers(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Four zpools are required for region replacement or region snapshot
-    // replacement
+    // Create one zpool on each of the 4 sleds. This is required for region
+    // replacement or region snapshot replacement
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
-        .with_zpool_count(4)
+        .on_all_sleds()
+        .with_zpool_count(1)
         .build()
         .await;
 
@@ -4360,7 +4357,7 @@ async fn test_read_only_region_reference_counting_layers(
         .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
 
     let allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
 
     assert_eq!(allocated_regions.len(), 3);
 
@@ -4390,7 +4387,7 @@ async fn test_read_only_region_reference_counting_layers(
         });
 
     let allocated_regions =
-        datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_snapshot.volume_id()).await.unwrap();
 
     assert_eq!(allocated_regions.len(), 1);
     let (_, read_only_region) = &allocated_regions[0];
@@ -4420,7 +4417,7 @@ async fn test_read_only_region_reference_counting_layers(
         .await
         .unwrap()
         .iter()
-        .any(|volume| volume.id() == db_disk_from_snapshot.volume_id));
+        .any(|volume| volume.id() == db_disk_from_snapshot.volume_id()));
 
     // Expect that there are two read-only region references now: one in the
     // snapshot volume, and one in the disk-from-snap volume.
@@ -4435,10 +4432,10 @@ async fn test_read_only_region_reference_counting_layers(
         .unwrap();
 
     assert_eq!(usage.len(), 2);
-    assert!(usage.iter().any(|r| r.volume_id == db_snapshot.volume_id));
+    assert!(usage.iter().any(|r| r.volume_id() == db_snapshot.volume_id()));
     assert!(usage
         .iter()
-        .any(|r| r.volume_id == db_disk_from_snapshot.volume_id));
+        .any(|r| r.volume_id() == db_disk_from_snapshot.volume_id()));
 
     // Take a snapshot of the disk-from-snapshot disk
 
@@ -4473,11 +4470,13 @@ async fn test_read_only_region_reference_counting_layers(
         .unwrap();
 
     assert_eq!(usage.len(), 3);
-    assert!(usage.iter().any(|r| r.volume_id == db_snapshot.volume_id));
+    assert!(usage.iter().any(|r| r.volume_id() == db_snapshot.volume_id()));
     assert!(usage
         .iter()
-        .any(|r| r.volume_id == db_disk_from_snapshot.volume_id));
-    assert!(usage.iter().any(|r| r.volume_id == db_double_snapshot.volume_id));
+        .any(|r| r.volume_id() == db_disk_from_snapshot.volume_id()));
+    assert!(usage
+        .iter()
+        .any(|r| r.volume_id() == db_double_snapshot.volume_id()));
 
     // Delete resources, assert volume resource usage records along the way
 
@@ -4499,8 +4498,10 @@ async fn test_read_only_region_reference_counting_layers(
         .unwrap();
 
     assert_eq!(usage.len(), 2);
-    assert!(usage.iter().any(|r| r.volume_id == db_snapshot.volume_id));
-    assert!(usage.iter().any(|r| r.volume_id == db_double_snapshot.volume_id));
+    assert!(usage.iter().any(|r| r.volume_id() == db_snapshot.volume_id()));
+    assert!(usage
+        .iter()
+        .any(|r| r.volume_id() == db_double_snapshot.volume_id()));
 
     NexusRequest::object_delete(client, &get_snapshot_url("snapshot"))
         .authn_as(AuthnMode::PrivilegedUser)
@@ -4520,7 +4521,9 @@ async fn test_read_only_region_reference_counting_layers(
         .unwrap();
 
     assert_eq!(usage.len(), 1);
-    assert!(usage.iter().any(|r| r.volume_id == db_double_snapshot.volume_id));
+    assert!(usage
+        .iter()
+        .any(|r| r.volume_id() == db_double_snapshot.volume_id()));
 
     NexusRequest::object_delete(client, &get_snapshot_url("double-snapshot"))
         .authn_as(AuthnMode::PrivilegedUser)
@@ -4563,7 +4566,7 @@ async fn test_volume_replace_snapshot_respects_accounting(
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -4581,7 +4584,7 @@ async fn test_volume_replace_snapshot_respects_accounting(
         .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
 
     let disk_allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
 
     assert_eq!(disk_allocated_regions.len(), 3);
 
@@ -4597,7 +4600,7 @@ async fn test_volume_replace_snapshot_respects_accounting(
         });
 
     let allocated_regions =
-        datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_snapshot.volume_id()).await.unwrap();
 
     // There won't be any regions for the snapshot volume, only region snapshots
 
@@ -4609,7 +4612,7 @@ async fn test_volume_replace_snapshot_respects_accounting(
         .arbitrary_region_allocate(
             &opctx,
             RegionAllocationFor::SnapshotVolume {
-                volume_id: db_snapshot.volume_id,
+                volume_id: db_snapshot.volume_id(),
                 snapshot_id: db_snapshot.id(),
             },
             RegionAllocationParameters::FromDiskSource {
@@ -4627,7 +4630,7 @@ async fn test_volume_replace_snapshot_respects_accounting(
     // Get the newly allocated region
 
     let mut new_allocated_regions =
-        datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_snapshot.volume_id()).await.unwrap();
 
     assert_eq!(new_allocated_regions.len(), 1);
 
@@ -4640,19 +4643,18 @@ async fn test_volume_replace_snapshot_respects_accounting(
 
     // Create a blank region to use as the "volume to delete"
 
-    let volume_to_delete_id = Uuid::new_v4();
+    let volume_to_delete_id = VolumeUuid::new_v4();
 
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             volume_to_delete_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
-                id: volume_to_delete_id,
+            VolumeConstructionRequest::Volume {
+                id: *volume_to_delete_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
                 read_only_parent: None,
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -4688,7 +4690,7 @@ async fn test_volume_replace_snapshot_respects_accounting(
 
     let replacement_result = datastore
         .volume_replace_snapshot(
-            VolumeWithTarget(db_snapshot.volume_id),
+            VolumeWithTarget(db_snapshot.volume_id()),
             ExistingTarget(existing.snapshot_addr.parse().unwrap()),
             ReplacementTarget(replacement),
             VolumeToDelete(volume_to_delete_id),
@@ -4717,13 +4719,13 @@ async fn test_volume_replace_snapshot_respects_accounting(
         .unwrap();
 
     assert_eq!(usage.len(), 1);
-    assert_eq!(usage[0].volume_id, db_snapshot.volume_id);
+    assert_eq!(usage[0].volume_id(), db_snapshot.volume_id());
 
     // Now, reverse the replacement
 
     let replacement_result = datastore
         .volume_replace_snapshot(
-            VolumeWithTarget(db_snapshot.volume_id),
+            VolumeWithTarget(db_snapshot.volume_id()),
             ExistingTarget(replacement), // swapped!
             ReplacementTarget(existing.snapshot_addr.parse().unwrap()), // swapped!
             VolumeToDelete(volume_to_delete_id),
@@ -4752,7 +4754,7 @@ async fn test_volume_replace_snapshot_respects_accounting(
         .unwrap();
 
     assert_eq!(usage.len(), 1);
-    assert_eq!(usage[0].volume_id, volume_to_delete_id);
+    assert_eq!(usage[0].volume_id(), volume_to_delete_id);
 }
 
 /// Test that the `volume_remove_rop` function correctly updates volume resource
@@ -4769,7 +4771,7 @@ async fn test_volume_remove_rop_respects_accounting(
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -4788,7 +4790,7 @@ async fn test_volume_remove_rop_respects_accounting(
         .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
 
     let disk_allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
 
     assert_eq!(disk_allocated_regions.len(), 3);
 
@@ -4849,32 +4851,34 @@ async fn test_volume_remove_rop_respects_accounting(
             .unwrap();
 
         assert_eq!(usage.len(), 2);
-        assert!(usage.iter().any(|r| r.volume_id == db_snapshot.volume_id));
+        assert!(usage.iter().any(|r| r.volume_id() == db_snapshot.volume_id()));
         assert!(usage
             .iter()
-            .any(|r| r.volume_id == db_disk_from_snapshot.volume_id));
+            .any(|r| r.volume_id() == db_disk_from_snapshot.volume_id()));
     }
 
     // Remove the ROP from disk-from-snapshot
 
-    let volume_to_delete_id = Uuid::new_v4();
+    let volume_to_delete_id = VolumeUuid::new_v4();
 
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             volume_to_delete_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
-                id: volume_to_delete_id,
+            VolumeConstructionRequest::Volume {
+                id: *volume_to_delete_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
                 read_only_parent: None,
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
     let result = datastore
-        .volume_remove_rop(db_disk_from_snapshot.volume_id, volume_to_delete_id)
+        .volume_remove_rop(
+            db_disk_from_snapshot.volume_id(),
+            volume_to_delete_id,
+        )
         .await
         .unwrap();
 
@@ -4909,8 +4913,8 @@ async fn test_volume_remove_rop_respects_accounting(
             .unwrap();
 
         assert_eq!(usage.len(), 2);
-        assert!(usage.iter().any(|r| r.volume_id == db_snapshot.volume_id));
-        assert!(usage.iter().any(|r| r.volume_id == volume_to_delete_id));
+        assert!(usage.iter().any(|r| r.volume_id() == db_snapshot.volume_id()));
+        assert!(usage.iter().any(|r| r.volume_id() == volume_to_delete_id));
     }
 }
 
@@ -4928,7 +4932,7 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -4947,7 +4951,7 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
         .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
 
     let disk_allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
 
     assert_eq!(disk_allocated_regions.len(), 3);
 
@@ -5029,35 +5033,37 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
             .unwrap();
 
         assert_eq!(usage.len(), 3);
-        assert!(usage.iter().any(|r| r.volume_id == db_snapshot.volume_id));
+        assert!(usage.iter().any(|r| r.volume_id() == db_snapshot.volume_id()));
         assert!(usage
             .iter()
-            .any(|r| r.volume_id == db_disk_from_snapshot.volume_id));
-        assert!(usage
-            .iter()
-            .any(|r| r.volume_id == db_another_disk_from_snapshot.volume_id));
+            .any(|r| r.volume_id() == db_disk_from_snapshot.volume_id()));
+        assert!(usage.iter().any(
+            |r| r.volume_id() == db_another_disk_from_snapshot.volume_id()
+        ));
     }
 
     // Remove the ROP from disk-from-snapshot
 
-    let volume_to_delete_id = Uuid::new_v4();
+    let volume_to_delete_id = VolumeUuid::new_v4();
 
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             volume_to_delete_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
-                id: volume_to_delete_id,
+            VolumeConstructionRequest::Volume {
+                id: *volume_to_delete_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
                 read_only_parent: None,
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
     let result = datastore
-        .volume_remove_rop(db_disk_from_snapshot.volume_id, volume_to_delete_id)
+        .volume_remove_rop(
+            db_disk_from_snapshot.volume_id(),
+            volume_to_delete_id,
+        )
         .await
         .unwrap();
 
@@ -5093,11 +5099,11 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
             .unwrap();
 
         assert_eq!(usage.len(), 3);
-        assert!(usage.iter().any(|r| r.volume_id == db_snapshot.volume_id));
-        assert!(usage.iter().any(|r| r.volume_id == volume_to_delete_id));
-        assert!(usage
-            .iter()
-            .any(|r| r.volume_id == db_another_disk_from_snapshot.volume_id));
+        assert!(usage.iter().any(|r| r.volume_id() == db_snapshot.volume_id()));
+        assert!(usage.iter().any(|r| r.volume_id() == volume_to_delete_id));
+        assert!(usage.iter().any(
+            |r| r.volume_id() == db_another_disk_from_snapshot.volume_id()
+        ));
     }
 }
 
@@ -5181,7 +5187,7 @@ async fn test_migrate_to_ref_count_with_records(
     let datastore = nexus.datastore();
 
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -5291,7 +5297,7 @@ async fn test_migrate_to_ref_count_with_records_soft_delete_volume(
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -5334,7 +5340,7 @@ async fn test_migrate_to_ref_count_with_records_soft_delete_volume(
         });
 
     let resources =
-        datastore.soft_delete_volume(db_snapshot.volume_id).await.unwrap();
+        datastore.soft_delete_volume(db_snapshot.volume_id()).await.unwrap();
 
     // Assert that the region snapshots did not have deleted set to true
 
@@ -5366,7 +5372,7 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
     let datastore = nexus.datastore();
 
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
+        .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
@@ -5425,12 +5431,12 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
     // Create two volumes, one with the first three region snapshots, one with
     // the last three region snapshots
 
-    let first_volume_id = Uuid::new_v4();
+    let first_volume_id = VolumeUuid::new_v4();
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             first_volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
-                id: first_volume_id,
+            VolumeConstructionRequest::Volume {
+                id: *first_volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
                 read_only_parent: Some(Box::new(
@@ -5457,18 +5463,17 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
                         },
                     },
                 )),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
-    let second_volume_id = Uuid::new_v4();
+    let second_volume_id = VolumeUuid::new_v4();
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             second_volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
-                id: second_volume_id,
+            VolumeConstructionRequest::Volume {
+                id: *second_volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
                 read_only_parent: Some(Box::new(
@@ -5495,9 +5500,8 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
                         },
                     },
                 )),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -5540,7 +5544,7 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
     assert_eq!(records_before, records_after);
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_double_layer_with_read_only_region_delete(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -5560,11 +5564,11 @@ async fn test_double_layer_with_read_only_region_delete(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Four zpools are required for region replacement or region snapshot
-    // replacement
+    // Create one zpool on each of the four sleds. This is required for region
+    // replacement or region snapshot replacement
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
-        .with_zpool_count(4)
+        .on_all_sleds()
+        .with_zpool_count(1)
         .build()
         .await;
 
@@ -5601,7 +5605,7 @@ async fn test_double_layer_with_read_only_region_delete(
         .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
 
     let allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
 
     assert_eq!(allocated_regions.len(), 3);
 
@@ -5662,7 +5666,7 @@ async fn test_double_layer_with_read_only_region_delete(
     assert!(disk_test.crucible_resources_deleted().await);
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_double_layer_snapshot_with_read_only_region_delete_2(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -5685,11 +5689,11 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Four zpools are required for region replacement or region snapshot
-    // replacement
+    // Create one zpool on each of the four sleds. This is required for region
+    // replacement or region snapshot replacement
     let disk_test = DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
-        .with_zpool_count(4)
+        .on_all_sleds()
+        .with_zpool_count(1)
         .build()
         .await;
 
@@ -5710,7 +5714,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
         .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
 
     let allocated_regions =
-        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
 
     assert_eq!(allocated_regions.len(), 3);
 
@@ -5839,7 +5843,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
     assert!(disk_test.crucible_resources_deleted().await);
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_no_zombie_region_snapshots(cptestctx: &ControlPlaneTestContext) {
     // 1) Create disk, then a snapshot
     // 2) Delete the disk
@@ -5860,11 +5864,11 @@ async fn test_no_zombie_region_snapshots(cptestctx: &ControlPlaneTestContext) {
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Four zpools are required for region replacement or region snapshot
-    // replacement
+    // Create one zpool on each of the 4 sleds. This is required for region
+    // replacement or region snapshot replacement
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
-        .with_zpool_count(4)
+        .on_all_sleds()
+        .with_zpool_count(1)
         .build()
         .await;
 
@@ -5896,7 +5900,7 @@ async fn test_no_zombie_region_snapshots(cptestctx: &ControlPlaneTestContext) {
         });
 
     let snapshot_volume: Volume = datastore
-        .volume_get(db_snapshot.volume_id)
+        .volume_get(db_snapshot.volume_id())
         .await
         .expect("volume_get without error")
         .expect("volume exists");
@@ -5904,24 +5908,24 @@ async fn test_no_zombie_region_snapshots(cptestctx: &ControlPlaneTestContext) {
     let snapshot_vcr: VolumeConstructionRequest =
         serde_json::from_str(snapshot_volume.data()).unwrap();
 
-    let step_3_volume_id = Uuid::new_v4();
+    let step_3_volume_id = VolumeUuid::new_v4();
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             step_3_volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
-                id: step_3_volume_id,
+            VolumeConstructionRequest::Volume {
+                id: *step_3_volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
                 read_only_parent: Some(Box::new(snapshot_vcr.clone())),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
     // Soft-delete the snapshot volume
 
-    let cr = datastore.soft_delete_volume(db_snapshot.volume_id).await.unwrap();
+    let cr =
+        datastore.soft_delete_volume(db_snapshot.volume_id()).await.unwrap();
 
     // Assert that no resources are returned for clean-up
 
@@ -5941,24 +5945,23 @@ async fn test_no_zombie_region_snapshots(cptestctx: &ControlPlaneTestContext) {
     // that uses the snapshot volume as a read-only parent. This call should
     // fail!
 
-    let racing_volume_id = Uuid::new_v4();
+    let racing_volume_id = VolumeUuid::new_v4();
     let result = datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             racing_volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
-                id: racing_volume_id,
+            VolumeConstructionRequest::Volume {
+                id: *racing_volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
                 read_only_parent: Some(Box::new(snapshot_vcr.clone())),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await;
 
     assert!(result.is_err());
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
     // 1) Create a volume with three read-only regions
     // 2) Create another volume that uses the first step's volume as a read-only
@@ -5977,15 +5980,17 @@ async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
+    // Create one zpool on each of the 4 sleds. This is required for region
+    // replacement or region snapshot replacement
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
-        .with_zpool_count(4)
+        .on_all_sleds()
+        .with_zpool_count(1)
         .build()
         .await;
 
     // Create a volume with three read-only regions
 
-    let step_1_volume_id = Uuid::new_v4();
+    let step_1_volume_id = VolumeUuid::new_v4();
     let snapshot_id = Uuid::new_v4();
 
     let datasets_and_regions = datastore
@@ -6041,10 +6046,10 @@ async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
     // subvolume, not the read-only parent
 
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             step_1_volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
-                id: step_1_volume_id,
+            VolumeConstructionRequest::Volume {
+                id: *step_1_volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![VolumeConstructionRequest::Region {
                     block_size: 512,
@@ -6069,9 +6074,8 @@ async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
                     },
                 }],
                 read_only_parent: None,
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -6087,19 +6091,18 @@ async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
     let step_1_vcr: VolumeConstructionRequest =
         serde_json::from_str(step_1_volume.data()).unwrap();
 
-    let step_2_volume_id = Uuid::new_v4();
+    let step_2_volume_id = VolumeUuid::new_v4();
 
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             step_2_volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
-                id: step_2_volume_id,
+            VolumeConstructionRequest::Volume {
+                id: *step_2_volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
                 read_only_parent: Some(Box::new(step_1_vcr.clone())),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -6125,24 +6128,23 @@ async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
     // that uses the step 1 volume as a read-only parent. This call should
     // fail!
 
-    let racing_volume_id = Uuid::new_v4();
+    let racing_volume_id = VolumeUuid::new_v4();
     let result = datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             racing_volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
-                id: racing_volume_id,
+            VolumeConstructionRequest::Volume {
+                id: *racing_volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
                 read_only_parent: Some(Box::new(step_1_vcr)),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await;
 
     assert!(result.is_err());
 }
 
-#[nexus_test]
+#[nexus_test(extra_sled_agents = 3)]
 async fn test_no_zombie_read_write_regions(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -6163,15 +6165,17 @@ async fn test_no_zombie_read_write_regions(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
+    // Create one zpool on each of the 4 sleds. This is required for region
+    // replacement or region snapshot replacement
     DiskTestBuilder::new(&cptestctx)
-        .on_specific_sled(cptestctx.first_sled())
-        .with_zpool_count(4)
+        .on_all_sleds()
+        .with_zpool_count(1)
         .build()
         .await;
 
     // Create a volume with three read-only regions
 
-    let step_1_volume_id = Uuid::new_v4();
+    let step_1_volume_id = VolumeUuid::new_v4();
     let snapshot_id = Uuid::new_v4();
 
     let datasets_and_regions = datastore
@@ -6227,10 +6231,10 @@ async fn test_no_zombie_read_write_regions(
     // subvolume, not the read-only parent
 
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             step_1_volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
-                id: step_1_volume_id,
+            VolumeConstructionRequest::Volume {
+                id: *step_1_volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![VolumeConstructionRequest::Region {
                     block_size: 512,
@@ -6255,9 +6259,8 @@ async fn test_no_zombie_read_write_regions(
                     },
                 }],
                 read_only_parent: None,
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -6273,19 +6276,18 @@ async fn test_no_zombie_read_write_regions(
     let step_1_vcr: VolumeConstructionRequest =
         serde_json::from_str(step_1_volume.data()).unwrap();
 
-    let step_2_volume_id = Uuid::new_v4();
+    let step_2_volume_id = VolumeUuid::new_v4();
 
     datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             step_2_volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
-                id: step_2_volume_id,
+            VolumeConstructionRequest::Volume {
+                id: *step_2_volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
                 read_only_parent: Some(Box::new(step_1_vcr.clone())),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await
         .unwrap();
 
@@ -6311,19 +6313,121 @@ async fn test_no_zombie_read_write_regions(
     // that uses the step 1 volume as a read-only parent. This call should
     // fail!
 
-    let racing_volume_id = Uuid::new_v4();
+    let racing_volume_id = VolumeUuid::new_v4();
     let result = datastore
-        .volume_create(nexus_db_model::Volume::new(
+        .volume_create(
             racing_volume_id,
-            serde_json::to_string(&VolumeConstructionRequest::Volume {
-                id: racing_volume_id,
+            VolumeConstructionRequest::Volume {
+                id: *racing_volume_id.as_untyped_uuid(),
                 block_size: 512,
                 sub_volumes: vec![],
                 read_only_parent: Some(Box::new(step_1_vcr)),
-            })
-            .unwrap(),
-        ))
+            },
+        )
         .await;
 
     assert!(result.is_err());
+}
+
+/// Ensure that regions are not allocated to the same physical sled during
+/// arbitrary region allocation
+#[nexus_test(extra_sled_agents = 3)]
+async fn test_proper_region_sled_redundancy(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+    DiskTestBuilder::new(&cptestctx)
+        .on_all_sleds()
+        .with_zpool_count(10)
+        .build()
+        .await;
+
+    // Assert 4 sleds, all in service and provisionable
+    assert_eq!(cptestctx.all_sled_agents().count(), 4);
+
+    let client = &cptestctx.external_client;
+    let sleds_url = "/v1/system/hardware/sleds";
+    let sleds_found = sleds_list(&client, &sleds_url).await;
+    assert_eq!(sleds_found.len(), 4);
+    for sled in sleds_found {
+        assert_eq!(sled.state, views::SledState::Active);
+        assert!(matches!(
+            sled.policy,
+            views::SledPolicy::InService {
+                provision_policy: views::SledProvisionPolicy::Provisionable
+            },
+        ));
+    }
+
+    // Create a volume with three read-only regions, then simulate a replacement
+    // that will allocate with a bumped redundancy
+
+    let volume_id = VolumeUuid::new_v4();
+    let snapshot_id = Uuid::new_v4();
+
+    for redundancy in 3..=4 {
+        let datasets_and_regions = datastore
+            .arbitrary_region_allocate(
+                &opctx,
+                RegionAllocationFor::SnapshotVolume { volume_id, snapshot_id },
+                RegionAllocationParameters::FromDiskSource {
+                    disk_source: &params::DiskSource::Blank {
+                        block_size: params::BlockSize::try_from(512).unwrap(),
+                    },
+                    size: ByteCount::from_gibibytes_u32(1),
+                },
+                &RegionAllocationStrategy::RandomWithDistinctSleds {
+                    seed: None,
+                },
+                redundancy,
+            )
+            .await
+            .unwrap();
+
+        // Ensure distinct sleds for each region
+
+        let mut sled_ids = HashSet::new();
+
+        for (_, region) in &datasets_and_regions {
+            let sled_id = {
+                let dataset = {
+                    use db::schema::crucible_dataset::dsl;
+                    dsl::crucible_dataset
+                        .filter(
+                            dsl::id.eq(to_db_typed_uuid(region.dataset_id())),
+                        )
+                        .select(CrucibleDataset::as_select())
+                        .get_result_async::<CrucibleDataset>(&*conn)
+                        .await
+                        .unwrap()
+                };
+
+                let zpool = {
+                    use db::schema::zpool::dsl;
+                    dsl::zpool
+                        .filter(dsl::id.eq(dataset.pool_id))
+                        .select(db::model::Zpool::as_select())
+                        .get_result_async::<db::model::Zpool>(&*conn)
+                        .await
+                        .unwrap()
+                };
+
+                zpool.sled_id
+            };
+
+            assert!(
+                sled_ids.insert(sled_id),
+                "region {} shares sled {}",
+                region.id(),
+                sled_id
+            );
+        }
+    }
 }

@@ -7,6 +7,8 @@ use crate::schema::volume_resource_usage;
 use crate::typed_uuid::DbTypedUuid;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::VolumeKind;
+use omicron_uuid_kinds::VolumeUuid;
 use uuid::Uuid;
 
 impl_enum_type!(
@@ -51,7 +53,7 @@ impl_enum_type!(
 pub struct VolumeResourceUsageRecord {
     pub usage_id: Uuid,
 
-    pub volume_id: Uuid,
+    pub volume_id: DbTypedUuid<VolumeKind>,
 
     pub usage_type: VolumeResourceUsageType,
 
@@ -76,12 +78,12 @@ pub enum VolumeResourceUsage {
 }
 
 impl VolumeResourceUsageRecord {
-    pub fn new(volume_id: Uuid, usage: VolumeResourceUsage) -> Self {
+    pub fn new(volume_id: VolumeUuid, usage: VolumeResourceUsage) -> Self {
         match usage {
             VolumeResourceUsage::ReadOnlyRegion { region_id } => {
                 VolumeResourceUsageRecord {
                     usage_id: Uuid::new_v4(),
-                    volume_id,
+                    volume_id: volume_id.into(),
                     usage_type: VolumeResourceUsageType::ReadOnlyRegion,
 
                     region_id: Some(region_id),
@@ -98,7 +100,7 @@ impl VolumeResourceUsageRecord {
                 snapshot_id,
             } => VolumeResourceUsageRecord {
                 usage_id: Uuid::new_v4(),
-                volume_id,
+                volume_id: volume_id.into(),
                 usage_type: VolumeResourceUsageType::RegionSnapshot,
 
                 region_id: None,
@@ -108,6 +110,10 @@ impl VolumeResourceUsageRecord {
                 region_snapshot_snapshot_id: Some(snapshot_id),
             },
         }
+    }
+
+    pub fn volume_id(&self) -> VolumeUuid {
+        self.volume_id.into()
     }
 }
 
