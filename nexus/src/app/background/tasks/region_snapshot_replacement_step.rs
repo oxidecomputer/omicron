@@ -438,18 +438,125 @@ impl RegionSnapshotReplacementFindAffected {
                 }
             };
 
-            if volume_deleted {
-                // Volume was soft or hard deleted, so proceed with clean up,
-                // which if this is in state Requested there won't be any
-                // additional associated state, so transition the record to
+            // Also check if the read-only target is still present in the
+            // volume: if the read-only parent was removed (eg. after a
+            // completed scrub), then this step request could now be invalid.
+            //
+            // Also note: if that read-only parent removal removed the last
+            // reference to the read-only target, then it will be deleted.
+
+            let associated_replacement_request = match self
+                .datastore
+                .get_region_snapshot_replacement_request_by_id(
+                    opctx,
+                    request.request_id,
+                )
+                .await
+            {
+                Ok(request) => request,
+
+                Err(e) => {
+                    // Nexus deleted the request before all the steps were
+                    // done?!
+                    let s = format!(
+                        "error looking up region snapshot replacement {}: \
+                            {e}",
+                        request.request_id,
+                    );
+                    error!(log, "{s}");
+                    status.errors.push(s);
+
+                    // Continue on to other steps
+                    continue;
+                }
+            };
+
+            let maybe_target_address = match self
+                .datastore
+                .read_only_target_addr(&associated_replacement_request)
+                .await
+            {
+                Ok(maybe_target_address) => maybe_target_address,
+
+                Err(e) => {
+                    let s = format!(
+                        "error looking up read-only target address: {e}"
+                    );
+                    error!(log, "{s}"; "request_id" => %request.request_id);
+                    status.errors.push(s);
+
+                    continue;
+                }
+            };
+
+            let target_still_referenced =
+                if let Some(target_address) = &maybe_target_address {
+                    match self
+                        .datastore
+                        .volume_references_read_only_target(
+                            request.volume_id(),
+                            *target_address,
+                        )
+                        .await
+                    {
+                        Ok(maybe_referenced) => maybe_referenced.unwrap_or({
+                            // This means that the volume was deleted!
+                            false
+                        }),
+
+                        Err(e) => {
+                            let s = format!(
+                                "error determining if volume reference exists:\
+                                {e}"
+                            );
+                            error!(
+                                log,
+                                "{s}";
+                                "request_id" => %request.request_id,
+                            );
+                            status.errors.push(s);
+
+                            continue;
+                        }
+                    }
+                } else {
+                    // Note: if in this branch, then the below
+                    // `step_invalidated` check will already trip for
+                    // maybe_target_address.is_none().
+
+                    false
+                };
+
+            let step_invalidated = volume_deleted
+                || maybe_target_address.is_none()
+                || !target_still_referenced;
+
+            if step_invalidated {
+                // The replacement step was somehow invalidated, so proceed with
+                // clean up, which if this is in state Requested there won't be
+                // any additional associated state, so transition the record to
                 // Completed.
 
                 info!(
                     &log,
-                    "request {} step {} volume {} was soft or hard deleted!",
+                    "request {} step {} {}",
                     request.request_id,
                     request_step_id,
-                    request.volume_id,
+                    if volume_deleted {
+                        format!(
+                            "volume {} was soft or hard deleted!",
+                            request.volume_id,
+                        )
+                    } else if maybe_target_address.is_none() {
+                        String::from("associated read-only target was deleted")
+                    } else if !target_still_referenced {
+                        format!(
+                            "volume {} no longer references target",
+                            request.volume_id,
+                        )
+                    } else {
+                        String::from("UNKNOWN")
+                    }
                 );
 
                 let result = self

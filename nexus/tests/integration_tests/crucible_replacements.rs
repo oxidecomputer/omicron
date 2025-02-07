@@ -1615,6 +1615,51 @@ mod region_snapshot_replacement {
                 }
             }
         }
+
+        pub async fn assert_read_only_target_gone(&self) {
+            let region_snapshot_replace_request = self
+                .datastore
+                .get_region_snapshot_replacement_request_by_id(
+                    &self.opctx(),
+                    self.replacement_request_id,
+                )
+                .await
+                .unwrap();
+
+            assert!(self
+                .datastore
+                .read_only_target_addr(&region_snapshot_replace_request)
+                .await
+                .unwrap()
+                .is_none());
+        }
+
+        pub async fn remove_disk_from_snapshot_rop(&self) {
+            let disk_url = get_disk_url("disk-from-snapshot");
+
+            let disk_from_snapshot: external::Disk =
+                NexusRequest::object_get(&self.client, &disk_url)
+                    .authn_as(AuthnMode::PrivilegedUser)
+                    .execute()
+                    .await
+                    .unwrap()
+                    .parsed_body()
+                    .unwrap();
+
+            let disk_id = disk_from_snapshot.identity.id;
+
+            // Note: `make_request` needs a type here, otherwise rustc cannot
+            // figure out the type of the `request_body` parameter
+            self.internal_client
+                .make_request::<u32>(
+                    http::Method::POST,
+                    &format!("/disk/{disk_id}/remove-read-only-parent"),
+                    None,
+                    http::StatusCode::NO_CONTENT,
+                )
+                .await
+                .unwrap();
+        }
     }
 }
 
@@ -1797,6 +1842,86 @@ async fn test_delete_volume_region_snapshot_replacement_step(
 
     // Assert there are no more Crucible resources
 
+    test_harness.assert_no_crucible_resources_leaked().await;
+}
+
+/// Assert that a region snapshot replacement step can still transition to
+/// VolumeDeleted if the volume-remove-read-only-parent fires _after_  the step
+/// was created.
+#[nexus_test(extra_sled_agents = 3)]
+async fn test_region_snapshot_replacement_step_after_rop_remove(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let test_harness =
+        region_snapshot_replacement::DeletedVolumeTest::new(cptestctx).await;
+
+    // The request leaves the above `new` function in state Requested:
+    // - transition the request to "ReplacementDone"
+    // - transition the request to "Running"
+    // - manually create a region snapshot replacement step for the disk created
+    //   from the snapshot
+    // - invoke the volume-remove-read-only-parent saga, which will delete the
+    //   region snapshot
+    // - finally, call finish_test
+
+    test_harness.transition_request_to_replacement_done().await;
+    test_harness.transition_request_to_running().await;
+
+    test_harness.create_manual_region_snapshot_replacement_step().await;
+
+    // Remove the ROP of the disk created from the snapshot
+    test_harness.remove_disk_from_snapshot_rop().await;
+
+    // Now the volume doesn't reference the read-only target but the step
+    // request still exists.
+    test_harness.finish_test().await;
+
+    // Delete the resources, and assert there are no more Crucible resources
+    test_harness.delete_the_disk().await;
+    test_harness.delete_the_snapshot().await;
+    test_harness.delete_the_disk_from_snapshot().await;
+
+    test_harness.assert_no_crucible_resources_leaked().await;
+}
+
+/// Assert that a region snapshot replacement step can still transition to
+/// VolumeDeleted if the volume-remove-read-only-parent fires _after_  the step
+/// was created and the read-only target is gone.
+#[nexus_test(extra_sled_agents = 3)]
+async fn test_region_snapshot_replacement_step_after_rop_remove_target_gone(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let test_harness =
+        region_snapshot_replacement::DeletedVolumeTest::new(cptestctx).await;
+
+    // The request leaves the above `new` function in state Requested:
+    // - transition the request to "ReplacementDone"
+    // - transition the request to "Running"
+    // - manually create a region snapshot replacement step for the disk created
+    //   from the snapshot
+    // - delete the disk and snapshot
+    // - invoke the volume-remove-read-only-parent saga, which will delete the
+    //   region snapshot
+    // - finally, call finish_test
+
+    test_harness.transition_request_to_replacement_done().await;
+    test_harness.transition_request_to_running().await;
+
+    test_harness.create_manual_region_snapshot_replacement_step().await;
+    test_harness.delete_the_disk().await;
+    test_harness.delete_the_snapshot().await;
+
+    // Remove the ROP of the disk created from the snapshot
+    test_harness.remove_disk_from_snapshot_rop().await;
+    test_harness.assert_read_only_target_gone().await;
+
+    // Now the region snapshot is gone but the step request still exists.
+
+    test_harness.finish_test().await;
+
+    // Delete the final resource, and assert there are no more Crucible
+    // resources
+    test_harness.delete_the_disk_from_snapshot().await;
     test_harness.assert_no_crucible_resources_leaked().await;
 }
 
