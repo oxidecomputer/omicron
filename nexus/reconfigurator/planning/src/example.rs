@@ -423,8 +423,9 @@ impl ExampleSystemBuilder {
             base_input.all_sleds(SledFilter::Commissioned).enumerate()
         {
             if self.create_disks_in_blueprint {
-                let _ =
-                    builder.sled_ensure_disks(sled_id, sled_details).unwrap();
+                let _ = builder
+                    .sled_add_disks(sled_id, &sled_details.resources)
+                    .unwrap();
             }
             if self.create_zones {
                 let _ = builder.sled_ensure_zone_ntp(sled_id).unwrap();

@@ -1037,36 +1037,6 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(())
     }
 
-    /// Set the disposition of disks to expunged if their policy is expunged
-    ///
-    /// Called by the planner in the `do_plan_expunge()` stage of planning
-    pub fn sled_expunge_disks(
-        &mut self,
-        sled_id: SledUuid,
-        sled_resources: &SledResources,
-    ) -> Result<SledEditCounts, Error> {
-        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
-            Error::Planner(anyhow!(
-                "tried to expunge disks for unknown sled {sled_id}"
-            ))
-        })?;
-
-        let initial_counts = editor.edit_counts();
-
-        // These are the disks in the database as observed at the start of the
-        // planning phase that have their policy set to expunged, but have not
-        // yet been decommissioned. These disks must have been expunged already
-        // earlier in the planning pass.
-        for (_, disk) in sled_resources.all_disks(DiskFilter::All) {
-            editor
-                .expunge_disk(&disk.disk_id)
-                .map_err(|err| Error::SledEditError { sled_id, err })?;
-        }
-
-        let final_counts = editor.edit_counts();
-        Ok(final_counts.difference_since(initial_counts))
-    }
-
     /// Add any disks to the blueprint
     /// Called by the planner in the `do_plan_add()` stage of planning
     pub fn sled_add_disks(
@@ -1214,43 +1184,6 @@ impl<'a> BlueprintBuilder<'a> {
         }
 
         let final_counts = editor.edit_counts();
-        Ok(final_counts.difference_since(initial_counts))
-    }
-
-    // TODO: REMOVE ME
-    //
-    /// This method only exists for use in tests. It wraps
-    /// calls to `sled_disk_expunge, sled_disk_add, and sled_disk_decommission`
-    /// such that they happen in planner order.
-    pub fn sled_ensure_disks(
-        &mut self,
-        sled_id: SledUuid,
-        sled_details: &SledDetails,
-    ) -> Result<SledEditCounts, Error> {
-        let initial_counts = {
-            let editor =
-                self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
-                    Error::Planner(anyhow!(
-                "tried to ensure zone datasets for unknown sled {sled_id}"
-            ))
-                })?;
-            editor.edit_counts()
-        };
-
-        self.sled_expunge_disks(sled_id, &sled_details.resources)?;
-        self.sled_add_disks(sled_id, &sled_details.resources)?;
-        self.sled_decommision_disks(sled_id, sled_details)?;
-
-        let final_counts = {
-            let editor =
-                self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
-                    Error::Planner(anyhow!(
-                "tried to ensure zone datasets for unknown sled {sled_id}"
-            ))
-                })?;
-            editor.edit_counts()
-        };
-
         Ok(final_counts.difference_since(initial_counts))
     }
 
@@ -2297,7 +2230,7 @@ pub mod test {
         for (sled_id, sled_details) in
             example.input.all_sleds(SledFilter::Commissioned)
         {
-            builder.sled_ensure_disks(sled_id, &sled_details).unwrap();
+            builder.sled_add_disks(sled_id, &sled_details.resources).unwrap();
             builder.sled_ensure_zone_ntp(sled_id).unwrap();
             for pool_id in sled_details.resources.zpools.keys() {
                 builder.sled_ensure_zone_crucible(sled_id, *pool_id).unwrap();
@@ -2332,7 +2265,9 @@ pub mod test {
         .expect("failed to create builder");
         let new_sled_details =
             &input.sled_lookup(SledFilter::Commissioned, new_sled_id).unwrap();
-        builder.sled_ensure_disks(new_sled_id, new_sled_details).unwrap();
+        builder
+            .sled_add_disks(new_sled_id, &new_sled_details.resources)
+            .unwrap();
         builder.sled_ensure_zone_ntp(new_sled_id).unwrap();
         for pool_id in new_sled_details.resources.zpools.keys() {
             builder.sled_ensure_zone_crucible(new_sled_id, *pool_id).unwrap();
@@ -2567,7 +2502,7 @@ pub mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Start with an empty system (sleds with no zones). However, we leave
-        // the disks around so that `sled_ensure_disks` can add them.
+        // the disks around so that `sled_add_disks` can add them.
         let (example, parent) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
                 .create_zones(false)
@@ -2605,8 +2540,9 @@ pub mod test {
             for (sled_id, sled_details) in
                 input.all_sleds(SledFilter::InService)
             {
-                let edits =
-                    builder.sled_ensure_disks(sled_id, sled_details).unwrap();
+                let edits = builder
+                    .sled_add_disks(sled_id, &sled_details.resources)
+                    .unwrap();
                 assert_eq!(
                     edits.disks,
                     EditCounts {
