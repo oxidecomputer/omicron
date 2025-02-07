@@ -19,8 +19,8 @@ use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use nexus_db_model::{ArtifactHash, TufArtifact, TufRepo, TufRepoDescription};
 use omicron_common::api::external::{
-    self, CreateResult, DataPageParams, ListResultVec, LookupResult,
-    LookupType, ResourceType, TufRepoInsertStatus,
+    self, CreateResult, DataPageParams, Error, Generation, ListResultVec,
+    LookupResult, LookupType, ResourceType, TufRepoInsertStatus,
 };
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
@@ -158,6 +158,26 @@ impl DataStore {
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Returns the current TUF repo generation number.
+    pub async fn update_tuf_generation_get(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<Generation> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        use db::schema::tuf_generation::dsl;
+
+        let generation: i64 = dsl::tuf_generation
+            .filter(dsl::singleton.eq(true))
+            .select(dsl::generation)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Generation::try_from(generation).map_err(|e| Error::InternalError {
+            internal_message: e.to_string(),
+        })
     }
 }
 
@@ -297,6 +317,11 @@ async fn insert_impl(
             .values(new_artifacts)
             .execute_async(&conn)
             .await?;
+
+        // If we inserted any new artifacts, we need to bump the generation
+        // number.
+        increment_generation(&log, &conn).await?;
+
         all_artifacts
     };
 
@@ -328,6 +353,28 @@ async fn insert_impl(
         recorded,
         status: TufRepoInsertStatus::Inserted,
     })
+}
+
+async fn increment_generation(
+    log: &slog::Logger,
+    conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
+) -> Result<(), DieselError> {
+    use db::schema::tuf_generation::dsl;
+
+    // We use `get_result_async` instead of `exeucte_async` to check that we
+    // updated a single row; since we have it we may as well log it too.
+    let generation: i64 =
+        diesel::update(dsl::tuf_generation.filter(dsl::singleton.eq(true)))
+            .set(dsl::generation.eq(dsl::generation + 1))
+            .returning(dsl::generation)
+            .get_result_async(conn)
+            .await?;
+    debug!(
+        log,
+        "incrementing generation number";
+        "generation" => generation,
+    );
+    Ok(())
 }
 
 #[derive(Clone, Debug)]
