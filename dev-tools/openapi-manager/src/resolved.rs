@@ -128,7 +128,7 @@ pub enum Problem<'a> {
     // This kind of problem is not associated with any *supported* version of an
     // API.  (All the others are.)
     #[error(
-        "A local spec file was found that does not correspond to a \
+        "A local OpenAPI document was found that does not correspond to a \
          supported version of this API: {spec_file_name}.  This is unusual, \
          but it could happen if you created this version of the API in this \
          branch, then later changed it (maybe because you merged with upstream \
@@ -141,45 +141,43 @@ pub enum Problem<'a> {
     // API.
     #[error(
         "This version is blessed, and it's a supported version, but it's \
-         missing a local spec file.  This is unusual.  If you intended to \
-         remove this version, you must also update the list of supported \
+         missing a local OpenAPI document.  This is unusual.  If you intended \
+         to remove this version, you must also update the list of supported \
          versions in Rust.  If you didn't, restore the file from git: \
          {spec_file_name}"
     )]
     BlessedVersionMissingLocal { spec_file_name: ApiSpecFileName },
 
     #[error(
-        "Found extra local file for blessed version that does not match the \
-         blessed (upstream) spec file: {spec_file_names}.  This can happen if \
-         you created this version of the API in this branch, then merged with \
-         an upstream commit that also added the same version number.  In that \
-         case, you likely already bumped your local version number (when you \
-         merged the list of supported versions in Rust) and this file is \
-         vestigial. This tool can remove the unused file for you."
+        "For this blessed version, found an extra OpenAPI document that does \
+         not match the blessed (upstream) OpenAPI document: {spec_file_name}.  \
+         This can happen if you created this version of the API in this branch, \
+         then merged with an upstream commit that also added the same version \
+         number.  In that case, you likely already bumped your local version \
+         number (when you merged the list of supported versions in Rust) and \
+         this file is vestigial. This tool can remove the unused file for you."
     )]
-    BlessedVersionExtraLocalSpec {
-        spec_file_names: DisplayableVec<ApiSpecFileName>,
-    },
+    BlessedVersionExtraLocalSpec { spec_file_name: ApiSpecFileName },
 
     #[error(
-        "Spec generated from the current code is not compatible with the \
-         blessed spec (from upstream)."
+        "OpenAPI document generated from the current code is not compatible \
+         with the blessed document (from upstream): {compatibility_issues}"
     )]
     BlessedVersionBroken {
         compatibility_issues: DisplayableVec<OpenApiCompatibilityError>,
     },
 
     #[error(
-        "No local spec file was found for lockstep API.  This is only \
-         expected if you're adding a new lockstep API.  This tool can \
+        "No local OpenAPI document was found for this lockstep API.  This is \
+         only expected if you're adding a new lockstep API.  This tool can \
          generate the file for you."
     )]
     LockstepMissingLocal { generated: &'a GeneratedApiSpecFile },
 
     #[error(
-        "Spec generated from the current code does not match this lockstep \
-         spec: {:?}.  This tool can update the local file for \
-         you.", generated.spec_file_name().path()
+        "For this lockstep API, OpenAPI document generated from the current \
+         code does not match the local file: {:?}.  This tool can update the \
+         local file for you.", generated.spec_file_name().path()
     )]
     LockstepStale {
         found: &'a LocalApiSpecFile,
@@ -187,21 +185,22 @@ pub enum Problem<'a> {
     },
 
     #[error(
-        "No local spec file was found for locally-added API version.  \
+        "No OpenAPI document was found for this locally-added API version.  \
          This is normal if you have added or changed this API version.  \
          This tool can generate the file for you."
     )]
     LocalVersionMissingLocal { generated: &'a GeneratedApiSpecFile },
 
     #[error(
-        "Extra (incorrect) spec files were found for non-blessed version: \
-         {spec_file_names}.  This tool can remove the files for you."
+        "Extra (incorrect) OpenAPI documents were found for locally-added \
+         version: {spec_file_names}.  This tool can remove the files for you."
     )]
     LocalVersionExtra { spec_file_names: DisplayableVec<ApiSpecFileName> },
 
     #[error(
-        "Spec generated from the current code does not match spec file(s) for \
-         locally-new API: {}.  This tool can update the local file(s) for you.",
+        "For this locally-added version, the OpenAPI document generated \
+         from the current code does not match the local file: {}.\
+         This tool can update the local file(s) for you.",
         DisplayableVec(
             spec_files.iter().map(|s| s.spec_file_name().to_string()).collect()
         )
@@ -217,7 +216,8 @@ pub enum Problem<'a> {
     },
 
     #[error(
-        "Generated spec for API {api_ident:?} version {version} is not valid"
+        "Generated OpenAPI document for API {api_ident:?} version {version} \
+         is not valid"
     )]
     GeneratedValidationError {
         api_ident: ApiIdent,
@@ -226,7 +226,10 @@ pub enum Problem<'a> {
         source: anyhow::Error,
     },
 
-    #[error("Extra file associated with API {api_ident:?} is stale")]
+    #[error(
+        "Additional validated file associated with API {api_ident:?} is \
+         stale: {path}"
+    )]
     ExtraFileStale {
         api_ident: ApiIdent,
         path: Utf8PathBuf,
@@ -247,8 +250,10 @@ impl<'a> Problem<'a> {
                 })
             }
             Problem::BlessedVersionMissingLocal { .. } => None,
-            Problem::BlessedVersionExtraLocalSpec { spec_file_names } => {
-                Some(Fix::DeleteFiles { files: spec_file_names.clone() })
+            Problem::BlessedVersionExtraLocalSpec { spec_file_name } => {
+                Some(Fix::DeleteFiles {
+                    files: DisplayableVec(vec![spec_file_name.clone()]),
+                })
             }
             Problem::BlessedVersionBroken { .. } => None,
             Problem::LockstepMissingLocal { generated }
@@ -738,15 +743,11 @@ fn resolve_api_version_blessed<'a>(
 
     // There shouldn't be any local specs that match the same version but don't
     // match the same contents.
-    if !non_matching.is_empty() {
-        let spec_file_names = DisplayableVec(
-            non_matching
-                .into_iter()
-                .map(|s| s.spec_file_name().clone())
-                .collect(),
-        );
-        problems.push(Problem::BlessedVersionExtraLocalSpec { spec_file_names })
-    }
+    problems.extend(non_matching.into_iter().map(|s| {
+        Problem::BlessedVersionExtraLocalSpec {
+            spec_file_name: s.spec_file_name().clone(),
+        }
+    }));
 
     Resolution::new_blessed(problems)
 }
