@@ -135,7 +135,15 @@ impl<'a> Planner<'a> {
             // Check 1: look for sleds that are expunged.
             match (sled_details.policy, sled_details.state) {
                 // If the sled is still in service, don't decommission it.
-                (SledPolicy::InService { .. }, _) => continue,
+                //
+                // We do still want to decommission any expunged disks if
+                // possible though. For example, we can expunge disks on active
+                // sleds if they are faulty.
+                (SledPolicy::InService { .. }, _) => {
+                    self.blueprint
+                        .sled_decommision_disks(sled_id, sled_details)?;
+                    continue;
+                }
                 // If the sled is already decommissioned it... why is it showing
                 // up when we ask for commissioned sleds? Warn, but don't try to
                 // decommission it again.
@@ -163,6 +171,10 @@ impl<'a> Planner<'a> {
             }
 
             // Decommission any disks that need it
+            //
+            // This call must live here so that we don't try to decommission disks
+            // on an already decommissioned sled. That violates editor invariants,
+            // as the planner should not be trying to edit sleds that have been pulled.
             self.blueprint.sled_decommision_disks(sled_id, sled_details)?;
 
             // Check 2: have all this sled's zones been expunged? It's possible
