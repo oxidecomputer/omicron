@@ -1055,10 +1055,9 @@ impl<'a> BlueprintBuilder<'a> {
 
         // These are the disks in the database as observed at the start of the
         // planning phase that have their policy set to expunged, but have not
-        // yet been decommissioned.
-        for (_, disk) in
-            sled_resources.all_disks(DiskFilter::ExpungedButNotDecommissioned)
-        {
+        // yet been decommissioned. These disks must have been expunged already
+        // earlier in the planning pass.
+        for (_, disk) in sled_resources.all_disks(DiskFilter::All) {
             editor
                 .expunge_disk(&disk.disk_id)
                 .map_err(|err| Error::SledEditError { sled_id, err })?;
@@ -1161,10 +1160,7 @@ impl<'a> BlueprintBuilder<'a> {
         // an expunged sled is one that has been removed from the rack either
         // physically or via trust-quorum.
         if sled_details.policy == SledPolicy::Expunged {
-            for (_, disk) in sled_details
-                .resources
-                .all_disks(DiskFilter::ExpungedButNotDecommissioned)
-            {
+            for (_, disk) in sled_details.resources.all_disks(DiskFilter::All) {
                 editor
                     .decommission_disk(&disk.disk_id)
                     .map_err(|err| Error::SledEditError { sled_id, err })?;

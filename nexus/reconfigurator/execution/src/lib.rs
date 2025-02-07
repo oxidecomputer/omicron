@@ -13,7 +13,6 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::execution::*;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
-use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::SledState;
 use nexus_types::identity::Asset;
@@ -170,7 +169,7 @@ pub async fn realize_blueprint_with_overrides(
         blueprint,
     );
 
-    register_decommission_expunged_disks_step(
+    register_decommission_disks_step(
         &engine.for_component(ExecutionComponent::PhysicalDisks),
         &opctx,
         datastore,
@@ -506,7 +505,7 @@ fn register_decommission_sleds_step<'a>(
         .register();
 }
 
-fn register_decommission_expunged_disks_step<'a>(
+fn register_decommission_disks_step<'a>(
     registrar: &ComponentRegistrar<'_, 'a>,
     opctx: &'a OpContext,
     datastore: &'a DataStore,
@@ -521,9 +520,7 @@ fn register_decommission_expunged_disks_step<'a>(
                     &opctx,
                     datastore,
                     blueprint
-                        .all_omicron_disks(
-                            DiskFilter::ExpungedButNotDecommissioned,
-                        )
+                        .all_decommisioned_disks()
                         .map(|(sled_id, config)| (sled_id, config.id)),
                 )
                 .await

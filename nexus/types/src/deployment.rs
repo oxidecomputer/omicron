@@ -293,6 +293,19 @@ impl Blueprint {
         })
     }
 
+    // Return all disks that are decommissioned along with the id of the sled
+    // they reside in.
+    pub fn all_decommisioned_disks(
+        &self,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintPhysicalDiskConfig)> {
+        self.blueprint_disks
+            .iter()
+            .flat_map(move |(sled_id, disks)| {
+                disks.disks.iter().map(|disk| (*sled_id, disk))
+            })
+            .filter(move |(_, d)| d.state == PhysicalDiskState::Decommissioned)
+    }
+
     /// Iterate over the ids of all sleds in the blueprint
     pub fn sleds(&self) -> impl Iterator<Item = SledUuid> + '_ {
         self.blueprint_zones.keys().copied()
@@ -889,12 +902,10 @@ impl BlueprintPhysicalDiskDisposition {
             Self::InService => match filter {
                 DiskFilter::All => true,
                 DiskFilter::InService => true,
-                DiskFilter::ExpungedButNotDecommissioned => false,
             },
             Self::Expunged => match filter {
                 DiskFilter::All => true,
                 DiskFilter::InService => false,
-                DiskFilter::ExpungedButNotDecommissioned => true,
             },
         }
     }
