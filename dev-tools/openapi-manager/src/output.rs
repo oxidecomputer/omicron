@@ -111,8 +111,7 @@ where
     Ok(())
 }
 
-// XXX-dap should these calls be replaced with a specific version one?
-pub(crate) fn display_api_spec_new(
+pub(crate) fn display_api_spec(
     api: &ManagedApi,
     styles: &Styles,
 ) -> String {
@@ -128,7 +127,7 @@ pub(crate) fn display_api_spec_new(
         )
     } else {
         format!(
-            "{} ({}, unversioned, v{})",
+            "{} ({}, lockstep, v{})",
             api.ident().style(styles.filename),
             api.title(),
             latest_version,
@@ -508,42 +507,13 @@ pub(crate) mod headers {
     pub(crate) static GENERATING: &str = "Generating";
 
     pub(crate) static FRESH: &str = "Fresh";
-
-    // Stale encompasses:
-    // - Stale: the file on disk is different from what we generated.
-    // - Missing: the file on disk does not exist.
     pub(crate) static STALE: &str = "Stale";
-    pub(crate) static NEW: &str = "-> New";
-    pub(crate) static MODIFIED: &str = "-> Modified";
 
-    pub(crate) static UPDATED: &str = "Updated";
     pub(crate) static UNCHANGED: &str = "Unchanged";
 
     pub(crate) static SUCCESS: &str = "Success";
     pub(crate) static FAILURE: &str = "Failure";
     pub(crate) static WARNING: &str = "Warning";
-
-    fn count_section_width(count_width: usize) -> usize {
-        // Status strings are of the form:
-        //
-        //    Generated [ 1/12] api.json: 1 path, 1 schema
-        //             ^^^^^^^^^
-        //
-        // So the width of the count section is:
-        // (count_width * 2) for current and total counts
-        // + 3 for '[/]'
-        // + 2 for spaces on either side.
-        count_width * 2 + 3 + 2
-    }
-
-    pub(crate) fn count_section_indent(count_width: usize) -> String {
-        " ".repeat(count_section_width(count_width))
-    }
-
-    pub(crate) fn continued_indent(count_width: usize) -> String {
-        // HEADER_WIDTH for the status string + count_section_width
-        " ".repeat(HEADER_WIDTH + count_section_width(count_width))
-    }
 }
 
 pub(crate) mod plural {

@@ -7,6 +7,7 @@
 
 use crate::apis::ManagedApis;
 use crate::git::GitRevision;
+use crate::output::headers::GENERATING;
 use crate::output::headers::HEADER_WIDTH;
 use crate::output::Styles;
 use crate::spec_files_blessed::BlessedFiles;
@@ -125,7 +126,7 @@ impl GeneratedSource {
                 eprintln!(
                     "{:>HEADER_WIDTH$} OpenAPI documents from API \
                      definitions ... ",
-                    "Generating".style(styles.success_header)
+                    GENERATING.style(styles.success_header)
                 );
                 GeneratedFiles::generate(apis)
             }

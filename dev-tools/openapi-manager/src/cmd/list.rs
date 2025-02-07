@@ -2,16 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::io::Write;
-
+use crate::{
+    apis::ManagedApis,
+    output::{display_api_spec, display_error, plural, OutputOpts, Styles},
+};
 use indent_write::io::IndentWriter;
 use openapiv3::OpenAPI;
 use owo_colors::OwoColorize;
-
-use crate::{
-    apis::ManagedApis,
-    output::{display_api_spec_new, display_error, OutputOpts, Styles},
-};
+use std::io::Write;
 
 pub(crate) fn list_impl(
     verbose: bool,
@@ -48,7 +46,7 @@ pub(crate) fn list_impl(
                 "{initial_indent} {}: {} ({})",
                 "title".style(styles.header),
                 api.title(),
-                if api.is_versioned() { "versioned" } else { "unversioned" },
+                if api.is_versioned() { "versioned" } else { "lockstep" },
             )?;
 
             write!(
@@ -81,14 +79,15 @@ pub(crate) fn list_impl(
                         let summary = DocumentSummary::new(&openapi);
                         let num_schemas = summary.schema_count.map_or_else(
                             || "(data missing)".to_owned(),
-                            |c| c.to_string(),
+                            |c| format!("{} {}", c, plural::schemas(c)),
                         );
                         writeln!(
                             &mut out,
-                            "{continued_indent} {}: {} paths, {} schemas",
+                            "{continued_indent} {}: {} {}, {}",
                             format!("v{}", v).style(styles.header),
                             summary.path_count.style(styles.bold),
-                            num_schemas.style(styles.bold),
+                            plural::paths(summary.path_count),
+                            num_schemas
                         )?;
                     }
                     Err(error) => {
@@ -108,10 +107,10 @@ pub(crate) fn list_impl(
                         )?;
                     }
                 };
+            }
 
-                if ix + 1 < total {
-                    writeln!(&mut out)?;
-                }
+            if ix + 1 < total {
+                writeln!(&mut out)?;
             }
         }
     } else {
@@ -121,7 +120,7 @@ pub(crate) fn list_impl(
             writeln!(
                 &mut out,
                 "{count:count_width$}) {}",
-                display_api_spec_new(spec, &styles),
+                display_api_spec(spec, &styles),
             )?;
         }
 

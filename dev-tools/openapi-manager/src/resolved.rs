@@ -10,6 +10,7 @@ use crate::apis::ManagedApis;
 use crate::compatibility::api_compatible;
 use crate::compatibility::OpenApiCompatibilityError;
 use crate::environment::Environment;
+use crate::output::plural;
 use crate::spec_files_blessed::BlessedApiSpecFile;
 use crate::spec_files_blessed::BlessedFiles;
 use crate::spec_files_generated::GeneratedApiSpecFile;
@@ -298,7 +299,11 @@ impl<'a> Display for Fix<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         Ok(match self {
             Fix::DeleteFiles { files } => {
-                writeln!(f, "delete files: {files}")?;
+                writeln!(
+                    f,
+                    "delete {}: {files}",
+                    plural::files(files.0.len())
+                )?;
             }
             Fix::FixLockstepFile { generated } => {
                 writeln!(
@@ -309,7 +314,11 @@ impl<'a> Display for Fix<'a> {
             }
             Fix::FixVersionedFiles { old, generated } => {
                 if !old.0.is_empty() {
-                    writeln!(f, "remove old files: {old}")?;
+                    writeln!(
+                        f,
+                        "remove old {}: {old}",
+                        plural::files(old.0.len())
+                    )?;
                 }
                 writeln!(
                     f,
