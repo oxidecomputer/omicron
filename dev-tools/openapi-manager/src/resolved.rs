@@ -10,6 +10,7 @@ use crate::apis::ManagedApis;
 use crate::compatibility::api_compatible;
 use crate::compatibility::OpenApiCompatibilityError;
 use crate::environment::Environment;
+use crate::iter_only::iter_only;
 use crate::output::plural;
 use crate::spec_files_blessed::BlessedApiSpecFile;
 use crate::spec_files_blessed::BlessedFiles;
@@ -591,35 +592,6 @@ fn resolve_api<'a>(
                 (version, resolution)
             })
             .collect()
-    }
-}
-
-#[derive(Debug, Error)]
-pub enum OnlyError {
-    #[error("list was unexpectedly empty")]
-    Empty,
-
-    #[error(
-        "unexpectedly found at least two elements in one-element list:
-         {0} {1}"
-    )]
-    // Store the debug representations directly here rather than the values
-    // so that `OnlyError: 'static` (so that it can be used as the cause of
-    // another error) even when `T` is not 'static.
-    Extra(String, String),
-}
-
-// XXX-dap move somewhere common
-pub fn iter_only<T: Debug>(
-    mut iter: impl Iterator<Item = T>,
-) -> Result<T, OnlyError> {
-    let first = iter.next().ok_or(OnlyError::Empty)?;
-    match iter.next() {
-        None => Ok(first),
-        Some(second) => Err(OnlyError::Extra(
-            format!("{:?}", first),
-            format!("{:?}", second),
-        )),
     }
 }
 

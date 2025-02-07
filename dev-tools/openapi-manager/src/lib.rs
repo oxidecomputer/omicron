@@ -16,6 +16,7 @@ mod cmd;
 mod compatibility;
 mod environment;
 mod git;
+mod iter_only;
 mod output;
 mod resolved;
 mod spec;
