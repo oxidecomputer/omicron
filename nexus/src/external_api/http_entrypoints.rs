@@ -6986,7 +6986,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let webhook_selector = path_params.into_inner();
-            let rx = self.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
             let webhook =
                 nexus.webhook_receiver_config_fetch(&opctx, rx).await?;
             Ok(HttpResponseOk(views::Webhook::try_from(webhook)?))
