@@ -85,18 +85,19 @@ impl super::Nexus {
         rx: lookup::WebhookReceiver<'_>,
         secret: String,
     ) -> Result<views::WebhookSecretId, Error> {
-        let authz_rx = rx.lookup_for(authz::Action::CreateChild).await?;
+        let (authz_rx,) = rx.lookup_for(authz::Action::CreateChild).await?;
         let secret = WebhookSecret::new(authz_rx.id(), secret);
-        let WebhookSecret { id, .. } = self
+        let WebhookSecret { identity, .. } = self
             .datastore()
             .webhook_rx_secret_create(opctx, &authz_rx, secret)
             .await?;
+        let secret_id = identity.id();
         slog::info!(
             &opctx.log,
             "added secret to webhook receiver";
             "rx_id" => ?authz_rx.id(),
-            "secret_id" => ?id,
+            "secret_id" => ?secret_id,
         );
-        Ok(views::WebhookSecretId { id: id.into_untyped_uuid() })
+        Ok(views::WebhookSecretId { id: secret_id.into_untyped_uuid() })
     }
 }

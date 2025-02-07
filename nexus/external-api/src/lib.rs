@@ -3352,7 +3352,7 @@ pub trait NexusExternalApi {
     async fn webhook_secrets_delete(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::WebhookSecretSelector>,
-    ) -> Result<HttpResponseCreated<views::WebhookSecretId>, HttpError>;
+    ) -> Result<HttpResponseDeleted, HttpError>;
 
     /// List delivery attempts to a webhook receiver.
     #[endpoint {

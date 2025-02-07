@@ -6980,13 +6980,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
         path_params: Path<params::WebhookPath>,
     ) -> Result<HttpResponseOk<views::Webhook>, HttpError> {
         let apictx = rqctx.context();
-        let params::WebhookPath { webhook_id } = path_params.into_inner();
         let handler = async {
             let nexus = &apictx.context.nexus;
 
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-
+            let webhook = path_params.into_inner();
             let webhook = nexus
                 .webhook_receiver_config_fetch(
                     &opctx,
@@ -7113,6 +7112,30 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let secret =
                 nexus.webhook_receiver_secret_add(&opctx, rx, secret).await?;
             Ok(HttpResponseCreated(secret))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    /// Delete a secret from a webhook receiver.
+    async fn webhook_secrets_delete(
+        rqctx: RequestContext<Self::Context>,
+        _path_params: Path<params::WebhookSecretSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            Err(nexus
+                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
+                .await
+                .into())
         };
         apictx
             .context
