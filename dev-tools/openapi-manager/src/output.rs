@@ -203,14 +203,22 @@ impl fmt::Display for MissingNewlineHint {
 pub fn display_load_problems(
     warnings: &[anyhow::Error],
     errors: &[anyhow::Error],
+    styles: &Styles,
 ) -> anyhow::Result<()> {
-    // XXX-dap style these
     for w in warnings {
-        println!("    warn: {:#}", w);
+        eprintln!(
+            "{:>HEADER_WIDTH$} {:#}",
+            WARNING.style(styles.warning_header),
+            w
+        );
     }
 
     for e in errors {
-        println!("    error: {:#}", e);
+        println!(
+            "{:>HEADER_WIDTH$} {:#}",
+            FAILURE.style(styles.failure_header),
+            e
+        );
     }
 
     if !errors.is_empty() {
@@ -513,6 +521,7 @@ pub(crate) mod headers {
 
     pub(crate) static SUCCESS: &str = "Success";
     pub(crate) static FAILURE: &str = "Failure";
+    pub(crate) static WARNING: &str = "Warning";
 
     fn count_section_width(count_width: usize) -> usize {
         // Status strings are of the form:

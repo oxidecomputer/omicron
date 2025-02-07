@@ -354,7 +354,7 @@ impl<'a> ApiSpecFilesBuilder<'a> {
             Ok(file_name) => Some(file_name),
             Err(error) => {
                 // XXX-dap some of these should be warnings
-                self.load_error(error);
+                self.load_error(error.context(format!("file {}", basename)));
                 None
             }
         }
