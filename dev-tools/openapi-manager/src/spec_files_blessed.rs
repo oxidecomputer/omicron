@@ -86,9 +86,9 @@ impl BlessedFiles {
                     api_files.load_contents(file_name, contents);
                 }
             } else if parts.len() == 2 {
-                if let Some(ident) = api_files.versioned_directory(parts[0]) {
+                if let Some(ident) = api_files.versioned_directory(parts[0], true) {
                     if let Some(file_name) =
-                        api_files.versioned_file_name(&ident, parts[1])
+                        api_files.versioned_file_name(&ident, parts[1], true)
                     {
                         api_files.load_contents(file_name, contents);
                     }

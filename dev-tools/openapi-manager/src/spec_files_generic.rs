@@ -37,56 +37,72 @@ impl ApiSpecFileName {
         apis: &ManagedApis,
         ident: &str,
         basename: &str,
-    ) -> anyhow::Result<ApiSpecFileName> {
+    ) -> Result<ApiSpecFileName, BadVersionedFileName> {
         let ident = ApiIdent::from(ident.to_string());
         let Some(api) = apis.api(&ident) else {
-            bail!("does not match a known API")
+            return Err(BadVersionedFileName::NoSuchApi);
         };
 
         if !api.is_versioned() {
-            bail!("{:?} is not a versioned API", ident);
+            return Err(BadVersionedFileName::NotVersioned);
         }
 
-        let expected_prefix = format!("{}-", ident);
+        let expected_prefix = format!("{}-", &ident);
         let suffix =
             basename.strip_prefix(&expected_prefix).ok_or_else(|| {
-                anyhow!(
-                    "versioned API document filename did not start with {:?}",
-                    expected_prefix
-                )
+                BadVersionedFileName::UnexpectedName {
+                    ident: ident.clone(),
+                    source: anyhow!("unexpected prefix"),
+                }
             })?;
 
         let middle = suffix.strip_suffix(".json").ok_or_else(|| {
-            anyhow!("versioned API document filename did not end in .json")
+            BadVersionedFileName::UnexpectedName {
+                ident: ident.clone(),
+                source: anyhow!("bad suffix"),
+            }
         })?;
 
         let (version_str, hash) = middle.rsplit_once("-").ok_or_else(|| {
-            anyhow!(
-                "extracting version and hash from versioned API \
-                     document filename"
-            )
+            BadVersionedFileName::UnexpectedName {
+                ident: ident.clone(),
+                source: anyhow!("cannot extract version and hash"),
+            }
         })?;
 
         let version: semver::Version =
-            version_str.parse().with_context(|| {
-                format!("version string {:?} is not a semver", version_str)
+            version_str.parse().map_err(|e: semver::Error| {
+                BadVersionedFileName::UnexpectedName {
+                    ident: ident.clone(),
+                    source: anyhow!(e).context(format!(
+                        "version string is not a semver: {:?}",
+                        version_str
+                    )),
+                }
             })?;
 
         // Dropshot does not support pre-release strings and we don't either.
         // This could probably be made to work, but it's easier to constrain
         // things for now and relax it later.
         if !version.pre.is_empty() {
-            bail!(
-                "version string {:?} has a prerelease field (not supported)",
-                version_str
-            );
+            return Err(BadVersionedFileName::UnexpectedName {
+                ident,
+                source: anyhow!(
+                    "version string has a prerelease field \
+                     (not supported): {:?}",
+                    version_str
+                ),
+            });
         }
 
         if !version.build.is_empty() {
-            bail!(
-                "version string {:?} has a build field (not supported)",
-                version_str
-            );
+            return Err(BadVersionedFileName::UnexpectedName {
+                ident,
+                source: anyhow!(
+                    "version string has a build field (not supported): {:?}",
+                    version_str
+                ),
+            });
         }
 
         Ok(ApiSpecFileName {
@@ -182,6 +198,19 @@ enum BadLockstepFileName {
     NoSuchApi,
     #[error("this API is not a lockstep API")]
     NotLockstep,
+}
+
+#[derive(Debug, Error)]
+enum BadVersionedFileName {
+    #[error("does not match a known API")]
+    NoSuchApi,
+    #[error("this API is not a versioned API")]
+    NotVersioned,
+    #[error(
+        "expected a versioned API document filename for API {ident:?} to look \
+         like \"{ident:?}-SEMVER-HASH.json\""
+    )]
+    UnexpectedName { ident: ApiIdent, source: anyhow::Error },
 }
 
 /// Describes an OpenAPI document found on disk
@@ -324,22 +353,37 @@ impl<'a> ApiSpecFilesBuilder<'a> {
         }
     }
 
-    pub fn versioned_directory(&mut self, basename: &str) -> Option<ApiIdent> {
+    pub fn versioned_directory(
+        &mut self,
+        basename: &str,
+        misconfigurations_okay: bool,
+    ) -> Option<ApiIdent> {
         let ident = ApiIdent::from(basename.to_owned());
         match self.apis.api(&ident) {
             Some(api) if api.is_versioned() => Some(ident),
             Some(_) => {
-                self.load_error(anyhow!(
-                    "found directory for lockstep API: {:?}",
+                // See lockstep_file_name().  This is not always a problem.
+                let error = anyhow!(
+                    "skipping directory for lockstep API: {:?}",
                     basename,
-                ));
+                );
+                if misconfigurations_okay {
+                    self.load_warning(error);
+                } else {
+                    self.load_error(error);
+                }
                 None
             }
             None => {
-                self.load_warning(anyhow!(
-                    "does not match a known API: {:?}",
+                let error = anyhow!(
+                    "skipping directory for unknown API: {:?}",
                     basename,
-                ));
+                );
+                if misconfigurations_okay {
+                    self.load_warning(error);
+                } else {
+                    self.load_error(error);
+                }
                 None
             }
         }
@@ -349,12 +393,33 @@ impl<'a> ApiSpecFilesBuilder<'a> {
         &mut self,
         ident: &ApiIdent,
         basename: &str,
+        misconfigurations_okay: bool,
     ) -> Option<ApiSpecFileName> {
         match ApiSpecFileName::new_versioned(&self.apis, ident, basename) {
             Ok(file_name) => Some(file_name),
+            Err(
+                warning @ (BadVersionedFileName::NoSuchApi
+                | BadVersionedFileName::NotVersioned),
+            ) if misconfigurations_okay => {
+                // See lockstep_file_name().
+                self.load_warning(
+                    anyhow!(warning)
+                        .context(format!("skipping file {}", basename)),
+                );
+                None
+            }
+            Err(warning @ BadVersionedFileName::UnexpectedName { .. }) => {
+                // See lockstep_file_name().
+                self.load_warning(
+                    anyhow!(warning)
+                        .context(format!("skipping file {}", basename)),
+                );
+                None
+            }
             Err(error) => {
-                // XXX-dap some of these should be warnings
-                self.load_error(error.context(format!("file {}", basename)));
+                self.load_error(
+                    anyhow!(error).context(format!("file {}", basename)),
+                );
                 None
             }
         }

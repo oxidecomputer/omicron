@@ -105,7 +105,7 @@ fn load_versioned_directory(
     path: &Utf8Path,
     basename: &str,
 ) {
-    let Some(ident) = api_files.versioned_directory(basename) else {
+    let Some(ident) = api_files.versioned_directory(basename, false) else {
         return;
     };
 
@@ -124,7 +124,8 @@ fn load_versioned_directory(
 
     for entry in entries {
         let file_name = entry.file_name();
-        let Some(file_name) = api_files.versioned_file_name(&ident, file_name)
+        let Some(file_name) =
+            api_files.versioned_file_name(&ident, file_name, false)
         else {
             continue;
         };
