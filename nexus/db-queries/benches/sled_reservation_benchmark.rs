@@ -29,11 +29,10 @@ use omicron_uuid_kinds::PropolisUuid;
 use slog::Logger;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
+use tokio::sync::Barrier;
 use uuid::Uuid;
 
 /////////////////////////////////////////////////////////////////
@@ -124,7 +123,10 @@ fn small_resource_request() -> Resources {
     )
 }
 
-async fn create_reservation(opctx: &OpContext, db: &DataStore) -> Result<PropolisUuid> {
+async fn create_reservation(
+    opctx: &OpContext,
+    db: &DataStore,
+) -> Result<PropolisUuid> {
     let instance_id = InstanceUuid::new_v4();
     let vmm_id = PropolisUuid::new_v4();
     db.sled_reservation_create(
@@ -172,59 +174,8 @@ impl TestHarness {
         Self { db }
     }
 
-    // Spin up a number of background tasks which perform the work of "create
-    // reservation, destroy reservation" in a loop.
-    //
-    // TODO: Have all of these tasks call "bench_one_iter", and return
-    // the total latency. Then divide by the number of workers.
-    fn create_contention(&self, count: usize) -> ContendingTasks {
-        let mut tasks = tokio::task::JoinSet::new();
-        let is_terminating = Arc::new(AtomicBool::new(false));
-
-        for _ in 0..count {
-            tasks.spawn({
-                let is_terminating = is_terminating.clone();
-                let opctx =
-                    self.db.opctx().child(std::collections::BTreeMap::new());
-                let datastore = self.db.datastore().clone();
-                async move {
-                    loop {
-                        if is_terminating.load(Ordering::SeqCst) {
-                            return;
-                        }
-
-                        let vmm_id = create_reservation(&opctx, &datastore)
-                            .await
-                            .expect("Task causing contention failed to reserve");
-                        delete_reservation(&opctx, &datastore, vmm_id)
-                            .await
-                            .expect("Task causing contention failed to delete");
-                    }
-                }
-            });
-        }
-
-        ContendingTasks { tasks, is_terminating }
-    }
-
     async fn terminate(self) {
         self.db.terminate().await;
-    }
-}
-
-// A handle to tasks created by [TestHarness::create_contention].
-//
-// Should be terminated after the benchmark has completed executing.
-#[must_use]
-struct ContendingTasks {
-    tasks: tokio::task::JoinSet<()>,
-    is_terminating: Arc<AtomicBool>,
-}
-
-impl ContendingTasks {
-    async fn terminate(self) {
-        self.is_terminating.store(true, Ordering::SeqCst);
-        self.tasks.join_all().await;
     }
 }
 
@@ -241,7 +192,7 @@ struct TestParams {
     tasks: usize,
 }
 
-const VMM_PARAMS: [usize; 3] = [1, 10, 100];
+const VMM_PARAMS: [usize; 3] = [1, 8, 16];
 const TASK_PARAMS: [usize; 3] = [1, 2, 3];
 
 /////////////////////////////////////////////////////////////////
@@ -289,7 +240,11 @@ async fn reserve_vmms_and_return_average_duration(
         // Note that all prior reservations will remain in the DB as we continue
         // provisioning the "next" vmm.
         for _ in 0..params.vmms {
-            vmm_ids.push(create_reservation(opctx, db).await.expect("Failed to provision vmm"));
+            vmm_ids.push(
+                create_reservation(opctx, db)
+                    .await
+                    .expect("Failed to provision vmm"),
+            );
         }
     });
 
@@ -305,7 +260,9 @@ async fn reserve_vmms_and_return_average_duration(
     //
     // We don't really care how long this takes, so we omit it from the tracking time.
     for vmm_id in vmm_ids.drain(..) {
-        delete_reservation(opctx, db,vmm_id).await.expect("Failed to delete vmm");
+        delete_reservation(opctx, db, vmm_id)
+            .await
+            .expect("Failed to delete vmm");
     }
 
     duration
@@ -318,7 +275,6 @@ async fn bench_reservation(
 ) -> Duration {
     const SLED_COUNT: usize = 4;
     let harness = TestHarness::new(&log, SLED_COUNT).await;
-    let tasks = harness.create_contention(params.tasks);
 
     let duration = {
         let mut total_duration = Duration::ZERO;
@@ -327,18 +283,40 @@ async fn bench_reservation(
         for _ in 0..iterations {
             // Within each attempt, we spawn the tasks requested.
             let mut set = tokio::task::JoinSet::new();
+
+            // This barrier exists to lessen the impact of "task spawning" on the benchmark.
+            //
+            // We want to have all tasks run as concurrently as possible, since we're trying to
+            // measure contention explicitly.
+            let barrier = Arc::new(Barrier::new(params.tasks));
+
             for _ in 0..params.tasks {
                 set.spawn({
-                    let opctx = harness.db.opctx().child(std::collections::BTreeMap::new());
+                    let opctx = harness
+                        .db
+                        .opctx()
+                        .child(std::collections::BTreeMap::new());
                     let db = harness.db.datastore().clone();
+                    let barrier = barrier.clone();
                     async move {
-                        reserve_vmms_and_return_average_duration(&params, &opctx, &db).await
+                        // Wait until all tasks are ready...
+                        barrier.wait().await;
+
+                        // ... and then actually do the benchmark
+                        reserve_vmms_and_return_average_duration(
+                            &params, &opctx, &db,
+                        )
+                        .await
                     }
                 });
             }
 
             // The sum of "average time to provision a single vmm" across all tasks.
-            let all_tasks_duration = set.join_all().await.into_iter().fold(Duration::ZERO, |acc, x| acc + x);
+            let all_tasks_duration = set
+                .join_all()
+                .await
+                .into_iter()
+                .fold(Duration::ZERO, |acc, x| acc + x);
 
             // The normalized "time to provision a single vmm", across both:
             // - The number of vmms reserved by each task, and
@@ -363,12 +341,12 @@ async fn bench_reservation(
             // request, we should see similar durations for "100 vmms reserved" vs "1 vmm
             // reserved". However, if more vmms actually make reservation times slower, we'll see
             // the "100 vmm" case take longer than the "1 vmm" case. The same goes for tasks:
-            total_duration += average_duration(all_tasks_duration, params.tasks);
+            total_duration +=
+                average_duration(all_tasks_duration, params.tasks);
         }
         total_duration
     };
 
-    tasks.terminate().await;
     harness.terminate().await;
     duration
 }
