@@ -6,6 +6,7 @@
 
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::WebhookEvent;
 use nexus_db_queries::db::model::WebhookEventClass;
@@ -16,6 +17,7 @@ use nexus_types::external_api::views;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::WebhookEventUuid;
 use omicron_uuid_kinds::WebhookReceiverUuid;
 
@@ -26,14 +28,14 @@ impl super::Nexus {
         webhook_selector: params::WebhookPath,
     ) -> LookupResult<lookup::WebhookReceiver<'a>> {
         Ok(LookupPath::new(opctx, self.datastore()).webhook_receiver_id(
-            WebhookReceiverUuid::from_untyped_uuid(webhook_selector.id),
+            WebhookReceiverUuid::from_untyped_uuid(webhook_selector.webhook_id),
         ))
     }
 
     pub async fn webhook_receiver_config_fetch(
         &self,
         opctx: &OpContext,
-        rx: lookup::WebhookReceiver<'a>,
+        rx: lookup::WebhookReceiver<'_>,
     ) -> LookupResult<WebhookReceiverConfig> {
         let (authz_rx, rx) = rx.fetch().await?;
         let (events, secrets) =

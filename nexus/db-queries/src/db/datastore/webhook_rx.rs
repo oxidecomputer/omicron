@@ -434,7 +434,7 @@ impl DataStore {
         secret: WebhookSecret,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<WebhookSecret, TransactionError<Error>> {
-        let rx_id = secret.rx_id;
+        let rx_id = secret.webhook_receiver_id;
         let secret: WebhookSecret = WebhookReceiver::insert_resource(
             rx_id.into_untyped_uuid(),
             diesel::insert_into(secret_dsl::webhook_secret).values(secret),

@@ -7100,12 +7100,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn webhook_secrets_add(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::WebhookPath>,
-        params: TypedBody<params::WebhookSecret>,
+        params: TypedBody<params::WebhookSecretCreate>,
     ) -> Result<HttpResponseCreated<views::WebhookSecretId>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
-            let params::WebhookSecret { secret } = params.into_inner();
+            let params::WebhookSecretCreate { secret } = params.into_inner();
             let webhook_selector = path_params.into_inner();
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
