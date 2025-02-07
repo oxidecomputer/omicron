@@ -3839,6 +3839,40 @@ impl DataStore {
 
         Ok(volumes)
     }
+
+    /// Returns Some(bool) depending on if a read-only target exists in a
+    /// volume, None if the volume was deleted, or an error otherwise.
+    pub async fn volume_references_read_only_target(
+        &self,
+        volume_id: VolumeUuid,
+        address: SocketAddrV6,
+    ) -> LookupResult<Option<bool>> {
+        let Some(volume) = self.volume_get(volume_id).await? else {
+            return Ok(None);
+        };
+
+        let vcr: VolumeConstructionRequest =
+            match serde_json::from_str(&volume.data()) {
+                Ok(vcr) => vcr,
+
+                Err(e) => {
+                    return Err(Error::internal_error(&format!(
+                        "cannot deserialize volume data for {}: {e}",
+                        volume.id(),
+                    )));
+                }
+            };
+
+        let reference =
+            read_only_target_in_vcr(&vcr, &address).map_err(|e| {
+                Error::internal_error(&format!(
+                    "cannot deserialize volume data for {}: {e}",
+                    volume.id(),
+                ))
+            })?;
+
+        Ok(Some(reference))
+    }
 }
 
 // Add some validation that runs only for tests

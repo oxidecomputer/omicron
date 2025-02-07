@@ -76,6 +76,7 @@ use nexus_db_model::NetworkInterfaceKind;
 use nexus_db_model::PhysicalDisk;
 use nexus_db_model::Probe;
 use nexus_db_model::Project;
+use nexus_db_model::ReadOnlyTargetReplacement;
 use nexus_db_model::Region;
 use nexus_db_model::RegionReplacement;
 use nexus_db_model::RegionReplacementState;
@@ -3068,11 +3069,19 @@ async fn cmd_db_region_replacement_request(
 ) -> Result<(), anyhow::Error> {
     let region = datastore.get_region(args.region_id).await?;
 
-    let request_id = datastore
-        .create_region_replacement_request_for_region(opctx, &region)
-        .await?;
+    if region.read_only() {
+        let request_id = datastore
+            .create_read_only_region_replacement_request(opctx, region.id())
+            .await?;
 
-    println!("region replacement {request_id} created");
+        println!("region snapshot replacement {request_id} created");
+    } else {
+        let request_id = datastore
+            .create_region_replacement_request_for_region(opctx, &region)
+            .await?;
+
+        println!("region replacement {request_id} created");
+    }
 
     Ok(())
 }
@@ -4448,12 +4457,22 @@ async fn cmd_db_region_snapshot_replacement_status(
             "                      state: {:?}",
             request.replacement_state
         );
-        println!(
-            "            region snapshot: {} {} {}",
-            request.old_dataset_id,
-            request.old_region_id,
-            request.old_snapshot_id,
-        );
+        match request.replacement_type() {
+            ReadOnlyTargetReplacement::RegionSnapshot {
+                dataset_id,
+                region_id,
+                snapshot_id,
+            } => {
+                println!(
+                    "            region snapshot: {} {} {}",
+                    dataset_id, region_id, snapshot_id,
+                );
+            }
+
+            ReadOnlyTargetReplacement::ReadOnlyRegion { region_id } => {
+                println!("           read-only region: {}", region_id);
+            }
+        }
         println!("              new region id: {:?}", request.new_region_id);
         println!("     in-progress steps left: {:?}", steps_left);
         println!();
@@ -4485,10 +4504,22 @@ async fn cmd_db_region_snapshot_replacement_info(
 
     println!("                    started: {}", request.request_time);
     println!("                      state: {:?}", request.replacement_state);
-    println!(
-        "            region snapshot: {} {} {}",
-        request.old_dataset_id, request.old_region_id, request.old_snapshot_id,
-    );
+    match request.replacement_type() {
+        ReadOnlyTargetReplacement::RegionSnapshot {
+            dataset_id,
+            region_id,
+            snapshot_id,
+        } => {
+            println!(
+                "            region snapshot: {} {} {}",
+                dataset_id, region_id, snapshot_id,
+            );
+        }
+
+        ReadOnlyTargetReplacement::ReadOnlyRegion { region_id } => {
+            println!("           read-only region: {}", region_id);
+        }
+    }
     println!("              new region id: {:?}", request.new_region_id);
     println!("     in-progress steps left: {:?}", steps_left);
     println!();

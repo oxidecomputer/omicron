@@ -4097,7 +4097,7 @@ async fn test_read_only_region_reference_counting(
 
     let (dataset, region) = &allocated_regions[0];
 
-    let request = RegionSnapshotReplacement::new(
+    let request = RegionSnapshotReplacement::new_from_region_snapshot(
         dataset.id(),
         region.id(),
         snapshot.identity.id,
@@ -4363,7 +4363,7 @@ async fn test_read_only_region_reference_counting_layers(
 
     let (dataset, region) = &allocated_regions[0];
 
-    let request = RegionSnapshotReplacement::new(
+    let request = RegionSnapshotReplacement::new_from_region_snapshot(
         dataset.id(),
         region.id(),
         snapshot.identity.id,
@@ -5611,7 +5611,7 @@ async fn test_double_layer_with_read_only_region_delete(
 
     let (dataset, region) = &allocated_regions[0];
 
-    let request = RegionSnapshotReplacement::new(
+    let request = RegionSnapshotReplacement::new_from_region_snapshot(
         dataset.id(),
         region.id(),
         snapshot.identity.id,
@@ -5720,7 +5720,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
 
     let (dataset, region) = &allocated_regions[0];
 
-    let request = RegionSnapshotReplacement::new(
+    let request = RegionSnapshotReplacement::new_from_region_snapshot(
         dataset.id(),
         region.id(),
         snapshot.identity.id,
@@ -5768,7 +5768,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
 
     let (dataset, region) = &allocated_regions[1];
 
-    let request = RegionSnapshotReplacement::new(
+    let request = RegionSnapshotReplacement::new_from_region_snapshot(
         dataset.id(),
         region.id(),
         snapshot.identity.id,
@@ -5797,7 +5797,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
 
     let (dataset, region) = &allocated_regions[2];
 
-    let request = RegionSnapshotReplacement::new(
+    let request = RegionSnapshotReplacement::new_from_region_snapshot(
         dataset.id(),
         region.id(),
         snapshot.identity.id,

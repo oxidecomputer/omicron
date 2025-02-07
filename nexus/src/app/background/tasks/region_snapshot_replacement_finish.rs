@@ -104,49 +104,45 @@ impl RegionSnapshotReplacementFinishDetector {
             };
 
             if count == 0 {
-                // If the region snapshot has been deleted, then the snapshot
-                // replacement is done: the reference number went to zero and it
-                // was deleted, therefore there aren't any volumes left that
-                // reference it!
-                match self
-                    .datastore
-                    .region_snapshot_get(
-                        request.old_dataset_id.into(),
-                        request.old_region_id,
-                        request.old_snapshot_id,
-                    )
-                    .await
-                {
-                    Ok(Some(_)) => {
-                        info!(
-                            &log,
-                            "region snapshot still exists";
-                            "request.old_dataset_id" => %request.old_dataset_id,
-                            "request.old_region_id" => %request.old_region_id,
-                            "request.old_snapshot_id" => %request.old_snapshot_id,
-                        );
-                        continue;
+                // If the region snapshot or read-only region has been deleted,
+                // then the snapshot replacement is done: the reference number
+                // went to zero and it was deleted, therefore there aren't any
+                // volumes left that reference it!
+
+                let request_id = request.id;
+
+                match self.datastore.read_only_target_deleted(&request).await {
+                    Ok(true) => {
+                        // gone!
                     }
 
-                    Ok(None) => {
-                        // gone!
+                    Ok(false) => {
+                        // not deleted yet
+                        info!(
+                            &log,
+                            "read-only target still exists";
+                            "request_id" => %request_id,
+                            request.replacement_type()
+                        );
+                        continue;
                     }
 
                     Err(e) => {
                         let s = format!(
-                            "error querying for region snapshot {} {} {}: {e}",
-                            request.old_dataset_id,
-                            request.old_region_id,
-                            request.old_snapshot_id,
+                            "error querying for read-only target deletion: {e}",
                         );
-                        error!(&log, "{s}");
+                        error!(
+                            &log,
+                            "{s}";
+                            "request_id" => %request_id,
+                            request.replacement_type()
+                        );
                         status.errors.push(s);
-
                         continue;
                     }
-                };
+                }
 
-                let request_id = request.id;
+                let replacement = request.replacement_type();
 
                 match self.send_finish_request(opctx, request).await {
                     Ok(()) => {
@@ -155,7 +151,7 @@ impl RegionSnapshotReplacementFinishDetector {
                             {request_id}"
                         );
 
-                        info!(&log, "{s}");
+                        info!(&log, "{s}"; replacement);
                         status.finish_invoked_ok.push(s);
                     }
 
@@ -164,7 +160,7 @@ impl RegionSnapshotReplacementFinishDetector {
                             "invoking region snapshot replacement finish for \
                             {request_id} failed: {e}",
                         );
-                        error!(&log, "{s}");
+                        error!(&log, "{s}"; replacement);
                         status.errors.push(s);
                     }
                 }
@@ -237,8 +233,11 @@ mod test {
         // Do not add the fake region snapshot to the database, as it should
         // have been deleted by the time the request transitions to "Running"
 
-        let request =
-            RegionSnapshotReplacement::new(dataset_id, region_id, snapshot_id);
+        let request = RegionSnapshotReplacement::new_from_region_snapshot(
+            dataset_id,
+            region_id,
+            snapshot_id,
+        );
 
         let request_id = request.id;
 
