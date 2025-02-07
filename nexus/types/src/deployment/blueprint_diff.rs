@@ -12,19 +12,20 @@ use super::blueprint_display::{
 };
 use super::{
     unwrap_or_none, zone_sort_key, BlueprintDatasetConfigDiff,
-    BlueprintDatasetsConfigDiff, BlueprintDiff, BlueprintMetadata,
-    BlueprintPhysicalDiskConfig, BlueprintPhysicalDisksConfigDiff,
-    BlueprintZoneConfigDiff, BlueprintZonesConfigDiff, ClickhouseClusterConfig,
+    BlueprintDatasetDisposition, BlueprintDatasetsConfigDiff, BlueprintDiff,
+    BlueprintMetadata, BlueprintPhysicalDiskConfig,
+    BlueprintPhysicalDisksConfigDiff, BlueprintZoneConfigDiff,
+    BlueprintZonesConfigDiff, ClickhouseClusterConfig,
     CockroachDbPreserveDowngrade,
 };
 use daft::Diffable;
 use nexus_sled_agent_shared::inventory::ZoneKind;
-use omicron_common::api::external::Generation;
-use omicron_common::disk::DatasetName;
-use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_common::api::external::{ByteCount, Generation};
+use omicron_common::disk::{CompressionAlgorithm, DatasetName};
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
+use std::fmt::{self, Write as _};
 
 use crate::deployment::blueprint_display::BpClickhouseKeepersTableSchema;
 use crate::deployment::{
@@ -603,21 +604,18 @@ impl<'a> BlueprintDiffSummary<'a> {
     pub fn modified_datasets(
         &'a self,
         sled_id: &SledUuid,
-    ) -> Option<BpDiffDatasetsModified<'a>> {
+    ) -> Option<(BpDiffDatasetsModified, BpDiffDatasetErrors)> {
         // Check if the sled is modified and there are any modified datasets
         let datasets_cfg_diff =
             self.diff.blueprint_datasets.modified.get(sled_id)?;
         if datasets_cfg_diff.datasets.modified.is_empty() {
             return None;
         }
-        let mut datasets: Vec<_> =
-            datasets_cfg_diff.datasets.modified.values().collect();
-        datasets.sort_unstable_by_key(|d| (d.kind.before, d.pool.before));
-        Some(BpDiffDatasetsModified {
-            generation_before: *datasets_cfg_diff.generation.before,
-            generation_after: *datasets_cfg_diff.generation.after,
-            datasets,
-        })
+        Some(BpDiffDatasetsModified::new(
+            *datasets_cfg_diff.generation.before,
+            *datasets_cfg_diff.generation.after,
+            datasets_cfg_diff.datasets.modified.values(),
+        ))
     }
 }
 
@@ -796,8 +794,8 @@ impl BpTableData for BpDiffZonesModified {
     }
 }
 
-#[derive(Debug)]
 /// Errors arising from illegally modified zone fields
+#[derive(Debug)]
 pub struct BpDiffZoneErrors {
     pub generation_before: Generation,
     pub generation_after: Generation,
@@ -1051,14 +1049,147 @@ impl BpTableData for DiffDatasetsDetails {
     }
 }
 
+/// Properties of a dataset that may change from one blueprint to another.
+///
+/// Other properties of a dataset (e.g., its `pool`, `kind`, and `address`) are
+/// not expected to change, and we'll record an error if they do.
 #[derive(Debug)]
-pub struct BpDiffDatasetsModified<'a> {
-    pub generation_before: Generation,
-    pub generation_after: Generation,
-    pub datasets: Vec<&'a BlueprintDatasetConfigDiff<'a>>,
+pub struct ModifiableDatasetProperties {
+    pub disposition: BlueprintDatasetDisposition,
+    pub quota: Option<ByteCount>,
+    pub reservation: Option<ByteCount>,
+    pub compression: CompressionAlgorithm,
 }
 
-impl BpTableData for BpDiffDatasetsModified<'_> {
+/// Errors arising from illegally modified dataset fields
+#[derive(Debug)]
+pub struct BpDiffDatasetErrors {
+    pub generation_before: Generation,
+    pub generation_after: Generation,
+    pub errors: Vec<BpDiffDatasetError>,
+}
+
+#[derive(Debug)]
+pub struct BpDiffDatasetError {
+    pub dataset_id: DatasetUuid,
+    pub reason: String,
+}
+
+#[derive(Debug)]
+pub struct ModifiedDataset {
+    pub prior_properties: ModifiableDatasetProperties,
+    pub dataset: BlueprintDatasetConfig,
+}
+
+impl ModifiedDataset {
+    pub fn from_diff(
+        diff: &BlueprintDatasetConfigDiff,
+    ) -> Result<Self, BpDiffDatasetError> {
+        // Do we have any errors? If so, create a "reason" string.
+        let mut reason = String::new();
+        let BlueprintDatasetConfigDiff {
+            disposition,
+            id,
+            pool,
+            kind,
+            address,
+            quota,
+            reservation,
+            compression,
+        } = diff;
+
+        // If we're a "modified" dataset, we must have the same ID before and
+        // after. (Otherwise our "before" or "after" should've been recorded as
+        // removed/added.)
+        debug_assert_eq!(id.before, id.after);
+
+        let prior_properties = ModifiableDatasetProperties {
+            disposition: *disposition.before,
+            quota: *quota.before,
+            reservation: *reservation.before,
+            compression: *compression.before,
+        };
+        if pool.before != pool.after {
+            writeln!(
+                &mut reason,
+                "mismatched zpool: before: {}, after: {}",
+                pool.before, pool.after
+            )
+            .expect("write to String is infallible");
+        }
+        if kind.before != kind.after {
+            writeln!(
+                &mut reason,
+                "mismatched kind: before: {}, after: {}",
+                kind.before, kind.after
+            )
+            .expect("write to String is infallible");
+        }
+        if address.before != address.after {
+            writeln!(
+                &mut reason,
+                "mismatched address: before: {:?}, after: {:?}",
+                address.before, address.after
+            )
+            .expect("write to String is infallible");
+        }
+
+        if reason.is_empty() {
+            Ok(Self {
+                prior_properties,
+                dataset: BlueprintDatasetConfig {
+                    disposition: *disposition.after,
+                    id: *id.after,
+                    pool: pool.after.clone(),
+                    kind: kind.after.clone(),
+                    address: *address.after,
+                    quota: *quota.after,
+                    reservation: *reservation.after,
+                    compression: *compression.after,
+                },
+            })
+        } else {
+            Err(BpDiffDatasetError { dataset_id: *id.after, reason })
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct BpDiffDatasetsModified {
+    pub generation_before: Generation,
+    pub generation_after: Generation,
+    pub datasets: Vec<ModifiedDataset>,
+}
+
+impl BpDiffDatasetsModified {
+    pub fn new<'a>(
+        generation_before: Generation,
+        generation_after: Generation,
+        dataset_diffs: impl Iterator<Item = &'a BlueprintDatasetConfigDiff<'a>>,
+    ) -> (BpDiffDatasetsModified, BpDiffDatasetErrors) {
+        let mut datasets = vec![];
+        let mut errors = vec![];
+        for diff in dataset_diffs {
+            match ModifiedDataset::from_diff(diff) {
+                Ok(modified_zone) => datasets.push(modified_zone),
+                Err(error) => errors.push(error),
+            }
+        }
+        datasets.sort_unstable_by_key(|d| {
+            (d.dataset.kind.clone(), d.dataset.pool.clone())
+        });
+        (
+            BpDiffDatasetsModified {
+                generation_before,
+                generation_after,
+                datasets,
+            },
+            BpDiffDatasetErrors { generation_before, generation_after, errors },
+        )
+    }
+}
+
+impl BpTableData for BpDiffDatasetsModified {
     fn bp_generation(&self) -> BpGeneration {
         BpGeneration::Diff {
             before: Some(self.generation_before),
@@ -1067,55 +1198,60 @@ impl BpTableData for BpDiffDatasetsModified<'_> {
     }
 
     fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
-        self.datasets.iter().map(move |&dataset| {
-            let mut columns = vec![];
+        self.datasets.iter().map(move |dataset| {
+            let ModifiableDatasetProperties {
+                disposition: before_disposition,
+                quota: before_quota,
+                reservation: before_reservation,
+                compression: before_compression,
+            } = &dataset.prior_properties;
 
-            // Dataset Name
-            let before = DatasetName::new(
-                dataset.pool.before.clone(),
-                dataset.kind.before.clone(),
+            BpTableRow::new(
+                state,
+                vec![
+                    BpTableColumn::value(
+                        DatasetName::new(
+                            dataset.dataset.pool.clone(),
+                            dataset.dataset.kind.clone(),
+                        )
+                        .full_name(),
+                    ),
+                    BpTableColumn::value(dataset.dataset.id.to_string()),
+                    BpTableColumn::new(
+                        before_disposition.to_string(),
+                        dataset.dataset.disposition.to_string(),
+                    ),
+                    BpTableColumn::new(
+                        unwrap_or_none(&before_quota),
+                        unwrap_or_none(&dataset.dataset.quota),
+                    ),
+                    BpTableColumn::new(
+                        unwrap_or_none(&before_reservation),
+                        unwrap_or_none(&dataset.dataset.reservation),
+                    ),
+                    BpTableColumn::new(
+                        before_compression.to_string(),
+                        dataset.dataset.compression.to_string(),
+                    ),
+                ],
             )
-            .full_name();
-            let after = DatasetName::new(
-                dataset.pool.after.clone(),
-                dataset.kind.after.clone(),
-            )
-            .full_name();
-            columns.push(BpTableColumn::new(before, after));
-
-            // IDs don't change
-            columns.push(BpTableColumn::Value(dataset.id.before.to_string()));
-
-            // Quota
-            let before = unwrap_or_none(dataset.quota.before);
-            let after = unwrap_or_none(dataset.quota.after);
-            columns.push(BpTableColumn::new(before, after));
-
-            // Reservation
-            let before = unwrap_or_none(dataset.reservation.before);
-            let after = unwrap_or_none(dataset.reservation.after);
-            columns.push(BpTableColumn::new(before, after));
-
-            // Compression
-            let before = dataset.compression.before.to_string();
-            let after = dataset.compression.after.to_string();
-            columns.push(BpTableColumn::new(before, after));
-
-            BpTableRow::new(state, columns)
         })
     }
 }
 
 #[derive(Debug, Default)]
-pub struct BpDiffDatasets<'a> {
+pub struct BpDiffDatasets {
     pub added: BTreeMap<SledUuid, DiffDatasetsDetails>,
     pub removed: BTreeMap<SledUuid, DiffDatasetsDetails>,
-    pub modified: BTreeMap<SledUuid, BpDiffDatasetsModified<'a>>,
+    pub modified: BTreeMap<SledUuid, BpDiffDatasetsModified>,
     pub unchanged: BTreeMap<SledUuid, DiffDatasetsDetails>,
+    pub errors: BTreeMap<SledUuid, BpDiffDatasetErrors>,
 }
 
-impl<'a> BpDiffDatasets<'a> {
-    pub fn from_diff_summary(summary: &'a BlueprintDiffSummary<'a>) -> Self {
+impl BpDiffDatasets {
+    pub fn from_diff_summary<'a>(
+        summary: &'a BlueprintDiffSummary<'a>,
+    ) -> Self {
         let mut diffs = BpDiffDatasets::default();
         for sled_id in &summary.all_sleds {
             if let Some(added) = summary.added_datasets(sled_id) {
@@ -1127,8 +1263,12 @@ impl<'a> BpDiffDatasets<'a> {
             if let Some(unchanged) = summary.unchanged_datasets(sled_id) {
                 diffs.unchanged.insert(*sled_id, unchanged);
             }
-            if let Some(modified) = summary.modified_datasets(sled_id) {
+            if let Some((modified, errors)) = summary.modified_datasets(sled_id)
+            {
                 diffs.modified.insert(*sled_id, modified);
+                if !errors.errors.is_empty() {
+                    diffs.errors.insert(*sled_id, errors);
+                }
             }
         }
         diffs
@@ -1568,7 +1708,7 @@ pub struct BlueprintDiffDisplay<'diff> {
     after_meta: BlueprintMetadata,
     zones: BpDiffZones,
     disks: BpDiffPhysicalDisks,
-    datasets: BpDiffDatasets<'diff>,
+    datasets: BpDiffDatasets,
 }
 
 impl<'diff> BlueprintDiffDisplay<'diff> {
@@ -1823,7 +1963,7 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
 
         // Write out zone errors.
         if !self.zones.errors.is_empty() {
-            writeln!(f, "ERRORS:")?;
+            writeln!(f, "ZONE ERRORS:")?;
             for (sled_id, errors) in &self.zones.errors {
                 writeln!(f, "\n  sled {sled_id}\n")?;
                 writeln!(
@@ -1834,6 +1974,24 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
 
                 for err in &errors.errors {
                     writeln!(f, "      zone id: {}", err.zone_before_id)?;
+                    writeln!(f, "      reason: {}", err.reason)?;
+                }
+            }
+        }
+
+        // Write out dataset errors.
+        if !self.datasets.errors.is_empty() {
+            writeln!(f, "DATASET ERRORS:")?;
+            for (sled_id, errors) in &self.datasets.errors {
+                writeln!(f, "\n  sled {sled_id}\n")?;
+                writeln!(
+                    f,
+                    "    dataset diff errors: before gen {}, after gen {}\n",
+                    errors.generation_before, errors.generation_after
+                )?;
+
+                for err in &errors.errors {
+                    writeln!(f, "      dataset id: {}", err.dataset_id)?;
                     writeln!(f, "      reason: {}", err.reason)?;
                 }
             }

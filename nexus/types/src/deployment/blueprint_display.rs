@@ -122,6 +122,7 @@ impl fmt::Display for BpGeneration {
     }
 }
 
+#[derive(Debug)]
 pub enum BpTableColumn {
     Value(String),
     Diff { before: String, after: String },
@@ -343,7 +344,14 @@ impl BpTableSchema for BpDatasetsTableSchema {
     }
 
     fn column_names(&self) -> &'static [&'static str] {
-        &["dataset name", "dataset uuid", "quota", "reservation", "compression"]
+        &[
+            "dataset name",
+            "dataset id",
+            "disposition",
+            "quota",
+            "reservation",
+            "compression",
+        ]
     }
 }
 
