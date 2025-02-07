@@ -791,7 +791,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
             quote! {
                 let (#(#ancestors_authz_names,)* _) =
                     #parent_resource_name::lookup_by_id_no_authz(
-                        opctx, datastore, &db_row.#parent_id
+                        opctx, datastore, &db_row.#parent_id.into()
                     ).await?;
             },
             quote! { .filter(dsl::#parent_id.eq(#parent_authz_name.id())) },
