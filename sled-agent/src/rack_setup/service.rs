@@ -344,7 +344,7 @@ impl ServiceInner {
                 // Ensure all the physical disks are initialized
                 self.initialize_disks_on_sled(
                     *sled_address,
-                    config.disks.clone().into(),
+                    config.disks.clone().into_in_service_disks(),
                 )
                 .await?;
 

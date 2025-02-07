@@ -976,9 +976,8 @@ mod test {
                     .blueprint_zones
                     .get(&new_sled_id)
                     .expect("blueprint should contain zones for new sled")
-                    .to_omicron_zones_config(
-                        BlueprintZoneFilter::ShouldBeRunning,
-                    ),
+                    .clone()
+                    .into_running_omicron_zones_config(),
             )
             .unwrap();
         let collection =

@@ -48,7 +48,9 @@ pub(crate) async fn deploy_disks(
                 &log,
             );
             let result = client
-                .omicron_physical_disks_put(&config.clone().into())
+                .omicron_physical_disks_put(
+                    &config.clone().into_in_service_disks(),
+                )
                 .await
                 .with_context(|| {
                     format!("Failed to put {config:#?} to sled {sled_id}")

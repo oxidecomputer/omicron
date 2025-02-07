@@ -547,33 +547,30 @@ pub struct BlueprintZonesConfig {
     pub zones: IdMap<BlueprintZoneConfig>,
 }
 
-impl From<BlueprintZonesConfig> for OmicronZonesConfig {
-    fn from(config: BlueprintZonesConfig) -> Self {
-        Self {
-            generation: config.generation,
-            zones: config.zones.into_iter().map(From::from).collect(),
-        }
-    }
-}
-
 impl BlueprintZonesConfig {
-    /// Converts self to an [`OmicronZonesConfig`], applying the provided
-    /// [`BlueprintZoneFilter`].
+    /// Converts self into [`OmicronZonesConfig`].
     ///
-    /// The filter controls which zones should be exported into the resulting
-    /// [`OmicronZonesConfig`].
-    pub fn to_omicron_zones_config(
-        &self,
-        filter: BlueprintZoneFilter,
-    ) -> OmicronZonesConfig {
+    /// [`OmicronZonesConfig`] is a format of the zones configuration that can
+    /// be passed to Sled Agents for deployment.
+    ///
+    /// This function is effectively a `From` implementation, but
+    /// is named slightly more explicitly, as it filters the blueprint
+    /// configuration to only consider zones that should be running.
+    pub fn into_running_omicron_zones_config(self) -> OmicronZonesConfig {
         OmicronZonesConfig {
             generation: self.generation,
             zones: self
                 .zones
-                .iter()
-                .filter(|z| z.disposition.matches(filter))
-                .cloned()
-                .map(OmicronZoneConfig::from)
+                .into_iter()
+                .filter_map(|z| {
+                    if z.disposition
+                        .matches(BlueprintZoneFilter::ShouldBeRunning)
+                    {
+                        Some(z.into())
+                    } else {
+                        None
+                    }
+                })
                 .collect(),
         }
     }
@@ -899,6 +896,33 @@ pub struct BlueprintPhysicalDisksConfig {
     pub disks: IdMap<BlueprintPhysicalDiskConfig>,
 }
 
+impl BlueprintPhysicalDisksConfig {
+    /// Converts self into [`OmicronPhysicalDisksConfig`].
+    ///
+    /// [`OmicronPhysicalDisksConfig`] is a format of the disks configuration
+    /// that can be passed to Sled Agents for deployment.
+    ///
+    /// This function is effectively a `From` implementation, but
+    /// is named slightly more explicitly, as it filters the blueprint
+    /// configuration to only consider in-service disks.
+    pub fn into_in_service_disks(self) -> OmicronPhysicalDisksConfig {
+        OmicronPhysicalDisksConfig {
+            generation: self.generation,
+            disks: self
+                .disks
+                .into_iter()
+                .filter_map(|d| {
+                    if d.disposition.matches(DiskFilter::InService) {
+                        Some(d.into())
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+        }
+    }
+}
+
 impl IdMappable for BlueprintPhysicalDiskConfig {
     type Id = PhysicalDiskUuid;
 
@@ -927,19 +951,6 @@ impl From<BlueprintPhysicalDiskConfig> for OmicronPhysicalDiskConfig {
     }
 }
 
-impl From<BlueprintPhysicalDisksConfig> for OmicronPhysicalDisksConfig {
-    fn from(value: BlueprintPhysicalDisksConfig) -> Self {
-        OmicronPhysicalDisksConfig {
-            generation: value.generation,
-            disks: value
-                .disks
-                .into_iter()
-                .map(OmicronPhysicalDiskConfig::from)
-                .collect(),
-        }
-    }
-}
-
 /// Information about Omicron datasets as recorded in a blueprint.
 #[derive(
     Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
@@ -950,7 +961,7 @@ pub struct BlueprintDatasetsConfig {
 }
 
 impl BlueprintDatasetsConfig {
-    /// Converts [Self] into [DatasetsConfig].
+    /// Converts self into [DatasetsConfig].
     ///
     /// [DatasetsConfig] is a format of the dataset configuration that can be
     /// passed to Sled Agents for deployment.
