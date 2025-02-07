@@ -19,7 +19,6 @@ use nexus_db_queries::db::datastore::CollectorReassignment;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
-use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_common::address::COCKROACH_ADMIN_PORT;
@@ -65,8 +64,8 @@ pub(crate) async fn deploy_zones(
                 db_sled.sled_agent_address(),
                 &opctx.log,
             );
-            let omicron_zones = config
-                .to_omicron_zones_config(BlueprintZoneFilter::ShouldBeRunning);
+            let omicron_zones =
+                config.clone().into_running_omicron_zones_config();
             let result = client
                 .omicron_zones_put(&omicron_zones)
                 .await
