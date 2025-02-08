@@ -31,3 +31,4 @@ switch_table:inserts
 switch_table:occupancy
 switch_table:update_misses
 switch_table:updates
+dendrite:sample_collection_duration
