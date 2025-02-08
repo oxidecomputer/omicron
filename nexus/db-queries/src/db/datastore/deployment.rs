@@ -2346,12 +2346,12 @@ mod tests {
         assert_eq!(
             EnsureMultiple::from(
                 builder
-                    .sled_ensure_disks(
+                    .sled_add_disks(
                         new_sled_id,
                         &planning_input
                             .sled_lookup(SledFilter::Commissioned, new_sled_id)
                             .unwrap()
-                            .resources,
+                            .resources
                     )
                     .unwrap()
                     .disks
@@ -2360,6 +2360,7 @@ mod tests {
                 added: 4,
                 updated: 0,
                 expunged: 0,
+                decommissioned: 0,
                 removed: 0
             }
         );

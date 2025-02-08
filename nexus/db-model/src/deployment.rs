@@ -17,8 +17,8 @@ use crate::schema::{
 };
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
-    impl_enum_type, ipv6, ByteCount, Generation, MacAddr, Name, SledState,
-    SqlU16, SqlU32, SqlU8,
+    impl_enum_type, ipv6, ByteCount, Generation, MacAddr, Name,
+    PhysicalDiskState, SledState, SqlU16, SqlU32, SqlU8,
 };
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Utc};
@@ -233,6 +233,7 @@ pub struct BpOmicronPhysicalDisk {
     pub pool_id: Uuid,
 
     pub disposition: DbBpPhysicalDiskDisposition,
+    pub state: PhysicalDiskState,
 }
 
 impl BpOmicronPhysicalDisk {
@@ -252,6 +253,7 @@ impl BpOmicronPhysicalDisk {
             disposition: to_db_bp_physical_disk_disposition(
                 disk_config.disposition,
             ),
+            state: disk_config.state.into(),
         }
     }
 }
@@ -267,6 +269,7 @@ impl From<BpOmicronPhysicalDisk> for BlueprintPhysicalDiskConfig {
             },
             id: disk.id.into(),
             pool_id: ZpoolUuid::from_untyped_uuid(disk.pool_id),
+            state: disk.state.into(),
         }
     }
 }

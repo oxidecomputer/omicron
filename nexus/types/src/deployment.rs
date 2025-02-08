@@ -12,6 +12,7 @@
 //! nexus/db-model, but nexus/reconfigurator/planning does not currently know
 //! about nexus/db-model and it's convenient to separate these concerns.)
 
+use crate::external_api::views::PhysicalDiskState;
 use crate::external_api::views::SledState;
 use crate::internal_api::params::DnsConfigParams;
 use crate::inventory::Collection;
@@ -249,6 +250,21 @@ impl Blueprint {
         })
     }
 
+    /// Iterate over the [`BlueprintPhysicalDiskConfig`] instances in the
+    /// blueprint that match the provided filter, along with the associated
+    /// sled id.
+    pub fn all_omicron_disks(
+        &self,
+        filter: DiskFilter,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintPhysicalDiskConfig)> {
+        self.blueprint_disks
+            .iter()
+            .flat_map(move |(sled_id, disks)| {
+                disks.disks.iter().map(|disk| (*sled_id, disk))
+            })
+            .filter(move |(_, d)| d.disposition.matches(filter))
+    }
+
     /// Iterate over the [`BlueprintDatasetsConfig`] instances in the blueprint.
     pub fn all_omicron_datasets(
         &self,
@@ -275,6 +291,19 @@ impl Blueprint {
                 .filter(move |z| !z.disposition.matches(filter))
                 .map(|z| (*sled_id, z))
         })
+    }
+
+    // Return all disks that are decommissioned along with the id of the sled
+    // they reside in.
+    pub fn all_decommisioned_disks(
+        &self,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintPhysicalDiskConfig)> {
+        self.blueprint_disks
+            .iter()
+            .flat_map(move |(sled_id, disks)| {
+                disks.disks.iter().map(|disk| (*sled_id, disk))
+            })
+            .filter(move |(_, d)| d.state == PhysicalDiskState::Decommissioned)
     }
 
     /// Iterate over the ids of all sleds in the blueprint
@@ -306,11 +335,20 @@ impl BpTableData for &BlueprintPhysicalDisksConfig {
     }
 
     fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
-        let sorted_disk_ids: BTreeSet<DiskIdentity> =
-            self.disks.iter().map(|d| d.identity.clone()).collect();
+        let mut disks: Vec<_> = self.disks.iter().cloned().collect();
+        disks.sort_unstable_by_key(|d| d.identity.clone());
 
-        sorted_disk_ids.into_iter().map(move |d| {
-            BpTableRow::from_strings(state, vec![d.vendor, d.model, d.serial])
+        disks.into_iter().map(move |d| {
+            BpTableRow::from_strings(
+                state,
+                vec![
+                    d.identity.vendor,
+                    d.identity.model,
+                    d.identity.serial,
+                    d.disposition.to_string(),
+                    d.state.to_string(),
+                ],
+            )
         })
     }
 }
@@ -864,15 +902,22 @@ impl BlueprintPhysicalDiskDisposition {
             Self::InService => match filter {
                 DiskFilter::All => true,
                 DiskFilter::InService => true,
-                // TODO remove this variant?
-                DiskFilter::ExpungedButActive => false,
             },
             Self::Expunged => match filter {
                 DiskFilter::All => true,
                 DiskFilter::InService => false,
-                // TODO remove this variant?
-                DiskFilter::ExpungedButActive => true,
             },
+        }
+    }
+}
+
+impl fmt::Display for BlueprintPhysicalDiskDisposition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            // Neither `write!(f, "...")` nor `f.write_str("...")` obey fill
+            // and alignment (used above), but this does.
+            BlueprintPhysicalDiskDisposition::InService => "in service".fmt(f),
+            BlueprintPhysicalDiskDisposition::Expunged => "expunged".fmt(f),
         }
     }
 }
@@ -883,6 +928,7 @@ impl BlueprintPhysicalDiskDisposition {
 )]
 pub struct BlueprintPhysicalDiskConfig {
     pub disposition: BlueprintPhysicalDiskDisposition,
+    pub state: PhysicalDiskState,
     pub identity: DiskIdentity,
     pub id: PhysicalDiskUuid,
     pub pool_id: ZpoolUuid,
