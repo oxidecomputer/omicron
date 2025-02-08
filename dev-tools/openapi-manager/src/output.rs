@@ -362,7 +362,6 @@ fn summarize_one(
     let problems: Vec<_> = resolution.problems().collect();
     if problems.is_empty() {
         // Success case: file is up-to-date.
-        // XXX-dap this used to print a summary and "extra"
         eprintln!(
             "{:>HEADER_WIDTH$} {}",
             FRESH.style(styles.success_header),
