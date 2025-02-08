@@ -1,21 +1,29 @@
 format_version = 1
 
 [target]
-name = "tfportd_link_data"
-description = "Network data for each link type related to a tfport interface"
+name = "switch_port_control_data_link"
+description = "Network data for datalinks related to a switch and management control data"
 authz_scope = "fleet"
 
 versions = [
-    { version = 1, fields = [ "kind", "link_name", "rack_id", "sled_id", "sled_model", "sled_revision", "sled_serial", "switch_id", "switch_fab", "switch_lot", "switch_wafer", "switch_wafer_loc_x", "switch_wafer_loc_y", "switch_model", "switch_revision", "switch_serial", "switch_slot" ] },
+    { version = 1, fields = [ "kind", "link_name", "model", "network", "rack_id", "sled_id", "sled_model", "sled_revision", "sled_serial", "switch_id", "switch_model", "switch_revision", "switch_serial", "switch_slot", "asic_fab", "asic_lot", "asic_wafer", "asic_wafer_loc_x", "asic_wafer_loc_y" ] },
 ]
 
 [fields.kind]
 type = "string"
-description = "The kind or class of the data link"
+description = "The kind or class of the data link (examples: physical-device, gateway, switch-port)"
 
 [fields.link_name]
 type = "string"
-description = "Name of the data link"
+description = "Name of the data link in the system (examples: oxControlService1, opte0, tfport0)"
+
+[fields.model]
+type = "string"
+description = "Model type of the link, indicating what implements or enables the link itself (examples: TF2, tfportd, STM32H753, opte)"
+
+[fields.network]
+type = "string"
+description = "Network type of the link (examples: primary-data, management, vpc)"
 
 [fields.rack_id]
 type = "uuid"
@@ -41,29 +49,9 @@ description = "Serial number of the sled"
 type = "uuid"
 description = "ID of the switch the link is on"
 
-[fields.switch_fab]
-type = "string"
-description = "Fabrication plant identifier of the switch the link is on"
-
-[fields.switch_lot]
-type = "string"
-description = "Lot number of the switch the link is on"
-
-[fields.switch_wafer]
-type = "u8"
-description = "Wafer number of the switch the link is on"
-
-[fields.switch_wafer_loc_x]
-type = "i16"
-description = "X-coordinate wafer location of the switch the link is on"
-
-[fields.switch_wafer_loc_y]
-type = "i16"
-description = "Y-coordinate wafer location of the switch the link is on"
-
 [fields.switch_model]
 type = "string"
-description = "The model number switch the link is on"
+description = "Model number of the switch the link is on"
 
 [fields.switch_revision]
 type = "u32"
@@ -76,6 +64,26 @@ description = "Serial number of the switch the link is on"
 [fields.switch_slot]
 type = "u16"
 description = "Slot number of the switch the link is on"
+
+[fields.asic_fab]
+type = "string"
+description = "Fabrication plant identifier of the switch ASIC the link is on"
+
+[fields.asic_lot]
+type = "string"
+description = "Lot identifier of the switch ASIC the link is on"
+
+[fields.asic_wafer]
+type = "u8"
+description = "Wafer identifier of the switch ASIC the link is on"
+
+[fields.asic_wafer_loc_x]
+type = "i16"
+description = "X-coordinate wafer location of the switch ASIC the link is on"
+
+[fields.asic_wafer_loc_y]
+type = "i16"
+description = "Y-coordinate wafer location of the switch ASIC the link is on"
 
 [[metrics]]
 name = "bytes_sent"
