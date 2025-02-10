@@ -6,13 +6,14 @@ use crate::app::background::BackgroundTask;
 use crate::app::db::lookup::LookupPath;
 use chrono::{TimeDelta, Utc};
 use futures::future::BoxFuture;
+use hmac::{Hmac, Mac};
 use http::HeaderName;
 use http::HeaderValue;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::webhook_delivery::DeliveryAttemptState;
 use nexus_db_queries::db::model::{
     SqlU8, WebhookDeliveryAttempt, WebhookDeliveryResult, WebhookEventClass,
-    WebhookReceiver,
+    WebhookReceiver, WebhookSecret,
 };
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
@@ -25,11 +26,11 @@ use omicron_uuid_kinds::{
     GenericUuid, OmicronZoneUuid, WebhookDeliveryUuid, WebhookEventUuid,
     WebhookReceiverUuid,
 };
+use sha2::Sha256;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::task::JoinSet;
-
 // The Deliverator belongs to an elite order, a hallowed sub-category. He's got
 // esprit up to here. Right now he is preparing to carry out his third mission
 // of the night. His uniform is black as activated charcoal, filtering the very
@@ -202,11 +203,19 @@ impl WebhookDeliverator {
             .lookup_for(authz::Action::ListChildren)
             .await
             .map_err(|e| anyhow::anyhow!("could not look up receiver: {e}"))?;
-        let secrets = self
+        let mut secrets = self
             .datastore
             .webhook_rx_secret_list(opctx, &authz_rx)
             .await
-            .map_err(|e| anyhow::anyhow!("could not list secrets: {e}"))?;
+            .map_err(|e| anyhow::anyhow!("could not list secrets: {e}"))?
+            .into_iter()
+            .map(|WebhookSecret { identity, secret, .. }| {
+                let mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())
+                    .expect("HMAC key can be any size; this should never fail");
+                (identity.id, mac)
+            })
+            .collect::<Vec<_>>();
+
         anyhow::ensure!(!secrets.is_empty(), "receiver has no secrets");
         let deliveries = self
             .datastore
@@ -304,21 +313,69 @@ impl WebhookDeliverator {
                     sent_at: &sent_at,
                 },
             };
-            // TODO(eliza): signatures!
-            let request = self
+            // N.B. that we serialize the body "ourselves" rather than just
+            // passing it to `RequestBuilder::json` because we must access
+            // the serialized body in order to calculate HMAC signatures.
+            // This means we have to add the `Content-Type` ourselves below.
+            let body = match serde_json::to_vec(&payload) {
+                Ok(body) => body,
+                Err(e) => {
+                    const MSG: &'static str =
+                        "event payload could not be serialized";
+                    slog::error!(
+                        &opctx.log,
+                        "webhook {MSG}";
+                        "event_id" => %delivery.event_id,
+                        "event_class" => %event_class,
+                        "delivery_id" => %delivery_id,
+                        "error" => %e,
+                    );
+
+                    // This really shouldn't happen --- we expect the event
+                    // payload will always be valid JSON. We could *probably*
+                    // just panic here unconditionally, but it seems nicer to
+                    // try and do the other events. But, if there's ever a bug
+                    // that breaks serialization for *all* webhook payloads,
+                    // I'd like the tests to fail in a more obvious way than
+                    // eventually timing out waiting for the event to be
+                    // delivered ...
+                    if cfg!(debug_assertions) {
+                        panic!("{MSG}:{e}\npayload: {payload:#?}");
+                    }
+                    delivery_status
+                        .delivery_errors
+                        .insert(delivery_id, format!("{MSG}: {e}"));
+                    continue;
+                }
+            };
+            let mut request = self
                 .client
                 .post(&rx.endpoint)
                 .header(HDR_RX_ID, hdr_rx_id.clone())
                 .header(HDR_DELIVERY_ID, delivery_id.to_string())
                 .header(HDR_EVENT_ID, delivery.event_id.to_string())
                 .header(HDR_EVENT_CLASS, event_class.to_string())
-                .json(&payload)
+                .header(http::header::CONTENT_TYPE, "application/json");
+
+            // For each secret assigned to this webhook, calculate the HMAC and add a signature header.
+            for (secret_id, mac) in &mut secrets {
+                mac.update(&body);
+                let sig_bytes = mac.finalize_reset().into_bytes();
+                let sig = hex::encode(&sig_bytes[..]);
+                request = request.header(
+                    HDR_SIG,
+                    format!("a=sha256&id={secret_id}&s={sig}"),
+                );
+            }
+            let request = request
+                .body(body)
                 // Per [RFD 538 § 4.3.2][1], a 30-second timeout is applied to
                 // each webhook delivery request.
                 //
                 // [1]: https://rfd.shared.oxide.computer/rfd/538#delivery-failure
                 .timeout(Duration::from_secs(30))
                 .build();
+
             let request = match request {
                 // We couldn't construct a request for some reason! This one's
                 // our fault, so don't penalize the receiver for it.

@@ -39,6 +39,7 @@ gateway-client.workspace = true
 headers.workspace = true
 hex.workspace = true
 hickory-resolver.workspace = true
+hmac.workspace = true
 http.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true

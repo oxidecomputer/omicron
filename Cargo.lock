@@ -7025,6 +7025,7 @@ dependencies = [
  "headers",
  "hex",
  "hickory-resolver",
+ "hmac",
  "http",
  "http-body-util",
  "httpmock",
