@@ -75,7 +75,7 @@ pub struct RetryHelper {
 
 const MIN_RETRY_BACKOFF: Duration = Duration::from_millis(0);
 const MAX_RETRY_BACKOFF: Duration = Duration::from_millis(50);
-const MAX_RETRY_ATTEMPTS: u32 = 100;
+const MAX_RETRY_ATTEMPTS: u32 = 50;
 
 impl RetryHelper {
     /// Creates a new RetryHelper, and starts a timer tracking the transaction

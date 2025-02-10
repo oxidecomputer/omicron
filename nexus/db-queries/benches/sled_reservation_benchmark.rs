@@ -21,12 +21,15 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pub_test_utils::TestDatabase;
 use nexus_db_queries::db::DataStore;
+use nexus_test_utils::sql::process_rows;
+use nexus_test_utils::sql::Row;
 use nexus_types::external_api::params;
 use omicron_common::api::external;
 use omicron_test_utils::dev;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use slog::Logger;
+use std::collections::HashMap;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -174,6 +177,89 @@ impl TestHarness {
         Self { db }
     }
 
+    // Emit internal CockroachDb information about contention
+    async fn print_contention(&self) {
+        let client = self.db.crdb().connect().await.expect("Failed to connect to db");
+
+        let queries = [
+            "SELECT table_name, index_name, num_contention_events::TEXT FROM crdb_internal.cluster_contended_indexes",
+            "SELECT table_name,num_contention_events::TEXT FROM crdb_internal.cluster_contended_tables",
+            "WITH c AS (SELECT DISTINCT ON (table_id, index_id) table_id, index_id, num_contention_events AS events, cumulative_contention_time AS time FROM crdb_internal.cluster_contention_events) SELECT i.descriptor_name, i.index_name, c.events::TEXT, c.time::TEXT FROM crdb_internal.table_indexes AS i JOIN c ON i.descriptor_id = c.table_id AND i.index_id = c.index_id ORDER BY c.time DESC LIMIT 10;"
+        ];
+
+        // Used for padding: get a map of "column name" -> "max value length".
+        let max_lengths_by_column = |rows: &Vec<Row>| {
+            let mut lengths = HashMap::new();
+            for row in rows {
+                for column in &row.values {
+                    let value_len = column.value().unwrap().as_str().len();
+                    let name_len = column.name().len();
+                    let len = std::cmp::max(value_len, name_len);
+
+                    lengths.entry(column.name().to_string())
+                        .and_modify(|entry| {
+                            if len > *entry {
+                                *entry = len;
+                            }
+                        })
+                        .or_insert(len);
+                }
+            }
+            lengths
+        };
+
+        for sql in queries {
+            let rows = client.query(sql, &[])
+                .await.expect("Failed to query contended tables");
+            let rows = process_rows(&rows);
+            if rows.is_empty() {
+                continue;
+            }
+
+            println!("{sql}");
+            let max_lengths = max_lengths_by_column(&rows);
+            let mut header = true;
+
+            for row in rows {
+                if header {
+                    let mut total_len = 0;
+                    for column in &row.values {
+                        let width = max_lengths.get(column.name()).unwrap();
+                        print!(" {:width$} ", column.name());
+                        print!("|");
+                        total_len += width + 3;
+                    }
+                    println!("");
+                    println!("{:-<total_len$}", "");
+                }
+                header = false;
+
+                for column in row.values {
+                    let width = max_lengths.get(column.name()).unwrap();
+                    let value = column.value().unwrap().as_str();
+                    print!(" {value:width$} ");
+                    print!("|");
+                }
+                println!("");
+            }
+            println!("");
+        }
+
+        client.cleanup().await.expect("Failed to clean up db connection");
+    }
+
+    fn opctx(&self) -> Arc<OpContext> {
+        Arc::new(
+            self.db
+                .opctx()
+                .child(std::collections::BTreeMap::new())
+        )
+    }
+
+    fn db(&self) -> Arc<DataStore> {
+        self.db.datastore().clone()
+    }
+
     async fn terminate(self) {
         self.db.terminate().await;
     }
@@ -192,8 +278,10 @@ struct TestParams {
     tasks: usize,
 }
 
-const VMM_PARAMS: [usize; 3] = [1, 8, 16];
-const TASK_PARAMS: [usize; 3] = [1, 2, 3];
+// const VMM_PARAMS: [usize; 3] = [1, 8, 16];
+// const TASK_PARAMS: [usize; 3] = [1, 2, 3];
+const VMM_PARAMS: [usize; 1] = [4];
+const TASK_PARAMS: [usize; 1] = [4];
 
 /////////////////////////////////////////////////////////////////
 //
@@ -269,13 +357,11 @@ async fn reserve_vmms_and_return_average_duration(
 }
 
 async fn bench_reservation(
-    log: &Logger,
+    opctx: Arc<OpContext>,
+    db: Arc<DataStore>,
     params: TestParams,
     iterations: u64,
 ) -> Duration {
-    const SLED_COUNT: usize = 4;
-    let harness = TestHarness::new(&log, SLED_COUNT).await;
-
     let duration = {
         let mut total_duration = Duration::ZERO;
 
@@ -292,12 +378,10 @@ async fn bench_reservation(
 
             for _ in 0..params.tasks {
                 set.spawn({
-                    let opctx = harness
-                        .db
-                        .opctx()
-                        .child(std::collections::BTreeMap::new());
-                    let db = harness.db.datastore().clone();
+                    let opctx = opctx.clone();
+                    let db = db.clone();
                     let barrier = barrier.clone();
+
                     async move {
                         // Wait until all tasks are ready...
                         barrier.wait().await;
@@ -347,7 +431,6 @@ async fn bench_reservation(
         total_duration
     };
 
-    harness.terminate().await;
     duration
 }
 
@@ -384,16 +467,37 @@ fn sled_reservation_benchmark(c: &mut Criterion) {
             let params = TestParams { vmms, tasks };
             let name = format!("{vmms}-vmms-{tasks}-tasks");
 
+            // Initialize the harness before calling "bench_function" so
+            // that the "warm-up" calls to "bench_function" are actually useful
+            // at warming up the database.
+            //
+            // This mitigates any database-caching issues like "loading schema
+            // on boot", or "connection pooling", as the pool stays the same
+            // between calls to the benchmark function.
+            let log = logctx.log.clone();
+            let harness = rt.block_on(async move {
+                const SLED_COUNT: usize = 4;
+                TestHarness::new(&log, SLED_COUNT).await
+            });
+
+            // Actually invoke the benchmark.
             group.bench_function(&name, |b| {
                 b.to_async(&rt).iter_custom(|iters| {
-                    let log = logctx.log.clone();
-                    async move { bench_reservation(&log, params, iters).await }
+                    let opctx = harness.opctx();
+                    let db = harness.db();
+                    async move { bench_reservation(opctx, db, params, iters).await }
                 })
+            });
+
+            // Clean-up the harness; we'll use a new database between
+            // varations in parameters.
+            rt.block_on(async move {
+                harness.print_contention().await;
+                harness.terminate().await;
             });
         }
     }
     group.finish();
-
     logctx.cleanup_successful();
 }
 

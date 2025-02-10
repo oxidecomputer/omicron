@@ -103,6 +103,7 @@ pub mod background;
 pub mod db;
 pub mod http_testing;
 pub mod resource_helpers;
+pub mod sql;
 
 pub const SLED_AGENT_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";
 pub const SLED_AGENT2_UUID: &str = "039be560-54cc-49e3-88df-1a29dadbf913";
