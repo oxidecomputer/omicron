@@ -230,11 +230,11 @@ versions = [
 
 [fields.kind]
 type = "string"
-description = "The kind or class of the data link (examples: physical-device, gateway, switch-port)"
+description = "The kind or class of the data link, such as whether it is a physical or virtual device"
 
 [fields.model]
 type = "string"
-description = "Model type of the link, indicating what implements or enables the link itself (examples: TF2, tfportd, STM32H753, opte)"
+description = "Model type of the link, indicating what implements the link. For example, this might be the model number of a physical NIC, or the name of the software component that implements a virtual link."
 
 [fields.network]
 type = "string"

@@ -2,28 +2,28 @@ format_version = 1
 
 [target]
 name = "management_network_data_link"
-description = "A network data link related to a management gateway virtual local area network (vlan)"
+description = "A data link on the management network"
 authz_scope = "fleet"
 
 versions = [
-    { version = 1, fields = [ "kind", "link_name", "model", "network", "rack_id", "sled_id", "sled_model", "sled_revision", "sled_serial", "switch_id", "switch_model", "switch_revision", "switch_serial", "switch_slot", "asic_fab", "asic_lot", "asic_wafer", "asic_wafer_loc_x", "asic_wafer_loc_y" ] },
+    { version = 1, fields = [ "kind", "model", "network", "link_name", "rack_id", "sled_id", "sled_model", "sled_revision", "sled_serial", "switch_id", "switch_model", "switch_revision", "switch_serial", "switch_slot" ] },
 ]
 
 [fields.kind]
 type = "string"
-description = "The kind or class of the data link (examples: physical-device, gateway, switch-port)"
-
-[fields.link_name]
-type = "string"
-description = "Name of the data link in the system (examples: oxControlService1, opte0, tfport0)"
+description = "The kind or class of the data link, such as whether it is a physical or virtual device"
 
 [fields.model]
 type = "string"
-description = "Model type of the link, indicating what implements or enables the link itself (examples: TF2, tfportd, STM32H753, opte)"
+description = "Model type of the link, indicating what implements the link. For example, this might be the model number of a physical NIC, or the name of the software component that implements a virtual link."
 
 [fields.network]
 type = "string"
 description = "Network type of the link (examples: primary-data, management, vpc)"
+
+[fields.link_name]
+type = "string"
+description = "The name of the link as it appears to Oxide-internal software"
 
 [fields.rack_id]
 type = "uuid"
@@ -64,26 +64,6 @@ description = "Serial number of the switch the link is on"
 [fields.switch_slot]
 type = "u16"
 description = "Slot number of the switch the link is on"
-
-[fields.asic_fab]
-type = "string"
-description = "Fabrication plant identifier of the switch the link is on"
-
-[fields.asic_lot]
-type = "string"
-description = "Lot identifier of the switch the link is on"
-
-[fields.asic_wafer]
-type = "u8"
-description = "Wafer identifier of the switch the link is on"
-
-[fields.asic_wafer_loc_x]
-type = "i16"
-description = "X-coordinate wafer location of the switch the link is on"
-
-[fields.asic_wafer_loc_y]
-type = "i16"
-description = "Y-coordinate wafer location of the switch the link is on"
 
 [[metrics]]
 name = "bytes_sent"
