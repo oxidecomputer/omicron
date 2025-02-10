@@ -15,7 +15,6 @@ use crate::system::SledBuilder;
 use crate::system::SystemDescription;
 use nexus_inventory::CollectionBuilderRng;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
@@ -491,9 +490,7 @@ impl ExampleSystemBuilder {
             system
                 .sled_set_omicron_zones(
                     *sled_id,
-                    zones.to_omicron_zones_config(
-                        BlueprintZoneFilter::ShouldBeRunning,
-                    ),
+                    zones.clone().into_running_omicron_zones_config(),
                 )
                 .unwrap();
         }
@@ -547,7 +544,7 @@ impl ZoneCount {
 mod tests {
     use chrono::{NaiveDateTime, TimeZone, Utc};
     use nexus_sled_agent_shared::inventory::{OmicronZoneConfig, ZoneKind};
-    use nexus_types::deployment::BlueprintZoneConfig;
+    use nexus_types::deployment::{BlueprintZoneConfig, BlueprintZoneFilter};
     use omicron_test_utils::dev::test_setup_log;
 
     use super::*;

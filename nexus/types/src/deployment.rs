@@ -19,6 +19,7 @@ use crate::inventory::Collection;
 pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
 use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
+use blueprint_display::BpDatasetsTableSchema;
 use daft::Diffable;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
@@ -353,6 +354,21 @@ impl BpTableData for &BlueprintPhysicalDisksConfig {
     }
 }
 
+impl BpTableData for BlueprintDatasetsConfig {
+    fn bp_generation(&self) -> BpGeneration {
+        BpGeneration::Value(self.generation)
+    }
+
+    fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
+        // We want to sort by (kind, pool)
+        let mut datasets: Vec<_> = self.datasets.iter().collect();
+        datasets.sort_unstable_by_key(|d| (&d.kind, &d.pool));
+        datasets.into_iter().map(move |dataset| {
+            BpTableRow::from_strings(state, dataset.as_strings())
+        })
+    }
+}
+
 impl BpTableData for BlueprintZonesConfig {
     fn bp_generation(&self) -> BpGeneration {
         BpGeneration::Value(self.generation)
@@ -478,12 +494,36 @@ impl BlueprintDisplay<'_> {
 
 impl fmt::Display for BlueprintDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let b = self.blueprint;
-        writeln!(f, "blueprint  {}", b.id)?;
+        // Unpack the blueprint so any future field changes require updating
+        // this method to update the display.
+        let Blueprint {
+            id,
+            sled_state,
+            blueprint_zones,
+            blueprint_disks,
+            blueprint_datasets,
+            parent_blueprint_id,
+            // These two cockroachdb_* fields are handled by
+            // `make_cockroachdb_table()`, called below.
+            cockroachdb_fingerprint: _,
+            cockroachdb_setting_preserve_downgrade: _,
+            // Handled by `make_clickhouse_cluster_config_tables()`, called
+            // below.
+            clickhouse_cluster_config: _,
+            // These five fields are handled by `make_metadata_table()`, called
+            // below.
+            internal_dns_version: _,
+            external_dns_version: _,
+            time_created: _,
+            creator: _,
+            comment: _,
+        } = self.blueprint;
+
+        writeln!(f, "blueprint  {}", id)?;
         writeln!(
             f,
             "parent:    {}",
-            b.parent_blueprint_id
+            parent_blueprint_id
                 .map(|u| u.to_string())
                 .unwrap_or_else(|| String::from("<none>"))
         )?;
@@ -495,7 +535,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
         // those physical disks.
         //
         // If there are corresponding zones, print those as well.
-        for (sled_id, disks) in &self.blueprint.blueprint_disks {
+        for (sled_id, disks) in blueprint_disks {
             // Construct the disks subtable
             let disks_table = BpTable::new(
                 BpPhysicalDisksTableSchema {},
@@ -504,50 +544,85 @@ impl fmt::Display for BlueprintDisplay<'_> {
             );
 
             // Look up the sled state
-            let sled_state = self
-                .blueprint
-                .sled_state
+            let sled_state = sled_state
                 .get(sled_id)
                 .map(|state| state.to_string())
                 .unwrap_or_else(|| {
                     "blueprint error: unknown sled state".to_string()
                 });
+            writeln!(
+                f,
+                "\n  sled: {sled_id} ({sled_state})\n\n{disks_table}\n",
+            )?;
+
+            // Construct the datasets subtable
+            if let Some(datasets) = blueprint_datasets.get(sled_id) {
+                let datasets_tab = BpTable::new(
+                    BpDatasetsTableSchema {},
+                    datasets.bp_generation(),
+                    datasets.rows(BpDiffState::Unchanged).collect(),
+                );
+                writeln!(f, "{datasets_tab}\n")?;
+            }
 
             // Construct the zones subtable
-            match self.blueprint.blueprint_zones.get(sled_id) {
-                Some(zones) => {
-                    let zones_tab = BpTable::new(
-                        BpOmicronZonesTableSchema {},
-                        zones.bp_generation(),
-                        zones.rows(BpDiffState::Unchanged).collect(),
-                    );
-                    writeln!(
-                        f,
-                        "\n  sled: {sled_id} ({sled_state})\n\n{disks_table}\n\n{zones_tab}\n"
-                    )?;
-                }
-                None => writeln!(
-                    f,
-                    "\n  sled: {sled_id} ({sled_state})\n\n{disks_table}\n"
-                )?,
+            if let Some(zones) = blueprint_zones.get(sled_id) {
+                let zones_tab = BpTable::new(
+                    BpOmicronZonesTableSchema {},
+                    zones.bp_generation(),
+                    zones.rows(BpDiffState::Unchanged).collect(),
+                );
+                writeln!(f, "{zones_tab}\n")?;
             }
             seen_sleds.insert(sled_id);
         }
 
-        // Now create and display a table of zones on sleds that don't
-        // yet have physical disks.
+        // Now create and display a table of zones/datasets on sleds that don't
+        // have physical disks.
         //
         // This should basically be impossible, so we warn if it occurs.
-        for (sled_id, zones) in &self.blueprint.blueprint_zones {
+        for (sled_id, zones) in blueprint_zones {
             if !seen_sleds.contains(sled_id) && !zones.zones.is_empty() {
                 writeln!(
                     f,
-                    "\n!{sled_id}\n{}\n{}\n\n",
+                    "!{sled_id}\n{}\n{}\n\n",
                     "WARNING: Zones exist without physical disks!",
                     BpTable::new(
                         BpOmicronZonesTableSchema {},
                         zones.bp_generation(),
                         zones.rows(BpDiffState::Unchanged).collect()
+                    )
+                )?;
+                if let Some(datasets) = blueprint_datasets.get(sled_id) {
+                    writeln!(
+                        f,
+                        "{}\n{}\n",
+                        "WARNING: Datasets also exist without physical disks!",
+                        BpTable::new(
+                            BpDatasetsTableSchema {},
+                            datasets.bp_generation(),
+                            datasets.rows(BpDiffState::Unchanged).collect(),
+                        )
+                    )?;
+                }
+                seen_sleds.insert(sled_id);
+            }
+        }
+
+        // Finally, create and display a table of datasets on sleds that don't
+        // have disks or zones.
+        //
+        // This should basically be impossible, so we warn if it occurs.
+        for (sled_id, datasets) in blueprint_datasets {
+            if !seen_sleds.contains(sled_id) && !datasets.datasets.is_empty() {
+                writeln!(
+                    f,
+                    "!{sled_id}\n{}\n{}\n\n",
+                    "WARNING: Datasets exist without physical disks or zones!",
+                    BpTable::new(
+                        BpDatasetsTableSchema {},
+                        datasets.bp_generation(),
+                        datasets.rows(BpDiffState::Unchanged).collect(),
                     )
                 )?;
             }
@@ -585,33 +660,30 @@ pub struct BlueprintZonesConfig {
     pub zones: IdMap<BlueprintZoneConfig>,
 }
 
-impl From<BlueprintZonesConfig> for OmicronZonesConfig {
-    fn from(config: BlueprintZonesConfig) -> Self {
-        Self {
-            generation: config.generation,
-            zones: config.zones.into_iter().map(From::from).collect(),
-        }
-    }
-}
-
 impl BlueprintZonesConfig {
-    /// Converts self to an [`OmicronZonesConfig`], applying the provided
-    /// [`BlueprintZoneFilter`].
+    /// Converts self into [`OmicronZonesConfig`].
     ///
-    /// The filter controls which zones should be exported into the resulting
-    /// [`OmicronZonesConfig`].
-    pub fn to_omicron_zones_config(
-        &self,
-        filter: BlueprintZoneFilter,
-    ) -> OmicronZonesConfig {
+    /// [`OmicronZonesConfig`] is a format of the zones configuration that can
+    /// be passed to Sled Agents for deployment.
+    ///
+    /// This function is effectively a `From` implementation, but
+    /// is named slightly more explicitly, as it filters the blueprint
+    /// configuration to only consider zones that should be running.
+    pub fn into_running_omicron_zones_config(self) -> OmicronZonesConfig {
         OmicronZonesConfig {
             generation: self.generation,
             zones: self
                 .zones
-                .iter()
-                .filter(|z| z.disposition.matches(filter))
-                .cloned()
-                .map(OmicronZoneConfig::from)
+                .into_iter()
+                .filter_map(|z| {
+                    if z.disposition
+                        .matches(BlueprintZoneFilter::ShouldBeRunning)
+                    {
+                        Some(z.into())
+                    } else {
+                        None
+                    }
+                })
                 .collect(),
         }
     }
@@ -945,6 +1017,33 @@ pub struct BlueprintPhysicalDisksConfig {
     pub disks: IdMap<BlueprintPhysicalDiskConfig>,
 }
 
+impl BlueprintPhysicalDisksConfig {
+    /// Converts self into [`OmicronPhysicalDisksConfig`].
+    ///
+    /// [`OmicronPhysicalDisksConfig`] is a format of the disks configuration
+    /// that can be passed to Sled Agents for deployment.
+    ///
+    /// This function is effectively a `From` implementation, but
+    /// is named slightly more explicitly, as it filters the blueprint
+    /// configuration to only consider in-service disks.
+    pub fn into_in_service_disks(self) -> OmicronPhysicalDisksConfig {
+        OmicronPhysicalDisksConfig {
+            generation: self.generation,
+            disks: self
+                .disks
+                .into_iter()
+                .filter_map(|d| {
+                    if d.disposition.matches(DiskFilter::InService) {
+                        Some(d.into())
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+        }
+    }
+}
+
 impl IdMappable for BlueprintPhysicalDiskConfig {
     type Id = PhysicalDiskUuid;
 
@@ -973,19 +1072,6 @@ impl From<BlueprintPhysicalDiskConfig> for OmicronPhysicalDiskConfig {
     }
 }
 
-impl From<BlueprintPhysicalDisksConfig> for OmicronPhysicalDisksConfig {
-    fn from(value: BlueprintPhysicalDisksConfig) -> Self {
-        OmicronPhysicalDisksConfig {
-            generation: value.generation,
-            disks: value
-                .disks
-                .into_iter()
-                .map(OmicronPhysicalDiskConfig::from)
-                .collect(),
-        }
-    }
-}
-
 /// Information about Omicron datasets as recorded in a blueprint.
 #[derive(
     Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
@@ -996,7 +1082,7 @@ pub struct BlueprintDatasetsConfig {
 }
 
 impl BlueprintDatasetsConfig {
-    /// Converts [Self] into [DatasetsConfig].
+    /// Converts self into [DatasetsConfig].
     ///
     /// [DatasetsConfig] is a format of the dataset configuration that can be
     /// passed to Sled Agents for deployment.
