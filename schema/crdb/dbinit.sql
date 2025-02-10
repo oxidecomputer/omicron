@@ -4836,12 +4836,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_secret (
     -- N.B. that this will always be equal to `time_created` for secrets, as
     -- they are never modified once created.
     time_modified TIMESTAMPTZ NOT NULL,
-    time_deleted TIMESTAMPTZ
+    time_deleted TIMESTAMPTZ,
     -- UUID of the webhook receiver (foreign key into
     -- `omicron.public.webhook_rx`)
     rx_id UUID NOT NULL,
     -- Secret value.
-    secret STRING(512) NOT NULL,
+    secret STRING(512) NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS lookup_webhook_secrets_by_rx
