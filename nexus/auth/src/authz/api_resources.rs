@@ -1048,7 +1048,6 @@ authz_resource! {
     primary_key = { uuid_kind = WebhookReceiverKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
-
 }
 
 authz_resource! {

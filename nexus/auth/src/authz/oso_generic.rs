@@ -160,6 +160,8 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         Sled::init(),
         TufRepo::init(),
         TufArtifact::init(),
+        WebhookReceiver::init(),
+        WebhookSecret::init(),
         Zpool::init(),
         Service::init(),
         UserBuiltin::init(),
