@@ -5,6 +5,9 @@
 //! Manages TUF artifacts stored on this sled. The implementation is a
 //! content-addressed object store.
 //!
+//! See docs/tuf-artifact-replication.adoc for an architectural overview of the
+//! TUF artifact replication system.
+//!
 //! GET operations are handled by the "Repo Depot" API, which is deliberately
 //! a separate Dropshot service from the rest of Sled Agent. This is to avoid a
 //! circular logical dependency, because we expect Sled Agent to fetch artifacts

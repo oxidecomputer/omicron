@@ -4,6 +4,9 @@
 
 //! TUF Repo Depot: Artifact replication across sleds (RFD 424)
 //!
+//! See docs/tuf-artifact-replication.adoc for an architectural overview of the
+//! TUF artifact replication system.
+//!
 //! `Nexus::updates_put_repository` accepts a TUF repository, which Nexus
 //! unpacks, verifies, and reasons about the artifacts in. This uses temporary
 //! storage within the Nexus zone. After that, the update artifacts have to
