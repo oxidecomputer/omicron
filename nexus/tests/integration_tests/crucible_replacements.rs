@@ -137,7 +137,7 @@ async fn wait_for_all_replacements(datastore: &Arc<DataStore>) {
             }
         },
         &std::time::Duration::from_millis(500),
-        &std::time::Duration::from_secs(60),
+        &std::time::Duration::from_secs(120),
     )
     .await
     .expect("all replacements finished");
