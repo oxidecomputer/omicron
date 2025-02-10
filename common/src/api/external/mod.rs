@@ -1046,6 +1046,7 @@ pub enum ResourceType {
     Oximeter,
     MetricProducer,
     RoleBuiltin,
+    TargetRelease,
     TufRepo,
     TufArtifact,
     SwitchPort,

@@ -45,6 +45,7 @@ mod ssh_keys;
 mod subnet_allocation;
 mod support_bundles;
 mod switch_port;
+mod target_release;
 mod unauthorized;
 mod unauthorized_coverage;
 mod updates;

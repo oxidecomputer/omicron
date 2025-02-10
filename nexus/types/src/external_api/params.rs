@@ -2165,11 +2165,17 @@ pub struct UpdatesPutRepositoryParams {
 }
 
 /// Parameters for GET requests for `/v1/system/update/repository`.
-
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 pub struct UpdatesGetRepositoryParams {
     /// The version to get.
     pub system_version: SemverVersion,
+}
+
+/// Parameters for POST requests to `/v1/system/update/target-release`.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct SetTargetReleaseParams {
+    /// Source of the requested target release.
+    pub release_source: super::views::TargetReleaseSource,
 }
 
 // Probes

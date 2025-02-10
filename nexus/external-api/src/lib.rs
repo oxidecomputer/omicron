@@ -2662,6 +2662,39 @@ pub trait NexusExternalApi {
         path_params: Path<params::UpdatesGetRepositoryParams>,
     ) -> Result<HttpResponseOk<TufRepoGetResponse>, HttpError>;
 
+    /// Get the current target release of the rack's system software
+    ///
+    /// This may not correpond to the actual software running on the rack
+    /// at the time of request; it is instead the release that the rack
+    /// reconfigurator should be moving towards as a goal state. After some
+    /// number of planning and execution phases, the software running on the
+    /// rack should eventually correspond to the release described here.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/update/target-release",
+        tags = ["system/update"],
+        unpublished = true,
+    }]
+    async fn system_update_get_target_release(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<views::TargetRelease>, HttpError>;
+
+    /// Set the current target release of the rack's system software
+    ///
+    /// The rack reconfigurator will treat the software specified here as
+    /// a goal state for the rack's software, and attempt to asynchronously
+    /// update to that release.
+    #[endpoint {
+        method = POST,
+        path = "/v1/system/update/target-release",
+        tags = ["system/update"],
+        unpublished = true,
+    }]
+    async fn system_update_set_target_release(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<params::SetTargetReleaseParams>,
+    ) -> Result<HttpResponseCreated<views::TargetRelease>, HttpError>;
+
     // Silo users
 
     /// List users

@@ -6,6 +6,7 @@ use super::{impl_enum_type, Generation};
 use crate::schema::target_release;
 use crate::SemverVersion;
 use chrono::{DateTime, Utc};
+use nexus_types::external_api::views;
 
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
@@ -64,5 +65,24 @@ impl TargetRelease {
             release_source,
             system_version,
         )
+    }
+
+    pub fn into_external(self) -> views::TargetRelease {
+        views::TargetRelease {
+            generation: (&self.generation.0).into(),
+            time_requested: self.time_requested,
+            release_source: match self.release_source {
+                TargetReleaseSource::InstallDataset => {
+                    views::TargetReleaseSource::InstallDataset
+                }
+                TargetReleaseSource::SystemVersion => {
+                    views::TargetReleaseSource::SystemVersion(
+                        self.system_version
+                            .expect("CONSTRAINT system_version_for_release")
+                            .into(),
+                    )
+                }
+            },
+        }
     }
 }
