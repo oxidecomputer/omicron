@@ -172,9 +172,10 @@ impl<'a> Planner<'a> {
 
             // Decommission any disks that need it
             //
-            // This call must live here so that we don't try to decommission disks
-            // on an already decommissioned sled. That violates editor invariants,
-            // as the planner should not be trying to edit sleds that have been pulled.
+            // This call must live here so that we don't try to decommission
+            // disks on an already decommissioned sled. That violates editor
+            // invariants, as the planner should not be trying to edit sleds
+            // that have been decommissioned.
             self.blueprint.sled_decommision_disks(sled_id, sled_details)?;
 
             // Check 2: have all this sled's zones been expunged? It's possible
@@ -1869,8 +1870,8 @@ mod test {
 
         let mut builder = input.into_builder();
 
-        // Let's expunge a disk. It's disposition should change to `Expunged`
-        // but it's state should remain active.
+        // Let's expunge a disk. Its disposition should change to `Expunged`
+        // but its state should remain active.
         let expunged_disk_id = {
             let expunged_disk = &mut builder
                 .sleds_mut()
@@ -2351,8 +2352,9 @@ mod test {
         println!("1 -> 2: marked non-provisionable {nonprovisionable_sled_id}");
         let expunged_sled_id = {
             let (sled_id, _) = sleds_iter.next().expect("no sleds");
-            // We need to call builde.expunge, but can't while iterating; we defer
-            // that work to after we're done with `sleds_iter`.
+            // We need to call builder.expunge_sled(), but can't while
+            // iterating; we defer that work until after we're done with
+            // `sleds_iter`.
             *sled_id
         };
         println!("1 -> 2: expunged {expunged_sled_id}");

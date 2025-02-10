@@ -283,7 +283,7 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Decommissions all expunged disks.
+    /// Decommissions a single expunged disk.
     pub async fn physical_disk_decommission(
         &self,
         opctx: &OpContext,

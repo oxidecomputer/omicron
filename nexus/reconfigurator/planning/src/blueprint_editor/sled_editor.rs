@@ -537,7 +537,8 @@ impl ActiveSledEditor {
         &mut self,
         disk_id: &PhysicalDiskUuid,
     ) -> Result<(), SledEditError> {
-        self.disks.decommission(disk_id)?;
+        // TODO: report decommissioning
+        let _ = self.disks.decommission(disk_id)?;
         Ok(())
     }
 

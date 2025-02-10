@@ -230,6 +230,8 @@ fn result_to_step_result(
     }
 }
 
+/// We explicitly don't continue with execution after this step. It only talks
+/// to CRDB, and if nexus cannot talk to CRDB, we probably shouldn't continue.
 fn register_zone_external_networking_step<'a>(
     registrar: &ComponentRegistrar<'_, 'a>,
     opctx: &'a OpContext,
@@ -245,13 +247,14 @@ fn register_zone_external_networking_step<'a>(
             ExecutionStepId::Ensure,
             "Ensure external networking resources",
             move |_cx| async move {
-                let res = datastore
+                datastore
                     .blueprint_ensure_external_networking_resources(
                         &opctx, blueprint,
                     )
                     .await
-                    .map_err(|err| anyhow!(err));
-                result_to_step_result(res)
+                    .map_err(|err| anyhow!(err))?;
+
+                StepSuccess::new(()).into()
             },
         )
         .register();

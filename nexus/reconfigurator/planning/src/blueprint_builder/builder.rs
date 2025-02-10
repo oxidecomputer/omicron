@@ -1139,7 +1139,9 @@ impl<'a> BlueprintBuilder<'a> {
                     .decommission_disk(&disk.disk_id)
                     .map_err(|err| Error::SledEditError { sled_id, err })?;
             }
-        } else {
+        } else if let Some(parent_bp_config) =
+            self.parent_blueprint.blueprint_disks.get(&sled_id)
+        {
             // The sled is not expunged. We have to see if the inventory
             // reflects the parent blueprint disk generation. If it does
             // then we mark any expunged disks decommissioned.
@@ -1148,11 +1150,6 @@ impl<'a> BlueprintBuilder<'a> {
                 .sled_agents
                 .get(&sled_id)
                 .map(|sa| sa.omicron_physical_disks_generation);
-            let parent_bp_generation = self
-                .parent_blueprint
-                .blueprint_disks
-                .get(&sled_id)
-                .map(|config| config.generation);
 
             // We can only check if the current generation has been seen.
             // If a new generation has been seen then this blueprint is already
@@ -1163,19 +1160,9 @@ impl<'a> BlueprintBuilder<'a> {
             // delay decommissioning, but we are limited by the total number of
             // disks per sled that this will reasonably happen to in multiple
             // passes.
-            if seen_generation.is_some()
-                && seen_generation == parent_bp_generation
-            {
+            if seen_generation == Some(parent_bp_config.generation) {
                 // Do we have any expunged disks in the parent blueprint?
-                //
-                // SAFETY: We check that we have a parent blueprint in the
-                // condition immediately above.
-                let config = self
-                    .parent_blueprint
-                    .blueprint_disks
-                    .get(&sled_id)
-                    .unwrap();
-                for disk in &config.disks {
+                for disk in &parent_bp_config.disks {
                     if disk.disposition
                         == BlueprintPhysicalDiskDisposition::Expunged
                     {
@@ -2231,12 +2218,12 @@ pub mod test {
         // The example blueprint should have internal NTP zones on all the
         // existing sleds, plus Crucible zones on all pools.  So if we ensure
         // all these zones exist, we should see no change.
-        for (sled_id, sled_details) in
-            example.input.all_sleds(SledFilter::Commissioned)
+        for (sled_id, sled_resources) in
+            example.input.all_sled_resources(SledFilter::Commissioned)
         {
-            builder.sled_add_disks(sled_id, &sled_details.resources).unwrap();
+            builder.sled_add_disks(sled_id, sled_resources).unwrap();
             builder.sled_ensure_zone_ntp(sled_id).unwrap();
-            for pool_id in sled_details.resources.zpools.keys() {
+            for pool_id in sled_resources.zpools.keys() {
                 builder.sled_ensure_zone_crucible(sled_id, *pool_id).unwrap();
             }
         }
@@ -2267,13 +2254,13 @@ pub mod test {
             "test_basic",
         )
         .expect("failed to create builder");
-        let new_sled_details =
-            &input.sled_lookup(SledFilter::Commissioned, new_sled_id).unwrap();
-        builder
-            .sled_add_disks(new_sled_id, &new_sled_details.resources)
-            .unwrap();
+        let new_sled_resources = &input
+            .sled_lookup(SledFilter::Commissioned, new_sled_id)
+            .unwrap()
+            .resources;
+        builder.sled_add_disks(new_sled_id, &new_sled_resources).unwrap();
         builder.sled_ensure_zone_ntp(new_sled_id).unwrap();
-        for pool_id in new_sled_details.resources.zpools.keys() {
+        for pool_id in new_sled_resources.zpools.keys() {
             builder.sled_ensure_zone_crucible(new_sled_id, *pool_id).unwrap();
         }
         builder.sled_ensure_zone_datasets(new_sled_id).unwrap();
@@ -2297,11 +2284,7 @@ pub mod test {
 
         // All zones' underlay addresses ought to be on the sled's subnet.
         for z in &new_sled_zones.zones {
-            assert!(new_sled_details
-                .resources
-                .subnet
-                .net()
-                .contains(z.underlay_ip()));
+            assert!(new_sled_resources.subnet.net().contains(z.underlay_ip()));
         }
 
         // Check for an NTP zone.  Its sockaddr's IP should also be on the
@@ -2315,8 +2298,7 @@ pub mod test {
                 ..
             } = &z
             {
-                assert!(new_sled_details
-                    .resources
+                assert!(new_sled_resources
                     .subnet
                     .net()
                     .contains(*address.ip()));
@@ -2342,11 +2324,7 @@ pub mod test {
                     } = &z
                     {
                         let ip = address.ip();
-                        assert!(new_sled_details
-                            .resources
-                            .subnet
-                            .net()
-                            .contains(*ip));
+                        assert!(new_sled_resources.subnet.net().contains(*ip));
                         Some(dataset.pool_name.clone())
                     } else {
                         None
@@ -2355,8 +2333,7 @@ pub mod test {
                 .collect::<BTreeSet<_>>();
         assert_eq!(
             crucible_pool_names,
-            new_sled_details
-                .resources
+            new_sled_resources
                 .zpools
                 .keys()
                 .map(|id| { ZpoolName::new_external(*id) })
@@ -2541,12 +2518,11 @@ pub mod test {
                 );
             }
 
-            for (sled_id, sled_details) in
-                input.all_sleds(SledFilter::InService)
+            for (sled_id, sled_resources) in
+                input.all_sled_resources(SledFilter::InService)
             {
-                let edits = builder
-                    .sled_add_disks(sled_id, &sled_details.resources)
-                    .unwrap();
+                let edits =
+                    builder.sled_add_disks(sled_id, &sled_resources).unwrap();
                 assert_eq!(
                     edits.disks,
                     EditCounts {

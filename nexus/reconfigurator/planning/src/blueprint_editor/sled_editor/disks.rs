@@ -97,14 +97,29 @@ impl DisksEditor {
             Entry::Occupied(mut slot) => {
                 let existing = slot.get();
                 if *existing != disk {
-                    if existing.disposition
-                        == BlueprintPhysicalDiskDisposition::Expunged
-                        && disk.disposition
-                            == BlueprintPhysicalDiskDisposition::InService
-                    {
-                        return Err(DisksEditError::AddExpungedDisk {
-                            id: disk.id,
-                        });
+                    match (existing.disposition, disk.disposition) {
+                        // All other combinations are valid
+                        (
+                            BlueprintPhysicalDiskDisposition::Expunged,
+                            BlueprintPhysicalDiskDisposition::InService,
+                        ) => {
+                            return Err(DisksEditError::AddExpungedDisk {
+                                id: disk.id,
+                            });
+                        }
+                        // All following combinations are valid
+                        (
+                            BlueprintPhysicalDiskDisposition::Expunged,
+                            BlueprintPhysicalDiskDisposition::Expunged,
+                        ) => (),
+                        (
+                            BlueprintPhysicalDiskDisposition::InService,
+                            BlueprintPhysicalDiskDisposition::InService,
+                        ) => (),
+                        (
+                            BlueprintPhysicalDiskDisposition::InService,
+                            BlueprintPhysicalDiskDisposition::Expunged,
+                        ) => (),
                     }
 
                     slot.insert(disk);
@@ -142,27 +157,35 @@ impl DisksEditor {
     pub fn decommission(
         &mut self,
         disk_id: &PhysicalDiskUuid,
-    ) -> Result<(), DisksEditError> {
+    ) -> Result<bool, DisksEditError> {
         let config = self.disks.get_mut(disk_id).ok_or_else(|| {
             DisksEditError::DecommissionNonexistentDisk { id: *disk_id }
         })?;
 
-        match config.state {
-            PhysicalDiskState::Active => {
-                if config.disposition
-                    != BlueprintPhysicalDiskDisposition::Expunged
-                {
-                    return Err(DisksEditError::DecommissionInServiceDisk {
-                        id: *disk_id,
-                    });
-                }
+        match (config.state, config.disposition) {
+            (
+                PhysicalDiskState::Active,
+                BlueprintPhysicalDiskDisposition::InService,
+            ) => {
+                return Err(DisksEditError::DecommissionInServiceDisk {
+                    id: *disk_id,
+                });
+            }
+            (
+                PhysicalDiskState::Active,
+                BlueprintPhysicalDiskDisposition::Expunged,
+            ) => {
                 config.state = PhysicalDiskState::Decommissioned;
                 self.counts.decommissioned += 1;
+                let did_decommission = true;
+                Ok(did_decommission)
             }
-            PhysicalDiskState::Decommissioned => {}
+            // We've already decommissioned this disk
+            (PhysicalDiskState::Decommissioned, _) => {
+                let did_decommision = false;
+                Ok(did_decommision)
+            }
         }
-
-        Ok(())
     }
 }
 

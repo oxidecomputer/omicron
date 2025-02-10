@@ -118,9 +118,14 @@ pub(crate) async fn decommission_expunged_disks(
 
             match datastore.physical_disk_decommission(&opctx, disk_id).await {
                 Err(error) => {
-                    warn!(log, "failed to decommission expunged disk";
-                "error" => #%error);
-                    Some(anyhow!(error))
+                    warn!(
+                        log,
+                        "failed to decommission expunged disk";
+                        "error" => #%error
+                    );
+                    Some(anyhow!(error).context(format!(
+                        "failed to decommission: disk_id = {disk_id}",
+                    )))
                 }
                 Ok(()) => {
                     info!(log, "successfully decommissioned expunged disk");
