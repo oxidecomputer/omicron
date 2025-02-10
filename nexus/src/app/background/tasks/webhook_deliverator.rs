@@ -1,7 +1,9 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
+use crate::app::authz;
 use crate::app::background::BackgroundTask;
+use crate::app::db::lookup::LookupPath;
 use chrono::{TimeDelta, Utc};
 use futures::future::BoxFuture;
 use http::HeaderName;
@@ -155,7 +157,21 @@ impl WebhookDeliverator {
                 let deliverator = self.clone();
                 tasks.spawn(async move {
                     let rx_id = rx.id();
-                    let status = deliverator.rx_deliver(&opctx, rx).await;
+                    let status = match deliverator.rx_deliver(&opctx, rx).await {
+                        Ok(status) => status,
+                        Err(e) => {
+                            slog::error!(
+                                &opctx.log,
+                                "failed to deliver webhook events to a receiver";
+                                "rx_id" => ?rx_id,
+                                "error" => %e,
+                            );
+                            WebhookRxDeliveryStatus {
+                                error: Some(e.to_string()),
+                                ..Default::default()
+                            }
+                        }
+                    };
                     (rx_id, status)
                 });
             }
@@ -176,8 +192,23 @@ impl WebhookDeliverator {
         &self,
         opctx: &OpContext,
         rx: WebhookReceiver,
-    ) -> WebhookRxDeliveryStatus {
-        let deliveries = match self
+    ) -> Result<WebhookRxDeliveryStatus, anyhow::Error> {
+        // First, look up the receiver's secrets and any deliveries for that
+        // receiver. If any of these lookups fail, bail out, as we can't
+        // meaningfully deliver any events to a receiver if we don't know what
+        // they are or how to sign them.
+        let (authz_rx,) = LookupPath::new(opctx, &self.datastore)
+            .webhook_receiver_id(rx.id())
+            .lookup_for(authz::Action::ListChildren)
+            .await
+            .map_err(|e| anyhow::anyhow!("could not look up receiver: {e}"))?;
+        let secrets = self
+            .datastore
+            .webhook_rx_secret_list(opctx, &authz_rx)
+            .await
+            .map_err(|e| anyhow::anyhow!("could not list secrets: {e}"))?;
+        anyhow::ensure!(!secrets.is_empty(), "receiver has no secrets");
+        let deliveries = self
             .datastore
             .webhook_rx_delivery_list_ready(
                 &opctx,
@@ -185,21 +216,12 @@ impl WebhookDeliverator {
                 self.lease_timeout,
             )
             .await
-        {
-            Err(e) => {
-                const MSG: &str = "failed to list ready deliveries";
-                slog::error!(
-                    &opctx.log,
-                    "{MSG}";
-                    "error" => %e,
-                );
-                return WebhookRxDeliveryStatus {
-                    error: Some(format!("{MSG}: {e}")),
-                    ..Default::default()
-                };
-            }
-            Ok(deliveries) => deliveries,
-        };
+            .map_err(|e| {
+                anyhow::anyhow!("could not list ready deliveries: {e}")
+            })?;
+
+        // Okay, we got everything we need in order to deliver events to this
+        // receiver. Now, let's actually...do that.
         let mut delivery_status = WebhookRxDeliveryStatus {
             ready: deliveries.len(),
             ..Default::default()
@@ -225,7 +247,7 @@ impl WebhookDeliverator {
                         "event_id" => %delivery.event_id,
                         "event_class" => %event_class,
                         "delivery_id" => %delivery_id,
-                        "attempt" => attempt,
+                        "attempt" => ?attempt,
                     );
                 }
                 Ok(DeliveryAttemptState::AlreadyCompleted(time)) => {
@@ -436,7 +458,7 @@ impl WebhookDeliverator {
 
         // TODO(eliza): if no events were sent, do a probe...
 
-        delivery_status
+        Ok(delivery_status)
     }
 }
 
