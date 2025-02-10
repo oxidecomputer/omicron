@@ -123,7 +123,10 @@ async fn replacements_left(datastore: &DataStore) -> i64 {
     region_replacement_left + region_snapshot_replacement_left
 }
 
-async fn wait_for_all_replacements(datastore: &Arc<DataStore>) {
+async fn wait_for_all_replacements(
+    datastore: &Arc<DataStore>,
+    internal_client: &ClientTestContext,
+) {
     wait_for_condition(
         || {
             let datastore = datastore.clone();
@@ -132,12 +135,14 @@ async fn wait_for_all_replacements(datastore: &Arc<DataStore>) {
                 if replacements_left(&datastore).await == 0 {
                     Ok(())
                 } else {
+                    run_replacement_tasks_to_completion(internal_client).await;
+
                     Err(CondCheckError::<()>::NotYet)
                 }
             }
         },
-        &std::time::Duration::from_millis(500),
-        &std::time::Duration::from_secs(120),
+        &std::time::Duration::from_millis(50),
+        &std::time::Duration::from_secs(30),
     )
     .await
     .expect("all replacements finished");
@@ -2005,7 +2010,7 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
     // Now, run all replacement tasks to completion
     let internal_client = &cptestctx.internal_client;
     run_replacement_tasks_to_completion(&internal_client).await;
-    wait_for_all_replacements(&datastore).await;
+    wait_for_all_replacements(&datastore, &internal_client).await;
 
     // Validate all regions are on non-expunged physical disks
     assert!(datastore
@@ -2114,7 +2119,7 @@ async fn test_region_replacement_triple_sanity(
         run_replacement_tasks_to_completion(&internal_client).await;
     }
 
-    wait_for_all_replacements(&datastore).await;
+    wait_for_all_replacements(&datastore, &internal_client).await;
 
     let disk_allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -2266,7 +2271,7 @@ async fn test_region_replacement_triple_sanity_2(
     // Now, run all replacement tasks to completion
     run_replacement_tasks_to_completion(&internal_client).await;
 
-    wait_for_all_replacements(&datastore).await;
+    wait_for_all_replacements(&datastore, &internal_client).await;
 
     let disk_allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -2373,7 +2378,7 @@ async fn test_replacement_sanity_twice(cptestctx: &ControlPlaneTestContext) {
         run_replacement_tasks_to_completion(&internal_client).await;
     }
 
-    wait_for_all_replacements(&datastore).await;
+    wait_for_all_replacements(&datastore, &internal_client).await;
 
     // Now, do it again, except this time specifying the read-only regions
 
@@ -2400,7 +2405,7 @@ async fn test_replacement_sanity_twice(cptestctx: &ControlPlaneTestContext) {
         run_replacement_tasks_to_completion(&internal_client).await;
     }
 
-    wait_for_all_replacements(&datastore).await;
+    wait_for_all_replacements(&datastore, &internal_client).await;
 }
 
 /// Tests that expunging a sled with read-only regions will lead to them being
@@ -2484,7 +2489,7 @@ async fn test_read_only_replacement_sanity(
         run_replacement_tasks_to_completion(&internal_client).await;
     }
 
-    wait_for_all_replacements(&datastore).await;
+    wait_for_all_replacements(&datastore, &internal_client).await;
 
     // Now expunge a sled with read-only regions on it.
 
@@ -2519,7 +2524,7 @@ async fn test_read_only_replacement_sanity(
 
     run_replacement_tasks_to_completion(&internal_client).await;
 
-    wait_for_all_replacements(&datastore).await;
+    wait_for_all_replacements(&datastore, &internal_client).await;
 
     // Validate all regions are on non-expunged physical disks
     assert!(datastore

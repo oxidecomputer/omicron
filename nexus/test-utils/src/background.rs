@@ -402,8 +402,8 @@ pub async fn run_replacement_tasks_to_completion(
                 Ok(())
             }
         },
-        &Duration::from_millis(500),
-        &Duration::from_secs(60),
+        &Duration::from_millis(50),
+        &Duration::from_secs(30),
     )
     .await
     .unwrap();
