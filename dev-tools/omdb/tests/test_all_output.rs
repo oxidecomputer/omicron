@@ -105,6 +105,9 @@ async fn test_omdb_usage_errors() {
         &["oxql", "--help"],
         // Mispelled argument
         &["oxql", "--summarizes"],
+        &["reconfigurator"],
+        &["reconfigurator", "export"],
+        &["reconfigurator", "archive"],
     ];
 
     for args in invocations {
@@ -135,7 +138,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
 
     let tmpdir = camino_tempfile::tempdir()
         .expect("failed to create temporary directory");
-    let tmppath = tmpdir.path().join("reconfigurator-save.out");
+    let tmppath = tmpdir.path().join("reconfigurator-export.out");
     let initial_blueprint_id = cptestctx.initial_blueprint_id.to_string();
 
     // Get the CockroachDB metadata from the blueprint so we can redact it
@@ -160,7 +163,6 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &["db", "dns", "diff", "external", "2"],
         &["db", "dns", "names", "external", "2"],
         &["db", "instances"],
-        &["db", "reconfigurator-save", tmppath.as_str()],
         &["db", "sleds"],
         &["db", "sleds", "-F", "discretionary"],
         &["mgs", "inventory"],
@@ -199,6 +201,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
             &initial_blueprint_id,
             "current-target",
         ],
+        &["reconfigurator", "export", tmppath.as_str()],
         // We can't easily test the sled agent output because that's only
         // provided by a real sled agent, which is not available in the
         // ControlPlaneTestContext.
