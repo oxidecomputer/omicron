@@ -1,0 +1,120 @@
+format_version = 1
+
+[target]
+name = "management_network_data_link"
+description = "A data link on the management network"
+authz_scope = "fleet"
+
+versions = [
+    { version = 1, fields = [ "kind", "model", "network", "link_name", "rack_id", "sled_id", "sled_model", "sled_revision", "sled_serial", "switch_id", "switch_model", "switch_revision", "switch_serial", "switch_slot" ] },
+]
+
+[fields.kind]
+type = "string"
+description = "The kind or class of the data link, such as whether it is a physical or virtual device"
+
+[fields.model]
+type = "string"
+description = "Model type of the link, indicating what implements the link. For example, this might be the model number of a physical NIC, or the name of the software component that implements a virtual link."
+
+[fields.network]
+type = "string"
+description = "Network type of the link (examples: primary-data, management, vpc)"
+
+[fields.link_name]
+type = "string"
+description = "The name of the link as it appears to Oxide-internal software"
+
+[fields.rack_id]
+type = "uuid"
+description = "ID for the link's rack"
+
+[fields.sled_id]
+type = "uuid"
+description = "ID for the link's sled"
+
+[fields.sled_model]
+type = "string"
+description = "Model number of the link's sled"
+
+[fields.sled_revision]
+type = "u32"
+description = "Revision number of the sled"
+
+[fields.sled_serial]
+type = "string"
+description = "Serial number of the sled"
+
+[fields.switch_id]
+type = "uuid"
+description = "ID of the switch the link is on"
+
+[fields.switch_model]
+type = "string"
+description = "Model number of the switch the link is on"
+
+[fields.switch_revision]
+type = "u32"
+description = "Revision number of the switch the link is on"
+
+[fields.switch_serial]
+type = "string"
+description = "Serial number of the switch the link is on"
+
+[fields.switch_slot]
+type = "u16"
+description = "Slot number of the switch the link is on"
+
+[[metrics]]
+name = "bytes_sent"
+description = "Number of bytes sent on the link"
+units = "bytes"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "bytes_received"
+description = "Number of bytes received on the link"
+units = "bytes"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "packets_sent"
+description = "Number of packets sent on the link"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "packets_received"
+description = "Number of packets received on the link"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "errors_sent"
+description = "Number of errors encountered when sending on the link"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "errors_received"
+description = "Number of errors encountered when receiving on the link"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]

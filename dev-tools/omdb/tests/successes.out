@@ -1357,6 +1357,12 @@ parent:    <none>
     nexus-tests   nexus-test-model   nexus-test-disk-19
 
 
+    datasets at generation 2:
+    ---------------------------------------------------------------------------
+    dataset name   dataset id   disposition   quota   reservation   compression
+    ---------------------------------------------------------------------------
+
+
     omicron zones at generation 2:
     -----------------------------------------------
     zone type   zone id   disposition   underlay IP
@@ -1380,6 +1386,18 @@ parent:    <none>
     nexus-tests   nexus-test-model   nexus-test-disk-7
     nexus-tests   nexus-test-model   nexus-test-disk-8
     nexus-tests   nexus-test-model   nexus-test-disk-9
+
+
+    datasets at generation 2:
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    dataset name                                                                                                   dataset id                             disposition   quota   reservation   compression
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_clickhouse_..........<REDACTED_UUID>...........        ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_cockroachdb_..........<REDACTED_UUID>...........       ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_crucible_pantry_..........<REDACTED_UUID>...........   ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
 
 
     omicron zones at generation 2:
@@ -1435,6 +1453,12 @@ parent:    <none>
     nexus-tests   nexus-test-model   nexus-test-disk-19
 
 
+    datasets at generation 2:
+    ---------------------------------------------------------------------------
+    dataset name   dataset id   disposition   quota   reservation   compression
+    ---------------------------------------------------------------------------
+
+
     omicron zones at generation 2:
     -----------------------------------------------
     zone type   zone id   disposition   underlay IP
@@ -1458,6 +1482,18 @@ parent:    <none>
     nexus-tests   nexus-test-model   nexus-test-disk-7
     nexus-tests   nexus-test-model   nexus-test-disk-8
     nexus-tests   nexus-test-model   nexus-test-disk-9
+
+
+    datasets at generation 2:
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    dataset name                                                                                                   dataset id                             disposition   quota   reservation   compression
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_clickhouse_..........<REDACTED_UUID>...........        ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_cockroachdb_..........<REDACTED_UUID>...........       ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_crucible_pantry_..........<REDACTED_UUID>...........   ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
 
 
     omicron zones at generation 2:
