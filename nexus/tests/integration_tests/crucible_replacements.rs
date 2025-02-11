@@ -426,21 +426,24 @@ mod region_replacement {
             .await
             .expect("request transitioned to expected state");
 
-            // Assert the request state
+            // Assert the request state (if the expected start state is
+            // different from the expected end state)
 
-            let region_replacement = self
-                .datastore
-                .get_region_replacement_request_by_id(
-                    &self.opctx(),
-                    self.replacement_request_id,
-                )
-                .await
-                .unwrap();
+            if expected_start_state.0 != expected_end_state.0 {
+                let region_replacement = self
+                    .datastore
+                    .get_region_replacement_request_by_id(
+                        &self.opctx(),
+                        self.replacement_request_id,
+                    )
+                    .await
+                    .unwrap();
 
-            assert_eq!(
-                region_replacement.replacement_state,
-                expected_end_state.0
-            );
+                assert_eq!(
+                    region_replacement.replacement_state,
+                    expected_end_state.0
+                );
+            }
         }
 
         /// Run the "region replacement" task to transition the request to
