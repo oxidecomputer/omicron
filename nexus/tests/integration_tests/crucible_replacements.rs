@@ -135,6 +135,8 @@ async fn wait_for_all_replacements(
                 if replacements_left(&datastore).await == 0 {
                     Ok(())
                 } else {
+                    // While there are replacements left, continually activate
+                    // the background tasks that will push them forward.
                     run_replacement_tasks_to_completion(internal_client).await;
 
                     Err(CondCheckError::<()>::NotYet)
