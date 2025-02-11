@@ -649,14 +649,19 @@ impl ArtifactReplication {
             })
             .await
             .ok();
-        // Check if the sled told us the generation was invalid and bail early.
-        if let Err(sled_agent_client::Error::ErrorResponse(response)) = response
-        {
-            if response.status() == StatusCode::CONFLICT
-                && response.error_code.as_deref() == Some("CONFIG_GENERATION")
-            {
-                return ControlFlow::Break(());
+        // Bail without sending a list request if the config put failed.
+        if let Err(err) = response {
+            // If the request failed because the sled told us the
+            // generation was invalid, return `Break`.
+            if let sled_agent_client::Error::ErrorResponse(response) = err {
+                if response.status() == StatusCode::CONFLICT
+                    && response.error_code.as_deref()
+                        == Some("CONFIG_GENERATION")
+                {
+                    return ControlFlow::Break(());
+                }
             }
+            return ControlFlow::Continue(BTreeMap::new());
         }
 
         let response = sled.client.artifact_list().await;
