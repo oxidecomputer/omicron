@@ -14,7 +14,7 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl as _;
 use diesel::insert_into;
 use diesel::prelude::*;
-use omicron_common::api::external::{CreateResult, Error, LookupResult};
+use omicron_common::api::external::{CreateResult, LookupResult};
 
 impl DataStore {
     /// Fetch the current target release, i.e., the row with the largest
@@ -26,26 +26,16 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        // We should be able to fetch the row with the largest generation
-        // with one nested query, but diesel makes it unreasonably difficult
-        // to express:
-        //   SELECT * FROM target_release
-        //   WHERE generation IN (SELECT MAX(generation) FROM target_release);
-        // So we use two queries. This is okay because rows are immutable.
-        let latest: i64 = if let Some(generation) = dsl::target_release
-            .select(diesel::dsl::max(dsl::generation))
-            .first_async::<Option<i64>>(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-        {
-            generation
-        } else {
-            return Err(Error::internal_error(
-                "there should always be at least one target_release row",
-            ));
-        };
+        // Fetch the row in the `target_release` table with the largest
+        // generation number. The subquery accesses the same table, so we
+        // have to make an alias to not confuse diesel.
+        let target_release2 = diesel::alias!(
+            crate::db::schema::target_release as target_release_2
+        );
         dsl::target_release
-            .filter(dsl::generation.eq(latest))
+            .filter(dsl::generation.nullable().eq_any(target_release2.select(
+                diesel::dsl::max(target_release2.field(dsl::generation)),
+            )))
             .select(TargetRelease::as_select())
             .first_async(&*conn)
             .await
