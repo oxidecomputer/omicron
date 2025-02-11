@@ -5760,7 +5760,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
                 }
             }
         },
-        &std::time::Duration::from_millis(500),
+        &std::time::Duration::from_millis(50),
         &std::time::Duration::from_secs(60),
     )
     .await

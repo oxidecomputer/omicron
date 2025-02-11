@@ -61,7 +61,7 @@ pub async fn wait_background_task(
                 Err(CondCheckError::<()>::NotYet)
             }
         },
-        &Duration::from_millis(500),
+        &Duration::from_millis(50),
         &Duration::from_secs(60),
     )
     .await
@@ -150,7 +150,7 @@ pub async fn activate_background_task(
                 Err(CondCheckError::<()>::NotYet)
             }
         },
-        &Duration::from_millis(500),
+        &Duration::from_millis(50),
         &Duration::from_secs(60),
     )
     .await
@@ -403,7 +403,7 @@ pub async fn run_replacement_tasks_to_completion(
             }
         },
         &Duration::from_millis(50),
-        &Duration::from_secs(30),
+        &Duration::from_secs(60),
     )
     .await
     .unwrap();

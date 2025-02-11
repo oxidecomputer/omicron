@@ -144,7 +144,7 @@ async fn wait_for_all_replacements(
             }
         },
         &std::time::Duration::from_millis(50),
-        &std::time::Duration::from_secs(30),
+        &std::time::Duration::from_secs(60),
     )
     .await
     .expect("all replacements finished");
@@ -420,7 +420,7 @@ mod region_replacement {
                         }
                     }
                 },
-                &std::time::Duration::from_millis(500),
+                &std::time::Duration::from_millis(50),
                 &std::time::Duration::from_secs(60),
             )
             .await
@@ -517,7 +517,7 @@ mod region_replacement {
                         }
                     }
                 },
-                &std::time::Duration::from_millis(500),
+                &std::time::Duration::from_millis(50),
                 &std::time::Duration::from_secs(10),
             )
             .await
@@ -841,7 +841,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
                 }
             }
         },
-        &std::time::Duration::from_millis(500),
+        &std::time::Duration::from_millis(50),
         &std::time::Duration::from_secs(20),
     )
     .await
@@ -891,7 +891,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
                 }
             }
         },
-        &std::time::Duration::from_millis(500),
+        &std::time::Duration::from_millis(50),
         &std::time::Duration::from_secs(20),
     )
     .await
@@ -976,7 +976,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
                 }
             }
         },
-        &std::time::Duration::from_millis(500),
+        &std::time::Duration::from_millis(50),
         &std::time::Duration::from_secs(60),
     )
     .await
@@ -1073,7 +1073,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
                 }
             }
         },
-        &std::time::Duration::from_millis(500),
+        &std::time::Duration::from_millis(50),
         &std::time::Duration::from_secs(60),
     )
     .await
@@ -1135,7 +1135,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
                 }
             }
         },
-        &std::time::Duration::from_millis(500),
+        &std::time::Duration::from_millis(50),
         &std::time::Duration::from_secs(60),
     )
     .await
@@ -1185,7 +1185,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
                 }
             }
         },
-        &std::time::Duration::from_millis(500),
+        &std::time::Duration::from_millis(50),
         &std::time::Duration::from_secs(10),
     )
     .await
@@ -1434,7 +1434,7 @@ mod region_snapshot_replacement {
                         }
                     }
                 },
-                &std::time::Duration::from_millis(500),
+                &std::time::Duration::from_millis(50),
                 &std::time::Duration::from_secs(10),
             )
             .await
@@ -1515,7 +1515,7 @@ mod region_snapshot_replacement {
                         }
                     }
                 },
-                &std::time::Duration::from_millis(500),
+                &std::time::Duration::from_millis(50),
                 &std::time::Duration::from_secs(60),
             )
             .await
@@ -2122,9 +2122,8 @@ async fn test_region_replacement_triple_sanity(
 
         // Now, run all replacement tasks to completion
         run_replacement_tasks_to_completion(&internal_client).await;
+        wait_for_all_replacements(&datastore, &internal_client).await;
     }
-
-    wait_for_all_replacements(&datastore, &internal_client).await;
 
     let disk_allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -2247,6 +2246,7 @@ async fn test_region_replacement_triple_sanity_2(
 
     // Now, run all replacement tasks to completion
     run_replacement_tasks_to_completion(&internal_client).await;
+    wait_for_all_replacements(&datastore, &internal_client).await;
 
     // Expunge the last physical disk
     {
@@ -2275,7 +2275,6 @@ async fn test_region_replacement_triple_sanity_2(
 
     // Now, run all replacement tasks to completion
     run_replacement_tasks_to_completion(&internal_client).await;
-
     wait_for_all_replacements(&datastore, &internal_client).await;
 
     let disk_allocated_regions =
@@ -2381,9 +2380,8 @@ async fn test_replacement_sanity_twice(cptestctx: &ControlPlaneTestContext) {
             .unwrap();
 
         run_replacement_tasks_to_completion(&internal_client).await;
+        wait_for_all_replacements(&datastore, &internal_client).await;
     }
-
-    wait_for_all_replacements(&datastore, &internal_client).await;
 
     // Now, do it again, except this time specifying the read-only regions
 
@@ -2408,9 +2406,8 @@ async fn test_replacement_sanity_twice(cptestctx: &ControlPlaneTestContext) {
             .unwrap();
 
         run_replacement_tasks_to_completion(&internal_client).await;
+        wait_for_all_replacements(&datastore, &internal_client).await;
     }
-
-    wait_for_all_replacements(&datastore, &internal_client).await;
 }
 
 /// Tests that expunging a sled with read-only regions will lead to them being
@@ -2492,9 +2489,8 @@ async fn test_read_only_replacement_sanity(
             .unwrap();
 
         run_replacement_tasks_to_completion(&internal_client).await;
+        wait_for_all_replacements(&datastore, &internal_client).await;
     }
-
-    wait_for_all_replacements(&datastore, &internal_client).await;
 
     // Now expunge a sled with read-only regions on it.
 
@@ -2528,7 +2524,6 @@ async fn test_read_only_replacement_sanity(
         .unwrap();
 
     run_replacement_tasks_to_completion(&internal_client).await;
-
     wait_for_all_replacements(&datastore, &internal_client).await;
 
     // Validate all regions are on non-expunged physical disks
