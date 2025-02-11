@@ -1322,19 +1322,19 @@ parent:    <none>
   sled: ..........<REDACTED_UUID>........... (active)
 
     physical disks at generation 2:
-    ---------------------------------------------------
-    vendor        model              serial            
-    ---------------------------------------------------
-    nexus-tests   nexus-test-model   nexus-test-disk-10
-    nexus-tests   nexus-test-model   nexus-test-disk-11
-    nexus-tests   nexus-test-model   nexus-test-disk-12
-    nexus-tests   nexus-test-model   nexus-test-disk-13
-    nexus-tests   nexus-test-model   nexus-test-disk-14
-    nexus-tests   nexus-test-model   nexus-test-disk-15
-    nexus-tests   nexus-test-model   nexus-test-disk-16
-    nexus-tests   nexus-test-model   nexus-test-disk-17
-    nexus-tests   nexus-test-model   nexus-test-disk-18
-    nexus-tests   nexus-test-model   nexus-test-disk-19
+    --------------------------------------------------------------------------
+    vendor        model              serial               disposition   state 
+    --------------------------------------------------------------------------
+    nexus-tests   nexus-test-model   nexus-test-disk-10   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-11   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-12   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-13   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-14   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-15   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-16   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-17   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-18   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-19   in service    active
 
 
     datasets at generation 2:
@@ -1353,19 +1353,19 @@ parent:    <none>
   sled: ..........<REDACTED_UUID>........... (active)
 
     physical disks at generation 2:
-    --------------------------------------------------
-    vendor        model              serial           
-    --------------------------------------------------
-    nexus-tests   nexus-test-model   nexus-test-disk-0
-    nexus-tests   nexus-test-model   nexus-test-disk-1
-    nexus-tests   nexus-test-model   nexus-test-disk-2
-    nexus-tests   nexus-test-model   nexus-test-disk-3
-    nexus-tests   nexus-test-model   nexus-test-disk-4
-    nexus-tests   nexus-test-model   nexus-test-disk-5
-    nexus-tests   nexus-test-model   nexus-test-disk-6
-    nexus-tests   nexus-test-model   nexus-test-disk-7
-    nexus-tests   nexus-test-model   nexus-test-disk-8
-    nexus-tests   nexus-test-model   nexus-test-disk-9
+    -------------------------------------------------------------------------
+    vendor        model              serial              disposition   state 
+    -------------------------------------------------------------------------
+    nexus-tests   nexus-test-model   nexus-test-disk-0   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-1   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-2   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-3   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-4   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-5   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-6   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-7   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-8   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-9   in service    active
 
 
     datasets at generation 2:
@@ -1418,19 +1418,19 @@ parent:    <none>
   sled: ..........<REDACTED_UUID>........... (active)
 
     physical disks at generation 2:
-    ---------------------------------------------------
-    vendor        model              serial            
-    ---------------------------------------------------
-    nexus-tests   nexus-test-model   nexus-test-disk-10
-    nexus-tests   nexus-test-model   nexus-test-disk-11
-    nexus-tests   nexus-test-model   nexus-test-disk-12
-    nexus-tests   nexus-test-model   nexus-test-disk-13
-    nexus-tests   nexus-test-model   nexus-test-disk-14
-    nexus-tests   nexus-test-model   nexus-test-disk-15
-    nexus-tests   nexus-test-model   nexus-test-disk-16
-    nexus-tests   nexus-test-model   nexus-test-disk-17
-    nexus-tests   nexus-test-model   nexus-test-disk-18
-    nexus-tests   nexus-test-model   nexus-test-disk-19
+    --------------------------------------------------------------------------
+    vendor        model              serial               disposition   state 
+    --------------------------------------------------------------------------
+    nexus-tests   nexus-test-model   nexus-test-disk-10   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-11   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-12   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-13   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-14   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-15   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-16   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-17   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-18   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-19   in service    active
 
 
     datasets at generation 2:
@@ -1449,19 +1449,19 @@ parent:    <none>
   sled: ..........<REDACTED_UUID>........... (active)
 
     physical disks at generation 2:
-    --------------------------------------------------
-    vendor        model              serial           
-    --------------------------------------------------
-    nexus-tests   nexus-test-model   nexus-test-disk-0
-    nexus-tests   nexus-test-model   nexus-test-disk-1
-    nexus-tests   nexus-test-model   nexus-test-disk-2
-    nexus-tests   nexus-test-model   nexus-test-disk-3
-    nexus-tests   nexus-test-model   nexus-test-disk-4
-    nexus-tests   nexus-test-model   nexus-test-disk-5
-    nexus-tests   nexus-test-model   nexus-test-disk-6
-    nexus-tests   nexus-test-model   nexus-test-disk-7
-    nexus-tests   nexus-test-model   nexus-test-disk-8
-    nexus-tests   nexus-test-model   nexus-test-disk-9
+    -------------------------------------------------------------------------
+    vendor        model              serial              disposition   state 
+    -------------------------------------------------------------------------
+    nexus-tests   nexus-test-model   nexus-test-disk-0   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-1   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-2   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-3   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-4   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-5   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-6   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-7   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-8   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-9   in service    active
 
 
     datasets at generation 2:
@@ -1516,37 +1516,37 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
   sled ..........<REDACTED_UUID>........... (active):
 
     physical disks at generation 2:
-    ---------------------------------------------------
-    vendor        model              serial            
-    ---------------------------------------------------
-    nexus-tests   nexus-test-model   nexus-test-disk-10
-    nexus-tests   nexus-test-model   nexus-test-disk-11
-    nexus-tests   nexus-test-model   nexus-test-disk-12
-    nexus-tests   nexus-test-model   nexus-test-disk-13
-    nexus-tests   nexus-test-model   nexus-test-disk-14
-    nexus-tests   nexus-test-model   nexus-test-disk-15
-    nexus-tests   nexus-test-model   nexus-test-disk-16
-    nexus-tests   nexus-test-model   nexus-test-disk-17
-    nexus-tests   nexus-test-model   nexus-test-disk-18
-    nexus-tests   nexus-test-model   nexus-test-disk-19
+    --------------------------------------------------------------------------
+    vendor        model              serial               disposition   state 
+    --------------------------------------------------------------------------
+    nexus-tests   nexus-test-model   nexus-test-disk-10   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-11   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-12   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-13   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-14   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-15   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-16   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-17   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-18   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-19   in service    active
 
 
   sled ..........<REDACTED_UUID>........... (active):
 
     physical disks at generation 2:
-    --------------------------------------------------
-    vendor        model              serial           
-    --------------------------------------------------
-    nexus-tests   nexus-test-model   nexus-test-disk-0
-    nexus-tests   nexus-test-model   nexus-test-disk-1
-    nexus-tests   nexus-test-model   nexus-test-disk-2
-    nexus-tests   nexus-test-model   nexus-test-disk-3
-    nexus-tests   nexus-test-model   nexus-test-disk-4
-    nexus-tests   nexus-test-model   nexus-test-disk-5
-    nexus-tests   nexus-test-model   nexus-test-disk-6
-    nexus-tests   nexus-test-model   nexus-test-disk-7
-    nexus-tests   nexus-test-model   nexus-test-disk-8
-    nexus-tests   nexus-test-model   nexus-test-disk-9
+    -------------------------------------------------------------------------
+    vendor        model              serial              disposition   state 
+    -------------------------------------------------------------------------
+    nexus-tests   nexus-test-model   nexus-test-disk-0   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-1   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-2   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-3   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-4   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-5   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-6   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-7   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-8   in service    active
+    nexus-tests   nexus-test-model   nexus-test-disk-9   in service    active
 
 
     datasets at generation 2:
