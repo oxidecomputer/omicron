@@ -2677,7 +2677,7 @@ pub trait NexusExternalApi {
     }]
     async fn system_update_get_target_release(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<views::TargetRelease>, HttpError>;
+    ) -> Result<HttpResponseOk<shared::TargetRelease>, HttpError>;
 
     /// Set the current target release of the rack's system software
     ///
@@ -2693,7 +2693,7 @@ pub trait NexusExternalApi {
     async fn system_update_set_target_release(
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<params::SetTargetReleaseParams>,
-    ) -> Result<HttpResponseCreated<views::TargetRelease>, HttpError>;
+    ) -> Result<HttpResponseCreated<shared::TargetRelease>, HttpError>;
 
     // Silo users
 

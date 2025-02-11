@@ -14,7 +14,7 @@ use nexus_test_utils::http_testing::{NexusRequest, RequestBuilder};
 use nexus_test_utils::load_test_config;
 use nexus_test_utils::test_setup_with_config;
 use nexus_types::external_api::params::SetTargetReleaseParams;
-use nexus_types::external_api::views::{TargetRelease, TargetReleaseSource};
+use nexus_types::external_api::shared::{TargetRelease, TargetReleaseSource};
 use omicron_common::api::external::{SemverVersion, TufRepoInsertResponse};
 use omicron_sled_agent::sim;
 

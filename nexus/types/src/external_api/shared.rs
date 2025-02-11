@@ -11,6 +11,7 @@ use anyhow::Context;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::Name;
+use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_uuid_kinds::SupportBundleUuid;
 use parse_display::FromStr;
@@ -509,4 +510,28 @@ impl RelayState {
         )
         .context("json from relay state string")
     }
+}
+
+/// The source of the target release.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TargetReleaseSource {
+    /// Obtain the release artifact from the `install` dataset.
+    InstallDataset,
+
+    /// Use the specified release of the rack's system software.
+    SystemVersion(SemverVersion),
+}
+
+/// View of a system software target release
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct TargetRelease {
+    /// The target-release generation.
+    pub generation: i64,
+
+    /// The time it was or is to be set as the target release.
+    pub time_requested: DateTime<Utc>,
+
+    /// The source of the target release.
+    pub release_source: TargetReleaseSource,
 }

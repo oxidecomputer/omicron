@@ -5734,7 +5734,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn system_update_get_target_release(
         rqctx: RequestContext<ApiContext>,
-    ) -> Result<HttpResponseOk<views::TargetRelease>, HttpError> {
+    ) -> Result<HttpResponseOk<shared::TargetRelease>, HttpError> {
         let apictx = rqctx.context();
         let nexus = &apictx.context.nexus;
         let handler = async {
@@ -5758,7 +5758,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn system_update_set_target_release(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<params::SetTargetReleaseParams>,
-    ) -> Result<HttpResponseCreated<views::TargetRelease>, HttpError> {
+    ) -> Result<HttpResponseCreated<shared::TargetRelease>, HttpError> {
         let apictx = rqctx.context();
         let nexus = &apictx.context.nexus;
         let handler = async {
@@ -5766,10 +5766,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let params = body.into_inner();
             let (release_source, version) = match params.release_source {
-                views::TargetReleaseSource::InstallDataset => {
+                shared::TargetReleaseSource::InstallDataset => {
                     (nexus_db_model::TargetReleaseSource::InstallDataset, None)
                 }
-                views::TargetReleaseSource::SystemVersion(version) => (
+                shared::TargetReleaseSource::SystemVersion(version) => (
                     nexus_db_model::TargetReleaseSource::SystemVersion,
                     Some(version),
                 ),

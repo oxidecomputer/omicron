@@ -2175,7 +2175,7 @@ pub struct UpdatesGetRepositoryParams {
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct SetTargetReleaseParams {
     /// Source of the requested target release.
-    pub release_source: super::views::TargetReleaseSource,
+    pub release_source: shared::TargetReleaseSource,
 }
 
 // Probes
