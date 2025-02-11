@@ -1018,6 +1018,8 @@ mod test {
         // putting a modified config from a newer generation succeeds
         config.generation = store.get_config().unwrap().generation.next();
         store.put_config(config.clone()).unwrap();
+
+        log.cleanup_successful();
     }
 
     #[tokio::test]
