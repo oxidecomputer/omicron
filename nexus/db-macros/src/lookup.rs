@@ -296,7 +296,7 @@ fn generate_struct(config: &Config) -> TokenStream {
 /// resource is not known when generating the parent resource code, so it's
 /// performed by the child instead.
 fn generate_child_selector(config: &Config) -> TokenStream {
-    // If this resource can only be looked up by ID, we don't need to generate
+    // If this resource cannot be looked up by name, we don't need to generate
     // child selectors on the parent resource.
     if !config.lookup_by_name {
         return quote! {};
