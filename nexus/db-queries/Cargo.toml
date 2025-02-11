@@ -101,5 +101,5 @@ subprocess.workspace = true
 term.workspace = true
 
 [[bench]]
-name = "sled_reservation_benchmark"
+name = "sled_reservation"
 harness = false

@@ -484,32 +484,6 @@ impl DataStore {
                         return Ok(old_resource[0].clone());
                     }
 
-                    // Lock all "sled_resource_vmm" rows that we can read from.
-                    //
-                    // This operation is done only for performance reasons:
-                    // - Creating a sled VMM resource reads all existing sled
-                    // VMM resources, to determine space usage.
-                    // - The operation ultimately concludes by INSERT-ing a new
-                    // sled VMM resource row.
-                    // - However, if there are concurrent transactions, this
-                    // final INSERT invalidates the reads performed by other
-                    // ongoing transactions, forcing them to restart.
-                    //
-                    // By locking these rows, we minimize contention, even
-                    // though we're a potentially large number of rows.
-                    let _ = resource_dsl::sled_resource_vmm
-                        .inner_join(
-                            sled_dsl::sled
-                                .on(sled_dsl::id.eq(resource_dsl::sled_id))
-                        )
-                        .filter(sled_dsl::time_deleted.is_null())
-                        .sled_filter(SledFilter::ReservationCreate)
-                        .select(resource_dsl::id)
-                        .for_update()
-                        .get_results_async::<Uuid>(&conn)
-                        .await?;
-
-
                     // If it doesn't already exist, find a sled with enough space
                     // for the resources we're requesting.
                     use db::schema::sled::dsl as sled_dsl;
