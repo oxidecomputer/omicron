@@ -19,4 +19,4 @@ pub mod to_block;
 /// - [`crate::Client::initialize_db_with_version`]
 /// - [`crate::Client::ensure_schema`]
 /// - The `clickhouse-schema-updater` binary in this crate
-pub const OXIMETER_VERSION: u64 = 13;
+pub const OXIMETER_VERSION: u64 = 14;
