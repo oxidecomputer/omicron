@@ -69,26 +69,40 @@ fn signature_verifies(
 ) -> impl Fn(&HttpMockRequest) -> bool {
     let secret_id = secret_id.to_string();
     move |req| {
-        let hdrs = req.headers();
-        let Some(sig_hdr) = hdrs.get_all("x-oxide-signature").iter().filter_map(|hdr| {
-                // Signature header format:
-                // a={algorithm}&id={secret_id}&s={signature}
-                let hdr = dbg!(hdr.to_str()).expect("all x-oxide-signature headers should be valid utf-8");
-                // Strip the expected algorithm part. Note that we only support
-                // SHA256 for now. Panic if this is invalid.
-                let hdr = hdr.strip_prefix("a=sha256").expect("all x-oxide-signature headers should have the SHA256 algorithm");
-                // Strip the leading `&id=` for the ID part, panicking if this
-                // is not found.
-                let hdr = hdr.strip_prefix("&id=").expect("all x-oxide-signature headers should have a secret ID ID part");
-                // If the ID isn't the one we're looking for, we want to keep
-                // going, so just return `None` here
-                let hdr = hdr.strip_prefix(secret_id.as_str())?;
-                // Finally, extract the signature part by stripping the &s=
-                // prefix.
-                hdr.strip_prefix("&s=")
-            }).next() else {
-                panic!("no x-oxide-signature header for secret with ID {secret_id} found");
-            };
+        // N.B. that `HttpMockRequest::headers_vec()`, which returns a
+        // `Vec<(String, String)>` is used here, rather than
+        // `HttpMockRequest::headers()`, which returns a `HeaderMap`. This is
+        // currently necessary because of a `httpmock` bug where, when multiple
+        // values for the same header are present in the request, the map
+        // returned by `headers()` will only contain one of those values. See:
+        // https://github.com/alexliesenfeld/httpmock/issues/119
+        let hdrs = req.headers_vec();
+        let Some(sig_hdr) = hdrs.iter().find_map(|(name, hdr)| {
+            if name != "x-oxide-signature" {
+                return None;
+            }
+            // Signature header format:
+            // a={algorithm}&id={secret_id}&s={signature}
+
+            // Strip the expected algorithm part. Note that we only support
+            // SHA256 for now. Panic if this is invalid.
+            let hdr = dbg!(hdr)
+                .strip_prefix("a=sha256")
+                .expect("all x-oxide-signature headers should be SHA256");
+            // Strip the leading `&id=` for the ID part, panicking if this
+            // is not found.
+            let hdr = hdr.strip_prefix("&id=").expect(
+                "all x-oxide-signature headers should have a secret ID part",
+            );
+            // If the ID isn't the one we're looking for, we want to keep
+            // going, so just return `None` here
+            let hdr = hdr.strip_prefix(secret_id.as_str())?;
+            // Finally, extract the signature part by stripping the &s=
+            // prefix.
+            hdr.strip_prefix("&s=")
+        }) else {
+            panic!("no x-oxide-signature header for secret with ID {secret_id} found");
+        };
         let sig_bytes = hex::decode(sig_hdr)
             .expect("x-oxide-signature signature value should be a hex string");
         let mut mac = Hmac::<Sha256>::new_from_slice(&secret[..])
