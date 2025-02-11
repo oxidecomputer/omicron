@@ -118,14 +118,16 @@ pub async fn create_reservation(
     let vmm_id = PropolisUuid::new_v4();
 
     loop {
-        match db.sled_reservation_create(
-            &opctx,
-            instance_id,
-            vmm_id,
-            small_resource_request(),
-            SledReservationConstraintBuilder::new().build(),
-        )
-        .await {
+        match db
+            .sled_reservation_create(
+                &opctx,
+                instance_id,
+                vmm_id,
+                small_resource_request(),
+                SledReservationConstraintBuilder::new().build(),
+            )
+            .await
+        {
             Ok(_) => break,
             Err(err) => {
                 // This condition is bad - it would result in a user-visible
@@ -140,7 +142,7 @@ pub async fn create_reservation(
                 return Err(err).context("Failed to create reservation");
             }
         }
-    };
+    }
     Ok(vmm_id)
 }
 

@@ -12,6 +12,7 @@ use nexus_db_queries::db::pub_test_utils::TestDatabase;
 use nexus_db_queries::db::DataStore;
 use nexus_test_utils::sql::process_rows;
 use nexus_test_utils::sql::Row;
+use omicron_test_utils::dev;
 use slog::Logger;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -173,3 +174,23 @@ impl TestHarness {
     }
 }
 
+/// Typically we run our database tests using "cargo nextest run",
+/// which triggers the "crdb-seed" binary to create an initialized
+/// database when we boot up.
+///
+/// If we're using "cargo bench", we don't get that guarantee.
+/// Go through the database ensuring process manually.
+pub async fn setup_db(log: &Logger) {
+    print!("setting up seed cockroachdb database... ");
+    let (seed_tar, status) = dev::seed::ensure_seed_tarball_exists(
+        log,
+        dev::seed::should_invalidate_seed(),
+    )
+    .await
+    .expect("Failed to create seed tarball for CRDB");
+    status.log(log, &seed_tar);
+    unsafe {
+        std::env::set_var(dev::CRDB_SEED_TAR_ENV, seed_tar);
+    }
+    println!("OK");
+}

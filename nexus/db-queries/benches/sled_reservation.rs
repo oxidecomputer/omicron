@@ -9,7 +9,6 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use omicron_test_utils::dev;
-use slog::Logger;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -56,7 +55,7 @@ fn average_duration(duration: Duration, divisor: usize) -> Duration {
 
     Duration::from_nanos(
         u64::try_from(duration.as_nanos() / divisor as u128)
-            .expect("This benchmark is taking hundreds of years to run, maybe optimize it")
+            .expect("This benchmark is taking hundreds of years to run, maybe optimize it?")
     )
 }
 
@@ -188,32 +187,11 @@ async fn bench_reservation(
     duration
 }
 
-// Typically we run our database tests using "cargo nextest run",
-// which triggers the "crdb-seed" binary to create an initialized
-// database when we boot up.
-//
-// If we're using "cargo bench", we don't get that guarantee.
-// Go through the database ensuring process manually.
-async fn setup_db(log: &Logger) {
-    print!("setting up seed cockroachdb database... ");
-    let (seed_tar, status) = dev::seed::ensure_seed_tarball_exists(
-        log,
-        dev::seed::should_invalidate_seed(),
-    )
-    .await
-    .expect("Failed to create seed tarball for CRDB");
-    status.log(log, &seed_tar);
-    unsafe {
-        std::env::set_var(dev::CRDB_SEED_TAR_ENV, seed_tar);
-    }
-    println!("OK");
-}
-
 fn sled_reservation_benchmark(c: &mut Criterion) {
     let logctx = dev::test_setup_log("sled-reservation");
 
     let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(setup_db(&logctx.log));
+    rt.block_on(harness::setup_db(&logctx.log));
 
     let mut group = c.benchmark_group("vmm-reservation");
     for vmms in VMM_PARAMS {
