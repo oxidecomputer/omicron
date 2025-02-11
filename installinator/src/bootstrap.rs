@@ -92,7 +92,7 @@ pub(crate) async fn bootstrap_sled(
                         "Sending prefix to ddmd for advertisement";
                         "prefix" => ?prefix,
                     );
-                    ddmd_client.advertise_prefixes(vec![prefix]).await?;
+                    ddmd_client.advertise_prefixes(&vec![prefix]).await?;
                     Ok(())
                 },
                 |err, duration| {

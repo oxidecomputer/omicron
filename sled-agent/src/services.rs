@@ -30,6 +30,7 @@ use crate::bootstrap::early_networking::{
 };
 use crate::bootstrap::BootstrapNetworking;
 use crate::config::SidecarRevision;
+use crate::ddm_reconciler::DdmReconciler;
 use crate::metrics::MetricsRequestQueue;
 use crate::params::{DendriteAsic, OmicronZoneConfigExt, OmicronZoneTypeExt};
 use crate::profile::*;
@@ -93,7 +94,7 @@ use omicron_common::backoff::{
 };
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::{self, Ledger, Ledgerable};
-use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
+use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use once_cell::sync::OnceCell;
 use rand::prelude::SliceRandom;
@@ -109,7 +110,6 @@ use sled_storage::config::MountConfig;
 use sled_storage::dataset::{CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
-use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
@@ -670,8 +670,7 @@ pub struct ServiceManagerInner {
     underlay_vnic_allocator: VnicAllocator<Etherstub>,
     underlay_vnic: EtherstubVnic,
     bootstrap_vnic_allocator: VnicAllocator<Etherstub>,
-    ddmd_client: DdmAdminClient,
-    advertised_prefixes: Mutex<HashSet<Ipv6Subnet<SLED_PREFIX>>>,
+    ddm_reconciler: DdmReconciler,
     sled_info: OnceCell<SledAgentInfo>,
     switch_zone_bootstrap_address: Ipv6Addr,
     storage: StorageHandle,
@@ -724,7 +723,7 @@ impl ServiceManager {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         log: &Logger,
-        ddmd_client: DdmAdminClient,
+        ddm_reconciler: DdmReconciler,
         bootstrap_networking: BootstrapNetworking,
         sled_mode: SledMode,
         time_sync_config: TimeSyncConfig,
@@ -758,8 +757,7 @@ impl ServiceManager {
                     "Bootstrap",
                     bootstrap_networking.bootstrap_etherstub,
                 ),
-                ddmd_client,
-                advertised_prefixes: Mutex::new(HashSet::new()),
+                ddm_reconciler,
                 sled_info: OnceCell::new(),
                 switch_zone_bootstrap_address: bootstrap_networking
                     .switch_zone_bootstrap_ip,
@@ -779,6 +777,10 @@ impl ServiceManager {
     #[cfg(all(test, target_os = "illumos"))]
     fn override_image_directory(&self, path: Utf8PathBuf) {
         self.inner.image_directory_override.set(path).unwrap();
+    }
+
+    pub(crate) fn ddm_reconciler(&self) -> &DdmReconciler {
+        &self.inner.ddm_reconciler
     }
 
     pub fn switch_zone_bootstrap_address(&self) -> Ipv6Addr {
@@ -983,56 +985,6 @@ impl ServiceManager {
     /// Returns the metrics queue for the sled agent.
     fn metrics_queue(&self) -> &MetricsRequestQueue {
         &self.maybe_metrics_queue().expect("Sled agent should have started")
-    }
-
-    // Advertise the /64 prefix of `address`, unless we already have.
-    //
-    // This method only blocks long enough to check our HashSet of
-    // already-advertised prefixes; the actual request to ddmd to advertise the
-    // prefix is spawned onto a background task.
-    async fn advertise_prefix_of_address(&self, address: Ipv6Addr) {
-        let subnet = Ipv6Subnet::new(address);
-        if self.inner.advertised_prefixes.lock().await.insert(subnet) {
-            // Spawn a background task to notify our local ddmd of this
-            // prefix so it can advertise it to other sleds.
-            //
-            // TODO-correctness Spawning a task here is NOT correct; we need to
-            // withdraw our advertisement for this prefix if the zone providing
-            // it is shut down, which we can't do correctly if we've spawned an
-            // infinite retry loop here. This is omicron#7377.
-            tokio::spawn({
-                let prefix = subnet.net();
-                let ddmd_client = self.inner.ddmd_client.clone();
-                async move {
-                    retry_notify(
-                        retry_policy_internal_service_aggressive(),
-                        || async {
-                            info!(
-                                ddmd_client.log(),
-                                "Sending prefix to \
-                                 ddmd for advertisement";
-                                "prefix" => ?prefix,
-                            );
-                            ddmd_client
-                                .advertise_prefixes(vec![prefix])
-                                .await?;
-                            Ok(())
-                        },
-                        |err, duration| {
-                            info!(
-                                ddmd_client.log(),
-                                "Failed to notify ddmd \
-                                 of our prefix (will retry)";
-                                "retry_after" => ?duration,
-                                InlineErrorChain::new(&err),
-                            );
-                        },
-                    )
-                    .await
-                    .expect("retry policy retries until success");
-                }
-            });
-        }
     }
 
     // Check the services intended to run in the zone to determine whether any
@@ -2337,10 +2289,6 @@ impl ServiceManager {
                     err,
                 })?;
 
-                // If this address is in a new ipv6 prefix, notify
-                // maghemite so it can advertise it to other sleds.
-                self.advertise_prefix_of_address(*gz_address).await;
-
                 let internal_dns_config = PropertyGroupBuilder::new("config")
                     .add_property(
                         "http_address",
@@ -3606,6 +3554,20 @@ impl ServiceManager {
         // Add the new zones to our tracked zone set
         existing_zones.extend(
             new_zones.into_iter().map(|zone| (zone.name().to_string(), zone)),
+        );
+
+        // Update our DDM reconciler with the set of all internal DNS global
+        // zone addresses we need maghemite to advertise on our behalf.
+        self.ddm_reconciler().set_internal_dns_subnets(
+            existing_zones
+                .values()
+                .filter_map(|z| match z.config.zone.zone_type {
+                    OmicronZoneType::InternalDns { gz_address, .. } => {
+                        Some(Ipv6Subnet::new(gz_address))
+                    }
+                    _ => None,
+                })
+                .collect(),
         );
 
         // If any zones failed to start, exit with an error
