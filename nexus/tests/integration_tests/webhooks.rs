@@ -294,3 +294,168 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
 
     mock.assert_async().await;
 }
+
+#[nexus_test]
+async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
+    let nexus = cptestctx.server.server_context().nexus.clone();
+    let internal_client = &cptestctx.internal_client;
+
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let bar_event_id = WebhookEventUuid::new_v4();
+    let baz_event_id = WebhookEventUuid::new_v4();
+
+    // Create three webhook receivers
+    let srv_bar = httpmock::MockServer::start_async().await;
+    const BAR_SECRET: &str = "this is bar's secret";
+    let rx_bar = webhook_create(
+        &cptestctx,
+        &params::WebhookCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "webhooked-on-phonics".parse().unwrap(),
+                description: String::from("webhooked on phonics"),
+            },
+            endpoint: srv_bar
+                .url("/webhooks")
+                .parse()
+                .expect("this should be a valid URL"),
+            secrets: vec![BAR_SECRET.to_string()],
+            events: vec!["test.foo.bar".to_string()],
+            disable_probes: false,
+        },
+    )
+    .await;
+    dbg!(&rx_bar);
+    let mock_bar = {
+        let webhook = rx_bar.clone();
+        srv_bar
+            .mock_async(move |when, then| {
+                when.method(POST)
+                    .header("x-oxide-event-class", "test.foo.bar")
+                    .header("x-oxide-event-id", bar_event_id.to_string())
+                    .and(is_valid_for_webhook(&webhook))
+                    .is_true(signature_verifies(
+                        webhook.secrets[0].id,
+                        BAR_SECRET.as_bytes().to_vec(),
+                    ));
+                then.status(200);
+            })
+            .await
+    };
+
+    let srv_baz = httpmock::MockServer::start_async().await;
+    const BAZ_SECRET: &str = "this is baz's secret";
+    let rx_baz = webhook_create(
+        &cptestctx,
+        &params::WebhookCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "webhook-line-and-sinker".parse().unwrap(),
+                description: String::from("webhook, line, and sinker"),
+            },
+            endpoint: srv_baz
+                .url("/webhooks")
+                .parse()
+                .expect("this should be a valid URL"),
+            secrets: vec![BAZ_SECRET.to_string()],
+            events: vec!["test.foo.baz".to_string()],
+            disable_probes: false,
+        },
+    )
+    .await;
+    dbg!(&rx_baz);
+    let mock_baz = {
+        let webhook = rx_baz.clone();
+        srv_baz
+            .mock_async(move |when, then| {
+                when.method(POST)
+                    .header("x-oxide-event-class", "test.foo.baz")
+                    .header("x-oxide-event-id", baz_event_id.to_string())
+                    .and(is_valid_for_webhook(&webhook))
+                    .is_true(signature_verifies(
+                        webhook.secrets[0].id,
+                        BAZ_SECRET.as_bytes().to_vec(),
+                    ));
+                then.status(200);
+            })
+            .await
+    };
+
+    let srv_star = httpmock::MockServer::start_async().await;
+    const STAR_SECRET: &str = "this is star's secret";
+    let rx_star = webhook_create(
+        &cptestctx,
+        &params::WebhookCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "globulated".parse().unwrap(),
+                description: String::from("this one has globs"),
+            },
+            endpoint: srv_star
+                .url("/webhooks")
+                .parse()
+                .expect("this should be a valid URL"),
+            secrets: vec![STAR_SECRET.to_string()],
+            events: vec!["test.foo.*".to_string()],
+            disable_probes: false,
+        },
+    )
+    .await;
+    dbg!(&rx_star);
+    let mock_star = {
+        let webhook = rx_star.clone();
+        srv_star
+            .mock_async(move |when, then| {
+                when.method(POST)
+                    .header_matches(
+                        "x-oxide-event-class",
+                        "test\\.foo\\.ba[rz]",
+                    )
+                    .header_exists("x-oxide-event-id")
+                    .and(is_valid_for_webhook(&webhook))
+                    .is_true(signature_verifies(
+                        webhook.secrets[0].id,
+                        STAR_SECRET.as_bytes().to_vec(),
+                    ));
+                then.status(200);
+            })
+            .await
+    };
+
+    // Publish a test.foo.bar event
+    let event = nexus
+        .webhook_event_publish(
+            &opctx,
+            bar_event_id,
+            WebhookEventClass::TestFooBar,
+            serde_json::json!({"lol": "webhooked on phonics"}),
+        )
+        .await
+        .expect("event should be published successfully");
+    dbg!(event);
+    // Publish a test.foo.baz event
+    let event = nexus
+        .webhook_event_publish(
+            &opctx,
+            baz_event_id,
+            WebhookEventClass::TestFooBaz,
+            serde_json::json!({"lol": "webhook, line, and sinker"}),
+        )
+        .await
+        .expect("event should be published successfully");
+    dbg!(event);
+
+    dbg!(activate_background_task(internal_client, "webhook_dispatcher").await);
+    dbg!(
+        activate_background_task(internal_client, "webhook_deliverator").await
+    );
+
+    // The `test.foo.bar` receiver should have received 1 event.
+    mock_bar.assert_calls_async(1).await;
+
+    // The `test.foo.baz` receiver should have received 1 event.
+    mock_baz.assert_calls_async(1).await;
+
+    // The `test.foo.*` receiver should have received both events.
+    mock_star.assert_calls_async(2).await;
+}
