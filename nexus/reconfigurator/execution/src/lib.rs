@@ -20,6 +20,7 @@ use omicron_physical_disks::DeployDisksDone;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_zones::DeployZonesDone;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -131,7 +132,7 @@ pub async fn realize_blueprint_with_overrides(
         sled_list.clone(),
     );
 
-    register_deploy_zones_step(
+    let deploy_zones_done = register_deploy_zones_step(
         &engine.for_component(ExecutionComponent::OmicronZones),
         &opctx,
         blueprint,
@@ -154,12 +155,13 @@ pub async fn realize_blueprint_with_overrides(
         sled_list.clone(),
     );
 
-    register_cleanup_expunged_zones_step(
+    let deploy_zones_done = register_cleanup_expunged_zones_step(
         &engine.for_component(ExecutionComponent::OmicronZones),
         &opctx,
         datastore,
         resolver,
         blueprint,
+        deploy_zones_done,
     );
 
     register_decommission_sleds_step(
@@ -194,6 +196,7 @@ pub async fn realize_blueprint_with_overrides(
         datastore,
         blueprint,
         nexus_id,
+        deploy_zones_done,
     );
 
     let register_cockroach_output = register_cockroachdb_settings_step(
@@ -354,14 +357,14 @@ fn register_deploy_zones_step<'a>(
     opctx: &'a OpContext,
     blueprint: &'a Blueprint,
     sleds: SharedStepHandle<Arc<BTreeMap<SledUuid, Sled>>>,
-) {
+) -> StepHandle<DeployZonesDone> {
     registrar
         .new_step(
             ExecutionStepId::Ensure,
             "Deploy Omicron zones",
             move |cx| async move {
                 let sleds_by_id = sleds.into_value(cx.token()).await;
-                omicron_zones::deploy_zones(
+                let done = omicron_zones::deploy_zones(
                     &opctx,
                     &sleds_by_id,
                     &blueprint.blueprint_zones,
@@ -369,10 +372,10 @@ fn register_deploy_zones_step<'a>(
                 .await
                 .map_err(merge_anyhow_list)?;
 
-                StepSuccess::new(()).into()
+                StepSuccess::new(done).into()
             },
         )
-        .register();
+        .register()
 }
 
 fn register_plumb_firewall_rules_step<'a>(
@@ -447,25 +450,28 @@ fn register_cleanup_expunged_zones_step<'a>(
     datastore: &'a DataStore,
     resolver: &'a Resolver,
     blueprint: &'a Blueprint,
-) {
+    deploy_zones_done: StepHandle<DeployZonesDone>,
+) -> StepHandle<DeployZonesDone> {
     registrar
         .new_step(
             ExecutionStepId::Remove,
             "Cleanup expunged zones",
-            move |_cx| async move {
+            move |cx| async move {
+                let done = deploy_zones_done.into_value(cx.token()).await;
                 omicron_zones::clean_up_expunged_zones(
                     &opctx,
                     datastore,
                     resolver,
                     blueprint.all_omicron_zones(BlueprintZoneFilter::Expunged),
+                    &done,
                 )
                 .await
                 .map_err(merge_anyhow_list)?;
 
-                StepSuccess::new(()).into()
+                StepSuccess::new(done).into()
             },
         )
-        .register();
+        .register()
 }
 
 fn register_decommission_sleds_step<'a>(
@@ -591,6 +597,7 @@ fn register_reassign_sagas_step<'a>(
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
     nexus_id: OmicronZoneUuid,
+    deploy_zones_done: StepHandle<DeployZonesDone>,
 ) -> StepHandle<ReassignSagaOutput> {
     // For this and subsequent steps, we'll assume that any errors that we
     // encounter do *not* require stopping execution.  We'll just accumulate
@@ -601,13 +608,15 @@ fn register_reassign_sagas_step<'a>(
         .new_step(
             ExecutionStepId::Ensure,
             "Reassign sagas",
-            move |_cx| async move {
+            move |cx| async move {
+                let done = deploy_zones_done.into_value(cx.token()).await;
+
                 // For any expunged Nexus zones, re-assign in-progress sagas to
                 // some other Nexus.  If this fails for some reason, it doesn't
                 // affect anything else.
                 let sec_id = nexus_db_model::SecId::from(nexus_id);
                 let reassigned = sagas::reassign_sagas_from_expunged(
-                    &opctx, datastore, blueprint, sec_id,
+                    &opctx, datastore, blueprint, sec_id, &done,
                 )
                 .await
                 .context("failed to re-assign sagas");
