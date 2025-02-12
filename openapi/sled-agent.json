@@ -19,13 +19,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Map_of_uint",
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "integer",
-                    "format": "uint",
-                    "minimum": 0
-                  }
+                  "$ref": "#/components/schemas/ArtifactListResponse"
                 }
               }
             }
@@ -50,6 +44,14 @@
             "schema": {
               "type": "string",
               "format": "hex string (32 bytes)"
+            }
+          },
+          {
+            "in": "query",
+            "name": "generation",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Generation"
             }
           }
         ],
@@ -82,31 +84,6 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      },
-      "delete": {
-        "operationId": "artifact_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "sha256",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "hex string (32 bytes)"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
       }
     },
     "/artifacts/{sha256}/copy-from-depot": {
@@ -120,6 +97,14 @@
             "schema": {
               "type": "string",
               "format": "hex string (32 bytes)"
+            }
+          },
+          {
+            "in": "query",
+            "name": "generation",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Generation"
             }
           }
         ],
@@ -143,6 +128,53 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/artifacts-config": {
+      "get": {
+        "operationId": "artifact_config_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "artifact_config_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -2139,6 +2171,26 @@
           "start_request"
         ]
       },
+      "ArtifactConfig": {
+        "type": "object",
+        "properties": {
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "hex string (32 bytes)"
+            },
+            "uniqueItems": true
+          },
+          "generation": {
+            "$ref": "#/components/schemas/Generation"
+          }
+        },
+        "required": [
+          "artifacts",
+          "generation"
+        ]
+      },
       "ArtifactCopyFromDepotBody": {
         "type": "object",
         "properties": {
@@ -2152,6 +2204,26 @@
       },
       "ArtifactCopyFromDepotResponse": {
         "type": "object"
+      },
+      "ArtifactListResponse": {
+        "type": "object",
+        "properties": {
+          "generation": {
+            "$ref": "#/components/schemas/Generation"
+          },
+          "list": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            }
+          }
+        },
+        "required": [
+          "generation",
+          "list"
+        ]
       },
       "ArtifactPutResponse": {
         "type": "object",

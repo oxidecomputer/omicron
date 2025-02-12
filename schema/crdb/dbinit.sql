@@ -2397,6 +2397,28 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo_artifact (
     PRIMARY KEY (tuf_repo_id, tuf_artifact_id)
 );
 
+-- Generation number for the current list of TUF artifacts the system wants.
+-- This is incremented whenever a TUF repo is added or removed.
+CREATE TABLE IF NOT EXISTS omicron.public.tuf_generation (
+    -- There should only be one row of this table for the whole DB.
+    -- It's a little goofy, but filter on "singleton = true" before querying
+    -- or applying updates, and you'll access the singleton row.
+    --
+    -- We also add a constraint on this table to ensure it's not possible to
+    -- access the version of this table with "singleton = false".
+    singleton BOOL NOT NULL PRIMARY KEY,
+    -- Generation number owned and incremented by Nexus
+    generation INT NOT NULL,
+
+    CHECK (singleton = true)
+);
+INSERT INTO omicron.public.tuf_generation (
+    singleton,
+    generation
+) VALUES
+    (TRUE, 1)
+ON CONFLICT DO NOTHING;
+
 /*******************************************************************/
 
 /*
@@ -4831,7 +4853,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '123.0.0', NULL)
+    (TRUE, NOW(), NOW(), '124.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
