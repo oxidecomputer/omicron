@@ -450,7 +450,7 @@ mod test {
                 zones: [BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: zone_id,
-                    filesystem_pool: Some(zpool.clone()),
+                    filesystem_pool: zpool.clone(),
                     zone_type: BlueprintZoneType::InternalDns(
                         blueprint_zone_type::InternalDns {
                             dataset: OmicronZoneDataset { pool_name: zpool },
@@ -554,9 +554,7 @@ mod test {
             zones.zones.insert(BlueprintZoneConfig {
                 disposition,
                 id: OmicronZoneUuid::new_v4(),
-                filesystem_pool: Some(ZpoolName::new_external(
-                    ZpoolUuid::new_v4(),
-                )),
+                filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
                 zone_type: BlueprintZoneType::InternalNtp(
                     blueprint_zone_type::InternalNtp {
                         address: "[::1]:0".parse().unwrap(),
@@ -620,7 +618,7 @@ mod test {
         let crdb_zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::Expunged,
             id: OmicronZoneUuid::new_v4(),
-            filesystem_pool: Some(ZpoolName::new_external(ZpoolUuid::new_v4())),
+            filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
             zone_type: BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb {
                     address: "[::1]:0".parse().unwrap(),

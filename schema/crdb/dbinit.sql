@@ -3951,9 +3951,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     -- created yet.
     external_ip_id UUID,
 
-    -- TODO: This is nullable for backwards compatibility.
-    -- Eventually, that nullability should be removed.
-    filesystem_pool UUID,
+    filesystem_pool UUID NOT NULL,
 
     PRIMARY KEY (blueprint_id, id)
 );
@@ -4854,7 +4852,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '124.0.0', NULL)
+    (TRUE, NOW(), NOW(), '125.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

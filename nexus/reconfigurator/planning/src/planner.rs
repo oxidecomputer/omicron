@@ -1883,7 +1883,7 @@ pub(crate) mod test {
         let mut zpool_by_zone_usage = HashMap::new();
         for zones in blueprint1.blueprint_zones.values() {
             for zone in &zones.zones {
-                let pool = zone.filesystem_pool.as_ref().unwrap();
+                let pool = &zone.filesystem_pool;
                 zpool_by_zone_usage
                     .entry(pool.id())
                     .and_modify(|count| *count += 1)
@@ -2024,7 +2024,7 @@ pub(crate) mod test {
             .find_map(|(_, zones_config)| {
                 for zone_config in &zones_config.zones {
                     if zone_config.zone_type.is_ntp() {
-                        return zone_config.filesystem_pool.clone();
+                        return Some(zone_config.filesystem_pool.clone());
                     }
                 }
                 None
@@ -2038,18 +2038,7 @@ pub(crate) mod test {
         for (_, zone_config) in
             blueprint1.all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
         {
-            let mut on_pool = false;
-            if let Some(pool) = &zone_config.filesystem_pool {
-                if pool == &pool_to_expunge {
-                    on_pool = true;
-                }
-            } else if let Some(pool) = zone_config.zone_type.durable_zpool() {
-                if pool == &pool_to_expunge {
-                    on_pool = true;
-                }
-            }
-
-            if on_pool {
+            if pool_to_expunge == zone_config.filesystem_pool {
                 zones_on_pool.insert(zone_config.id);
                 *zone_kinds_on_pool
                     .entry(zone_config.zone_type.kind())

@@ -711,7 +711,7 @@ pub struct BlueprintZoneConfig {
 
     pub id: OmicronZoneUuid,
     /// zpool used for the zone's (transient) root filesystem
-    pub filesystem_pool: Option<ZpoolName>,
+    pub filesystem_pool: ZpoolName,
     pub zone_type: BlueprintZoneType,
 }
 
@@ -733,14 +733,13 @@ impl BlueprintZoneConfig {
     }
 
     /// Returns the dataset used for the the zone's (transient) root filesystem.
-    pub fn filesystem_dataset(&self) -> Option<DatasetName> {
-        let pool_name = self.filesystem_pool.clone()?;
+    pub fn filesystem_dataset(&self) -> DatasetName {
         let name = illumos_utils::zone::zone_name(
             self.zone_type.kind().zone_prefix(),
             Some(self.id),
         );
         let kind = DatasetKind::TransientZone { name };
-        Some(DatasetName::new(pool_name, kind))
+        DatasetName::new(self.filesystem_pool.clone(), kind)
     }
 
     pub fn kind(&self) -> ZoneKind {
@@ -752,7 +751,7 @@ impl From<BlueprintZoneConfig> for OmicronZoneConfig {
     fn from(z: BlueprintZoneConfig) -> Self {
         Self {
             id: z.id,
-            filesystem_pool: z.filesystem_pool,
+            filesystem_pool: Some(z.filesystem_pool),
             zone_type: z.zone_type.into(),
         }
     }

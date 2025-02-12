@@ -1170,7 +1170,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: self.rng.sled_rng(sled_id).next_zone(),
-            filesystem_pool: Some(zpool),
+            filesystem_pool: zpool,
             zone_type,
         };
 
@@ -1221,7 +1221,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
-            filesystem_pool: Some(pool_name),
+            filesystem_pool: pool_name,
             zone_type,
         };
         self.sled_add_zone(sled_id, zone)
@@ -1259,7 +1259,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: self.rng.sled_rng(sled_id).next_zone(),
-            filesystem_pool: Some(filesystem_pool),
+            filesystem_pool,
             zone_type,
         };
 
@@ -1319,7 +1319,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: self.rng.sled_rng(sled_id).next_zone(),
-            filesystem_pool: Some(filesystem_pool),
+            filesystem_pool,
             zone_type,
         };
 
@@ -1428,7 +1428,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: nexus_id,
-            filesystem_pool: Some(filesystem_pool),
+            filesystem_pool,
             zone_type,
         };
         self.sled_add_zone(sled_id, zone)
@@ -1452,7 +1452,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: oximeter_id,
-            filesystem_pool: Some(filesystem_pool),
+            filesystem_pool,
             zone_type,
         };
         self.sled_add_zone(sled_id, zone)
@@ -1475,7 +1475,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: pantry_id,
-            filesystem_pool: Some(filesystem_pool),
+            filesystem_pool,
             zone_type,
         };
         self.sled_add_zone(sled_id, zone)
@@ -1508,7 +1508,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
-            filesystem_pool: Some(filesystem_pool),
+            filesystem_pool,
             zone_type,
         };
         self.sled_add_zone(sled_id, zone)
@@ -1533,7 +1533,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
-            filesystem_pool: Some(pool_name),
+            filesystem_pool: pool_name,
             zone_type,
         };
         self.sled_add_zone(sled_id, zone)
@@ -1560,7 +1560,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
-            filesystem_pool: Some(filesystem_pool),
+            filesystem_pool,
             zone_type,
         };
         self.sled_add_zone(sled_id, zone)
@@ -1587,7 +1587,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
-            filesystem_pool: Some(filesystem_pool),
+            filesystem_pool,
             zone_type,
         };
         self.sled_add_zone(sled_id, zone)
@@ -1714,7 +1714,7 @@ impl<'a> BlueprintBuilder<'a> {
             BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: new_zone_id,
-                filesystem_pool: Some(filesystem_pool),
+                filesystem_pool,
                 zone_type,
             },
         )
@@ -1807,9 +1807,7 @@ impl<'a> BlueprintBuilder<'a> {
             if let Some(zpool) = zone_config.zone_type.durable_zpool() {
                 skip_zpools.insert(zpool);
             }
-            if let Some(zpool) = &zone_config.filesystem_pool {
-                skip_zpools.insert(zpool);
-            }
+            skip_zpools.insert(&zone_config.filesystem_pool);
         }
 
         for &zpool_id in all_in_service_zpools {
@@ -2438,14 +2436,8 @@ pub mod test {
 
         for (_, zone_config) in &blueprint.blueprint_zones {
             for zone in &zone_config.zones {
-                // The pool should only be optional for backwards compatibility.
-                let filesystem_pool = zone
-                    .filesystem_pool
-                    .as_ref()
-                    .expect("Should have filesystem pool");
-
                 if let Some(durable_pool) = zone.zone_type.durable_zpool() {
-                    assert_eq!(durable_pool, filesystem_pool);
+                    assert_eq!(*durable_pool, zone.filesystem_pool);
                 }
             }
         }
