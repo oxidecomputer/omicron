@@ -522,10 +522,6 @@ impl DataStore {
             }
         }
 
-        // TODO: are we picking targets randomly enough??
-        // maybe this needs to be a property of picking a sled reservation
-        // target.
-
         // We loop here because our attempts to INSERT may be violated by
         // concurrent operations. We'll respond by looking through a slightly
         // smaller set of possible sleds.
