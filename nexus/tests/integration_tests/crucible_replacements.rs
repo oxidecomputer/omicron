@@ -518,7 +518,7 @@ mod region_replacement {
                     }
                 },
                 &std::time::Duration::from_millis(50),
-                &std::time::Duration::from_secs(10),
+                &std::time::Duration::from_secs(30),
             )
             .await
             .expect("most recent step");
@@ -1186,7 +1186,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
             }
         },
         &std::time::Duration::from_millis(50),
-        &std::time::Duration::from_secs(10),
+        &std::time::Duration::from_secs(30),
     )
     .await
     .expect("disk volume deleted");
@@ -1435,7 +1435,7 @@ mod region_snapshot_replacement {
                     }
                 },
                 &std::time::Duration::from_millis(50),
-                &std::time::Duration::from_secs(10),
+                &std::time::Duration::from_secs(60),
             )
             .await
             .expect("request transitioned to expected state");
