@@ -2,7 +2,7 @@ WITH
   sled_has_space
     AS (
       SELECT
-        sled.id AS sled_id
+        1
       FROM
         sled LEFT JOIN sled_resource_vmm ON sled_resource_vmm.sled_id = sled.id
       WHERE
@@ -92,8 +92,11 @@ WITH
         1
       WHERE
         EXISTS(SELECT 1 FROM sled_has_space)
-        AND NOT (EXISTS(SELECT $9 FROM banned_sleds))
-        AND (EXISTS(SELECT $10 FROM required_sleds) OR NOT EXISTS(SELECT 1 FROM required_sleds))
+        AND NOT (EXISTS(SELECT 1 FROM banned_sleds WHERE sled_id = $9))
+        AND (
+            EXISTS(SELECT 1 FROM required_sleds WHERE sled_id = $10)
+            OR NOT EXISTS(SELECT 1 FROM required_sleds)
+          )
     )
 INSERT
 INTO
