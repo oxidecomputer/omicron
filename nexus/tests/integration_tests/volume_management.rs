@@ -38,7 +38,6 @@ use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::pagination::paginated;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
-use nexus_test_utils::background::run_replacement_tasks_to_completion;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -4109,7 +4108,6 @@ async fn test_read_only_region_reference_counting(
         .await
         .unwrap();
 
-    run_replacement_tasks_to_completion(&internal_client).await;
     wait_for_all_replacements(datastore, &internal_client).await;
 
     // The snapshot's allocated regions should have the one read-only region
@@ -4376,7 +4374,6 @@ async fn test_read_only_region_reference_counting_layers(
         .await
         .unwrap();
 
-    run_replacement_tasks_to_completion(&internal_client).await;
     wait_for_all_replacements(datastore, &internal_client).await;
 
     // Grab the read-only region in the snapshot volume
@@ -5625,7 +5622,6 @@ async fn test_double_layer_with_read_only_region_delete(
         .await
         .unwrap();
 
-    run_replacement_tasks_to_completion(&internal_client).await;
     wait_for_all_replacements(datastore, &internal_client).await;
 
     assert!(!disk_test.crucible_resources_deleted().await);
@@ -5737,7 +5733,6 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
         .await
         .unwrap();
 
-    run_replacement_tasks_to_completion(&internal_client).await;
     wait_for_all_replacements(datastore, &internal_client).await;
 
     wait_for_condition(
@@ -5784,7 +5779,6 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
         .await
         .unwrap();
 
-    run_replacement_tasks_to_completion(&internal_client).await;
     wait_for_all_replacements(datastore, &internal_client).await;
 
     assert!(!disk_test.crucible_resources_deleted().await);
@@ -5814,7 +5808,6 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
         .await
         .unwrap();
 
-    run_replacement_tasks_to_completion(&internal_client).await;
     wait_for_all_replacements(datastore, &internal_client).await;
 
     assert!(!disk_test.crucible_resources_deleted().await);

@@ -378,35 +378,20 @@ pub async fn run_read_only_region_replacement_start(
     status.requests_created_ok.len()
 }
 
-/// Run all replacement related background tasks until they aren't doing
-/// anything anymore.
-pub async fn run_replacement_tasks_to_completion(
+/// Run all replacement related background tasks and return how many actions
+/// were taken.
+pub async fn run_all_crucible_replacement_tasks(
     internal_client: &ClientTestContext,
-) {
-    wait_for_condition(
-        || async {
-            let actions_taken =
-                // region replacement related
-                run_region_replacement(internal_client).await +
-                run_region_replacement_driver(internal_client).await +
-                // region snapshot replacement related
-                run_region_snapshot_replacement_start(internal_client).await +
-                run_region_snapshot_replacement_garbage_collection(internal_client).await +
-                run_region_snapshot_replacement_step(internal_client).await +
-                run_region_snapshot_replacement_finish(internal_client).await +
-                run_read_only_region_replacement_start(internal_client).await;
-
-            if actions_taken > 0 {
-                Err(CondCheckError::<()>::NotYet)
-            } else {
-                Ok(())
-            }
-        },
-        &Duration::from_millis(50),
-        &Duration::from_secs(60),
-    )
-    .await
-    .unwrap();
+) -> usize {
+    // region replacement related
+    run_region_replacement(internal_client).await +
+    run_region_replacement_driver(internal_client).await +
+    // region snapshot replacement related
+    run_region_snapshot_replacement_start(internal_client).await +
+    run_region_snapshot_replacement_garbage_collection(internal_client).await +
+    run_region_snapshot_replacement_step(internal_client).await +
+    run_region_snapshot_replacement_finish(internal_client).await +
+    run_read_only_region_replacement_start(internal_client).await
 }
 
 pub async fn wait_tuf_artifact_replication_step(

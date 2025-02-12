@@ -132,15 +132,27 @@ pub(crate) async fn wait_for_all_replacements(
             let datastore = datastore.clone();
 
             async move {
-                if replacements_left(&datastore).await == 0 {
-                    Ok(())
-                } else {
-                    // While there are replacements left, continually activate
-                    // the background tasks that will push them forward.
-                    run_replacement_tasks_to_completion(internal_client).await;
+                // Trigger all the replacement related background tasks. If
+                // there were actions taken, continually activate the tasks to
+                // push the replacements forward.
+                //
+                // If no actions were taken and no replacements are left, we are
+                // done waiting. `replacements_left` should only be called after
+                // `run_all_crucible_replacement_tasks`, as that could create
+                // more replacements.
 
-                    Err(CondCheckError::<()>::NotYet)
+                let actions_taken =
+                    run_all_crucible_replacement_tasks(internal_client).await;
+
+                if actions_taken > 0 {
+                    return Err(CondCheckError::<()>::NotYet);
                 }
+
+                if replacements_left(&datastore).await == 0 {
+                    return Ok(());
+                }
+
+                Err(CondCheckError::<()>::NotYet)
             }
         },
         &std::time::Duration::from_millis(50),
@@ -339,7 +351,6 @@ mod region_replacement {
         pub async fn finish_test(&self) {
             // Make sure that all the background tasks can run to completion.
 
-            run_replacement_tasks_to_completion(&self.internal_client).await;
             wait_for_all_replacements(&self.datastore, &self.internal_client)
                 .await;
 
@@ -1168,7 +1179,6 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
 
     // Make sure that all the background tasks can run to completion.
 
-    run_replacement_tasks_to_completion(&internal_client).await;
     wait_for_all_replacements(datastore, &internal_client).await;
 
     // The disk volume should be deleted by the snapshot delete: wait until this
@@ -1407,7 +1417,6 @@ mod region_snapshot_replacement {
         pub async fn finish_test(&self) {
             // Make sure that all the background tasks can run to completion.
 
-            run_replacement_tasks_to_completion(&self.internal_client).await;
             wait_for_all_replacements(&self.datastore, &self.internal_client)
                 .await;
 
@@ -1987,7 +1996,6 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
 
     // Now, run all replacement tasks to completion
     let internal_client = &cptestctx.internal_client;
-    run_replacement_tasks_to_completion(&internal_client).await;
     wait_for_all_replacements(&datastore, &internal_client).await;
 
     // Validate all regions are on non-expunged physical disks
@@ -2094,7 +2102,6 @@ async fn test_region_replacement_triple_sanity(
             .unwrap();
 
         // Now, run all replacement tasks to completion
-        run_replacement_tasks_to_completion(&internal_client).await;
         wait_for_all_replacements(&datastore, &internal_client).await;
     }
 
@@ -2218,7 +2225,6 @@ async fn test_region_replacement_triple_sanity_2(
     }
 
     // Now, run all replacement tasks to completion
-    run_replacement_tasks_to_completion(&internal_client).await;
     wait_for_all_replacements(&datastore, &internal_client).await;
 
     // Expunge the last physical disk
@@ -2247,7 +2253,6 @@ async fn test_region_replacement_triple_sanity_2(
     }
 
     // Now, run all replacement tasks to completion
-    run_replacement_tasks_to_completion(&internal_client).await;
     wait_for_all_replacements(&datastore, &internal_client).await;
 
     let disk_allocated_regions =
@@ -2352,7 +2357,6 @@ async fn test_replacement_sanity_twice(cptestctx: &ControlPlaneTestContext) {
             .await
             .unwrap();
 
-        run_replacement_tasks_to_completion(&internal_client).await;
         wait_for_all_replacements(&datastore, &internal_client).await;
     }
 
@@ -2378,7 +2382,6 @@ async fn test_replacement_sanity_twice(cptestctx: &ControlPlaneTestContext) {
             .await
             .unwrap();
 
-        run_replacement_tasks_to_completion(&internal_client).await;
         wait_for_all_replacements(&datastore, &internal_client).await;
     }
 }
@@ -2461,7 +2464,6 @@ async fn test_read_only_replacement_sanity(
             .await
             .unwrap();
 
-        run_replacement_tasks_to_completion(&internal_client).await;
         wait_for_all_replacements(&datastore, &internal_client).await;
     }
 
@@ -2496,7 +2498,6 @@ async fn test_read_only_replacement_sanity(
         .await
         .unwrap();
 
-    run_replacement_tasks_to_completion(&internal_client).await;
     wait_for_all_replacements(&datastore, &internal_client).await;
 
     // Validate all regions are on non-expunged physical disks
