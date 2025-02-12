@@ -2057,8 +2057,8 @@ pub mod test {
     use crate::example::example;
     use crate::example::ExampleSystemBuilder;
     use crate::example::SimRngState;
+    use crate::planner::test::assert_planning_makes_no_changes;
     use crate::system::SledBuilder;
-    use nexus_inventory::CollectionBuilder;
     use nexus_reconfigurator_blippy::Blippy;
     use nexus_reconfigurator_blippy::BlippyReportSortKey;
     use nexus_types::deployment::BlueprintDatasetDisposition;
@@ -2085,34 +2085,6 @@ pub mod test {
             eprintln!("{}", blippy_report.display());
             panic!("expected blippy report for blueprint to have no notes");
         }
-    }
-
-    #[track_caller]
-    pub fn assert_planning_makes_no_changes(
-        log: &Logger,
-        blueprint: &Blueprint,
-        input: &PlanningInput,
-        test_name: &'static str,
-    ) {
-        let collection = CollectionBuilder::new("test").build();
-        let builder = BlueprintBuilder::new_based_on(
-            &log,
-            &blueprint,
-            &input,
-            &collection,
-            test_name,
-        )
-        .expect("failed to create builder");
-        let child_blueprint = builder.build();
-        verify_blueprint(&child_blueprint);
-        let diff = child_blueprint.diff_since_blueprint(&blueprint);
-        println!(
-            "diff between blueprints (expected no changes):\n{}",
-            diff.display()
-        );
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 0);
     }
 
     #[test]
@@ -2267,6 +2239,7 @@ pub mod test {
             &logctx.log,
             &blueprint3,
             &input,
+            &example.collection,
             TEST_NAME,
         );
 
@@ -2386,14 +2359,6 @@ pub mod test {
         assert_eq!(
             blueprint4.sled_state.get(&decommision_sled_id).copied(),
             Some(SledState::Decommissioned),
-        );
-
-        // Test a no-op planning iteration.
-        assert_planning_makes_no_changes(
-            &logctx.log,
-            &blueprint4,
-            &input,
-            TEST_NAME,
         );
 
         logctx.cleanup_successful();
@@ -2840,13 +2805,24 @@ pub mod test {
         static TEST_NAME: &str = "blueprint_builder_test_ensure_cockroachdb";
         let logctx = test_setup_log(TEST_NAME);
 
-        // Start with an empty system (sleds with no zones).
+        // Start with an example system (no CRDB zones).
         let (example, parent) =
-            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
-                .create_zones(false)
-                .build();
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
         let collection = example.collection;
         let input = example.input;
+
+        // Ensure no CRDB zones (currently `ExampleSystemBuilder` never
+        // provisions CRDB; this check makes sure we update our use of it if
+        // that changes).
+        for (_, z) in
+            parent.all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+        {
+            assert!(
+                !z.zone_type.is_cockroach(),
+                "unexpected cockroach zone \
+                 (update use of ExampleSystemBuilder?): {z:?}"
+            );
+        }
 
         // Pick an arbitrary sled.
         let (target_sled_id, sled_resources) = input
@@ -2895,6 +2871,7 @@ pub mod test {
             &logctx.log,
             &blueprint,
             &input,
+            &collection,
             TEST_NAME,
         );
 
