@@ -19,7 +19,6 @@ reqwest = { workspace = true, features = ["json", "stream", "rustls-tls"] }
 schemars.workspace = true
 serde.workspace = true
 slog.workspace = true
-transceiver-decode.workspace = true
 uuid.workspace = true
 
 [build-dependencies]
