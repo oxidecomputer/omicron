@@ -1010,7 +1010,7 @@ mod test {
         // No removed or modified zones on this sled
         let zones_cfg_diff = summary.zones_on_modified_sled(sled_id).unwrap();
         assert!(zones_cfg_diff.zones.removed.is_empty());
-        assert!(zones_cfg_diff.zones.modified.is_empty());
+        assert_eq!(zones_cfg_diff.zones.modified().count(), 0);
         // 10 crucible zones addeed
         assert_eq!(
             *zones_cfg_diff.generation.after,
@@ -1193,7 +1193,7 @@ mod test {
                 .contains_key(sled_id));
             let zones_cfg_diff =
                 summary.zones_on_modified_sled(sled_id).unwrap();
-            assert!(zones_cfg_diff.zones.modified.is_empty());
+            assert_eq!(zones_cfg_diff.zones.modified().count(), 0);
             let zones_added = &zones_cfg_diff.zones.added;
             match zones_added.len() {
                 n @ (3 | 4) => {
@@ -1321,7 +1321,7 @@ mod test {
             let zones_diff =
                 &summary.zones_on_modified_sled(&sled_id).unwrap().zones;
             assert!(zones_diff.removed.is_empty());
-            assert!(zones_diff.modified.is_empty());
+            assert_eq!(zones_diff.modified().count(), 0);
             let zones_added = &zones_diff.added;
             match zones_added.len() {
                 0 => {}
@@ -1895,10 +1895,10 @@ mod test {
             DatasetKind::TransientZoneRoot,
             test_transient_zone_kind.clone(),
         ]);
-        for (_, sled_with_modified_datasets) in
-            &summary.diff.blueprint_datasets.modified
+        for (_, sled_with_modified_datasets) in &summary.modified_datasets_diff
         {
-            for (_, modified) in &sled_with_modified_datasets.datasets.modified
+            for modified in
+                sled_with_modified_datasets.datasets.modified_values_diff()
             {
                 assert_eq!(
                     *modified.disposition.before,
@@ -1921,10 +1921,10 @@ mod test {
         assert!(expected_kinds.is_empty());
 
         let (_zone_id, modified_zones) =
-            summary.diff.blueprint_zones.modified.iter().next().unwrap();
-        assert_eq!(modified_zones.zones.modified.len(), 1);
+            summary.modified_zones_diff.iter().next().unwrap();
+        assert_eq!(modified_zones.zones.modified().count(), 1);
         let (_, modified_zone) =
-            &modified_zones.zones.modified.first_key_value().unwrap();
+            &modified_zones.zones.modified_diff().next().unwrap();
         assert!(
             matches!(modified_zone.zone_type.before.kind(), ZoneKind::Crucible),
             "Expected the modified zone to be a Crucible zone, but it was: {:?}",
@@ -2044,7 +2044,7 @@ mod test {
         assert_eq!(summary.total_zones_modified(), 6);
 
         let (_zone_id, zones_on_a_modified_sled) =
-            summary.diff.blueprint_zones.modified.iter().next().unwrap();
+            summary.modified_zones_diff.iter().next().unwrap();
         let added_zones = &zones_on_a_modified_sled.zones.added;
         assert_eq!(added_zones.len(), 1);
         for (_, zone) in added_zones {
@@ -2052,10 +2052,11 @@ mod test {
         }
 
         assert_eq!(
-            zones_on_a_modified_sled.zones.modified.len(),
+            zones_on_a_modified_sled.zones.modified().count(),
             zones_using_zpool
         );
-        for (_, modified_zone) in &zones_on_a_modified_sled.zones.modified {
+        for (_, modified_zone) in zones_on_a_modified_sled.zones.modified_diff()
+        {
             assert_eq!(
                 *modified_zone.disposition.after,
                 BlueprintZoneDisposition::Expunged,
@@ -2380,7 +2381,7 @@ mod test {
             "for {desc}, generation should have been bumped"
         );
 
-        for (_, modified_zone) in &modified_zones.zones.modified {
+        for modified_zone in modified_zones.zones.modified_values_diff() {
             assert_eq!(
                 *modified_zone.disposition.after,
                 BlueprintZoneDisposition::Expunged,
