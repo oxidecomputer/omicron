@@ -5244,7 +5244,6 @@ mod illumos_tests {
 
     struct LedgerTestHelper<'a> {
         log: slog::Logger,
-        ddmd_client: DdmAdminClient,
         storage_test_harness: StorageManagerTestHarness,
         zone_bundler: ZoneBundler,
         test_config: &'a TestConfig,
@@ -5252,7 +5251,6 @@ mod illumos_tests {
 
     impl<'a> LedgerTestHelper<'a> {
         async fn new(log: slog::Logger, test_config: &'a TestConfig) -> Self {
-            let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
             let storage_test_harness = setup_storage(&log).await;
             let zone_bundler = ZoneBundler::new(
                 log.clone(),
@@ -5262,7 +5260,6 @@ mod illumos_tests {
 
             LedgerTestHelper {
                 log,
-                ddmd_client,
                 storage_test_harness,
                 zone_bundler,
                 test_config,
@@ -5282,9 +5279,12 @@ mod illumos_tests {
             time_sync_config: TimeSyncConfig,
         ) -> ServiceManager {
             let log = &self.log;
+            let reconciler =
+                DdmReconciler::new(Ipv6Subnet::new(Ipv6Addr::LOCALHOST), log)
+                    .expect("created DdmReconciler");
             let mgr = ServiceManager::new(
                 log,
-                self.ddmd_client.clone(),
+                reconciler,
                 make_bootstrap_networking_config(),
                 SledMode::Auto,
                 time_sync_config,
