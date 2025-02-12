@@ -22,14 +22,13 @@ use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
 use crate::db::pool::DbConnection;
 use crate::db::queries::sled_reservation::sled_find_targets_query;
+use crate::db::queries::sled_reservation::sled_insert_resource_query;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
 use crate::db::TransactionError;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
-use itertools::Either;
-use itertools::Itertools;
 use nexus_db_model::ApplySledFilterExt;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::SledPolicy;
@@ -206,23 +205,12 @@ enum SledReservationTransactionError {
 // - Fail, no targets are available.
 fn pick_sled_reservation_target(
     log: &Logger,
-    mut targets: HashSet<SledUuid>,
-    anti_affinity_sleds: Vec<(AffinityPolicy, SledUuid)>,
-    affinity_sleds: Vec<(AffinityPolicy, SledUuid)>,
+    targets: &HashSet<SledUuid>,
+    banned: &HashSet<SledUuid>,
+    unpreferred: &HashSet<SledUuid>,
+    required: &HashSet<SledUuid>,
+    preferred: &HashSet<SledUuid>,
 ) -> Result<SledUuid, SledReservationError> {
-    let (banned, mut unpreferred): (HashSet<_>, HashSet<_>) =
-        anti_affinity_sleds.into_iter().partition_map(|(policy, id)| {
-            match policy {
-                AffinityPolicy::Fail => Either::Left(id),
-                AffinityPolicy::Allow => Either::Right(id),
-            }
-        });
-    let (required, mut preferred): (HashSet<_>, HashSet<_>) =
-        affinity_sleds.into_iter().partition_map(|(policy, id)| match policy {
-            AffinityPolicy::Fail => Either::Left(id),
-            AffinityPolicy::Allow => Either::Right(id),
-        });
-
     if !banned.is_empty() {
         info!(
             log,
@@ -255,12 +243,15 @@ fn pick_sled_reservation_target(
     }
 
     // We have no "required" sleds, but might have preferences.
-    targets = targets.difference(&banned).cloned().collect();
+    let mut targets: HashSet<_> =
+        targets.difference(&banned).cloned().collect();
 
     // Only consider "preferred" sleds that are viable targets
-    preferred = targets.intersection(&preferred).cloned().collect();
+    let preferred: HashSet<_> =
+        targets.intersection(&preferred).cloned().collect();
     // Only consider "unpreferred" sleds that are viable targets
-    unpreferred = targets.intersection(&unpreferred).cloned().collect();
+    let mut unpreferred: HashSet<_> =
+        targets.intersection(&unpreferred).cloned().collect();
 
     // If a target is both preferred and unpreferred, it is not considered
     // a part of either set.
@@ -455,8 +446,23 @@ impl DataStore {
         constraints: db::model::SledReservationConstraints,
     ) -> Result<db::model::SledResourceVmm, SledReservationTransactionError>
     {
-        let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
+
+        // Check if resource ID already exists - if so, return it.
+        //
+        // This check makes this function idempotent. Beyond this point, however
+        // we rely on primary key constraints in the database to prevent
+        // concurrent reservations for same propolis_id.
+        use db::schema::sled_resource_vmm::dsl as resource_dsl;
+        let old_resource = resource_dsl::sled_resource_vmm
+            .filter(resource_dsl::id.eq(*propolis_id.as_untyped_uuid()))
+            .select(SledResourceVmm::as_select())
+            .limit(1)
+            .load_async(&*conn)
+            .await?;
+        if !old_resource.is_empty() {
+            return Ok(old_resource[0].clone());
+        }
 
         let must_use_sleds: HashSet<SledUuid> = constraints
             .must_select_from()
@@ -465,97 +471,103 @@ impl DataStore {
             .map(|id| SledUuid::from_untyped_uuid(*id))
             .collect();
 
-        self.transaction_retry_wrapper("sled_reservation_create")
-            .transaction(&conn, |conn| {
-                // Clone variables into retryable function
-                let err = err.clone();
-                let must_use_sleds = must_use_sleds.clone();
-                let resources = resources.clone();
+        // Query for the set of possible sleds using a CTE.
+        //
+        // Note that this is not transactional, to reduce contention.
+        // However, that lack of transactionality means we need to validate
+        // our constraints again when we later try to INSERT the reservation.
+        let possible_sleds = sled_find_targets_query(instance_id, &resources)
+            .get_results_async::<(
+                // Sled UUID
+                Uuid,
+                // Would an allocation to this sled fit?
+                bool,
+                // Affinity policy on this sled
+                Option<AffinityPolicy>,
+                // Anti-affinity policy on this sled
+                Option<AffinityPolicy>,
+            )>(&*conn).await?;
 
-                async move {
-                    use db::schema::sled_resource_vmm::dsl as resource_dsl;
+        // Translate the database results into a format which we can use to pick
+        // a sled using more complex rules.
+        //
+        // See: `pick_sled_reservation_target(...)`
+        let mut sled_targets = HashSet::new();
+        let mut banned = HashSet::new();
+        let mut unpreferred = HashSet::new();
+        let mut required = HashSet::new();
+        let mut preferred = HashSet::new();
+        for (sled_id, fits, affinity_policy, anti_affinity_policy) in
+            possible_sleds
+        {
+            let sled_id = SledUuid::from_untyped_uuid(sled_id);
 
-                    // Check if resource ID already exists - if so, return it.
-                    let old_resource = resource_dsl::sled_resource_vmm
-                        .filter(resource_dsl::id.eq(*propolis_id.as_untyped_uuid()))
-                        .select(SledResourceVmm::as_select())
-                        .limit(1)
-                        .load_async(&conn)
-                        .await?;
+            if fits
+                && (must_use_sleds.is_empty()
+                    || must_use_sleds.contains(&sled_id))
+            {
+                sled_targets.insert(sled_id);
+            }
+            if let Some(policy) = affinity_policy {
+                match policy {
+                    AffinityPolicy::Fail => required.insert(sled_id),
+                    AffinityPolicy::Allow => preferred.insert(sled_id),
+                };
+            }
+            if let Some(policy) = anti_affinity_policy {
+                match policy {
+                    AffinityPolicy::Fail => banned.insert(sled_id),
+                    AffinityPolicy::Allow => unpreferred.insert(sled_id),
+                };
+            }
+        }
 
-                    if !old_resource.is_empty() {
-                        return Ok(old_resource[0].clone());
-                    }
+        // TODO: are we picking targets randomly enough??
+        // maybe this needs to be a property of picking a sled reservation
+        // target.
 
-                    let possible_sleds = sled_find_targets_query(instance_id, &resources)
-                        .get_results_async::<(
-                            // Sled UUID
-                            Uuid,
-                            // Would an allocation to this sled fit?
-                            bool,
-                            // Affinity policy on this sled
-                            Option<AffinityPolicy>,
-                            // Anti-affinity policy on this sled
-                            Option<AffinityPolicy>,
-                        )>(&conn).await?;
+        // We loop here because our attempts to INSERT may be violated by
+        // concurrent operations. We'll respond by looking through a slightly
+        // smaller set of possible sleds.
+        //
+        // In the uncontended case, however, we'll only iterate through this
+        // loop once.
+        loop {
+            // Pick a reservation target, given the constraints we previously
+            // saw in the database.
+            let sled_target = pick_sled_reservation_target(
+                &opctx.log,
+                &sled_targets,
+                &banned,
+                &unpreferred,
+                &required,
+                &preferred,
+            )?;
 
-                    println!("Observed sleds: {possible_sleds:#?}");
+            // Create a SledResourceVmm record, associate it with the target
+            // sled.
+            let resource = SledResourceVmm::new(
+                propolis_id,
+                instance_id,
+                sled_target,
+                resources.clone(),
+            );
 
-                    let mut sled_targets = HashSet::new();
-                    let mut affinity_sleds = vec![];
-                    let mut anti_affinity_sleds = vec![];
+            // Try to INSERT the record. If this is still a valid target, we'll
+            // use it. If it isn't a valid target, we'll shrink the set of
+            // viable sled targets and try again.
+            let rows_inserted = sled_insert_resource_query(&resource)
+                .execute_async(&*conn)
+                .await?;
+            if rows_inserted > 0 {
+                return Ok(resource);
+            }
 
-                    for (
-                        sled_id,
-                        fits,
-                        affinity_policy,
-                        anti_affinity_policy,
-                    ) in possible_sleds {
-                        let sled_id = SledUuid::from_untyped_uuid(sled_id);
-
-                        if fits && (must_use_sleds.is_empty() || must_use_sleds.contains(&sled_id)) {
-                            sled_targets.insert(sled_id);
-                        }
-                        if let Some(policy) = affinity_policy {
-                            affinity_sleds.push((policy, sled_id));
-                        }
-                        if let Some(policy) = anti_affinity_policy {
-                            anti_affinity_sleds.push((policy, sled_id));
-                        }
-                    }
-
-                    let sled_target = pick_sled_reservation_target(
-                        &opctx.log,
-                        sled_targets,
-                        anti_affinity_sleds,
-                        affinity_sleds,
-                    ).map_err(|e| {
-                        err.bail(e)
-                    })?;
-
-                    // Create a SledResourceVmm record, associate it with the target
-                    // sled.
-                    let resource = SledResourceVmm::new(
-                        propolis_id,
-                        instance_id,
-                        sled_target,
-                        resources,
-                    );
-
-                    diesel::insert_into(resource_dsl::sled_resource_vmm)
-                        .values(resource)
-                        .returning(SledResourceVmm::as_returning())
-                        .get_result_async(&conn)
-                        .await
-                }
-            })
-            .await
-            .map_err(|e| {
-                if let Some(err) = err.take() {
-                    return SledReservationTransactionError::Reservation(err);
-                }
-                SledReservationTransactionError::Diesel(e)
-            })
+            sled_targets.remove(&sled_target);
+            banned.remove(&sled_target);
+            unpreferred.remove(&sled_target);
+            preferred.remove(&sled_target);
+        }
     }
 
     pub async fn sled_reservation_delete(

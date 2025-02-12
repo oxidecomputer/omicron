@@ -82,9 +82,24 @@ WITH
         other_a_instances_by_policy
         JOIN sled_resource_vmm ON
             sled_resource_vmm.instance_id = other_a_instances_by_policy.instance_id
+    ),
+  sleds_with_space
+    AS (
+      SELECT
+        s.sled_id, a.policy AS a_policy, aa.policy AS aa_policy
+      FROM
+        sled_targets AS s
+        LEFT JOIN a_policy_and_sleds AS a ON a.sled_id = s.sled_id
+        LEFT JOIN aa_policy_and_sleds AS aa ON aa.sled_id = s.sled_id
+    ),
+  sleds_without_space
+    AS (
+      SELECT
+        sled_id, policy AS a_policy, NULL AS aa_policy
+      FROM
+        a_policy_and_sleds
+      WHERE
+        a_policy_and_sleds.sled_id NOT IN (SELECT sled_id FROM sleds_with_space)
     )
-SELECT
-  a_policy_and_sleds.policy, aa_policy_and_sleds.policy, sled_targets.sled_id
-FROM
-  (sled_targets LEFT JOIN a_policy_and_sleds ON a_policy_and_sleds.sled_id = sled_targets.sled_id)
-  LEFT JOIN aa_policy_and_sleds ON aa_policy_and_sleds.sled_id = sled_targets.sled_id
+SELECT sled_id, true, a_policy, aa_policy FROM sleds_with_space
+UNION SELECT sled_id, false, a_policy, aa_policy FROM sleds_without_space
