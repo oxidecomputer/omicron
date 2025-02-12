@@ -21,7 +21,7 @@ use super::{
 use daft::Diffable;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::{ByteCount, Generation};
-use omicron_common::disk::{CompressionAlgorithm, DatasetName, DiskIdentity};
+use omicron_common::disk::{CompressionAlgorithm, DatasetName};
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
 use std::collections::{BTreeMap, BTreeSet};
@@ -904,7 +904,7 @@ pub struct DiffPhysicalDisksDetails {
     pub after_generation: Option<Generation>,
 
     // Disks added, removed, or unmodified
-    pub disks: Vec<DiskIdentity>,
+    pub disks: Vec<BlueprintPhysicalDiskConfig>,
 }
 
 impl DiffPhysicalDisksDetails {
@@ -913,11 +913,8 @@ impl DiffPhysicalDisksDetails {
         after_generation: Option<Generation>,
         disks_iter: impl Iterator<Item = &'a BlueprintPhysicalDiskConfig>,
     ) -> Self {
-        let mut disks: Vec<_> = disks_iter
-            .map(|disk_config| &disk_config.identity)
-            .cloned()
-            .collect();
-        disks.sort_unstable();
+        let mut disks: Vec<_> = disks_iter.cloned().collect();
+        disks.sort_unstable_by_key(|d| d.identity.clone());
         DiffPhysicalDisksDetails { before_generation, after_generation, disks }
     }
 }
@@ -934,7 +931,13 @@ impl BpTableData for DiffPhysicalDisksDetails {
         self.disks.iter().map(move |d| {
             BpTableRow::from_strings(
                 state,
-                vec![d.vendor.clone(), d.model.clone(), d.serial.clone()],
+                vec![
+                    d.identity.vendor.clone(),
+                    d.identity.model.clone(),
+                    d.identity.serial.clone(),
+                    d.disposition.to_string(),
+                    d.state.to_string(),
+                ],
             )
         })
     }

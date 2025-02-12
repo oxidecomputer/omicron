@@ -298,8 +298,7 @@ impl SledEditor {
         disk: BlueprintPhysicalDiskConfig,
         rng: &mut SledPlannerRng,
     ) -> Result<(), SledEditError> {
-        self.as_active_mut()?.ensure_disk(disk, rng);
-        Ok(())
+        self.as_active_mut()?.ensure_disk(disk, rng)
     }
 
     pub fn expunge_disk(
@@ -307,6 +306,14 @@ impl SledEditor {
         disk_id: &PhysicalDiskUuid,
     ) -> Result<DiskExpungeDetails, SledEditError> {
         self.as_active_mut()?.expunge_disk(disk_id)
+    }
+
+    pub fn decommission_disk(
+        &mut self,
+        disk_id: &PhysicalDiskUuid,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.decommission_disk(disk_id)?;
+        Ok(())
     }
 
     pub fn add_zone(
@@ -483,10 +490,10 @@ impl ActiveSledEditor {
         &mut self,
         disk: BlueprintPhysicalDiskConfig,
         rng: &mut SledPlannerRng,
-    ) {
+    ) -> Result<(), SledEditError> {
         let zpool = ZpoolName::new_external(disk.pool_id);
 
-        self.disks.ensure(disk);
+        self.disks.ensure(disk)?;
 
         // Every disk also gets a Debug and Transient Zone Root dataset; ensure
         // both of those exist as well.
@@ -495,6 +502,8 @@ impl ActiveSledEditor {
 
         self.datasets.ensure_in_service(debug, rng);
         self.datasets.ensure_in_service(zone_root, rng);
+
+        Ok(())
     }
 
     pub fn expunge_disk(
@@ -522,6 +531,15 @@ impl ActiveSledEditor {
             num_datasets_expunged,
             num_zones_expunged,
         })
+    }
+
+    pub fn decommission_disk(
+        &mut self,
+        disk_id: &PhysicalDiskUuid,
+    ) -> Result<(), SledEditError> {
+        // TODO: report decommissioning
+        let _ = self.disks.decommission(disk_id)?;
+        Ok(())
     }
 
     pub fn add_zone(

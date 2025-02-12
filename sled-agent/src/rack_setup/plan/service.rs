@@ -19,6 +19,7 @@ use nexus_types::deployment::{
     OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
     OmicronZoneExternalSnatIp,
 };
+use nexus_types::external_api::views::PhysicalDiskState;
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet,
     DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, MGD_PORT, MGS_PORT,
@@ -329,6 +330,7 @@ impl Plan {
                 .filter(|disk| matches!(disk.variant, DiskVariant::U2))
                 .map(|disk| BlueprintPhysicalDiskConfig {
                     disposition: BlueprintPhysicalDiskDisposition::InService,
+                    state: PhysicalDiskState::Active,
                     identity: disk.identity.clone(),
                     id: PhysicalDiskUuid::new_v4(),
                     pool_id: ZpoolUuid::new_v4(),
