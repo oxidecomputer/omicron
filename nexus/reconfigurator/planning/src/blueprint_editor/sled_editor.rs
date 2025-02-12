@@ -602,7 +602,8 @@ impl ActiveSledEditor {
             return Ok(did_expunge);
         }
 
-        if let Some(dataset) = config.filesystem_dataset() {
+        {
+            let dataset = config.filesystem_dataset();
             self.datasets.expunge(&dataset.pool().id(), dataset.kind())?;
         }
         if let Some(dataset) = config.zone_type.durable_dataset() {
@@ -648,7 +649,7 @@ impl ActiveSledEditor {
 
 #[derive(Debug)]
 struct ZoneDatasetConfigs {
-    filesystem: Option<PartialDatasetConfig>,
+    filesystem: PartialDatasetConfig,
     durable: Option<PartialDatasetConfig>,
 }
 
@@ -657,9 +658,8 @@ impl ZoneDatasetConfigs {
         disks: &DisksEditor,
         zone: &BlueprintZoneConfig,
     ) -> Result<Self, SledEditError> {
-        let filesystem_dataset = zone
-            .filesystem_dataset()
-            .map(|dataset| PartialDatasetConfig::for_transient_zone(dataset));
+        let filesystem_dataset =
+            PartialDatasetConfig::for_transient_zone(zone.filesystem_dataset());
         let durable_dataset = zone.zone_type.durable_dataset().map(|dataset| {
             // `dataset` records include an optional socket address, which is
             // only applicable for durable datasets backing crucible. This this
@@ -680,27 +680,23 @@ impl ZoneDatasetConfigs {
 
         // Ensure that if this zone has both kinds of datasets, they reside on
         // the same zpool.
-        if let (Some(fs), Some(dur)) = (&filesystem_dataset, &durable_dataset) {
-            if fs.zpool() != dur.zpool() {
+        if let Some(dur) = &durable_dataset {
+            if filesystem_dataset.zpool() != dur.zpool() {
                 return Err(SledEditError::ZoneInvalidZpoolCombination {
                     zone_id: zone.id,
-                    fs_zpool: fs.zpool().clone(),
+                    fs_zpool: filesystem_dataset.zpool().clone(),
                     dur_zpool: dur.zpool().clone(),
                 });
             }
         }
 
-        // Ensure that if we have a zpool, we have a matching disk (i.e., a zone
-        // can't be added if it has a dataset on a zpool that we don't have)
-        if let Some(dataset) =
-            filesystem_dataset.as_ref().or(durable_dataset.as_ref())
-        {
-            if !disks.contains_zpool(&dataset.zpool().id()) {
-                return Err(SledEditError::ZoneOnNonexistentZpool {
-                    zone_id: zone.id,
-                    zpool: dataset.zpool().clone(),
-                });
-            }
+        // Ensure that we have a matching disk (i.e., a zone can't be added if
+        // it has a dataset on a zpool that we don't have)
+        if !disks.contains_zpool(&filesystem_dataset.zpool().id()) {
+            return Err(SledEditError::ZoneOnNonexistentZpool {
+                zone_id: zone.id,
+                zpool: filesystem_dataset.zpool().clone(),
+            });
         }
 
         Ok(Self { filesystem: filesystem_dataset, durable: durable_dataset })
@@ -711,9 +707,7 @@ impl ZoneDatasetConfigs {
         datasets: &mut DatasetsEditor,
         rng: &mut SledPlannerRng,
     ) {
-        if let Some(dataset) = self.filesystem {
-            datasets.ensure_in_service(dataset, rng);
-        }
+        datasets.ensure_in_service(self.filesystem, rng);
         if let Some(dataset) = self.durable {
             datasets.ensure_in_service(dataset, rng);
         }

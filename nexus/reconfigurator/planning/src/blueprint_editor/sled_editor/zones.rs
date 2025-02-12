@@ -205,10 +205,7 @@ impl ZonesEditor {
             // this zpool. (If it has both, they should be on the _same_ zpool,
             // but that's not strictly required by this method - we'll expunge a
             // zone that depends on this zpool in any way.)
-            let fs_is_on_zpool = config
-                .filesystem_pool
-                .as_ref()
-                .map_or(false, |pool| pool.id() == *zpool);
+            let fs_is_on_zpool = config.filesystem_pool.id() == *zpool;
             let dd_is_on_zpool = config
                 .zone_type
                 .durable_zpool()
