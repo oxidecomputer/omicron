@@ -21,8 +21,7 @@ use crate::db::model::SledUpdate;
 use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
 use crate::db::pool::DbConnection;
-use crate::db::queries::affinity::lookup_affinity_sleds_query;
-use crate::db::queries::affinity::lookup_anti_affinity_sleds_query;
+use crate::db::queries::sled_reservation::sled_find_targets_query;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
 use crate::db::TransactionError;
 use crate::transaction_retry::OptionalError;
@@ -208,24 +207,20 @@ enum SledReservationTransactionError {
 fn pick_sled_reservation_target(
     log: &Logger,
     mut targets: HashSet<SledUuid>,
-    anti_affinity_sleds: Vec<(AffinityPolicy, Uuid)>,
-    affinity_sleds: Vec<(AffinityPolicy, Uuid)>,
+    anti_affinity_sleds: Vec<(AffinityPolicy, SledUuid)>,
+    affinity_sleds: Vec<(AffinityPolicy, SledUuid)>,
 ) -> Result<SledUuid, SledReservationError> {
     let (banned, mut unpreferred): (HashSet<_>, HashSet<_>) =
         anti_affinity_sleds.into_iter().partition_map(|(policy, id)| {
-            let id = SledUuid::from_untyped_uuid(id);
             match policy {
                 AffinityPolicy::Fail => Either::Left(id),
                 AffinityPolicy::Allow => Either::Right(id),
             }
         });
     let (required, mut preferred): (HashSet<_>, HashSet<_>) =
-        affinity_sleds.into_iter().partition_map(|(policy, id)| {
-            let id = SledUuid::from_untyped_uuid(id);
-            match policy {
-                AffinityPolicy::Fail => Either::Left(id),
-                AffinityPolicy::Allow => Either::Right(id),
-            }
+        affinity_sleds.into_iter().partition_map(|(policy, id)| match policy {
+            AffinityPolicy::Fail => Either::Left(id),
+            AffinityPolicy::Allow => Either::Right(id),
         });
 
     if !banned.is_empty() {
@@ -463,15 +458,23 @@ impl DataStore {
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
 
+        let must_use_sleds: HashSet<SledUuid> = constraints
+            .must_select_from()
+            .into_iter()
+            .flatten()
+            .map(|id| SledUuid::from_untyped_uuid(*id))
+            .collect();
+
         self.transaction_retry_wrapper("sled_reservation_create")
             .transaction(&conn, |conn| {
                 // Clone variables into retryable function
                 let err = err.clone();
-                let constraints = constraints.clone();
+                let must_use_sleds = must_use_sleds.clone();
                 let resources = resources.clone();
 
                 async move {
                     use db::schema::sled_resource_vmm::dsl as resource_dsl;
+
                     // Check if resource ID already exists - if so, return it.
                     let old_resource = resource_dsl::sled_resource_vmm
                         .filter(resource_dsl::id.eq(*propolis_id.as_untyped_uuid()))
@@ -484,103 +487,46 @@ impl DataStore {
                         return Ok(old_resource[0].clone());
                     }
 
-                    // If it doesn't already exist, find a sled with enough space
-                    // for the resources we're requesting.
-                    use db::schema::sled::dsl as sled_dsl;
-                    // This answers the boolean question:
-                    // "Does the SUM of all hardware thread usage, plus the one we're trying
-                    // to allocate, consume less threads than exists on the sled?"
-                    let sled_has_space_for_threads =
-                        (diesel::dsl::sql::<diesel::sql_types::BigInt>(
-                            &format!(
-                                "COALESCE(SUM(CAST({} as INT8)), 0)",
-                                resource_dsl::hardware_threads::NAME
-                            ),
-                        ) + resources.hardware_threads)
-                            .le(sled_dsl::usable_hardware_threads);
+                    let possible_sleds = sled_find_targets_query(instance_id, &resources)
+                        .get_results_async::<(
+                            // Sled UUID
+                            Uuid,
+                            // Would an allocation to this sled fit?
+                            bool,
+                            // Affinity policy on this sled
+                            Option<AffinityPolicy>,
+                            // Anti-affinity policy on this sled
+                            Option<AffinityPolicy>,
+                        )>(&conn).await?;
 
-                    // This answers the boolean question:
-                    // "Does the SUM of all RAM usage, plus the one we're trying
-                    // to allocate, consume less RAM than exists on the sled?"
-                    let sled_has_space_for_rss =
-                        (diesel::dsl::sql::<diesel::sql_types::BigInt>(
-                            &format!(
-                                "COALESCE(SUM(CAST({} as INT8)), 0)",
-                                resource_dsl::rss_ram::NAME
-                            ),
-                        ) + resources.rss_ram)
-                            .le(sled_dsl::usable_physical_ram);
+                    println!("Observed sleds: {possible_sleds:#?}");
 
-                    // Determine whether adding this service's reservoir allocation
-                    // to what's allocated on the sled would avoid going over quota.
-                    let sled_has_space_in_reservoir =
-                        (diesel::dsl::sql::<diesel::sql_types::BigInt>(
-                            &format!(
-                                "COALESCE(SUM(CAST({} as INT8)), 0)",
-                                resource_dsl::reservoir_ram::NAME
-                            ),
-                        ) + resources.reservoir_ram)
-                            .le(sled_dsl::reservoir_size);
+                    let mut sled_targets = HashSet::new();
+                    let mut affinity_sleds = vec![];
+                    let mut anti_affinity_sleds = vec![];
 
-                    // Generate a query describing all of the sleds that have space
-                    // for this reservation.
-                    let mut sled_targets = sled_dsl::sled
-                        .left_join(
-                            resource_dsl::sled_resource_vmm
-                                .on(resource_dsl::sled_id.eq(sled_dsl::id)),
-                        )
-                        .group_by(sled_dsl::id)
-                        .having(
-                            sled_has_space_for_threads
-                                .and(sled_has_space_for_rss)
-                                .and(sled_has_space_in_reservoir),
-                        )
-                        .filter(sled_dsl::time_deleted.is_null())
-                        // Ensure that reservations can be created on the sled.
-                        .sled_filter(SledFilter::ReservationCreate)
-                        .select(sled_dsl::id)
-                        .into_boxed();
+                    for (
+                        sled_id,
+                        fits,
+                        affinity_policy,
+                        anti_affinity_policy,
+                    ) in possible_sleds {
+                        let sled_id = SledUuid::from_untyped_uuid(sled_id);
 
-                    // Further constrain the sled IDs according to any caller-
-                    // supplied constraints.
-                    if let Some(must_select_from) =
-                        constraints.must_select_from()
-                    {
-                        sled_targets = sled_targets.filter(
-                            sled_dsl::id.eq_any(must_select_from.to_vec()),
-                        );
+                        if fits && (must_use_sleds.is_empty() || must_use_sleds.contains(&sled_id)) {
+                            sled_targets.insert(sled_id);
+                        }
+                        if let Some(policy) = affinity_policy {
+                            affinity_sleds.push((policy, sled_id));
+                        }
+                        if let Some(policy) = anti_affinity_policy {
+                            anti_affinity_sleds.push((policy, sled_id));
+                        }
                     }
-
-                    define_sql_function!(fn random() -> diesel::sql_types::Float);
-
-                    // Fetch all viable sled targets
-                    let sled_targets = sled_targets
-                        .order(random())
-                        .get_results_async::<Uuid>(&conn)
-                        .await?;
-
-                    info!(
-                        opctx.log,
-                        "found {} available sled targets before considering affinity", sled_targets.len();
-                        "sled_ids" => ?sled_targets,
-                    );
-
-                    let anti_affinity_sleds = lookup_anti_affinity_sleds_query(
-                        instance_id,
-                    ).get_results_async::<(AffinityPolicy, Uuid)>(&conn).await?;
-
-                    let affinity_sleds = lookup_affinity_sleds_query(
-                        instance_id,
-                    ).get_results_async::<(AffinityPolicy, Uuid)>(&conn).await?;
-
-                    let targets: HashSet<SledUuid> = sled_targets
-                        .into_iter()
-                        .map(|id| SledUuid::from_untyped_uuid(id))
-                        .collect();
 
                     let sled_target = pick_sled_reservation_target(
                         &opctx.log,
-                        targets,
+                        sled_targets,
                         anti_affinity_sleds,
                         affinity_sleds,
                     ).map_err(|e| {
