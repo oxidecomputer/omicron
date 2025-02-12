@@ -15,36 +15,6 @@ pub enum Project<'a> {
     PrimaryKey(Root<'a>, Uuid),
 }
 impl<'a> Project<'a> {
-    ///Select a resource of type Disk within this Project, identified by its name
-    pub fn disk_name<'b, 'c>(self, name: &'b Name) -> Disk<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
-        Disk::Name(self, name)
-    }
-    ///Select a resource of type Disk within this Project, identified by its name
-    pub fn disk_name_owned<'c>(self, name: Name) -> Disk<'c>
-    where
-        'a: 'c,
-    {
-        Disk::OwnedName(self, name)
-    }
-    ///Select a resource of type Instance within this Project, identified by its name
-    pub fn instance_name<'b, 'c>(self, name: &'b Name) -> Instance<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
-        Instance::Name(self, name)
-    }
-    ///Select a resource of type Instance within this Project, identified by its name
-    pub fn instance_name_owned<'c>(self, name: Name) -> Instance<'c>
-    where
-        'a: 'c,
-    {
-        Instance::OwnedName(self, name)
-    }
     /// Fetch the record corresponding to the selected resource
     ///
     /// This is equivalent to `fetch_for(authz::Action::Read)`.
@@ -391,5 +361,22 @@ impl<'a> Project<'a> {
             LookupType::ById(::omicron_uuid_kinds::GenericUuid::into_untyped_uuid(*v0)),
         );
         Ok((authz_silo, authz_project, db_row))
+    }
+}
+impl<'a> Silo<'a> {
+    ///Select a resource of type Project within this Silo, identified by its name
+    pub fn project_name<'b, 'c>(self, name: &'b Name) -> Project<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        Project::Name(self, name)
+    }
+    ///Select a resource of type Project within this Silo, identified by its name
+    pub fn project_name_owned<'c>(self, name: Name) -> Project<'c>
+    where
+        'a: 'c,
+    {
+        Project::OwnedName(self, name)
     }
 }
