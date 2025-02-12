@@ -22,6 +22,7 @@ use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
+use nexus_types::deployment::OximeterReadsPolicy;
 use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledDetails;
@@ -94,6 +95,7 @@ pub struct SystemDescription {
     internal_dns_version: Generation,
     external_dns_version: Generation,
     clickhouse_policy: Option<ClickhousePolicy>,
+    oximeter_reads_policy: Option<OximeterReadsPolicy>,
 }
 
 impl SystemDescription {
@@ -170,6 +172,7 @@ impl SystemDescription {
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
             clickhouse_policy: None,
+            oximeter_reads_policy: None,
         }
     }
 
@@ -421,6 +424,7 @@ impl SystemDescription {
             target_crucible_pantry_zone_count: self
                 .target_crucible_pantry_zone_count,
             clickhouse_policy: self.clickhouse_policy.clone(),
+            oximeter_reads_policy: self.oximeter_reads_policy.clone(),
         };
         let mut builder = PlanningInputBuilder::new(
             policy,
