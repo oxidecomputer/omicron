@@ -15,6 +15,7 @@ use super::pumpkind;
 use super::server::StartError;
 use crate::config::Config;
 use crate::config::SidecarRevision;
+use crate::ddm_reconciler::DdmReconciler;
 use crate::long_running_tasks::{
     spawn_all_longrunning_tasks, LongRunningTaskHandles,
 };
@@ -33,18 +34,13 @@ use illumos_utils::zfs::Zfs;
 use illumos_utils::zone;
 use illumos_utils::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
-use omicron_common::backoff::retry_notify;
-use omicron_common::backoff::retry_policy_internal_service_aggressive;
 use omicron_common::FileKv;
-use omicron_ddm_admin_client::Client as DdmAdminClient;
 use sled_hardware::underlay;
 use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Drain;
 use slog::Logger;
-use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use tokio::sync::oneshot;
@@ -52,7 +48,6 @@ use tokio::sync::oneshot;
 pub(super) struct BootstrapAgentStartup {
     pub(super) config: Config,
     pub(super) global_zone_bootstrap_ip: Ipv6Addr,
-    pub(super) ddm_admin_localhost_client: DdmAdminClient,
     pub(super) base_log: Logger,
     pub(super) startup_log: Logger,
     pub(super) service_manager: ServiceManager,
@@ -77,7 +72,7 @@ impl BootstrapAgentStartup {
 
         // Perform several blocking startup tasks first; we move `config` and
         // `log` into this task, and on success, it gives them back to us.
-        let (config, log, ddm_admin_localhost_client, startup_networking) =
+        let (config, log, startup_networking) =
             tokio::task::spawn_blocking(move || {
                 enable_mg_ddm(&config, &log)?;
                 pumpkind::enable_pumpkind_service(&log)?;
@@ -85,63 +80,23 @@ impl BootstrapAgentStartup {
 
                 let startup_networking = BootstrapNetworking::setup(&config)?;
 
-                // Spawn a background task to notify our local ddmd of our
-                // bootstrap address so it can advertise it to other sleds.
-                //
-                // TODO-cleanup Spawning a task here is a little suspect;
-                // consider moving to a reconciler loop when we do omicron#7377.
-                let ddmd_client = DdmAdminClient::localhost(&log)
-                    .map_err(StartError::CreateDdmAdminLocalhostClient)?;
-                tokio::spawn({
-                    let prefix = Ipv6Subnet::<SLED_PREFIX>::new(
-                        startup_networking.global_zone_bootstrap_ip,
-                    )
-                    .net();
-                    let ddmd_client = ddmd_client.clone();
-                    async move {
-                        retry_notify(
-                            retry_policy_internal_service_aggressive(),
-                            || async {
-                                info!(
-                                    ddmd_client.log(),
-                                    "Sending underlay prefix to \
-                                     ddmd for advertisement";
-                                    "prefix" => ?prefix,
-                                );
-                                ddmd_client
-                                    .advertise_prefixes(vec![prefix])
-                                    .await?;
-                                Ok(())
-                            },
-                            |err, duration| {
-                                info!(
-                                    ddmd_client.log(),
-                                    "Failed to notify ddmd \
-                                     of our address (will retry)";
-                                    "retry_after" => ?duration,
-                                    InlineErrorChain::new(&err),
-                                );
-                            },
-                        )
-                        .await
-                        .expect("retry policy retries until success");
-                    }
-                });
-
                 // Before we create the switch zone, we need to ensure that the
                 // necessary ZFS and Zone resources are ready. All other zones
                 // are created on U.2 drives.
                 ensure_zfs_ramdisk_dataset()?;
 
-                Ok::<_, StartError>((
-                    config,
-                    log,
-                    ddmd_client,
-                    startup_networking,
-                ))
+                Ok::<_, StartError>((config, log, startup_networking))
             })
             .await
             .unwrap()?;
+
+        // Start the DDM reconciler, giving it our bootstrap subnet to
+        // advertise to other sleds.
+        let ddm_reconciler = DdmReconciler::new(
+            Ipv6Subnet::new(startup_networking.global_zone_bootstrap_ip),
+            &base_log,
+        )
+        .map_err(StartError::CreateDdmAdminLocalhostClient)?;
 
         // Before we start monitoring for hardware, ensure we're running from a
         // predictable state.
@@ -184,7 +139,7 @@ impl BootstrapAgentStartup {
 
         let service_manager = ServiceManager::new(
             &base_log,
-            ddm_admin_localhost_client.clone(),
+            ddm_reconciler,
             startup_networking,
             sled_mode,
             time_sync,
@@ -204,7 +159,6 @@ impl BootstrapAgentStartup {
         Ok(Self {
             config,
             global_zone_bootstrap_ip,
-            ddm_admin_localhost_client,
             base_log,
             startup_log: log,
             service_manager,
