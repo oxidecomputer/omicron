@@ -34,8 +34,11 @@ use illumos_utils::zone;
 use illumos_utils::zone::Zones;
 use internal_dns_resolver::Resolver;
 use omicron_common::address::{Ipv6Subnet, AZ_PREFIX};
+use omicron_common::backoff::retry_notify;
+use omicron_common::backoff::retry_policy_internal_service_aggressive;
 use omicron_common::ledger;
 use omicron_common::ledger::Ledger;
+use omicron_ddm_admin_client::types::EnableStatsRequest;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::GenericUuid;
@@ -46,6 +49,7 @@ use sled_hardware::underlay;
 use sled_storage::dataset::CONFIG_DATASET;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::io;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -394,8 +398,11 @@ async fn start_sled_agent(
     // Inform the storage service that the key manager is available
     long_running_task_handles.storage_manager.key_manager_ready().await;
 
-    // Start trying to notify ddmd of our sled prefix so it can
-    // advertise it to other sleds.
+    // Spawn a background task to notify our local ddmd of our underlay address
+    // so it can advertise it to other sleds.
+    //
+    // TODO-cleanup Spawning a task here is a little suspect; consider moving to
+    // a reconciler loop when we do omicron#7377.
     //
     // TODO-security This ddmd_client is used to advertise both this
     // (underlay) address and our bootstrap address. Bootstrap addresses are
@@ -405,18 +412,74 @@ async fn start_sled_agent(
     // we'll need to do something different here for underlay vs bootstrap
     // addrs (either talk to a differently-configured ddmd, or include info
     // indicating which kind of address we're advertising).
-    ddmd_client.advertise_prefix(request.body.subnet);
+    tokio::spawn({
+        let prefix = request.body.subnet.net();
+        let ddmd_client = ddmd_client.clone();
+        async move {
+            retry_notify(
+                retry_policy_internal_service_aggressive(),
+                || async {
+                    info!(
+                        ddmd_client.log(),
+                        "Sending underlay prefix to ddmd for advertisement";
+                        "prefix" => ?prefix,
+                    );
+                    ddmd_client.advertise_prefixes(vec![prefix]).await?;
+                    Ok(())
+                },
+                |err, duration| {
+                    info!(
+                        ddmd_client.log(),
+                        "Failed to notify ddmd of our address (will retry)";
+                        "retry_after" => ?duration,
+                        InlineErrorChain::new(&err),
+                    );
+                },
+            )
+            .await
+            .expect("retry policy retries until success");
+        }
+    });
 
-    let az_prefix =
-        Ipv6Subnet::<AZ_PREFIX>::new(request.body.subnet.net().addr());
-    let addr = request.body.subnet.net().iter().nth(1).unwrap();
-    let dns_servers = Resolver::servers_from_subnet(az_prefix);
-    ddmd_client.enable_stats(
-        addr.into(),
-        dns_servers,
-        request.body.rack_id,
-        request.body.id.into_untyped_uuid(),
-    );
+    // Also spawn a task to give ddmd the config it needs to start its oximeter
+    // stats producer.
+    tokio::spawn({
+        let az_prefix =
+            Ipv6Subnet::<AZ_PREFIX>::new(request.body.subnet.net().addr());
+        let addr = request.body.subnet.net().iter().nth(1).unwrap();
+        let dns_servers = Resolver::servers_from_subnet(az_prefix);
+        let request = EnableStatsRequest {
+            addr: addr.into(),
+            dns_servers: dns_servers.iter().map(|x| x.to_string()).collect(),
+            rack_id: request.body.rack_id,
+            sled_id: request.body.id.into_untyped_uuid(),
+        };
+        let ddmd_client = ddmd_client.clone();
+
+        async move {
+            retry_notify(
+                retry_policy_internal_service_aggressive(),
+                || async {
+                    info!(
+                        ddmd_client.log(), "Enabling ddm stats";
+                        "request" => ?request,
+                    );
+                    ddmd_client.enable_stats(&request).await?;
+                    Ok(())
+                },
+                |err, duration| {
+                    info!(
+                        ddmd_client.log(),
+                        "Failed enable ddm stats (will retry)";
+                        "retry_after" => ?duration,
+                        InlineErrorChain::new(&err),
+                    );
+                },
+            )
+            .await
+            .unwrap();
+        }
+    });
 
     // Server does not exist, initialize it.
     let server = SledAgentServer::start(
