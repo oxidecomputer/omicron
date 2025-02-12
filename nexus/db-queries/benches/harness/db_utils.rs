@@ -136,7 +136,6 @@ pub async fn create_reservation(
                 // rather than stalling the request, but in this particular
                 // case, we choose to retry immediately.
                 if err.to_string().contains("restart transaction") {
-                    eprintln!("Warning: Transaction aborted due to contention");
                     continue;
                 }
                 return Err(err).context("Failed to create reservation");

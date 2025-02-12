@@ -194,10 +194,10 @@ fn sled_reservation_benchmark(c: &mut Criterion) {
     rt.block_on(harness::setup_db(&logctx.log));
 
     let mut group = c.benchmark_group("vmm-reservation");
-    for vmms in VMM_PARAMS {
-        for tasks in TASK_PARAMS {
+    for tasks in TASK_PARAMS {
+        for vmms in VMM_PARAMS {
             let params = TestParams { vmms, tasks };
-            let name = format!("{vmms}-vmms-{tasks}-tasks");
+            let name = format!("{tasks}-tasks-{vmms}-vmms");
 
             // Initialize the harness before calling "bench_function" so
             // that the "warm-up" calls to "bench_function" are actually useful
