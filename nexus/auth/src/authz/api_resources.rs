@@ -886,6 +886,14 @@ authz_resource! {
 }
 
 authz_resource! {
+    name = "TargetRelease",
+    parent = "Rack",
+    primary_key = u64, // generation
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
     name = "Silo",
     parent = "Fleet",
     primary_key = Uuid,
