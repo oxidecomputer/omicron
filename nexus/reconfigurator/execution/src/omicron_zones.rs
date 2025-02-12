@@ -33,13 +33,18 @@ use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 
+/// Typestate indicating that the deploy disks step was performed.
+#[derive(Debug)]
+#[must_use = "token indicating completion of deploy_zones"]
+pub(crate) struct DeployZonesDone(());
+
 /// Idempotently ensure that the specified Omicron zones are deployed to the
 /// corresponding sleds
 pub(crate) async fn deploy_zones(
     opctx: &OpContext,
     sleds_by_id: &BTreeMap<SledUuid, Sled>,
     zones: &BTreeMap<SledUuid, BlueprintZonesConfig>,
-) -> Result<(), Vec<anyhow::Error>> {
+) -> Result<DeployZonesDone, Vec<anyhow::Error>> {
     let errors: Vec<_> = stream::iter(zones)
         .filter_map(|(sled_id, config)| async move {
             let db_sled = match sleds_by_id.get(sled_id) {
@@ -94,7 +99,7 @@ pub(crate) async fn deploy_zones(
         .await;
 
     if errors.is_empty() {
-        Ok(())
+        Ok(DeployZonesDone(()))
     } else {
         Err(errors)
     }
@@ -106,6 +111,7 @@ pub(crate) async fn clean_up_expunged_zones<R: CleanupResolver>(
     datastore: &DataStore,
     resolver: &R,
     expunged_zones: impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)>,
+    _deploy_zones_done: &DeployZonesDone,
 ) -> Result<(), Vec<anyhow::Error>> {
     let errors: Vec<anyhow::Error> = stream::iter(expunged_zones)
         .filter_map(|(sled_id, config)| async move {
@@ -429,7 +435,7 @@ mod test {
         // Get a success result back when the blueprint has an empty set of
         // zones.
         let (_, blueprint) = create_blueprint(BTreeMap::new());
-        deploy_zones(&opctx, &sleds_by_id, &blueprint.blueprint_zones)
+        _ = deploy_zones(&opctx, &sleds_by_id, &blueprint.blueprint_zones)
             .await
             .expect("failed to deploy no zones");
 
@@ -487,7 +493,7 @@ mod test {
         }
 
         // Execute it.
-        deploy_zones(&opctx, &sleds_by_id, &blueprint.blueprint_zones)
+        _ = deploy_zones(&opctx, &sleds_by_id, &blueprint.blueprint_zones)
             .await
             .expect("failed to deploy initial zones");
 
@@ -504,7 +510,7 @@ mod test {
                 .respond_with(status_code(204)),
             );
         }
-        deploy_zones(&opctx, &sleds_by_id, &blueprint.blueprint_zones)
+        _ = deploy_zones(&opctx, &sleds_by_id, &blueprint.blueprint_zones)
             .await
             .expect("failed to deploy same zones");
         s1.verify_and_clear();
@@ -590,7 +596,7 @@ mod test {
         }
 
         // Activate the task
-        deploy_zones(&opctx, &sleds_by_id, &blueprint.blueprint_zones)
+        _ = deploy_zones(&opctx, &sleds_by_id, &blueprint.blueprint_zones)
             .await
             .expect("failed to deploy last round of zones");
         s1.verify_and_clear();
@@ -641,6 +647,10 @@ mod test {
         }
         let fake_resolver = FixedResolver(vec![mock_admin.addr()]);
 
+        // This is a unit test, so pretend we already successfully called
+        // deploy_zones.
+        let deploy_zones_done = DeployZonesDone(());
+
         // We haven't yet inserted a mapping from zone ID to cockroach node ID
         // in the db, so trying to clean up the zone should log a warning but
         // otherwise succeed, without attempting to contact our mock admin
@@ -651,6 +661,7 @@ mod test {
             datastore,
             &fake_resolver,
             iter::once((any_sled_id, &crdb_zone)),
+            &deploy_zones_done,
         )
         .await
         .expect("unknown node ID: no cleanup");
@@ -697,6 +708,7 @@ mod test {
             datastore,
             &fake_resolver,
             iter::once((any_sled_id, &crdb_zone)),
+            &deploy_zones_done,
         )
         .await
         .expect("decommissioned test node");
@@ -728,6 +740,7 @@ mod test {
             datastore,
             &fake_resolver,
             iter::once((any_sled_id, &crdb_zone)),
+            &deploy_zones_done,
         )
         .await
         .expect_err("no successful response should result in failure");
@@ -756,6 +769,7 @@ mod test {
             datastore,
             &fake_resolver,
             iter::once((any_sled_id, &crdb_zone)),
+            &deploy_zones_done,
         )
         .await
         .expect("decommissioned test node");
