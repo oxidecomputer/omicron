@@ -340,6 +340,8 @@ mod region_replacement {
             // Make sure that all the background tasks can run to completion.
 
             run_replacement_tasks_to_completion(&self.internal_client).await;
+            wait_for_all_replacements(&self.datastore, &self.internal_client)
+                .await;
 
             // Assert the request is in state Complete
 
@@ -1167,6 +1169,7 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     // Make sure that all the background tasks can run to completion.
 
     run_replacement_tasks_to_completion(&internal_client).await;
+    wait_for_all_replacements(datastore, &internal_client).await;
 
     // The disk volume should be deleted by the snapshot delete: wait until this
     // happens
@@ -1405,40 +1408,10 @@ mod region_snapshot_replacement {
             // Make sure that all the background tasks can run to completion.
 
             run_replacement_tasks_to_completion(&self.internal_client).await;
+            wait_for_all_replacements(&self.datastore, &self.internal_client)
+                .await;
 
             // Assert the request is in state Complete
-
-            wait_for_condition(
-                || {
-                    let datastore = self.datastore.clone();
-                    let opctx = self.opctx();
-                    let replacement_request_id = self.replacement_request_id;
-
-                    async move {
-                        let region_replacement = datastore
-                            .get_region_snapshot_replacement_request_by_id(
-                                &opctx,
-                                replacement_request_id,
-                            )
-                            .await
-                            .unwrap();
-
-                        let state = region_replacement.replacement_state;
-
-                        if state == RegionSnapshotReplacementState::Complete {
-                            // The saga transitioned the request ok
-                            Ok(())
-                        } else {
-                            // The saga is still running
-                            Err(CondCheckError::<()>::NotYet)
-                        }
-                    }
-                },
-                &std::time::Duration::from_millis(50),
-                &std::time::Duration::from_secs(60),
-            )
-            .await
-            .expect("request transitioned to expected state");
 
             let region_snapshot_replacement = self
                 .datastore
