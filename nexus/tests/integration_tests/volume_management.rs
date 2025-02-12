@@ -5,6 +5,7 @@
 //! Tests that Nexus properly manages and cleans up Crucible resources
 //! associated with Volumes
 
+use crate::integration_tests::crucible_replacements::wait_for_all_replacements;
 use crate::integration_tests::sleds::sleds_list;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -4109,6 +4110,7 @@ async fn test_read_only_region_reference_counting(
         .unwrap();
 
     run_replacement_tasks_to_completion(&internal_client).await;
+    wait_for_all_replacements(datastore, &internal_client).await;
 
     // The snapshot's allocated regions should have the one read-only region
 
@@ -4375,6 +4377,7 @@ async fn test_read_only_region_reference_counting_layers(
         .unwrap();
 
     run_replacement_tasks_to_completion(&internal_client).await;
+    wait_for_all_replacements(datastore, &internal_client).await;
 
     // Grab the read-only region in the snapshot volume
 
@@ -5623,6 +5626,7 @@ async fn test_double_layer_with_read_only_region_delete(
         .unwrap();
 
     run_replacement_tasks_to_completion(&internal_client).await;
+    wait_for_all_replacements(datastore, &internal_client).await;
 
     assert!(!disk_test.crucible_resources_deleted().await);
 
@@ -5734,6 +5738,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
         .unwrap();
 
     run_replacement_tasks_to_completion(&internal_client).await;
+    wait_for_all_replacements(datastore, &internal_client).await;
 
     wait_for_condition(
         || {
@@ -5780,6 +5785,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
         .unwrap();
 
     run_replacement_tasks_to_completion(&internal_client).await;
+    wait_for_all_replacements(datastore, &internal_client).await;
 
     assert!(!disk_test.crucible_resources_deleted().await);
 
@@ -5809,6 +5815,7 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
         .unwrap();
 
     run_replacement_tasks_to_completion(&internal_client).await;
+    wait_for_all_replacements(datastore, &internal_client).await;
 
     assert!(!disk_test.crucible_resources_deleted().await);
 

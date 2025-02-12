@@ -123,7 +123,7 @@ async fn replacements_left(datastore: &DataStore) -> i64 {
     region_replacement_left + region_snapshot_replacement_left
 }
 
-async fn wait_for_all_replacements(
+pub(crate) async fn wait_for_all_replacements(
     datastore: &Arc<DataStore>,
     internal_client: &ClientTestContext,
 ) {
