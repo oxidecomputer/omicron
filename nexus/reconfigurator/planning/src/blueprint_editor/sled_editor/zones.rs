@@ -5,7 +5,6 @@
 use crate::blueprint_builder::EditCounts;
 use id_map::Entry;
 use id_map::IdMap;
-use illumos_utils::zpool::ZpoolName;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -99,32 +98,6 @@ impl ZonesEditor {
                     kind2: prev.get().zone_type.kind(),
                 })
             }
-        }
-    }
-
-    /// Temporary method to backfill `filesystem_pool` properties for existing
-    /// zones.
-    ///
-    /// # Panics
-    ///
-    /// Panics if called with a nonexistent zone_id. This is not meant to be a
-    /// general-purpose method and should be removed entirely once all deployed
-    /// systems have this property backfilled successfully.
-    pub(super) fn backfill_filesystem_pool(
-        &mut self,
-        zone_id: OmicronZoneUuid,
-        filesystem_pool: ZpoolName,
-    ) {
-        let Some(mut zone) = self.zones.get_mut(&zone_id) else {
-            panic!(
-                "backfill_filesystem_pool called with \
-                 nonexistent zone id {zone_id}"
-            );
-        };
-
-        if zone.filesystem_pool.as_ref() != Some(&filesystem_pool) {
-            zone.filesystem_pool = Some(filesystem_pool);
-            self.counts.updated += 1;
         }
     }
 
