@@ -63,7 +63,6 @@ generic-array = { version = "0.14.7", default-features = false, features = ["mor
 getrandom = { version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.15.1" }
-heck = { version = "0.4.1" }
 hex = { version = "0.4.3", features = ["serde"] }
 hickory-proto = { version = "0.24.3", features = ["text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
@@ -184,7 +183,6 @@ generic-array = { version = "0.14.7", default-features = false, features = ["mor
 getrandom = { version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.15.1" }
-heck = { version = "0.4.1" }
 hex = { version = "0.4.3", features = ["serde"] }
 hickory-proto = { version = "0.24.3", features = ["text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
