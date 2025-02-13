@@ -70,7 +70,7 @@ impl BlessedFiles {
             // ("api/api-1.2.3-hash.json").  Figure out which case we're in.
             let parts: Vec<_> = f.iter().collect();
             if parts.is_empty() || parts.len() > 2 {
-                api_files.load_error(anyhow!(
+                api_files.load_warning(anyhow!(
                     "path {:?}: can't understand this path name",
                     f
                 ));
