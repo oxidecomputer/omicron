@@ -23,15 +23,16 @@ workspace = true
 # reasons, `xtask` does *not* depend on `omicron-workspace-hack`. But the
 # downstream binaries do depend on it.)
 anyhow.workspace = true
-camino.workspace = true
 camino-tempfile.workspace = true
-cargo_toml = "0.20"
+camino.workspace = true
 cargo_metadata.workspace = true
+cargo_toml = "0.20"
 clap.workspace = true
 fs-err.workspace = true
 macaddr.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 shell-words.workspace = true
 swrite.workspace = true
 tabled.workspace = true
@@ -40,4 +41,3 @@ toml.workspace = true
 usdt.workspace = true
 walkdir.workspace = true
 xshell.workspace = true
-sha2.workspace = true
