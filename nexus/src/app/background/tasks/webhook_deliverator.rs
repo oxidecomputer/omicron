@@ -453,16 +453,29 @@ impl WebhookDeliverator {
                 }
                 Ok(rsp) => {
                     let status = rsp.status();
-                    slog::debug!(
-                        &opctx.log,
-                        "webhook event delivered successfully";
-                        "event_id" => %delivery.event_id,
-                        "event_class" => %event_class,
-                        "delivery_id" => %delivery_id,
-                        "response_status" => ?status,
-                        "response_duration" => ?duration,
-                    );
-                    (WebhookDeliveryResult::Succeeded, Some(status))
+                    if status.is_success() {
+                        slog::debug!(
+                            &opctx.log,
+                            "webhook event delivered successfully";
+                            "event_id" => %delivery.event_id,
+                            "event_class" => %event_class,
+                            "delivery_id" => %delivery_id,
+                            "response_status" => ?status,
+                            "response_duration" => ?duration,
+                        );
+                        (WebhookDeliveryResult::Succeeded, Some(status))
+                    } else {
+                        slog::warn!(
+                            &opctx.log,
+                            "webhook receiver endpoint returned an HTTP error";
+                            "event_id" => %delivery.event_id,
+                            "event_class" => %event_class,
+                            "delivery_id" => %delivery_id,
+                            "response_status" => ?status,
+                            "response_duration" => ?duration,
+                        );
+                        (WebhookDeliveryResult::FailedHttpError, Some(status))
+                    }
                 }
             };
             // only include a response duration if we actually got a response back
