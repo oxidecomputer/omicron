@@ -29,6 +29,13 @@ static INSECURE_SSH_ARGS: [&str; 8] = [
 /// default path used when none provided on command line
 static DEFAULT_A4X2_PKG_PATH: &str = "out/a4x2-package-out.tgz";
 
+/// This subnet is set by testbed for accessing the control plane. In the future
+/// this should be configurable.
+static DEFAULT_OMICRON_SUBNET: &str = "198.51.100.0/24";
+
+/// This nexus address is set by testbed for accessing the control plane.
+static DEFAULT_OMICRON_NEXUS_ADDR: &str = "198.51.100.23";
+
 #[derive(Parser)]
 pub struct A4x2DeployArgs {
     #[command(subcommand)]
@@ -282,11 +289,11 @@ fn try_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
     // necessary so I'm leaving it out for now. We'll see if that's true.
     // So far it seems to be.
 
-    cmd!(sh, "pfexec route add 198.51.100.0/24 {customer_edge_addr}").run()?;
+    cmd!(sh, "pfexec route add {DEFAULT_OMICRON_SUBNET} {customer_edge_addr}").run()?;
 
     // Not sure how this IP is fixed, but it is
-    let api_url = "http://198.51.100.23";
-    println!("polling control plane for signs of life for up to 25 minutes");
+    let api_url = DEFAULT_OMICRON_NEXUS_ADDR;
+    println!("polling control plane @ {api_url} for signs of life for up to 25 minutes");
 
     // Print the date for the logs' benefit
     let _ = cmd!(sh, "date").run();
@@ -372,7 +379,7 @@ fn teardown_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
     // all of them. But, I don't like unbounded loops, so we will do at max 10,
     // which is a number that seems unlikely enough to reach, to me.
     for _ in 0..10 {
-        let mut route_cmd = cmd!(sh, "pfexec route get 198.51.100.0/24");
+        let mut route_cmd = cmd!(sh, "pfexec route get {DEFAULT_OMICRON_SUBNET}");
 
         // We get an error code when there is no route (and thus, nothing for
         // us to delete!)
@@ -387,7 +394,7 @@ fn teardown_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
                     "teardown_a4x2: could not get gateway for a4x2 route from line {ln}"
                 ))?;
 
-                cmd!(sh, "pfexec route delete 198.51.100.0/24 {gateway}")
+                cmd!(sh, "pfexec route delete {DEFAULT_OMICRON_SUBNET} {gateway}")
                     .run()?;
 
                 had_gateway = true;
