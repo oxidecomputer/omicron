@@ -7,7 +7,7 @@
 
 use crate::{
     apis::{ApiIdent, ManagedApis},
-    spec_files_generic::{ApiSpecFile, ApiSpecFilesBuilder},
+    spec_files_generic::{ApiFiles, ApiSpecFile, ApiSpecFilesBuilder},
 };
 use anyhow::{anyhow, Context};
 use camino::Utf8Path;
@@ -19,8 +19,10 @@ use std::collections::BTreeMap;
 // XXX-dap see comments on BlessedFiles
 #[derive(Debug)]
 pub struct LocalFiles {
-    pub spec_files:
-        BTreeMap<ApiIdent, BTreeMap<semver::Version, Vec<LocalApiSpecFile>>>,
+    pub spec_files: BTreeMap<
+        ApiIdent,
+        BTreeMap<semver::Version, ApiFiles<LocalApiSpecFile>>,
+    >,
     pub errors: Vec<anyhow::Error>,
     pub warnings: Vec<anyhow::Error>,
 }

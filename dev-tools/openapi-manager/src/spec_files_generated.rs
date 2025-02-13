@@ -6,7 +6,9 @@
 
 use crate::{
     apis::{ApiIdent, ManagedApis},
-    spec_files_generic::{ApiSpecFile, ApiSpecFileName, ApiSpecFilesBuilder},
+    spec_files_generic::{
+        ApiFiles, ApiSpecFile, ApiSpecFileName, ApiSpecFilesBuilder,
+    },
 };
 use std::collections::BTreeMap;
 
@@ -18,7 +20,7 @@ use std::collections::BTreeMap;
 pub struct GeneratedFiles {
     pub spec_files: BTreeMap<
         ApiIdent,
-        BTreeMap<semver::Version, Vec<GeneratedApiSpecFile>>,
+        BTreeMap<semver::Version, ApiFiles<GeneratedApiSpecFile>>,
     >,
     pub errors: Vec<anyhow::Error>,
     pub warnings: Vec<anyhow::Error>,

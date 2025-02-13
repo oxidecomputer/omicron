@@ -8,7 +8,7 @@
 use crate::{
     apis::{ApiIdent, ManagedApis},
     git::{git_ls_tree, git_merge_base_head, git_show_file, GitRevision},
-    spec_files_generic::{ApiSpecFile, ApiSpecFilesBuilder},
+    spec_files_generic::{ApiFiles, ApiSpecFile, ApiSpecFilesBuilder},
 };
 use anyhow::anyhow;
 use camino::Utf8Path;
@@ -33,8 +33,10 @@ use std::collections::BTreeMap;
 // a lot simpler and they *can* use the same type as LocalFiles
 #[derive(Debug)]
 pub struct BlessedFiles {
-    pub spec_files:
-        BTreeMap<ApiIdent, BTreeMap<semver::Version, Vec<BlessedApiSpecFile>>>,
+    pub spec_files: BTreeMap<
+        ApiIdent,
+        BTreeMap<semver::Version, ApiFiles<BlessedApiSpecFile>>,
+    >,
     pub errors: Vec<anyhow::Error>,
     pub warnings: Vec<anyhow::Error>,
 }
@@ -86,7 +88,9 @@ impl BlessedFiles {
                     api_files.load_contents(file_name, contents);
                 }
             } else if parts.len() == 2 {
-                if let Some(ident) = api_files.versioned_directory(parts[0], true) {
+                if let Some(ident) =
+                    api_files.versioned_directory(parts[0], true)
+                {
                     if let Some(file_name) =
                         api_files.versioned_file_name(&ident, parts[1], true)
                     {
