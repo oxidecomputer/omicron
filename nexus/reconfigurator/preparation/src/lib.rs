@@ -149,7 +149,7 @@ impl PlanningInputFromDb<'_> {
         let oximeter_read_policy = datastore
             .oximeter_read_policy_get_latest(opctx)
             .await
-            .internal_context("fetching oximeter reads policy")?;
+            .internal_context("fetching oximeter read policy")?;
 
         let planning_input = PlanningInputFromDb {
             sled_rows: &sled_rows,

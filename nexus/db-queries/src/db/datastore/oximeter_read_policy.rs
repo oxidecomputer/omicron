@@ -169,3 +169,109 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::pub_test_utils::TestDatabase;
+    use nexus_inventory::now_db_precision;
+    use nexus_types::deployment::OximeterReadMode;
+    use omicron_test_utils::dev;
+
+    #[tokio::test]
+    async fn test_oximeter_read_policy_basic() {
+        // Setup
+        let logctx = dev::test_setup_log("test_oximeter_read_policy_basic");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Listing an empty table should return an empty vec
+
+        assert!(datastore
+            .oximeter_read_policy_list(opctx, &DataPageParams::max_page())
+            .await
+            .unwrap()
+            .is_empty());
+
+        // Fail to insert a policy with version 0
+        let mut policy = OximeterReadPolicy {
+            version: 0,
+            mode: OximeterReadMode::SingleNode,
+            time_created: now_db_precision(),
+        };
+
+        assert!(datastore
+            .oximeter_read_policy_insert_latest_version(opctx, &policy)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("policy version must be greater than 0"));
+
+        // Inserting version 2 before version 1 should not work
+        policy.version = 2;
+        assert!(datastore
+            .oximeter_read_policy_insert_latest_version(opctx, &policy)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("policy version 2 is not the most recent"));
+
+        // Inserting version 1 should work
+        policy.version = 1;
+        assert!(datastore
+            .oximeter_read_policy_insert_latest_version(opctx, &policy)
+            .await
+            .is_ok());
+
+        // Inserting version 2 should work
+        policy.version = 2;
+        assert!(datastore
+            .oximeter_read_policy_insert_latest_version(opctx, &policy)
+            .await
+            .is_ok());
+
+        // Inserting version 4 should not work, since the prior version is 2
+        policy.version = 4;
+        assert!(datastore
+            .oximeter_read_policy_insert_latest_version(opctx, &policy)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("policy version 4 is not the most recent"));
+
+        // Inserting version 3 should work
+        policy.version = 3;
+        assert!(datastore
+            .oximeter_read_policy_insert_latest_version(opctx, &policy)
+            .await
+            .is_ok());
+
+        // Inserting version 4 should work
+        policy.version = 4;
+        policy.mode =
+            OximeterReadMode::Cluster;
+        assert!(datastore
+            .oximeter_read_policy_insert_latest_version(opctx, &policy)
+            .await
+            .is_ok());
+
+        let history = datastore
+            .oximeter_read_policy_list(opctx, &DataPageParams::max_page())
+            .await
+            .unwrap();
+
+        for i in 1..=4 {
+            let policy = &history[i - 1];
+            assert_eq!(policy.version, i as u32);
+            if i != 4 {
+                assert!(matches!(policy.mode, OximeterReadMode::SingleNode));
+            } else {
+                assert!(matches!(policy.mode, OximeterReadMode::Cluster));
+            }
+        }
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+}

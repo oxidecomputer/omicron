@@ -170,6 +170,21 @@ impl PlanningInput {
         clickhouse_policy.mode.single_node_enabled()
     }
 
+    pub fn oximeter_cluster_read_enabled(&self) -> bool {
+        let Some(oximeter_read_policy) = &self.policy.oximeter_read_policy else {
+            return false;
+        };
+        oximeter_read_policy.mode.cluster_enabled()
+    }
+
+    pub fn oximeter_single_node_read_enabled(&self) -> bool {
+        let Some(oximeter_read_policy) = &self.policy.oximeter_read_policy else {
+            // If there is no policy oximeter defaults to reading from single-node clickhouse.
+            return true;
+        };
+        oximeter_read_policy.mode.single_node_enabled()
+    }
+
     pub fn all_sleds(
         &self,
         filter: SledFilter,
