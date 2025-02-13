@@ -76,7 +76,7 @@ mod lldp;
 mod migration;
 mod network_interface;
 mod oximeter;
-mod oximeter_reads_policy;
+mod oximeter_read_policy;
 mod physical_disk;
 mod probe;
 mod project;

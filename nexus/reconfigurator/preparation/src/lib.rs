@@ -21,7 +21,7 @@ use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::OmicronZoneNic;
-use nexus_types::deployment::OximeterReadsPolicy;
+use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
@@ -77,7 +77,7 @@ pub struct PlanningInputFromDb<'a> {
     pub external_dns_version: nexus_db_model::Generation,
     pub cockroachdb_settings: &'a CockroachDbSettings,
     pub clickhouse_policy: Option<ClickhousePolicy>,
-    pub oximeter_reads_policy: Option<OximeterReadsPolicy>,
+    pub oximeter_read_policy: Option<OximeterReadPolicy>,
     pub log: &'a Logger,
 }
 
@@ -146,8 +146,8 @@ impl PlanningInputFromDb<'_> {
             .await
             .internal_context("fetching clickhouse policy")?;
 
-        let oximeter_reads_policy = datastore
-            .oximeter_reads_policy_get_latest(opctx)
+        let oximeter_read_policy = datastore
+            .oximeter_read_policy_get_latest(opctx)
             .await
             .internal_context("fetching oximeter reads policy")?;
 
@@ -170,7 +170,7 @@ impl PlanningInputFromDb<'_> {
             external_dns_version,
             cockroachdb_settings: &cockroachdb_settings,
             clickhouse_policy,
-            oximeter_reads_policy,
+            oximeter_read_policy,
         }
         .build()
         .internal_context("assembling planning_input")?;
@@ -193,7 +193,7 @@ impl PlanningInputFromDb<'_> {
             target_crucible_pantry_zone_count: self
                 .target_crucible_pantry_zone_count,
             clickhouse_policy: self.clickhouse_policy.clone(),
-            oximeter_reads_policy: self.oximeter_reads_policy.clone(),
+            oximeter_read_policy: self.oximeter_read_policy.clone(),
         };
         let mut builder = PlanningInputBuilder::new(
             policy,

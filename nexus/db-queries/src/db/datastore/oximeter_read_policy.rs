@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Queries related to the oximeter_reads policy
+//! Queries related to the oximeter_read policy
 
 use super::DataStore;
 use crate::authz;
@@ -18,54 +18,54 @@ use diesel::sql_types;
 use diesel::ExpressionMethods;
 use diesel::OptionalExtension;
 use diesel::QueryDsl;
-use nexus_db_model::DbOximeterReadsMode;
-use nexus_db_model::OximeterReadsModeEnum;
-use nexus_db_model::OximeterReadsPolicy as DbOximeterReadsPolicy;
+use nexus_db_model::DbOximeterReadMode;
+use nexus_db_model::OximeterReadModeEnum;
+use nexus_db_model::OximeterReadPolicy as DbOximeterReadPolicy;
 use nexus_db_model::SqlU32;
-use nexus_types::deployment::OximeterReadsPolicy;
+use nexus_types::deployment::OximeterReadPolicy;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 
 impl DataStore {
-    /// Return a list of all oximeter_reads policies
-    pub async fn oximeter_reads_policy_list(
+    /// Return a list of all oximeter_read policies
+    pub async fn oximeter_read_policy_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, SqlU32>,
-    ) -> ListResultVec<OximeterReadsPolicy> {
-        use db::schema::oximeter_reads_policy;
+    ) -> ListResultVec<OximeterReadPolicy> {
+        use db::schema::oximeter_read_policy;
 
         opctx
             .authorize(authz::Action::ListChildren, &authz::BLUEPRINT_CONFIG)
             .await?;
 
         let policies = paginated(
-            oximeter_reads_policy::table,
-            oximeter_reads_policy::version,
+            oximeter_read_policy::table,
+            oximeter_read_policy::version,
             pagparams,
         )
-        .select(DbOximeterReadsPolicy::as_select())
+        .select(DbOximeterReadPolicy::as_select())
         .get_results_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        Ok(policies.into_iter().map(OximeterReadsPolicy::from).collect())
+        Ok(policies.into_iter().map(OximeterReadPolicy::from).collect())
     }
 
     /// Return the clickhouse policy with the highest version
-    pub async fn oximeter_reads_policy_get_latest(
+    pub async fn oximeter_read_policy_get_latest(
         &self,
         opctx: &OpContext,
-    ) -> Result<Option<OximeterReadsPolicy>, Error> {
+    ) -> Result<Option<OximeterReadPolicy>, Error> {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        use db::schema::oximeter_reads_policy::dsl;
+        use db::schema::oximeter_read_policy::dsl;
 
-        let latest_policy = dsl::oximeter_reads_policy
+        let latest_policy = dsl::oximeter_read_policy
             .order_by(dsl::version.desc())
-            .first_async::<DbOximeterReadsPolicy>(&*conn)
+            .first_async::<DbOximeterReadPolicy>(&*conn)
             .await
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -76,12 +76,12 @@ impl DataStore {
     /// Insert the current version of the policy in the database
     ///
     /// Only succeeds if the prior version is the latest version currently
-    /// in the `oximeter_reads_policy` table. If there are no versions currently
+    /// in the `oximeter_read_policy` table. If there are no versions currently
     /// in the table, then the current policy must be at version 1.
-    pub async fn oximeter_reads_policy_insert_latest_version(
+    pub async fn oximeter_read_policy_insert_latest_version(
         &self,
         opctx: &OpContext,
-        policy: &OximeterReadsPolicy,
+        policy: &OximeterReadPolicy,
     ) -> Result<(), Error> {
         if policy.version < 1 {
             return Err(Error::invalid_request(
@@ -93,10 +93,10 @@ impl DataStore {
             .await?;
 
         let num_inserted = if policy.version == 1 {
-            self.oximeter_reads_policy_insert_first_policy(opctx, &policy)
+            self.oximeter_read_policy_insert_first_policy(opctx, &policy)
                 .await?
         } else {
-            self.oximeter_reads_policy_insert_next_policy(opctx, &policy)
+            self.oximeter_read_policy_insert_next_policy(opctx, &policy)
                 .await?
         };
 
@@ -115,27 +115,27 @@ impl DataStore {
     /// Insert the next version of the policy in the database
     ///
     /// Only succeeds if the prior version is the latest version currently
-    /// in the `oximeter_reads_policy` table.
+    /// in the `oximeter_read_policy` table.
     ///
     /// Panics if `policy.version <= 1`;
-    async fn oximeter_reads_policy_insert_next_policy(
+    async fn oximeter_read_policy_insert_next_policy(
         &self,
         opctx: &OpContext,
-        policy: &OximeterReadsPolicy,
+        policy: &OximeterReadPolicy,
     ) -> Result<usize, Error> {
         assert!(policy.version > 1);
         let prev_version = policy.version - 1;
 
         sql_query(
-                r"INSERT INTO oximeter_reads_policy
-                     (version, oximeter_reads_mode, time_created)
+                r"INSERT INTO oximeter_read_policy
+                     (version, oximeter_read_mode, time_created)
                      SELECT $1, $2, $3
-                      FROM oximeter_reads_policy WHERE version = $4 AND version IN
-                       (SELECT version FROM oximeter_reads_policy
+                      FROM oximeter_read_policy WHERE version = $4 AND version IN
+                       (SELECT version FROM oximeter_read_policy
                         ORDER BY version DESC LIMIT 1)",
             )
             .bind::<sql_types::BigInt, SqlU32>(policy.version.into())
-            .bind::<OximeterReadsModeEnum, DbOximeterReadsMode>((&policy.mode).into())
+            .bind::<OximeterReadModeEnum, DbOximeterReadMode>((&policy.mode).into())
             .bind::<sql_types::Timestamptz, _>(policy.time_created)
             .bind::<sql_types::BigInt, SqlU32>(prev_version.into())
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
@@ -148,19 +148,19 @@ impl DataStore {
     /// Only insert this policy if no other policy exists yet.
     ///
     /// Return the number of inserted rows or an error.
-    async fn oximeter_reads_policy_insert_first_policy(
+    async fn oximeter_read_policy_insert_first_policy(
         &self,
         opctx: &OpContext,
-        policy: &OximeterReadsPolicy,
+        policy: &OximeterReadPolicy,
     ) -> Result<usize, Error> {
         sql_query(
-            r"INSERT INTO oximeter_reads_policy
-                  (version, oximeter_reads_mode, time_created)
+            r"INSERT INTO oximeter_read_policy
+                  (version, oximeter_read_mode, time_created)
                  SELECT $1, $2, $3
-                 WHERE NOT EXISTS (SELECT * FROM oximeter_reads_policy)",
+                 WHERE NOT EXISTS (SELECT * FROM oximeter_read_policy)",
         )
         .bind::<sql_types::BigInt, SqlU32>(policy.version.into())
-        .bind::<OximeterReadsModeEnum, DbOximeterReadsMode>(
+        .bind::<OximeterReadModeEnum, DbOximeterReadMode>(
             (&policy.mode).into(),
         )
         .bind::<sql_types::Timestamptz, _>(policy.time_created)

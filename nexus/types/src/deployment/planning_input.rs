@@ -912,36 +912,36 @@ pub struct Policy {
     /// If this policy is `None`, then we are reading from a single node
     /// clickhouse setup. Eventually we will only allow reads from a cluster
     /// and this will no longer be an option.
-    pub oximeter_reads_policy: Option<OximeterReadsPolicy>,
+    pub oximeter_read_policy: Option<OximeterReadPolicy>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct OximeterReadsPolicy {
+pub struct OximeterReadPolicy {
     pub version: u32,
-    pub mode: OximeterReadsMode,
+    pub mode: OximeterReadMode,
     pub time_created: DateTime<Utc>,
 }
 
 /// How to deploy clickhouse nodes
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "type", content = "value")]
-pub enum OximeterReadsMode {
+pub enum OximeterReadMode {
     SingleNode,
     Cluster,
 }
 
-impl OximeterReadsMode {
+impl OximeterReadMode {
     pub fn cluster_enabled(&self) -> bool {
         match self {
-            OximeterReadsMode::SingleNode => false,
-            OximeterReadsMode::Cluster => true,
+            OximeterReadMode::SingleNode => false,
+            OximeterReadMode::Cluster => true,
         }
     }
 
     pub fn single_node_enabled(&self) -> bool {
         match self {
-            OximeterReadsMode::Cluster { .. } => false,
-            OximeterReadsMode::SingleNode => true,
+            OximeterReadMode::Cluster { .. } => false,
+            OximeterReadMode::SingleNode => true,
         }
     }
 }
@@ -1055,7 +1055,7 @@ impl PlanningInputBuilder {
                     CockroachDbClusterVersion::POLICY,
                 target_crucible_pantry_zone_count: 0,
                 clickhouse_policy: None,
-                oximeter_reads_policy: None,
+                oximeter_read_policy: None,
             },
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),

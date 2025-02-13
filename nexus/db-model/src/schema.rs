@@ -864,9 +864,9 @@ table! {
 }
 
 table! {
-    oximeter_reads_policy (version) {
+    oximeter_read_policy (version) {
         version -> Int8,
-        oximeter_reads_mode -> crate::oximeter_reads_policy::OximeterReadsModeEnum,
+        oximeter_read_mode -> crate::oximeter_read_policy::OximeterReadModeEnum,
         time_created -> Timestamptz,
     }
 }
