@@ -16,6 +16,7 @@ use crate::spec_files_blessed::BlessedApiSpecFile;
 use crate::spec_files_blessed::BlessedFiles;
 use crate::spec_files_generated::GeneratedApiSpecFile;
 use crate::spec_files_generated::GeneratedFiles;
+use crate::spec_files_generic::ApiFiles;
 use crate::spec_files_generic::ApiSpecFileName;
 use crate::spec_files_local::LocalApiSpecFile;
 use crate::spec_files_local::LocalFiles;
@@ -529,9 +530,9 @@ fn resolve_removed_blessed_versions<'a>(
     >,
     blessed: &'a BlessedFiles,
 ) -> impl Iterator<Item = (&'a ApiIdent, &'a semver::Version)> + 'a {
-    blessed.spec_files.iter().flat_map(|(ident, version_map)| {
+    blessed.spec_files.iter().flat_map(|(ident, api_files)| {
         let set = supported_versions_by_api.get(ident);
-        version_map.keys().filter_map(move |version| match set {
+        api_files.versions().keys().filter_map(move |version| match set {
             Some(set) if set.contains(version) => None,
             _ => Some((ident, version)),
         })
@@ -545,9 +546,10 @@ fn resolve_orphaned_local_specs<'a>(
     >,
     local: &'a LocalFiles,
 ) -> impl Iterator<Item = &'a ApiSpecFileName> + 'a {
-    local.spec_files.iter().flat_map(|(ident, version_map)| {
+    local.spec_files.iter().flat_map(|(ident, api_files)| {
         let set = supported_versions_by_api.get(ident);
-        version_map
+        api_files
+            .versions()
             .iter()
             .filter_map(move |(version, files)| match set {
                 Some(set) if !set.contains(version) => {
@@ -562,9 +564,9 @@ fn resolve_orphaned_local_specs<'a>(
 fn resolve_api<'a>(
     env: &'a Environment,
     api: &'a ManagedApi,
-    api_blessed: Option<&'a BTreeMap<semver::Version, Vec<BlessedApiSpecFile>>>,
-    api_generated: &'a BTreeMap<semver::Version, Vec<GeneratedApiSpecFile>>,
-    api_local: Option<&'a BTreeMap<semver::Version, Vec<LocalApiSpecFile>>>,
+    api_blessed: Option<&'a ApiFiles<BlessedApiSpecFile>>,
+    api_generated: &'a ApiFiles<GeneratedApiSpecFile>,
+    api_local: Option<&'a ApiFiles<LocalApiSpecFile>>,
 ) -> BTreeMap<semver::Version, Resolution<'a>> {
     if api.is_lockstep() {
         resolve_api_lockstep(env, api, api_generated, api_local)
@@ -572,8 +574,9 @@ fn resolve_api<'a>(
         api.iter_versions_semver()
             .map(|version| {
                 let version = version.clone();
-                let blessed =
-                    api_blessed.and_then(|b| b.get(&version)).map(|list| {
+                let blessed = api_blessed
+                    .and_then(|b| b.versions().get(&version))
+                    .map(|list| {
                         // XXX-dap validate this and have the type reflect it; or
                         // else fail gracefully here
                         assert_eq!(list.len(), 1);
@@ -582,6 +585,7 @@ fn resolve_api<'a>(
                 // XXX-dap validate this and have the type reflect it; or else
                 // fail gracefully here
                 let generated = api_generated
+                    .versions()
                     .get(&version)
                     .map(|list| {
                         assert_eq!(list.len(), 1);
@@ -589,7 +593,7 @@ fn resolve_api<'a>(
                     })
                     .unwrap();
                 let local = api_local
-                    .and_then(|b| b.get(&version))
+                    .and_then(|b| b.versions().get(&version))
                     .map(|v| v.as_slice())
                     .unwrap_or(&[]);
                 let resolution = resolve_api_version(
@@ -604,8 +608,8 @@ fn resolve_api<'a>(
 fn resolve_api_lockstep<'a>(
     env: &'a Environment,
     api: &'a ManagedApi,
-    api_generated: &'a BTreeMap<semver::Version, Vec<GeneratedApiSpecFile>>,
-    api_local: Option<&'a BTreeMap<semver::Version, Vec<LocalApiSpecFile>>>,
+    api_generated: &'a ApiFiles<GeneratedApiSpecFile>,
+    api_local: Option<&'a ApiFiles<LocalApiSpecFile>>,
 ) -> BTreeMap<semver::Version, Resolution<'a>> {
     assert!(api.is_lockstep());
 
@@ -619,6 +623,7 @@ fn resolve_api_lockstep<'a>(
     // unwrap(): We should always have generated an OpenAPI document for
     // each supported version.
     let generated_for_version = api_generated
+        .versions()
         .get(version)
         .expect("at least one OpenAPI document for version of lockstep API");
 
@@ -635,7 +640,7 @@ fn resolve_api_lockstep<'a>(
 
     // We may or may not have found a local OpenAPI document for this API.
     let local = api_local
-        .and_then(|by_version| by_version.get(version))
+        .and_then(|by_version| by_version.versions().get(version))
         .and_then(|list| match &list.as_slice() {
             &[first] => Some(first),
             &[] => None,

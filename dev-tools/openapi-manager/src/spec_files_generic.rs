@@ -10,7 +10,7 @@ use anyhow::{anyhow, bail, Context};
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
 use openapiv3::OpenAPI;
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 use std::{collections::BTreeMap, ops::Deref};
 use thiserror::Error;
 
@@ -293,7 +293,7 @@ impl ApiSpecFile {
 
 pub struct ApiSpecFilesBuilder<'a> {
     apis: &'a ManagedApis,
-    spec_files: BTreeMap<ApiIdent, BTreeMap<semver::Version, Vec<ApiSpecFile>>>,
+    spec_files: BTreeMap<ApiIdent, ApiFiles<ApiSpecFile>>,
     errors: Vec<anyhow::Error>,
     warnings: Vec<anyhow::Error>,
 }
@@ -446,7 +446,8 @@ impl<'a> ApiSpecFilesBuilder<'a> {
                 let api_version = file.version();
                 self.spec_files
                     .entry(ident.clone())
-                    .or_insert_with(BTreeMap::new)
+                    .or_insert_with(ApiFiles::new)
+                    .spec_files
                     .entry(api_version.clone())
                     .or_insert_with(Vec::new)
                     .push(file);
@@ -457,13 +458,10 @@ impl<'a> ApiSpecFilesBuilder<'a> {
         }
     }
 
-    pub fn into_parts<T: From<ApiSpecFile>>(
+    pub fn into_parts<T: Debug + From<ApiSpecFile>>(
         self,
-    ) -> (
-        BTreeMap<ApiIdent, BTreeMap<semver::Version, Vec<T>>>,
-        Vec<anyhow::Error>,
-        Vec<anyhow::Error>,
-    ) {
+    ) -> (BTreeMap<ApiIdent, ApiFiles<T>>, Vec<anyhow::Error>, Vec<anyhow::Error>)
+    {
         let errors = self.errors;
         let warnings = self.warnings;
         // This mess is just mapping the items in the inner BTreeMap with the
@@ -471,24 +469,40 @@ impl<'a> ApiSpecFilesBuilder<'a> {
         let map = self
             .spec_files
             .into_iter()
-            .map(|(api_ident, vmap)| {
-                (
-                    api_ident,
-                    vmap.into_iter()
-                        .map(|(v, files)| {
-                            (
-                                v,
-                                files
-                                    .into_iter()
-                                    .map(T::from)
-                                    .collect::<Vec<_>>(),
-                            )
-                        })
-                        .collect::<BTreeMap<_, _>>(),
-                )
-            })
+            .map(|(api_ident, api_files)| (api_ident, api_files.convert()))
             .collect::<BTreeMap<_, _>>();
         (map, errors, warnings)
+    }
+}
+
+#[derive(Debug)]
+pub struct ApiFiles<T: Debug> {
+    spec_files: BTreeMap<semver::Version, Vec<T>>,
+    latest_link: Option<ApiSpecFileName>,
+}
+
+impl<T: Debug> ApiFiles<T> {
+    fn new() -> ApiFiles<T> {
+        ApiFiles { spec_files: BTreeMap::new(), latest_link: None }
+    }
+
+    fn convert<U: Debug + From<T>>(self) -> ApiFiles<U> {
+        ApiFiles {
+            spec_files: self
+                .spec_files
+                .into_iter()
+                .map(|(v, files)| (v, files.into_iter().map(U::from).collect()))
+                .collect(),
+            latest_link: self.latest_link,
+        }
+    }
+
+    pub fn versions(&self) -> &BTreeMap<semver::Version, Vec<T>> {
+        &self.spec_files
+    }
+
+    pub fn latest_link(&self) -> Option<&ApiSpecFileName> {
+        self.latest_link.as_ref()
     }
 }
 
