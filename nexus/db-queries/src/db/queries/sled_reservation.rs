@@ -380,5 +380,6 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    // NOTE: There are some tests you might wanna nab from "affinity.rs"
+    // NOTE: These queries are more exhaustively tested in db/datastore/sled.rs,
+    // where they are used.
 }
