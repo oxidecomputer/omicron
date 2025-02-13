@@ -7,7 +7,6 @@
 use anyhow::Result;
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
-use serde::Deserialize;
 use sha2::Digest;
 use std::env;
 use std::fs;
@@ -26,25 +25,29 @@ pub struct A4x2PackageArgs {
     end_to_end_tests: bool,
 }
 
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "kebab-case")]
-struct NextestConfig {
-    nextest_version: NextestConfigVersion,
-}
-
-#[derive(Deserialize, Debug)]
-struct NextestConfigVersion {
-    // required: String,
-    recommended: String,
-}
-
 struct Environment {
-    cargo: String,
-    home_dir: Utf8PathBuf,
-    work_dir: Utf8PathBuf,
+    /// Path to `cargo` command
+    cargo: Utf8PathBuf,
+
+    /// Path to `git` command
+    git: Utf8PathBuf,
+
+    /// Directory from which xtask a4x2-package was invoked. Should be an
+    /// omicron source tree.
     src_dir: Utf8PathBuf,
+
+    /// Directory within which we will build a4x2, omicron, tests, and then
+    /// package them
+    work_dir: Utf8PathBuf,
+
+    /// Path within `work_dir` where we will place build outputs, prior to
+    /// generation of the final tarball artifact.
     out_dir: Utf8PathBuf,
+
+    /// Path within `work_dir` containing a copy of the omicron source tree
     omicron_dir: Utf8PathBuf,
+
+    /// Are we taking the CI codepaths?
     in_ci: bool,
 }
 
@@ -56,8 +59,12 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
         // differently in that case (no cleanup, use /work)
         let in_ci = env::var("CI").is_ok();
 
-        let cargo =
-            std::env::var("CARGO").unwrap_or_else(|_| String::from("cargo"));
+        let cargo = Utf8PathBuf::from(
+            std::env::var("CARGO").unwrap_or(String::from("cargo")),
+        );
+        let git = Utf8PathBuf::from(
+            std::env::var("GIT").unwrap_or(String::from("git")),
+        );
 
         let home_dir = Utf8PathBuf::from(std::env::var("HOME")?);
         let work_dir = if in_ci {
@@ -84,7 +91,7 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
 
         Environment {
             cargo,
-            home_dir,
+            git,
             work_dir,
             src_dir,
             out_dir,
@@ -117,14 +124,16 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
 fn prepare_source(sh: &Shell, env: &Environment) -> Result<()> {
     cmd!(sh, "banner 'prepare'").run()?;
 
+    let git = &env.git;
+
     // Get a ref we can checkout from the local working tree
     let treeish = {
         let _popdir = sh.push_dir(&env.src_dir);
-        let mut treeish = cmd!(sh, "git stash create").read()?;
+        let mut treeish = cmd!(sh, "{git} stash create").read()?;
         if treeish.is_empty() {
             // nothing to stash
             eprintln!("Nothing to stash, using most recent commit for clone");
-            treeish = cmd!(sh, "git rev-parse HEAD").read()?;
+            treeish = cmd!(sh, "{git} rev-parse HEAD").read()?;
         }
         assert_eq!(
             treeish.len(),
@@ -140,15 +149,14 @@ fn prepare_source(sh: &Shell, env: &Environment) -> Result<()> {
 
     // Clone the local source tree into the packaging work dir
     let _popdir = sh.push_dir(&env.omicron_dir);
-    cmd!(sh, "git init").run()?;
+    cmd!(sh, "{git} init").run()?;
 
     let src_dir = &env.src_dir;
-    cmd!(sh, "git remote add origin {src_dir}").run()?;
+    cmd!(sh, "{git} remote add origin {src_dir}").run()?;
 
-    cmd!(sh, "git fetch origin {treeish}").run()?;
-    cmd!(sh, "git checkout {treeish}").run()?;
+    cmd!(sh, "{git} fetch origin {treeish}").run()?;
+    cmd!(sh, "{git} checkout {treeish}").run()?;
 
-    // XXX is this needed in CI?
     cmd!(sh, "./tools/install_builder_prerequisites.sh -yp").run()?;
 
     Ok(())
@@ -179,31 +187,11 @@ fn build_live_tests(sh: &Shell, env: &Environment) -> Result<()> {
 
     // We need nextest available, both to generate the test bundle and to
     // include in the output tarball to execute the bundle on a4x2.
-
-    // XXX right now we only download a new nextest in CI, and we use
-    // the user's locally installed nextest otherwise. I'm inclined to
-    // say we should always download a fresh one for consistency.
-    // thoughts?
-    let nextest_path = if env.in_ci {
-        // In CI, we need to download nextest
-        let config_str = sh.read_file(".config/nextest.toml")?;
-        let nextest_config: NextestConfig = toml::from_str(&config_str)?;
-
-        // This line of bash comes from build-and-test.sh
-        // If you want to rewrite this in rust, please! Make sure you
-        // - retry correctly
-        // - follow redirects correctly
-        // - handle http errors
-        cmd!(sh, "bash -c")
-            .arg(&format!("curl -sSfL --retry 10 https://get.nexte.st/'{}'/illumos | gunzip | tar -xvf - -C ~/.cargo/bin", nextest_config.nextest_version.recommended))
-            .run()?;
-        env.home_dir.join(".cargo/bin/cargo-nextest")
-    } else {
-        // XXX do we need to test nextest exists & is the right version? need to
-        // see if the incidental errors from stuff below already take care of
-        // telling someone outside of CI what they need to be doing.
-        Utf8PathBuf::from(cmd!(sh, "/usr/bin/which cargo-nextest").read()?)
-    };
+    // XXX do we need to test nextest exists & is the right version? need to
+    // see if the incidental errors from stuff below already take care of
+    // telling someone outside of CI what they need to be doing.
+    let nextest_path =
+        Utf8PathBuf::from(cmd!(sh, "/usr/bin/which cargo-nextest").read()?);
 
     // Build and generate the live tests bundle
     // generates
@@ -260,14 +248,13 @@ fn build_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
     // TODO move this clone & build to prepare, so that if the omicron build
     // takes awhile we wont have lost our git token when we get here. Relevant
     // for CI but not for running locally.
+    // TODO: flag to set testbed branch
+    let git = &env.git;
     cmd!(
         sh,
-        "git clone https://github.com/oxidecomputer/testbed {testbed_dir}"
+        "{git} clone https://github.com/oxidecomputer/testbed {testbed_dir}"
     )
     .run()?;
-
-    // XXX use main branch
-    // cmd!(sh, "git -C {testbed_dir} checkout artemis/init-in-smf").run()?;
 
     let _popdir = sh.push_dir(&a4x2_dir);
 
