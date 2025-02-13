@@ -289,7 +289,7 @@ fn try_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
     // necessary so I'm leaving it out for now. We'll see if that's true.
     // So far it seems to be.
 
-    cmd!(sh, "pfexec route add {DEFAULT_OMICRON_SUBNET} {customer_edge_addr}").run()?;
+    cmd!(sh, "pfexec route -n add {DEFAULT_OMICRON_SUBNET} {customer_edge_addr}").run()?;
 
     // Not sure how this IP is fixed, but it is
     let api_url = DEFAULT_OMICRON_NEXUS_ADDR;
@@ -379,7 +379,7 @@ fn teardown_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
     // all of them. But, I don't like unbounded loops, so we will do at max 10,
     // which is a number that seems unlikely enough to reach, to me.
     for _ in 0..10 {
-        let mut route_cmd = cmd!(sh, "pfexec route get {DEFAULT_OMICRON_SUBNET}");
+        let mut route_cmd = cmd!(sh, "route -n get {DEFAULT_OMICRON_SUBNET}");
 
         // We get an error code when there is no route (and thus, nothing for
         // us to delete!)
@@ -394,7 +394,7 @@ fn teardown_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
                     "teardown_a4x2: could not get gateway for a4x2 route from line {ln}"
                 ))?;
 
-                cmd!(sh, "pfexec route delete {DEFAULT_OMICRON_SUBNET} {gateway}")
+                cmd!(sh, "pfexec route -n delete {DEFAULT_OMICRON_SUBNET} {gateway}")
                     .run()?;
 
                 had_gateway = true;
