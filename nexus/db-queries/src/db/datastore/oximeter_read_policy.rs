@@ -96,8 +96,7 @@ impl DataStore {
             self.oximeter_read_policy_insert_first_policy(opctx, &policy)
                 .await?
         } else {
-            self.oximeter_read_policy_insert_next_policy(opctx, &policy)
-                .await?
+            self.oximeter_read_policy_insert_next_policy(opctx, &policy).await?
         };
 
         match num_inserted {
@@ -160,9 +159,7 @@ impl DataStore {
                  WHERE NOT EXISTS (SELECT * FROM oximeter_read_policy)",
         )
         .bind::<sql_types::BigInt, SqlU32>(policy.version.into())
-        .bind::<OximeterReadModeEnum, DbOximeterReadMode>(
-            (&policy.mode).into(),
-        )
+        .bind::<OximeterReadModeEnum, DbOximeterReadMode>((&policy.mode).into())
         .bind::<sql_types::Timestamptz, _>(policy.time_created)
         .execute_async(&*self.pool_connection_authorized(opctx).await?)
         .await
@@ -248,8 +245,7 @@ mod tests {
 
         // Inserting version 4 should work
         policy.version = 4;
-        policy.mode =
-            OximeterReadMode::Cluster;
+        policy.mode = OximeterReadMode::Cluster;
         assert!(datastore
             .oximeter_read_policy_insert_latest_version(opctx, &policy)
             .await
