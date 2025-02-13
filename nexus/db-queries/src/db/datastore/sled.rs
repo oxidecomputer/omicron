@@ -1679,9 +1679,12 @@ pub(in crate::db::datastore) mod test {
             );
 
             sled_insert_resource_query(&resource)
-                .execute_async(&*datastore.pool_connection_for_tests().await.unwrap())
+                .execute_async(
+                    &*datastore.pool_connection_for_tests().await.unwrap(),
+                )
                 .await
-                .unwrap() > 0
+                .unwrap()
+                > 0
         }
 
         fn use_many_resources(mut self) -> Self {
@@ -2505,7 +2508,9 @@ pub(in crate::db::datastore) mod test {
     // the INSERT of a sled_resource_vmm to fail.
     #[tokio::test]
     async fn sled_reservation_concurrent_affinity_requirement() {
-        let logctx = dev::test_setup_log("sled_reservation_concurrent_affinity_requirement");
+        let logctx = dev::test_setup_log(
+            "sled_reservation_concurrent_affinity_requirement",
+        );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
@@ -2522,25 +2527,23 @@ pub(in crate::db::datastore) mod test {
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
         assert!(possible_sleds.iter().all(|sled| sled.fits));
-        assert!(possible_sleds.iter().all(|sled| sled.affinity_policy.is_none()));
-        assert!(possible_sleds.iter().all(|sled| sled.anti_affinity_policy.is_none()));
+        assert!(possible_sleds
+            .iter()
+            .all(|sled| sled.affinity_policy.is_none()));
+        assert!(possible_sleds
+            .iter()
+            .all(|sled| sled.anti_affinity_policy.is_none()));
 
         // Concurrently create an instance on sleds[0].
-        let groups = [
-            Group {
-                affinity: Affinity::Positive,
-                name: "affinity",
-                policy: external::AffinityPolicy::Fail,
-            },
-        ];
+        let groups = [Group {
+            affinity: Affinity::Positive,
+            name: "affinity",
+            policy: external::AffinityPolicy::Fail,
+        }];
         let all_groups =
             AllGroups::create(&opctx, &datastore, &authz_project, &groups)
                 .await;
-        let instances = [
-            Instance::new()
-                .group("affinity")
-                .sled(sleds[0].id()),
-        ];
+        let instances = [Instance::new().group("affinity").sled(sleds[0].id())];
         for instance in instances {
             instance
                 .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
@@ -2555,33 +2558,43 @@ pub(in crate::db::datastore) mod test {
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
         assert!(possible_sleds.iter().all(|sled| sled.fits));
-        assert!(possible_sleds.iter().all(|sled| sled.anti_affinity_policy.is_none()));
-        let affine_sled = possible_sleds.iter()
+        assert!(possible_sleds
+            .iter()
+            .all(|sled| sled.anti_affinity_policy.is_none()));
+        let affine_sled = possible_sleds
+            .iter()
             .find(|sled| sled.id.into_untyped_uuid() == sleds[0].id())
             .unwrap();
-        assert!(
-            matches!(
-                affine_sled.affinity_policy.expect("Sled 0 should be affine"),
-                AffinityPolicy::Fail
-            )
-        );
+        assert!(matches!(
+            affine_sled.affinity_policy.expect("Sled 0 should be affine"),
+            AffinityPolicy::Fail
+        ));
 
         // Inserting onto sleds[1..3] should fail -- the affinity requirement
         // should bind us to sleds[0].
         for i in 1..=3 {
-            assert!(!test_instance.insert_resource(
-                &datastore,
-                PropolisUuid::new_v4(),
-                SledUuid::from_untyped_uuid(sleds[i].id()),
-            ).await, "Shouldn't have been able to insert into sled {i}")
-        };
+            assert!(
+                !test_instance
+                    .insert_resource(
+                        &datastore,
+                        PropolisUuid::new_v4(),
+                        SledUuid::from_untyped_uuid(sleds[i].id()),
+                    )
+                    .await,
+                "Shouldn't have been able to insert into sled {i}"
+            )
+        }
 
         // Inserting into sleds[0] should succeed
-        assert!(test_instance.insert_resource(
-            &datastore,
-            PropolisUuid::new_v4(),
-            SledUuid::from_untyped_uuid(sleds[0].id()),
-        ).await);
+        assert!(
+            test_instance
+                .insert_resource(
+                    &datastore,
+                    PropolisUuid::new_v4(),
+                    SledUuid::from_untyped_uuid(sleds[0].id()),
+                )
+                .await
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2591,7 +2604,9 @@ pub(in crate::db::datastore) mod test {
     // the INSERT of a sled_resource_vmm to fail.
     #[tokio::test]
     async fn sled_reservation_concurrent_anti_affinity_requirement() {
-        let logctx = dev::test_setup_log("sled_reservation_concurrent_anti_affinity_requirement");
+        let logctx = dev::test_setup_log(
+            "sled_reservation_concurrent_anti_affinity_requirement",
+        );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
@@ -2608,25 +2623,24 @@ pub(in crate::db::datastore) mod test {
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
         assert!(possible_sleds.iter().all(|sled| sled.fits));
-        assert!(possible_sleds.iter().all(|sled| sled.affinity_policy.is_none()));
-        assert!(possible_sleds.iter().all(|sled| sled.anti_affinity_policy.is_none()));
+        assert!(possible_sleds
+            .iter()
+            .all(|sled| sled.affinity_policy.is_none()));
+        assert!(possible_sleds
+            .iter()
+            .all(|sled| sled.anti_affinity_policy.is_none()));
 
         // Concurrently create an instance on sleds[0].
-        let groups = [
-            Group {
-                affinity: Affinity::Negative,
-                name: "anti-affinity",
-                policy: external::AffinityPolicy::Fail,
-            },
-        ];
+        let groups = [Group {
+            affinity: Affinity::Negative,
+            name: "anti-affinity",
+            policy: external::AffinityPolicy::Fail,
+        }];
         let all_groups =
             AllGroups::create(&opctx, &datastore, &authz_project, &groups)
                 .await;
-        let instances = [
-            Instance::new()
-                .group("anti-affinity")
-                .sled(sleds[0].id()),
-        ];
+        let instances =
+            [Instance::new().group("anti-affinity").sled(sleds[0].id())];
         for instance in instances {
             instance
                 .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
@@ -2641,31 +2655,43 @@ pub(in crate::db::datastore) mod test {
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
         assert!(possible_sleds.iter().all(|sled| sled.fits));
-        assert!(possible_sleds.iter().all(|sled| sled.affinity_policy.is_none()));
-        let anti_affine_sled = possible_sleds.iter()
+        assert!(possible_sleds
+            .iter()
+            .all(|sled| sled.affinity_policy.is_none()));
+        let anti_affine_sled = possible_sleds
+            .iter()
             .find(|sled| sled.id.into_untyped_uuid() == sleds[0].id())
             .unwrap();
-        assert!(
-            matches!(
-                anti_affine_sled.anti_affinity_policy.expect("Sled 0 should be anti-affine"),
-                AffinityPolicy::Fail
-            )
-        );
+        assert!(matches!(
+            anti_affine_sled
+                .anti_affinity_policy
+                .expect("Sled 0 should be anti-affine"),
+            AffinityPolicy::Fail
+        ));
 
         // Inserting onto sleds[0] should fail -- the anti-affinity requirement
         // should prevent us from inserting there.
-        assert!(!test_instance.insert_resource(
-            &datastore,
-            PropolisUuid::new_v4(),
-            SledUuid::from_untyped_uuid(sleds[0].id()),
-        ).await, "Shouldn't have been able to insert into sleds[0]");
+        assert!(
+            !test_instance
+                .insert_resource(
+                    &datastore,
+                    PropolisUuid::new_v4(),
+                    SledUuid::from_untyped_uuid(sleds[0].id()),
+                )
+                .await,
+            "Shouldn't have been able to insert into sleds[0]"
+        );
 
         // Inserting into sleds[1] should succeed
-        assert!(test_instance.insert_resource(
-            &datastore,
-            PropolisUuid::new_v4(),
-            SledUuid::from_untyped_uuid(sleds[1].id()),
-        ).await);
+        assert!(
+            test_instance
+                .insert_resource(
+                    &datastore,
+                    PropolisUuid::new_v4(),
+                    SledUuid::from_untyped_uuid(sleds[1].id()),
+                )
+                .await
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2673,7 +2699,9 @@ pub(in crate::db::datastore) mod test {
 
     #[tokio::test]
     async fn sled_reservation_concurrent_space_requirement() {
-        let logctx = dev::test_setup_log("sled_reservation_concurrent_space_requirement");
+        let logctx = dev::test_setup_log(
+            "sled_reservation_concurrent_space_requirement",
+        );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
@@ -2690,24 +2718,22 @@ pub(in crate::db::datastore) mod test {
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
         assert!(possible_sleds.iter().all(|sled| sled.fits));
-        assert!(possible_sleds.iter().all(|sled| sled.affinity_policy.is_none()));
-        assert!(possible_sleds.iter().all(|sled| sled.anti_affinity_policy.is_none()));
+        assert!(possible_sleds
+            .iter()
+            .all(|sled| sled.affinity_policy.is_none()));
+        assert!(possible_sleds
+            .iter()
+            .all(|sled| sled.anti_affinity_policy.is_none()));
 
         // Concurrently create large instances on sleds 0, 2, 3.
         let groups = [];
-        let all_groups = AllGroups::create(&opctx, &datastore, &authz_project, &groups)
-            .await;
+        let all_groups =
+            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
+                .await;
         let instances = [
-            Instance::new()
-                .use_many_resources()
-                .sled(sleds[0].id()),
-            Instance::new()
-                .use_many_resources()
-                .sled(sleds[2].id()),
-            Instance::new()
-                .use_many_resources()
-                .sled(sleds[3].id()),
-
+            Instance::new().use_many_resources().sled(sleds[0].id()),
+            Instance::new().use_many_resources().sled(sleds[2].id()),
+            Instance::new().use_many_resources().sled(sleds[3].id()),
         ];
         for instance in instances {
             instance
@@ -2727,19 +2753,28 @@ pub(in crate::db::datastore) mod test {
         // Inserting onto sleds[0, 2, 3] should fail - there shouldn't
         // be enough space on these sleds.
         for i in [0, 2, 3] {
-            assert!(!test_instance.insert_resource(
-                &datastore,
-                PropolisUuid::new_v4(),
-                SledUuid::from_untyped_uuid(sleds[i].id()),
-            ).await, "Shouldn't have been able to insert into sleds[i]");
+            assert!(
+                !test_instance
+                    .insert_resource(
+                        &datastore,
+                        PropolisUuid::new_v4(),
+                        SledUuid::from_untyped_uuid(sleds[i].id()),
+                    )
+                    .await,
+                "Shouldn't have been able to insert into sleds[i]"
+            );
         }
 
         // Inserting into sleds[1] should succeed
-        assert!(test_instance.insert_resource(
-            &datastore,
-            PropolisUuid::new_v4(),
-            SledUuid::from_untyped_uuid(sleds[1].id()),
-        ).await);
+        assert!(
+            test_instance
+                .insert_resource(
+                    &datastore,
+                    PropolisUuid::new_v4(),
+                    SledUuid::from_untyped_uuid(sleds[1].id()),
+                )
+                .await
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
