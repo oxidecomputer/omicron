@@ -110,6 +110,21 @@ fn small_resource_request() -> Resources {
     )
 }
 
+/// Given a `sled_count`, returns the number of times a call to
+/// `create_reservation` should succeed.
+///
+/// This can be used to validate parameters before running benchmarks.
+pub fn max_resource_request_count(sled_count: usize) -> usize {
+    let threads_per_request: usize =
+        small_resource_request().hardware_threads.0.try_into().unwrap();
+    let threads_per_sled: usize = sled_system_hardware_for_test()
+        .usable_hardware_threads
+        .try_into()
+        .unwrap();
+
+    threads_per_sled * sled_count / threads_per_request
+}
+
 pub async fn create_reservation(
     opctx: &OpContext,
     db: &DataStore,

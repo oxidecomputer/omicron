@@ -5,7 +5,7 @@
 //! Benchmarks creating sled reservations
 
 use criterion::black_box;
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion, SamplingMode};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use omicron_test_utils::dev;
@@ -18,6 +18,7 @@ mod harness;
 
 use harness::db_utils::create_reservation;
 use harness::db_utils::delete_reservation;
+use harness::db_utils::max_resource_request_count;
 use harness::TestHarness;
 
 /////////////////////////////////////////////////////////////////
@@ -35,6 +36,7 @@ struct TestParams {
 
 const VMM_PARAMS: [usize; 3] = [1, 8, 16];
 const TASK_PARAMS: [usize; 3] = [1, 4, 8];
+const SLED_PARAMS: [usize; 3] = [1, 4, 8];
 
 /////////////////////////////////////////////////////////////////
 //
@@ -45,6 +47,9 @@ const TASK_PARAMS: [usize; 3] = [1, 4, 8];
 // ```bash
 // cargo bench -p nexus-db-queries
 // ```
+//
+// You can also set the "SHOW_CONTENTION" environment variable to display
+// additional data from CockroachDB tables about contention statistics.
 
 // Average a duration over a divisor.
 //
@@ -66,16 +71,13 @@ async fn reserve_vmms_and_return_average_duration(
     params: &TestParams,
     opctx: &OpContext,
     db: &DataStore,
+    cleanup_barrier: &Barrier,
 ) -> Duration {
     let mut vmm_ids = Vec::with_capacity(params.vmms);
-    let start = Instant::now();
 
-    // Clippy: We don't want to move this block outside of "black_box", even though it
-    // isn't returning anything. That would defeat the whole point of using "black_box",
-    // which is to avoid profiling code that is optimized based on the surrounding
-    // benchmark function.
-    #[allow(clippy::unit_arg)]
-    black_box({
+    let duration = black_box({
+        let start = Instant::now();
+
         // Create all the requested vmms.
         //
         // Note that all prior reservations will remain in the DB as we continue
@@ -87,19 +89,22 @@ async fn reserve_vmms_and_return_average_duration(
                     .expect("Failed to provision vmm"),
             );
         }
+        // Return the "average time to provision a single vmm".
+        //
+        // This normalizes the results, regardless of how many vmms we are provisioning.
+        //
+        // Note that we expect additional contention to create more work, but it's difficult to
+        // normalize "how much work is being created by contention".
+        average_duration(start.elapsed(), params.vmms)
     });
-
-    // Return the "average time to provision a single vmm".
-    //
-    // This normalizes the results, regardless of how many vmms we are provisioning.
-    //
-    // Note that we expect additional contention to create more work, but it's difficult to
-    // normalize "how much work is being created by contention".
-    let duration = average_duration(start.elapsed(), params.vmms);
 
     // Clean up all our vmms.
     //
     // We don't really care how long this takes, so we omit it from the tracking time.
+    //
+    // Use a barrier to ensure this does not interfere with the work of
+    // concurrent reservations.
+    cleanup_barrier.wait().await;
     for vmm_id in vmm_ids.drain(..) {
         delete_reservation(opctx, db, vmm_id)
             .await
@@ -141,7 +146,7 @@ async fn bench_reservation(
 
                         // ... and then actually do the benchmark
                         reserve_vmms_and_return_average_duration(
-                            &params, &opctx, &db,
+                            &params, &opctx, &db, &barrier,
                         )
                         .await
                     }
@@ -194,39 +199,58 @@ fn sled_reservation_benchmark(c: &mut Criterion) {
     rt.block_on(harness::setup_db(&logctx.log));
 
     let mut group = c.benchmark_group("vmm-reservation");
-    for tasks in TASK_PARAMS {
-        for vmms in VMM_PARAMS {
-            let params = TestParams { vmms, tasks };
-            let name = format!("{tasks}-tasks-{vmms}-vmms");
 
-            // Initialize the harness before calling "bench_function" so
-            // that the "warm-up" calls to "bench_function" are actually useful
-            // at warming up the database.
-            //
-            // This mitigates any database-caching issues like "loading schema
-            // on boot", or "connection pooling", as the pool stays the same
-            // between calls to the benchmark function.
-            let log = logctx.log.clone();
-            let harness = rt.block_on(async move {
-                const SLED_COUNT: usize = 4;
-                TestHarness::new(&log, SLED_COUNT).await
-            });
+    // Flat sampling is recommended for benchmarks which run "longer than
+    // milliseconds", which is the case for these benches.
+    //
+    // See: https://bheisler.github.io/criterion.rs/book/user_guide/advanced_configuration.html
+    group.sampling_mode(SamplingMode::Flat);
 
-            // Actually invoke the benchmark.
-            group.bench_function(&name, |b| {
-                b.to_async(&rt).iter_custom(|iters| {
-                    let opctx = harness.opctx();
-                    let db = harness.db();
-                    async move { bench_reservation(opctx, db, params, iters).await }
-                })
-            });
+    for sleds in SLED_PARAMS {
+        for tasks in TASK_PARAMS {
+            for vmms in VMM_PARAMS {
+                let params = TestParams { vmms, tasks };
+                let name = format!("{sleds}-sleds-{tasks}-tasks-{vmms}-vmms");
 
-            // Clean-up the harness; we'll use a new database between
-            // varations in parameters.
-            rt.block_on(async move {
-                harness.print_contention().await;
-                harness.terminate().await;
-            });
+                if tasks * vmms > max_resource_request_count(sleds) {
+                    eprintln!(
+                        "{name} would request too many VMMs; skipping..."
+                    );
+                    continue;
+                }
+
+                // Initialize the harness before calling "bench_function" so
+                // that the "warm-up" calls to "bench_function" are actually useful
+                // at warming up the database.
+                //
+                // This mitigates any database-caching issues like "loading schema
+                // on boot", or "connection pooling", as the pool stays the same
+                // between calls to the benchmark function.
+                let log = logctx.log.clone();
+                let harness =
+                    rt.block_on(
+                        async move { TestHarness::new(&log, sleds).await },
+                    );
+
+                // Actually invoke the benchmark.
+                group.bench_function(&name, |b| {
+                    b.to_async(&rt).iter_custom(|iters| {
+                        let opctx = harness.opctx();
+                        let db = harness.db();
+                        async move {
+                            bench_reservation(opctx, db, params, iters).await
+                        }
+                    })
+                });
+                // Clean-up the harness; we'll use a new database between
+                // varations in parameters.
+                rt.block_on(async move {
+                    if std::env::var("SHOW_CONTENTION").is_ok() {
+                        harness.print_contention().await;
+                    }
+                    harness.terminate().await;
+                });
+            }
         }
     }
     group.finish();
@@ -241,6 +265,8 @@ criterion_group!(
     // - Higher noise threshold, to avoid avoid false positive change detection
     config = Criterion::default()
         .sample_size(10)
+        // Allow for 10% variance in performance without identifying performance
+        // improvements/regressions
         .noise_threshold(0.10);
     targets = sled_reservation_benchmark
 );
