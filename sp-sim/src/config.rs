@@ -17,15 +17,64 @@ use std::path::Path;
 use std::path::PathBuf;
 use thiserror::Error;
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum NetworkConfig {
+    /// Listen address for a fake KSZ8463 port
+    Simulated { bind_addr: SocketAddrV6 },
+
+    Real {
+        bind_addr: SocketAddrV6,
+
+        /// IPv6 multicast address
+        multicast_addr: Ipv6Addr,
+
+        /// IPv6 multicast interface to use.
+        multicast_interface: String,
+    },
+}
+
+impl slog::KV for NetworkConfig {
+    fn serialize(
+        &self,
+        _record: &slog::Record<'_>,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        match &self {
+            NetworkConfig::Simulated { bind_addr } => {
+                serializer.emit_str("type".into(), "simulated")?;
+                serializer
+                    .emit_str("bind_addr".into(), &bind_addr.to_string())?;
+            }
+
+            NetworkConfig::Real {
+                bind_addr,
+                multicast_addr,
+                multicast_interface,
+            } => {
+                serializer.emit_str("type".into(), "real")?;
+                serializer
+                    .emit_str("bind_addr".into(), &bind_addr.to_string())?;
+                serializer.emit_str(
+                    "multicast_addr".into(),
+                    &multicast_addr.to_string(),
+                )?;
+                serializer.emit_str(
+                    "multicast_interface".into(),
+                    &multicast_interface,
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
 /// Common configuration for all flavors of SP
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SpCommonConfig {
-    /// IPv6 multicast address to join.
+    /// Network config for the two (fake) KSZ8463 ports.
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub multicast_addr: Option<Ipv6Addr>,
-    /// UDP address of the two (fake) KSZ8463 ports
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub bind_addrs: Option<[SocketAddrV6; 2]>,
+    pub network_config: Option<[NetworkConfig; 2]>,
     /// Fake serial number
     pub serial_number: String,
     /// 32-byte seed to create a manufacturing root certificate.

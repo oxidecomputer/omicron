@@ -6449,6 +6449,7 @@ dependencies = [
  "cfg-if",
  "cfg_aliases 0.2.1",
  "libc",
+ "memoffset",
 ]
 
 [[package]]
@@ -11263,6 +11264,7 @@ dependencies = [
  "gateway-messages",
  "gateway-types",
  "hex",
+ "nix 0.29.0",
  "omicron-common",
  "omicron-workspace-hack",
  "serde",
