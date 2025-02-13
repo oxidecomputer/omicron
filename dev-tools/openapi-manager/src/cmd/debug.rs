@@ -58,6 +58,13 @@ pub(crate) fn debug_impl(
         let ident = api.ident();
         println!("    API: {}", ident);
 
+        if let Some(symlink_problem) = resolved.symlink_problem(ident) {
+            println!("        PROBLEM: {}\n", symlink_problem);
+            if let Some(fix) = symlink_problem.fix() {
+                println!("        FIX: {}\n", fix);
+            }
+        }
+
         for version in api.iter_versions_semver() {
             print!("        version {}: ", version);
 
@@ -98,7 +105,13 @@ fn dump_structure<T: std::fmt::Debug + Deref<Target = ApiSpecFile>>(
 
     for (api_ident, info) in spec_files {
         println!("    API: {}", api_ident);
-        println!("        latest: {:?}", info.latest_link());
+        println!(
+            "        latest: {}",
+            info.latest_link()
+                .map(|s| s.to_string())
+                .as_deref()
+                .unwrap_or("none")
+        );
         for (version, files) in info.versions() {
             println!("        version {}:", version);
             for f in files {

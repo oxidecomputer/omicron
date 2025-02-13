@@ -123,6 +123,32 @@ fn load_versioned_directory(
 
     for entry in entries {
         let file_name = entry.file_name();
+
+        // XXX-dap use helper function that does rsplitn and checks both parts?
+        // see also blessed.rs
+        if file_name == format!("{}-latest.json", ident) {
+            // We should be looking at a symlink.
+            let symlink = match entry.path().read_link_utf8() {
+                Ok(s) => s,
+                Err(error) => {
+                    api_files.load_error(anyhow!(error).context(format!(
+                        "read what should be a symlink {:?}",
+                        entry.path()
+                    )));
+                    continue;
+                }
+            };
+
+            // XXX-dap this error message will be confusing because the user
+            // won't know why we're looking at this path
+            if let Some(v) =
+                api_files.versioned_file_name(&ident, symlink.as_str(), false)
+            {
+                api_files.load_latest_link(&ident, v, false);
+            }
+            continue;
+        }
+
         let Some(file_name) =
             api_files.versioned_file_name(&ident, file_name, false)
         else {

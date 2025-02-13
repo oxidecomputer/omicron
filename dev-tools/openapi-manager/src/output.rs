@@ -248,6 +248,7 @@ pub fn display_resolution(
     let mut num_fresh = 0;
     let mut num_stale = 0;
     let mut num_failed = 0;
+    let mut num_general_problems = 0;
 
     // Print problems associated with a supported API version
     // (i.e., one of the expected OpenAPI documents).
@@ -267,11 +268,50 @@ pub fn display_resolution(
             }
             summarize_one(env, api, version, resolution, styles);
         }
+
+        if !api.is_versioned() {
+            continue;
+        }
+
+        if let Some(symlink_problem) = resolved.symlink_problem(ident) {
+            if symlink_problem.is_fixable() {
+                num_general_problems += 1;
+                eprintln!(
+                    "{:>HEADER_WIDTH$} {} \"latest\" symlink",
+                    STALE.style(styles.warning_header),
+                    ident.style(styles.filename),
+                );
+                display_resolution_problems(
+                    env,
+                    std::iter::once(symlink_problem),
+                    styles,
+                );
+            } else {
+                num_failed += 1;
+                eprintln!(
+                    "{:>HEADER_WIDTH$} {} \"latest\" symlink",
+                    FAILURE.style(styles.failure_header),
+                    ident.style(styles.filename),
+                );
+                display_resolution_problems(
+                    env,
+                    std::iter::once(symlink_problem),
+                    styles,
+                );
+            }
+        } else {
+            num_fresh += 1;
+            eprintln!(
+                "{:>HEADER_WIDTH$} {} \"latest\" symlink",
+                FRESH.style(styles.success_header),
+                ident.style(styles.filename),
+            );
+        }
     }
 
     // Print problems not associated with any supported version, if any.
     let general_problems: Vec<_> = resolved.general_problems().collect();
-    let num_general_problems = if !general_problems.is_empty() {
+    num_general_problems += if !general_problems.is_empty() {
         eprintln!(
             "\n{:>HEADER_WIDTH$} problems not associated with a specific \
              supported API version:",

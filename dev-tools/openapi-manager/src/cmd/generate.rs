@@ -114,6 +114,28 @@ pub(crate) fn generate_impl(
                 );
             }
         }
+
+        if let Some(symlink_problem) = resolved.symlink_problem(ident) {
+            eprintln!(
+                "{:>HEADER_WIDTH$} {} \"latest\" symlink",
+                STALE.style(styles.warning_header),
+                ident.style(styles.filename),
+            );
+
+            fix_problems(
+                env,
+                std::iter::once(symlink_problem),
+                &styles,
+                &mut num_updated,
+                &mut num_errors,
+            );
+        } else if api.is_versioned() {
+            eprintln!(
+                "{:>HEADER_WIDTH$} {} \"latest\" symlink",
+                UNCHANGED.style(styles.unchanged_header),
+                ident.style(styles.filename),
+            );
+        }
     }
 
     // Fix problems not associated with any supported version, if any.
@@ -169,6 +191,19 @@ pub(crate) fn generate_impl(
                 );
                 display_resolution_problems(env, problems, &styles);
             }
+        }
+
+        if let Some(symlink_problem) = resolved.symlink_problem(ident) {
+            nproblems += 1;
+            eprintln!(
+                "found unexpected problem with API {} symlink (this is a bug)",
+                ident
+            );
+            display_resolution_problems(
+                env,
+                std::iter::once(symlink_problem),
+                &styles,
+            );
         }
     }
 

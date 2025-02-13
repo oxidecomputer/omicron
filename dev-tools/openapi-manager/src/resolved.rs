@@ -24,7 +24,7 @@ use crate::validation::overwrite_file;
 use crate::validation::validate;
 use crate::validation::CheckStale;
 use crate::validation::CheckStatus;
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use std::collections::BTreeMap;
@@ -236,6 +236,21 @@ pub enum Problem<'a> {
         path: Utf8PathBuf,
         check_stale: CheckStale,
     },
+
+    #[error("\"Latest\" symlink for versioned API {api_ident:?} is missing")]
+    LatestLinkMissing { api_ident: ApiIdent, link: &'a ApiSpecFileName },
+
+    #[error(
+        "\"Latest\" symlink for versioned API {api_ident:?} is stale: points \
+         to {}, but should be {}",
+         found.basename(),
+         link.basename(),
+    )]
+    LatestLinkStale {
+        api_ident: ApiIdent,
+        found: &'a ApiSpecFileName,
+        link: &'a ApiSpecFileName,
+    },
 }
 
 impl<'a> Problem<'a> {
@@ -282,6 +297,10 @@ impl<'a> Problem<'a> {
             Problem::ExtraFileStale { path, check_stale, .. } => {
                 Some(Fix::FixExtraFile { path, check_stale })
             }
+            Problem::LatestLinkStale { api_ident, link, .. }
+            | Problem::LatestLinkMissing { api_ident, link } => {
+                Some(Fix::FixSymlink { api_ident, link })
+            }
         }
     }
 }
@@ -300,6 +319,10 @@ pub enum Fix<'a> {
     FixExtraFile {
         path: &'a Utf8Path,
         check_stale: &'a CheckStale,
+    },
+    FixSymlink {
+        api_ident: &'a ApiIdent,
+        link: &'a ApiSpecFileName,
     },
 }
 
@@ -341,6 +364,9 @@ impl<'a> Display for Fix<'a> {
                 };
                 writeln!(f, "{label} file {path} from generated")?;
             }
+            Fix::FixSymlink { link, .. } => {
+                writeln!(f, "update symlink to point to {}", link.basename())?;
+            }
         })
     }
 }
@@ -380,11 +406,6 @@ impl<'a> Fix<'a> {
                     &path,
                     overwrite_file(&path, generated.contents())?
                 ));
-                rv.push(format!(
-                    "FIX NOTE: be sure to update the corresponding \
-                     progenitor client to refer to this new OpenAPI \
-                     document file!"
-                ));
                 Ok(rv)
             }
             Fix::FixExtraFile { path, check_stale } => {
@@ -398,6 +419,27 @@ impl<'a> Fix<'a> {
                     overwrite_file(&path, expected_contents)?
                 )])
             }
+            Fix::FixSymlink { api_ident, link } => {
+                // XXX-dap helper
+                let path = root
+                    .join(api_ident.to_string())
+                    .join(format!("{api_ident}-latest.json"));
+                // We want the link to contain a relative path to a file in the
+                // same directory so that it's correct no matter where it's
+                // resolved from.
+                let target = link.basename();
+                match fs_err::remove_file(&path) {
+                    Ok(_) => (),
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                        ()
+                    }
+                    Err(err) => {
+                        return Err(anyhow!(err).context("removing old link"))
+                    }
+                };
+                fs_err::os::unix::fs::symlink(&target, &path)?;
+                Ok(vec![format!("write link {} -> {}", path, target)])
+            }
         }
     }
 }
@@ -407,7 +449,7 @@ impl<'a> Fix<'a> {
 pub struct Resolved<'a> {
     notes: Vec<Note>,
     non_version_problems: Vec<Problem<'a>>,
-    api_results: BTreeMap<ApiIdent, BTreeMap<semver::Version, Resolution<'a>>>,
+    api_results: BTreeMap<ApiIdent, ApiResolved<'a>>,
     nexpected_documents: usize,
 }
 
@@ -511,15 +553,28 @@ impl<'a> Resolved<'a> {
         ident: &ApiIdent,
         version: &semver::Version,
     ) -> Option<&Resolution> {
-        self.api_results.get(ident).and_then(|v| v.get(version))
+        self.api_results.get(ident).and_then(|v| v.by_version.get(version))
+    }
+
+    pub fn symlink_problem(&self, ident: &ApiIdent) -> Option<&Problem> {
+        self.api_results.get(ident).and_then(|v| v.symlink.as_ref())
     }
 
     pub fn has_unfixable_problems(&self) -> bool {
         self.general_problems().any(|p| !p.is_fixable())
-            || self
-                .api_results
-                .values()
-                .any(|version_map| version_map.values().any(|r| r.has_errors()))
+            || self.api_results.values().any(|a| a.has_unfixable_problems())
+    }
+}
+
+struct ApiResolved<'a> {
+    by_version: BTreeMap<semver::Version, Resolution<'a>>,
+    symlink: Option<Problem<'a>>,
+}
+
+impl<'a> ApiResolved<'a> {
+    fn has_unfixable_problems(&self) -> bool {
+        self.symlink.as_ref().map_or(false, |f| !f.is_fixable())
+            || self.by_version.values().any(|r| r.has_errors())
     }
 }
 
@@ -567,11 +622,12 @@ fn resolve_api<'a>(
     api_blessed: Option<&'a ApiFiles<BlessedApiSpecFile>>,
     api_generated: &'a ApiFiles<GeneratedApiSpecFile>,
     api_local: Option<&'a ApiFiles<LocalApiSpecFile>>,
-) -> BTreeMap<semver::Version, Resolution<'a>> {
-    if api.is_lockstep() {
-        resolve_api_lockstep(env, api, api_generated, api_local)
+) -> ApiResolved<'a> {
+    let (by_version, symlink) = if api.is_lockstep() {
+        (resolve_api_lockstep(env, api, api_generated, api_local), None)
     } else {
-        api.iter_versions_semver()
+        let by_version = api
+            .iter_versions_semver()
             .map(|version| {
                 let version = version.clone();
                 let blessed = api_blessed
@@ -601,8 +657,28 @@ fn resolve_api<'a>(
                 );
                 (version, resolution)
             })
-            .collect()
-    }
+            .collect();
+
+        // Check the "latest" symlink.
+        // unwrap(): the "generated" source should always have a latest link.
+        let latest_generated = api_generated.latest_link().unwrap();
+        let symlink = match api_local.and_then(|l| l.latest_link()) {
+            Some(latest_local) if latest_local == latest_generated => None,
+            Some(latest_local) => Some(Problem::LatestLinkStale {
+                api_ident: api.ident().clone(),
+                link: latest_generated,
+                found: latest_local,
+            }),
+            None => Some(Problem::LatestLinkMissing {
+                api_ident: api.ident().clone(),
+                link: latest_generated,
+            }),
+        };
+
+        (by_version, symlink)
+    };
+
+    ApiResolved { by_version, symlink }
 }
 
 fn resolve_api_lockstep<'a>(

@@ -43,6 +43,7 @@ impl GeneratedFiles {
             } else {
                 // unwrap(): this returns `Some` for versioned APIs.
                 let supported_versions = api.iter_versioned_versions().unwrap();
+                let mut latest = None;
                 for supported_version in supported_versions {
                     let version = supported_version.semver();
                     let contents = api.generate_spec_bytes(version)?;
@@ -51,8 +52,16 @@ impl GeneratedFiles {
                         version.clone(),
                         &contents,
                     );
+                    latest = Some(file_name.clone());
                     api_files.load_contents(file_name, contents);
                 }
+
+                // unwrap(): there must have been at least one version
+                api_files.load_latest_link(
+                    api.ident(),
+                    latest.expect("at least one version of supported API"),
+                    false,
+                );
             }
         }
 

@@ -170,7 +170,7 @@ impl ApiSpecFileName {
         }
     }
 
-    fn basename(&self) -> String {
+    pub fn basename(&self) -> String {
         match &self.kind {
             ApiSpecFileNameKind::Lockstep => format!("{}.json", self.ident),
             ApiSpecFileNameKind::Versioned { version, hash } => {
@@ -455,6 +455,52 @@ impl<'a> ApiSpecFilesBuilder<'a> {
             Err(error) => {
                 self.errors.push(error);
             }
+        }
+    }
+
+    pub fn load_latest_link(
+        &mut self,
+        ident: &ApiIdent,
+        links_to: ApiSpecFileName,
+        misconfigurations_okay: bool,
+    ) {
+        let Some(api) = self.apis.api(ident) else {
+            let error =
+                anyhow!("link for unknown API {:?} ({})", ident, links_to);
+            if misconfigurations_okay {
+                self.load_warning(error);
+            } else {
+                self.load_error(error);
+            }
+
+            return;
+        };
+
+        if !api.is_versioned() {
+            let error = anyhow!(
+                "link for non-versioned API {:?} ({})",
+                ident,
+                links_to
+            );
+            if misconfigurations_okay {
+                self.load_warning(error);
+            } else {
+                self.load_error(error);
+            }
+            return;
+        }
+
+        let api_files =
+            self.spec_files.entry(ident.clone()).or_insert_with(ApiFiles::new);
+        if let Some(previous) = api_files.latest_link.replace(links_to) {
+            // unwrap(): we just put this here.
+            let new_link = api_files.latest_link.as_ref().unwrap().to_string();
+            self.load_error(anyhow!(
+                "API {:?}: multiple \"latest\" links (at least {}, {})",
+                ident,
+                previous,
+                new_link,
+            ));
         }
     }
 

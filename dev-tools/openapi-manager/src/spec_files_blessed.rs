@@ -88,6 +88,13 @@ impl BlessedFiles {
                 if let Some(ident) =
                     api_files.versioned_directory(parts[0], true)
                 {
+                    if parts[1] == format!("{}-latest.json", ident) {
+                        // This is the "latest" symlink.  We could dereference
+                        // it and report it here, but it's not relevant for
+                        // anything this tool does.
+                        continue;
+                    }
+
                     if let Some(file_name) =
                         api_files.versioned_file_name(&ident, parts[1], true)
                     {
