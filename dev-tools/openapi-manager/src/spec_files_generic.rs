@@ -10,7 +10,7 @@ use anyhow::{anyhow, bail, Context};
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
 use openapiv3::OpenAPI;
-use std::fmt::{Debug, Display};
+use std::fmt::Display;
 use std::{collections::BTreeMap, ops::Deref};
 use thiserror::Error;
 
@@ -293,8 +293,7 @@ impl ApiSpecFile {
 
 pub struct ApiSpecFilesBuilder<'a> {
     apis: &'a ManagedApis,
-    spec_files:
-        BTreeMap<ApiIdent, BTreeMap<semver::Version, ApiFiles<ApiSpecFile>>>,
+    spec_files: BTreeMap<ApiIdent, BTreeMap<semver::Version, Vec<ApiSpecFile>>>,
     errors: Vec<anyhow::Error>,
     warnings: Vec<anyhow::Error>,
 }
@@ -445,13 +444,12 @@ impl<'a> ApiSpecFilesBuilder<'a> {
             Ok(file) => {
                 let ident = file.spec_file_name().ident();
                 let api_version = file.version();
-                let info = self
-                    .spec_files
+                self.spec_files
                     .entry(ident.clone())
                     .or_insert_with(BTreeMap::new)
                     .entry(api_version.clone())
-                    .or_insert_with(ApiFiles::new);
-                info.files.push(file);
+                    .or_insert_with(Vec::new)
+                    .push(file);
             }
             Err(error) => {
                 self.errors.push(error);
@@ -459,44 +457,13 @@ impl<'a> ApiSpecFilesBuilder<'a> {
         }
     }
 
-    pub fn load_latest_link(
-        &mut self,
-        ident: &ApiIdent,
-        version: &semver::Version,
-        links_to: ApiSpecFileName,
-    ) {
-        let info = self
-            .spec_files
-            .entry(ident.clone())
-            .or_insert_with(BTreeMap::new)
-            .entry(version.clone())
-            .or_insert_with(ApiFiles::new);
-
-        if let Some(previous) = info.latest_link.replace(links_to) {
-            // This is likely a bug, not a problem in the files we're scanning,
-            // but report it gracefully.
-            // unwrap(): we just placed this here.
-            let link = format!("{:?}", info.latest_link.as_ref().unwrap());
-            self.load_error(anyhow!(
-                "API {:?} version {}: found multiple \"latest\" links \
-                (at least {:?} and {:?})",
-                ident,
-                version,
-                previous,
-                link,
-            ));
-        }
-    }
-
-    pub fn into_parts<T: Debug + From<ApiSpecFile>>(
+    pub fn into_parts<T: From<ApiSpecFile>>(
         self,
     ) -> (
-        BTreeMap<ApiIdent, BTreeMap<semver::Version, ApiFiles<T>>>,
+        BTreeMap<ApiIdent, BTreeMap<semver::Version, Vec<T>>>,
         Vec<anyhow::Error>,
         Vec<anyhow::Error>,
     ) {
-        // XXX-dap where will we identify the case where the link is dangling?
-
         let errors = self.errors;
         let warnings = self.warnings;
         // This mess is just mapping the items in the inner BTreeMap with the
@@ -508,39 +475,20 @@ impl<'a> ApiSpecFilesBuilder<'a> {
                 (
                     api_ident,
                     vmap.into_iter()
-                        .map(|(v, info)| (v, info.convert::<T>()))
+                        .map(|(v, files)| {
+                            (
+                                v,
+                                files
+                                    .into_iter()
+                                    .map(T::from)
+                                    .collect::<Vec<_>>(),
+                            )
+                        })
                         .collect::<BTreeMap<_, _>>(),
                 )
             })
             .collect::<BTreeMap<_, _>>();
         (map, errors, warnings)
-    }
-}
-
-#[derive(Debug)]
-pub struct ApiFiles<T: Debug> {
-    files: Vec<T>,
-    latest_link: Option<ApiSpecFileName>,
-}
-
-impl<T: Debug> ApiFiles<T> {
-    fn new() -> ApiFiles<T> {
-        ApiFiles { files: Vec::new(), latest_link: None }
-    }
-
-    fn convert<U: Debug + From<T>>(self) -> ApiFiles<U> {
-        ApiFiles {
-            files: self.files.into_iter().map(U::from).collect(),
-            latest_link: self.latest_link,
-        }
-    }
-
-    pub fn iter_files(&self) -> impl Iterator<Item = &T> + '_ {
-        self.files.iter()
-    }
-
-    pub fn latest_link(&self) -> Option<&ApiSpecFileName> {
-        self.latest_link.as_ref()
     }
 }
 
