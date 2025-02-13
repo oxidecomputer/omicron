@@ -52,7 +52,8 @@ use sled_agent_types::zone_bundle::{
     StorageLimit, ZoneBundleId, ZoneBundleMetadata,
 };
 use sled_diagnostics::{
-    SledDiagnosticsCommandHttpOutput, SledDiagnosticsQueryOutput,
+    SledDiagnosticsCommandHttpOutput, SledDiagnosticsLogs,
+    SledDiagnosticsQueryOutput,
 };
 use std::collections::BTreeMap;
 
@@ -1032,5 +1033,27 @@ impl SledAgentApi for SledAgentImpl {
                 .map(|cmd| cmd.get_output())
                 .collect::<Vec<_>>(),
         ))
+    }
+
+    async fn support_logs(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledDiagnosticsLogs>, HttpError> {
+        let sa = request_context.context();
+        let logs = sa.as_support_bundle_logs().get_index().await?;
+
+        Ok(HttpResponseOk(logs))
+    }
+
+    async fn support_logs_download(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<SledDiagnosticsLogsFilePathParam>,
+    ) -> Result<http::Response<Body>, HttpError> {
+        let sa = request_context.context();
+        let p = path_params.into_inner();
+
+        let range = request_context.range();
+        let file =
+            sa.as_support_bundle_logs().get_log_file(&p.file, range).await?;
+        Ok(file)
     }
 }

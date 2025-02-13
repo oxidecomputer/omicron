@@ -16,6 +16,9 @@ cfg_if::cfg_if! {
     }
 }
 
+mod logs;
+pub use crate::logs::*;
+
 mod queries;
 pub use crate::queries::{
     SledDiagnosticsCmdError, SledDiagnosticsCmdOutput,

@@ -7,11 +7,14 @@ edition = "2021"
 workspace = true
 
 [dependencies]
+anyhow.workspace = true
+camino.workspace = true
 cfg-if.workspace = true
 fs-err.workspace = true
 futures.workspace = true
 libc.workspace = true
 omicron-workspace-hack.workspace = true
+oxlog.workspace = true
 schemars.workspace = true
 serde.workspace = true
 slog.workspace = true

@@ -60,6 +60,7 @@ use sled_agent_types::zone_bundle::CleanupContext;
 use sled_agent_types::zone_bundle::CleanupCount;
 use sled_agent_types::zone_bundle::ZoneBundleId;
 use sled_agent_types::zone_bundle::ZoneBundleMetadata;
+use sled_diagnostics::SledDiagnosticsLogs;
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -739,6 +740,19 @@ impl SledAgentApi for SledAgentSimImpl {
         _request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
     {
+        method_unimplemented()
+    }
+
+    async fn support_logs(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledDiagnosticsLogs>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn support_logs_download(
+        _request_context: RequestContext<Self::Context>,
+        _path_params: Path<SledDiagnosticsLogsFilePathParam>,
+    ) -> Result<http::Response<dropshot::Body>, HttpError> {
         method_unimplemented()
     }
 }

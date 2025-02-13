@@ -19,6 +19,7 @@ use crate::params::OmicronZoneTypeExt;
 use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::StorageMonitorHandle;
+use crate::support_bundle::logs::SupportBundleLogs;
 use crate::support_bundle::storage::SupportBundleManager;
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
 use crate::zone_bundle;
@@ -697,6 +698,11 @@ impl SledAgent {
     /// Accesses the [SupportBundleManager] API.
     pub(crate) fn as_support_bundle_storage(&self) -> SupportBundleManager<'_> {
         SupportBundleManager::new(&self.log, self.storage())
+    }
+
+    /// Accesses the [SupportBundleLogs] API.
+    pub(crate) fn as_support_bundle_logs(&self) -> SupportBundleLogs<'_> {
+        SupportBundleLogs::new(&self.log)
     }
 
     pub(crate) fn switch_zone_underlay_info(

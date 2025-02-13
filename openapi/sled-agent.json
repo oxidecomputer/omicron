@@ -727,6 +727,55 @@
         }
       }
     },
+    "/support/logs/download/{file}": {
+      "get": {
+        "operationId": "support_logs_download",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file",
+            "description": "The path of the file to be included in the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/support/logs/index": {
+      "get": {
+        "operationId": "support_logs",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledDiagnosticsLogs"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/support/pargs-info": {
       "get": {
         "operationId": "support_pargs_info",
@@ -5572,6 +5621,18 @@
         "required": [
           "router_id",
           "version"
+        ]
+      },
+      "SledDiagnosticsLogs": {
+        "type": "object",
+        "properties": {
+          "logs": {
+            "type": "string",
+            "format": "Utf8PathBuf"
+          }
+        },
+        "required": [
+          "logs"
         ]
       },
       "SledDiagnosticsQueryOutput": {
