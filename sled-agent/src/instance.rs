@@ -47,7 +47,9 @@ use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
@@ -472,8 +474,31 @@ struct InstanceRunner {
 }
 
 impl InstanceRunner {
+    /// How long to wait for VMM shutdown to complete before forcefully
+    /// terminating the zone.
+    const STOP_GRACE_PERIOD: Duration = Duration::from_secs(60 * 10);
+
     async fn run(mut self, mut terminate_rx: mpsc::Receiver<TerminateRequest>) {
         use InstanceRequest::*;
+
+        // Timeout for stopping the instance gracefully.
+        //
+        // When we send Propolis a put-state request to transition to
+        // Stopped`, we start this timer. If Propolis does not report back
+        // that it has stopped the instance within `STOP_GRACE_PERIOD`, we
+        // will forcibly terminate the VMM. This is to ensure that a totally
+        // stuck VMM does not prevent the Propolis zone from being cleaned up.
+        let mut stop_timeout = None;
+        async fn stop_timeout_completed(
+            stop_timeout: &mut Option<Pin<Box<tokio::time::Sleep>>>,
+        ) {
+            if let Some(ref mut timeout) = stop_timeout {
+                timeout.await
+            } else {
+                std::future::pending().await
+            }
+        }
+
         while !self.should_terminate {
             tokio::select! {
                 biased;
@@ -539,6 +564,24 @@ impl InstanceRunner {
                         },
                     }
                 },
+
+                // We are waiting for the VMM to stop, and the grace period has
+                // elapsed without us hearing back from Propolis that it has
+                // stopped the instance. Time to terminate it violently!
+                //
+                // Note that this must be a lower priority in the `select!` than
+                // instance monitor requests, as we would prefer to honor a
+                // message from the instance monitor indicating a successful
+                // stop, even if we have reached the timeout.
+                _ = stop_timeout_completed(&mut stop_timeout) => {
+                    warn!(
+                        self.log,
+                        "Instance failed to stop within the grace period, \
+                         terminating it violently!",
+                    );
+                    self.terminate(false).await;
+                }
+
                 // Requests to terminate the instance take priority over any
                 // other request to the instance.
                 request = terminate_rx.recv() => {
@@ -584,7 +627,22 @@ impl InstanceRunner {
                                 tx.send(Ok(self.current_state()))
                                     .map_err(|_| Error::FailedSendClientClosed)
                             },
-                            PutState{ state, tx } => {
+                            PutState { state, tx } => {
+                                // If we're going to stop the instance, start
+                                // the timeout after which we will forcefully
+                                // terminate the VMM.
+                                if let VmmStateRequested::Stopped = state {
+                                    // Only start the stop timeout if there
+                                    // isn't one already, so that additional
+                                    // requests to stop coming in don't reset
+                                    // the clock.
+                                    if stop_timeout.is_none() {
+                                        stop_timeout = Some(Box::pin(tokio::time::sleep(
+                                            Self::STOP_GRACE_PERIOD
+                                        )));
+                                    }
+                                }
+
                                 tx.send(self.put_state(state).await
                                     .map(|r| VmmPutStateResponse { updated_runtime: Some(r) })
                                     .map_err(|e| e.into()))
