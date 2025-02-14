@@ -3892,6 +3892,7 @@ mod tests {
                         name: "nic".parse().unwrap(),
                         description: "A NIC...".into(),
                     },
+                    vec![],
                     None,
                 )
                 .unwrap(),

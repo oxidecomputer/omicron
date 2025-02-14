@@ -2147,6 +2147,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         vpc_name: default_name.clone(),
         subnet_name: default_name.clone(),
         ip: Some(requested_address),
+        transit_ips: vec![],
     };
     let interface_params =
         params::InstanceNetworkInterfaceAttachment::Create(vec![
@@ -2226,6 +2227,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         vpc_name: default_name.clone(),
         subnet_name: default_name.clone(),
         ip: Some(requested_address),
+        transit_ips: vec![],
     };
     let interface_params =
         params::InstanceNetworkInterfaceAttachment::Create(vec![
@@ -2268,6 +2270,7 @@ async fn test_instance_with_single_explicit_ip_address(
         vpc_name: default_name.clone(),
         subnet_name: default_name.clone(),
         ip: Some(requested_address),
+        transit_ips: vec![],
     };
     let interface_params =
         params::InstanceNetworkInterfaceAttachment::Create(vec![
@@ -2376,6 +2379,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         vpc_name: default_name.clone(),
         subnet_name: default_name.clone(),
         ip: None,
+        transit_ips: vec![],
     };
     let if1_params = params::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
@@ -2385,6 +2389,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         vpc_name: default_name.clone(),
         subnet_name: non_default_subnet_name.clone(),
         ip: None,
+        transit_ips: vec![],
     };
     let interface_params =
         params::InstanceNetworkInterfaceAttachment::Create(vec![
@@ -2563,6 +2568,7 @@ async fn test_instance_create_delete_network_interface(
             vpc_name: "default".parse().unwrap(),
             subnet_name: "default".parse().unwrap(),
             ip: Some("172.30.0.10".parse().unwrap()),
+            transit_ips: vec![],
         },
         params::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
@@ -2572,6 +2578,7 @@ async fn test_instance_create_delete_network_interface(
             vpc_name: "default".parse().unwrap(),
             subnet_name: secondary_subnet.identity.name.clone(),
             ip: Some("172.31.0.11".parse().unwrap()),
+            transit_ips: vec!["10.0.0.0/24".parse().unwrap()],
         },
     ];
 
@@ -2625,6 +2632,15 @@ async fn test_instance_create_delete_network_interface(
             i == 0,
             "Only the first interface should be primary"
         );
+        if i == 1 {
+            assert!(
+                iface.transit_ips.len() == 1
+                    && iface.transit_ips[0].to_string() == "10.0.0.0/24",
+                "Only the second interface has a transit IP"
+            );
+        } else {
+            assert!(iface.transit_ips.is_empty())
+        }
         interfaces.push(iface);
     }
 
@@ -2645,6 +2661,7 @@ async fn test_instance_create_delete_network_interface(
         assert_eq!(iface0.subnet_id, iface1.subnet_id);
         assert_eq!(iface0.ip, iface1.ip);
         assert_eq!(iface0.primary, iface1.primary);
+        assert_eq!(iface0.transit_ips, iface1.transit_ips);
     }
 
     // Verify we cannot delete either interface while the instance is running
@@ -2798,6 +2815,7 @@ async fn test_instance_update_network_interfaces(
             vpc_name: "default".parse().unwrap(),
             subnet_name: "default".parse().unwrap(),
             ip: Some("172.30.0.10".parse().unwrap()),
+            transit_ips: vec![],
         },
         params::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
@@ -2807,6 +2825,7 @@ async fn test_instance_update_network_interfaces(
             vpc_name: "default".parse().unwrap(),
             subnet_name: secondary_subnet.identity.name.clone(),
             ip: Some("172.31.0.11".parse().unwrap()),
+            transit_ips: vec![],
         },
     ];
 
@@ -3140,6 +3159,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         vpc_name: default_name.clone(),
         subnet_name: default_name.clone(),
         ip: Some("172.30.0.6".parse().unwrap()),
+        transit_ips: vec![],
     };
     let if1_params = params::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
@@ -3149,6 +3169,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         vpc_name: default_name.clone(),
         subnet_name: default_name.clone(),
         ip: Some("172.30.0.7".parse().unwrap()),
+        transit_ips: vec![],
     };
     let interface_params =
         params::InstanceNetworkInterfaceAttachment::Create(vec![

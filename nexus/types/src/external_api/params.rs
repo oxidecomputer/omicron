@@ -835,6 +835,9 @@ pub struct InstanceNetworkInterfaceCreate {
     pub subnet_name: Name,
     /// The IP address for the interface. One will be auto-assigned if not provided.
     pub ip: Option<IpAddr>,
+    /// A set of additional networks that this interface may send and
+    /// receive traffic on
+    pub transit_ips: Vec<IpNet>,
 }
 
 /// Parameters for updating an `InstanceNetworkInterface`
@@ -863,7 +866,7 @@ pub struct InstanceNetworkInterfaceUpdate {
     pub primary: bool,
 
     /// A set of additional networks that this interface may send and
-    /// receive traffic on.
+    /// receive traffic on
     #[serde(default)]
     pub transit_ips: Vec<IpNet>,
 }
