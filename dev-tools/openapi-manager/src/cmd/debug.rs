@@ -7,7 +7,7 @@ use crate::{
     environment::{BlessedSource, Environment, GeneratedSource},
     output::{OutputOpts, Styles},
     resolved::Resolved,
-    spec_files_generic::{ApiFiles, ApiSpecFile},
+    spec_files_generic::{ApiFiles, ApiSpecFile, AsRawFiles},
 };
 use std::{collections::BTreeMap, ops::Deref};
 
@@ -89,7 +89,7 @@ pub(crate) fn debug_impl(
     Ok(())
 }
 
-fn dump_structure<T: std::fmt::Debug + Deref<Target = ApiSpecFile>>(
+fn dump_structure<T: AsRawFiles>(
     spec_files: &BTreeMap<ApiIdent, ApiFiles<T>>,
     errors: &[anyhow::Error],
     warnings: &[anyhow::Error],
@@ -114,7 +114,7 @@ fn dump_structure<T: std::fmt::Debug + Deref<Target = ApiSpecFile>>(
         );
         for (version, files) in info.versions() {
             println!("        version {}:", version);
-            for f in files {
+            for f in files.as_raw_files() {
                 let api_spec: &ApiSpecFile = f.deref();
                 println!(
                     "            file {} (v{})",

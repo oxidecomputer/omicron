@@ -8,11 +8,14 @@
 use crate::{
     apis::{ApiIdent, ManagedApis},
     git::{git_ls_tree, git_merge_base_head, git_show_file, GitRevision},
-    spec_files_generic::{ApiFiles, ApiSpecFile, ApiSpecFilesBuilder},
+    iter_only::iter_only,
+    spec_files_generic::{
+        ApiFiles, ApiSpecFile, ApiSpecFilesBuilder, AsRawFiles,
+    },
 };
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use camino::Utf8Path;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, ops::Deref};
 
 /// Container for "blessed" OpenAPI spec files, found in Git
 ///
@@ -43,6 +46,25 @@ NewtypeDebug! { () pub struct BlessedApiSpecFile(ApiSpecFile); }
 NewtypeDeref! { () pub struct BlessedApiSpecFile(ApiSpecFile); }
 NewtypeDerefMut! { () pub struct BlessedApiSpecFile(ApiSpecFile); }
 NewtypeFrom! { () pub struct BlessedApiSpecFile(ApiSpecFile); }
+
+impl TryFrom<Vec<ApiSpecFile>> for BlessedApiSpecFile {
+    type Error = anyhow::Error;
+
+    fn try_from(value: Vec<ApiSpecFile>) -> Result<Self, Self::Error> {
+        Ok(BlessedApiSpecFile(
+            iter_only(value.into_iter())
+                .context("list of blessed OpenAPI documents for an API")?,
+        ))
+    }
+}
+
+impl AsRawFiles for BlessedApiSpecFile {
+    fn as_raw_files<'a>(
+        &'a self,
+    ) -> Box<dyn Iterator<Item = &'a ApiSpecFile> + 'a> {
+        Box::new(std::iter::once(self.deref()))
+    }
+}
 
 impl BlessedFiles {
     pub fn load_from_git_parent_branch(
@@ -104,13 +126,15 @@ impl BlessedFiles {
             }
         }
 
-        Ok(BlessedFiles::from(api_files))
+        BlessedFiles::try_from(api_files)
     }
 }
 
-impl<'a> From<ApiSpecFilesBuilder<'a>> for BlessedFiles {
-    fn from(api_files: ApiSpecFilesBuilder<'a>) -> Self {
-        let (spec_files, errors, warnings) = api_files.into_parts();
-        BlessedFiles { spec_files, errors, warnings }
+impl<'a> TryFrom<ApiSpecFilesBuilder<'a>> for BlessedFiles {
+    type Error = anyhow::Error;
+
+    fn try_from(api_files: ApiSpecFilesBuilder<'a>) -> anyhow::Result<Self> {
+        let (spec_files, errors, warnings) = api_files.into_parts()?;
+        Ok(BlessedFiles { spec_files, errors, warnings })
     }
 }

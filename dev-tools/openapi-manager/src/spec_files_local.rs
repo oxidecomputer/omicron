@@ -7,11 +7,13 @@
 
 use crate::{
     apis::{ApiIdent, ManagedApis},
-    spec_files_generic::{ApiFiles, ApiSpecFile, ApiSpecFilesBuilder},
+    spec_files_generic::{
+        ApiFiles, ApiSpecFile, ApiSpecFilesBuilder, AsRawFiles,
+    },
 };
 use anyhow::{anyhow, Context};
 use camino::Utf8Path;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, ops::Deref};
 
 /// Container for OpenAPI spec files found in the local filesystem
 ///
@@ -19,7 +21,7 @@ use std::collections::BTreeMap;
 // XXX-dap see comments on BlessedFiles
 #[derive(Debug)]
 pub struct LocalFiles {
-    pub spec_files: BTreeMap<ApiIdent, ApiFiles<LocalApiSpecFile>>,
+    pub spec_files: BTreeMap<ApiIdent, ApiFiles<Vec<LocalApiSpecFile>>>,
     pub errors: Vec<anyhow::Error>,
     pub warnings: Vec<anyhow::Error>,
 }
@@ -35,14 +37,16 @@ impl LocalFiles {
         apis: &ManagedApis,
     ) -> anyhow::Result<LocalFiles> {
         let api_files = walk_local_directory(dir, apis, false)?;
-        Ok(Self::from(api_files))
+        Self::try_from(api_files)
     }
 }
 
-impl<'a> From<ApiSpecFilesBuilder<'a>> for LocalFiles {
-    fn from(api_files: ApiSpecFilesBuilder) -> Self {
-        let (spec_files, errors, warnings) = api_files.into_parts();
-        LocalFiles { spec_files, errors, warnings }
+impl<'a> TryFrom<ApiSpecFilesBuilder<'a>> for LocalFiles {
+    type Error = anyhow::Error;
+
+    fn try_from(api_files: ApiSpecFilesBuilder) -> anyhow::Result<Self> {
+        let (spec_files, errors, warnings) = api_files.into_parts()?;
+        Ok(LocalFiles { spec_files, errors, warnings })
     }
 }
 
@@ -51,6 +55,22 @@ NewtypeDebug! { () pub struct LocalApiSpecFile(ApiSpecFile); }
 NewtypeDeref! { () pub struct LocalApiSpecFile(ApiSpecFile); }
 NewtypeDerefMut! { () pub struct LocalApiSpecFile(ApiSpecFile); }
 NewtypeFrom! { () pub struct LocalApiSpecFile(ApiSpecFile); }
+
+impl AsRawFiles for Vec<LocalApiSpecFile> {
+    fn as_raw_files<'a>(
+        &'a self,
+    ) -> Box<dyn Iterator<Item = &'a ApiSpecFile> + 'a> {
+        Box::new(self.iter().map(|t| t.deref()))
+    }
+}
+
+// impl TryFrom<Vec<ApiSpecFile>> for Vec<LocalApiSpecFile> {
+//     type Error = anyhow::Error;
+//
+//     fn try_from(value: Vec<ApiSpecFile>) -> Result<Self, Self::Error> {
+//         Ok(value.into_iter().map(LocalApiSpecFile::from).collect())
+//     }
+// }
 
 pub fn walk_local_directory<'a>(
     dir: &'_ Utf8Path,

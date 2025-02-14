@@ -293,7 +293,7 @@ impl ApiSpecFile {
 
 pub struct ApiSpecFilesBuilder<'a> {
     apis: &'a ManagedApis,
-    spec_files: BTreeMap<ApiIdent, ApiFiles<ApiSpecFile>>,
+    spec_files: BTreeMap<ApiIdent, ApiFiles<Vec<ApiSpecFile>>>,
     errors: Vec<anyhow::Error>,
     warnings: Vec<anyhow::Error>,
 }
@@ -504,10 +504,15 @@ impl<'a> ApiSpecFilesBuilder<'a> {
         }
     }
 
-    pub fn into_parts<T: Debug + From<ApiSpecFile>>(
+    pub fn into_parts<
+        T: Debug + TryFrom<Vec<ApiSpecFile>, Error = anyhow::Error> + AsRawFiles,
+    >(
         self,
-    ) -> (BTreeMap<ApiIdent, ApiFiles<T>>, Vec<anyhow::Error>, Vec<anyhow::Error>)
-    {
+    ) -> anyhow::Result<(
+        BTreeMap<ApiIdent, ApiFiles<T>>,
+        Vec<anyhow::Error>,
+        Vec<anyhow::Error>,
+    )> {
         let errors = self.errors;
         let warnings = self.warnings;
         // This mess is just mapping the items in the inner BTreeMap with the
@@ -515,40 +520,66 @@ impl<'a> ApiSpecFilesBuilder<'a> {
         let map = self
             .spec_files
             .into_iter()
-            .map(|(api_ident, api_files)| (api_ident, api_files.convert()))
-            .collect::<BTreeMap<_, _>>();
-        (map, errors, warnings)
+            .map(|(api_ident, api_files)| Ok((api_ident, api_files.convert()?)))
+            .collect::<Result<BTreeMap<_, _>, anyhow::Error>>()?;
+        Ok((map, errors, warnings))
     }
 }
 
 #[derive(Debug)]
-pub struct ApiFiles<T: Debug> {
-    spec_files: BTreeMap<semver::Version, Vec<T>>,
+pub struct ApiFiles<T: AsRawFiles> {
+    spec_files: BTreeMap<semver::Version, T>,
     latest_link: Option<ApiSpecFileName>,
 }
 
-impl<T: Debug> ApiFiles<T> {
+impl<T: AsRawFiles> ApiFiles<T> {
     fn new() -> ApiFiles<T> {
         ApiFiles { spec_files: BTreeMap::new(), latest_link: None }
     }
 
-    fn convert<U: Debug + From<T>>(self) -> ApiFiles<U> {
-        ApiFiles {
+    fn convert<U>(self) -> anyhow::Result<ApiFiles<U>>
+    where
+        U: Debug + TryFrom<T, Error = anyhow::Error> + AsRawFiles,
+    {
+        Ok(ApiFiles {
             spec_files: self
                 .spec_files
                 .into_iter()
-                .map(|(v, files)| (v, files.into_iter().map(U::from).collect()))
-                .collect(),
+                .map(|(v, files)| Ok((v, U::try_from(files)?)))
+                .collect::<Result<_, _>>()?,
             latest_link: self.latest_link,
-        }
+        })
     }
 
-    pub fn versions(&self) -> &BTreeMap<semver::Version, Vec<T>> {
+    pub fn versions(&self) -> &BTreeMap<semver::Version, T> {
         &self.spec_files
+    }
+
+    pub fn raw_files_map(
+        &self,
+    ) -> BTreeMap<semver::Version, Vec<&'_ ApiSpecFile>> {
+        self.spec_files
+            .iter()
+            .map(|(k, v)| (k.clone(), v.as_raw_files().collect()))
+            .collect()
     }
 
     pub fn latest_link(&self) -> Option<&ApiSpecFileName> {
         self.latest_link.as_ref()
+    }
+}
+
+pub trait AsRawFiles: Debug {
+    fn as_raw_files<'a>(
+        &'a self,
+    ) -> Box<dyn Iterator<Item = &'a ApiSpecFile> + 'a>;
+}
+
+impl AsRawFiles for Vec<ApiSpecFile> {
+    fn as_raw_files<'a>(
+        &'a self,
+    ) -> Box<dyn Iterator<Item = &'a ApiSpecFile> + 'a> {
+        Box::new(self.iter())
     }
 }
 
