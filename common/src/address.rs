@@ -49,7 +49,7 @@ pub const MGS_PORT: u16 = 12225;
 pub const WICKETD_PORT: u16 = 12226;
 pub const BOOTSTRAP_ARTIFACT_PORT: u16 = 12227;
 pub const CRUCIBLE_PANTRY_PORT: u16 = 17000;
-
+pub const TFPORTD_PORT: u16 = 12231;
 pub const NEXUS_INTERNAL_PORT: u16 = 12221;
 
 /// The port on which Nexus exposes its external API on the underlay network.
