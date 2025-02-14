@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+
+# resolve_openapi_symlink: resolve Git merge conflicts in one of the
+# tool-managed OpenAPI document symlinks
+#
+# We have configured Git to automatically use this tool to resolve conflicts on
+# these symlinks.
+#
+# These symlinks are automatically managed by the `cargo xtask openapi` tool.
+# All this tool does is print a message to orient the user and then delete the
+# symlink.  Logically, the user would resolve the conflict by invoking the tool.
+# But we don't want to do that directly in the context of a merge because there
+# will likely be merge conflicts that prevent the tool itself from running.  The
+# user has to resolve those first.  (That's why this is a bash script and not a
+# Rust program.)
+
+# Validate our sole argument.
+if [[ $# != 1 ]]; then
+	echo "usage: resolve_openapi_symlink path/to/symlink" >&2
+	echo "Deletes the specified symlink." >&2
+	exit 2
+fi
+
+link_path="$1"
+if ! [[ -L "$link_path" ]]; then
+	echo "not a symlink: \"$link_path\"" >&2
+	exit 1
+fi
+
+# Print a message about what's going on to help the user resolve the conflict.
+cat <<EOF
+
+--------------------------------------------------------------------------------
+Heads up!  It looks like you're merging a commit that includes changes to an
+OpenAPI document that you've also changed locally.  You should have merge
+conflicts in at least two places:
+
+1. The crate containing the API definition (the API trait), in the invocation
+   of the \`api_versions!\` macro.  You need to resolve this by hand.
+   Generally, your locally-added versions should appear NEWER (earlier in the
+   list) than any upstream ones.
+
+2. The "latest" symlink for this API's OpenAPI document file:
+
+       $link_path
+
+   This symlink will be removed automatically to avoid confusion.
+   You should regenerate it (see below).
+
+Once you've resolved these and any other conflicts, run this command:
+
+     cargo xtask openapi generate
+
+to re-generate all affected OpenAPI documents.  This will also fix the symlink.
+--------------------------------------------------------------------------------
+
+EOF
+
+# Remove the link and use `git add` to mark the conflitc resolved.
+if ! (set -o xtrace; rm -f "$link_path" && git add "$link_path"); then
+	echo "failed to remove symlink \"$link_path\" or "\
+	    "mark the conflict resolved" >&2
+fi
