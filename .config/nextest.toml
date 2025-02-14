@@ -49,13 +49,17 @@ live-tests = { max-threads = 1 }
 default-filter = 'all() - package(omicron-live-tests) - package(end-to-end-tests)'
 
 [[profile.default.overrides]]
-filter = 'package(oximeter-db) and test(replicated) + package(omicron-clickhouse-admin)'
-test-group = 'clickhouse-cluster'
-
-[[profile.default.overrides]]
 # These tests are quite slow and can hold up the run, so run them first.
 filter = 'package(oximeter-db) and test(=client::tests::test_replicated) + test(test_action_failure_can_unwind)'
 priority = 20
+
+[[profile.default.overrides]]
+filter = 'package(oximeter-db) and test(replicated) + package(omicron-clickhouse-admin)'
+test-group = 'clickhouse-cluster'
+# client::tests::test_replicated is part of this filter, but it's matched with
+# the higher priority (20) first. The other tests in this group are run after
+# that.
+priority = 10
 
 [[profile.default.overrides]]
 # These tests can time out under heavy contention.
