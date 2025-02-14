@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 cfg_if::cfg_if! {
-    if #[cfg(target_os = "illumos")] {
+    if #[cfg(all(target_os = "illumos", not(test)))] {
         mod illumos;
         pub use illumos::*;
     } else {
