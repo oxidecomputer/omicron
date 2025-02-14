@@ -255,8 +255,7 @@ async fn create_test_groups(
         .group_pattern
         .stripe
         .iter()
-        .map(|groups| groups.belongs_to.iter())
-        .flatten()
+        .flat_map(|groups| groups.belongs_to.iter())
         .collect();
     for group in all_groups {
         match group.flavor {
@@ -293,8 +292,7 @@ async fn delete_test_groups(
         .group_pattern
         .stripe
         .iter()
-        .map(|groups| groups.belongs_to.iter())
-        .flatten()
+        .flat_map(|groups| groups.belongs_to.iter())
         .collect();
     for group in all_groups {
         match group.flavor {

@@ -149,7 +149,7 @@ pub async fn create_instance_record(
                 description: "".to_string(),
             },
             ncpus: 2i64.try_into().unwrap(),
-            memory: external::ByteCount::from_gibibytes_u32(16).into(),
+            memory: external::ByteCount::from_gibibytes_u32(16),
             hostname: "myhostname".try_into().unwrap(),
             user_data: Vec::new(),
             network_interfaces:
