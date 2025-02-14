@@ -223,15 +223,15 @@ async fn remove_datalink(
             Ok(_) => {
                 debug!(
                     log,
-                    "Removed VNIC from tracked links";
+                    "removed VNIC from tracked links";
                     "link_name" => name,
                 );
             }
             Err(err) => {
                 error!(
                     log,
-                    "Failed to remove VNIC from kstat sampler, \
-                    metrics may still be produced for it";
+                    "failed to remove VNIC from kstat sampler, \
+                     metrics may still be produced for it";
                     "link_name" => name,
                     "error" => ?err,
                 );
@@ -263,7 +263,7 @@ async fn add_datalink(
                 Ok(id) => {
                     debug!(
                         log,
-                        "Added new link to kstat sampler";
+                        "added new link to kstat sampler";
                         "link_name" => entry.key(),
                         "link_kind" => %link.kind(),
                         "zone_name" => %link.zone_name(),
@@ -273,8 +273,8 @@ async fn add_datalink(
                 Err(err) => {
                     error!(
                         log,
-                        "Failed to add VNIC to kstat sampler, \
-                        no metrics will be collected for it";
+                        "failed to add VNIC to kstat sampler, \
+                         no metrics will be collected for it";
                         "link_name" => entry.key(),
                         "link_kind" => %link.kind(),
                         "zone_name" => %link.zone_name(),
@@ -310,14 +310,14 @@ async fn sync_sled_datalinks(
             Ok(_) => {
                 debug!(
                     log,
-                    "Updated link already tracked by kstat sampler";
+                    "updated link already tracked by kstat sampler";
                     "link_name" => link_name,
                 );
             }
             Err(err) => {
                 error!(
                     log,
-                    "Failed to update link already tracked by kstat sampler";
+                    "failed to update link already tracked by kstat sampler";
                     "link_name" => link_name,
                     "error" => ?err,
                 );
@@ -528,7 +528,7 @@ fn start_producer_server(
             interval: METRIC_COLLECTION_INTERVAL,
         },
         registration_address,
-        request_body_max_bytes: METRIC_REQUEST_MAX_SIZE,
+        default_request_body_max_bytes: METRIC_REQUEST_MAX_SIZE,
         log: LogConfig::Logger(log),
     };
     ProducerServer::start(&config).map_err(Error::ProducerServer)

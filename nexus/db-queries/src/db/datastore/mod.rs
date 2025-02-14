@@ -59,7 +59,7 @@ mod clickhouse_policy;
 mod cockroachdb_node_id;
 mod cockroachdb_settings;
 mod console_session;
-mod dataset;
+mod crucible_dataset;
 mod db_metadata;
 mod deployment;
 mod device_auth;
@@ -72,6 +72,7 @@ pub mod instance;
 mod inventory;
 mod ip_pool;
 mod ipv4_nat_entry;
+mod lldp;
 mod migration;
 mod network_interface;
 mod oximeter;
@@ -84,6 +85,7 @@ mod region;
 mod region_replacement;
 mod region_snapshot;
 pub mod region_snapshot_replacement;
+mod rendezvous_debug_dataset;
 mod role;
 mod saga;
 mod silo;
@@ -93,6 +95,7 @@ mod sled;
 mod sled_instance;
 mod snapshot;
 mod ssh_key;
+mod support_bundle;
 mod switch;
 mod switch_interface;
 mod switch_port;
@@ -119,22 +122,16 @@ pub use rack::RackInit;
 pub use rack::SledUnderlayAllocationResult;
 pub use region::RegionAllocationFor;
 pub use region::RegionAllocationParameters;
+pub use region_snapshot_replacement::NewRegionVolumeId;
+pub use region_snapshot_replacement::OldSnapshotVolumeId;
 pub use silo::Discoverability;
 pub use sled::SledTransition;
 pub use sled::TransitionError;
+pub use support_bundle::SupportBundleExpungementReport;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use virtual_provisioning_collection::StorageType;
 pub use vmm::VmmStateUpdateResult;
-pub use volume::read_only_resources_associated_with_volume;
-pub use volume::CrucibleResources;
-pub use volume::CrucibleTargets;
-pub use volume::ExistingTarget;
-pub use volume::ReplacementTarget;
-pub use volume::VolumeCheckoutReason;
-pub use volume::VolumeReplaceResult;
-pub use volume::VolumeReplacementParams;
-pub use volume::VolumeToDelete;
-pub use volume::VolumeWithTarget;
+pub use volume::*;
 
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.
@@ -320,6 +317,14 @@ impl DataStore {
         )
     }
 
+    /// Constructs a non-retryable transaction helper
+    pub fn transaction_non_retry_wrapper(
+        &self,
+        name: &'static str,
+    ) -> crate::transaction_retry::NonRetryHelper {
+        crate::transaction_retry::NonRetryHelper::new(&self.log, name)
+    }
+
     #[cfg(test)]
     pub(crate) fn transaction_retry_producer(
         &self,
@@ -451,7 +456,7 @@ mod test {
     use crate::db::identity::Asset;
     use crate::db::lookup::LookupPath;
     use crate::db::model::{
-        BlockSize, ConsoleSession, Dataset, ExternalIp, PhysicalDisk,
+        BlockSize, ConsoleSession, CrucibleDataset, ExternalIp, PhysicalDisk,
         PhysicalDiskKind, PhysicalDiskPolicy, PhysicalDiskState, Project, Rack,
         Region, SiloUser, SledBaseboard, SledSystemHardware, SledUpdate,
         SshKey, Zpool,
@@ -465,18 +470,21 @@ mod test {
     use nexus_db_fixed_data::silo::DEFAULT_SILO;
     use nexus_db_model::IpAttachState;
     use nexus_db_model::{to_db_typed_uuid, Generation};
+    use nexus_types::deployment::Blueprint;
+    use nexus_types::deployment::BlueprintTarget;
     use nexus_types::external_api::params;
     use nexus_types::silo::DEFAULT_SILO_ID;
+    use omicron_common::address::REPO_DEPOT_PORT;
     use omicron_common::api::external::{
         ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
-    use omicron_common::api::internal::shared::DatasetKind;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
+    use omicron_uuid_kinds::VolumeUuid;
     use std::collections::HashMap;
     use std::collections::HashSet;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
@@ -503,6 +511,33 @@ mod test {
             reservoir_size: crate::db::model::ByteCount::try_from(1 << 39)
                 .unwrap(),
         }
+    }
+
+    /// Inserts a blueprint in the DB and forcibly makes it the target
+    ///
+    /// WARNING: This makes no attempts to validate the blueprint relative to
+    /// parents -- this is just a test-only helper to make testing
+    /// blueprint-specific checks easier.
+    pub async fn bp_insert_and_make_target(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        bp: &Blueprint,
+    ) {
+        datastore
+            .blueprint_insert(opctx, bp)
+            .await
+            .expect("inserted blueprint");
+        datastore
+            .blueprint_target_set_current(
+                opctx,
+                BlueprintTarget {
+                    target_id: bp.id,
+                    enabled: true,
+                    time_made_target: Utc::now(),
+                },
+            )
+            .await
+            .expect("made blueprint the target");
     }
 
     #[tokio::test]
@@ -685,12 +720,14 @@ mod test {
             0,
             0,
         );
+        let bogus_repo_depot_port = 8081;
         let rack_id = Uuid::new_v4();
         let sled_id = SledUuid::new_v4();
 
         let sled_update = SledUpdate::new(
             sled_id.into_untyped_uuid(),
             bogus_addr,
+            bogus_repo_depot_port,
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id,
@@ -955,8 +992,7 @@ mod test {
                 .collect()
                 .await;
 
-            let bogus_addr =
-                Some(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0));
+            let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
 
             let datasets = stream::iter(zpools)
                 .map(|zpool| {
@@ -965,16 +1001,18 @@ mod test {
                         (0..3).map(|_| zpool).collect();
                     stream::iter(zpool_iter).then(|zpool| {
                         let dataset_id = DatasetUuid::new_v4();
-                        let dataset = Dataset::new(
+                        let dataset = CrucibleDataset::new(
                             dataset_id,
                             zpool.pool_id,
                             bogus_addr,
-                            DatasetKind::Crucible,
                         );
 
                         let datastore = datastore.clone();
                         async move {
-                            datastore.dataset_upsert(dataset).await.unwrap();
+                            datastore
+                                .crucible_dataset_upsert(dataset)
+                                .await
+                                .unwrap();
 
                             (zpool.sled_id, dataset_id)
                         }
@@ -1021,7 +1059,7 @@ mod test {
                 &format!("disk{}", alloc_seed),
                 ByteCount::from_mebibytes_u32(1),
             );
-            let volume_id = Uuid::new_v4();
+            let volume_id = VolumeUuid::new_v4();
 
             let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
             let dataset_and_regions = datastore
@@ -1115,7 +1153,7 @@ mod test {
                 &format!("disk{}", alloc_seed),
                 ByteCount::from_mebibytes_u32(1),
             );
-            let volume_id = Uuid::new_v4();
+            let volume_id = VolumeUuid::new_v4();
 
             let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
             let dataset_and_regions = datastore
@@ -1203,7 +1241,7 @@ mod test {
                 &format!("disk{}", alloc_seed),
                 ByteCount::from_mebibytes_u32(1),
             );
-            let volume_id = Uuid::new_v4();
+            let volume_id = VolumeUuid::new_v4();
 
             let err = datastore
                 .disk_region_allocate(
@@ -1249,7 +1287,7 @@ mod test {
             "disk",
             ByteCount::from_mebibytes_u32(500),
         );
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
         let mut dataset_and_regions1 = datastore
             .disk_region_allocate(
                 &opctx,
@@ -1275,7 +1313,7 @@ mod test {
             .unwrap();
 
         // Give them a consistent order so we can easily compare them.
-        let sort_vec = |v: &mut Vec<(Dataset, Region)>| {
+        let sort_vec = |v: &mut Vec<(CrucibleDataset, Region)>| {
             v.sort_by(|(d1, r1), (d2, r2)| {
                 let order = d1.id().cmp(&d2.id());
                 match order {
@@ -1331,22 +1369,16 @@ mod test {
             .collect()
             .await;
 
-        let bogus_addr =
-            Some(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0));
+        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
 
         // 1 dataset per zpool
         stream::iter(zpool_ids.clone())
             .then(|zpool_id| {
                 let id = DatasetUuid::new_v4();
-                let dataset = Dataset::new(
-                    id,
-                    zpool_id,
-                    bogus_addr,
-                    DatasetKind::Crucible,
-                );
+                let dataset = CrucibleDataset::new(id, zpool_id, bogus_addr);
                 let datastore = datastore.clone();
                 async move {
-                    datastore.dataset_upsert(dataset).await.unwrap();
+                    datastore.crucible_dataset_upsert(dataset).await.unwrap();
                     id
                 }
             })
@@ -1358,7 +1390,7 @@ mod test {
             "disk1",
             ByteCount::from_mebibytes_u32(500),
         );
-        let volume1_id = Uuid::new_v4();
+        let volume1_id = VolumeUuid::new_v4();
         let err = datastore
             .disk_region_allocate(
                 &opctx,
@@ -1431,22 +1463,16 @@ mod test {
                 .collect()
                 .await;
 
-        let bogus_addr =
-            Some(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0));
+        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
 
         // 1 dataset per zpool
         stream::iter(zpool_ids)
             .then(|zpool_id| {
                 let id = DatasetUuid::new_v4();
-                let dataset = Dataset::new(
-                    id,
-                    zpool_id,
-                    bogus_addr,
-                    DatasetKind::Crucible,
-                );
+                let dataset = CrucibleDataset::new(id, zpool_id, bogus_addr);
                 let datastore = datastore.clone();
                 async move {
-                    datastore.dataset_upsert(dataset).await.unwrap();
+                    datastore.crucible_dataset_upsert(dataset).await.unwrap();
                     id
                 }
             })
@@ -1458,7 +1484,7 @@ mod test {
             "disk1",
             ByteCount::from_mebibytes_u32(500),
         );
-        let volume1_id = Uuid::new_v4();
+        let volume1_id = VolumeUuid::new_v4();
         let err = datastore
             .disk_region_allocate(
                 &opctx,
@@ -1511,15 +1537,13 @@ mod test {
                 physical_disk_id,
             )
             .await;
-            let bogus_addr =
-                Some(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0));
-            let dataset = Dataset::new(
+            let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
+            let dataset = CrucibleDataset::new(
                 DatasetUuid::new_v4(),
                 zpool_id,
                 bogus_addr,
-                DatasetKind::Crucible,
             );
-            datastore.dataset_upsert(dataset).await.unwrap();
+            datastore.crucible_dataset_upsert(dataset).await.unwrap();
             physical_disk_ids.push(physical_disk_id);
         }
 
@@ -1547,7 +1571,7 @@ mod test {
             (Policy::InService, State::Active, AllocationShould::Succeed),
         ];
 
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
         let params = create_test_disk_create_params(
             "disk",
             ByteCount::from_mebibytes_u32(500),
@@ -1617,7 +1641,7 @@ mod test {
         let disk_size = test_zpool_size();
         let alloc_size = ByteCount::try_from(disk_size.to_bytes() * 2).unwrap();
         let params = create_test_disk_create_params("disk1", alloc_size);
-        let volume1_id = Uuid::new_v4();
+        let volume1_id = VolumeUuid::new_v4();
 
         assert!(datastore
             .disk_region_allocate(
@@ -1644,10 +1668,11 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let datastore = db.datastore();
         let conn = datastore.pool_connection_for_tests().await.unwrap();
-        let explanation = DataStore::get_allocated_regions_query(Uuid::nil())
-            .explain_async(&conn)
-            .await
-            .unwrap();
+        let explanation =
+            DataStore::get_allocated_regions_query(VolumeUuid::nil())
+                .explain_async(&conn)
+                .await
+                .unwrap();
         assert!(
             !explanation.contains("FULL SCAN"),
             "Found an unexpected FULL SCAN: {}",
@@ -1692,6 +1717,7 @@ mod test {
         let sled1 = db::model::SledUpdate::new(
             sled1_id,
             addr1,
+            REPO_DEPOT_PORT,
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id,
@@ -1704,6 +1730,7 @@ mod test {
         let sled2 = db::model::SledUpdate::new(
             sled2_id,
             addr2,
+            REPO_DEPOT_PORT,
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id,

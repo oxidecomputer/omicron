@@ -72,15 +72,9 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
 
     // Figure out which zone is new and make a new client for it.
     let diff = blueprint2.diff_since_blueprint(&blueprint1);
-    let new_zone = diff
-        .zones
-        .added
-        .values()
-        .next()
-        .expect("at least one sled with added zones")
-        .zones
-        .first()
-        .expect("at least one added zone on that sled");
+    let zones = diff.added_zones(&sled_id).expect("sled has added zones");
+    let new_zone =
+        zones.zones.first().expect("at least one added zone on that sled");
     assert_eq!(new_zone.kind(), ZoneKind::Nexus);
     let new_zone_addr = new_zone.underlay_ip();
     let new_zone_sockaddr =
@@ -126,7 +120,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
         &nexus,
         &|builder: &mut BlueprintBuilder| {
             builder
-                .sled_expunge_zone(sled_id, new_zone.id())
+                .sled_expunge_zone(sled_id, new_zone.id)
                 .context("expunging zone")?;
             Ok(())
         },

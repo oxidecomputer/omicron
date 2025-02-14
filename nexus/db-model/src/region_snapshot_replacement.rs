@@ -10,6 +10,8 @@ use chrono::DateTime;
 use chrono::Utc;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::VolumeKind;
+use omicron_uuid_kinds::VolumeUuid;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -28,6 +30,7 @@ impl_enum_type!(
     ReplacementDone => b"replacement_done"
     DeletingOldVolume => b"deleting_old_volume"
     Running => b"running"
+    Completing => b"completing"
     Complete => b"complete"
 );
 
@@ -46,9 +49,86 @@ impl std::str::FromStr for RegionSnapshotReplacementState {
                 Ok(RegionSnapshotReplacementState::DeletingOldVolume)
             }
             "running" => Ok(RegionSnapshotReplacementState::Running),
+            "completing" => Ok(RegionSnapshotReplacementState::Completing),
             "complete" => Ok(RegionSnapshotReplacementState::Complete),
             _ => Err(format!("unrecognized value {} for enum", s)),
         }
+    }
+}
+
+impl_enum_type!(
+    #[derive(SqlType, Debug, QueryId)]
+    #[diesel(postgres_type(name = "read_only_target_replacement_type", schema = "public"))]
+    pub struct ReadOnlyTargetReplacementTypeEnum;
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
+    #[diesel(sql_type = ReadOnlyTargetReplacementTypeEnum)]
+    pub enum ReadOnlyTargetReplacementType;
+
+    // Enum values
+    RegionSnapshot => b"region_snapshot"
+    ReadOnlyRegion => b"read_only_region"
+);
+
+// FromStr impl required for use with clap (aka omdb)
+impl std::str::FromStr for ReadOnlyTargetReplacementType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "region_snapshot" => {
+                Ok(ReadOnlyTargetReplacementType::RegionSnapshot)
+            }
+            "read_only_region" => {
+                Ok(ReadOnlyTargetReplacementType::ReadOnlyRegion)
+            }
+            _ => Err(format!("unrecognized value {} for enum", s)),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum ReadOnlyTargetReplacement {
+    RegionSnapshot {
+        dataset_id: DbTypedUuid<DatasetKind>,
+        region_id: Uuid,
+        snapshot_id: Uuid,
+    },
+
+    ReadOnlyRegion {
+        region_id: Uuid,
+    },
+}
+
+impl slog::KV for ReadOnlyTargetReplacement {
+    fn serialize(
+        &self,
+        _record: &slog::Record<'_>,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        match &self {
+            ReadOnlyTargetReplacement::RegionSnapshot {
+                dataset_id,
+                region_id,
+                snapshot_id,
+            } => {
+                serializer.emit_str("type".into(), "region_snapshot")?;
+                serializer
+                    .emit_str("dataset_id".into(), &dataset_id.to_string())?;
+                serializer
+                    .emit_str("region_id".into(), &region_id.to_string())?;
+                serializer
+                    .emit_str("snapshot_id".into(), &snapshot_id.to_string())?;
+            }
+
+            ReadOnlyTargetReplacement::ReadOnlyRegion { region_id } => {
+                serializer.emit_str("type".into(), "region_snapshot")?;
+                serializer
+                    .emit_str("region_id".into(), &region_id.to_string())?;
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -79,9 +159,14 @@ impl std::str::FromStr for RegionSnapshotReplacementState {
 ///          |                        |
 ///          v                        ---
 ///                                   ---
-///       Running                     |
-///                                   | set in region snapshot replacement
-///          |                        | finish background task
+///       Running  <--                |
+///                  |                |
+///          |       |                |
+///          v       |                |
+///                  |                | responsibility of region snapshot
+///     Completing --                 | replacement finish saga
+///                                   |
+///          |                        |
 ///          v                        |
 ///                                   |
 ///      Complete                     ---
@@ -121,30 +206,39 @@ pub struct RegionSnapshotReplacement {
     pub request_time: DateTime<Utc>,
 
     // These are a copy of fields from the corresponding region snapshot record
-    pub old_dataset_id: DbTypedUuid<DatasetKind>,
-    pub old_region_id: Uuid,
-    pub old_snapshot_id: Uuid,
+    // or the corresponding read-only region
+    old_dataset_id: Option<DbTypedUuid<DatasetKind>>,
+    old_region_id: Uuid,
+    old_snapshot_id: Option<Uuid>,
 
     /// A synthetic volume that only is used to later delete the old snapshot
-    pub old_snapshot_volume_id: Option<Uuid>,
+    pub old_snapshot_volume_id: Option<DbTypedUuid<VolumeKind>>,
 
     pub new_region_id: Option<Uuid>,
 
     pub replacement_state: RegionSnapshotReplacementState,
 
     pub operating_saga_id: Option<Uuid>,
+
+    /// In order for the newly created region not to be deleted inadvertently,
+    /// an additional reference count bump is required. This volume should live
+    /// as long as this request so that all necessary replacements can be
+    /// completed.
+    pub new_region_volume_id: Option<DbTypedUuid<VolumeKind>>,
+
+    pub replacement_type: ReadOnlyTargetReplacementType,
 }
 
 impl RegionSnapshotReplacement {
     pub fn for_region_snapshot(region_snapshot: &RegionSnapshot) -> Self {
-        Self::new(
+        Self::new_from_region_snapshot(
             region_snapshot.dataset_id(),
             region_snapshot.region_id,
             region_snapshot.snapshot_id,
         )
     }
 
-    pub fn new(
+    pub fn new_from_region_snapshot(
         old_dataset_id: DatasetUuid,
         old_region_id: Uuid,
         old_snapshot_id: Uuid,
@@ -152,13 +246,57 @@ impl RegionSnapshotReplacement {
         Self {
             id: Uuid::new_v4(),
             request_time: Utc::now(),
-            old_dataset_id: old_dataset_id.into(),
+            old_dataset_id: Some(old_dataset_id.into()),
             old_region_id,
-            old_snapshot_id,
+            old_snapshot_id: Some(old_snapshot_id),
             old_snapshot_volume_id: None,
             new_region_id: None,
+            new_region_volume_id: None,
             replacement_state: RegionSnapshotReplacementState::Requested,
             operating_saga_id: None,
+            replacement_type: ReadOnlyTargetReplacementType::RegionSnapshot,
+        }
+    }
+
+    pub fn new_from_read_only_region(old_region_id: Uuid) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            request_time: Utc::now(),
+            old_dataset_id: None,
+            old_region_id,
+            old_snapshot_id: None,
+            old_snapshot_volume_id: None,
+            new_region_id: None,
+            new_region_volume_id: None,
+            replacement_state: RegionSnapshotReplacementState::Requested,
+            operating_saga_id: None,
+            replacement_type: ReadOnlyTargetReplacementType::ReadOnlyRegion,
+        }
+    }
+
+    pub fn old_snapshot_volume_id(&self) -> Option<VolumeUuid> {
+        self.old_snapshot_volume_id.map(|v| v.into())
+    }
+
+    pub fn new_region_volume_id(&self) -> Option<VolumeUuid> {
+        self.new_region_volume_id.map(|v| v.into())
+    }
+
+    pub fn replacement_type(&self) -> ReadOnlyTargetReplacement {
+        match &self.replacement_type {
+            ReadOnlyTargetReplacementType::RegionSnapshot => {
+                ReadOnlyTargetReplacement::RegionSnapshot {
+                    dataset_id: self.old_dataset_id.unwrap(),
+                    region_id: self.old_region_id,
+                    snapshot_id: self.old_snapshot_id.unwrap(),
+                }
+            }
+
+            ReadOnlyTargetReplacementType::ReadOnlyRegion => {
+                ReadOnlyTargetReplacement::ReadOnlyRegion {
+                    region_id: self.old_region_id,
+                }
+            }
         }
     }
 }

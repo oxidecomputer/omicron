@@ -6,8 +6,13 @@
 
 use std::net::IpAddr;
 
+use super::params::RelativeUri;
+use anyhow::Context;
+use chrono::DateTime;
+use chrono::Utc;
 use omicron_common::api::external::Name;
 use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_uuid_kinds::SupportBundleUuid;
 use parse_display::FromStr;
 use schemars::JsonSchema;
 use serde::de::Error as _;
@@ -414,6 +419,45 @@ mod test {
     }
 }
 
+#[derive(
+    Debug, Clone, Copy, JsonSchema, Serialize, Deserialize, Eq, PartialEq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SupportBundleState {
+    /// Support Bundle still actively being collected.
+    ///
+    /// This is the initial state for a Support Bundle, and it will
+    /// automatically transition to either "Failing" or "Active".
+    ///
+    /// If a user no longer wants to access a Support Bundle, they can
+    /// request cancellation, which will transition to the "Destroying" state.
+    Collecting,
+
+    /// Support Bundle is being destroyed.
+    ///
+    /// Once backing storage has been freed, this bundle is destroyed.
+    Destroying,
+
+    /// Support Bundle was not created successfully, or was created and has lost
+    /// backing storage.
+    ///
+    /// The record of the bundle still exists for readability, but the only
+    /// valid operation on these bundles is to destroy them.
+    Failed,
+
+    /// Support Bundle has been processed, and is ready for usage.
+    Active,
+}
+
+#[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
+pub struct SupportBundleInfo {
+    pub id: SupportBundleUuid,
+    pub time_created: DateTime<Utc>,
+    pub reason_for_creation: String,
+    pub reason_for_failure: Option<String>,
+    pub state: SupportBundleState,
+}
+
 #[derive(Debug, Clone, JsonSchema, Serialize, Deserialize)]
 pub struct ProbeInfo {
     pub id: Uuid,
@@ -437,4 +481,32 @@ pub enum ProbeExternalIpKind {
     Snat,
     Floating,
     Ephemeral,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RelayState {
+    pub redirect_uri: Option<RelativeUri>,
+}
+
+impl RelayState {
+    pub fn to_encoded(&self) -> Result<String, anyhow::Error> {
+        Ok(base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            serde_json::to_string(&self).context("encoding relay state")?,
+        ))
+    }
+
+    pub fn from_encoded(encoded: String) -> Result<Self, anyhow::Error> {
+        serde_json::from_str(
+            &String::from_utf8(
+                base64::Engine::decode(
+                    &base64::engine::general_purpose::STANDARD,
+                    encoded,
+                )
+                .context("base64 decoding relay state")?,
+            )
+            .context("creating relay state string")?,
+        )
+        .context("json from relay state string")
+    }
 }

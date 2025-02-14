@@ -2,9 +2,13 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Subcommand;
+use config::MultiPresetArg;
+use omicron_zone_package::config::{PackageName, PresetName};
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 
+pub mod cargo_plan;
+pub mod config;
 pub mod dot;
 pub mod target;
 
@@ -33,48 +37,40 @@ pub fn parse<P: AsRef<Utf8Path>, C: DeserializeOwned>(
 pub enum TargetCommand {
     /// Creates a new build target, and sets it as "active".
     Create {
-        #[clap(short, long, default_value = "standard")]
-        image: crate::target::Image,
+        /// The preset to use as part of the build (use `dev` for development).
+        ///
+        /// Presets are defined in the `target.preset` section of the config.
+        /// The other configurations are layered on top of the preset.
+        #[clap(short, long)]
+        preset: PresetName,
 
-        #[clap(
-            short,
-            long,
-            default_value_if("image", "standard", "non-gimlet")
-        )]
+        /// The image to use for the target.
+        ///
+        /// If specified, this configuration is layered on top of the preset.
+        #[clap(short, long)]
+        image: Option<crate::target::Image>,
+
+        /// The kind of machine to build for.
+        #[clap(short, long, help_heading = "Preset overrides")]
         machine: Option<crate::target::Machine>,
 
-        #[clap(short, long, default_value_if("image", "standard", "stub"))]
+        /// The switch to use for the target.
+        #[clap(short, long, help_heading = "Preset overrides")]
         switch: Option<crate::target::Switch>,
 
-        #[clap(
-            short,
-            long,
-            default_value_if("image", "trampoline", Some("single-sled")),
-
-            // This opt is required, and clap will enforce that even with
-            // `required = false`, since it's not an Option. But the
-            // default_value_if only works if we set `required` to false. It's
-            // jank, but it is what it is.
-            // https://github.com/clap-rs/clap/issues/4086
-            required = false
-        )]
+        #[clap(short, long, help_heading = "Preset overrides")]
         /// Specify whether nexus will run in a single-sled or multi-sled
         /// environment.
         ///
         /// Set single-sled for dev purposes when you're running a single
-        /// sled-agent. Set multi-sled if you're running with mulitple sleds.
+        /// sled-agent. Set multi-sled if you're running with multiple sleds.
         /// Currently this only affects the crucible disk allocation strategy-
         /// VM disks will require 3 distinct sleds with `multi-sled`, which will
         /// fail in a single-sled environment. `single-sled` relaxes this
         /// requirement.
-        rack_topology: crate::target::RackTopology,
+        rack_topology: Option<crate::target::RackTopology>,
 
-        #[clap(
-            short,
-            long,
-            default_value = Some("single-node"),
-            required = false
-        )]
+        #[clap(short, long, help_heading = "Preset overrides")]
         // TODO (https://github.com/oxidecomputer/omicron/issues/4148): Remove
         // once single-node functionality is removed.
         /// Specify whether clickhouse will be deployed as a replicated cluster
@@ -82,7 +78,7 @@ pub enum TargetCommand {
         ///
         /// Replicated cluster configuration is an experimental feature to be
         /// used only for testing.
-        clickhouse_topology: crate::target::ClickhouseTopology,
+        clickhouse_topology: Option<crate::target::ClickhouseTopology>,
     },
     /// List all existing targets
     List,
@@ -120,15 +116,24 @@ pub enum BuildCommand {
         disable_cache: bool,
         /// Limit to building only these packages
         #[clap(long)]
-        only: Vec<String>,
+        only: Vec<PackageName>,
     },
     /// Stamps semver versions onto packages within a manifest
     Stamp {
         /// The name of the artifact to be stamped.
-        package_name: String,
+        package_name: PackageName,
 
         /// The version to be stamped onto the package.
         version: semver::Version,
+    },
+    /// Show the Cargo commands that would be run to build the packages.
+    ShowCargoCommands {
+        /// Show cargo commands for the specified presets, or `all` for all
+        /// presets.
+        ///
+        /// If not specified, the active target's preset is used.
+        #[clap(short, long = "preset")]
+        presets: Option<MultiPresetArg>,
     },
     /// Checks the packages specified in a manifest, without building them.
     Check,

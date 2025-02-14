@@ -115,7 +115,7 @@ pub enum StartError {
     CreateDdmAdminLocalhostClient(#[source] DdmError),
 
     #[error("Failed to create ZFS ramdisk dataset")]
-    EnsureZfsRamdiskDataset(#[source] zfs::EnsureFilesystemError),
+    EnsureZfsRamdiskDataset(#[source] zfs::EnsureDatasetError),
 
     #[error("Failed to list zones")]
     ListZones(#[source] zone::AdmError),
@@ -450,7 +450,7 @@ fn start_dropshot_server(
     context: BootstrapServerContext,
 ) -> Result<HttpServer<BootstrapServerContext>, StartError> {
     let mut dropshot_config = dropshot::ConfigDropshot::default();
-    dropshot_config.request_body_max_bytes = 1024 * 1024;
+    dropshot_config.default_request_body_max_bytes = 1024 * 1024;
     dropshot_config.bind_address = SocketAddr::V6(SocketAddrV6::new(
         context.global_zone_bootstrap_ip,
         BOOTSTRAP_AGENT_HTTP_PORT,

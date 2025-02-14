@@ -5,6 +5,7 @@
 use super::tri_map::TriMap;
 use super::tri_map::TriMapEntry;
 use anyhow::anyhow;
+use daft::Diffable;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_uuid_kinds::ExternalIpUuid;
@@ -147,7 +148,18 @@ impl OmicronZoneNetworkResources {
 }
 
 /// External IP variants possible for Omicron-managed zones.
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Hash,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+)]
 pub enum OmicronZoneExternalIp {
     Floating(OmicronZoneExternalFloatingIp),
     Snat(OmicronZoneExternalSnatIp),
@@ -199,7 +211,18 @@ pub enum OmicronZoneExternalIpKey {
 /// necessary for blueprint planning, and requires that the zone have a single
 /// IP.
 #[derive(
-    Debug, Clone, Copy, Hash, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    Hash,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    Serialize,
+    Deserialize,
+    Diffable,
 )]
 pub struct OmicronZoneExternalFloatingIp {
     pub id: ExternalIpUuid,
@@ -208,7 +231,17 @@ pub struct OmicronZoneExternalFloatingIp {
 
 /// Floating external address with port allocated to an Omicron-managed zone.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    JsonSchema,
+    Serialize,
+    Deserialize,
+    Diffable,
 )]
 pub struct OmicronZoneExternalFloatingAddr {
     pub id: ExternalIpUuid,
@@ -227,7 +260,18 @@ impl OmicronZoneExternalFloatingAddr {
 /// necessary for blueprint planning, and requires that the zone have a single
 /// IP.
 #[derive(
-    Debug, Clone, Copy, Hash, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    Hash,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+    JsonSchema,
+    Serialize,
+    Deserialize,
+    Diffable,
 )]
 pub struct OmicronZoneExternalSnatIp {
     pub id: ExternalIpUuid,

@@ -224,7 +224,9 @@ impl ArtifactManifest {
     /// Checks that all expected artifacts are present, returning an error with
     /// details if any artifacts are missing.
     pub fn verify_all_present(&self) -> Result<()> {
-        let all_artifacts: BTreeSet<_> = KnownArtifactKind::iter().collect();
+        let all_artifacts: BTreeSet<_> = KnownArtifactKind::iter()
+            .filter(|k| !matches!(k, KnownArtifactKind::Zone))
+            .collect();
         let present_artifacts: BTreeSet<_> =
             self.artifacts.keys().copied().collect();
 
@@ -261,7 +263,8 @@ impl<'a> FakeDataAttributes<'a> {
             // non-Hubris artifacts: just make fake data
             KnownArtifactKind::Host
             | KnownArtifactKind::Trampoline
-            | KnownArtifactKind::ControlPlane => return make_filler_text(size),
+            | KnownArtifactKind::ControlPlane
+            | KnownArtifactKind::Zone => return make_filler_text(size),
 
             // hubris artifacts: build a fake archive (SimGimletSp and
             // SimGimletRot are used by sp-sim)
@@ -539,15 +542,40 @@ impl DeserializedControlPlaneZoneSource {
                     })?;
                 // For now, always use the current time as the source. (Maybe
                 // change this to use the mtime on disk in the future?)
-                (name, data, MtimeSource::Now)
+                (name.to_owned(), data, MtimeSource::Now)
             }
             DeserializedControlPlaneZoneSource::Fake { name, size } => {
-                let data = make_filler_text(*size as usize);
-                (name.as_str(), data, MtimeSource::Zero)
+                use flate2::{write::GzEncoder, Compression};
+                use omicron_brand_metadata::{
+                    ArchiveType, LayerInfo, Metadata,
+                };
+
+                let mut tar = tar::Builder::new(GzEncoder::new(
+                    Vec::new(),
+                    Compression::fast(),
+                ));
+
+                let metadata = Metadata::new(ArchiveType::Layer(LayerInfo {
+                    pkg: name.clone(),
+                    version: semver::Version::new(0, 0, 0),
+                }));
+                metadata.append_to_tar(&mut tar, 0)?;
+
+                let mut h = tar::Header::new_ustar();
+                h.set_entry_type(tar::EntryType::Regular);
+                h.set_path("fake")?;
+                h.set_mode(0o444);
+                h.set_size(*size);
+                h.set_mtime(0);
+                h.set_cksum();
+                tar.append(&h, make_filler_text(*size as usize).as_slice())?;
+
+                let data = tar.into_inner()?.finish()?;
+                (format!("{name}.tar.gz"), data, MtimeSource::Zero)
             }
         };
         let entry = CompositeEntry { data: &data, mtime_source };
-        f(name, entry)
+        f(&name, entry)
     }
 
     fn apply_size_delta(&mut self, size_delta: i64) -> Result<()> {
@@ -583,7 +611,7 @@ where
 
     struct Visitor;
 
-    impl<'de> serde::de::Visitor<'de> for Visitor {
+    impl serde::de::Visitor<'_> for Visitor {
         type Value = u64;
 
         fn expecting(

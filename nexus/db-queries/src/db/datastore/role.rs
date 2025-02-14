@@ -20,7 +20,6 @@ use crate::db::model::RoleAssignment;
 use crate::db::model::RoleBuiltin;
 use crate::db::pagination::paginated_multicolumn;
 use crate::db::pool::DbConnection;
-use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_db_fixed_data::role_assignment::BUILTIN_ROLE_ASSIGNMENTS;
@@ -209,9 +208,13 @@ impl DataStore {
         // We might instead want to first-class the idea of Policies in the
         // database so that we can build up a whole new Policy in batches and
         // then flip the resource over to using it.
-        self.pool_connection_authorized(opctx)
-            .await?
-            .transaction_async(|conn| async move {
+
+        // This method should probably be retryable, but this is slightly
+        // complicated by the cloning semantics of the queries, which
+        // must be Clone to be retried.
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.transaction_non_retry_wrapper("role_assignment_replace_visible")
+            .transaction(&conn, |conn| async move {
                 delete_old_query.execute_async(&conn).await?;
                 Ok(insert_new_query.get_results_async(&conn).await?)
             })

@@ -23,6 +23,7 @@ use nexus_db_model::RegionReplacement;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::RegionReplacementStatus;
+use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TypedUuid;
 use serde_json::json;
@@ -42,7 +43,7 @@ impl RegionReplacementDetector {
         &self,
         serialized_authn: authn::saga::Serialized,
         request: RegionReplacement,
-    ) -> Result<(), omicron_common::api::external::Error> {
+    ) -> Result<(), Error> {
         let params = sagas::region_replacement_start::Params {
             serialized_authn,
             request,
@@ -68,17 +69,18 @@ impl BackgroundTask for RegionReplacementDetector {
 
             let mut status = RegionReplacementStatus::default();
 
-            // Find regions on expunged physical disks
+            // Find read/write regions on expunged physical disks
             let regions_to_be_replaced = match self
                 .datastore
-                .find_regions_on_expunged_physical_disks(opctx)
+                .find_read_write_regions_on_expunged_physical_disks(opctx)
                 .await
             {
                 Ok(regions) => regions,
 
                 Err(e) => {
                     let s = format!(
-                        "find_regions_on_expunged_physical_disks failed: {e}"
+                        "find_read_write_regions_on_expunged_physical_disks \
+                        failed: {e}"
                     );
                     error!(&log, "{s}");
                     status.errors.push(s);
@@ -134,15 +136,31 @@ impl BackgroundTask for RegionReplacementDetector {
                         }
 
                         Err(e) => {
-                            let s = format!(
-                                "error adding region replacement request for \
-                                 region {} volume id {}: {e}",
-                                region.id(),
-                                region.volume_id(),
-                            );
-                            error!(&log, "{s}");
+                            match e {
+                                Error::Conflict { message }
+                                    if message.external_message()
+                                        == "volume repair lock" =>
+                                {
+                                    // This is not a fatal error! If there are
+                                    // competing region replacement and region
+                                    // snapshot replacements, then they are both
+                                    // attempting to lock volumes.
+                                }
 
-                            status.errors.push(s);
+                                _ => {
+                                    let s = format!(
+                                        "error adding region replacement \
+                                        request for region {} volume id {}: \
+                                        {e}",
+                                        region.id(),
+                                        region.volume_id(),
+                                    );
+                                    error!(&log, "{s}");
+
+                                    status.errors.push(s);
+                                }
+                            }
+
                             continue;
                         }
                     }
@@ -173,11 +191,13 @@ impl BackgroundTask for RegionReplacementDetector {
                 // If the replacement request is in the `requested` state and
                 // the request's volume was soft-deleted or hard-deleted, avoid
                 // sending the start request and instead transition the request
-                // to completed
+                // to completed. Note the saga will do the right thing if the
+                // volume is deleted, but this avoids the overhead of starting
+                // it.
 
                 let volume_deleted = match self
                     .datastore
-                    .volume_deleted(request.volume_id)
+                    .volume_deleted(request.volume_id())
                     .await
                 {
                     Ok(volume_deleted) => volume_deleted,
@@ -185,7 +205,7 @@ impl BackgroundTask for RegionReplacementDetector {
                     Err(e) => {
                         let s = format!(
                             "error checking if volume id {} was deleted: {e}",
-                            request.volume_id,
+                            request.volume_id(),
                         );
                         error!(&log, "{s}");
 
@@ -206,7 +226,7 @@ impl BackgroundTask for RegionReplacementDetector {
                         &log,
                         "request {} volume {} was soft or hard deleted!",
                         request_id,
-                        request.volume_id,
+                        request.volume_id(),
                     );
 
                     let result = self
@@ -284,10 +304,10 @@ mod test {
     use super::*;
     use crate::app::background::init::test::NoopStartSaga;
     use nexus_db_model::RegionReplacement;
-    use nexus_db_model::Volume;
     use nexus_test_utils_macros::nexus_test;
-    use sled_agent_client::types::CrucibleOpts;
-    use sled_agent_client::types::VolumeConstructionRequest;
+    use omicron_uuid_kinds::VolumeUuid;
+    use sled_agent_client::CrucibleOpts;
+    use sled_agent_client::VolumeConstructionRequest;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -313,7 +333,21 @@ mod test {
         assert_eq!(result, json!(RegionReplacementStatus::default()));
 
         // Add a region replacement request for a fake region
-        let volume_id = Uuid::new_v4();
+        let volume_id = VolumeUuid::new_v4();
+
+        datastore
+            .volume_create(
+                volume_id,
+                VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(),
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                },
+            )
+            .await
+            .unwrap();
+
         let request = RegionReplacement::new(Uuid::new_v4(), volume_id);
         let request_id = request.id;
 
@@ -323,7 +357,7 @@ mod test {
             .unwrap();
 
         let volume_construction_request = VolumeConstructionRequest::Volume {
-            id: volume_id,
+            id: *volume_id.as_untyped_uuid(),
             block_size: 0,
             sub_volumes: vec![VolumeConstructionRequest::Region {
                 block_size: 0,
@@ -331,7 +365,7 @@ mod test {
                 extent_count: 0,
                 gen: 0,
                 opts: CrucibleOpts {
-                    id: volume_id,
+                    id: Uuid::new_v4(),
                     target: vec![
                         // if you put something here, you'll need a synthetic
                         // dataset record
@@ -349,12 +383,10 @@ mod test {
             read_only_parent: None,
         };
 
-        let volume_data =
-            serde_json::to_string(&volume_construction_request).unwrap();
-
-        let volume = Volume::new(volume_id, volume_data);
-
-        datastore.volume_create(volume).await.unwrap();
+        datastore
+            .volume_create(volume_id, volume_construction_request)
+            .await
+            .unwrap();
 
         // Activate the task - it should pick that up and try to run the region
         // replacement start saga

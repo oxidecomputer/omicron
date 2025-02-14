@@ -12,6 +12,8 @@ use serde::Serialize;
 use std::convert::TryFrom;
 use uuid::Uuid;
 
+pub use propolis_client::{CrucibleOpts, VolumeConstructionRequest};
+
 progenitor::generate_api!(
     spec = "../../openapi/sled-agent.json",
     derives = [schemars::JsonSchema, PartialEq],
@@ -81,6 +83,7 @@ progenitor::generate_api!(
         TypedUuidForOmicronZoneKind = omicron_uuid_kinds::OmicronZoneUuid,
         TypedUuidForPropolisKind = omicron_uuid_kinds::PropolisUuid,
         TypedUuidForSledKind = omicron_uuid_kinds::SledUuid,
+        TypedUuidForSupportBundleKind = omicron_uuid_kinds::SupportBundleUuid,
         TypedUuidForZpoolKind = omicron_uuid_kinds::ZpoolUuid,
         Vni = omicron_common::api::external::Vni,
         ZpoolKind = omicron_common::zpool_name::ZpoolKind,
@@ -256,63 +259,6 @@ impl From<types::DiskState> for omicron_common::api::external::DiskState {
 impl From<omicron_common::api::external::L4PortRange> for types::L4PortRange {
     fn from(s: omicron_common::api::external::L4PortRange) -> Self {
         Self::try_from(s.to_string()).unwrap_or_else(|e| panic!("{}: {}", s, e))
-    }
-}
-
-impl From<omicron_common::api::internal::nexus::UpdateArtifactId>
-    for types::UpdateArtifactId
-{
-    fn from(s: omicron_common::api::internal::nexus::UpdateArtifactId) -> Self {
-        types::UpdateArtifactId {
-            name: s.name,
-            version: s.version.into(),
-            kind: s.kind.into(),
-        }
-    }
-}
-
-impl From<omicron_common::api::external::SemverVersion>
-    for types::SemverVersion
-{
-    fn from(s: omicron_common::api::external::SemverVersion) -> Self {
-        s.to_string().parse().expect(
-            "semver should generate output that matches validation regex",
-        )
-    }
-}
-
-impl From<omicron_common::api::internal::nexus::KnownArtifactKind>
-    for types::KnownArtifactKind
-{
-    fn from(
-        s: omicron_common::api::internal::nexus::KnownArtifactKind,
-    ) -> Self {
-        use omicron_common::api::internal::nexus::KnownArtifactKind;
-
-        match s {
-            KnownArtifactKind::GimletRotBootloader => {
-                types::KnownArtifactKind::GimletRotBootloader
-            }
-            KnownArtifactKind::PscRotBootloader => {
-                types::KnownArtifactKind::PscRotBootloader
-            }
-            KnownArtifactKind::SwitchRotBootloader => {
-                types::KnownArtifactKind::SwitchRotBootloader
-            }
-            KnownArtifactKind::GimletSp => types::KnownArtifactKind::GimletSp,
-            KnownArtifactKind::GimletRot => types::KnownArtifactKind::GimletRot,
-            KnownArtifactKind::Host => types::KnownArtifactKind::Host,
-            KnownArtifactKind::Trampoline => {
-                types::KnownArtifactKind::Trampoline
-            }
-            KnownArtifactKind::ControlPlane => {
-                types::KnownArtifactKind::ControlPlane
-            }
-            KnownArtifactKind::PscSp => types::KnownArtifactKind::PscSp,
-            KnownArtifactKind::PscRot => types::KnownArtifactKind::PscRot,
-            KnownArtifactKind::SwitchSp => types::KnownArtifactKind::SwitchSp,
-            KnownArtifactKind::SwitchRot => types::KnownArtifactKind::SwitchRot,
-        }
     }
 }
 

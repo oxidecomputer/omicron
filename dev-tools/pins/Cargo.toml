@@ -1,0 +1,17 @@
+[package]
+name = "omicron-pins"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+anyhow.workspace = true
+camino.workspace = true
+cargo_metadata.workspace = true
+fs-err.workspace = true
+omicron-workspace-hack.workspace = true
+serde.workspace = true
+toml_edit.workspace = true
+
+[lints]
+workspace = true

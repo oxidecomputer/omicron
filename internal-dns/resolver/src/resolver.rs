@@ -12,7 +12,7 @@ use omicron_common::address::{
     get_internal_dns_server_addresses, Ipv6Subnet, AZ_PREFIX, DNS_PORT,
 };
 use slog::{debug, error, info, trace};
-use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ResolveError {
@@ -323,20 +323,6 @@ impl Resolver {
         }
     }
 
-    pub async fn lookup_ip(
-        &self,
-        srv: ServiceName,
-    ) -> Result<IpAddr, ResolveError> {
-        let name = srv.srv_name();
-        debug!(self.log, "lookup srv"; "dns_name" => &name);
-        let response = self.resolver.lookup_ip(&name).await?;
-        let address = response
-            .iter()
-            .next()
-            .ok_or_else(|| ResolveError::NotFound(srv))?;
-        Ok(address)
-    }
-
     /// Returns an iterator of [`SocketAddrV6`]'s for the targets of the given
     /// SRV lookup response.
     // SRV records have a target, which is itself another DNS name that needs
@@ -466,7 +452,7 @@ mod test {
                 },
                 &dropshot::ConfigDropshot {
                     bind_address: "[::1]:0".parse().unwrap(),
-                    request_body_max_bytes: 8 * 1024,
+                    default_request_body_max_bytes: 8 * 1024,
                     default_handler_task_mode: HandlerTaskMode::Detached,
                     log_headers: vec![],
                 },
@@ -534,7 +520,7 @@ mod test {
         let resolver = dns_server.resolver().unwrap();
 
         let err = resolver
-            .lookup_ip(ServiceName::Cockroach)
+            .lookup_srv(ServiceName::Cockroach)
             .await
             .expect_err("Looking up non-existent service should fail");
 

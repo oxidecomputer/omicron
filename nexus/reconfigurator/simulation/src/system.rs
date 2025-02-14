@@ -13,13 +13,14 @@ use nexus_reconfigurator_planning::{
     system::{SledHwInventory, SystemDescription},
 };
 use nexus_types::{
-    deployment::{Blueprint, SledFilter, UnstableReconfiguratorState},
+    deployment::{
+        Blueprint, BlueprintTarget, SledFilter, UnstableReconfiguratorState,
+    },
     internal_api::params::{DnsConfigParams, DnsConfigZone},
     inventory::Collection,
 };
 use omicron_common::{address::IpRange, api::external::Generation};
-use omicron_uuid_kinds::{CollectionUuid, SledUuid};
-use uuid::Uuid;
+use omicron_uuid_kinds::{BlueprintUuid, CollectionUuid, SledUuid};
 
 use crate::{
     errors::{DuplicateError, KeyError, NonEmptySystemError},
@@ -76,7 +77,10 @@ pub struct SimSystem {
     /// Blueprints created by the user.
     ///
     /// Stored with `Arc` to allow cheap cloning.
-    blueprints: IndexMap<Uuid, Arc<Blueprint>>,
+    blueprints: IndexMap<BlueprintUuid, Arc<Blueprint>>,
+
+    /// Current target blueprint.
+    target_blueprint: Option<BlueprintTarget>,
 
     /// Internal DNS configurations.
     ///
@@ -95,6 +99,7 @@ impl SimSystem {
             description: SystemDescription::new(),
             collections: IndexMap::new(),
             blueprints: IndexMap::new(),
+            target_blueprint: None,
             internal_dns: BTreeMap::new(),
             external_dns: BTreeMap::new(),
         }
@@ -104,6 +109,7 @@ impl SimSystem {
         !self.description.has_sleds()
             && self.collections.is_empty()
             && self.blueprints.is_empty()
+            && self.target_blueprint.is_none()
             && self.internal_dns.is_empty()
             && self.external_dns.is_empty()
     }
@@ -129,11 +135,18 @@ impl SimSystem {
         self.collections.values().map(|c| &**c)
     }
 
-    pub fn get_blueprint(&self, id: Uuid) -> Result<&Blueprint, KeyError> {
+    pub fn get_blueprint(
+        &self,
+        id: BlueprintUuid,
+    ) -> Result<&Blueprint, KeyError> {
         match self.blueprints.get(&id) {
             Some(b) => Ok(&**b),
             None => Err(KeyError::blueprint(id)),
         }
+    }
+
+    pub fn target_blueprint(&self) -> Option<BlueprintTarget> {
+        self.target_blueprint
     }
 
     pub fn all_blueprints(&self) -> impl ExactSizeIterator<Item = &Blueprint> {
@@ -226,7 +239,10 @@ impl SimSystemBuilder {
     }
 
     #[inline]
-    pub fn get_blueprint(&self, id: Uuid) -> Result<&Blueprint, KeyError> {
+    pub fn get_blueprint(
+        &self,
+        id: BlueprintUuid,
+    ) -> Result<&Blueprint, KeyError> {
         self.inner.system.get_blueprint(id)
     }
 
@@ -384,13 +400,13 @@ impl SimSystemBuilder {
 pub enum SimSystemLogEntry {
     LoadExample {
         collection_id: CollectionUuid,
-        blueprint_id: Uuid,
+        blueprint_id: BlueprintUuid,
         internal_dns_version: Generation,
         external_dns_version: Generation,
     },
     LoadSerialized(LoadSerializedSystemResult),
     AddCollection(CollectionUuid),
-    AddBlueprint(Uuid),
+    AddBlueprint(BlueprintUuid),
     AddInternalDns(Generation),
     AddExternalDns(Generation),
     Wipe,
@@ -413,7 +429,7 @@ pub struct LoadSerializedSystemResult {
     pub collection_ids: Vec<CollectionUuid>,
 
     /// The blueprint IDs successfully loaded.
-    pub blueprint_ids: Vec<Uuid>,
+    pub blueprint_ids: Vec<BlueprintUuid>,
 
     /// The service IP pool ranges.
     pub service_ip_pool_ranges: Vec<IpRange>,
@@ -524,6 +540,11 @@ impl SimSystemBuilderInner {
             example.initial_blueprint.id,
             Arc::new(example.initial_blueprint),
         );
+        self.system.target_blueprint = Some(BlueprintTarget {
+            target_id: blueprint.id,
+            enabled: true,
+            time_made_target: blueprint.time_created,
+        });
         self.system.blueprints.insert(blueprint.id, Arc::new(blueprint));
     }
 
@@ -616,6 +637,8 @@ impl SimSystemBuilderInner {
                 }
             }
         }
+
+        self.system.target_blueprint = state.target_blueprint;
 
         for blueprint in state.blueprints {
             let blueprint_id = blueprint.id;

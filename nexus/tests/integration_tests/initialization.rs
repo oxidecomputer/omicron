@@ -145,7 +145,18 @@ async fn test_nexus_boots_before_dendrite() {
     info!(log, "Started mgd");
 
     info!(log, "Populating internal DNS records");
-    builder.record_switch_dns().await;
+    builder
+        .record_switch_dns(
+            nexus_test_utils::SLED_AGENT_UUID.parse().unwrap(),
+            SwitchLocation::Switch0,
+        )
+        .await;
+    builder
+        .record_switch_dns(
+            nexus_test_utils::SLED_AGENT2_UUID.parse().unwrap(),
+            SwitchLocation::Switch1,
+        )
+        .await;
     builder.populate_internal_dns().await;
     info!(log, "Populated internal DNS records");
 

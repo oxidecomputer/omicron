@@ -12,7 +12,11 @@ use clap::ValueEnum;
 use clap::{Args, Parser, Subcommand};
 use indent_write::fmt::IndentWriter;
 use internal_dns_types::diff::DnsDiff;
+use itertools::Itertools;
+use log_capture::LogCapture;
 use nexus_inventory::CollectionBuilder;
+use nexus_reconfigurator_blippy::Blippy;
+use nexus_reconfigurator_blippy::BlippyReportSortKey;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
@@ -31,6 +35,7 @@ use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
 use omicron_common::policy::NEXUS_REDUNDANCY;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -42,9 +47,11 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::io::BufRead;
+use std::io::IsTerminal;
 use swrite::{swriteln, SWrite};
 use tabled::Tabled;
-use uuid::Uuid;
+
+mod log_capture;
 
 /// REPL state
 #[derive(Debug)]
@@ -116,8 +123,8 @@ impl ReconfiguratorSim {
         builder.set_internal_dns_version(parent_blueprint.internal_dns_version);
         builder.set_external_dns_version(parent_blueprint.external_dns_version);
 
-        for (_, zone) in
-            parent_blueprint.all_omicron_zones(BlueprintZoneFilter::All)
+        for (_, zone) in parent_blueprint
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
         {
             if let Some((external_ip, nic)) =
                 zone.zone_type.external_networking()
@@ -157,11 +164,7 @@ struct CmdReconfiguratorSim {
 fn main() -> anyhow::Result<()> {
     let cmd = CmdReconfiguratorSim::parse();
 
-    let log = dropshot::ConfigLogging::StderrTerminal {
-        level: dropshot::ConfigLoggingLevel::Info,
-    }
-    .to_logger("reconfigurator-sim")
-    .context("creating logger")?;
+    let (log_capture, log) = LogCapture::new(std::io::stdout().is_terminal());
 
     let seed_provided = cmd.seed.is_some();
     let mut sim = ReconfiguratorSim::new(log, cmd.seed);
@@ -179,7 +182,7 @@ fn main() -> anyhow::Result<()> {
             let buffer = maybe_buffer
                 .with_context(|| format!("read {:?}", &input_file))?;
             println!("> {}", buffer);
-            match process_entry(&mut sim, buffer) {
+            match process_entry(&mut sim, buffer, &log_capture) {
                 LoopResult::Continue => (),
                 LoopResult::Bail(error) => return Err(error),
             }
@@ -194,7 +197,7 @@ fn main() -> anyhow::Result<()> {
         loop {
             match ed.read_line(&prompt) {
                 Ok(Signal::Success(buffer)) => {
-                    match process_entry(&mut sim, buffer) {
+                    match process_entry(&mut sim, buffer, &log_capture) {
                         LoopResult::Continue => (),
                         LoopResult::Bail(error) => return Err(error),
                     }
@@ -225,7 +228,11 @@ enum LoopResult {
 }
 
 /// Processes one "line" of user input.
-fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
+fn process_entry(
+    sim: &mut ReconfiguratorSim,
+    entry: String,
+    logs: &LogCapture,
+) -> LoopResult {
     // If no input was provided, take another lap (print the prompt and accept
     // another line).  This gets handled specially because otherwise clap would
     // treat this as a usage error and print a help message, which isn't what we
@@ -271,6 +278,7 @@ fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
         Commands::InventoryList => cmd_inventory_list(sim),
         Commands::InventoryGenerate => cmd_inventory_generate(sim),
         Commands::BlueprintList => cmd_blueprint_list(sim),
+        Commands::BlueprintBlippy(args) => cmd_blueprint_blippy(sim, args),
         Commands::BlueprintEdit(args) => cmd_blueprint_edit(sim, args),
         Commands::BlueprintPlan(args) => cmd_blueprint_plan(sim, args),
         Commands::BlueprintShow(args) => cmd_blueprint_show(sim, args),
@@ -288,6 +296,10 @@ fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
         Commands::Save(args) => cmd_save(sim, args),
         Commands::Wipe(args) => cmd_wipe(sim, args),
     };
+
+    for line in logs.take_log_lines() {
+        println!("{line}");
+    }
 
     match cmd_result {
         Err(error) => println!("error: {:#}", error),
@@ -330,6 +342,8 @@ enum Commands {
 
     /// list all blueprints
     BlueprintList,
+    /// run blippy on a blueprint
+    BlueprintBlippy(BlueprintArgs),
     /// run planner to generate a new blueprint
     BlueprintPlan(BlueprintPlanArgs),
     /// edit contents of a blueprint directly
@@ -394,15 +408,18 @@ struct InventoryArgs {
 #[derive(Debug, Args)]
 struct BlueprintPlanArgs {
     /// id of the blueprint on which this one will be based
-    parent_blueprint_id: Uuid,
+    parent_blueprint_id: BlueprintUuid,
     /// id of the inventory collection to use in planning
-    collection_id: CollectionUuid,
+    ///
+    /// Must be provided unless there is only one collection in the loaded
+    /// state.
+    collection_id: Option<CollectionUuid>,
 }
 
 #[derive(Debug, Args)]
 struct BlueprintEditArgs {
     /// id of the blueprint to edit
-    blueprint_id: Uuid,
+    blueprint_id: BlueprintUuid,
     /// "creator" field for the new blueprint
     #[arg(long)]
     creator: Option<String>,
@@ -423,13 +440,13 @@ enum BlueprintEditCommands {
     /// add a CockroachDB instance to a particular sled
     AddCockroach { sled_id: SledUuid },
     /// expunge a particular zone from a particular sled
-    ExpungeZone { sled_id: SledUuid, zone_id: OmicronZoneUuid },
+    ExpungeZone { zone_id: OmicronZoneUuid },
 }
 
 #[derive(Debug, Args)]
 struct BlueprintArgs {
     /// id of the blueprint
-    blueprint_id: Uuid,
+    blueprint_id: BlueprintUuid,
 }
 
 #[derive(Debug, Args)]
@@ -439,7 +456,7 @@ struct BlueprintDiffDnsArgs {
     /// DNS version to diff against
     dns_version: u32,
     /// id of the blueprint
-    blueprint_id: Uuid,
+    blueprint_id: BlueprintUuid,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -453,13 +470,13 @@ struct BlueprintDiffInventoryArgs {
     /// id of the inventory collection
     collection_id: CollectionUuid,
     /// id of the blueprint
-    blueprint_id: Uuid,
+    blueprint_id: BlueprintUuid,
 }
 
 #[derive(Debug, Args)]
 struct BlueprintSaveArgs {
     /// id of the blueprint
-    blueprint_id: Uuid,
+    blueprint_id: BlueprintUuid,
     /// output file
     filename: Utf8PathBuf,
 }
@@ -467,9 +484,9 @@ struct BlueprintSaveArgs {
 #[derive(Debug, Args)]
 struct BlueprintDiffArgs {
     /// id of the first blueprint
-    blueprint1_id: Uuid,
+    blueprint1_id: BlueprintUuid,
     /// id of the second blueprint
-    blueprint2_id: Uuid,
+    blueprint2_id: BlueprintUuid,
 }
 
 #[derive(Debug, Subcommand)]
@@ -648,12 +665,9 @@ fn cmd_sled_show(
     swriteln!(s, "sled {}", sled_id);
     swriteln!(s, "subnet {}", sled_resources.subnet.net());
     swriteln!(s, "zpools ({}):", sled_resources.zpools.len());
-    for (zpool, (disk, datasets)) in &sled_resources.zpools {
+    for (zpool, disk) in &sled_resources.zpools {
         swriteln!(s, "    {:?}", zpool);
         swriteln!(s, "    {:?}", disk);
-        for dataset in datasets {
-            swriteln!(s, "    ↳ {:?}", dataset);
-        }
     }
     Ok(Some(s))
 }
@@ -716,31 +730,58 @@ fn cmd_blueprint_list(
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct BlueprintRow {
-        id: Uuid,
+        #[tabled(rename = "T")]
+        is_target: &'static str,
+        #[tabled(rename = "ENA")]
+        enabled: &'static str,
+        id: BlueprintUuid,
         parent: Cow<'static, str>,
         time_created: String,
     }
 
     let state = sim.current_state();
 
+    let target_blueprint = state.system().target_blueprint();
     let mut rows = state.system().all_blueprints().collect::<Vec<_>>();
     rows.sort_unstable_by_key(|blueprint| blueprint.time_created);
-    let rows = rows.into_iter().map(|blueprint| BlueprintRow {
-        id: blueprint.id,
-        parent: blueprint
-            .parent_blueprint_id
-            .map(|s| Cow::Owned(s.to_string()))
-            .unwrap_or(Cow::Borrowed("<none>")),
-        time_created: humantime::format_rfc3339_millis(
-            blueprint.time_created.into(),
-        )
-        .to_string(),
+    let rows = rows.into_iter().map(|blueprint| {
+        let (is_target, enabled) = match target_blueprint {
+            Some(t) if t.target_id == blueprint.id => {
+                let enabled = if t.enabled { "yes" } else { "no" };
+                ("*", enabled)
+            }
+            _ => ("", ""),
+        };
+        BlueprintRow {
+            is_target,
+            enabled,
+            id: blueprint.id,
+            parent: blueprint
+                .parent_blueprint_id
+                .map(|s| Cow::Owned(s.to_string()))
+                .unwrap_or(Cow::Borrowed("<none>")),
+            time_created: humantime::format_rfc3339_millis(
+                blueprint.time_created.into(),
+            )
+            .to_string(),
+        }
     });
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
         .to_string();
     Ok(Some(table))
+}
+
+fn cmd_blueprint_blippy(
+    sim: &mut ReconfiguratorSim,
+    args: BlueprintArgs,
+) -> anyhow::Result<Option<String>> {
+    let state = sim.current_state();
+    let blueprint = state.system().get_blueprint(args.blueprint_id)?;
+    let report =
+        Blippy::new(&blueprint).into_report(BlippyReportSortKey::Severity);
+    Ok(Some(format!("{}", report.display())))
 }
 
 fn cmd_blueprint_plan(
@@ -754,10 +795,25 @@ fn cmd_blueprint_plan(
     let parent_blueprint_id = args.parent_blueprint_id;
     let collection_id = args.collection_id;
     let parent_blueprint = system.get_blueprint(parent_blueprint_id)?;
-    let collection = system.get_collection(collection_id)?;
+    let collection = match collection_id {
+        Some(collection_id) => system.get_collection(collection_id)?,
+        None => {
+            let mut all_collections_iter = system.all_collections();
+            match all_collections_iter.len() {
+                0 => bail!("cannot plan blueprint with no loaded collections"),
+                1 => all_collections_iter.next().expect("iter length is 1"),
+                _ => bail!(
+                    "blueprint-plan: must specify collection ID (one of {:?})",
+                    all_collections_iter.map(|c| c.id).join(", ")
+                ),
+            }
+        }
+    };
 
     let creator = "reconfigurator-sim";
-    let planning_input = sim.planning_input(parent_blueprint)?;
+    let planning_input = sim
+        .planning_input(parent_blueprint)
+        .context("failed to construct planning input")?;
     let planner = Planner::new_based_on(
         sim.log.clone(),
         parent_blueprint,
@@ -791,7 +847,9 @@ fn cmd_blueprint_edit(
     let blueprint_id = args.blueprint_id;
     let blueprint = system.get_blueprint(blueprint_id)?;
     let creator = args.creator.as_deref().unwrap_or("reconfigurator-cli");
-    let planning_input = sim.planning_input(blueprint)?;
+    let planning_input = sim
+        .planning_input(blueprint)
+        .context("failed to create planning input")?;
 
     // TODO: We may want to do something other than just using the latest
     // collection -- add a way to specify which collection to use.
@@ -828,7 +886,20 @@ fn cmd_blueprint_edit(
                 .context("failed to add CockroachDB zone")?;
             format!("added CockroachDB zone to sled {}", sled_id)
         }
-        BlueprintEditCommands::ExpungeZone { sled_id, zone_id } => {
+        BlueprintEditCommands::ExpungeZone { zone_id } => {
+            let mut parent_sled_id = None;
+            for sled_id in builder.sled_ids_with_zones() {
+                if builder
+                    .current_sled_zones(sled_id, BlueprintZoneFilter::All)
+                    .any(|z| z.id == zone_id)
+                {
+                    parent_sled_id = Some(sled_id);
+                    break;
+                }
+            }
+            let Some(sled_id) = parent_sled_id else {
+                bail!("could not find parent sled for zone {zone_id}");
+            };
             builder
                 .sled_expunge_zone(sled_id, zone_id)
                 .context("failed to expunge zone")?;
@@ -991,10 +1062,12 @@ fn cmd_blueprint_diff_inventory(
     let blueprint_id = args.blueprint_id;
 
     let state = sim.current_state();
-    let collection = state.system().get_collection(collection_id)?;
-    let blueprint = state.system().get_blueprint(blueprint_id)?;
-    let diff = blueprint.diff_since_collection(&collection);
-    Ok(Some(diff.display().to_string()))
+    let _collection = state.system().get_collection(collection_id)?;
+    let _blueprint = state.system().get_blueprint(blueprint_id)?;
+    // See https://github.com/oxidecomputer/omicron/issues/7242
+    // let diff = blueprint.diff_since_collection(&collection);
+    // Ok(Some(diff.display().to_string()))
+    bail!("Not Implemented")
 }
 
 fn cmd_blueprint_save(
@@ -1269,6 +1342,8 @@ fn cmd_load_example(
                     .num_nexus()
                     .map_or(NEXUS_REDUNDANCY, |n| n.into()),
             )
+            .external_dns_count(3)
+            .context("invalid external DNS zone count")?
             .create_zones(!args.no_zones)
             .create_disks_in_blueprint(!args.no_disks_in_blueprint)
             .build();

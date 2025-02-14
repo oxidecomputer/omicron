@@ -19,7 +19,6 @@ use nexus_db_queries::db::datastore::CollectorReassignment;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
-use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_common::address::COCKROACH_ADMIN_PORT;
@@ -65,8 +64,8 @@ pub(crate) async fn deploy_zones(
                 db_sled.sled_agent_address(),
                 &opctx.log,
             );
-            let omicron_zones = config
-                .to_omicron_zones_config(BlueprintZoneFilter::ShouldBeRunning);
+            let omicron_zones =
+                config.clone().into_running_omicron_zones_config();
             let result = client
                 .omicron_zones_put(&omicron_zones)
                 .await
@@ -359,6 +358,7 @@ mod test {
     };
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
+    use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
@@ -372,7 +372,7 @@ mod test {
     fn create_blueprint(
         blueprint_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
     ) -> (BlueprintTarget, Blueprint) {
-        let id = Uuid::new_v4();
+        let id = BlueprintUuid::new_v4();
         (
             BlueprintTarget {
                 target_id: id,
@@ -438,11 +438,12 @@ mod test {
         // See `rack_setup::service::ServiceInner::run` for more details.
         fn make_zones() -> BlueprintZonesConfig {
             let zpool = ZpoolName::new_external(ZpoolUuid::new_v4());
+            let zone_id = OmicronZoneUuid::new_v4();
             BlueprintZonesConfig {
                 generation: Generation::new(),
-                zones: vec![BlueprintZoneConfig {
+                zones: [BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
-                    id: OmicronZoneUuid::new_v4(),
+                    id: zone_id,
                     filesystem_pool: Some(zpool.clone()),
                     zone_type: BlueprintZoneType::InternalDns(
                         blueprint_zone_type::InternalDns {
@@ -453,7 +454,9 @@ mod test {
                             http_address: "[::1]:0".parse().unwrap(),
                         },
                     ),
-                }],
+                }]
+                .into_iter()
+                .collect(),
             }
         }
 
@@ -542,7 +545,7 @@ mod test {
             zones: &mut BlueprintZonesConfig,
             disposition: BlueprintZoneDisposition,
         ) {
-            zones.zones.push(BlueprintZoneConfig {
+            zones.zones.insert(BlueprintZoneConfig {
                 disposition,
                 id: OmicronZoneUuid::new_v4(),
                 filesystem_pool: Some(ZpoolName::new_external(

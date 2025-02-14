@@ -12,6 +12,7 @@ clap.workspace = true
 clickhouse-admin-api.workspace = true
 clickhouse-admin-types.workspace = true
 dropshot.workspace = true
+flume = {workspace = true, features = ["async"]}
 http.workspace = true
 illumos-utils.workspace = true
 omicron-common.workspace = true
@@ -22,7 +23,9 @@ slog.workspace = true
 slog-async.workspace = true
 slog-dtrace.workspace = true
 slog-error-chain.workspace = true
+slog-term.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-postgres.workspace = true

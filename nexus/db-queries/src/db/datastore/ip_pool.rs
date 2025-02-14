@@ -30,7 +30,7 @@ use crate::db::pagination::Paginator;
 use crate::db::pool::DbConnection;
 use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
 use crate::db::TransactionError;
-use async_bb8_diesel::AsyncConnection;
+use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -722,67 +722,90 @@ impl DataStore {
         }
         type TxnError = TransactionError<IpPoolResourceUpdateError>;
 
-        conn.transaction_async(|conn| async move {
-            // note this is matching the specified silo, but could be any pool
-            let existing_default_for_silo = dsl::ip_pool_resource
-                .filter(dsl::resource_type.eq(IpPoolResourceType::Silo))
-                .filter(dsl::resource_id.eq(silo_id))
-                .filter(dsl::is_default.eq(true))
-                .select(IpPoolResource::as_select())
-                .get_result_async(&conn)
-                .await;
+        let err = OptionalError::new();
 
-            // if there is an existing default, we need to unset it before we can
-            // set the new default
-            if let Ok(existing_default) = existing_default_for_silo {
-                // if the pool we're making default is already default for this
-                // silo, don't error: just noop
-                if existing_default.ip_pool_id == ip_pool_id {
-                    return Ok(existing_default);
+        self.transaction_retry_wrapper("ip_pool_set_default")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    // note this is matching the specified silo, but could be any pool
+                    let existing_default_for_silo = dsl::ip_pool_resource
+                        .filter(dsl::resource_type.eq(IpPoolResourceType::Silo))
+                        .filter(dsl::resource_id.eq(silo_id))
+                        .filter(dsl::is_default.eq(true))
+                        .select(IpPoolResource::as_select())
+                        .get_result_async(&conn)
+                        .await;
+
+                    // if there is an existing default, we need to unset it before we can
+                    // set the new default
+                    if let Ok(existing_default) = existing_default_for_silo {
+                        // if the pool we're making default is already default for this
+                        // silo, don't error: just noop
+                        if existing_default.ip_pool_id == ip_pool_id {
+                            return Ok(existing_default);
+                        }
+
+                        let unset_default =
+                            diesel::update(dsl::ip_pool_resource)
+                                .filter(
+                                    dsl::resource_id
+                                        .eq(existing_default.resource_id),
+                                )
+                                .filter(
+                                    dsl::ip_pool_id
+                                        .eq(existing_default.ip_pool_id),
+                                )
+                                .filter(
+                                    dsl::resource_type
+                                        .eq(existing_default.resource_type),
+                                )
+                                .set(dsl::is_default.eq(false))
+                                .execute_async(&conn)
+                                .await;
+                        if let Err(e) = unset_default {
+                            return Err(err.bail(TxnError::CustomError(
+                                IpPoolResourceUpdateError::FailedToUnsetDefault(
+                                    e,
+                                ),
+                            )));
+                        }
+                    }
+
+                    let updated_link = diesel::update(dsl::ip_pool_resource)
+                        .filter(dsl::resource_id.eq(silo_id))
+                        .filter(dsl::ip_pool_id.eq(ip_pool_id))
+                        .filter(dsl::resource_type.eq(IpPoolResourceType::Silo))
+                        .set(dsl::is_default.eq(true))
+                        .returning(IpPoolResource::as_returning())
+                        .get_result_async(&conn)
+                        .await?;
+                    Ok(updated_link)
                 }
-
-                let unset_default = diesel::update(dsl::ip_pool_resource)
-                    .filter(dsl::resource_id.eq(existing_default.resource_id))
-                    .filter(dsl::ip_pool_id.eq(existing_default.ip_pool_id))
-                    .filter(
-                        dsl::resource_type.eq(existing_default.resource_type),
+            })
+            .await
+            .map_err(|e| match err.take() {
+                Some(TxnError::CustomError(
+                    IpPoolResourceUpdateError::FailedToUnsetDefault(err),
+                )) => public_error_from_diesel(err, ErrorHandler::Server),
+                Some(TxnError::Database(err)) => {
+                    public_error_from_diesel(err, ErrorHandler::Server)
+                }
+                None => {
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::NotFoundByLookup(
+                            ResourceType::IpPoolResource,
+                            // TODO: would be nice to put the actual names and/or ids in
+                            // here but LookupType on each of the two silos doesn't have
+                            // a nice to_string yet or a way of composing them
+                            LookupType::ByCompositeId(
+                                "(pool, silo)".to_string(),
+                            ),
+                        ),
                     )
-                    .set(dsl::is_default.eq(false))
-                    .execute_async(&conn)
-                    .await;
-                if let Err(e) = unset_default {
-                    return Err(TxnError::CustomError(
-                        IpPoolResourceUpdateError::FailedToUnsetDefault(e),
-                    ));
                 }
-            }
-
-            let updated_link = diesel::update(dsl::ip_pool_resource)
-                .filter(dsl::resource_id.eq(silo_id))
-                .filter(dsl::ip_pool_id.eq(ip_pool_id))
-                .filter(dsl::resource_type.eq(IpPoolResourceType::Silo))
-                .set(dsl::is_default.eq(true))
-                .returning(IpPoolResource::as_returning())
-                .get_result_async(&conn)
-                .await?;
-            Ok(updated_link)
-        })
-        .await
-        .map_err(|e| match e {
-            TransactionError::CustomError(
-                IpPoolResourceUpdateError::FailedToUnsetDefault(e),
-            ) => public_error_from_diesel(e, ErrorHandler::Server),
-            TransactionError::Database(e) => public_error_from_diesel(
-                e,
-                ErrorHandler::NotFoundByLookup(
-                    ResourceType::IpPoolResource,
-                    // TODO: would be nice to put the actual names and/or ids in
-                    // here but LookupType on each of the two silos doesn't have
-                    // a nice to_string yet or a way of composing them
-                    LookupType::ByCompositeId("(pool, silo)".to_string()),
-                ),
-            ),
-        })
+            })
     }
 
     /// Ephemeral and snat IPs are associated with a silo through an instance,

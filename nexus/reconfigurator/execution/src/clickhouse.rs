@@ -16,11 +16,13 @@ use clickhouse_admin_types::KeeperSettings;
 use clickhouse_admin_types::RaftServerSettings;
 use clickhouse_admin_types::ServerConfigurableSettings;
 use clickhouse_admin_types::ServerSettings;
+use clickhouse_admin_types::CLICKHOUSE_KEEPER_CONFIG_DIR;
+use clickhouse_admin_types::CLICKHOUSE_SERVER_CONFIG_DIR;
 use futures::future::Either;
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use nexus_db_queries::context::OpContext;
-use nexus_sled_agent_shared::inventory::OmicronZoneType;
+use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::ClickhouseClusterConfig;
@@ -36,9 +38,6 @@ use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::str::FromStr;
 
-const CLICKHOUSE_SERVER_CONFIG_DIR: &str =
-    "/opt/oxide/clickhouse_server/config.d";
-const CLICKHOUSE_KEEPER_CONFIG_DIR: &str = "/opt/oxide/clickhouse_keeper";
 const CLICKHOUSE_DATA_DIR: &str = "/data";
 
 pub(crate) async fn deploy_nodes(
@@ -114,7 +113,7 @@ pub(crate) async fn deploy_nodes(
                 })
         }));
     }
-    for config in server_configs {
+    for config in &server_configs {
         let admin_addr = SocketAddr::V6(SocketAddrV6::new(
             config.settings.listen_addr,
             CLICKHOUSE_ADMIN_PORT,
@@ -125,7 +124,7 @@ pub(crate) async fn deploy_nodes(
         let log = opctx.log.new(slog::o!("admin_url" => admin_url.clone()));
         futs.push(Either::Right(async move {
             let client = ClickhouseServerClient::new(&admin_url, log.clone());
-            client
+            if let Err(e) = client
                 .generate_config_and_enable_svc(&config)
                 .await
                 .map(|_| ())
@@ -140,7 +139,23 @@ pub(crate) async fn deploy_nodes(
                         admin_url,
                         e
                     )
-                })
+                }) {
+                    return Err(e);
+            };
+
+            client
+            .init_db()
+            .await
+            .map(|_| ())
+            .map_err(|e| {
+                anyhow!(
+                    concat!(
+                    "failed to initialize the replicated ClickHouse cluster database:",
+                    "error = {}"
+                ),
+                    e
+                )
+            })
         }));
     }
 
@@ -157,7 +172,7 @@ pub(crate) async fn deploy_nodes(
 
     info!(
         opctx.log,
-        "Successfully deployed all clickhouse server and keeper configs"
+        "Successfully deployed all clickhouse server and keeper configs, and initialised database schema."
     );
 
     Ok(())
@@ -167,18 +182,9 @@ pub(crate) async fn deploy_single_node(
     opctx: &OpContext,
     zones: &BTreeMap<SledUuid, BlueprintZonesConfig>,
 ) -> Result<(), anyhow::Error> {
-    if let Some(zone) = zones
-        .values()
-        .flat_map(|zones| {
-            zones
-                .to_omicron_zones_config(BlueprintZoneFilter::ShouldBeRunning)
-                .zones
-                .into_iter()
-                .find(|zone| {
-                    matches!(zone.zone_type, OmicronZoneType::Clickhouse { .. })
-                })
-        })
-        .next()
+    if let Some((_, zone)) =
+        Blueprint::filtered_zones(zones, BlueprintZoneFilter::ShouldBeRunning)
+            .find(|(_, zone)| zone.zone_type.is_clickhouse())
     {
         let admin_addr = SocketAddr::V6(SocketAddrV6::new(
             zone.underlay_ip(),
@@ -351,7 +357,7 @@ mod test {
             let zone_id = OmicronZoneUuid::new_v4();
             let zone_config = BlueprintZonesConfig {
                 generation: Generation::new(),
-                zones: vec![BlueprintZoneConfig {
+                zones: [BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: zone_id,
                     filesystem_pool: None,
@@ -379,7 +385,9 @@ mod test {
                             },
                         },
                     ),
-                }],
+                }]
+                .into_iter()
+                .collect(),
             };
             zones.insert(sled_id, zone_config);
             config.keepers.insert(zone_id, keeper_id.into());
@@ -390,7 +398,7 @@ mod test {
             let zone_id = OmicronZoneUuid::new_v4();
             let zone_config = BlueprintZonesConfig {
                 generation: Generation::new(),
-                zones: vec![BlueprintZoneConfig {
+                zones: [BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: zone_id,
                     filesystem_pool: None,
@@ -418,7 +426,9 @@ mod test {
                             },
                         },
                     ),
-                }],
+                }]
+                .into_iter()
+                .collect(),
             };
             zones.insert(sled_id, zone_config);
             config.servers.insert(zone_id, server_id.into());

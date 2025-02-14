@@ -20,7 +20,6 @@ use dropshot::{
     ApiDescription, HttpError, HttpResponseOk, HttpResponseUpdatedNoContent,
     RequestContext, TypedBody,
 };
-use http::StatusCode;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
@@ -29,6 +28,7 @@ use sled_agent_types::rack_ops::RackOperationStatus;
 use sled_hardware_types::Baseboard;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use sprockets_tls::keys::SprocketsConfig;
 use std::net::Ipv6Addr;
 use tokio::sync::mpsc::error::TrySendError;
@@ -86,10 +86,11 @@ impl BootstrapAgentApi for BootstrapAgentImpl {
     ) -> Result<HttpResponseOk<Vec<Component>>, HttpError> {
         let ctx = rqctx.context();
         let updates = UpdateManager::new(ctx.updates.clone());
-        let components = updates
-            .components_get()
-            .await
-            .map_err(|err| HttpError::for_internal_error(err.to_string()))?;
+        let components = updates.components_get().await.map_err(|err| {
+            HttpError::for_internal_error(
+                InlineErrorChain::new(&err).to_string(),
+            )
+        })?;
         Ok(HttpResponseOk(components))
     }
 
@@ -143,9 +144,9 @@ impl BootstrapAgentApi for BootstrapAgentImpl {
         match ctx.sled_reset_tx.try_send(response_tx) {
             Ok(()) => (),
             Err(TrySendError::Full(_)) => {
-                return Err(HttpError::for_status(
+                return Err(HttpError::for_client_error_with_status(
                     Some("ResetPending".to_string()),
-                    StatusCode::TOO_MANY_REQUESTS,
+                    dropshot::ClientErrorStatusCode::TOO_MANY_REQUESTS,
                 ));
             }
             Err(TrySendError::Closed(_)) => {

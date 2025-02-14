@@ -24,7 +24,6 @@ use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
 use crate::db::pool::DbConnection;
-use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -67,10 +66,11 @@ impl DataStore {
 
         use db::schema::silo::dsl;
         use db::schema::silo_quotas::dsl as quotas_dsl;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
         let count = self
-            .pool_connection_authorized(opctx)
-            .await?
-            .transaction_async(|conn| async move {
+            .transaction_retry_wrapper("load_builtin_silos")
+            .transaction(&conn, |conn| async move {
                 diesel::insert_into(quotas_dsl::silo_quotas)
                     .values(SiloQuotas::arbitrarily_high_default(
                         DEFAULT_SILO.id(),
@@ -78,19 +78,17 @@ impl DataStore {
                     .on_conflict(quotas_dsl::silo_id)
                     .do_nothing()
                     .execute_async(&conn)
-                    .await
-                    .map_err(TransactionError::CustomError)
-                    .unwrap();
-                diesel::insert_into(dsl::silo)
+                    .await?;
+                let count = diesel::insert_into(dsl::silo)
                     .values([&*DEFAULT_SILO, &*INTERNAL_SILO])
                     .on_conflict(dsl::id)
                     .do_nothing()
                     .execute_async(&conn)
-                    .await
-                    .map_err(TransactionError::CustomError)
+                    .await?;
+                Ok(count)
             })
             .await
-            .unwrap();
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         info!(opctx.log, "created {} built-in silos", count);
 
@@ -226,8 +224,11 @@ impl DataStore {
                 None
             };
 
-        let silo = conn
-            .transaction_async(|conn| async move {
+        // This method uses nested transactions, which are not supported
+        // with retryable transactions.
+        let silo = self
+            .transaction_non_retry_wrapper("silo_create")
+            .transaction(&conn, |conn| async move {
                 let silo = silo_create_query
                     .get_result_async(&conn)
                     .await
@@ -424,47 +425,52 @@ impl DataStore {
         let now = Utc::now();
 
         type TxnError = TransactionError<Error>;
-        conn.transaction_async(|conn| async move {
-            let updated_rows = diesel::update(silo::dsl::silo)
-                .filter(silo::dsl::time_deleted.is_null())
-                .filter(silo::dsl::id.eq(id))
-                .filter(silo::dsl::rcgen.eq(rcgen))
-                .set(silo::dsl::time_deleted.eq(now))
-                .execute_async(&conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(
-                        e,
-                        ErrorHandler::NotFoundByResource(authz_silo),
-                    )
-                })?;
 
-            if updated_rows == 0 {
-                return Err(TxnError::CustomError(Error::invalid_request(
-                    "silo deletion failed due to concurrent modification",
-                )));
-            }
+        // This method uses nested transactions, which are not supported
+        // with retryable transactions.
+        self.transaction_non_retry_wrapper("silo_delete")
+            .transaction(&conn, |conn| async move {
+                let updated_rows = diesel::update(silo::dsl::silo)
+                    .filter(silo::dsl::time_deleted.is_null())
+                    .filter(silo::dsl::id.eq(id))
+                    .filter(silo::dsl::rcgen.eq(rcgen))
+                    .set(silo::dsl::time_deleted.eq(now))
+                    .execute_async(&conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(
+                            e,
+                            ErrorHandler::NotFoundByResource(authz_silo),
+                        )
+                    })?;
 
-            self.silo_quotas_delete(opctx, &conn, &authz_silo).await?;
+                if updated_rows == 0 {
+                    return Err(TxnError::CustomError(Error::invalid_request(
+                        "silo deletion failed due to concurrent modification",
+                    )));
+                }
 
-            self.virtual_provisioning_collection_delete_on_connection(
-                &opctx.log, &conn, id,
-            )
-            .await?;
+                self.silo_quotas_delete(opctx, &conn, &authz_silo).await?;
 
-            self.dns_update_incremental(dns_opctx, &conn, dns_update).await?;
+                self.virtual_provisioning_collection_delete_on_connection(
+                    &opctx.log, &conn, id,
+                )
+                .await?;
 
-            info!(opctx.log, "deleted silo {}", id);
+                self.dns_update_incremental(dns_opctx, &conn, dns_update)
+                    .await?;
 
-            Ok(())
-        })
-        .await
-        .map_err(|e| match e {
-            TxnError::CustomError(e) => e,
-            TxnError::Database(e) => {
-                public_error_from_diesel(e, ErrorHandler::Server)
-            }
-        })?;
+                info!(opctx.log, "deleted silo {}", id);
+
+                Ok(())
+            })
+            .await
+            .map_err(|e| match e {
+                TxnError::CustomError(e) => e,
+                TxnError::Database(e) => {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })?;
 
         // TODO-correctness This needs to happen in a saga or some other
         // mechanism that ensures it happens even if we crash at this point.

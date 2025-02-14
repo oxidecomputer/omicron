@@ -50,9 +50,11 @@ inventory.nkeep = 3
 inventory.disable = false
 phantom_disks.period_secs = 30
 physical_disk_adoption.period_secs = 30
+support_bundle_collector.period_secs = 30
 decommissioned_disk_cleaner.period_secs = 60
 blueprints.period_secs_load = 10
 blueprints.period_secs_execute = 60
+blueprints.period_secs_rendezvous = 300
 blueprints.period_secs_collect_crdb_node_ids = 180
 sync_service_zone_nat.period_secs = 30
 switch_port_settings_manager.period_secs = 30
@@ -71,6 +73,9 @@ region_snapshot_replacement_start.period_secs = 30
 region_snapshot_replacement_garbage_collection.period_secs = 30
 region_snapshot_replacement_step.period_secs = 30
 region_snapshot_replacement_finish.period_secs = 30
+tuf_artifact_replication.period_secs = 300
+tuf_artifact_replication.min_sled_replication = 1
+read_only_region_replacement_start.period_secs = 30
 
 [default_region_allocation_strategy]
 # by default, allocate without requirement for distinct sleds.

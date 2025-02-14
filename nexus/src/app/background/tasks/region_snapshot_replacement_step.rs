@@ -32,10 +32,11 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_model::RegionSnapshotReplacementStep;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::datastore::region_snapshot_replacement;
+use nexus_db_queries::db::datastore::region_snapshot_replacement::*;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
+use omicron_common::api::external::Error;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -53,7 +54,7 @@ impl RegionSnapshotReplacementFindAffected {
         &self,
         opctx: &OpContext,
         request: RegionSnapshotReplacementStep,
-    ) -> Result<(), omicron_common::api::external::Error> {
+    ) -> Result<(), Error> {
         let params = sagas::region_snapshot_replacement_step::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             request,
@@ -70,8 +71,8 @@ impl RegionSnapshotReplacementFindAffected {
         &self,
         opctx: &OpContext,
         request: RegionSnapshotReplacementStep,
-    ) -> Result<(), omicron_common::api::external::Error> {
-        let Some(old_snapshot_volume_id) = request.old_snapshot_volume_id
+    ) -> Result<(), Error> {
+        let Some(old_snapshot_volume_id) = request.old_snapshot_volume_id()
         else {
             // This state is illegal!
             let s = format!(
@@ -79,9 +80,7 @@ impl RegionSnapshotReplacementFindAffected {
                 request.id,
             );
 
-            return Err(omicron_common::api::external::Error::internal_error(
-                &s,
-            ));
+            return Err(Error::internal_error(&s));
         };
 
         let params =
@@ -134,15 +133,15 @@ impl RegionSnapshotReplacementFindAffected {
             match result {
                 Ok(()) => {
                     let s = format!(
-                        "region snapshot replacement step garbage \
-                    collect request ok for {request_id}"
+                        "region snapshot replacement step garbage collect \
+                        request ok for {request_id}"
                     );
 
                     info!(
                         &log,
                         "{s}";
-                        "request.volume_id" => %request.volume_id,
-                        "request.old_snapshot_volume_id" => ?request.old_snapshot_volume_id,
+                        "volume_id" => %request.volume_id(),
+                        "old_snapshot_volume_id" => ?request.old_snapshot_volume_id(),
                     );
                     status.step_garbage_collect_invoked_ok.push(s);
                 }
@@ -155,8 +154,8 @@ impl RegionSnapshotReplacementFindAffected {
                     error!(
                         &log,
                         "{s}";
-                        "request.volume_id" => %request.volume_id,
-                        "request.old_snapshot_volume_id" => ?request.old_snapshot_volume_id,
+                        "volume_id" => %request.volume_id(),
+                        "old_snapshot_volume_id" => ?request.old_snapshot_volume_id(),
                     );
                     status.errors.push(s);
                 }
@@ -203,65 +202,48 @@ impl RegionSnapshotReplacementFindAffected {
         };
 
         for request in requests {
-            // Find all volumes that reference the replaced snapshot
-            let region_snapshot = match self
-                .datastore
-                .region_snapshot_get(
-                    request.old_dataset_id.into(),
-                    request.old_region_id,
-                    request.old_snapshot_id,
-                )
-                .await
-            {
-                Ok(Some(region_snapshot)) => region_snapshot,
+            let replacement = request.replacement_type();
 
-                Ok(None) => {
-                    // If the associated region snapshot was deleted, then there
-                    // are no more volumes that reference it. This is not an
-                    // error! Continue processing the other requests.
-                    let s = format!(
-                        "region snapshot {} {} {} not found",
-                        request.old_dataset_id,
-                        request.old_region_id,
-                        request.old_snapshot_id,
-                    );
-                    info!(&log, "{s}");
+            // Find all volumes that reference the replaced read-only target
+            let target_addr =
+                match self.datastore.read_only_target_addr(&request).await {
+                    Ok(Some(address)) => address,
 
-                    continue;
-                }
+                    Ok(None) => {
+                        // If the associated region snapshot or read-only region was
+                        // deleted, then there are no more volumes that reference
+                        // it. This is not an error! Continue processing the other
+                        // requests.
+                        let s = format!(
+                            "read-only target for {} not found",
+                            request.id,
+                        );
+                        info!(&log, "{s}"; replacement);
 
-                Err(e) => {
-                    let s = format!(
-                        "error querying for region snapshot {} {} {}: {e}",
-                        request.old_dataset_id,
-                        request.old_region_id,
-                        request.old_snapshot_id,
-                    );
-                    error!(&log, "{s}");
-                    status.errors.push(s);
+                        continue;
+                    }
 
-                    continue;
-                }
-            };
-
-            let snapshot_addr = match region_snapshot.snapshot_addr.parse() {
-                Ok(addr) => addr,
-
-                Err(e) => {
-                    let s = format!(
-                        "region snapshot addr {} could not be parsed: {e}",
-                        region_snapshot.snapshot_addr,
-                    );
-                    error!(&log, "{s}");
-                    status.errors.push(s);
-
-                    continue;
-                }
-            };
+                    Err(e) => {
+                        let s = format!(
+                            "error querying for read-only target address: {e}",
+                        );
+                        error!(
+                            &log,
+                            "{s}";
+                            "request_id" => %request.id,
+                            replacement,
+                        );
+                        status.errors.push(s);
+                        continue;
+                    }
+                };
 
             let volumes = match self
                 .datastore
-                .find_volumes_referencing_socket_addr(&opctx, snapshot_addr)
+                .find_volumes_referencing_socket_addr(
+                    &opctx,
+                    target_addr.into(),
+                )
                 .await
             {
                 Ok(volumes) => volumes,
@@ -272,6 +254,7 @@ impl RegionSnapshotReplacementFindAffected {
                         log,
                         "{s}";
                         "request id" => ?request.id,
+                        replacement
                     );
                     status.errors.push(s);
 
@@ -294,16 +277,16 @@ impl RegionSnapshotReplacementFindAffected {
                 // step records are created for some volume id, and a null old
                 // snapshot volume id:
                 //
-                //   volume_id: references snapshot_addr
+                //   volume_id: references target_addr
                 //   old_snapshot_volume_id: null
                 //
                 // The region snapshot replacement step saga will create a
-                // volume to stash the reference to snapshot_addr, and then call
-                // `volume_replace_snapshot`. This will swap snapshot_addr
+                // volume to stash the reference to target_addr, and then call
+                // `volume_replace_snapshot`. This will swap target_addr
                 // reference into the old snapshot volume for later deletion:
                 //
-                //   volume_id: does _not_ reference snapshot_addr anymore
-                //   old_snapshot_volume_id: now references snapshot_addr
+                //   volume_id: does _not_ reference target_addr anymore
+                //   old_snapshot_volume_id: now references target_addr
                 //
                 // If `find_volumes_referencing_socket_addr` is executed before
                 // that volume is deleted, it will return the old snapshot
@@ -313,8 +296,24 @@ impl RegionSnapshotReplacementFindAffected {
                 // Allowing a region snapshot replacement step record to be
                 // created in this case would mean that (depending on when the
                 // functions execute), an indefinite amount of work would be
-                // created, continually "moving" the snapshot_addr from
-                // temporary volume to temporary volume.
+                // created, continually "moving" the target_addr from temporary
+                // volume to temporary volume.
+                //
+                // If the volume was soft deleted, then skip making a step for
+                // it.
+
+                if volume.time_deleted.is_some() {
+                    info!(
+                        log,
+                        "volume was soft-deleted, skipping creating a step for \
+                        it";
+                        "request id" => ?request.id,
+                        "volume id" => ?volume.id(),
+                        &replacement,
+                    );
+
+                    continue;
+                }
 
                 match self
                     .datastore
@@ -326,36 +325,56 @@ impl RegionSnapshotReplacementFindAffected {
                     .await
                 {
                     Ok(insertion_result) => match insertion_result {
-                        region_snapshot_replacement::InsertStepResult::Inserted { step_id } => {
+                        InsertStepResult::Inserted { step_id } => {
                             let s = format!("created {step_id}");
                             info!(
                                 log,
                                 "{s}";
                                 "request id" => ?request.id,
                                 "volume id" => ?volume.id(),
+                                &replacement
                             );
                             status.step_records_created_ok.push(s);
                         }
 
-                        region_snapshot_replacement::InsertStepResult::AlreadyHandled { .. } => {
+                        InsertStepResult::AlreadyHandled { .. } => {
                             info!(
                                 log,
                                 "step already exists for volume id";
                                 "request id" => ?request.id,
                                 "volume id" => ?volume.id(),
+                                &replacement
                             );
                         }
-                    }
+                    },
 
                     Err(e) => {
-                        let s = format!("error creating step request: {e}");
-                        error!(
-                            log,
-                            "{s}";
-                            "request id" => ?request.id,
-                            "volume id" => ?volume.id(),
-                        );
-                        status.errors.push(s);
+                        match e {
+                            Error::Conflict { message }
+                                if message.external_message()
+                                    == "volume repair lock" =>
+                            {
+                                // This is not a fatal error! If there are
+                                // competing region replacement and region
+                                // snapshot replacements, then they are both
+                                // attempting to lock volumes.
+                            }
+
+                            _ => {
+                                let s =
+                                    format!("error creating step request: {e}");
+
+                                error!(
+                                    log,
+                                    "{s}";
+                                    "request id" => ?request.id,
+                                    "volume id" => ?volume.id(),
+                                    &replacement
+                                );
+
+                                status.errors.push(s);
+                            }
+                        }
                     }
                 }
             }
@@ -392,20 +411,198 @@ impl RegionSnapshotReplacementFindAffected {
         };
 
         for request in step_requests {
-            let request_id = request.id;
+            let request_step_id = request.id;
+
+            // Check if the volume was deleted _after_ the replacement step was
+            // created. Avoid launching the region snapshot replacement step
+            // saga if it was deleted: the saga will do the right thing if it is
+            // deleted, but this avoids the overhead of starting it.
+
+            let volume_deleted = match self
+                .datastore
+                .volume_deleted(request.volume_id())
+                .await
+            {
+                Ok(volume_deleted) => volume_deleted,
+
+                Err(e) => {
+                    let s = format!(
+                        "error checking if volume id {} was \
+                        deleted: {e}",
+                        request.volume_id,
+                    );
+                    error!(&log, "{s}");
+
+                    status.errors.push(s);
+                    continue;
+                }
+            };
+
+            // Also check if the read-only target is still present in the
+            // volume: if the read-only parent was removed (eg. after a
+            // completed scrub), then this step request could now be invalid.
+            //
+            // Also note: if that read-only parent removal removed the last
+            // reference to the read-only target, then it will be deleted.
+
+            let associated_replacement_request = match self
+                .datastore
+                .get_region_snapshot_replacement_request_by_id(
+                    opctx,
+                    request.request_id,
+                )
+                .await
+            {
+                Ok(request) => request,
+
+                Err(e) => {
+                    // Nexus deleted the request before all the steps were
+                    // done?!
+                    let s = format!(
+                        "error looking up region snapshot replacement {}: \
+                            {e}",
+                        request.request_id,
+                    );
+                    error!(log, "{s}");
+                    status.errors.push(s);
+
+                    // Continue on to other steps
+                    continue;
+                }
+            };
+
+            let maybe_target_address = match self
+                .datastore
+                .read_only_target_addr(&associated_replacement_request)
+                .await
+            {
+                Ok(maybe_target_address) => maybe_target_address,
+
+                Err(e) => {
+                    let s = format!(
+                        "error looking up read-only target address: {e}"
+                    );
+                    error!(log, "{s}"; "request_id" => %request.request_id);
+                    status.errors.push(s);
+
+                    continue;
+                }
+            };
+
+            let target_still_referenced =
+                if let Some(target_address) = &maybe_target_address {
+                    match self
+                        .datastore
+                        .volume_references_read_only_target(
+                            request.volume_id(),
+                            *target_address,
+                        )
+                        .await
+                    {
+                        Ok(maybe_referenced) => maybe_referenced.unwrap_or({
+                            // This means that the volume was deleted!
+                            false
+                        }),
+
+                        Err(e) => {
+                            let s = format!(
+                                "error determining if volume reference exists:\
+                                {e}"
+                            );
+                            error!(
+                                log,
+                                "{s}";
+                                "request_id" => %request.request_id,
+                            );
+                            status.errors.push(s);
+
+                            continue;
+                        }
+                    }
+                } else {
+                    // Note: if in this branch, then the below
+                    // `step_invalidated` check will already trip for
+                    // maybe_target_address.is_none().
+
+                    false
+                };
+
+            let step_invalidated = volume_deleted
+                || maybe_target_address.is_none()
+                || !target_still_referenced;
+
+            if step_invalidated {
+                // The replacement step was somehow invalidated, so proceed with
+                // clean up, which if this is in state Requested there won't be
+                // any additional associated state, so transition the record to
+                // Completed.
+
+                info!(
+                    &log,
+                    "request {} step {} {}",
+                    request.request_id,
+                    request_step_id,
+                    if volume_deleted {
+                        format!(
+                            "volume {} was soft or hard deleted!",
+                            request.volume_id,
+                        )
+                    } else if maybe_target_address.is_none() {
+                        String::from("associated read-only target was deleted")
+                    } else if !target_still_referenced {
+                        format!(
+                            "volume {} no longer references target",
+                            request.volume_id,
+                        )
+                    } else {
+                        String::from("UNKNOWN")
+                    }
+                );
+
+                let result = self
+                    .datastore
+                    .set_region_snapshot_replacement_step_volume_deleted_from_requested(
+                        opctx, request,
+                    )
+                    .await;
+
+                match result {
+                    Ok(()) => {
+                        let s = format!(
+                            "request step {request_step_id} transitioned from \
+                            requested to volume_deleted"
+                        );
+
+                        info!(&log, "{s}");
+                        status.step_set_volume_deleted_ok.push(s);
+                    }
+
+                    Err(e) => {
+                        let s = format!(
+                            "error transitioning {request_step_id} from \
+                            requested to complete: {e}"
+                        );
+
+                        error!(&log, "{s}");
+                        status.errors.push(s);
+                    }
+                }
+
+                continue;
+            }
 
             match self.send_start_request(opctx, request.clone()).await {
                 Ok(()) => {
                     let s = format!(
                         "region snapshot replacement step saga invoked ok for \
-                        {request_id}"
+                        {request_step_id}"
                     );
 
                     info!(
                         &log,
                         "{s}";
                         "request.request_id" => %request.request_id,
-                        "request.volume_id" => %request.volume_id,
+                        "request.volume_id" => %request.volume_id(),
                     );
                     status.step_invoked_ok.push(s);
                 }
@@ -413,14 +610,14 @@ impl RegionSnapshotReplacementFindAffected {
                 Err(e) => {
                     let s = format!(
                         "invoking region snapshot replacement step saga for \
-                        {request_id} failed: {e}"
+                        {request_step_id} failed: {e}"
                     );
 
                     error!(
                         &log,
                         "{s}";
                         "request.request_id" => %request.request_id,
-                        "request.volume_id" => %request.volume_id,
+                        "request.volume_id" => %request.volume_id(),
                     );
                     status.errors.push(s);
                 }
@@ -466,11 +663,13 @@ mod test {
     use nexus_db_model::RegionSnapshotReplacement;
     use nexus_db_model::RegionSnapshotReplacementStep;
     use nexus_db_model::RegionSnapshotReplacementStepState;
-    use nexus_db_model::Volume;
     use nexus_test_utils_macros::nexus_test;
     use omicron_uuid_kinds::DatasetUuid;
-    use sled_agent_client::types::CrucibleOpts;
-    use sled_agent_client::types::VolumeConstructionRequest;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::VolumeUuid;
+    use sled_agent_client::CrucibleOpts;
+    use sled_agent_client::VolumeConstructionRequest;
+    use std::net::SocketAddrV6;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -478,9 +677,9 @@ mod test {
 
     async fn add_fake_volume_for_snapshot_addr(
         datastore: &DataStore,
-        snapshot_addr: String,
-    ) -> Uuid {
-        let new_volume_id = Uuid::new_v4();
+        snapshot_addr: SocketAddrV6,
+    ) -> VolumeUuid {
+        let new_volume_id = VolumeUuid::new_v4();
 
         // need to add region snapshot objects to satisfy volume create
         // transaction's search for resources
@@ -490,13 +689,13 @@ mod test {
                 DatasetUuid::new_v4(),
                 Uuid::new_v4(),
                 Uuid::new_v4(),
-                snapshot_addr.clone(),
+                snapshot_addr.to_string(),
             ))
             .await
             .unwrap();
 
         let volume_construction_request = VolumeConstructionRequest::Volume {
-            id: new_volume_id,
+            id: *new_volume_id.as_untyped_uuid(),
             block_size: 0,
             sub_volumes: vec![],
             read_only_parent: Some(Box::new(
@@ -507,7 +706,7 @@ mod test {
                     gen: 0,
                     opts: CrucibleOpts {
                         id: Uuid::new_v4(),
-                        target: vec![snapshot_addr],
+                        target: vec![snapshot_addr.into()],
                         lossy: false,
                         flush_timeout: None,
                         key: None,
@@ -521,12 +720,10 @@ mod test {
             )),
         };
 
-        let volume_data =
-            serde_json::to_string(&volume_construction_request).unwrap();
-
-        let volume = Volume::new(new_volume_id, volume_data);
-
-        datastore.volume_create(volume).await.unwrap();
+        datastore
+            .volume_create(new_volume_id, volume_construction_request)
+            .await
+            .unwrap();
 
         new_volume_id
     }
@@ -559,27 +756,44 @@ mod test {
         let dataset_id = DatasetUuid::new_v4();
         let region_id = Uuid::new_v4();
         let snapshot_id = Uuid::new_v4();
-        let snapshot_addr = String::from("[fd00:1122:3344::101]:9876");
+        let snapshot_addr: SocketAddrV6 =
+            "[fd00:1122:3344::101]:9876".parse().unwrap();
 
         let fake_region_snapshot = RegionSnapshot::new(
             dataset_id,
             region_id,
             snapshot_id,
-            snapshot_addr.clone(),
+            snapshot_addr.to_string(),
         );
 
         datastore.region_snapshot_create(fake_region_snapshot).await.unwrap();
 
-        let request =
-            RegionSnapshotReplacement::new(dataset_id, region_id, snapshot_id);
+        let request = RegionSnapshotReplacement::new_from_region_snapshot(
+            dataset_id,
+            region_id,
+            snapshot_id,
+        );
 
         let request_id = request.id;
 
+        let volume_id = VolumeUuid::new_v4();
+
+        datastore
+            .volume_create(
+                volume_id,
+                VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(), // not required to match!
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                },
+            )
+            .await
+            .unwrap();
+
         datastore
             .insert_region_snapshot_replacement_request_with_volume_id(
-                &opctx,
-                request,
-                Uuid::new_v4(),
+                &opctx, request, volume_id,
             )
             .await
             .unwrap();
@@ -599,7 +813,8 @@ mod test {
             .unwrap();
 
         let new_region_id = Uuid::new_v4();
-        let old_snapshot_volume_id = Uuid::new_v4();
+        let new_region_volume_id = VolumeUuid::new_v4();
+        let old_snapshot_volume_id = VolumeUuid::new_v4();
 
         datastore
             .set_region_snapshot_replacement_replacement_done(
@@ -607,7 +822,8 @@ mod test {
                 request_id,
                 operating_saga_id,
                 new_region_id,
-                old_snapshot_volume_id,
+                NewRegionVolumeId(new_region_volume_id),
+                OldSnapshotVolumeId(old_snapshot_volume_id),
             )
             .await
             .unwrap();
@@ -633,28 +849,22 @@ mod test {
         // Add some fake volumes that reference the region snapshot being
         // replaced
 
-        let new_volume_1_id = add_fake_volume_for_snapshot_addr(
-            &datastore,
-            snapshot_addr.clone(),
-        )
-        .await;
-        let new_volume_2_id = add_fake_volume_for_snapshot_addr(
-            &datastore,
-            snapshot_addr.clone(),
-        )
-        .await;
+        let new_volume_1_id =
+            add_fake_volume_for_snapshot_addr(&datastore, snapshot_addr).await;
+        let new_volume_2_id =
+            add_fake_volume_for_snapshot_addr(&datastore, snapshot_addr).await;
 
         // Add some fake volumes that do not
 
         let other_volume_1_id = add_fake_volume_for_snapshot_addr(
             &datastore,
-            String::from("[fd00:1122:3344::101]:1000"),
+            "[fd00:1122:3344::101]:1000".parse().unwrap(),
         )
         .await;
 
         let other_volume_2_id = add_fake_volume_for_snapshot_addr(
             &datastore,
-            String::from("[fd12:5544:3344::912]:3901"),
+            "[fd12:5544:3344::912]:3901".parse().unwrap(),
         )
         .await;
 
@@ -681,12 +891,12 @@ mod test {
             );
             assert!(result.step_invoked_ok.contains(&s));
 
-            if step.volume_id == new_volume_1_id
-                || step.volume_id == new_volume_2_id
+            if step.volume_id() == new_volume_1_id
+                || step.volume_id() == new_volume_2_id
             {
                 // ok!
-            } else if step.volume_id == other_volume_1_id
-                || step.volume_id == other_volume_2_id
+            } else if step.volume_id() == other_volume_1_id
+                || step.volume_id() == other_volume_2_id
             {
                 // error!
                 assert!(false);
@@ -731,47 +941,73 @@ mod test {
         // Now, add some Complete records and make sure the garbage collection
         // saga is invoked.
 
+        let volume_id = VolumeUuid::new_v4();
+
+        datastore
+            .volume_create(
+                volume_id,
+                VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(),
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                },
+            )
+            .await
+            .unwrap();
+
         let result = datastore
             .insert_region_snapshot_replacement_step(&opctx, {
                 let mut record = RegionSnapshotReplacementStep::new(
                     Uuid::new_v4(),
-                    Uuid::new_v4(),
+                    volume_id,
                 );
 
                 record.replacement_state =
                     RegionSnapshotReplacementStepState::Complete;
-                record.old_snapshot_volume_id = Some(Uuid::new_v4());
+                record.old_snapshot_volume_id =
+                    Some(VolumeUuid::new_v4().into());
 
                 record
             })
             .await
             .unwrap();
 
-        assert!(matches!(
-            result,
-            region_snapshot_replacement::InsertStepResult::Inserted { .. }
-        ));
+        assert!(matches!(result, InsertStepResult::Inserted { .. }));
+
+        let volume_id = VolumeUuid::new_v4();
+
+        datastore
+            .volume_create(
+                volume_id,
+                VolumeConstructionRequest::Volume {
+                    id: Uuid::new_v4(),
+                    block_size: 512,
+                    sub_volumes: vec![], // nothing needed here
+                    read_only_parent: None,
+                },
+            )
+            .await
+            .unwrap();
 
         let result = datastore
             .insert_region_snapshot_replacement_step(&opctx, {
                 let mut record = RegionSnapshotReplacementStep::new(
                     Uuid::new_v4(),
-                    Uuid::new_v4(),
+                    volume_id,
                 );
 
                 record.replacement_state =
                     RegionSnapshotReplacementStepState::Complete;
-                record.old_snapshot_volume_id = Some(Uuid::new_v4());
+                record.old_snapshot_volume_id =
+                    Some(VolumeUuid::new_v4().into());
 
                 record
             })
             .await
             .unwrap();
 
-        assert!(matches!(
-            result,
-            region_snapshot_replacement::InsertStepResult::Inserted { .. }
-        ));
+        assert!(matches!(result, InsertStepResult::Inserted { .. }));
 
         // Activate the task - it should pick the complete steps up and try to
         // run the region snapshot replacement step garbage collect saga

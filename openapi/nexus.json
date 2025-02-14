@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "20241204.0.0"
+    "version": "20250212.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -297,6 +297,329 @@
           },
           "5XX": {
             "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/experimental/v1/system/support-bundles": {
+      "get": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "List all support bundles",
+        "operationId": "support_bundle_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleInfoResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Create a new support bundle",
+        "operationId": "support_bundle_create",
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleInfo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/experimental/v1/system/support-bundles/{support_bundle}": {
+      "get": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "View a support bundle",
+        "operationId": "support_bundle_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "support_bundle",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleInfo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Delete an existing support bundle",
+        "description": "May also be used to cancel a support bundle which is currently being collected, or to remove metadata for a support bundle that has failed.",
+        "operationId": "support_bundle_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "support_bundle",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/experimental/v1/system/support-bundles/{support_bundle}/download": {
+      "get": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Download the contents of a support bundle",
+        "operationId": "support_bundle_download",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "support_bundle",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Download the metadata of a support bundle",
+        "operationId": "support_bundle_head",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "support_bundle",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/experimental/v1/system/support-bundles/{support_bundle}/download/{file}": {
+      "get": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Download a file within a support bundle",
+        "operationId": "support_bundle_download_file",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file",
+            "description": "The file within the bundle to download",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "support_bundle",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Download the metadata of a file within the support bundle",
+        "operationId": "support_bundle_head_file",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file",
+            "description": "The file within the bundle to download",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "support_bundle",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/experimental/v1/system/support-bundles/{support_bundle}/index": {
+      "get": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Download the index of a support bundle",
+        "operationId": "support_bundle_index",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "support_bundle",
+            "description": "ID of the support bundle",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
           }
         }
       }
@@ -4811,6 +5134,93 @@
         }
       }
     },
+    "/v1/system/hardware/rack-switch-port/{rack_id}/{switch_location}/{port}/lldp/neighbors": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Fetch the LLDP neighbors seen on a switch port",
+        "operationId": "networking_switch_port_lldp_neighbors",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "description": "A name to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rack_id",
+            "description": "A rack id to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch_location",
+            "description": "A switch location to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LldpNeighborResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
     "/v1/system/hardware/racks": {
       "get": {
         "tags": [
@@ -5347,6 +5757,121 @@
         },
         "x-dropshot-pagination": {
           "required": []
+        }
+      }
+    },
+    "/v1/system/hardware/switch-port/{port}/lldp/config": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Fetch the LLDP configuration for a switch port",
+        "operationId": "networking_switch_port_lldp_config_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "description": "A name to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "rack_id",
+            "description": "A rack id to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "switch_location",
+            "description": "A switch location to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LldpLinkConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Update the LLDP configuration for a switch port",
+        "operationId": "networking_switch_port_lldp_config_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "description": "A name to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "rack_id",
+            "description": "A rack id to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "switch_location",
+            "description": "A switch location to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LldpLinkConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -17473,6 +17998,85 @@
           "enabled"
         ]
       },
+      "LldpNeighbor": {
+        "description": "Information about LLDP advertisements from other network entities directly connected to a switch port.  This structure contains both metadata about when and where the neighbor was seen, as well as the specific information the neighbor was advertising.",
+        "type": "object",
+        "properties": {
+          "chassis_id": {
+            "description": "The LLDP chassis identifier advertised by the neighbor",
+            "type": "string"
+          },
+          "first_seen": {
+            "description": "Initial sighting of this LldpNeighbor",
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_seen": {
+            "description": "Most recent sighting of this LldpNeighbor",
+            "type": "string",
+            "format": "date-time"
+          },
+          "link_description": {
+            "nullable": true,
+            "description": "The LLDP link description advertised by the neighbor",
+            "type": "string"
+          },
+          "link_name": {
+            "description": "The LLDP link name advertised by the neighbor",
+            "type": "string"
+          },
+          "local_port": {
+            "description": "The port on which the neighbor was seen",
+            "type": "string"
+          },
+          "management_ip": {
+            "description": "The LLDP management IP(s) advertised by the neighbor",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNet"
+            }
+          },
+          "system_description": {
+            "nullable": true,
+            "description": "The LLDP system description advertised by the neighbor",
+            "type": "string"
+          },
+          "system_name": {
+            "nullable": true,
+            "description": "The LLDP system name advertised by the neighbor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chassis_id",
+          "first_seen",
+          "last_seen",
+          "link_name",
+          "local_port",
+          "management_ip"
+        ]
+      },
+      "LldpNeighborResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LldpNeighbor"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
       "LoopbackAddress": {
         "description": "A loopback address is an address that is assigned to a rack switch but is not associated with any particular port.",
         "type": "object",
@@ -20059,6 +20663,87 @@
           "items"
         ]
       },
+      "SupportBundleInfo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+          },
+          "reason_for_creation": {
+            "type": "string"
+          },
+          "reason_for_failure": {
+            "nullable": true,
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SupportBundleState"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "reason_for_creation",
+          "state",
+          "time_created"
+        ]
+      },
+      "SupportBundleInfoResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SupportBundleInfo"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SupportBundleState": {
+        "oneOf": [
+          {
+            "description": "Support Bundle still actively being collected.\n\nThis is the initial state for a Support Bundle, and it will automatically transition to either \"Failing\" or \"Active\".\n\nIf a user no longer wants to access a Support Bundle, they can request cancellation, which will transition to the \"Destroying\" state.",
+            "type": "string",
+            "enum": [
+              "collecting"
+            ]
+          },
+          {
+            "description": "Support Bundle is being destroyed.\n\nOnce backing storage has been freed, this bundle is destroyed.",
+            "type": "string",
+            "enum": [
+              "destroying"
+            ]
+          },
+          {
+            "description": "Support Bundle was not created successfully, or was created and has lost backing storage.\n\nThe record of the bundle still exists for readability, but the only valid operation on these bundles is to destroy them.",
+            "type": "string",
+            "enum": [
+              "failed"
+            ]
+          },
+          {
+            "description": "Support Bundle has been processed, and is ready for usage.",
+            "type": "string",
+            "enum": [
+              "active"
+            ]
+          }
+        ]
+      },
       "Switch": {
         "description": "An operator's view of a Switch.",
         "type": "object",
@@ -21072,6 +21757,10 @@
             "format": "int32"
           }
         }
+      },
+      "TypedUuidForSupportBundleKind": {
+        "type": "string",
+        "format": "uuid"
       },
       "UninitializedSled": {
         "description": "A sled that has not been added to an initialized rack yet",
@@ -22509,6 +23198,18 @@
           }
         ]
       },
+      "IdSortMode": {
+        "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
+        "oneOf": [
+          {
+            "description": "sort in increasing order of \"id\"",
+            "type": "string",
+            "enum": [
+              "id_ascending"
+            ]
+          }
+        ]
+      },
       "DiskMetricName": {
         "type": "string",
         "enum": [
@@ -22526,18 +23227,6 @@
         "enum": [
           "ascending",
           "descending"
-        ]
-      },
-      "IdSortMode": {
-        "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
-        "oneOf": [
-          {
-            "description": "sort in increasing order of \"id\"",
-            "type": "string",
-            "enum": [
-              "id_ascending"
-            ]
-          }
         ]
       },
       "SystemMetricName": {

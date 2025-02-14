@@ -5,6 +5,7 @@
 //! Zpool labels and kinds shared between Nexus and Sled Agents
 
 use camino::{Utf8Path, Utf8PathBuf};
+use daft::{leaf, Diffable};
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -15,7 +16,16 @@ pub const ZPOOL_INTERNAL_PREFIX: &str = "oxi_";
 
 /// Describes the different classes of Zpools.
 #[derive(
-    Copy, Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, JsonSchema,
+    Copy,
+    Clone,
+    Debug,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    JsonSchema,
+    Diffable,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ZpoolKind {
@@ -34,6 +44,8 @@ pub struct ZpoolName {
     id: ZpoolUuid,
     kind: ZpoolKind,
 }
+
+leaf!(ZpoolName);
 
 const ZPOOL_NAME_REGEX: &str = r"^ox[ip]_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
 
