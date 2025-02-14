@@ -7,6 +7,7 @@
 //! This structure shares logic between benchmarks, making it easy
 //! to perform shared tasks such as creating contention for reservations.
 
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pub_test_utils::TestDatabase;
 use nexus_db_queries::db::DataStore;
@@ -23,6 +24,7 @@ use db_utils::*;
 
 pub struct TestHarness {
     db: TestDatabase,
+    authz_project: authz::Project,
 }
 
 struct ContentionQuery {
@@ -83,11 +85,11 @@ impl TestHarness {
     pub async fn new(log: &Logger, sled_count: usize) -> Self {
         let db = TestDatabase::new_with_datastore(log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
-        let (_authz_project, _project) =
+        let (authz_project, _project) =
             create_project(&opctx, &datastore).await;
         create_sleds(&datastore, sled_count).await;
 
-        Self { db }
+        Self { db, authz_project }
     }
 
     /// Emit internal CockroachDb information about contention
@@ -157,6 +159,10 @@ impl TestHarness {
         }
 
         client.cleanup().await.expect("Failed to clean up db connection");
+    }
+
+    pub fn authz_project(&self) -> authz::Project {
+        self.authz_project.clone()
     }
 
     /// Returns an owned reference to OpContext

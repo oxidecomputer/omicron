@@ -6,9 +6,13 @@
 
 use criterion::black_box;
 use criterion::{criterion_group, criterion_main, Criterion, SamplingMode};
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use omicron_common::api::external;
 use omicron_test_utils::dev;
+use omicron_uuid_kinds::InstanceUuid;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -16,7 +20,13 @@ use tokio::sync::Barrier;
 
 mod harness;
 
+use harness::db_utils::create_affinity_group;
+use harness::db_utils::create_affinity_group_member;
+use harness::db_utils::create_anti_affinity_group;
+use harness::db_utils::create_anti_affinity_group_member;
+use harness::db_utils::create_instance_record;
 use harness::db_utils::create_reservation;
+use harness::db_utils::delete_instance_record;
 use harness::db_utils::delete_reservation;
 use harness::db_utils::max_resource_request_count;
 use harness::TestHarness;
@@ -27,11 +37,45 @@ use harness::TestHarness;
 //
 // Describes varations between otherwise shared test logic
 
-#[derive(Copy, Clone)]
+#[derive(Clone, Hash, Eq, PartialEq)]
+enum GroupType {
+    Affinity,
+    AntiAffinity,
+}
+
+#[derive(Clone, Hash, Eq, PartialEq)]
+struct GroupInfo {
+    // Name of affinity/anti-affinity group
+    name: &'static str,
+    // Policy of the group
+    policy: external::AffinityPolicy,
+    // Type of group
+    flavor: GroupType,
+}
+
+#[derive(Clone)]
+struct InstanceGroups {
+    // An instance should belong to all these groups.
+    belongs_to: Vec<GroupInfo>,
+}
+
+#[derive(Clone)]
+struct InstanceGroupPattern {
+    description: &'static str,
+    // These "instance group settings" should be applied.
+    //
+    // NOTE: Currently, we rotate through these groups
+    group_pattern: Vec<InstanceGroups>,
+}
+
+#[derive(Clone)]
 struct TestParams {
     // Number of vmms to provision from the task-under-test
     vmms: usize,
+    // Number of tasks to concurrent provision vmms
     tasks: usize,
+    // The pattern of allocations
+    group_pattern: InstanceGroupPattern,
 }
 
 const VMM_PARAMS: [usize; 3] = [1, 8, 16];
@@ -64,6 +108,72 @@ fn average_duration(duration: Duration, divisor: usize) -> Duration {
     )
 }
 
+async fn create_instances_with_groups(
+    params: &TestParams,
+    opctx: &OpContext,
+    db: &DataStore,
+    authz_project: &authz::Project,
+    task_num: usize,
+) -> Vec<InstanceUuid> {
+    let mut instance_ids = Vec::with_capacity(params.vmms);
+    for i in 0..params.vmms {
+        let instance_id = create_instance_record(
+            opctx,
+            db,
+            authz_project,
+            &format!("task-{task_num}-instance-{i}"),
+        )
+        .await;
+
+        instance_ids.push(instance_id);
+
+        let patterns = params.group_pattern.group_pattern.len();
+        if patterns > 0 {
+            let groups =
+                &params.group_pattern.group_pattern[i % patterns].belongs_to;
+            for group in groups {
+                match group.flavor {
+                    GroupType::Affinity => {
+                        create_affinity_group_member(
+                            opctx,
+                            db,
+                            group.name,
+                            instance_id,
+                        )
+                        .await
+                        .expect("Failed to add instance to affinity group");
+                    }
+                    GroupType::AntiAffinity => {
+                        create_anti_affinity_group_member(
+                            opctx,
+                            db,
+                            group.name,
+                            instance_id,
+                        )
+                        .await
+                        .expect(
+                            "Failed to add instance to anti-affinity group",
+                        );
+                    }
+                }
+            }
+        }
+    }
+    instance_ids
+}
+
+async fn destroy_instances_with_groups(
+    opctx: &OpContext,
+    db: &DataStore,
+    instances: Vec<InstanceUuid>,
+) {
+    for instance_id in instances {
+        delete_instance_record(opctx, db, instance_id).await;
+    }
+
+    // TODO: Delete groups too
+}
+
 // Reserves "params.vmms" vmms, and later deletes their reservations.
 //
 // Returns the average time to provision a single vmm.
@@ -71,10 +181,22 @@ async fn reserve_vmms_and_return_average_duration(
     params: &TestParams,
     opctx: &OpContext,
     db: &DataStore,
-    cleanup_barrier: &Barrier,
+    authz_project: &authz::Project,
+    task_num: usize,
+    barrier: &Barrier,
 ) -> Duration {
+    let instance_ids = create_instances_with_groups(
+        params,
+        opctx,
+        db,
+        authz_project,
+        task_num,
+    )
+    .await;
     let mut vmm_ids = Vec::with_capacity(params.vmms);
 
+    // Wait for all tasks to start at roughly the same time
+    barrier.wait().await;
     let duration = black_box({
         let start = Instant::now();
 
@@ -83,8 +205,9 @@ async fn reserve_vmms_and_return_average_duration(
         // Note that all prior reservations will remain in the DB as we continue
         // provisioning the "next" vmm.
         for _ in 0..params.vmms {
+            let instance_id = InstanceUuid::new_v4();
             vmm_ids.push(
-                create_reservation(opctx, db)
+                create_reservation(opctx, db, instance_id)
                     .await
                     .expect("Failed to provision vmm"),
             );
@@ -104,92 +227,134 @@ async fn reserve_vmms_and_return_average_duration(
     //
     // Use a barrier to ensure this does not interfere with the work of
     // concurrent reservations.
-    cleanup_barrier.wait().await;
+    barrier.wait().await;
     for vmm_id in vmm_ids.drain(..) {
         delete_reservation(opctx, db, vmm_id)
             .await
             .expect("Failed to delete vmm");
     }
+    // Additionally, destroy all our instance records (and their affinity group memberships)
+    destroy_instances_with_groups(opctx, db, instance_ids).await;
 
     duration
+}
+
+async fn create_test_groups(
+    opctx: &OpContext,
+    db: &DataStore,
+    authz_project: &authz::Project,
+    params: &TestParams,
+) {
+    let all_groups: HashSet<_> = params
+        .group_pattern
+        .group_pattern
+        .iter()
+        .map(|groups| groups.belongs_to.iter())
+        .flatten()
+        .collect();
+    for group in all_groups {
+        match group.flavor {
+            GroupType::Affinity => {
+                create_affinity_group(
+                    opctx,
+                    db,
+                    authz_project,
+                    group.name,
+                    group.policy,
+                )
+                .await;
+            }
+            GroupType::AntiAffinity => {
+                create_anti_affinity_group(
+                    opctx,
+                    db,
+                    authz_project,
+                    group.name,
+                    group.policy,
+                )
+                .await;
+            }
+        }
+    }
 }
 
 async fn bench_reservation(
     opctx: Arc<OpContext>,
     db: Arc<DataStore>,
+    authz_project: authz::Project,
     params: TestParams,
     iterations: u64,
 ) -> Duration {
-    let duration = {
-        let mut total_duration = Duration::ZERO;
+    let mut total_duration = Duration::ZERO;
 
-        // Each iteration is an "attempt" at the test.
-        for _ in 0..iterations {
-            // Within each attempt, we spawn the tasks requested.
-            let mut set = tokio::task::JoinSet::new();
+    create_test_groups(&opctx, &db, &authz_project, &params).await;
 
-            // This barrier exists to lessen the impact of "task spawning" on the benchmark.
-            //
-            // We want to have all tasks run as concurrently as possible, since we're trying to
-            // measure contention explicitly.
-            let barrier = Arc::new(Barrier::new(params.tasks));
+    // Each iteration is an "attempt" at the test.
+    for _ in 0..iterations {
+        // Within each attempt, we spawn the tasks requested.
+        let mut set = tokio::task::JoinSet::new();
 
-            for _ in 0..params.tasks {
-                set.spawn({
-                    let opctx = opctx.clone();
-                    let db = db.clone();
-                    let barrier = barrier.clone();
+        // This barrier exists to lessen the impact of "task spawning" on the benchmark.
+        //
+        // We want to have all tasks run as concurrently as possible, since we're trying to
+        // measure contention explicitly.
+        let barrier = Arc::new(Barrier::new(params.tasks));
 
-                    async move {
-                        // Wait until all tasks are ready...
-                        barrier.wait().await;
+        for task_num in 0..params.tasks {
+            set.spawn({
+                let opctx = opctx.clone();
+                let db = db.clone();
+                let authz_project = authz_project.clone();
+                let barrier = barrier.clone();
+                let params = params.clone();
 
-                        // ... and then actually do the benchmark
-                        reserve_vmms_and_return_average_duration(
-                            &params, &opctx, &db, &barrier,
-                        )
-                        .await
-                    }
-                });
-            }
-
-            // The sum of "average time to provision a single vmm" across all tasks.
-            let all_tasks_duration = set
-                .join_all()
-                .await
-                .into_iter()
-                .fold(Duration::ZERO, |acc, x| acc + x);
-
-            // The normalized "time to provision a single vmm", across both:
-            // - The number of vmms reserved by each task, and
-            // - The number of tasks
-            //
-            // As an example, if we provision 10 vmms, and have 5 tasks, and we assume
-            // that VM provisioning time is exactly one second (contention has no impact, somehow):
-            //
-            // - Each task would take 10 seconds (10 vmms * 1 second), but would return an average
-            //   duration of "1 second".
-            // - Across all tasks, we'd see an "all_tasks_duration" of 5 seconds
-            //   (1 second average * 5 tasks).
-            // - So, we'd increment our "total_duration" by "1 second per vmm", which has been
-            //   normalized cross both the tasks and quantities of vmms.
-            //
-            // Why bother doing this?
-            //
-            // When we perform this normalization, we can vary the "total vmms provisioned" as well
-            // as "total tasks" significantly, but easily compare test durations with one another.
-            //
-            // For example: if the total number of vmms has no impact on the next provisioning
-            // request, we should see similar durations for "100 vmms reserved" vs "1 vmm
-            // reserved". However, if more vmms actually make reservation times slower, we'll see
-            // the "100 vmm" case take longer than the "1 vmm" case. The same goes for tasks:
-            total_duration +=
-                average_duration(all_tasks_duration, params.tasks);
+                async move {
+                    reserve_vmms_and_return_average_duration(
+                        &params,
+                        &opctx,
+                        &db,
+                        &authz_project,
+                        task_num,
+                        &barrier,
+                    )
+                    .await
+                }
+            });
         }
-        total_duration
-    };
 
-    duration
+        // The sum of "average time to provision a single vmm" across all tasks.
+        let all_tasks_duration = set
+            .join_all()
+            .await
+            .into_iter()
+            .fold(Duration::ZERO, |acc, x| acc + x);
+
+        // The normalized "time to provision a single vmm", across both:
+        // - The number of vmms reserved by each task, and
+        // - The number of tasks
+        //
+        // As an example, if we provision 10 vmms, and have 5 tasks, and we assume
+        // that VM provisioning time is exactly one second (contention has no impact, somehow):
+        //
+        // - Each task would take 10 seconds (10 vmms * 1 second), but would return an average
+        //   duration of "1 second".
+        // - Across all tasks, we'd see an "all_tasks_duration" of 5 seconds
+        //   (1 second average * 5 tasks).
+        // - So, we'd increment our "total_duration" by "1 second per vmm", which has been
+        //   normalized cross both the tasks and quantities of vmms.
+        //
+        // Why bother doing this?
+        //
+        // When we perform this normalization, we can vary the "total vmms provisioned" as well
+        // as "total tasks" significantly, but easily compare test durations with one another.
+        //
+        // For example: if the total number of vmms has no impact on the next provisioning
+        // request, we should see similar durations for "100 vmms reserved" vs "1 vmm
+        // reserved". However, if more vmms actually make reservation times slower, we'll see
+        // the "100 vmm" case take longer than the "1 vmm" case. The same goes for tasks:
+        total_duration += average_duration(all_tasks_duration, params.tasks);
+    }
+    total_duration
 }
 
 fn sled_reservation_benchmark(c: &mut Criterion) {
@@ -198,62 +363,109 @@ fn sled_reservation_benchmark(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(harness::setup_db(&logctx.log));
 
-    let mut group = c.benchmark_group("vmm-reservation");
+    let group_patterns = [
+        // No Affinity Groups
+        InstanceGroupPattern {
+            description: "no-groups",
+            group_pattern: vec![],
+        },
+        // Alternating "Affinity Group" and "Anti-Affinity Group", both permissive
+        InstanceGroupPattern {
+            description: "affinity-groups-permissive",
+            group_pattern: vec![
+                InstanceGroups {
+                    belongs_to: vec![GroupInfo {
+                        name: "affinity-1",
+                        policy: external::AffinityPolicy::Allow,
+                        flavor: GroupType::Affinity,
+                    }],
+                },
+                InstanceGroups {
+                    belongs_to: vec![GroupInfo {
+                        name: "anti-affinity-1",
+                        policy: external::AffinityPolicy::Allow,
+                        flavor: GroupType::AntiAffinity,
+                    }],
+                },
+            ],
+        },
+        // TODO create a test for "policy = Fail" groups?
+    ];
 
-    // Flat sampling is recommended for benchmarks which run "longer than
-    // milliseconds", which is the case for these benches.
-    //
-    // See: https://bheisler.github.io/criterion.rs/book/user_guide/advanced_configuration.html
-    group.sampling_mode(SamplingMode::Flat);
+    for grouping in &group_patterns {
+        let mut group = c.benchmark_group(format!(
+            "vmm-reservation-{}",
+            grouping.description
+        ));
 
-    for sleds in SLED_PARAMS {
-        for tasks in TASK_PARAMS {
-            for vmms in VMM_PARAMS {
-                let params = TestParams { vmms, tasks };
-                let name = format!("{sleds}-sleds-{tasks}-tasks-{vmms}-vmms");
+        // Flat sampling is recommended for benchmarks which run "longer than
+        // milliseconds", which is the case for these benches.
+        //
+        // See: https://bheisler.github.io/criterion.rs/book/user_guide/advanced_configuration.html
+        group.sampling_mode(SamplingMode::Flat);
 
-                if tasks * vmms > max_resource_request_count(sleds) {
-                    eprintln!(
-                        "{name} would request too many VMMs; skipping..."
-                    );
-                    continue;
-                }
+        for sleds in SLED_PARAMS {
+            for tasks in TASK_PARAMS {
+                for vmms in VMM_PARAMS {
+                    let params = TestParams {
+                        vmms,
+                        tasks,
+                        group_pattern: grouping.clone(),
+                    };
+                    let name =
+                        format!("{sleds}-sleds-{tasks}-tasks-{vmms}-vmms");
 
-                // Initialize the harness before calling "bench_function" so
-                // that the "warm-up" calls to "bench_function" are actually useful
-                // at warming up the database.
-                //
-                // This mitigates any database-caching issues like "loading schema
-                // on boot", or "connection pooling", as the pool stays the same
-                // between calls to the benchmark function.
-                let log = logctx.log.clone();
-                let harness =
-                    rt.block_on(
-                        async move { TestHarness::new(&log, sleds).await },
-                    );
-
-                // Actually invoke the benchmark.
-                group.bench_function(&name, |b| {
-                    b.to_async(&rt).iter_custom(|iters| {
-                        let opctx = harness.opctx();
-                        let db = harness.db();
-                        async move {
-                            bench_reservation(opctx, db, params, iters).await
-                        }
-                    })
-                });
-                // Clean-up the harness; we'll use a new database between
-                // varations in parameters.
-                rt.block_on(async move {
-                    if std::env::var("SHOW_CONTENTION").is_ok() {
-                        harness.print_contention().await;
+                    if tasks * vmms > max_resource_request_count(sleds) {
+                        eprintln!(
+                            "{name} would request too many VMMs; skipping..."
+                        );
+                        continue;
                     }
-                    harness.terminate().await;
-                });
+
+                    // Initialize the harness before calling "bench_function" so
+                    // that the "warm-up" calls to "bench_function" are actually useful
+                    // at warming up the database.
+                    //
+                    // This mitigates any database-caching issues like "loading schema
+                    // on boot", or "connection pooling", as the pool stays the same
+                    // between calls to the benchmark function.
+                    let log = logctx.log.clone();
+                    let harness = rt.block_on(async move {
+                        TestHarness::new(&log, sleds).await
+                    });
+
+                    // Actually invoke the benchmark.
+                    group.bench_function(&name, |b| {
+                        b.to_async(&rt).iter_custom(|iters| {
+                            let opctx = harness.opctx();
+                            let db = harness.db();
+                            let authz_project = harness.authz_project();
+                            let params = params.clone();
+                            async move {
+                                bench_reservation(
+                                    opctx,
+                                    db,
+                                    authz_project,
+                                    params,
+                                    iters,
+                                )
+                                .await
+                            }
+                        })
+                    });
+                    // Clean-up the harness; we'll use a new database between
+                    // varations in parameters.
+                    rt.block_on(async move {
+                        if std::env::var("SHOW_CONTENTION").is_ok() {
+                            harness.print_contention().await;
+                        }
+                        harness.terminate().await;
+                    });
+                }
             }
         }
+        group.finish();
     }
-    group.finish();
     logctx.cleanup_successful();
 }
 
