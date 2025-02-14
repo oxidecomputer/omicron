@@ -237,14 +237,10 @@ pub async fn delete_affinity_group(
         .project_name_owned(project.into())
         .affinity_group_name_owned(group.into())
         .lookup_for(authz::Action::Delete)
-        .await.unwrap();
+        .await
+        .unwrap();
 
-    db.affinity_group_delete(
-        &opctx,
-        &authz_group,
-    )
-    .await
-    .unwrap();
+    db.affinity_group_delete(&opctx, &authz_group).await.unwrap();
 }
 
 pub async fn create_anti_affinity_group(
@@ -284,14 +280,10 @@ pub async fn delete_anti_affinity_group(
         .project_name_owned(project.into())
         .anti_affinity_group_name_owned(group.into())
         .lookup_for(authz::Action::Delete)
-        .await.unwrap();
+        .await
+        .unwrap();
 
-    db.anti_affinity_group_delete(
-        &opctx,
-        &authz_group,
-    )
-    .await
-    .unwrap();
+    db.anti_affinity_group_delete(&opctx, &authz_group).await.unwrap();
 }
 
 pub async fn create_affinity_group_member(

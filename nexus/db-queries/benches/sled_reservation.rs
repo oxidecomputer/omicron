@@ -66,8 +66,14 @@ struct InstanceGroupPattern {
     description: &'static str,
     // These "instance group settings" should be applied.
     //
-    // NOTE: Currently, we rotate through these groups
-    group_pattern: Vec<InstanceGroups>,
+    // This is called "stripe" because we rotate through these groups.
+    //
+    // For example, with a stripe.len() == 2...
+    //   - Instance 0 belongs to the groups in stripe[0]
+    //   - Instance 1 belongs to the groups in stripe[1]
+    //   - Instance 2 belongs to the groups in stripe[0]
+    //   - etc
+    stripe: Vec<InstanceGroups>,
 }
 
 #[derive(Clone)]
@@ -110,6 +116,11 @@ fn average_duration(duration: Duration, divisor: usize) -> Duration {
     )
 }
 
+// Test setup: Create all instances and group memberships that will be
+// used by a particular task under test.
+//
+// Precondition: We expect that the test groups (shared by all tasks)
+// will already exist.
 async fn create_instances_with_groups(
     params: &TestParams,
     opctx: &OpContext,
@@ -129,10 +140,9 @@ async fn create_instances_with_groups(
 
         instance_ids.push(instance_id);
 
-        let patterns = params.group_pattern.group_pattern.len();
+        let patterns = params.group_pattern.stripe.len();
         if patterns > 0 {
-            let groups =
-                &params.group_pattern.group_pattern[i % patterns].belongs_to;
+            let groups = &params.group_pattern.stripe[i % patterns].belongs_to;
             for group in groups {
                 match group.flavor {
                     GroupType::Affinity => {
@@ -164,7 +174,10 @@ async fn create_instances_with_groups(
     instance_ids
 }
 
-async fn destroy_instances_with_groups(
+// Destroys all instances.
+//
+// This implicitly removes group memberships.
+async fn destroy_instances(
     opctx: &OpContext,
     db: &DataStore,
     instances: Vec<InstanceUuid>,
@@ -172,8 +185,6 @@ async fn destroy_instances_with_groups(
     for instance_id in instances {
         delete_instance_record(opctx, db, instance_id).await;
     }
-
-    // TODO: Delete groups too
 }
 
 // Reserves "params.vmms" vmms, and later deletes their reservations.
@@ -186,7 +197,11 @@ async fn reserve_vmms_and_return_average_duration(
     instance_ids: &Vec<InstanceUuid>,
     barrier: &Barrier,
 ) -> Duration {
-    assert_eq!(instance_ids.len(), params.vmms, "Not enough instances to provision");
+    assert_eq!(
+        instance_ids.len(),
+        params.vmms,
+        "Not enough instances to provision"
+    );
     let mut vmm_ids = Vec::with_capacity(params.vmms);
 
     // Wait for all tasks to start at roughly the same time
@@ -238,7 +253,7 @@ async fn create_test_groups(
 ) {
     let all_groups: HashSet<_> = params
         .group_pattern
-        .group_pattern
+        .stripe
         .iter()
         .map(|groups| groups.belongs_to.iter())
         .flatten()
@@ -276,7 +291,7 @@ async fn delete_test_groups(
 ) {
     let all_groups: HashSet<_> = params
         .group_pattern
-        .group_pattern
+        .stripe
         .iter()
         .map(|groups| groups.belongs_to.iter())
         .flatten()
@@ -284,20 +299,10 @@ async fn delete_test_groups(
     for group in all_groups {
         match group.flavor {
             GroupType::Affinity => {
-                delete_affinity_group(
-                    opctx,
-                    db,
-                    group.name,
-                )
-                .await;
+                delete_affinity_group(opctx, db, group.name).await;
             }
             GroupType::AntiAffinity => {
-                delete_anti_affinity_group(
-                    opctx,
-                    db,
-                    group.name,
-                )
-                .await;
+                delete_anti_affinity_group(opctx, db, group.name).await;
             }
         }
     }
@@ -312,23 +317,22 @@ async fn bench_reservation(
 ) -> Duration {
     let mut total_duration = Duration::ZERO;
 
-    // TODO: Can we avoid passing "authz_project" everywhere, and just do
-    // lookups in db_utils?
-
-    // Create all groups and instances belonging to those groups before
-    // we actually do any iterations. This is a slight optimization to
-    // make the benchmarks - focused on VMM reservation time - a little faster.
+    // Create all groups and instances belonging to those groups before we
+    // actually do any iterations. This is a slight optimization to make the
+    // benchmarks - which are focused on VMM reservation time - a little faster.
     create_test_groups(&opctx, &db, &authz_project, &params).await;
     let mut task_instances = vec![];
     for task_num in 0..params.tasks {
-        task_instances.push(create_instances_with_groups(
-            &params,
-            &opctx,
-            &db,
-            &authz_project,
-            task_num,
-        )
-        .await);
+        task_instances.push(
+            create_instances_with_groups(
+                &params,
+                &opctx,
+                &db,
+                &authz_project,
+                task_num,
+            )
+            .await,
+        );
     }
 
     // Each iteration is an "attempt" at the test.
@@ -352,11 +356,7 @@ async fn bench_reservation(
 
                 async move {
                     reserve_vmms_and_return_average_duration(
-                        &params,
-                        &opctx,
-                        &db,
-                        &instances,
-                        &barrier,
+                        &params, &opctx, &db, &instances, &barrier,
                     )
                     .await
                 }
@@ -397,9 +397,8 @@ async fn bench_reservation(
     }
     // Destroy all our instance records (and their affinity group memberships)
     for instance_ids in task_instances {
-        destroy_instances_with_groups(&opctx, &db, instance_ids).await;
+        destroy_instances(&opctx, &db, instance_ids).await;
     }
-
     delete_test_groups(&opctx, &db, &params).await;
     total_duration
 }
@@ -412,14 +411,11 @@ fn sled_reservation_benchmark(c: &mut Criterion) {
 
     let group_patterns = [
         // No Affinity Groups
-        InstanceGroupPattern {
-            description: "no-groups",
-            group_pattern: vec![],
-        },
+        InstanceGroupPattern { description: "no-groups", stripe: vec![] },
         // Alternating "Affinity Group" and "Anti-Affinity Group", both permissive
         InstanceGroupPattern {
             description: "affinity-groups-permissive",
-            group_pattern: vec![
+            stripe: vec![
                 InstanceGroups {
                     belongs_to: vec![GroupInfo {
                         name: "affinity-1",
@@ -436,7 +432,7 @@ fn sled_reservation_benchmark(c: &mut Criterion) {
                 },
             ],
         },
-        // TODO create a test for "policy = Fail" groups?
+        // TODO create a test for "policy = Fail" groups.
     ];
 
     for grouping in &group_patterns {
@@ -462,7 +458,7 @@ fn sled_reservation_benchmark(c: &mut Criterion) {
                     let name =
                         format!("{sleds}-sleds-{tasks}-tasks-{vmms}-vmms");
 
-                    // TODO: This can also fail depending on the group requirements,
+                    // NOTE: This can also fail depending on the group requirements,
                     // if we're using policy = fail. Maybe construct "TestParams"
                     // differently to let each test decide this.
                     if tasks * vmms > max_resource_request_count(sleds) {
