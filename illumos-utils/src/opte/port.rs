@@ -5,6 +5,7 @@
 //! A single port on the OPTE virtual switch.
 
 use crate::opte::Gateway;
+use crate::opte::Handle;
 use crate::opte::Vni;
 use macaddr::MacAddr6;
 use omicron_common::api::external;
@@ -46,8 +47,7 @@ impl core::ops::Deref for PortInner {
 #[cfg(target_os = "illumos")]
 impl Drop for PortInner {
     fn drop(&mut self) {
-        let err = match opte_ioctl::OpteHdl::open(opte_ioctl::OpteHdl::XDE_CTL)
-        {
+        let err = match Handle::new() {
             Ok(hdl) => {
                 if let Err(e) = hdl.delete_xde(&self.name) {
                     e

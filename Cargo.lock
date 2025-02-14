@@ -4516,6 +4516,7 @@ dependencies = [
  "macaddr",
  "mockall",
  "omicron-common",
+ "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "opte-ioctl",

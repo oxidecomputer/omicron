@@ -13,6 +13,11 @@ use slog::info;
 use slog::Logger;
 use std::net::IpAddr;
 
+#[cfg_attr(test, path = "test_handle.rs")]
+#[cfg_attr(not(test), path = "handle.rs")]
+mod handle;
+pub use handle::Handle;
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Failure interacting with the OPTE ioctl(2) interface: {0}")]

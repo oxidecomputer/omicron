@@ -48,6 +48,7 @@ omicron-workspace-hack.workspace = true
 opte-ioctl.workspace = true
 
 [dev-dependencies]
+omicron-test-utils.workspace = true
 mockall.workspace = true
 regress.workspace = true
 serde_json.workspace = true
