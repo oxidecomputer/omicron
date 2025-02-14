@@ -3,15 +3,16 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use clickhouse_admin_types::{
-    ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
-    KeeperConfig, KeeperConfigurableSettings, Lgif, MetricInfoPath, RaftConfig,
-    ReplicaConfig, ServerConfigurableSettings, SystemTimeSeries,
+    ClickhouseKeeperClusterMembership, DistributedDdlQueue,
+    GenerateConfigResult, KeeperConf, KeeperConfigurableSettings, Lgif,
+    MetricInfoPath, RaftConfig, ServerConfigurableSettings, SystemTimeSeries,
     TimeSeriesSettingsQuery,
 };
 use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
 };
+use omicron_common::api::external::Generation;
 
 /// API interface for our clickhouse-admin-keeper server
 ///
@@ -40,7 +41,16 @@ pub trait ClickhouseAdminKeeperApi {
     async fn generate_config_and_enable_svc(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<KeeperConfigurableSettings>,
-    ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError>;
+    ) -> Result<HttpResponseCreated<GenerateConfigResult>, HttpError>;
+
+    /// Retrieve the generation number of a configuration
+    #[endpoint {
+        method = GET,
+        path = "/generation",
+    }]
+    async fn generation(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Generation>, HttpError>;
 
     /// Retrieve a logically grouped information file from a keeper node.
     /// This information is used internally by ZooKeeper to manage snapshots
@@ -106,7 +116,16 @@ pub trait ClickhouseAdminServerApi {
     async fn generate_config_and_enable_svc(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<ServerConfigurableSettings>,
-    ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError>;
+    ) -> Result<HttpResponseCreated<GenerateConfigResult>, HttpError>;
+
+    /// Retrieve the generation number of a configuration
+    #[endpoint {
+        method = GET,
+        path = "/generation",
+    }]
+    async fn generation(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Generation>, HttpError>;
 
     /// Contains information about distributed ddl queries (ON CLUSTER clause)
     /// that were executed on a cluster.
