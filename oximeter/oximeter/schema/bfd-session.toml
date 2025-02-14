@@ -5,7 +5,7 @@ name = "bfd_session"
 description = "A Bidirectional Forwarding Protocol (BFD) session"
 authz_scope = "fleet"
 versions = [
-    { version = 1, fields = [ "hostname", "rack_id", "sled_id", "peer" ] },
+    { version = 1, fields = [ "hostname", "peer", "rack_id", "sled_id", "sled_model", "sled_revision", "sled_serial", "switch_id",  "switch_model", "switch_revision", "switch_serial", "switch_slot","asic_fab", "asic_lot", "asic_wafer", "asic_wafer_loc_x", "asic_wafer_loc_y" ] },
 ]
 
 [[metrics]]
@@ -88,6 +88,10 @@ versions = [
 type = "string"
 description = "The hostname of the machine running the BFD session"
 
+[fields.peer]
+type = "ip_addr"
+description = "Address of the BFD session peer"
+
 [fields.rack_id]
 type = "uuid"
 description = "ID of the rack running the BFD session"
@@ -96,6 +100,54 @@ description = "ID of the rack running the BFD session"
 type = "uuid"
 description = "ID of the sled running the BFD session"
 
-[fields.peer]
-type = "ip_addr"
-description = "Address of the BFD session peer"
+[fields.sled_model]
+type = "string"
+description = "Model number of the sled running the BFD session"
+
+[fields.sled_revision]
+type = "u32"
+description = "Revision number of the sled running the BFD session"
+
+[fields.sled_serial]
+type = "string"
+description = "Serial number of the sled running the BFD session"
+
+[fields.switch_id]
+type = "uuid"
+description = "ID of the switch running the BFD session"
+
+[fields.switch_model]
+type = "string"
+description = "Model number of the switch running the BFD session"
+
+[fields.switch_revision]
+type = "u32"
+description = "Revision number of the switch running the BFD session"
+
+[fields.switch_serial]
+type = "string"
+description = "Serial number of the switch running the BFD session"
+
+[fields.switch_slot]
+type = "u16"
+description = "Slot number of the switch running the BFD session"
+
+[fields.asic_fab]
+type = "string"
+description = "Fabrication plant identifier of the switch ASIC running the BFD session"
+
+[fields.asic_lot]
+type = "string"
+description = "Lot identifier of the switch ASIC running the BFD session"
+
+[fields.asic_wafer]
+type = "u8"
+description = "Wafer identifier of the switch ASIC running the BFD session"
+
+[fields.asic_wafer_loc_x]
+type = "i16"
+description = "X-coordinate wafer location of the switch ASIC running the BFD session"
+
+[fields.asic_wafer_loc_y]
+type = "i16"
+description = "Y-coordinate wafer location of the switch ASIC running the BFD session"
