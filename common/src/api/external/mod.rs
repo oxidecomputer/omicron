@@ -1329,7 +1329,9 @@ pub enum InstanceAutoRestartPolicy {
 /// Affinity policy used to describe "what to do when a request cannot be satisfied"
 ///
 /// Used for both Affinity and Anti-Affinity Groups
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, Deserialize, Hash, Eq, Serialize, PartialEq, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum AffinityPolicy {
     /// If the affinity request cannot be satisfied, allow it anyway.

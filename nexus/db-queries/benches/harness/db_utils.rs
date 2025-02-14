@@ -14,8 +14,12 @@
 
 use anyhow::Context;
 use anyhow::Result;
+use chrono::Utc;
 use nexus_db_model::ByteCount;
 use nexus_db_model::Generation;
+use nexus_db_model::Instance;
+use nexus_db_model::InstanceRuntimeState;
+use nexus_db_model::InstanceState;
 use nexus_db_model::Project;
 use nexus_db_model::Resources;
 use nexus_db_model::Sled;
@@ -25,13 +29,17 @@ use nexus_db_model::SledSystemHardware;
 use nexus_db_model::SledUpdate;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
 use nexus_types::external_api::params;
+use nexus_types::identity::Resource;
 use omicron_common::api::external;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
+use std::str::FromStr;
 use uuid::Uuid;
 
 pub async fn create_project(
@@ -110,11 +118,233 @@ fn small_resource_request() -> Resources {
     )
 }
 
+/// Given a `sled_count`, returns the number of times a call to
+/// `create_reservation` should succeed.
+///
+/// This can be used to validate parameters before running benchmarks.
+pub fn max_resource_request_count(sled_count: usize) -> usize {
+    let threads_per_request: usize =
+        small_resource_request().hardware_threads.0.try_into().unwrap();
+    let threads_per_sled: usize = sled_system_hardware_for_test()
+        .usable_hardware_threads
+        .try_into()
+        .unwrap();
+
+    threads_per_sled * sled_count / threads_per_request
+}
+
+// Helper function for creating an instance without a VMM.
+pub async fn create_instance_record(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    authz_project: &authz::Project,
+    name: &str,
+) -> InstanceUuid {
+    let instance = Instance::new(
+        InstanceUuid::new_v4(),
+        authz_project.id(),
+        &params::InstanceCreate {
+            identity: external::IdentityMetadataCreateParams {
+                name: name.parse().unwrap(),
+                description: "".to_string(),
+            },
+            ncpus: 2i64.try_into().unwrap(),
+            memory: external::ByteCount::from_gibibytes_u32(16).into(),
+            hostname: "myhostname".try_into().unwrap(),
+            user_data: Vec::new(),
+            network_interfaces:
+                params::InstanceNetworkInterfaceAttachment::None,
+            external_ips: Vec::new(),
+            disks: Vec::new(),
+            boot_disk: None,
+            ssh_public_keys: None,
+            start: false,
+            auto_restart_policy: Default::default(),
+        },
+    );
+
+    let instance = datastore
+        .project_create_instance(&opctx, &authz_project, instance)
+        .await
+        .unwrap();
+
+    let id = InstanceUuid::from_untyped_uuid(instance.id());
+    datastore
+        .instance_update_runtime(
+            &id,
+            &InstanceRuntimeState {
+                nexus_state: InstanceState::NoVmm,
+                time_updated: Utc::now(),
+                propolis_id: None,
+                migration_id: None,
+                dst_propolis_id: None,
+                gen: Generation::from(Generation::new().0.next()),
+                time_last_auto_restarted: None,
+            },
+        )
+        .await
+        .expect("Failed to update runtime state");
+
+    id
+}
+pub async fn delete_instance_record(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    instance_id: InstanceUuid,
+) {
+    let (.., authz_instance) = LookupPath::new(opctx, datastore)
+        .instance_id(instance_id.into_untyped_uuid())
+        .lookup_for(authz::Action::Delete)
+        .await
+        .unwrap();
+    datastore.project_delete_instance(&opctx, &authz_instance).await.unwrap();
+}
+
+pub async fn create_affinity_group(
+    opctx: &OpContext,
+    db: &DataStore,
+    authz_project: &authz::Project,
+    group_name: &'static str,
+    policy: external::AffinityPolicy,
+) {
+    db.affinity_group_create(
+        &opctx,
+        &authz_project,
+        nexus_db_model::AffinityGroup::new(
+            authz_project.id(),
+            params::AffinityGroupCreate {
+                identity: external::IdentityMetadataCreateParams {
+                    name: group_name.parse().unwrap(),
+                    description: "desc".to_string(),
+                },
+                policy,
+                failure_domain: external::FailureDomain::Sled,
+            },
+        ),
+    )
+    .await
+    .unwrap();
+}
+
+pub async fn delete_affinity_group(
+    opctx: &OpContext,
+    db: &DataStore,
+    group_name: &'static str,
+) {
+    let project = external::Name::from_str("project").unwrap();
+    let group = external::Name::from_str(group_name).unwrap();
+    let (.., authz_group) = LookupPath::new(opctx, db)
+        .project_name_owned(project.into())
+        .affinity_group_name_owned(group.into())
+        .lookup_for(authz::Action::Delete)
+        .await.unwrap();
+
+    db.affinity_group_delete(
+        &opctx,
+        &authz_group,
+    )
+    .await
+    .unwrap();
+}
+
+pub async fn create_anti_affinity_group(
+    opctx: &OpContext,
+    db: &DataStore,
+    authz_project: &authz::Project,
+    group_name: &'static str,
+    policy: external::AffinityPolicy,
+) {
+    db.anti_affinity_group_create(
+        &opctx,
+        &authz_project,
+        nexus_db_model::AntiAffinityGroup::new(
+            authz_project.id(),
+            params::AntiAffinityGroupCreate {
+                identity: external::IdentityMetadataCreateParams {
+                    name: group_name.parse().unwrap(),
+                    description: "desc".to_string(),
+                },
+                policy,
+                failure_domain: external::FailureDomain::Sled,
+            },
+        ),
+    )
+    .await
+    .unwrap();
+}
+
+pub async fn delete_anti_affinity_group(
+    opctx: &OpContext,
+    db: &DataStore,
+    group_name: &'static str,
+) {
+    let project = external::Name::from_str("project").unwrap();
+    let group = external::Name::from_str(group_name).unwrap();
+    let (.., authz_group) = LookupPath::new(opctx, db)
+        .project_name_owned(project.into())
+        .anti_affinity_group_name_owned(group.into())
+        .lookup_for(authz::Action::Delete)
+        .await.unwrap();
+
+    db.anti_affinity_group_delete(
+        &opctx,
+        &authz_group,
+    )
+    .await
+    .unwrap();
+}
+
+pub async fn create_affinity_group_member(
+    opctx: &OpContext,
+    db: &DataStore,
+    group_name: &'static str,
+    instance_id: InstanceUuid,
+) -> Result<()> {
+    let project = external::Name::from_str("project").unwrap();
+    let group = external::Name::from_str(group_name).unwrap();
+    let (.., authz_group) = LookupPath::new(opctx, db)
+        .project_name_owned(project.into())
+        .affinity_group_name_owned(group.into())
+        .lookup_for(authz::Action::Modify)
+        .await?;
+
+    db.affinity_group_member_add(
+        opctx,
+        &authz_group,
+        external::AffinityGroupMember::Instance(instance_id),
+    )
+    .await?;
+    Ok(())
+}
+
+pub async fn create_anti_affinity_group_member(
+    opctx: &OpContext,
+    db: &DataStore,
+    group_name: &'static str,
+    instance_id: InstanceUuid,
+) -> Result<()> {
+    let project = external::Name::from_str("project").unwrap();
+    let group = external::Name::from_str(group_name).unwrap();
+    let (.., authz_group) = LookupPath::new(opctx, db)
+        .project_name_owned(project.into())
+        .anti_affinity_group_name_owned(group.into())
+        .lookup_for(authz::Action::Modify)
+        .await?;
+
+    db.anti_affinity_group_member_add(
+        opctx,
+        &authz_group,
+        external::AntiAffinityGroupMember::Instance(instance_id),
+    )
+    .await?;
+    Ok(())
+}
+
 pub async fn create_reservation(
     opctx: &OpContext,
     db: &DataStore,
+    instance_id: InstanceUuid,
 ) -> Result<PropolisUuid> {
-    let instance_id = InstanceUuid::new_v4();
     let vmm_id = PropolisUuid::new_v4();
 
     loop {
