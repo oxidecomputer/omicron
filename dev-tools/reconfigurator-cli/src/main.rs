@@ -730,6 +730,10 @@ fn cmd_blueprint_list(
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct BlueprintRow {
+        #[tabled(rename = "T")]
+        is_target: &'static str,
+        #[tabled(rename = "ENA")]
+        enabled: &'static str,
         id: BlueprintUuid,
         parent: Cow<'static, str>,
         time_created: String,
@@ -737,18 +741,30 @@ fn cmd_blueprint_list(
 
     let state = sim.current_state();
 
+    let target_blueprint = state.system().target_blueprint();
     let mut rows = state.system().all_blueprints().collect::<Vec<_>>();
     rows.sort_unstable_by_key(|blueprint| blueprint.time_created);
-    let rows = rows.into_iter().map(|blueprint| BlueprintRow {
-        id: blueprint.id,
-        parent: blueprint
-            .parent_blueprint_id
-            .map(|s| Cow::Owned(s.to_string()))
-            .unwrap_or(Cow::Borrowed("<none>")),
-        time_created: humantime::format_rfc3339_millis(
-            blueprint.time_created.into(),
-        )
-        .to_string(),
+    let rows = rows.into_iter().map(|blueprint| {
+        let (is_target, enabled) = match target_blueprint {
+            Some(t) if t.target_id == blueprint.id => {
+                let enabled = if t.enabled { "yes" } else { "no" };
+                ("*", enabled)
+            }
+            _ => ("", ""),
+        };
+        BlueprintRow {
+            is_target,
+            enabled,
+            id: blueprint.id,
+            parent: blueprint
+                .parent_blueprint_id
+                .map(|s| Cow::Owned(s.to_string()))
+                .unwrap_or(Cow::Borrowed("<none>")),
+            time_created: humantime::format_rfc3339_millis(
+                blueprint.time_created.into(),
+            )
+            .to_string(),
+        }
     });
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())

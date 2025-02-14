@@ -9,7 +9,7 @@
 //! that is not needed by sled-agent.
 
 use super::OmicronZoneExternalIp;
-use diffus::Diffus;
+use daft::Diffable;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -31,7 +31,7 @@ use std::net::Ipv6Addr;
     JsonSchema,
     Deserialize,
     Serialize,
-    Diffus,
+    Diffable,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum BlueprintZoneType {
@@ -331,7 +331,7 @@ pub mod blueprint_zone_type {
     use crate::deployment::OmicronZoneExternalFloatingAddr;
     use crate::deployment::OmicronZoneExternalFloatingIp;
     use crate::deployment::OmicronZoneExternalSnatIp;
-    use diffus::Diffus;
+    use daft::Diffable;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use omicron_common::api::internal::shared::NetworkInterface;
     use schemars::JsonSchema;
@@ -351,7 +351,7 @@ pub mod blueprint_zone_type {
         JsonSchema,
         Deserialize,
         Serialize,
-        Diffus,
+        Diffable,
     )]
     pub struct BoundaryNtp {
         pub address: SocketAddrV6,
@@ -374,7 +374,7 @@ pub mod blueprint_zone_type {
         JsonSchema,
         Deserialize,
         Serialize,
-        Diffus,
+        Diffable,
     )]
     pub struct Clickhouse {
         pub address: SocketAddrV6,
@@ -391,7 +391,7 @@ pub mod blueprint_zone_type {
         JsonSchema,
         Deserialize,
         Serialize,
-        Diffus,
+        Diffable,
     )]
     pub struct ClickhouseKeeper {
         pub address: SocketAddrV6,
@@ -409,7 +409,7 @@ pub mod blueprint_zone_type {
         JsonSchema,
         Deserialize,
         Serialize,
-        Diffus,
+        Diffable,
     )]
     pub struct ClickhouseServer {
         pub address: SocketAddrV6,
@@ -426,7 +426,7 @@ pub mod blueprint_zone_type {
         JsonSchema,
         Deserialize,
         Serialize,
-        Diffus,
+        Diffable,
     )]
     pub struct CockroachDb {
         pub address: SocketAddrV6,
@@ -443,7 +443,7 @@ pub mod blueprint_zone_type {
         JsonSchema,
         Deserialize,
         Serialize,
-        Diffus,
+        Diffable,
     )]
     pub struct Crucible {
         pub address: SocketAddrV6,
@@ -460,7 +460,7 @@ pub mod blueprint_zone_type {
         JsonSchema,
         Deserialize,
         Serialize,
-        Diffus,
+        Diffable,
     )]
     pub struct CruciblePantry {
         pub address: SocketAddrV6,
@@ -476,7 +476,7 @@ pub mod blueprint_zone_type {
         JsonSchema,
         Deserialize,
         Serialize,
-        Diffus,
+        Diffable,
     )]
     pub struct ExternalDns {
         pub dataset: OmicronZoneDataset,
@@ -498,7 +498,7 @@ pub mod blueprint_zone_type {
         JsonSchema,
         Deserialize,
         Serialize,
-        Diffus,
+        Diffable,
     )]
     pub struct InternalDns {
         pub dataset: OmicronZoneDataset,
@@ -527,7 +527,7 @@ pub mod blueprint_zone_type {
         JsonSchema,
         Deserialize,
         Serialize,
-        Diffus,
+        Diffable,
     )]
     pub struct InternalNtp {
         pub address: SocketAddrV6,
@@ -543,7 +543,7 @@ pub mod blueprint_zone_type {
         JsonSchema,
         Deserialize,
         Serialize,
-        Diffus,
+        Diffable,
     )]
     pub struct Nexus {
         /// The address at which the internal nexus server is reachable.
@@ -568,7 +568,7 @@ pub mod blueprint_zone_type {
         JsonSchema,
         Deserialize,
         Serialize,
-        Diffus,
+        Diffable,
     )]
     pub struct Oximeter {
         pub address: SocketAddrV6,

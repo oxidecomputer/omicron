@@ -22,6 +22,7 @@ cancel-safe-futures.workspace = true
 cfg-if.workspace = true
 chrono.workspace = true
 clap.workspace = true
+clickhouse-admin-types.workspace = true
 # Only used by the simulated sled agent.
 crucible-agent-client.workspace = true
 derive_more.workspace = true

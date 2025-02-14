@@ -61,10 +61,10 @@ impl<'a> SupportBundleLogs<'a> {
     }
 
     pub async fn get_index(&self) -> Result<SledDiagnosticsLogs, Error> {
-        Ok(tokio::task::spawn_blocking(move || sled_diagnostics::find_logs())
+        tokio::task::spawn_blocking(move || sled_diagnostics::find_logs())
             .await
             .map_err(Error::Join)?
-            .map_err(Error::Logs)?)
+            .map_err(Error::Logs)
     }
 
     /// Get a log file from disk preforming normalization and validation along
