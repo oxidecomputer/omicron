@@ -459,3 +459,172 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
     // The `test.foo.*` receiver should have received both events.
     mock_star.assert_calls_async(2).await;
 }
+
+#[nexus_test]
+async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
+    let nexus = cptestctx.server.server_context().nexus.clone();
+    let internal_client = &cptestctx.internal_client;
+
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let server = httpmock::MockServer::start_async().await;
+
+    let id = WebhookEventUuid::new_v4();
+    let endpoint =
+        server.url("/webhooks").parse().expect("this should be a valid URL");
+
+    // Create a webhook receiver.
+    let webhook = webhook_create(
+        &cptestctx,
+        &params::WebhookCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-great-webhook".parse().unwrap(),
+                description: String::from("my great webhook"),
+            },
+            endpoint,
+            secrets: vec!["my cool secret".to_string()],
+            events: vec!["test.foo".to_string()],
+            disable_probes: false,
+        },
+    )
+    .await;
+    dbg!(&webhook);
+
+    let mock = {
+        let webhook = webhook.clone();
+        server
+            .mock_async(move |when, then| {
+                let body = serde_json::json!({
+                    "event_class": "test.foo",
+                    "event_id": id,
+                    "data": {
+                        "hello_world": true,
+                    }
+                })
+                .to_string();
+                when.method(POST)
+                    .header("x-oxide-event-class", "test.foo")
+                    .header("x-oxide-event-id", id.to_string())
+                    .and(is_valid_for_webhook(&webhook))
+                    .is_true(signature_verifies(
+                        webhook.secrets[0].id,
+                        "my cool secret".as_bytes().to_vec(),
+                    ))
+                    .json_body_includes(body);
+                then.status(500);
+            })
+            .await
+    };
+
+    // Publish an event
+    let event = nexus
+        .webhook_event_publish(
+            &opctx,
+            id,
+            WebhookEventClass::TestFoo,
+            serde_json::json!({"hello_world": true}),
+        )
+        .await
+        .expect("event should be published successfully");
+    dbg!(event);
+
+    dbg!(activate_background_task(internal_client, "webhook_dispatcher").await);
+    dbg!(
+        activate_background_task(internal_client, "webhook_deliverator").await
+    );
+
+    mock.assert_calls_async(1).await;
+
+    // Okay, we are now in backoff. Activate the deliverator again --- no new
+    // event should be delivered.
+    dbg!(
+        activate_background_task(internal_client, "webhook_deliverator").await
+    );
+    // Activating the deliverator whilst in backoff should not send another
+    // request.
+    mock.assert_calls_async(1).await;
+    mock.delete_async().await;
+
+    // Okay, now let's return a different 5xx status.
+    let mock = {
+        let webhook = webhook.clone();
+        server
+            .mock_async(move |when, then| {
+                let body = serde_json::json!({
+                    "event_class": "test.foo",
+                    "event_id": id,
+                    "data": {
+                        "hello_world": true,
+                    }
+                })
+                .to_string();
+                when.method(POST)
+                    .header("x-oxide-event-class", "test.foo")
+                    .header("x-oxide-event-id", id.to_string())
+                    .and(is_valid_for_webhook(&webhook))
+                    .is_true(signature_verifies(
+                        webhook.secrets[0].id,
+                        "my cool secret".as_bytes().to_vec(),
+                    ))
+                    .json_body_includes(body);
+                then.status(503);
+            })
+            .await
+    };
+
+    // Wait out the backoff period for the first request.
+    tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+    dbg!(
+        activate_background_task(internal_client, "webhook_deliverator").await
+    );
+    mock.assert_calls_async(1).await;
+
+    // Again, we should be in backoff, so no request will be sent.
+    dbg!(
+        activate_background_task(internal_client, "webhook_deliverator").await
+    );
+    mock.assert_calls_async(1).await;
+    mock.delete_async().await;
+
+    // Finally, allow the request to succeed.
+    let mock = {
+        let webhook = webhook.clone();
+        server
+            .mock_async(move |when, then| {
+                let body = serde_json::json!({
+                    "event_class": "test.foo",
+                    "event_id": id,
+                    "data": {
+                        "hello_world": true,
+                    }
+                })
+                .to_string();
+                when.method(POST)
+                    .header("x-oxide-event-class", "test.foo")
+                    .header("x-oxide-event-id", id.to_string())
+                    .and(is_valid_for_webhook(&webhook))
+                    .is_true(signature_verifies(
+                        webhook.secrets[0].id,
+                        "my cool secret".as_bytes().to_vec(),
+                    ))
+                    .json_body_includes(body);
+                then.status(200);
+            })
+            .await
+    };
+
+    //
+    tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+    dbg!(
+        activate_background_task(internal_client, "webhook_deliverator").await
+    );
+    mock.assert_calls_async(0).await;
+
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    dbg!(
+        activate_background_task(internal_client, "webhook_deliverator").await
+    );
+    mock.assert_async().await;
+}

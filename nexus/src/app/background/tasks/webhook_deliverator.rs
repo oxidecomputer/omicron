@@ -11,6 +11,7 @@ use http::HeaderName;
 use http::HeaderValue;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::webhook_delivery::DeliveryAttemptState;
+pub use nexus_db_queries::db::datastore::webhook_delivery::DeliveryConfig;
 use nexus_db_queries::db::model::{
     SqlU8, WebhookDeliveryAttempt, WebhookDeliveryResult, WebhookEventClass,
     WebhookReceiver, WebhookSecret,
@@ -82,8 +83,8 @@ use tokio::task::JoinSet;
 pub struct WebhookDeliverator {
     datastore: Arc<DataStore>,
     nexus_id: OmicronZoneUuid,
-    lease_timeout: TimeDelta,
     client: reqwest::Client,
+    cfg: DeliveryConfig,
 }
 
 impl BackgroundTask for WebhookDeliverator {
@@ -109,7 +110,7 @@ impl BackgroundTask for WebhookDeliverator {
 impl WebhookDeliverator {
     pub fn new(
         datastore: Arc<DataStore>,
-        lease_timeout: TimeDelta,
+        cfg: DeliveryConfig,
         nexus_id: OmicronZoneUuid,
     ) -> Self {
         let client = reqwest::Client::builder()
@@ -126,7 +127,7 @@ impl WebhookDeliverator {
             .connect_timeout(Duration::from_secs(10))
             .build()
             .expect("failed to configure webhook deliverator client!");
-        Self { datastore, nexus_id, lease_timeout, client }
+        Self { datastore, nexus_id, cfg, client }
     }
 
     const MAX_CONCURRENT_RXS: NonZeroU32 = {
@@ -219,11 +220,7 @@ impl WebhookDeliverator {
         anyhow::ensure!(!secrets.is_empty(), "receiver has no secrets");
         let deliveries = self
             .datastore
-            .webhook_rx_delivery_list_ready(
-                &opctx,
-                &rx.id(),
-                self.lease_timeout,
-            )
+            .webhook_rx_delivery_list_ready(&opctx, &rx.id(), &self.cfg)
             .await
             .map_err(|e| {
                 anyhow::anyhow!("could not list ready deliveries: {e}")
@@ -246,7 +243,7 @@ impl WebhookDeliverator {
                     opctx,
                     &delivery,
                     &self.nexus_id,
-                    self.lease_timeout,
+                    self.cfg.lease_timeout,
                 )
                 .await
             {

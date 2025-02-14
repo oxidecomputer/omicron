@@ -37,6 +37,23 @@ pub enum DeliveryAttemptState {
     InProgress { nexus_id: OmicronZoneUuid, started: DateTime<Utc> },
 }
 
+#[derive(Debug, Clone)]
+pub struct DeliveryConfig {
+    pub first_retry_backoff: TimeDelta,
+    pub second_retry_backoff: TimeDelta,
+    pub lease_timeout: TimeDelta,
+}
+
+impl Default for DeliveryConfig {
+    fn default() -> Self {
+        Self {
+            lease_timeout: TimeDelta::seconds(60), // 1 minute
+            first_retry_backoff: TimeDelta::seconds(60), // 1 minute
+            second_retry_backoff: TimeDelta::seconds(60 * 5), // 5 minutes
+        }
+    }
+}
+
 impl DataStore {
     pub async fn webhook_delivery_create_batch(
         &self,
@@ -77,7 +94,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         rx_id: &WebhookReceiverUuid,
-        lease_timeout: TimeDelta,
+        cfg: &DeliveryConfig,
     ) -> ListResultVec<(WebhookDelivery, WebhookEventClass)> {
         let conn = self.pool_connection_authorized(opctx).await?;
         let now =
@@ -90,9 +107,26 @@ impl DataStore {
                     .is_not_null()
                     .and(
                         dsl::time_delivery_started
-                            .le(now.nullable() - lease_timeout),
+                            .le(now.nullable() - cfg.lease_timeout),
                     )),
-                // TODO(eliza): retry backoffs...?
+            )
+            .filter(
+                // Retry backoffs: one of the following must be true:
+                // - the delivery has not yet been attempted,
+                dsl::attempts
+                    .eq(0)
+                    // - this is the first retry and the previous attempt was at
+                    //   least `first_retry_backoff` ago, or
+                    .or(dsl::attempts.eq(1).and(
+                        dsl::time_delivery_started
+                            .le(now.nullable() - cfg.first_retry_backoff),
+                    ))
+                    // - this is the second retry, and the previous attempt was at
+                    //   least `second_retry_backoff` ago.
+                    .or(dsl::attempts.eq(2).and(
+                        dsl::time_delivery_started
+                            .le(now.nullable() - cfg.second_retry_backoff),
+                    )),
             )
             .order_by(dsl::time_created.asc())
             // Join with the `webhook_event` table to get the event class, which
@@ -172,7 +206,7 @@ impl DataStore {
         nexus_id: &OmicronZoneUuid,
         attempt: &WebhookDeliveryAttempt,
     ) -> Result<(), Error> {
-        const MAX_ATTEMPTS: u8 = 4;
+        const MAX_ATTEMPTS: u8 = 3;
         let conn = self.pool_connection_authorized(opctx).await?;
         diesel::insert_into(attempt_dsl::webhook_delivery_attempt)
             .values(attempt.clone())
@@ -191,7 +225,7 @@ impl DataStore {
         let (completed, new_nexus_id) = if succeeded || failed_permanently {
             // If the delivery has succeeded or failed permanently, set the
             // "time_completed" timestamp to mark it as finished. Also, leave
-            // the  delivering Nexus ID in place to maintain a record of who
+            // the delivering Nexus ID in place to maintain a record of who
             // finished the delivery.
             (Some(Utc::now()), Some(nexus_id.into_untyped_uuid()))
         } else {

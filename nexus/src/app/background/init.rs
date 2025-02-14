@@ -122,7 +122,7 @@ use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
 use super::tasks::tuf_artifact_replication;
 use super::tasks::v2p_mappings::V2PManager;
 use super::tasks::vpc_routes;
-use super::tasks::webhook_deliverator::WebhookDeliverator;
+use super::tasks::webhook_deliverator;
 use super::tasks::webhook_dispatcher::WebhookDispatcher;
 use super::Activator;
 use super::Driver;
@@ -920,23 +920,38 @@ impl BackgroundTasksInitializer {
         });
 
         driver.register({
-            let lease_timeout_secs =
-                config.webhook_deliverator.lease_timeout_secs;
-            let lease_timeout = chrono::TimeDelta::seconds(
-                i64::try_from(lease_timeout_secs).expect(
-                    "webhook_deliverator.lease_timeout_secs must be less \
-                     than i64::MAX",
+            let nexus_config::WebhookDeliveratorConfig {
+                lease_timeout_secs,
+                period_secs,
+                first_retry_backoff_secs,
+                second_retry_backoff_secs,
+            } = config.webhook_deliverator;
+            let cfg = webhook_deliverator::DeliveryConfig {
+                lease_timeout: chrono::TimeDelta::seconds(
+                    lease_timeout_secs.try_into().expect(
+                        "invalid webhook_deliverator.lease_timeout_secs",
+                    ),
                 ),
-            );
+                first_retry_backoff: chrono::TimeDelta::seconds(
+                    first_retry_backoff_secs.try_into().expect(
+                        "invalid webhook_deliverator.first_retry_backoff_secs",
+                    ),
+                ),
+                second_retry_backoff: chrono::TimeDelta::seconds(
+                    second_retry_backoff_secs.try_into().expect(
+                        "invalid webhook_deliverator.first_retry_backoff_secs",
+                    ),
+                ),
+            };
             TaskDefinition {
                 name: "webhook_deliverator",
                 description: "sends webhook delivery requests",
-                period: config.webhook_deliverator.period_secs,
-                task_impl: Box::new(WebhookDeliverator::new(
-                    datastore,
-                    lease_timeout,
-                    nexus_id,
-                )),
+                period: period_secs,
+                task_impl: Box::new(
+                    webhook_deliverator::WebhookDeliverator::new(
+                        datastore, cfg, nexus_id,
+                    ),
+                ),
                 opctx: opctx.child(BTreeMap::new()),
                 watchers: vec![],
                 activator: task_webhook_deliverator,

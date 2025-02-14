@@ -761,6 +761,22 @@ pub struct WebhookDeliveratorConfig {
     /// wait a long time.
     #[serde(default = "WebhookDeliveratorConfig::default_lease_timeout_secs")]
     pub lease_timeout_secs: u64,
+
+    /// backoff period for the first retry of a failed delivery attempt.
+    ///
+    /// this is tuneable to allow testing delivery retries without having to
+    /// wait a long time.
+    #[serde(default = "WebhookDeliveratorConfig::default_first_retry_backoff")]
+    pub first_retry_backoff_secs: u64,
+
+    /// backoff period for the seecond retry of a failed delivery attempt.
+    ///
+    /// this is tuneable to allow testing delivery retries without having to
+    /// wait a long time.
+    #[serde(
+        default = "WebhookDeliveratorConfig::default_second_retry_backoff"
+    )]
+    pub second_retry_backoff_secs: u64,
 }
 
 /// Configuration for a nexus server
@@ -837,6 +853,14 @@ impl std::fmt::Display for SchemeName {
 impl WebhookDeliveratorConfig {
     const fn default_lease_timeout_secs() -> u64 {
         60 // one minute
+    }
+
+    const fn default_first_retry_backoff() -> u64 {
+        60 // one minute
+    }
+
+    const fn default_second_retry_backoff() -> u64 {
+        60 * 5 // five minutes
     }
 }
 
@@ -1030,6 +1054,8 @@ mod test {
             webhook_dispatcher.period_secs = 42
             webhook_deliverator.period_secs = 43
             webhook_deliverator.lease_timeout_secs = 44
+            webhook_deliverator.first_retry_backoff_secs = 45
+            webhook_deliverator.second_retry_backoff_secs = 45
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1237,6 +1263,8 @@ mod test {
                         webhook_deliverator: WebhookDeliveratorConfig {
                             period_secs: Duration::from_secs(43),
                             lease_timeout_secs: 44,
+                            first_retry_backoff_secs: 45,
+                            second_retry_backoff_secs: 46,
                         }
                     },
                     default_region_allocation_strategy:
