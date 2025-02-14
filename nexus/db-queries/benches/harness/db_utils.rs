@@ -226,6 +226,27 @@ pub async fn create_affinity_group(
     .unwrap();
 }
 
+pub async fn delete_affinity_group(
+    opctx: &OpContext,
+    db: &DataStore,
+    group_name: &'static str,
+) {
+    let project = external::Name::from_str("project").unwrap();
+    let group = external::Name::from_str(group_name).unwrap();
+    let (.., authz_group) = LookupPath::new(opctx, db)
+        .project_name_owned(project.into())
+        .affinity_group_name_owned(group.into())
+        .lookup_for(authz::Action::Delete)
+        .await.unwrap();
+
+    db.affinity_group_delete(
+        &opctx,
+        &authz_group,
+    )
+    .await
+    .unwrap();
+}
+
 pub async fn create_anti_affinity_group(
     opctx: &OpContext,
     db: &DataStore,
@@ -247,6 +268,27 @@ pub async fn create_anti_affinity_group(
                 failure_domain: external::FailureDomain::Sled,
             },
         ),
+    )
+    .await
+    .unwrap();
+}
+
+pub async fn delete_anti_affinity_group(
+    opctx: &OpContext,
+    db: &DataStore,
+    group_name: &'static str,
+) {
+    let project = external::Name::from_str("project").unwrap();
+    let group = external::Name::from_str(group_name).unwrap();
+    let (.., authz_group) = LookupPath::new(opctx, db)
+        .project_name_owned(project.into())
+        .anti_affinity_group_name_owned(group.into())
+        .lookup_for(authz::Action::Delete)
+        .await.unwrap();
+
+    db.anti_affinity_group_delete(
+        &opctx,
+        &authz_group,
     )
     .await
     .unwrap();

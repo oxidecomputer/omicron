@@ -26,6 +26,8 @@ use harness::db_utils::create_anti_affinity_group;
 use harness::db_utils::create_anti_affinity_group_member;
 use harness::db_utils::create_instance_record;
 use harness::db_utils::create_reservation;
+use harness::db_utils::delete_affinity_group;
+use harness::db_utils::delete_anti_affinity_group;
 use harness::db_utils::delete_instance_record;
 use harness::db_utils::delete_reservation;
 use harness::db_utils::max_resource_request_count;
@@ -181,18 +183,10 @@ async fn reserve_vmms_and_return_average_duration(
     params: &TestParams,
     opctx: &OpContext,
     db: &DataStore,
-    authz_project: &authz::Project,
-    task_num: usize,
+    instance_ids: &Vec<InstanceUuid>,
     barrier: &Barrier,
 ) -> Duration {
-    let instance_ids = create_instances_with_groups(
-        params,
-        opctx,
-        db,
-        authz_project,
-        task_num,
-    )
-    .await;
+    assert_eq!(instance_ids.len(), params.vmms, "Not enough instances to provision");
     let mut vmm_ids = Vec::with_capacity(params.vmms);
 
     // Wait for all tasks to start at roughly the same time
@@ -233,9 +227,6 @@ async fn reserve_vmms_and_return_average_duration(
             .await
             .expect("Failed to delete vmm");
     }
-    // Additionally, destroy all our instance records (and their affinity group memberships)
-    destroy_instances_with_groups(opctx, db, instance_ids).await;
-
     duration
 }
 
@@ -278,6 +269,40 @@ async fn create_test_groups(
     }
 }
 
+async fn delete_test_groups(
+    opctx: &OpContext,
+    db: &DataStore,
+    params: &TestParams,
+) {
+    let all_groups: HashSet<_> = params
+        .group_pattern
+        .group_pattern
+        .iter()
+        .map(|groups| groups.belongs_to.iter())
+        .flatten()
+        .collect();
+    for group in all_groups {
+        match group.flavor {
+            GroupType::Affinity => {
+                delete_affinity_group(
+                    opctx,
+                    db,
+                    group.name,
+                )
+                .await;
+            }
+            GroupType::AntiAffinity => {
+                delete_anti_affinity_group(
+                    opctx,
+                    db,
+                    group.name,
+                )
+                .await;
+            }
+        }
+    }
+}
+
 async fn bench_reservation(
     opctx: Arc<OpContext>,
     db: Arc<DataStore>,
@@ -287,7 +312,24 @@ async fn bench_reservation(
 ) -> Duration {
     let mut total_duration = Duration::ZERO;
 
+    // TODO: Can we avoid passing "authz_project" everywhere, and just do
+    // lookups in db_utils?
+
+    // Create all groups and instances belonging to those groups before
+    // we actually do any iterations. This is a slight optimization to
+    // make the benchmarks - focused on VMM reservation time - a little faster.
     create_test_groups(&opctx, &db, &authz_project, &params).await;
+    let mut task_instances = vec![];
+    for task_num in 0..params.tasks {
+        task_instances.push(create_instances_with_groups(
+            &params,
+            &opctx,
+            &db,
+            &authz_project,
+            task_num,
+        )
+        .await);
+    }
 
     // Each iteration is an "attempt" at the test.
     for _ in 0..iterations {
@@ -304,17 +346,16 @@ async fn bench_reservation(
             set.spawn({
                 let opctx = opctx.clone();
                 let db = db.clone();
-                let authz_project = authz_project.clone();
                 let barrier = barrier.clone();
                 let params = params.clone();
+                let instances = task_instances[task_num].clone();
 
                 async move {
                     reserve_vmms_and_return_average_duration(
                         &params,
                         &opctx,
                         &db,
-                        &authz_project,
-                        task_num,
+                        &instances,
                         &barrier,
                     )
                     .await
@@ -354,6 +395,12 @@ async fn bench_reservation(
         // the "100 vmm" case take longer than the "1 vmm" case. The same goes for tasks:
         total_duration += average_duration(all_tasks_duration, params.tasks);
     }
+    // Destroy all our instance records (and their affinity group memberships)
+    for instance_ids in task_instances {
+        destroy_instances_with_groups(&opctx, &db, instance_ids).await;
+    }
+
+    delete_test_groups(&opctx, &db, &params).await;
     total_duration
 }
 
@@ -415,6 +462,9 @@ fn sled_reservation_benchmark(c: &mut Criterion) {
                     let name =
                         format!("{sleds}-sleds-{tasks}-tasks-{vmms}-vmms");
 
+                    // TODO: This can also fail depending on the group requirements,
+                    // if we're using policy = fail. Maybe construct "TestParams"
+                    // differently to let each test decide this.
                     if tasks * vmms > max_resource_request_count(sleds) {
                         eprintln!(
                             "{name} would request too many VMMs; skipping..."
