@@ -76,8 +76,7 @@ impl DataStore {
     /// Insert the current version of the policy in the database
     ///
     /// Only succeeds if the prior version is the latest version currently
-    /// in the `oximeter_read_policy` table. If there are no versions currently
-    /// in the table, then the current policy must be at version 1.
+    /// in the `oximeter_read_policy` table.
     pub async fn oximeter_read_policy_insert_latest_version(
         &self,
         opctx: &OpContext,
@@ -92,13 +91,9 @@ impl DataStore {
             .authorize(authz::Action::Modify, &authz::BLUEPRINT_CONFIG)
             .await?;
 
-        let num_inserted = if policy.version == 1 {
-            self.oximeter_read_policy_insert_first_policy(opctx, &policy)
-                .await?
-        } else {
-            self.oximeter_read_policy_insert_next_policy(opctx, &policy).await?
-        };
-
+        let num_inserted = self
+            .oximeter_read_policy_insert_next_policy(opctx, &policy)
+            .await?;
         match num_inserted {
             0 => Err(Error::invalid_request(format!(
                 "policy version {} is not the most recent",
@@ -116,13 +111,13 @@ impl DataStore {
     /// Only succeeds if the prior version is the latest version currently
     /// in the `oximeter_read_policy` table.
     ///
-    /// Panics if `policy.version <= 1`;
+    /// Panics if `policy.version <= 0`;
     async fn oximeter_read_policy_insert_next_policy(
         &self,
         opctx: &OpContext,
         policy: &OximeterReadPolicy,
     ) -> Result<usize, Error> {
-        assert!(policy.version > 1);
+        assert!(policy.version > 0);
         let prev_version = policy.version - 1;
 
         sql_query(
@@ -141,30 +136,6 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
-
-    /// Insert the first clickhouse policy in the database at version 1.
-    ///
-    /// Only insert this policy if no other policy exists yet.
-    ///
-    /// Return the number of inserted rows or an error.
-    async fn oximeter_read_policy_insert_first_policy(
-        &self,
-        opctx: &OpContext,
-        policy: &OximeterReadPolicy,
-    ) -> Result<usize, Error> {
-        sql_query(
-            r"INSERT INTO oximeter_read_policy
-                  (version, oximeter_read_mode, time_created)
-                 SELECT $1, $2, $3
-                 WHERE NOT EXISTS (SELECT * FROM oximeter_read_policy)",
-        )
-        .bind::<sql_types::BigInt, SqlU32>(policy.version.into())
-        .bind::<OximeterReadModeEnum, DbOximeterReadMode>((&policy.mode).into())
-        .bind::<sql_types::Timestamptz, _>(policy.time_created)
-        .execute_async(&*self.pool_connection_authorized(opctx).await?)
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
 }
 
 #[cfg(test)]
@@ -182,13 +153,15 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // Listing an empty table should return an empty vec
-
-        assert!(datastore
-            .oximeter_read_policy_list(opctx, &DataPageParams::max_page())
-            .await
-            .unwrap()
-            .is_empty());
+        // Listing the table should return a single initial entry
+        assert!(
+            datastore
+                .oximeter_read_policy_list(opctx, &DataPageParams::max_page())
+                .await
+                .unwrap()
+                .len()
+                == 1
+        );
 
         // Fail to insert a policy with version 0
         let mut policy = OximeterReadPolicy {
@@ -256,8 +229,8 @@ mod tests {
             .await
             .unwrap();
 
-        for i in 1..=4 {
-            let policy = &history[i - 1];
+        for i in 0..=4 {
+            let policy = &history[i];
             assert_eq!(policy.version, i as u32);
             if i != 4 {
                 assert!(matches!(policy.mode, OximeterReadMode::SingleNode));
