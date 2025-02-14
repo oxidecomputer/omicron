@@ -17,23 +17,25 @@ use anyhow::{anyhow, Context};
 use camino::Utf8Path;
 use std::{collections::BTreeMap, ops::Deref};
 
+pub struct BlessedApiSpecFile(ApiSpecFile);
+NewtypeDebug! { () pub struct BlessedApiSpecFile(ApiSpecFile); }
+NewtypeDeref! { () pub struct BlessedApiSpecFile(ApiSpecFile); }
+NewtypeDerefMut! { () pub struct BlessedApiSpecFile(ApiSpecFile); }
+NewtypeFrom! { () pub struct BlessedApiSpecFile(ApiSpecFile); }
+
+impl AsRawFiles for BlessedApiSpecFile {
+    fn as_raw_files<'a>(
+        &'a self,
+    ) -> Box<dyn Iterator<Item = &'a ApiSpecFile> + 'a> {
+        Box::new(std::iter::once(self.deref()))
+    }
+}
+
 /// Container for "blessed" OpenAPI spec files, found in Git
 ///
 /// Most validation is not done at this point.
 /// XXX-dap be more specific about what has and has not been validated at this
 /// point.
-// XXX-dap actually, maybe the thing to do here is to have one type with a
-// sentinel generic type paramter, like SpecFileContainer<Local>.
-// XXX-dap alternatively: maybe the thing to do has have ApiSpecFilesBuilder
-// accept a config option which is either whether to allow more than one, or to
-// have it be parametrized across a "thing" that can accept a found spec (which
-// would either be Vec<X> or ... X?  That way, it would produce an error during
-// loading for BlessedFiles and GeneratedFiles if we found more than one
-// matching file *and* these structures' types could reflect that there's
-// exactly one.
-// XXX-dap however, we should probably decide on the question of whether to
-// include checksums in local file names first because if not, this will all get
-// a lot simpler and they *can* use the same type as LocalFiles
 #[derive(Debug)]
 pub struct BlessedFiles {
     pub spec_files: BTreeMap<ApiIdent, ApiFiles<BlessedApiSpecFile>>,
@@ -41,28 +43,30 @@ pub struct BlessedFiles {
     pub warnings: Vec<anyhow::Error>,
 }
 
-pub struct BlessedApiSpecFile(ApiSpecFile);
-NewtypeDebug! { () pub struct BlessedApiSpecFile(ApiSpecFile); }
-NewtypeDeref! { () pub struct BlessedApiSpecFile(ApiSpecFile); }
-NewtypeDerefMut! { () pub struct BlessedApiSpecFile(ApiSpecFile); }
-NewtypeFrom! { () pub struct BlessedApiSpecFile(ApiSpecFile); }
-
-impl TryFrom<Vec<ApiSpecFile>> for BlessedApiSpecFile {
+impl<'a> TryFrom<ApiSpecFilesBuilder<'a>> for BlessedFiles {
     type Error = anyhow::Error;
 
-    fn try_from(value: Vec<ApiSpecFile>) -> Result<Self, Self::Error> {
-        Ok(BlessedApiSpecFile(
-            iter_only(value.into_iter())
-                .context("list of blessed OpenAPI documents for an API")?,
-        ))
-    }
-}
-
-impl AsRawFiles for BlessedApiSpecFile {
-    fn as_raw_files<'a>(
-        &'a self,
-    ) -> Box<dyn Iterator<Item = &'a ApiSpecFile> + 'a> {
-        Box::new(std::iter::once(self.deref()))
+    fn try_from(api_files: ApiSpecFilesBuilder<'a>) -> anyhow::Result<Self> {
+        let (raw_spec_files, errors, warnings) = api_files.into_parts();
+        let spec_files = raw_spec_files
+            .into_iter()
+            .map(|(v, list)| {
+                let file = BlessedApiSpecFile::from(
+                        iter_only(list.into_iter()).context(
+                            "list of blessed OpenAPI documents for an API",
+                        )?,
+                    );
+                Ok((
+                    v,
+                    BlessedApiSpecFile::from(
+                        iter_only(list.into_iter()).context(
+                            "list of blessed OpenAPI documents for an API",
+                        )?,
+                    ),
+                ))
+            })
+            .collect::<Result<BTreeMap<_, _>, anyhow::Error>>()?;
+        Ok(BlessedFiles { spec_files, errors, warnings })
     }
 }
 
@@ -127,14 +131,5 @@ impl BlessedFiles {
         }
 
         BlessedFiles::try_from(api_files)
-    }
-}
-
-impl<'a> TryFrom<ApiSpecFilesBuilder<'a>> for BlessedFiles {
-    type Error = anyhow::Error;
-
-    fn try_from(api_files: ApiSpecFilesBuilder<'a>) -> anyhow::Result<Self> {
-        let (spec_files, errors, warnings) = api_files.into_parts()?;
-        Ok(BlessedFiles { spec_files, errors, warnings })
     }
 }

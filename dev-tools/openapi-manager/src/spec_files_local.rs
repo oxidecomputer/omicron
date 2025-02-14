@@ -15,41 +15,6 @@ use anyhow::{anyhow, Context};
 use camino::Utf8Path;
 use std::{collections::BTreeMap, ops::Deref};
 
-/// Container for OpenAPI spec files found in the local filesystem
-///
-/// Most validation is not done at this point.
-// XXX-dap see comments on BlessedFiles
-#[derive(Debug)]
-pub struct LocalFiles {
-    pub spec_files: BTreeMap<ApiIdent, ApiFiles<Vec<LocalApiSpecFile>>>,
-    pub errors: Vec<anyhow::Error>,
-    pub warnings: Vec<anyhow::Error>,
-}
-
-impl LocalFiles {
-    // XXX-dap goofy that this can return a thing with errors or an error
-    // itself.  but there are different layers of error here:
-    // - error traversing the directory (that's what this returned error means)
-    // - error with individual items found
-    // - things that were skipped, etc.
-    pub fn load_from_directory(
-        dir: &Utf8Path,
-        apis: &ManagedApis,
-    ) -> anyhow::Result<LocalFiles> {
-        let api_files = walk_local_directory(dir, apis, false)?;
-        Self::try_from(api_files)
-    }
-}
-
-impl<'a> TryFrom<ApiSpecFilesBuilder<'a>> for LocalFiles {
-    type Error = anyhow::Error;
-
-    fn try_from(api_files: ApiSpecFilesBuilder) -> anyhow::Result<Self> {
-        let (spec_files, errors, warnings) = api_files.into_parts()?;
-        Ok(LocalFiles { spec_files, errors, warnings })
-    }
-}
-
 pub struct LocalApiSpecFile(ApiSpecFile);
 NewtypeDebug! { () pub struct LocalApiSpecFile(ApiSpecFile); }
 NewtypeDeref! { () pub struct LocalApiSpecFile(ApiSpecFile); }
@@ -64,13 +29,44 @@ impl AsRawFiles for Vec<LocalApiSpecFile> {
     }
 }
 
-// impl TryFrom<Vec<ApiSpecFile>> for Vec<LocalApiSpecFile> {
-//     type Error = anyhow::Error;
-//
-//     fn try_from(value: Vec<ApiSpecFile>) -> Result<Self, Self::Error> {
-//         Ok(value.into_iter().map(LocalApiSpecFile::from).collect())
-//     }
-// }
+/// Container for OpenAPI spec files found in the local filesystem
+///
+/// Most validation is not done at this point.
+// XXX-dap see comments on BlessedFiles
+#[derive(Debug)]
+pub struct LocalFiles {
+    pub spec_files: BTreeMap<ApiIdent, ApiFiles<Vec<LocalApiSpecFile>>>,
+    pub errors: Vec<anyhow::Error>,
+    pub warnings: Vec<anyhow::Error>,
+}
+
+impl<'a> From<ApiSpecFilesBuilder<'a>> for LocalFiles {
+    fn from(api_files: ApiSpecFilesBuilder) -> Self {
+        let (raw_spec_files, errors, warnings) = api_files.into_parts();
+        let spec_files = raw_spec_files
+            .into_iter()
+            .map(|v, list| {
+                (v, list.into_iter().map(LocalApiSpecFile::from).collect())
+            })
+            .collect();
+        LocalFiles { spec_files, errors, warnings }
+    }
+}
+
+impl LocalFiles {
+    // XXX-dap goofy that this can return a thing with errors or an error
+    // itself.  but there are different layers of error here:
+    // - error traversing the directory (that's what this returned error means)
+    // - error with individual items found
+    // - things that were skipped, etc.
+    pub fn load_from_directory(
+        dir: &Utf8Path,
+        apis: &ManagedApis,
+    ) -> anyhow::Result<LocalFiles> {
+        let api_files = walk_local_directory(dir, apis, false)?;
+        Ok(Self::from(api_files))
+    }
+}
 
 pub fn walk_local_directory<'a>(
     dir: &'_ Utf8Path,

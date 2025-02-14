@@ -504,25 +504,17 @@ impl<'a> ApiSpecFilesBuilder<'a> {
         }
     }
 
-    pub fn into_parts<
-        T: Debug + TryFrom<Vec<ApiSpecFile>, Error = anyhow::Error> + AsRawFiles,
-    >(
+    pub fn into_parts(
         self,
-    ) -> anyhow::Result<(
-        BTreeMap<ApiIdent, ApiFiles<T>>,
+    ) -> (
+        BTreeMap<ApiIdent, ApiFiles<Vec<ApiSpecFile>>>,
         Vec<anyhow::Error>,
         Vec<anyhow::Error>,
-    )> {
+    ) {
         let errors = self.errors;
         let warnings = self.warnings;
-        // This mess is just mapping the items in the inner BTreeMap with the
-        // caller's type T.
-        let map = self
-            .spec_files
-            .into_iter()
-            .map(|(api_ident, api_files)| Ok((api_ident, api_files.convert()?)))
-            .collect::<Result<BTreeMap<_, _>, anyhow::Error>>()?;
-        Ok((map, errors, warnings))
+        let map = self.spec_files;
+        (map, errors, warnings)
     }
 }
 
@@ -535,20 +527,6 @@ pub struct ApiFiles<T: AsRawFiles> {
 impl<T: AsRawFiles> ApiFiles<T> {
     fn new() -> ApiFiles<T> {
         ApiFiles { spec_files: BTreeMap::new(), latest_link: None }
-    }
-
-    fn convert<U>(self) -> anyhow::Result<ApiFiles<U>>
-    where
-        U: Debug + TryFrom<T, Error = anyhow::Error> + AsRawFiles,
-    {
-        Ok(ApiFiles {
-            spec_files: self
-                .spec_files
-                .into_iter()
-                .map(|(v, files)| Ok((v, U::try_from(files)?)))
-                .collect::<Result<_, _>>()?,
-            latest_link: self.latest_link,
-        })
     }
 
     pub fn versions(&self) -> &BTreeMap<semver::Version, T> {
