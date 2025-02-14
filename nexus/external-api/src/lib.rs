@@ -1401,7 +1401,7 @@ pub trait NexusExternalApi {
     async fn networking_switch_port_settings_create(
         rqctx: RequestContext<Self::Context>,
         new_settings: TypedBody<params::SwitchPortSettingsCreate>,
-    ) -> Result<HttpResponseCreated<SwitchPortSettingsView>, HttpError>;
+    ) -> Result<HttpResponseCreated<SwitchPortSettingsWithChecksum>, HttpError>;
 
     /// Delete switch port settings
     #[endpoint {
@@ -1436,7 +1436,7 @@ pub trait NexusExternalApi {
     async fn networking_switch_port_settings_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SwitchPortSettingsInfoSelector>,
-    ) -> Result<HttpResponseOk<SwitchPortSettingsView>, HttpError>;
+    ) -> Result<HttpResponseOk<SwitchPortSettingsWithChecksum>, HttpError>;
 
     /// List switch ports
     #[endpoint {

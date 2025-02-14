@@ -8322,7 +8322,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SwitchPortSettingsView"
+                  "$ref": "#/components/schemas/SwitchPortSettingsWithChecksum"
                 }
               }
             }
@@ -8388,7 +8388,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SwitchPortSettingsView"
+                  "$ref": "#/components/schemas/SwitchPortSettingsWithChecksum"
                 }
               }
             }
@@ -21051,16 +21051,42 @@
         "type": "object",
         "properties": {
           "port_settings": {
-            "description": "A name or id to use when applying switch port settings.",
+            "description": "Name or ID of the desired configuration",
             "allOf": [
               {
                 "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
+          "precondition": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchPortApplySettingsChecksums"
               }
             ]
           }
         },
         "required": [
           "port_settings"
+        ]
+      },
+      "SwitchPortApplySettingsChecksums": {
+        "description": "Parameters for applying a precondition to SwitchPortApplySettings",
+        "type": "object",
+        "properties": {
+          "current_settings_checksum": {
+            "nullable": true,
+            "description": "md5 checksum of current SwitchPortApplySettings body This field protects against concurrent modification of `SwitchPortApplySettings` Set to `None` if you expect there to not be any settings currently applied.",
+            "type": "string"
+          },
+          "new_settings_checksum": {
+            "description": "md5 checksum of the desired configuration body This field ensures that the port settings you are applying have not been modified since you last viewed them",
+            "type": "string"
+          }
+        },
+        "required": [
+          "new_settings_checksum"
         ]
       },
       "SwitchPortConfig": {
@@ -21375,6 +21401,11 @@
           "port_config": {
             "$ref": "#/components/schemas/SwitchPortConfigCreate"
           },
+          "precondition": {
+            "nullable": true,
+            "description": "Optional checksum to provide for detecting conflicting concurrent updates",
+            "type": "string"
+          },
           "routes": {
             "description": "Routes indexed by interface name.",
             "type": "object",
@@ -21537,6 +21568,27 @@
           "settings",
           "tx_eq",
           "vlan_interfaces"
+        ]
+      },
+      "SwitchPortSettingsWithChecksum": {
+        "type": "object",
+        "properties": {
+          "checksum": {
+            "description": "Checksum of value to use for concurrency control",
+            "type": "string"
+          },
+          "value": {
+            "description": "Value of response",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchPortSettingsView"
+              }
+            ]
+          }
+        },
+        "required": [
+          "checksum",
+          "value"
         ]
       },
       "SwitchResultsPage": {

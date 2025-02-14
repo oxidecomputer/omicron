@@ -335,6 +335,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     // apply port settings
 
     let apply_settings = SwitchPortApplySettings {
+        precondition: None,
         port_settings: NameOrId::Name("portofino".parse().unwrap()),
     };
 

@@ -2392,6 +2392,15 @@ pub struct SwitchPortSettings {
     pub identity: IdentityMetadata,
 }
 
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct SwitchPortSettingsWithChecksum {
+    /// Value of response
+    pub value: SwitchPortSettingsView,
+
+    /// Checksum of value to use for concurrency control
+    pub checksum: String,
+}
+
 /// This structure contains all port settings information in one place. It's a
 /// convenience data structure for getting a complete view of a particular
 /// port's settings.
