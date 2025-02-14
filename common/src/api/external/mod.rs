@@ -17,7 +17,7 @@ use anyhow::Context;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
-use daft::{leaf, Diffable};
+use daft::Diffable;
 use dropshot::HttpError;
 pub use dropshot::PaginationOrder;
 pub use error::*;
@@ -758,10 +758,10 @@ impl From<ByteCount> for i64 {
     PartialEq,
     PartialOrd,
     Serialize,
+    Diffable,
 )]
+#[daft(leaf)]
 pub struct Generation(u64);
-
-leaf!(Generation);
 
 impl Generation {
     // `as` is a little distasteful because it allows lossy conversion, but we
@@ -1981,10 +1981,10 @@ impl JsonSchema for L4PortRange {
     Ord,
     SerializeDisplay,
     Hash,
+    Diffable,
 )]
+#[daft(leaf)]
 pub struct MacAddr(pub macaddr::MacAddr6);
-
-leaf!(MacAddr);
 
 impl MacAddr {
     // Guest MAC addresses begin with the Oxide OUI A8:40:25. Further, guest
