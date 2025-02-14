@@ -308,6 +308,23 @@ impl DataStore {
         }
     }
 
+    pub async fn find_snapshot_by_volume_id(
+        &self,
+        opctx: &OpContext,
+        volume_id: VolumeUuid,
+    ) -> LookupResult<Option<Snapshot>> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use db::schema::snapshot::dsl;
+        dsl::snapshot
+            .filter(dsl::volume_id.eq(to_db_typed_uuid(volume_id)))
+            .select(Snapshot::as_select())
+            .first_async(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     pub async fn find_snapshot_by_destination_volume_id(
         &self,
         opctx: &OpContext,
