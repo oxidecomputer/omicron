@@ -7566,6 +7566,7 @@ dependencies = [
  "memchr",
  "mio",
  "newtype-uuid",
+ "nix 0.29.0",
  "nom",
  "num-bigint-dig",
  "num-integer",
