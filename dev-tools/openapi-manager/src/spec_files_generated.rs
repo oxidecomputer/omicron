@@ -6,12 +6,12 @@
 
 use crate::{
     apis::{ApiIdent, ManagedApis},
-    iter_only::iter_only,
     spec_files_generic::{
-        ApiFiles, ApiSpecFile, ApiSpecFileName, ApiSpecFilesBuilder, AsRawFiles,
+        ApiFiles, ApiLoad, ApiSpecFile, ApiSpecFileName, ApiSpecFilesBuilder,
+        AsRawFiles,
     },
 };
-use anyhow::Context;
+use anyhow::bail;
 use std::{collections::BTreeMap, ops::Deref};
 
 pub struct GeneratedApiSpecFile(ApiSpecFile);
@@ -19,6 +19,24 @@ NewtypeDebug! { () pub struct GeneratedApiSpecFile(ApiSpecFile); }
 NewtypeDeref! { () pub struct GeneratedApiSpecFile(ApiSpecFile); }
 NewtypeDerefMut! { () pub struct GeneratedApiSpecFile(ApiSpecFile); }
 NewtypeFrom! { () pub struct GeneratedApiSpecFile(ApiSpecFile); }
+
+impl ApiLoad for GeneratedApiSpecFile {
+    const MISCONFIGURATIONS_ALLOWED: bool = false;
+
+    fn make_item(raw: ApiSpecFile) -> Self {
+        GeneratedApiSpecFile(raw)
+    }
+
+    fn try_extend(&mut self, item: ApiSpecFile) -> anyhow::Result<()> {
+        // This should be impossible.
+        bail!(
+            "found more than one generated OpenAPI document for a given \
+             API version: at least {} and {}",
+            self.spec_file_name(),
+            item.spec_file_name()
+        );
+    }
+}
 
 impl AsRawFiles for GeneratedApiSpecFile {
     fn as_raw_files<'a>(
@@ -39,30 +57,19 @@ pub struct GeneratedFiles {
     pub warnings: Vec<anyhow::Error>,
 }
 
-impl<'a> TryFrom<ApiSpecFilesBuilder<'a>> for GeneratedFiles {
-    type Error = anyhow::Error;
-    fn try_from(api_files: ApiSpecFilesBuilder<'a>) -> anyhow::Result<Self> {
-        let (raw_spec_files, errors, warnings) = api_files.into_parts()?;
-        let spec_files = raw_spec_files
-            .into_iter()
-            .map(|(v, list)| {
-                Ok((
-                    v,
-                    GeneratedApiSpecFile::from(
-                        iter_only(list.into_iter()).context(
-                            "list of generated OpenAPI documents for an API",
-                        )?,
-                    ),
-                ))
-            })
-            .collect::<Result<BTreeMap<_, _>, anyhow::Error>>()?;
-        Ok(GeneratedFiles { spec_files, errors, warnings })
+impl<'a> From<ApiSpecFilesBuilder<'a, GeneratedApiSpecFile>>
+    for GeneratedFiles
+{
+    fn from(api_files: ApiSpecFilesBuilder<'a, GeneratedApiSpecFile>) -> Self {
+        let (spec_files, errors, warnings) = api_files.into_parts();
+        GeneratedFiles { spec_files, errors, warnings }
     }
 }
 
 impl GeneratedFiles {
     pub fn generate(apis: &ManagedApis) -> anyhow::Result<GeneratedFiles> {
-        let mut api_files = ApiSpecFilesBuilder::new(apis);
+        let mut api_files: ApiSpecFilesBuilder<GeneratedApiSpecFile> =
+            ApiSpecFilesBuilder::new(apis);
 
         for api in apis.iter_apis() {
             if api.is_lockstep() {
@@ -91,11 +98,10 @@ impl GeneratedFiles {
                 api_files.load_latest_link(
                     api.ident(),
                     latest.expect("at least one version of supported API"),
-                    false,
                 );
             }
         }
 
-        Self::try_from(api_files)
+        Ok(Self::from(api_files))
     }
 }

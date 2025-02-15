@@ -10,6 +10,7 @@ use anyhow::{anyhow, bail, Context};
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
 use openapiv3::OpenAPI;
+use std::collections::btree_map::Entry;
 use std::fmt::{Debug, Display};
 use std::{collections::BTreeMap, ops::Deref};
 use thiserror::Error;
@@ -291,15 +292,15 @@ impl ApiSpecFile {
     }
 }
 
-pub struct ApiSpecFilesBuilder<'a> {
+pub struct ApiSpecFilesBuilder<'a, T> {
     apis: &'a ManagedApis,
-    spec_files: BTreeMap<ApiIdent, ApiFiles<Vec<ApiSpecFile>>>,
+    spec_files: BTreeMap<ApiIdent, ApiFiles<T>>,
     errors: Vec<anyhow::Error>,
     warnings: Vec<anyhow::Error>,
 }
 
-impl<'a> ApiSpecFilesBuilder<'a> {
-    pub fn new(apis: &'a ManagedApis) -> ApiSpecFilesBuilder<'a> {
+impl<'a, T: ApiLoad + AsRawFiles> ApiSpecFilesBuilder<'a, T> {
+    pub fn new(apis: &'a ManagedApis) -> ApiSpecFilesBuilder<'a, T> {
         ApiSpecFilesBuilder {
             apis,
             spec_files: BTreeMap::new(),
@@ -319,13 +320,12 @@ impl<'a> ApiSpecFilesBuilder<'a> {
     pub fn lockstep_file_name(
         &mut self,
         basename: &str,
-        misconfigurations_okay: bool,
     ) -> Option<ApiSpecFileName> {
         match ApiSpecFileName::new_lockstep(&self.apis, basename) {
             Err(
                 warning @ (BadLockstepFileName::NoSuchApi
                 | BadLockstepFileName::NotLockstep),
-            ) if misconfigurations_okay => {
+            ) if T::MISCONFIGURATIONS_ALLOWED => {
                 // When we're looking at the blessed files, the caller provides
                 // `misconfigurations_okay: true` and we treat these as
                 // warnings because the configuration for an API may have
@@ -358,11 +358,7 @@ impl<'a> ApiSpecFilesBuilder<'a> {
         }
     }
 
-    pub fn versioned_directory(
-        &mut self,
-        basename: &str,
-        misconfigurations_okay: bool,
-    ) -> Option<ApiIdent> {
+    pub fn versioned_directory(&mut self, basename: &str) -> Option<ApiIdent> {
         let ident = ApiIdent::from(basename.to_owned());
         match self.apis.api(&ident) {
             Some(api) if api.is_versioned() => Some(ident),
@@ -372,7 +368,7 @@ impl<'a> ApiSpecFilesBuilder<'a> {
                     "skipping directory for lockstep API: {:?}",
                     basename,
                 );
-                if misconfigurations_okay {
+                if T::MISCONFIGURATIONS_ALLOWED {
                     self.load_warning(error);
                 } else {
                     self.load_error(error);
@@ -384,7 +380,7 @@ impl<'a> ApiSpecFilesBuilder<'a> {
                     "skipping directory for unknown API: {:?}",
                     basename,
                 );
-                if misconfigurations_okay {
+                if T::MISCONFIGURATIONS_ALLOWED {
                     self.load_warning(error);
                 } else {
                     self.load_error(error);
@@ -398,14 +394,13 @@ impl<'a> ApiSpecFilesBuilder<'a> {
         &mut self,
         ident: &ApiIdent,
         basename: &str,
-        misconfigurations_okay: bool,
     ) -> Option<ApiSpecFileName> {
         match ApiSpecFileName::new_versioned(&self.apis, ident, basename) {
             Ok(file_name) => Some(file_name),
             Err(
                 warning @ (BadVersionedFileName::NoSuchApi
                 | BadVersionedFileName::NotVersioned),
-            ) if misconfigurations_okay => {
+            ) if T::MISCONFIGURATIONS_ALLOWED => {
                 // See lockstep_file_name().
                 self.load_warning(
                     anyhow!(warning)
@@ -444,13 +439,24 @@ impl<'a> ApiSpecFilesBuilder<'a> {
             Ok(file) => {
                 let ident = file.spec_file_name().ident();
                 let api_version = file.version();
-                self.spec_files
+                let entry = self
+                    .spec_files
                     .entry(ident.clone())
                     .or_insert_with(ApiFiles::new)
                     .spec_files
-                    .entry(api_version.clone())
-                    .or_insert_with(Vec::new)
-                    .push(file);
+                    .entry(api_version.clone());
+
+                match entry {
+                    Entry::Vacant(vacant_entry) => {
+                        vacant_entry.insert(T::make_item(file));
+                    }
+                    Entry::Occupied(mut occupied_entry) => {
+                        match occupied_entry.get_mut().try_extend(file) {
+                            Ok(()) => (),
+                            Err(error) => self.load_error(error),
+                        };
+                    }
+                };
             }
             Err(error) => {
                 self.errors.push(error);
@@ -462,12 +468,11 @@ impl<'a> ApiSpecFilesBuilder<'a> {
         &mut self,
         ident: &ApiIdent,
         links_to: ApiSpecFileName,
-        misconfigurations_okay: bool,
     ) {
         let Some(api) = self.apis.api(ident) else {
             let error =
                 anyhow!("link for unknown API {:?} ({})", ident, links_to);
-            if misconfigurations_okay {
+            if T::MISCONFIGURATIONS_ALLOWED {
                 self.load_warning(error);
             } else {
                 self.load_error(error);
@@ -482,7 +487,7 @@ impl<'a> ApiSpecFilesBuilder<'a> {
                 ident,
                 links_to
             );
-            if misconfigurations_okay {
+            if T::MISCONFIGURATIONS_ALLOWED {
                 self.load_warning(error);
             } else {
                 self.load_error(error);
@@ -506,11 +511,8 @@ impl<'a> ApiSpecFilesBuilder<'a> {
 
     pub fn into_parts(
         self,
-    ) -> (
-        BTreeMap<ApiIdent, ApiFiles<Vec<ApiSpecFile>>>,
-        Vec<anyhow::Error>,
-        Vec<anyhow::Error>,
-    ) {
+    ) -> (BTreeMap<ApiIdent, ApiFiles<T>>, Vec<anyhow::Error>, Vec<anyhow::Error>)
+    {
         let errors = self.errors;
         let warnings = self.warnings;
         let map = self.spec_files;
@@ -519,7 +521,7 @@ impl<'a> ApiSpecFilesBuilder<'a> {
 }
 
 #[derive(Debug)]
-pub struct ApiFiles<T: AsRawFiles> {
+pub struct ApiFiles<T> {
     spec_files: BTreeMap<semver::Version, T>,
     latest_link: Option<ApiSpecFileName>,
 }
@@ -531,15 +533,6 @@ impl<T: AsRawFiles> ApiFiles<T> {
 
     pub fn versions(&self) -> &BTreeMap<semver::Version, T> {
         &self.spec_files
-    }
-
-    pub fn raw_files_map(
-        &self,
-    ) -> BTreeMap<semver::Version, Vec<&'_ ApiSpecFile>> {
-        self.spec_files
-            .iter()
-            .map(|(k, v)| (k.clone(), v.as_raw_files().collect()))
-            .collect()
     }
 
     pub fn latest_link(&self) -> Option<&ApiSpecFileName> {
@@ -559,6 +552,13 @@ impl AsRawFiles for Vec<ApiSpecFile> {
     ) -> Box<dyn Iterator<Item = &'a ApiSpecFile> + 'a> {
         Box::new(self.iter())
     }
+}
+
+pub trait ApiLoad {
+    const MISCONFIGURATIONS_ALLOWED: bool;
+
+    fn make_item(raw: ApiSpecFile) -> Self;
+    fn try_extend(&mut self, raw: ApiSpecFile) -> anyhow::Result<()>;
 }
 
 fn hash_contents(contents: &[u8]) -> String {

@@ -8,7 +8,7 @@
 use crate::{
     apis::{ApiIdent, ManagedApis},
     spec_files_generic::{
-        ApiFiles, ApiSpecFile, ApiSpecFilesBuilder, AsRawFiles,
+        ApiFiles, ApiLoad, ApiSpecFile, ApiSpecFilesBuilder, AsRawFiles,
     },
 };
 use anyhow::{anyhow, Context};
@@ -20,6 +20,19 @@ NewtypeDebug! { () pub struct LocalApiSpecFile(ApiSpecFile); }
 NewtypeDeref! { () pub struct LocalApiSpecFile(ApiSpecFile); }
 NewtypeDerefMut! { () pub struct LocalApiSpecFile(ApiSpecFile); }
 NewtypeFrom! { () pub struct LocalApiSpecFile(ApiSpecFile); }
+
+impl ApiLoad for Vec<LocalApiSpecFile> {
+    const MISCONFIGURATIONS_ALLOWED: bool = false;
+
+    fn try_extend(&mut self, item: ApiSpecFile) -> anyhow::Result<()> {
+        self.push(LocalApiSpecFile::from(item));
+        Ok(())
+    }
+
+    fn make_item(raw: ApiSpecFile) -> Self {
+        vec![LocalApiSpecFile::from(raw)]
+    }
+}
 
 impl AsRawFiles for Vec<LocalApiSpecFile> {
     fn as_raw_files<'a>(
@@ -40,15 +53,9 @@ pub struct LocalFiles {
     pub warnings: Vec<anyhow::Error>,
 }
 
-impl<'a> From<ApiSpecFilesBuilder<'a>> for LocalFiles {
-    fn from(api_files: ApiSpecFilesBuilder) -> Self {
-        let (raw_spec_files, errors, warnings) = api_files.into_parts();
-        let spec_files = raw_spec_files
-            .into_iter()
-            .map(|v, list| {
-                (v, list.into_iter().map(LocalApiSpecFile::from).collect())
-            })
-            .collect();
+impl<'a> From<ApiSpecFilesBuilder<'a, Vec<LocalApiSpecFile>>> for LocalFiles {
+    fn from(api_files: ApiSpecFilesBuilder<Vec<LocalApiSpecFile>>) -> Self {
+        let (spec_files, errors, warnings) = api_files.into_parts();
         LocalFiles { spec_files, errors, warnings }
     }
 }
@@ -63,16 +70,15 @@ impl LocalFiles {
         dir: &Utf8Path,
         apis: &ManagedApis,
     ) -> anyhow::Result<LocalFiles> {
-        let api_files = walk_local_directory(dir, apis, false)?;
+        let api_files = walk_local_directory(dir, apis)?;
         Ok(Self::from(api_files))
     }
 }
 
-pub fn walk_local_directory<'a>(
+pub fn walk_local_directory<'a, T: ApiLoad + AsRawFiles>(
     dir: &'_ Utf8Path,
     apis: &'a ManagedApis,
-    misconfigurations_okay: bool,
-) -> anyhow::Result<ApiSpecFilesBuilder<'a>> {
+) -> anyhow::Result<ApiSpecFilesBuilder<'a, T>> {
     let mut api_files = ApiSpecFilesBuilder::new(apis);
     let entry_iter =
         dir.read_dir_utf8().with_context(|| format!("readdir {:?}", dir))?;
@@ -90,8 +96,8 @@ pub fn walk_local_directory<'a>(
         if file_type.is_file() {
             match fs_err::read(path) {
                 Ok(contents) => {
-                    if let Some(file_name) = api_files
-                        .lockstep_file_name(file_name, misconfigurations_okay)
+                    if let Some(file_name) =
+                        api_files.lockstep_file_name(file_name)
                     {
                         api_files.load_contents(file_name, contents);
                     }
@@ -115,12 +121,12 @@ pub fn walk_local_directory<'a>(
     Ok(api_files)
 }
 
-fn load_versioned_directory(
-    api_files: &mut ApiSpecFilesBuilder,
+fn load_versioned_directory<T: ApiLoad + AsRawFiles>(
+    api_files: &mut ApiSpecFilesBuilder<'_, T>,
     path: &Utf8Path,
     basename: &str,
 ) {
-    let Some(ident) = api_files.versioned_directory(basename, false) else {
+    let Some(ident) = api_files.versioned_directory(basename) else {
         return;
     };
 
@@ -158,15 +164,14 @@ fn load_versioned_directory(
             // XXX-dap this error message will be confusing because the user
             // won't know why we're looking at this path
             if let Some(v) =
-                api_files.versioned_file_name(&ident, symlink.as_str(), false)
+                api_files.versioned_file_name(&ident, symlink.as_str())
             {
-                api_files.load_latest_link(&ident, v, false);
+                api_files.load_latest_link(&ident, v);
             }
             continue;
         }
 
-        let Some(file_name) =
-            api_files.versioned_file_name(&ident, file_name, false)
+        let Some(file_name) = api_files.versioned_file_name(&ident, file_name)
         else {
             continue;
         };

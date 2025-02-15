@@ -83,9 +83,8 @@ impl BlessedSource {
                     "Loading".style(styles.success_header),
                     local_directory,
                 );
-                let api_files =
-                    walk_local_directory(local_directory, apis, true)?;
-                BlessedFiles::try_from(api_files)
+                let api_files = walk_local_directory(local_directory, apis)?;
+                Ok(BlessedFiles::from(api_files))
             }
             BlessedSource::GitRevisionMergeBase { revision, directory } => {
                 eprintln!(
@@ -137,9 +136,8 @@ impl GeneratedSource {
                     "Loading".style(styles.success_header),
                     local_directory,
                 );
-                let api_files =
-                    walk_local_directory(local_directory, apis, false)?;
-                GeneratedFiles::try_from(api_files)
+                let api_files = walk_local_directory(local_directory, apis)?;
+                Ok(GeneratedFiles::from(api_files))
             }
         }
     }

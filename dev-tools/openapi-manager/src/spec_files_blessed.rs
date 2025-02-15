@@ -8,12 +8,11 @@
 use crate::{
     apis::{ApiIdent, ManagedApis},
     git::{git_ls_tree, git_merge_base_head, git_show_file, GitRevision},
-    iter_only::iter_only,
     spec_files_generic::{
-        ApiFiles, ApiSpecFile, ApiSpecFilesBuilder, AsRawFiles,
+        ApiFiles, ApiLoad, ApiSpecFile, ApiSpecFilesBuilder, AsRawFiles,
     },
 };
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, bail};
 use camino::Utf8Path;
 use std::{collections::BTreeMap, ops::Deref};
 
@@ -22,6 +21,24 @@ NewtypeDebug! { () pub struct BlessedApiSpecFile(ApiSpecFile); }
 NewtypeDeref! { () pub struct BlessedApiSpecFile(ApiSpecFile); }
 NewtypeDerefMut! { () pub struct BlessedApiSpecFile(ApiSpecFile); }
 NewtypeFrom! { () pub struct BlessedApiSpecFile(ApiSpecFile); }
+
+impl ApiLoad for BlessedApiSpecFile {
+    const MISCONFIGURATIONS_ALLOWED: bool = true;
+
+    fn make_item(raw: ApiSpecFile) -> Self {
+        BlessedApiSpecFile(raw)
+    }
+
+    fn try_extend(&mut self, item: ApiSpecFile) -> anyhow::Result<()> {
+        // This should be impossible.
+        bail!(
+            "found more than one blessed OpenAPI document for a given \
+             API version: at least {} and {}",
+            self.spec_file_name(),
+            item.spec_file_name()
+        );
+    }
+}
 
 impl AsRawFiles for BlessedApiSpecFile {
     fn as_raw_files<'a>(
@@ -43,30 +60,10 @@ pub struct BlessedFiles {
     pub warnings: Vec<anyhow::Error>,
 }
 
-impl<'a> TryFrom<ApiSpecFilesBuilder<'a>> for BlessedFiles {
-    type Error = anyhow::Error;
-
-    fn try_from(api_files: ApiSpecFilesBuilder<'a>) -> anyhow::Result<Self> {
-        let (raw_spec_files, errors, warnings) = api_files.into_parts();
-        let spec_files = raw_spec_files
-            .into_iter()
-            .map(|(v, list)| {
-                let file = BlessedApiSpecFile::from(
-                        iter_only(list.into_iter()).context(
-                            "list of blessed OpenAPI documents for an API",
-                        )?,
-                    );
-                Ok((
-                    v,
-                    BlessedApiSpecFile::from(
-                        iter_only(list.into_iter()).context(
-                            "list of blessed OpenAPI documents for an API",
-                        )?,
-                    ),
-                ))
-            })
-            .collect::<Result<BTreeMap<_, _>, anyhow::Error>>()?;
-        Ok(BlessedFiles { spec_files, errors, warnings })
+impl<'a> From<ApiSpecFilesBuilder<'a, BlessedApiSpecFile>> for BlessedFiles {
+    fn from(api_files: ApiSpecFilesBuilder<'a, BlessedApiSpecFile>) -> Self {
+        let (spec_files, errors, warnings) = api_files.into_parts();
+        BlessedFiles { spec_files, errors, warnings }
     }
 }
 
@@ -87,7 +84,8 @@ impl BlessedFiles {
     ) -> anyhow::Result<BlessedFiles> {
         // XXX-dap how do we ensure this is a relative path from the root of the
         // workspace
-        let mut api_files = ApiSpecFilesBuilder::new(apis);
+        let mut api_files: ApiSpecFilesBuilder<BlessedApiSpecFile> =
+            ApiSpecFilesBuilder::new(apis);
         let files_found = git_ls_tree(&commit, directory)?;
         for f in files_found {
             // We should be looking at either a single-component path
@@ -105,15 +103,12 @@ impl BlessedFiles {
             // Read the contents.
             let contents = git_show_file(commit, &directory.join(&f))?;
             if parts.len() == 1 {
-                if let Some(file_name) =
-                    api_files.lockstep_file_name(parts[0], true)
+                if let Some(file_name) = api_files.lockstep_file_name(parts[0])
                 {
                     api_files.load_contents(file_name, contents);
                 }
             } else if parts.len() == 2 {
-                if let Some(ident) =
-                    api_files.versioned_directory(parts[0], true)
-                {
+                if let Some(ident) = api_files.versioned_directory(parts[0]) {
                     if parts[1] == format!("{}-latest.json", ident) {
                         // This is the "latest" symlink.  We could dereference
                         // it and report it here, but it's not relevant for
@@ -122,7 +117,7 @@ impl BlessedFiles {
                     }
 
                     if let Some(file_name) =
-                        api_files.versioned_file_name(&ident, parts[1], true)
+                        api_files.versioned_file_name(&ident, parts[1])
                     {
                         api_files.load_contents(file_name, contents);
                     }
@@ -130,6 +125,6 @@ impl BlessedFiles {
             }
         }
 
-        BlessedFiles::try_from(api_files)
+        Ok(BlessedFiles::from(api_files))
     }
 }
