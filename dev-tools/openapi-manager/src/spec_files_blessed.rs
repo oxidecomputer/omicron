@@ -7,6 +7,7 @@
 
 use crate::{
     apis::{versioned_api_is_latest_symlink, ApiIdent, ManagedApis},
+    environment::ErrorAccumulator,
     git::{git_ls_tree, git_merge_base_head, git_show_file, GitRevision},
     spec_files_generic::{
         ApiFiles, ApiLoad, ApiSpecFile, ApiSpecFilesBuilder, AsRawFiles,
@@ -70,14 +71,12 @@ impl AsRawFiles for BlessedApiSpecFile {
 /// For more on what's been validated at this point, see
 /// [`ApiSpecFilesBuilder`].
 #[derive(Debug)]
-pub struct BlessedFiles {
-    pub spec_files: BTreeMap<ApiIdent, ApiFiles<BlessedApiSpecFile>>,
-    /// load failures indicating that the loaded information is wrong or
-    /// incomplete
-    pub errors: Vec<anyhow::Error>,
-    /// load-time failures that should not affect the validity of the loaded
-    /// data
-    pub warnings: Vec<anyhow::Error>,
+pub struct BlessedFiles(BTreeMap<ApiIdent, ApiFiles<BlessedApiSpecFile>>);
+
+NewtypeDeref! {
+    () pub struct BlessedFiles(
+        BTreeMap<ApiIdent, ApiFiles<BlessedApiSpecFile>>
+    );
 }
 
 impl BlessedFiles {
@@ -100,9 +99,15 @@ impl BlessedFiles {
         branch: &GitRevision,
         directory: &Utf8Path,
         apis: &ManagedApis,
+        error_accumulator: &mut ErrorAccumulator,
     ) -> anyhow::Result<BlessedFiles> {
         let revision = git_merge_base_head(branch)?;
-        Self::load_from_git_revision(&revision, directory, apis)
+        Self::load_from_git_revision(
+            &revision,
+            directory,
+            apis,
+            error_accumulator,
+        )
     }
 
     /// Load OpenAPI documents from the given Git revision and directory.
@@ -110,9 +115,10 @@ impl BlessedFiles {
         commit: &GitRevision,
         directory: &Utf8Path,
         apis: &ManagedApis,
+        error_accumulator: &mut ErrorAccumulator,
     ) -> anyhow::Result<BlessedFiles> {
         let mut api_files: ApiSpecFilesBuilder<BlessedApiSpecFile> =
-            ApiSpecFilesBuilder::new(apis);
+            ApiSpecFilesBuilder::new(apis, error_accumulator);
         let files_found = git_ls_tree(&commit, directory)?;
         for f in files_found {
             // We should be looking at either a single-component path
@@ -158,7 +164,6 @@ impl BlessedFiles {
 
 impl<'a> From<ApiSpecFilesBuilder<'a, BlessedApiSpecFile>> for BlessedFiles {
     fn from(api_files: ApiSpecFilesBuilder<'a, BlessedApiSpecFile>) -> Self {
-        let (spec_files, errors, warnings) = api_files.into_parts();
-        BlessedFiles { spec_files, errors, warnings }
+        BlessedFiles(api_files.into_map())
     }
 }

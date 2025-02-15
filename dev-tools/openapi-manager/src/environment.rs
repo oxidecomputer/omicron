@@ -75,7 +75,8 @@ impl BlessedSource {
         &self,
         apis: &ManagedApis,
         styles: &Styles,
-    ) -> anyhow::Result<BlessedFiles> {
+    ) -> anyhow::Result<(BlessedFiles, ErrorAccumulator)> {
+        let mut errors = ErrorAccumulator::new();
         match self {
             BlessedSource::Directory { local_directory } => {
                 eprintln!(
@@ -83,8 +84,9 @@ impl BlessedSource {
                     "Loading".style(styles.success_header),
                     local_directory,
                 );
-                let api_files = walk_local_directory(local_directory, apis)?;
-                Ok(BlessedFiles::from(api_files))
+                let api_files =
+                    walk_local_directory(local_directory, apis, &mut errors)?;
+                Ok((BlessedFiles::from(api_files), errors))
             }
             BlessedSource::GitRevisionMergeBase { revision, directory } => {
                 eprintln!(
@@ -94,9 +96,15 @@ impl BlessedSource {
                     revision,
                     directory
                 );
-                BlessedFiles::load_from_git_parent_branch(
-                    &revision, &directory, apis,
-                )
+                Ok((
+                    BlessedFiles::load_from_git_parent_branch(
+                        &revision,
+                        &directory,
+                        apis,
+                        &mut errors,
+                    )?,
+                    errors,
+                ))
             }
         }
     }
@@ -119,7 +127,8 @@ impl GeneratedSource {
         &self,
         apis: &ManagedApis,
         styles: &Styles,
-    ) -> anyhow::Result<GeneratedFiles> {
+    ) -> anyhow::Result<(GeneratedFiles, ErrorAccumulator)> {
+        let mut errors = ErrorAccumulator::new();
         match self {
             GeneratedSource::Generated => {
                 eprintln!(
@@ -127,7 +136,7 @@ impl GeneratedSource {
                      definitions ... ",
                     GENERATING.style(styles.success_header)
                 );
-                GeneratedFiles::generate(apis)
+                Ok((GeneratedFiles::generate(apis, &mut errors)?, errors))
             }
             GeneratedSource::Directory { local_directory } => {
                 eprintln!(
@@ -136,8 +145,9 @@ impl GeneratedSource {
                     "Loading".style(styles.success_header),
                     local_directory,
                 );
-                let api_files = walk_local_directory(local_directory, apis)?;
-                Ok(GeneratedFiles::from(api_files))
+                let api_files =
+                    walk_local_directory(local_directory, apis, &mut errors)?;
+                Ok((GeneratedFiles::from(api_files), errors))
             }
         }
     }
@@ -155,7 +165,8 @@ impl LocalSource {
         &self,
         apis: &ManagedApis,
         styles: &Styles,
-    ) -> anyhow::Result<LocalFiles> {
+    ) -> anyhow::Result<(LocalFiles, ErrorAccumulator)> {
+        let mut errors = ErrorAccumulator::new();
         match self {
             LocalSource::Directory { local_directory } => {
                 eprintln!(
@@ -164,8 +175,49 @@ impl LocalSource {
                     "Loading".style(styles.success_header),
                     local_directory,
                 );
-                Ok(LocalFiles::load_from_directory(local_directory, apis)?)
+                Ok((
+                    LocalFiles::load_from_directory(
+                        local_directory,
+                        apis,
+                        &mut errors,
+                    )?,
+                    errors,
+                ))
             }
         }
+    }
+}
+
+/// Stores errors and warnings accumulated during loading
+pub struct ErrorAccumulator {
+    /// errors that reflect incorrectness or incompleteness of the loaded data
+    errors: Vec<anyhow::Error>,
+    /// problems that do not affect the correctness or completeness of the data
+    warnings: Vec<anyhow::Error>,
+}
+
+impl ErrorAccumulator {
+    pub fn new() -> ErrorAccumulator {
+        ErrorAccumulator { errors: Vec::new(), warnings: Vec::new() }
+    }
+
+    /// Record an error
+    pub fn error(&mut self, error: anyhow::Error) {
+        self.errors.push(error);
+    }
+
+    /// Record a warning
+    pub fn warning(&mut self, error: anyhow::Error) {
+        self.warnings.push(error);
+    }
+
+    pub fn iter_errors(&self) -> impl Iterator<Item = &'_ anyhow::Error> + '_ {
+        self.errors.iter()
+    }
+
+    pub fn iter_warnings(
+        &self,
+    ) -> impl Iterator<Item = &'_ anyhow::Error> + '_ {
+        self.warnings.iter()
     }
 }

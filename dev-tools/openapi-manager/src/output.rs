@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::apis::{ManagedApi, ManagedApis};
-use crate::environment::Environment;
+use crate::environment::{Environment, ErrorAccumulator};
 use crate::resolved::{Problem, Resolution, Resolved};
 use crate::validation::CheckStale;
 use anyhow::bail;
@@ -198,11 +198,10 @@ impl fmt::Display for MissingNewlineHint {
 }
 
 pub fn display_load_problems(
-    warnings: &[anyhow::Error],
-    errors: &[anyhow::Error],
+    error_accumulator: &ErrorAccumulator,
     styles: &Styles,
 ) -> anyhow::Result<()> {
-    for w in warnings {
+    for w in error_accumulator.iter_warnings() {
         eprintln!(
             "{:>HEADER_WIDTH$} {:#}",
             WARNING.style(styles.warning_header),
@@ -210,7 +209,9 @@ pub fn display_load_problems(
         );
     }
 
-    for e in errors {
+    let mut nerrors = 0;
+    for e in error_accumulator.iter_errors() {
+        nerrors += 1;
         println!(
             "{:>HEADER_WIDTH$} {:#}",
             FAILURE.style(styles.failure_header),
@@ -218,10 +219,11 @@ pub fn display_load_problems(
         );
     }
 
-    if !errors.is_empty() {
+    if nerrors > 0 {
         bail!(
-            "bailing out after error{} above",
-            if errors.len() != 1 { "s" } else { "" }
+            "bailing out after {} {} above",
+            nerrors,
+            plural::errors(nerrors)
         );
     }
 
@@ -575,6 +577,14 @@ pub(crate) mod plural {
             "document"
         } else {
             "documents"
+        }
+    }
+
+    pub(crate) fn errors(count: usize) -> &'static str {
+        if count == 1 {
+            "error"
+        } else {
+            "errors"
         }
     }
 

@@ -7,6 +7,7 @@
 
 use crate::{
     apis::{versioned_api_is_latest_symlink, ApiIdent, ManagedApis},
+    environment::ErrorAccumulator,
     spec_files_generic::{
         ApiFiles, ApiLoad, ApiSpecFile, ApiSpecFilesBuilder, AsRawFiles,
     },
@@ -60,16 +61,12 @@ impl AsRawFiles for Vec<LocalApiSpecFile> {
 /// For more on what's been validated at this point, see
 /// [`ApiSpecFilesBuilder`].
 #[derive(Debug)]
-pub struct LocalFiles {
-    pub spec_files: BTreeMap<ApiIdent, ApiFiles<Vec<LocalApiSpecFile>>>,
+pub struct LocalFiles(BTreeMap<ApiIdent, ApiFiles<Vec<LocalApiSpecFile>>>);
 
-    /// load failures indicating that the loaded information is wrong or
-    /// incomplete
-    pub errors: Vec<anyhow::Error>,
-
-    /// load-time failures that should not affect the validity of the loaded
-    /// data
-    pub warnings: Vec<anyhow::Error>,
+NewtypeDeref! {
+    () pub struct LocalFiles(
+        BTreeMap<ApiIdent, ApiFiles<Vec<LocalApiSpecFile>>>
+    );
 }
 
 impl LocalFiles {
@@ -81,16 +78,16 @@ impl LocalFiles {
     pub fn load_from_directory(
         dir: &Utf8Path,
         apis: &ManagedApis,
+        error_accumulator: &mut ErrorAccumulator,
     ) -> anyhow::Result<LocalFiles> {
-        let api_files = walk_local_directory(dir, apis)?;
+        let api_files = walk_local_directory(dir, apis, error_accumulator)?;
         Ok(Self::from(api_files))
     }
 }
 
 impl<'a> From<ApiSpecFilesBuilder<'a, Vec<LocalApiSpecFile>>> for LocalFiles {
     fn from(api_files: ApiSpecFilesBuilder<Vec<LocalApiSpecFile>>) -> Self {
-        let (spec_files, errors, warnings) = api_files.into_parts();
-        LocalFiles { spec_files, errors, warnings }
+        LocalFiles(api_files.into_map())
     }
 }
 
@@ -120,8 +117,9 @@ impl<'a> From<ApiSpecFilesBuilder<'a, Vec<LocalApiSpecFile>>> for LocalFiles {
 pub fn walk_local_directory<'a, T: ApiLoad + AsRawFiles>(
     dir: &'_ Utf8Path,
     apis: &'a ManagedApis,
+    error_accumulator: &'a mut ErrorAccumulator,
 ) -> anyhow::Result<ApiSpecFilesBuilder<'a, T>> {
-    let mut api_files = ApiSpecFilesBuilder::new(apis);
+    let mut api_files = ApiSpecFilesBuilder::new(apis, error_accumulator);
     let entry_iter =
         dir.read_dir_utf8().with_context(|| format!("readdir {:?}", dir))?;
     for maybe_entry in entry_iter {

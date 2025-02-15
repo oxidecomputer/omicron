@@ -5,11 +5,9 @@
 //! Newtype and collection to represent OpenAPI documents generated from the
 //! API definitions
 
-// XXX-dap consider centralizing the load-time error reporting
-// XXX-dap then consider making these type defs instead of structs
-
 use crate::{
     apis::{ApiIdent, ManagedApis},
+    environment::ErrorAccumulator,
     spec_files_generic::{
         ApiFiles, ApiLoad, ApiSpecFile, ApiSpecFileName, ApiSpecFilesBuilder,
         AsRawFiles,
@@ -67,25 +65,22 @@ impl AsRawFiles for GeneratedApiSpecFile {
 ///
 /// For more on what's been validated at this point, see
 /// [`ApiSpecFilesBuilder`].
-#[derive(Debug)]
-pub struct GeneratedFiles {
-    pub spec_files: BTreeMap<ApiIdent, ApiFiles<GeneratedApiSpecFile>>,
-
-    /// load failures indicating that the loaded information is wrong or
-    /// incomplete
-    pub errors: Vec<anyhow::Error>,
-
-    /// load-time failures that should not affect the validity of the loaded
-    /// data
-    pub warnings: Vec<anyhow::Error>,
+pub struct GeneratedFiles(BTreeMap<ApiIdent, ApiFiles<GeneratedApiSpecFile>>);
+NewtypeDeref! {
+    () pub struct GeneratedFiles(
+        BTreeMap<ApiIdent, ApiFiles<GeneratedApiSpecFile>>
+    );
 }
 
 impl GeneratedFiles {
     /// Generate OpenAPI documents for all supported versions of all managed
     /// APIs
-    pub fn generate(apis: &ManagedApis) -> anyhow::Result<GeneratedFiles> {
+    pub fn generate(
+        apis: &ManagedApis,
+        error_accumulator: &mut ErrorAccumulator,
+    ) -> anyhow::Result<GeneratedFiles> {
         let mut api_files: ApiSpecFilesBuilder<GeneratedApiSpecFile> =
-            ApiSpecFilesBuilder::new(apis);
+            ApiSpecFilesBuilder::new(apis, error_accumulator);
 
         for api in apis.iter_apis() {
             if api.is_lockstep() {
@@ -126,7 +121,6 @@ impl<'a> From<ApiSpecFilesBuilder<'a, GeneratedApiSpecFile>>
     for GeneratedFiles
 {
     fn from(api_files: ApiSpecFilesBuilder<'a, GeneratedApiSpecFile>) -> Self {
-        let (spec_files, errors, warnings) = api_files.into_parts();
-        GeneratedFiles { spec_files, errors, warnings }
+        GeneratedFiles(api_files.into_map())
     }
 }

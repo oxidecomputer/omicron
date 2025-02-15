@@ -4,7 +4,9 @@
 
 use crate::{
     apis::{ApiIdent, ManagedApis},
-    environment::{BlessedSource, Environment, GeneratedSource},
+    environment::{
+        BlessedSource, Environment, ErrorAccumulator, GeneratedSource,
+    },
     output::{OutputOpts, Styles},
     resolved::Resolved,
     spec_files_generic::{ApiFiles, AsRawFiles},
@@ -24,24 +26,17 @@ pub(crate) fn debug_impl(
     }
 
     // Print information about local files.
-    let local_files = env.local_source.load(&apis, &styles)?;
-    dump_structure(
-        &local_files.spec_files,
-        &local_files.errors,
-        &local_files.warnings,
-    );
+
+    let (local_files, errors) = env.local_source.load(&apis, &styles)?;
+    dump_structure(&local_files, &errors);
 
     // Print information about what we found in Git.
-    let blessed = blessed_source.load(&apis, &styles)?;
-    dump_structure(&blessed.spec_files, &blessed.errors, &blessed.warnings);
+    let (blessed, errors) = blessed_source.load(&apis, &styles)?;
+    dump_structure(&blessed, &errors);
 
     // Print information about generated files.
-    let generated = generated_source.load(&apis, &styles)?;
-    dump_structure(
-        &generated.spec_files,
-        &generated.errors,
-        &generated.warnings,
-    );
+    let (generated, errors) = generated_source.load(&apis, &styles)?;
+    dump_structure(&generated, &errors);
 
     // Print result of resolving the differences.
     println!("Resolving specs");
@@ -91,13 +86,15 @@ pub(crate) fn debug_impl(
 
 fn dump_structure<T: AsRawFiles>(
     spec_files: &BTreeMap<ApiIdent, ApiFiles<T>>,
-    errors: &[anyhow::Error],
-    warnings: &[anyhow::Error],
+    error_accumulator: &ErrorAccumulator,
 ) {
+    let warnings: Vec<_> = error_accumulator.iter_warnings().collect();
     println!("warnings: {}", warnings.len());
     for w in warnings {
         println!("    warn: {:#}", w);
     }
+
+    let errors: Vec<_> = error_accumulator.iter_errors().collect();
     println!("errors: {}", errors.len());
     for e in errors {
         println!("    error: {:#}", e);

@@ -6,6 +6,7 @@
 //! XXX-dap TODO-doc needs update
 
 use crate::apis::{ApiIdent, ManagedApi, ManagedApis};
+use crate::environment::ErrorAccumulator;
 use anyhow::{anyhow, bail, Context};
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
@@ -335,26 +336,27 @@ impl ApiSpecFile {
 pub struct ApiSpecFilesBuilder<'a, T> {
     apis: &'a ManagedApis,
     spec_files: BTreeMap<ApiIdent, ApiFiles<T>>,
-    errors: Vec<anyhow::Error>,
-    warnings: Vec<anyhow::Error>,
+    error_accumulator: &'a mut ErrorAccumulator,
 }
 
 impl<'a, T: ApiLoad + AsRawFiles> ApiSpecFilesBuilder<'a, T> {
-    pub fn new(apis: &'a ManagedApis) -> ApiSpecFilesBuilder<'a, T> {
+    pub fn new(
+        apis: &'a ManagedApis,
+        error_accumulator: &'a mut ErrorAccumulator,
+    ) -> ApiSpecFilesBuilder<'a, T> {
         ApiSpecFilesBuilder {
             apis,
             spec_files: BTreeMap::new(),
-            errors: Vec::new(),
-            warnings: Vec::new(),
+            error_accumulator,
         }
     }
 
     pub fn load_error(&mut self, error: anyhow::Error) {
-        self.errors.push(error);
+        self.error_accumulator.error(error);
     }
 
     pub fn load_warning(&mut self, error: anyhow::Error) {
-        self.warnings.push(error);
+        self.error_accumulator.warning(error);
     }
 
     pub fn lockstep_file_name(
@@ -499,7 +501,7 @@ impl<'a, T: ApiLoad + AsRawFiles> ApiSpecFilesBuilder<'a, T> {
                 };
             }
             Err(error) => {
-                self.errors.push(error);
+                self.load_error(error);
             }
         }
     }
@@ -549,14 +551,8 @@ impl<'a, T: ApiLoad + AsRawFiles> ApiSpecFilesBuilder<'a, T> {
         }
     }
 
-    pub fn into_parts(
-        self,
-    ) -> (BTreeMap<ApiIdent, ApiFiles<T>>, Vec<anyhow::Error>, Vec<anyhow::Error>)
-    {
-        let errors = self.errors;
-        let warnings = self.warnings;
-        let map = self.spec_files;
-        (map, errors, warnings)
+    pub fn into_map(self) -> BTreeMap<ApiIdent, ApiFiles<T>> {
+        self.spec_files
     }
 }
 

@@ -45,12 +45,15 @@ pub(crate) fn generate_impl(
     }
 
     let apis = ManagedApis::all()?;
-    let generated = generated_source.load(&apis, &styles)?;
-    display_load_problems(&generated.warnings, &generated.errors, &styles)?;
-    let local_files = env.local_source.load(&apis, &styles)?;
-    display_load_problems(&local_files.warnings, &local_files.errors, &styles)?;
-    let blessed = blessed_source.load(&apis, &styles)?;
-    display_load_problems(&blessed.warnings, &blessed.errors, &styles)?;
+
+    let (generated, errors) = generated_source.load(&apis, &styles)?;
+    display_load_problems(&errors, &styles)?;
+
+    let (local_files, errors) = env.local_source.load(&apis, &styles)?;
+    display_load_problems(&errors, &styles)?;
+
+    let (blessed, errors) = blessed_source.load(&apis, &styles)?;
+    display_load_problems(&errors, &styles)?;
 
     let resolved =
         Resolved::new(env, &apis, &blessed, &generated, &local_files);
@@ -162,12 +165,12 @@ pub(crate) fn generate_impl(
     // Finally, check again for any problems.  Since we expect this should have
     // fixed everything, be quiet unless we find something amiss.
     let mut nproblems = 0;
-    let local_files = env.local_source.load(&apis, &styles)?;
+    let (local_files, errors) = env.local_source.load(&apis, &styles)?;
     eprintln!(
         "{:>HEADER_WIDTH$} all local files",
         "Rechecking".style(styles.success_header),
     );
-    display_load_problems(&local_files.warnings, &local_files.errors, &styles)?;
+    display_load_problems(&errors, &styles)?;
     let resolved =
         Resolved::new(env, &apis, &blessed, &generated, &local_files);
     let general_problems: Vec<_> = resolved.general_problems().collect();

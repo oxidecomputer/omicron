@@ -509,10 +509,10 @@ impl<'a> Resolved<'a> {
             .iter_apis()
             .map(|api| {
                 let ident = api.ident().clone();
-                let api_blessed = blessed.spec_files.get(&ident);
+                let api_blessed = blessed.get(&ident);
                 // We should have generated an API for every supported version.
-                let api_generated = generated.spec_files.get(&ident).unwrap();
-                let api_local = local.spec_files.get(&ident);
+                let api_generated = generated.get(&ident).unwrap();
+                let api_local = local.get(&ident);
                 (
                     api.ident().clone(),
                     resolve_api(
@@ -585,7 +585,7 @@ fn resolve_removed_blessed_versions<'a>(
     >,
     blessed: &'a BlessedFiles,
 ) -> impl Iterator<Item = (&'a ApiIdent, &'a semver::Version)> + 'a {
-    blessed.spec_files.iter().flat_map(|(ident, api_files)| {
+    blessed.iter().flat_map(|(ident, api_files)| {
         let set = supported_versions_by_api.get(ident);
         api_files.versions().keys().filter_map(move |version| match set {
             Some(set) if set.contains(version) => None,
@@ -601,7 +601,7 @@ fn resolve_orphaned_local_specs<'a>(
     >,
     local: &'a LocalFiles,
 ) -> impl Iterator<Item = &'a ApiSpecFileName> + 'a {
-    local.spec_files.iter().flat_map(|(ident, api_files)| {
+    local.iter().flat_map(|(ident, api_files)| {
         let set = supported_versions_by_api.get(ident);
         api_files
             .versions()
