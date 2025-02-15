@@ -44,4 +44,3 @@ textwrap.workspace = true
 thiserror.workspace = true
 supports-color.workspace = true
 wicketd-api.workspace = true
-# XXX-dap check all of these
