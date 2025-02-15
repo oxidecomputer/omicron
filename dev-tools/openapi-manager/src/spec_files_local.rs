@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Working with OpenAPI specification files in the repository
-//! XXX-dap TODO-doc needs update
+//! Newtype and collection to represent OpenAPI documents local to this working
+//! tree
 
 use crate::{
     apis::{versioned_api_is_latest_symlink, ApiIdent, ManagedApis},
@@ -15,11 +15,21 @@ use anyhow::{anyhow, Context};
 use camino::Utf8Path;
 use std::{collections::BTreeMap, ops::Deref};
 
+/// Newtype wrapper around [`ApiSpecFile`] to describe OpenAPI documents found
+/// in this working tree
+///
+/// This includes documents for lockstep APIs and versioned APIs, for both
+/// blessed and locally-added versions.
 pub struct LocalApiSpecFile(ApiSpecFile);
 NewtypeDebug! { () pub struct LocalApiSpecFile(ApiSpecFile); }
 NewtypeDeref! { () pub struct LocalApiSpecFile(ApiSpecFile); }
 NewtypeDerefMut! { () pub struct LocalApiSpecFile(ApiSpecFile); }
 NewtypeFrom! { () pub struct LocalApiSpecFile(ApiSpecFile); }
+
+// Trait impls that allow us to use `ApiFiles<Vec<LocalApiSpecFile>>`
+//
+// Note that this is a `Vec` because it's allowed to have more than one
+// LocalApiSpecFile for a given version.
 
 impl ApiLoad for Vec<LocalApiSpecFile> {
     const MISCONFIGURATIONS_ALLOWED: bool = false;
@@ -42,30 +52,32 @@ impl AsRawFiles for Vec<LocalApiSpecFile> {
     }
 }
 
-/// Container for OpenAPI spec files found in the local filesystem
+/// Container for OpenAPI documents found in the local working tree
 ///
-/// Most validation is not done at this point.
-// XXX-dap see comments on BlessedFiles
+/// **Be sure to check for load errors and warnings before using this
+/// structure.**
+///
+/// For more on what's been validated at this point, see
+/// [`ApiSpecFilesBuilder`].
 #[derive(Debug)]
 pub struct LocalFiles {
     pub spec_files: BTreeMap<ApiIdent, ApiFiles<Vec<LocalApiSpecFile>>>,
+
+    /// load failures indicating that the loaded information is wrong or
+    /// incomplete
     pub errors: Vec<anyhow::Error>,
+
+    /// load-time failures that should not affect the validity of the loaded
+    /// data
     pub warnings: Vec<anyhow::Error>,
 }
 
-impl<'a> From<ApiSpecFilesBuilder<'a, Vec<LocalApiSpecFile>>> for LocalFiles {
-    fn from(api_files: ApiSpecFilesBuilder<Vec<LocalApiSpecFile>>) -> Self {
-        let (spec_files, errors, warnings) = api_files.into_parts();
-        LocalFiles { spec_files, errors, warnings }
-    }
-}
-
 impl LocalFiles {
-    // XXX-dap goofy that this can return a thing with errors or an error
-    // itself.  but there are different layers of error here:
-    // - error traversing the directory (that's what this returned error means)
-    // - error with individual items found
-    // - things that were skipped, etc.
+    /// Load OpenAPI documents from a given directory tree
+    ///
+    /// If it's at all possible to load any documents, this will return an `Ok`
+    /// value, but you should still check the `errors` field on the returned
+    /// [`LocalFiles`].
     pub fn load_from_directory(
         dir: &Utf8Path,
         apis: &ManagedApis,
@@ -75,6 +87,36 @@ impl LocalFiles {
     }
 }
 
+impl<'a> From<ApiSpecFilesBuilder<'a, Vec<LocalApiSpecFile>>> for LocalFiles {
+    fn from(api_files: ApiSpecFilesBuilder<Vec<LocalApiSpecFile>>) -> Self {
+        let (spec_files, errors, warnings) = api_files.into_parts();
+        LocalFiles { spec_files, errors, warnings }
+    }
+}
+
+/// Load OpenAPI documents for the local directory tree
+///
+/// Under `dir`, we expect to find either:
+///
+/// * for each lockstep API, a file called `api-ident.json` (e.g., `wicketd.json`)
+/// * for each versioned API, a directory called `api-ident` that contains:
+///     * any number of files called `api-ident-SEMVER-HASH.json`
+///       (e.g., dns-server-1.0.0-eb52aeeb.json)
+///     * one symlink called `api-ident-latest.json` that points to a file in
+///       the same directory
+///
+/// Here's an example:
+///
+/// ```text
+/// wicketd.json                                # file for lockstep API
+/// dns-server/                                 # directory for versioned API
+/// dns-server/dns-server-1.0.0-eb2aeeb.json    # file for versioned API
+/// dns-server/dns-server-2.0.0-298ea47.json    # file for versioned API
+/// dns-server/dns-server-latest.json           # symlink
+/// ```
+// This function is always used for the "local" files.  It can sometimes be
+// used for both generated and blessed files, if the user asks to load those
+// from the local filesystem instead of their usual sources.
 pub fn walk_local_directory<'a, T: ApiLoad + AsRawFiles>(
     dir: &'_ Utf8Path,
     apis: &'a ManagedApis,
@@ -121,6 +163,9 @@ pub fn walk_local_directory<'a, T: ApiLoad + AsRawFiles>(
     Ok(api_files)
 }
 
+/// Load the contents of a directory that corresponds to a versioned API.
+///
+/// See [`walk_local_directory()`] for what we expect to find.
 fn load_versioned_directory<T: ApiLoad + AsRawFiles>(
     api_files: &mut ApiSpecFilesBuilder<'_, T>,
     path: &Utf8Path,

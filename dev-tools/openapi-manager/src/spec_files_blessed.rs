@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Working with the "blessed" OpenAPI specification files
-//! XXX-dap TODO-doc needs update
+//! Newtype and collection to represent OpenAPI documents from the "blessed"
+//! source
 
 use crate::{
     apis::{versioned_api_is_latest_symlink, ApiIdent, ManagedApis},
@@ -16,11 +16,25 @@ use anyhow::{anyhow, bail};
 use camino::Utf8Path;
 use std::{collections::BTreeMap, ops::Deref};
 
+/// Newtype wrapper around [`ApiSpecFile`] to describe OpenAPI documents from
+/// the "blessed" source.
+///
+/// The blessed source contains the documents that are not allowed to be changed
+/// locally because they've been committed-to upstream.
+///
+/// Note that this type can represent documents for both lockstep APIs and
+/// versioned APIs, but it's meaningless for lockstep APIs.  Any documents for
+/// versioned APIs are blessed by definition.
 pub struct BlessedApiSpecFile(ApiSpecFile);
 NewtypeDebug! { () pub struct BlessedApiSpecFile(ApiSpecFile); }
 NewtypeDeref! { () pub struct BlessedApiSpecFile(ApiSpecFile); }
 NewtypeDerefMut! { () pub struct BlessedApiSpecFile(ApiSpecFile); }
 NewtypeFrom! { () pub struct BlessedApiSpecFile(ApiSpecFile); }
+
+// Trait impls that allow us to use `ApiFiles<BlessedApiSpecFile>`
+//
+// Note that this is NOT a `Vec` because it's NOT allowed to have more than one
+// BlessedApiSpecFile for a given version.
 
 impl ApiLoad for BlessedApiSpecFile {
     const MISCONFIGURATIONS_ALLOWED: bool = true;
@@ -48,26 +62,40 @@ impl AsRawFiles for BlessedApiSpecFile {
     }
 }
 
-/// Container for "blessed" OpenAPI spec files, found in Git
+/// Container for OpenAPI documents from the "blessed" source (usually Git)
 ///
-/// Most validation is not done at this point.
-/// XXX-dap be more specific about what has and has not been validated at this
-/// point.
+/// **Be sure to check for load errors and warnings before using this
+/// structure.**
+///
+/// For more on what's been validated at this point, see
+/// [`ApiSpecFilesBuilder`].
 #[derive(Debug)]
 pub struct BlessedFiles {
     pub spec_files: BTreeMap<ApiIdent, ApiFiles<BlessedApiSpecFile>>,
+    /// load failures indicating that the loaded information is wrong or
+    /// incomplete
     pub errors: Vec<anyhow::Error>,
+    /// load-time failures that should not affect the validity of the loaded
+    /// data
     pub warnings: Vec<anyhow::Error>,
 }
 
-impl<'a> From<ApiSpecFilesBuilder<'a, BlessedApiSpecFile>> for BlessedFiles {
-    fn from(api_files: ApiSpecFilesBuilder<'a, BlessedApiSpecFile>) -> Self {
-        let (spec_files, errors, warnings) = api_files.into_parts();
-        BlessedFiles { spec_files, errors, warnings }
-    }
-}
-
 impl BlessedFiles {
+    /// Load OpenAPI documents from the given directory in the merge base
+    /// between HEAD and the given branch.
+    ///
+    /// This is usually what users want.  For example, if these is the Git
+    /// repository history:
+    ///
+    /// ```text
+    /// main:  M1 -> M2 -> M3 -> M4
+    ///         \
+    /// branch:  +-- B1 --> B2
+    /// ```
+    ///
+    /// and you're on `B2`, `main` refers to `M4`, but you want to be looking at
+    /// `M1` for blessed documents because you haven't yet merged in commits M2,
+    /// M3, and M4.
     pub fn load_from_git_parent_branch(
         branch: &GitRevision,
         directory: &Utf8Path,
@@ -77,6 +105,7 @@ impl BlessedFiles {
         Self::load_from_git_revision(&revision, directory, apis)
     }
 
+    /// Load OpenAPI documents from the given Git revision and directory.
     pub fn load_from_git_revision(
         commit: &GitRevision,
         directory: &Utf8Path,
@@ -124,5 +153,12 @@ impl BlessedFiles {
         }
 
         Ok(BlessedFiles::from(api_files))
+    }
+}
+
+impl<'a> From<ApiSpecFilesBuilder<'a, BlessedApiSpecFile>> for BlessedFiles {
+    fn from(api_files: ApiSpecFilesBuilder<'a, BlessedApiSpecFile>) -> Self {
+        let (spec_files, errors, warnings) = api_files.into_parts();
+        BlessedFiles { spec_files, errors, warnings }
     }
 }

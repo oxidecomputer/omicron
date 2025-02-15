@@ -290,6 +290,48 @@ impl ApiSpecFile {
     }
 }
 
+/// Builder for constructing a set of found OpenAPI documents
+///
+/// The builder is agnostic to where the documents came from, whether it's the
+/// local filesystem, dynamic generation, Git, etc.  The caller supplies that.
+///
+/// **Be sure to check for load errors and warnings before using this
+/// structure.**
+///
+/// The source `T` is generally a Newtype wrapper around `ApiSpecFile`.  `T`
+/// must impl `ApiLoad` (which applies constraints on loading these documents)
+/// and `AsRawFiles` (which converts the Newtype bak to `ApiSpecFile` for
+/// consumers that don't care which Newtype they're dealing with).  There are
+/// three values of `T` that get used here:
+///
+/// * `BlessedApiSpecFile`: only one allowed per version, and it's okay if we
+///   find (and ignore) a file that doesn't match the API's configured type
+///   (e.g., a lockstep file for a versioned API or vice versa).  This is
+///   important for supporting changing the type of an API (e.g., converting
+///   from lockstep to versioned).
+/// * `GeneratedApiSpecFile`: only one allowed per version.  It is an error to
+///   find files of a different type than the API (e.g., a lockstep file for a
+///   versioned API or vice versa).
+/// * `Vec<LocalApiSpecFile>`: as the type suggests, more than one is allowed
+///   per version.  It is an error to find files of a different type than the
+///   API (e.g., a lockstep file for a versioned API or vice versa).
+///
+/// Assuming no errors, the caller can assume:
+///
+/// * Each OpenAPI document was valid (valid JSON and valid OpenAPI).
+/// * For versioned APIs, the version number in each file name corresponds to
+///   the version number inside the OpenAPI document.
+/// * For versioned APIs, the checksum in each file name matches the computed
+///   checksum for the file.
+/// * The files that were found correspond with whether the API is lockstep or
+///   versioned.  That is: if an API is lockstep, then if it has a file here,
+///   it's a lockstep file.  If an API is versioned, then if it has a file here,
+///   then it's a versioned file.
+///
+///   The question of whether it's an error to find a lockstep file for a
+///   versioned API or vice versa depends on the source `T` (see above).  If
+///   it's not an error when this happens, the file is still ignored.  Hence,
+///   any files present in this structure _do_ match the expected type.
 pub struct ApiSpecFilesBuilder<'a, T> {
     apis: &'a ManagedApis,
     spec_files: BTreeMap<ApiIdent, ApiFiles<T>>,
