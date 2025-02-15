@@ -3,10 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 progenitor::generate_api!(
-    // XXX-dap This path is changed locally to point to my temporary
-    // "openapi-blessed" directory.  This will eventually point back to
-    // "openapi".
-    spec = "../../openapi-blessed/dns-server/dns-server-latest.json",
+    spec = "../../openapi/dns-server/dns-server-latest.json",
     inner_type = slog::Logger,
     derives = [schemars::JsonSchema, Clone, Eq, PartialEq],
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
