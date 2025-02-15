@@ -175,8 +175,6 @@ impl ApiSpecFileName {
         match &self.kind {
             ApiSpecFileNameKind::Lockstep => format!("{}.json", self.ident),
             ApiSpecFileNameKind::Versioned { version, hash } => {
-                // XXX-dap the version number must not contain dashes
-                // XXX-dap actually I think that's fine now?
                 format!("{}-{}-{}.json", self.ident, version, hash)
             }
         }

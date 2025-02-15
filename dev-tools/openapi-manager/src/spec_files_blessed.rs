@@ -82,8 +82,6 @@ impl BlessedFiles {
         directory: &Utf8Path,
         apis: &ManagedApis,
     ) -> anyhow::Result<BlessedFiles> {
-        // XXX-dap how do we ensure this is a relative path from the root of the
-        // workspace
         let mut api_files: ApiSpecFilesBuilder<BlessedApiSpecFile> =
             ApiSpecFilesBuilder::new(apis);
         let files_found = git_ls_tree(&commit, directory)?;
