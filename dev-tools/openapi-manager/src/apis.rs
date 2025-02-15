@@ -247,6 +247,20 @@ NewtypeDerefMut! { () pub struct ApiIdent(String); }
 NewtypeDisplay! { () pub struct ApiIdent(String); }
 NewtypeFrom! { () pub struct ApiIdent(String); }
 
+/// Given an API identifier, return the basename of its "latest" symlink
+pub fn versioned_api_latest_symlink(api_ident: &ApiIdent) -> String {
+    format!("{api_ident}-latest.json")
+}
+
+/// Given an API identifier and a file name, determine if we're looking at this
+/// API's "latest" symlink
+pub fn versioned_api_is_latest_symlink(
+    api_ident: &ApiIdent,
+    path: &str,
+) -> bool {
+    path == versioned_api_latest_symlink(api_ident)
+}
+
 /// Whether an API is exposed externally from the Oxide system
 ///
 /// This affects the kind of validation that's done.

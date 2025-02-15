@@ -6,7 +6,7 @@
 //! XXX-dap TODO-doc needs update
 
 use crate::{
-    apis::{ApiIdent, ManagedApis},
+    apis::{versioned_api_is_latest_symlink, ApiIdent, ManagedApis},
     spec_files_generic::{
         ApiFiles, ApiLoad, ApiSpecFile, ApiSpecFilesBuilder, AsRawFiles,
     },
@@ -146,9 +146,7 @@ fn load_versioned_directory<T: ApiLoad + AsRawFiles>(
     for entry in entries {
         let file_name = entry.file_name();
 
-        // XXX-dap use helper function that does rsplitn and checks both parts?
-        // see also blessed.rs
-        if file_name == format!("{}-latest.json", ident) {
+        if versioned_api_is_latest_symlink(&ident, file_name) {
             // We should be looking at a symlink.
             let symlink = match entry.path().read_link_utf8() {
                 Ok(s) => s,

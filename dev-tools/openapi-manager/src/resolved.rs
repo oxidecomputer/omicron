@@ -4,6 +4,7 @@
 
 //! Resolve different sources of API information (blessed, local, upstream)
 
+use crate::apis::versioned_api_latest_symlink;
 use crate::apis::ApiIdent;
 use crate::apis::ManagedApi;
 use crate::apis::ManagedApis;
@@ -420,10 +421,9 @@ impl<'a> Fix<'a> {
                 )])
             }
             Fix::FixSymlink { api_ident, link } => {
-                // XXX-dap helper
                 let path = root
                     .join(api_ident.to_string())
-                    .join(format!("{api_ident}-latest.json"));
+                    .join(versioned_api_latest_symlink(*api_ident));
                 // We want the link to contain a relative path to a file in the
                 // same directory so that it's correct no matter where it's
                 // resolved from.

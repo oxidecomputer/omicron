@@ -6,7 +6,7 @@
 //! XXX-dap TODO-doc needs update
 
 use crate::{
-    apis::{ApiIdent, ManagedApis},
+    apis::{versioned_api_is_latest_symlink, ApiIdent, ManagedApis},
     git::{git_ls_tree, git_merge_base_head, git_show_file, GitRevision},
     spec_files_generic::{
         ApiFiles, ApiLoad, ApiSpecFile, ApiSpecFilesBuilder, AsRawFiles,
@@ -107,10 +107,10 @@ impl BlessedFiles {
                 }
             } else if parts.len() == 2 {
                 if let Some(ident) = api_files.versioned_directory(parts[0]) {
-                    if parts[1] == format!("{}-latest.json", ident) {
+                    if versioned_api_is_latest_symlink(&ident, parts[1]) {
                         // This is the "latest" symlink.  We could dereference
                         // it and report it here, but it's not relevant for
-                        // anything this tool does.
+                        // anything this tool does, so we don't bother.
                         continue;
                     }
 
