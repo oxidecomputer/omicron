@@ -5,9 +5,10 @@
 //! Integration test driver
 //!
 //! All integration tests are driven from this top-level integration test so
-//! that we only have to build one target and so that Cargo can run the tests
-//! concurrently.  (Currently, Cargo runs separate integration tests
-//! sequentially.)
+//! that we only have to build one target. This was originally done because
+//! `cargo test` does not parallelize across targets. We continue to do this
+//! because any targets depending on omicron-nexus as a library are very
+//! expensive to link, and it is better to only have to do that once.
 
 #[macro_use]
 extern crate slog;
