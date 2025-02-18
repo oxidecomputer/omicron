@@ -13,6 +13,7 @@ use omicron_common::{
         internal::shared::{NetworkInterface, SourceNatConfig},
     },
     disk::DiskVariant,
+    update::ArtifactHash,
     zpool_name::ZpoolName,
 };
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
@@ -160,6 +161,7 @@ pub struct OmicronZoneConfig {
     /// permitted to destroy this dataset each time the zone is initialized.
     pub filesystem_pool: Option<ZpoolName>,
     pub zone_type: OmicronZoneType,
+    pub image_source: OmicronZoneImageSource,
 }
 
 impl OmicronZoneConfig {
@@ -589,6 +591,15 @@ impl ZoneKind {
             ZoneKind::Oximeter => "oximeter",
         }
     }
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum OmicronZoneImageSource {
+    InstallDataset,
+    Artifact { hash: ArtifactHash },
 }
 
 #[cfg(test)]

@@ -4687,12 +4687,16 @@
           "id": {
             "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
           },
+          "image_source": {
+            "$ref": "#/components/schemas/OmicronZoneImageSource"
+          },
           "zone_type": {
             "$ref": "#/components/schemas/OmicronZoneType"
           }
         },
         "required": [
           "id",
+          "image_source",
           "zone_type"
         ]
       },
@@ -4706,6 +4710,43 @@
         },
         "required": [
           "pool_name"
+        ]
+      },
+      "OmicronZoneImageSource": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "install_dataset"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "hash": {
+                "type": "string",
+                "format": "hex string (32 bytes)"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "artifact"
+                ]
+              }
+            },
+            "required": [
+              "hash",
+              "type"
+            ]
+          }
         ]
       },
       "OmicronZoneType": {
