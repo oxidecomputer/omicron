@@ -4,6 +4,7 @@
 
 //! Re-assign sagas from expunged Nexus zones
 
+use crate::omicron_zones::DeployZonesDone;
 use nexus_db_model::SecId;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -20,6 +21,7 @@ pub(crate) async fn reassign_sagas_from_expunged(
     datastore: &DataStore,
     blueprint: &Blueprint,
     nexus_id: SecId,
+    _deploy_zones_done: &DeployZonesDone,
 ) -> Result<bool, Error> {
     let log = &opctx.log;
 

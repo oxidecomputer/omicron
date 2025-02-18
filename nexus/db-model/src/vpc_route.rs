@@ -109,6 +109,7 @@ pub struct RouterRoute {
     pub vpc_router_id: Uuid,
     pub target: RouteTarget,
     pub destination: RouteDestination,
+    pub vpc_subnet_id: Option<Uuid>,
 }
 
 impl RouterRoute {
@@ -125,6 +126,7 @@ impl RouterRoute {
             kind: RouterRouteKind(kind),
             target: RouteTarget(params.target),
             destination: RouteDestination::new(params.destination),
+            vpc_subnet_id: None,
         }
     }
 
@@ -133,39 +135,64 @@ impl RouterRoute {
     /// This defaults to use the same name as the subnet. If this would conflict
     /// with the internet gateway rules, then the UUID is used instead (alongside
     /// notice that a name conflict has occurred).
-    pub fn for_subnet(
+    pub fn new_subnet(
         route_id: Uuid,
         system_router_id: Uuid,
-        subnet: Name,
+        subnet_name: Name,
+        subnet_id: Uuid,
     ) -> Self {
-        let forbidden_names = ["default-v4", "default-v6"];
+        let name = Self::deconflict_subnet_name(&subnet_name, route_id);
 
-        let name = if forbidden_names.contains(&subnet.as_str()) {
+        let identity = RouterRouteIdentity::new(
+            route_id,
+            external::IdentityMetadataCreateParams {
+                name,
+                description: "System-managed VPC Subnet route.".into(),
+            },
+        );
+
+        // The destination and target are technically presentation-only --
+        // these need to accurately track the state of subnet_id, which can
+        // cause messy reconciles. Otherwise in the app layer we make sure one
+        // exists for each subnet and keep the fields synced on a best-effort
+        // basis. The route RPW will always rely on that linked subnet instead
+        // of these values.
+        Self {
+            identity,
+            vpc_router_id: system_router_id,
+            kind: RouterRouteKind(external::RouterRouteKind::VpcSubnet),
+            target: RouteTarget(external::RouteTarget::Subnet(
+                subnet_name.0.clone(),
+            )),
+            destination: RouteDestination(external::RouteDestination::Subnet(
+                subnet_name.0,
+            )),
+            vpc_subnet_id: Some(subnet_id),
+        }
+    }
+
+    /// Choose a new name (containing route_id) for a VPC subnet route when
+    /// it would conflict with prenamed IGW rules. These rules' names are
+    /// immutable.
+    pub fn deconflict_subnet_name(
+        name: &Name,
+        route_id: Uuid,
+    ) -> external::Name {
+        const FORBIDDEN_NAMES: [&str; 2] = ["default-v4", "default-v6"];
+        if FORBIDDEN_NAMES.contains(&name.as_str()) {
             // unwrap safety: a uuid is not by itself a valid name
             // so prepend it with another string.
-            // - length constraint is <63 chars,
+            // - length constraint is <= 63 chars,
             // - a UUID is 36 chars including hyphens,
-            // - "{subnet}-" is 11 chars
+            // - "{name}-" is max 11 chars
             // - "conflict-" is 9 chars
             //   = 56 chars
-            format!("conflict-{subnet}-{route_id}").parse().unwrap()
+            format!("conflict-{name}-{route_id}")
+                .parse()
+                .expect("all entries in 'FORBIDDEN_NAMES' are 10 chars long")
         } else {
-            subnet.0.clone()
-        };
-
-        Self::new(
-            route_id,
-            system_router_id,
-            external::RouterRouteKind::VpcSubnet,
-            params::RouterRouteCreate {
-                identity: external::IdentityMetadataCreateParams {
-                    name,
-                    description: format!("VPC Subnet route for '{subnet}'"),
-                },
-                target: external::RouteTarget::Subnet(subnet.0.clone()),
-                destination: external::RouteDestination::Subnet(subnet.0),
-            },
-        )
+            name.0.clone()
+        }
     }
 }
 
@@ -189,6 +216,30 @@ pub struct RouterRouteUpdate {
     pub time_modified: DateTime<Utc>,
     pub target: RouteTarget,
     pub destination: RouteDestination,
+}
+
+impl RouterRouteUpdate {
+    /// Generate an update for the presentation of an existing `VpcSubnet` route,
+    /// targeting a new name.
+    pub fn vpc_subnet_rename(
+        subnet_name: Name,
+        time_modified: DateTime<Utc>,
+    ) -> Self {
+        let name =
+            RouterRoute::deconflict_subnet_name(&subnet_name, Uuid::new_v4());
+
+        Self {
+            name: Some(Name(name)),
+            description: None,
+            time_modified,
+            target: RouteTarget(external::RouteTarget::Subnet(
+                subnet_name.0.clone(),
+            )),
+            destination: RouteDestination(external::RouteDestination::Subnet(
+                subnet_name.0,
+            )),
+        }
+    }
 }
 
 impl From<params::RouterRouteUpdate> for RouterRouteUpdate {

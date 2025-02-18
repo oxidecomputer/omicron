@@ -318,6 +318,11 @@ pub async fn reconfigurator_state_load(
         .collect::<Vec<Collection>>()
         .await;
 
+    let target_blueprint = datastore
+        .blueprint_target_get_current(opctx)
+        .await
+        .context("failed to read current target blueprint")?;
+
     let mut blueprint_ids = Vec::new();
     let mut paginator = Paginator::new(SQL_BATCH_SIZE);
     while let Some(p) = paginator.next() {
@@ -403,6 +408,7 @@ pub async fn reconfigurator_state_load(
     Ok(UnstableReconfiguratorState {
         planning_input,
         collections,
+        target_blueprint: Some(target_blueprint),
         blueprints,
         internal_dns,
         external_dns,
