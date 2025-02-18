@@ -925,13 +925,23 @@ impl<'a> BlueprintBuilder<'a> {
             match zone.disposition {
                 BlueprintZoneDisposition::Expunged => (),
                 BlueprintZoneDisposition::InService
-                | BlueprintZoneDisposition::Quiesced => todo!("fixme-1"),
+                | BlueprintZoneDisposition::Quiesced => {
+                    return Err(Error::Planner(anyhow!(
+                        "expunged all disks but a zone \
+                         is still in service: {zone:?}"
+                    )));
+                }
             }
         }
         for dataset in editor.datasets(BlueprintDatasetFilter::All) {
             match dataset.disposition {
                 BlueprintDatasetDisposition::Expunged => (),
-                BlueprintDatasetDisposition::InService => todo!("fixme-2"),
+                BlueprintDatasetDisposition::InService => {
+                    return Err(Error::Planner(anyhow!(
+                        "expunged all disks but a dataset \
+                         is still in service: {dataset:?}"
+                    )));
+                }
             }
         }
 
