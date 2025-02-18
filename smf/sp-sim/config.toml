@@ -8,11 +8,11 @@ manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de
 device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000000"
 
 [[simulated_sps.sidecar.network_config]]
-[simulated_sps.sidecar.network_config.Simulated]
+[simulated_sps.sidecar.network_config.simulated]
 bind_addr = "[::1]:33300"
 
 [[simulated_sps.sidecar.network_config]]
-[simulated_sps.sidecar.network_config.Simulated]
+[simulated_sps.sidecar.network_config.simulated]
 bind_addr = "[::1]:33301"
 
 [[simulated_sps.gimlet]]
@@ -21,11 +21,11 @@ manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de
 device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000001"
 
 [[simulated_sps.gimlet.network_config]]
-[simulated_sps.gimlet.network_config.Simulated]
+[simulated_sps.gimlet.network_config.simulated]
 bind_addr = "[::1]:33310"
 
 [[simulated_sps.gimlet.network_config]]
-[simulated_sps.gimlet.network_config.Simulated]
+[simulated_sps.gimlet.network_config.simulated]
 bind_addr = "[::1]:33311"
 
 [[simulated_sps.gimlet.components]]
@@ -42,11 +42,11 @@ manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de
 device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000002"
 
 [[simulated_sps.gimlet.network_config]]
-[simulated_sps.gimlet.network_config.Simulated]
+[simulated_sps.gimlet.network_config.simulated]
 bind_addr = "[::1]:33320"
 
 [[simulated_sps.gimlet.network_config]]
-[simulated_sps.gimlet.network_config.Simulated]
+[simulated_sps.gimlet.network_config.simulated]
 bind_addr = "[::1]:33321"
 
 [[simulated_sps.gimlet.components]]
