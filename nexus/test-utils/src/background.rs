@@ -305,8 +305,6 @@ pub async fn run_region_snapshot_replacement_step(
     )
     .unwrap();
 
-    eprintln!("{:?}", &status.errors);
-
     assert!(status.errors.is_empty());
 
     status.step_records_created_ok.len()

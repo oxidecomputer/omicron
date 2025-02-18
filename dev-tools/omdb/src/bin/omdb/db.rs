@@ -316,6 +316,8 @@ pub struct DbFetchOptions {
 /// Subcommands that query or update the database
 #[derive(Debug, Subcommand, Clone)]
 enum DbCommands {
+    /// Print any Crucible resources that are located on expunged physical disks
+    ReplacementsToDo,
     /// Print information about the rack
     Rack(RackArgs),
     /// Print information about virtual disks
@@ -915,6 +917,9 @@ impl DbArgs {
         self.db_url_opts.with_datastore(omdb, log, |opctx, datastore| {
             async move {
                 match &self.command {
+                    DbCommands::ReplacementsToDo => {
+                        replacements_to_do(&opctx, &datastore).await
+                    }
                     DbCommands::Rack(RackArgs { command: RackCommands::List }) => {
                         cmd_db_rack_list(&opctx, &datastore, &fetch_opts).await
                     }
@@ -1410,6 +1415,77 @@ async fn cmd_db_disk_list(
 
     let rows = disks.iter().map(DiskRow::from);
     let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+async fn replacements_to_do(
+    opctx: &OpContext,
+    datastore: &DataStore,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct RegionRow {
+        id: String,
+        dataset_id: String,
+        resource: String,
+    }
+
+    let region_rows: Vec<RegionRow> = vec![
+        datastore
+            .find_read_only_regions_on_expunged_physical_disks(opctx)
+            .await?,
+        datastore
+            .find_read_write_regions_on_expunged_physical_disks(opctx)
+            .await?,
+    ]
+    .into_iter()
+    .flatten()
+    .map(|region| RegionRow {
+        id: region.id().to_string(),
+        dataset_id: region.dataset_id().to_string(),
+        resource: if region.read_only() {
+            String::from("read-only region")
+        } else {
+            String::from("read/write region")
+        },
+    })
+    .collect();
+
+    let table = tabled::Table::new(region_rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    println!("");
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct RegionSnapshotRow {
+        dataset_id: String,
+        region_id: String,
+        snapshot_id: String,
+    }
+
+    let rs_rows: Vec<RegionSnapshotRow> = datastore
+        .find_region_snapshots_on_expunged_physical_disks(opctx)
+        .await?
+        .into_iter()
+        .map(|rs| RegionSnapshotRow {
+            dataset_id: rs.dataset_id().to_string(),
+            region_id: rs.region_id.to_string(),
+            snapshot_id: rs.snapshot_id.to_string(),
+        })
+        .collect();
+
+    let table = tabled::Table::new(rs_rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
         .to_string();

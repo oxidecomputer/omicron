@@ -14,6 +14,7 @@ use crate::blueprint_builder::Operation;
 use crate::blueprint_editor::DisksEditError;
 use crate::blueprint_editor::SledEditError;
 use crate::planner::omicron_zone_placement::PlacementError;
+use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -354,11 +355,39 @@ impl<'a> Planner<'a> {
                     sled_id,
                     kind: ZoneKind::BoundaryNtp,
                 });
-                // Don't make any other changes to this sled.  However, this
-                // change is compatible with any other changes to other sleds,
-                // so we can "continue" here rather than "break".
-                sleds_waiting_for_ntp_zone.insert(sled_id);
-                continue;
+
+                // If we're setting up a new sled (the typical reason to add a
+                // new NTP zone), we don't want make any other changes to this
+                // sled.  However, this change is compatible with any other
+                // changes to other sleds, so we can "continue" here rather than
+                // "break".
+                //
+                // However, we could be _replacing_ an NTP zone (e.g., if the
+                // disk on which a previous NTP zone was running was expunged).
+                // If the sled is still running some other control plane
+                // services (which is evidence it previously had an NTP zone!),
+                // we can go ahead and consider it eligible for new ones.
+                if self
+                    .blueprint
+                    .current_sled_zones(
+                        sled_id,
+                        BlueprintZoneFilter::ShouldBeRunning,
+                    )
+                    .any(|z| {
+                        OmicronZoneType::from(z.zone_type.clone())
+                            .requires_timesync()
+                    })
+                {
+                    info!(
+                        &self.log,
+                        "sled getting NTP zone has other services already; \
+                         considering it eligible for discretionary zones";
+                        "sled_id" => %sled_id,
+                    );
+                } else {
+                    sleds_waiting_for_ntp_zone.insert(sled_id);
+                    continue;
+                }
             }
 
             // Now we've established that the current blueprint _says_ there's
@@ -790,15 +819,12 @@ pub(crate) enum ZoneExpungeReason {
 }
 
 #[cfg(test)]
-mod test {
-    use super::Planner;
-    use crate::blueprint_builder::test::assert_planning_makes_no_changes;
+pub(crate) mod test {
+    use super::*;
     use crate::blueprint_builder::test::verify_blueprint;
-    use crate::blueprint_builder::BlueprintBuilder;
     use crate::example::example;
     use crate::example::ExampleSystemBuilder;
     use crate::example::SimRngState;
-    use crate::planner::rng::PlannerRng;
     use crate::system::SledBuilder;
     use chrono::NaiveDateTime;
     use chrono::TimeZone;
@@ -806,22 +832,14 @@ mod test {
     use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
     use clickhouse_admin_types::KeeperId;
     use expectorate::assert_contents;
-    use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::BlueprintDiffSummary;
-    use nexus_types::deployment::BlueprintZoneDisposition;
-    use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::ClickhouseMode;
     use nexus_types::deployment::ClickhousePolicy;
-    use nexus_types::deployment::CockroachDbClusterVersion;
-    use nexus_types::deployment::CockroachDbPreserveDowngrade;
-    use nexus_types::deployment::CockroachDbSettings;
     use nexus_types::deployment::SledDisk;
-    use nexus_types::external_api::views::PhysicalDiskPolicy;
     use nexus_types::external_api::views::PhysicalDiskState;
-    use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external::Generation;
@@ -830,10 +848,9 @@ mod test {
     use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::PhysicalDiskUuid;
-    use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use slog_error_chain::InlineErrorChain;
-    use std::collections::BTreeSet;
+    use std::collections::BTreeMap;
     use std::collections::HashMap;
     use std::net::IpAddr;
     use typed_rng::TypedUuidRng;
@@ -842,6 +859,33 @@ mod test {
     /// planner tests
     fn clickhouse_policy(mode: ClickhouseMode) -> ClickhousePolicy {
         ClickhousePolicy { version: 0, mode, time_created: Utc::now() }
+    }
+
+    pub(crate) fn assert_planning_makes_no_changes(
+        log: &Logger,
+        blueprint: &Blueprint,
+        input: &PlanningInput,
+        collection: &Collection,
+        test_name: &'static str,
+    ) {
+        let planner = Planner::new_based_on(
+            log.clone(),
+            &blueprint,
+            &input,
+            test_name,
+            &collection,
+        )
+        .expect("created planner");
+        let child_blueprint = planner.plan().expect("planning succeeded");
+        verify_blueprint(&child_blueprint);
+        let diff = child_blueprint.diff_since_blueprint(&blueprint);
+        eprintln!(
+            "diff between blueprints (expected no changes):\n{}",
+            diff.display()
+        );
+        assert_eq!(diff.sleds_added.len(), 0);
+        assert_eq!(diff.sleds_removed.len(), 0);
+        assert_eq!(diff.sleds_modified.len(), 0);
     }
 
     /// Runs through a basic sequence of blueprints for adding a sled
@@ -1010,7 +1054,7 @@ mod test {
         // No removed or modified zones on this sled
         let zones_cfg_diff = summary.zones_on_modified_sled(sled_id).unwrap();
         assert!(zones_cfg_diff.zones.removed.is_empty());
-        assert!(zones_cfg_diff.zones.modified.is_empty());
+        assert_eq!(zones_cfg_diff.zones.modified().count(), 0);
         // 10 crucible zones addeed
         assert_eq!(
             *zones_cfg_diff.generation.after,
@@ -1030,6 +1074,7 @@ mod test {
             &logctx.log,
             &blueprint5,
             &input,
+            &collection,
             TEST_NAME,
         );
 
@@ -1126,6 +1171,7 @@ mod test {
             &logctx.log,
             &blueprint2,
             &input,
+            &collection,
             TEST_NAME,
         );
 
@@ -1193,7 +1239,7 @@ mod test {
                 .contains_key(sled_id));
             let zones_cfg_diff =
                 summary.zones_on_modified_sled(sled_id).unwrap();
-            assert!(zones_cfg_diff.zones.modified.is_empty());
+            assert_eq!(zones_cfg_diff.zones.modified().count(), 0);
             let zones_added = &zones_cfg_diff.zones.added;
             match zones_added.len() {
                 n @ (3 | 4) => {
@@ -1216,6 +1262,7 @@ mod test {
             &logctx.log,
             &blueprint2,
             &input,
+            &collection,
             TEST_NAME,
         );
 
@@ -1321,7 +1368,7 @@ mod test {
             let zones_diff =
                 &summary.zones_on_modified_sled(&sled_id).unwrap().zones;
             assert!(zones_diff.removed.is_empty());
-            assert!(zones_diff.modified.is_empty());
+            assert_eq!(zones_diff.modified().count(), 0);
             let zones_added = &zones_diff.added;
             match zones_added.len() {
                 0 => {}
@@ -1347,6 +1394,7 @@ mod test {
             &logctx.log,
             &blueprint2,
             &input,
+            &collection,
             TEST_NAME,
         );
 
@@ -1446,6 +1494,7 @@ mod test {
             &logctx.log,
             &blueprint3,
             &input,
+            &collection,
             TEST_NAME,
         );
 
@@ -1616,6 +1665,7 @@ mod test {
             &logctx.log,
             &blueprint3,
             &input,
+            &collection,
             TEST_NAME,
         );
 
@@ -1717,6 +1767,7 @@ mod test {
             &logctx.log,
             &blueprint2,
             &input,
+            &collection,
             TEST_NAME,
         );
 
@@ -1895,10 +1946,10 @@ mod test {
             DatasetKind::TransientZoneRoot,
             test_transient_zone_kind.clone(),
         ]);
-        for (_, sled_with_modified_datasets) in
-            &summary.diff.blueprint_datasets.modified
+        for (_, sled_with_modified_datasets) in &summary.modified_datasets_diff
         {
-            for (_, modified) in &sled_with_modified_datasets.datasets.modified
+            for modified in
+                sled_with_modified_datasets.datasets.modified_values_diff()
             {
                 assert_eq!(
                     *modified.disposition.before,
@@ -1921,10 +1972,10 @@ mod test {
         assert!(expected_kinds.is_empty());
 
         let (_zone_id, modified_zones) =
-            summary.diff.blueprint_zones.modified.iter().next().unwrap();
-        assert_eq!(modified_zones.zones.modified.len(), 1);
+            summary.modified_zones_diff.iter().next().unwrap();
+        assert_eq!(modified_zones.zones.modified().count(), 1);
         let (_, modified_zone) =
-            &modified_zones.zones.modified.first_key_value().unwrap();
+            &modified_zones.zones.modified_diff().next().unwrap();
         assert!(
             matches!(modified_zone.zone_type.before.kind(), ZoneKind::Crucible),
             "Expected the modified zone to be a Crucible zone, but it was: {:?}",
@@ -1941,6 +1992,7 @@ mod test {
             &logctx.log,
             &blueprint2,
             &input,
+            &collection,
             TEST_NAME,
         );
 
@@ -1980,30 +2032,32 @@ mod test {
             .expect("No NTP zone pool?");
 
         // This is mostly for test stability across "example system" changes:
-        // Find how many other zones are using this same zpool.
-        let zones_using_zpool = blueprint1.blueprint_zones.iter().fold(
-            0,
-            |acc, (_, zones_config)| {
-                let mut zones_using_zpool = 0;
-                for zone_config in &zones_config.zones {
-                    if let Some(pool) = &zone_config.filesystem_pool {
-                        if pool == &pool_to_expunge {
-                            zones_using_zpool += 1;
-                            continue;
-                        }
-                    }
-                    if let Some(pool) = zone_config.zone_type.durable_zpool() {
-                        if pool == &pool_to_expunge {
-                            zones_using_zpool += 1;
-                            continue;
-                        }
-                    }
+        // Find all the zones using this same zpool.
+        let mut zones_on_pool = BTreeSet::new();
+        let mut zone_kinds_on_pool = BTreeMap::<_, usize>::new();
+        for (_, zone_config) in
+            blueprint1.all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+        {
+            let mut on_pool = false;
+            if let Some(pool) = &zone_config.filesystem_pool {
+                if pool == &pool_to_expunge {
+                    on_pool = true;
                 }
-                acc + zones_using_zpool
-            },
-        );
+            } else if let Some(pool) = zone_config.zone_type.durable_zpool() {
+                if pool == &pool_to_expunge {
+                    on_pool = true;
+                }
+            }
+
+            if on_pool {
+                zones_on_pool.insert(zone_config.id);
+                *zone_kinds_on_pool
+                    .entry(zone_config.zone_type.kind())
+                    .or_default() += 1;
+            }
+        }
         assert!(
-            zones_using_zpool > 0,
+            !zones_on_pool.is_empty(),
             "We should be expunging at least one zone using this zpool"
         );
 
@@ -2037,37 +2091,43 @@ mod test {
         assert_eq!(summary.sleds_removed.len(), 0);
         assert_eq!(summary.sleds_modified.len(), 1);
 
-        // We should be removing all zones using this zpool. Because we're
-        // removing the NTP zone, we should add a new one.
-        assert_eq!(summary.total_zones_added(), 1);
+        // No zones should have been removed from the blueprint entirely.
         assert_eq!(summary.total_zones_removed(), 0);
-        assert_eq!(summary.total_zones_modified(), 6);
 
-        let (_zone_id, zones_on_a_modified_sled) =
-            summary.diff.blueprint_zones.modified.iter().next().unwrap();
-        let added_zones = &zones_on_a_modified_sled.zones.added;
-        assert_eq!(added_zones.len(), 1);
-        for (_, zone) in added_zones {
-            assert_eq!(zone.kind(), ZoneKind::InternalNtp);
+        // We should have expunged all the zones on this pool.
+        let mut zones_expunged = BTreeSet::new();
+        for zones in summary.diff.blueprint_zones.modified_values_diff() {
+            for (_, z) in zones.zones.modified() {
+                assert_eq!(
+                    z.after.disposition,
+                    BlueprintZoneDisposition::Expunged,
+                    "Should have expunged this zone"
+                );
+                zones_expunged.insert(z.after.id);
+            }
         }
+        assert_eq!(zones_on_pool, zones_expunged);
 
-        assert_eq!(
-            zones_on_a_modified_sled.zones.modified.len(),
-            zones_using_zpool
-        );
-        for (_, modified_zone) in &zones_on_a_modified_sled.zones.modified {
-            assert_eq!(
-                *modified_zone.disposition.after,
-                BlueprintZoneDisposition::Expunged,
-                "Should have expunged this zone"
-            );
+        // We also should have added back a new zone for each kind that was
+        // removed, except the Crucible zone (which is specific to the disk).
+        // Remove the Crucible zone from our original count, then check against
+        // the added zones count.
+        assert_eq!(zone_kinds_on_pool.remove(&ZoneKind::Crucible), Some(1));
+        let mut zone_kinds_added = BTreeMap::new();
+        for zones in summary.diff.blueprint_zones.modified_values_diff() {
+            for (_, z) in zones.zones.added {
+                *zone_kinds_added.entry(z.zone_type.kind()).or_default() +=
+                    1_usize;
+            }
         }
+        assert_eq!(zone_kinds_on_pool, zone_kinds_added);
 
         // Test a no-op planning iteration.
         assert_planning_makes_no_changes(
             &logctx.log,
             &blueprint2,
             &input,
+            &collection,
             TEST_NAME,
         );
 
@@ -2380,7 +2440,7 @@ mod test {
             "for {desc}, generation should have been bumped"
         );
 
-        for (_, modified_zone) in &modified_zones.zones.modified {
+        for modified_zone in modified_zones.zones.modified_values_diff() {
             assert_eq!(
                 *modified_zone.disposition.after,
                 BlueprintZoneDisposition::Expunged,
@@ -2488,6 +2548,7 @@ mod test {
             &logctx.log,
             &blueprint3,
             &input,
+            &collection,
             TEST_NAME,
         );
 
@@ -2534,6 +2595,7 @@ mod test {
             &logctx.log,
             &blueprint4,
             &input,
+            &collection,
             TEST_NAME,
         );
 
@@ -2732,6 +2794,7 @@ mod test {
             &logctx.log,
             &blueprint2,
             &input,
+            &collection,
             TEST_NAME,
         );
 
@@ -2801,6 +2864,7 @@ mod test {
             &logctx.log,
             &blueprint2,
             &input,
+            &collection,
             TEST_NAME,
         );
 

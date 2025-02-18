@@ -38,6 +38,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::VolumeUuid;
+use slog::info;
 use slog::Logger;
 use std::collections::HashSet;
 use std::net::SocketAddr;
@@ -92,37 +93,6 @@ where
         .all_items
 }
 
-async fn replacements_left(datastore: &DataStore) -> i64 {
-    let conn = datastore.pool_connection_for_tests().await.unwrap();
-
-    let region_replacement_left = {
-        use db::schema::region_replacement::dsl;
-
-        dsl::region_replacement
-            .filter(dsl::replacement_state.ne(RegionReplacementState::Complete))
-            .select(diesel::dsl::count_star())
-            .first_async::<i64>(&*conn)
-            .await
-            .unwrap()
-    };
-
-    let region_snapshot_replacement_left = {
-        use db::schema::region_snapshot_replacement::dsl;
-
-        dsl::region_snapshot_replacement
-            .filter(
-                dsl::replacement_state
-                    .ne(RegionSnapshotReplacementState::Complete),
-            )
-            .select(diesel::dsl::count_star())
-            .first_async::<i64>(&*conn)
-            .await
-            .unwrap()
-    };
-
-    region_replacement_left + region_snapshot_replacement_left
-}
-
 pub(crate) async fn wait_for_all_replacements(
     datastore: &Arc<DataStore>,
     internal_client: &ClientTestContext,
@@ -130,29 +100,105 @@ pub(crate) async fn wait_for_all_replacements(
     wait_for_condition(
         || {
             let datastore = datastore.clone();
+            let opctx = OpContext::for_tests(
+                internal_client.client_log.new(o!()),
+                datastore.clone(),
+            );
 
             async move {
-                // Trigger all the replacement related background tasks. If
-                // there were actions taken, continually activate the tasks to
-                // push the replacements forward.
+                // Trigger all the replacement related background tasks. These
+                // will add replacement requests to the database and trigger the
+                // associated sagas to push the replacements forward. Bail out
+                // of this loop only when there's no more resources on expunged
+                // physical disks.
                 //
-                // If no actions were taken and no replacements are left, we are
-                // done waiting. `replacements_left` should only be called after
-                // `run_all_crucible_replacement_tasks`, as that could create
-                // more replacements.
+                // Be careful not to check if the background tasks performed any
+                // actions, or if there are in-progress replacement requests:
+                // the fixed point that we're waiting for is for all Crucible
+                // resources to be moved to non-expunged physical disks.
+                // Detecting whether or not there's an in-progress replacement
+                // can tell you that something is _currently_ moving but not
+                // that all work is done.
 
-                let actions_taken =
-                    run_all_crucible_replacement_tasks(internal_client).await;
+                run_all_crucible_replacement_tasks(internal_client).await;
 
-                if actions_taken > 0 {
+                let ro_left_to_do = datastore
+                    .find_read_only_regions_on_expunged_physical_disks(&opctx)
+                    .await
+                    .unwrap()
+                    .len();
+
+                let rw_left_to_do = datastore
+                    .find_read_write_regions_on_expunged_physical_disks(&opctx)
+                    .await
+                    .unwrap()
+                    .len();
+
+                let rs_left_to_do = datastore
+                    .find_region_snapshots_on_expunged_physical_disks(&opctx)
+                    .await
+                    .unwrap()
+                    .len();
+
+                if ro_left_to_do + rw_left_to_do + rs_left_to_do > 0 {
+                    info!(
+                        &internal_client.client_log,
+                        "wait_for_all_replacements: ro {} rw {} rs {}",
+                        ro_left_to_do,
+                        rw_left_to_do,
+                        rs_left_to_do,
+                    );
+
                     return Err(CondCheckError::<()>::NotYet);
                 }
 
-                if replacements_left(&datastore).await == 0 {
-                    return Ok(());
+                // Now that all resources have been moved, wait for the requests
+                // to all transition to complete.
+
+                let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+                let region_replacement_left = {
+                    use db::schema::region_replacement::dsl;
+
+                    dsl::region_replacement
+                        .filter(
+                            dsl::replacement_state
+                                .ne(RegionReplacementState::Complete),
+                        )
+                        .select(diesel::dsl::count_star())
+                        .first_async::<i64>(&*conn)
+                        .await
+                        .unwrap()
+                };
+
+                let region_snapshot_replacement_left = {
+                    use db::schema::region_snapshot_replacement::dsl;
+
+                    dsl::region_snapshot_replacement
+                        .filter(
+                            dsl::replacement_state
+                                .ne(RegionSnapshotReplacementState::Complete),
+                        )
+                        .select(diesel::dsl::count_star())
+                        .first_async::<i64>(&*conn)
+                        .await
+                        .unwrap()
+                };
+
+                if region_replacement_left + region_snapshot_replacement_left
+                    > 0
+                {
+                    info!(
+                        &internal_client.client_log,
+                        "wait_for_all_replacements: rr {} rsr {}",
+                        region_replacement_left,
+                        region_snapshot_replacement_left,
+                    );
+
+                    return Err(CondCheckError::<()>::NotYet);
                 }
 
-                Err(CondCheckError::<()>::NotYet)
+                Ok(())
             }
         },
         &std::time::Duration::from_millis(50),
@@ -2137,6 +2183,7 @@ async fn test_region_replacement_triple_sanity(
 async fn test_region_replacement_triple_sanity_2(
     cptestctx: &ControlPlaneTestContext,
 ) {
+    let log = &cptestctx.logctx.log;
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let opctx =
@@ -2214,6 +2261,8 @@ async fn test_region_replacement_triple_sanity_2(
             .await
             .unwrap();
 
+        info!(log, "expunging physical disk {}", db_zpool.physical_disk_id);
+
         datastore
             .physical_disk_update_policy(
                 &opctx,
@@ -2223,6 +2272,8 @@ async fn test_region_replacement_triple_sanity_2(
             .await
             .unwrap();
     }
+
+    info!(log, "waiting for all replacements");
 
     // Now, run all replacement tasks to completion
     wait_for_all_replacements(&datastore, &internal_client).await;
@@ -2242,6 +2293,8 @@ async fn test_region_replacement_triple_sanity_2(
             .await
             .unwrap();
 
+        info!(log, "expunging physical disk {}", db_zpool.physical_disk_id);
+
         datastore
             .physical_disk_update_policy(
                 &opctx,
@@ -2251,6 +2304,8 @@ async fn test_region_replacement_triple_sanity_2(
             .await
             .unwrap();
     }
+
+    info!(log, "waiting for all replacements");
 
     // Now, run all replacement tasks to completion
     wait_for_all_replacements(&datastore, &internal_client).await;
