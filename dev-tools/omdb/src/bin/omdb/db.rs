@@ -2081,7 +2081,6 @@ async fn cmd_db_snapshot_info(
     use db::schema::region_snapshot::dsl as region_snapshot_dsl;
     let region_snapshots = region_snapshot_dsl::region_snapshot
         .filter(region_snapshot_dsl::snapshot_id.eq(args.uuid))
-        .limit(3)
         .select(RegionSnapshot::as_select())
         .load_async(&*datastore.pool_connection_for_tests().await?)
         .await
