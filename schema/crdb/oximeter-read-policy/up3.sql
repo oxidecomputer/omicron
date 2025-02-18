@@ -7,4 +7,4 @@ INSERT INTO omicron.public.oximeter_read_policy (
     0,
     'single_node',
     NOW()
-);
+) ON CONFLICT DO NOTHING;
