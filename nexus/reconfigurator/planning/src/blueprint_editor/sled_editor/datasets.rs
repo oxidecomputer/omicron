@@ -8,6 +8,7 @@ use illumos_utils::zpool::ZpoolName;
 use nexus_types::deployment::id_map::{self, IdMap};
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
+use nexus_types::deployment::BlueprintDatasetFilter;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
@@ -19,11 +20,7 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
-
-#[cfg(test)]
-use nexus_types::deployment::BlueprintDatasetFilter;
 
 #[derive(Debug, thiserror::Error)]
 #[error(
@@ -125,11 +122,6 @@ pub(super) struct DatasetsEditor {
     // Cache of _in service only_ datasets, identified by (zpool, kind).
     in_service_by_zpool_and_kind:
         BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, DatasetUuid>>,
-    // Cache of _expunged_ dataset IDs. This serves as a list of IDs from
-    // `preexisting_dataset_ids` to ignore, as we shouldn't reuse old IDs if
-    // they belong to expunged datasets. We should be able to remove this when
-    // we remove `preexisting_dataset_ids`.
-    expunged_datasets: BTreeSet<DatasetUuid>,
     counts: EditCounts,
 }
 
@@ -138,7 +130,6 @@ impl DatasetsEditor {
         config: BlueprintDatasetsConfig,
     ) -> Result<Self, MultipleDatasetsOfKind> {
         let mut in_service_by_zpool_and_kind = BTreeMap::new();
-        let mut expunged_datasets = BTreeSet::new();
         for dataset in config.datasets.iter() {
             match dataset.disposition {
                 BlueprintDatasetDisposition::InService => {
@@ -160,15 +151,12 @@ impl DatasetsEditor {
                         }
                     }
                 }
-                BlueprintDatasetDisposition::Expunged => {
-                    expunged_datasets.insert(dataset.id);
-                }
+                BlueprintDatasetDisposition::Expunged => (),
             }
         }
         Ok(Self {
             config,
             in_service_by_zpool_and_kind,
-            expunged_datasets,
             counts: EditCounts::zeroes(),
         })
     }
@@ -180,7 +168,6 @@ impl DatasetsEditor {
                 datasets: IdMap::new(),
             },
             in_service_by_zpool_and_kind: BTreeMap::new(),
-            expunged_datasets: BTreeSet::new(),
             counts: EditCounts::zeroes(),
         }
     }
@@ -197,7 +184,6 @@ impl DatasetsEditor {
         self.counts
     }
 
-    #[cfg(test)]
     pub fn datasets(
         &self,
         filter: BlueprintDatasetFilter,
@@ -210,7 +196,7 @@ impl DatasetsEditor {
 
     // Private method; panics if given an ID that isn't present in
     // `self.config.datasets`. Callers must ensure the ID is valid.
-    fn expunge_by_known_valid_id(&mut self, id: DatasetUuid) {
+    fn expunge_by_known_valid_id(&mut self, id: DatasetUuid) -> bool {
         let mut dataset = self
             .config
             .datasets
@@ -220,12 +206,13 @@ impl DatasetsEditor {
             BlueprintDatasetDisposition::InService => {
                 dataset.disposition = BlueprintDatasetDisposition::Expunged;
                 self.counts.expunged += 1;
+                true
             }
             BlueprintDatasetDisposition::Expunged => {
                 // already expunged; nothing to do
+                false
             }
         }
-        self.expunged_datasets.insert(dataset.id);
     }
 
     /// Expunge a dataset identified by its zpool + kind combo.
@@ -252,15 +239,20 @@ impl DatasetsEditor {
         Ok(())
     }
 
-    pub fn expunge_all_on_zpool(&mut self, zpool: &ZpoolUuid) {
+    pub fn expunge_all_on_zpool(&mut self, zpool: &ZpoolUuid) -> usize {
         let Some(by_kind) = self.in_service_by_zpool_and_kind.remove(zpool)
         else {
-            return;
+            return 0;
         };
 
+        let mut nexpunged = 0;
         for id in by_kind.into_values() {
-            self.expunge_by_known_valid_id(id);
+            if self.expunge_by_known_valid_id(id) {
+                nexpunged += 1;
+            }
         }
+
+        nexpunged
     }
 
     pub fn ensure_in_service(
@@ -340,7 +332,6 @@ impl DatasetsEditor {
 mod tests {
     use super::*;
     use crate::planner::PlannerRng;
-    use nexus_types::deployment::BlueprintDatasetFilter;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::SledUuid;
     use proptest::prelude::*;

@@ -290,6 +290,7 @@ impl SledAgent {
                                     .memory
                                     .to_whole_mebibytes(),
                                 cpuid: None,
+                                guest_hv_interface: None,
                             },
                             components: [(
                                 "com1".to_string(),
