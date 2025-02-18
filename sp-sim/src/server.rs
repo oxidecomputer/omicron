@@ -57,7 +57,8 @@ impl UdpServer {
                 }
 
                 let interface_index =
-                    if_nametoindex(multicast_interface.as_str())?;
+                    if_nametoindex(multicast_interface.as_str())
+                        .context("if_nametoindex for {multicast_interface}")?;
 
                 let sock =
                     UdpSocket::bind(bind_addr).await.with_context(|| {
@@ -67,8 +68,9 @@ impl UdpServer {
                 sock.join_multicast_v6(&multicast_addr, interface_index)
                     .with_context(|| {
                         format!(
-                            "failed to join multicast group {} for index {}",
-                            multicast_addr, interface_index,
+                            "failed to join multicast group {multicast_addr} \
+                            for interface {multicast_interface} index \
+                            {interface_index}",
                         )
                     })?;
 
