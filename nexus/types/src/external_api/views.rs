@@ -11,7 +11,7 @@ use crate::identity::AssetIdentityMetadata;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
-use diffus::Diffus;
+use daft::Diffable;
 use omicron_common::api::external::{
     AffinityPolicy, AllowedSourceIps as ExternalAllowedSourceIps, ByteCount,
     Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
@@ -723,7 +723,7 @@ impl fmt::Display for SledPolicy {
     PartialEq,
     Eq,
     EnumIter,
-    Diffus,
+    Diffable,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum SledState {

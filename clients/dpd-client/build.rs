@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2024 Oxide Computer Company
+// Copyright 2025 Oxide Computer Company
 //
 // TODO: remove
 // This code is only required at the moment because the source repo
@@ -75,29 +75,30 @@ fn main() -> Result<()> {
         })?
     };
 
-    let code = progenitor::Generator::new(
-        progenitor::GenerationSettings::new()
-            .with_inner_type(quote!{ ClientState })
-            .with_pre_hook(quote! {
-                |state: &crate::ClientState, request: &reqwest::Request| {
-                    slog::debug!(state.log, "client request";
-                        "method" => %request.method(),
-                        "uri" => %request.url(),
-                        "body" => ?&request.body(),
-                    );
-                }
-            })
-            .with_post_hook(quote! {
-                |state: &crate::ClientState, result: &Result<_, _>| {
-                    slog::debug!(state.log, "client response"; "result" => ?result);
-                }
-            })
-	    .with_derive("PartialEq")
-    )
-    .generate_tokens(&spec)
-    .with_context(|| {
-        format!("failed to generate progenitor client from {local_path}")
-    })?;
+    let mut settings = progenitor::GenerationSettings::new();
+    settings
+        .with_inner_type(quote! { ClientState })
+        .with_pre_hook(quote! {
+            |state: &crate::ClientState, request: &reqwest::Request| {
+                slog::debug!(state.log, "client request";
+                    "method" => %request.method(),
+                    "uri" => %request.url(),
+                    "body" => ?&request.body(),
+                );
+            }
+        })
+        .with_post_hook(quote! {
+            |state: &crate::ClientState, result: &Result<_, _>| {
+                slog::debug!(state.log, "client response"; "result" => ?result);
+            }
+        })
+        .with_derive("PartialEq");
+
+    let code = progenitor::Generator::new(&settings)
+        .generate_tokens(&spec)
+        .with_context(|| {
+            format!("failed to generate progenitor client from {local_path}")
+        })?;
 
     let content = rustfmt_wrapper::rustfmt(code).with_context(|| {
         format!("rustfmt failed on progenitor code from {local_path}")
