@@ -10,7 +10,7 @@ use crate::addrobj::AddrObject;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use std::net::IpAddr;
 
-#[cfg(path = "illumos/test_handle.rs")]
+#[path = "illumos/test_handle.rs"]
 mod handle;
 pub use handle::Handle;
 
