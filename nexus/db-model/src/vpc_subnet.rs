@@ -109,12 +109,13 @@ impl From<VpcSubnet> for views::VpcSubnet {
     }
 }
 
-#[derive(AsChangeset)]
+#[derive(AsChangeset, Clone, Deserialize, Serialize, Debug)]
 #[diesel(table_name = vpc_subnet)]
 pub struct VpcSubnetUpdate {
     pub name: Option<Name>,
     pub description: Option<String>,
     pub time_modified: DateTime<Utc>,
+    pub custom_router_id: Option<Option<Uuid>>,
 }
 
 impl From<params::VpcSubnetUpdate> for VpcSubnetUpdate {
@@ -123,6 +124,7 @@ impl From<params::VpcSubnetUpdate> for VpcSubnetUpdate {
             name: params.identity.name.map(Name),
             description: params.identity.description,
             time_modified: Utc::now(),
+            custom_router_id: None,
         }
     }
 }

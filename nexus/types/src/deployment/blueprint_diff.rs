@@ -11,26 +11,625 @@ use super::blueprint_display::{
     BpTable, BpTableColumn, BpTableData, BpTableRow, KvListWithHeading, KvPair,
 };
 use super::{
-    zone_sort_key, Blueprint, ClickhouseClusterConfig,
-    CockroachDbPreserveDowngrade, DiffBeforeClickhouseClusterConfig,
+    unwrap_or_none, zone_sort_key, BlueprintDatasetConfigDiff,
+    BlueprintDatasetDisposition, BlueprintDatasetsConfigDiff, BlueprintDiff,
+    BlueprintMetadata, BlueprintPhysicalDiskConfig,
+    BlueprintPhysicalDisksConfigDiff, BlueprintZoneConfigDiff,
+    BlueprintZonesConfigDiff, ClickhouseClusterConfig,
+    CockroachDbPreserveDowngrade,
 };
-use diffus::Diffable;
+use daft::Diffable;
 use nexus_sled_agent_shared::inventory::ZoneKind;
-use omicron_common::api::external::Generation;
-use omicron_common::disk::DiskIdentity;
-use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_common::api::external::{ByteCount, Generation};
+use omicron_common::disk::{CompressionAlgorithm, DatasetName, DiskIdentity};
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
+use std::fmt::{self, Write as _};
 
 use crate::deployment::blueprint_display::BpClickhouseKeepersTableSchema;
 use crate::deployment::{
-    BlueprintDatasetConfig, BlueprintDatasetsConfig, BlueprintMetadata,
-    BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
-    BlueprintZoneDisposition, BlueprintZonesConfig,
-    CollectionDatasetIdentifier, DiffBeforeMetadata, ZoneSortKey,
+    Blueprint, BlueprintDatasetConfig, BlueprintZoneConfig,
+    BlueprintZoneDisposition, CollectionDatasetIdentifier, ZoneSortKey,
 };
-use crate::external_api::views::SledState;
+
+// A wrapper type around a `daft` generated `BlueprintDiff that provides summary
+// data and direct access to the underlying diff.
+#[derive(Debug)]
+pub struct BlueprintDiffSummary<'a> {
+    pub before: &'a Blueprint,
+    pub after: &'a Blueprint,
+    pub diff: BlueprintDiff<'a>,
+    pub modified_zones_diff: BTreeMap<SledUuid, BlueprintZonesConfigDiff<'a>>,
+    pub modified_disks_diff:
+        BTreeMap<SledUuid, BlueprintPhysicalDisksConfigDiff<'a>>,
+    pub modified_datasets_diff:
+        BTreeMap<SledUuid, BlueprintDatasetsConfigDiff<'a>>,
+    pub all_sleds: BTreeSet<SledUuid>,
+    pub sleds_added: BTreeSet<SledUuid>,
+    pub sleds_removed: BTreeSet<SledUuid>,
+    pub sleds_modified: BTreeSet<SledUuid>,
+    pub sleds_unchanged: BTreeSet<SledUuid>,
+}
+
+impl<'a> BlueprintDiffSummary<'a> {
+    pub fn new(before: &'a Blueprint, after: &'a Blueprint) -> Self {
+        let diff = before.diff(after);
+
+        let modified_zones_diff = diff
+            .blueprint_zones
+            .modified_diff()
+            .map(|(k, v)| (*k, v))
+            .collect();
+        let modified_disks_diff = diff
+            .blueprint_disks
+            .modified_diff()
+            .map(|(k, v)| (*k, v))
+            .collect();
+        let modified_datasets_diff = diff
+            .blueprint_datasets
+            .modified_diff()
+            .map(|(k, v)| (*k, v))
+            .collect();
+
+        // We assume for now that sled_state additions represent sled additions.
+        // Once we collapse the 4 blueprint maps this will be unambiguously
+        // true.
+        let sleds_added: BTreeSet<SledUuid> =
+            diff.sled_state.added.keys().map(|k| **k).collect();
+
+        // We can't do the same for removals unfortunately. We prematurely
+        // prune decommissioned sleds, but there may still be zones, disks,
+        // or datasets that have not yet been removed. We must check for this.
+        let mut sleds_removed: BTreeSet<_> =
+            diff.blueprint_zones.removed.keys().map(|k| **k).collect();
+
+        sleds_removed.retain(|sled_id| {
+            // Disks and datasets are removed
+            (diff.blueprint_disks.removed.contains_key(sled_id)
+                && diff.blueprint_datasets.removed.contains_key(sled_id)) ||
+
+            // Disks and datasets don't exist
+            (!diff.blueprint_disks.is_unchanged(sled_id)
+                && !diff.blueprint_disks.added.contains_key(sled_id)
+                && !diff.blueprint_disks.is_modified(sled_id)
+                && !diff.blueprint_datasets.is_unchanged(sled_id)
+                && !diff.blueprint_datasets.added.contains_key(sled_id)
+                && !diff.blueprint_datasets.is_modified(sled_id)
+            )
+        });
+
+        // In principle, sleds_unchanged are the intersection of all unchanged
+        // sets.
+        //
+        // Because of backwards compatibility however, the zones may still be
+        // present when expunged, but disks and datasets gone. Because of this,
+        // if there are no unchanged disks and datasets for the same sleds with
+        // unchanged zones, then we must check to see if there are any modified,
+        // added, or removed disks or datasets at all on the given sled. If not,
+        // we consider those sleds unchanged.
+        let mut sleds_unchanged: BTreeSet<_> =
+            diff.blueprint_zones.unchanged_keys().map(|id| *id).collect();
+
+        sleds_unchanged.retain(|sled_id| {
+            // Disks and datasets are unchanged
+            (diff.blueprint_disks.is_unchanged(sled_id)
+                && diff.blueprint_datasets.is_unchanged(sled_id)) ||
+
+            // Disks and datasets don't exist
+            (!diff.blueprint_disks.removed.contains_key(sled_id)
+                && !diff.blueprint_disks.added.contains_key(sled_id)
+                && !diff.blueprint_disks.is_modified(sled_id)
+                && !diff.blueprint_datasets.removed.contains_key(sled_id)
+                && !diff.blueprint_datasets.added.contains_key(sled_id)
+                && !diff.blueprint_datasets.is_modified(sled_id)
+            )
+        });
+
+        // Modifieds sleds are the union of sleds modified in `sled_state`,
+        // `blueprint_zones`, `blueprint_disks`, and `blueprint_datasets`.
+        //
+        // Because of backwards compatibility, disks and datasets get removed
+        // when expunged. Because of this we must also check for removed disks
+        // and datasets that are not in removed sleds.
+        let mut sleds_modified: BTreeSet<_> = diff
+            .sled_state
+            .modified_keys()
+            .chain(diff.blueprint_zones.modified_keys())
+            .chain(diff.blueprint_disks.modified_keys())
+            .chain(diff.blueprint_datasets.modified_keys())
+            .map(|k| *k)
+            .collect();
+        for sled_id in diff
+            .blueprint_disks
+            .removed
+            .keys()
+            .chain(diff.blueprint_datasets.removed.keys())
+        {
+            if !sleds_removed.contains(*sled_id) {
+                sleds_modified.insert(**sled_id);
+            }
+        }
+
+        let all_sleds = sleds_added
+            .iter()
+            .chain(sleds_removed.iter())
+            .chain(sleds_modified.iter())
+            .chain(sleds_unchanged.iter())
+            .cloned()
+            .collect();
+
+        BlueprintDiffSummary {
+            before,
+            after,
+            diff,
+            modified_zones_diff,
+            modified_disks_diff,
+            modified_datasets_diff,
+            all_sleds,
+            sleds_added,
+            sleds_removed,
+            sleds_modified,
+            sleds_unchanged,
+        }
+    }
+
+    /// Return a struct that can be used to display the diff.
+    pub fn display(&'a self) -> BlueprintDiffDisplay<'a> {
+        BlueprintDiffDisplay::new(self)
+    }
+
+    /// Returns whether the diff reflects any changes or if the blueprints are
+    /// equivalent.
+    pub fn has_changes(&self) -> bool {
+        // Any changes to physical disks, datasets, or zones would be reflected
+        // in `self.sleds_modified`, `self.sleds_added`, or
+        // `self.sleds_removed`.
+        if !self.sleds_modified.is_empty()
+            || !self.sleds_added.is_empty()
+            || !self.sleds_removed.is_empty()
+        {
+            return true;
+        }
+
+        self.diff.clickhouse_cluster_config.before
+            != self.diff.clickhouse_cluster_config.after
+    }
+
+    ///  The number of zones added across all sleds
+    pub fn total_zones_added(&self) -> usize {
+        self.diff
+            .blueprint_zones
+            .added
+            .values()
+            .fold(0, |acc, c| acc + c.zones.len())
+            + self
+                .modified_zones_diff
+                .values()
+                .fold(0, |acc, c| acc + c.zones.added.len())
+    }
+
+    ///  The number of zones removed across all sleds
+    pub fn total_zones_removed(&self) -> usize {
+        self.diff
+            .blueprint_zones
+            .removed
+            .values()
+            .fold(0, |acc, c| acc + c.zones.len())
+            + self
+                .modified_zones_diff
+                .values()
+                .fold(0, |acc, c| acc + c.zones.removed.len())
+    }
+    ///  The number of zones modified across all sleds
+    pub fn total_zones_modified(&self) -> usize {
+        self.modified_zones_diff
+            .values()
+            .fold(0, |acc, c| acc + c.zones.modified().count())
+    }
+
+    ///  The number of disks added across all sleds
+    pub fn total_disks_added(&self) -> usize {
+        self.diff
+            .blueprint_disks
+            .added
+            .values()
+            .fold(0, |acc, c| acc + c.disks.len())
+            + self
+                .modified_disks_diff
+                .values()
+                .fold(0, |acc, c| acc + c.disks.added.len())
+    }
+
+    ///  The number of disks removed across all sleds
+    pub fn total_disks_removed(&self) -> usize {
+        self.diff
+            .blueprint_disks
+            .removed
+            .values()
+            .fold(0, |acc, c| acc + c.disks.len())
+            + self
+                .modified_disks_diff
+                .values()
+                .fold(0, |acc, c| acc + c.disks.removed.len())
+    }
+    ///  The number of disks modified across all sleds
+    pub fn total_disks_modified(&self) -> usize {
+        self.modified_disks_diff
+            .values()
+            .fold(0, |acc, c| acc + c.disks.modified().count())
+    }
+
+    ///  The number of datasets added across all sleds
+    pub fn total_datasets_added(&self) -> usize {
+        self.diff
+            .blueprint_datasets
+            .added
+            .values()
+            .fold(0, |acc, c| acc + c.datasets.len())
+            + self
+                .modified_datasets_diff
+                .values()
+                .fold(0, |acc, c| acc + c.datasets.added.len())
+    }
+
+    ///  The number of datasets removed across all sleds
+    pub fn total_datasets_removed(&self) -> usize {
+        self.diff
+            .blueprint_datasets
+            .removed
+            .values()
+            .fold(0, |acc, c| acc + c.datasets.len())
+            + self
+                .modified_datasets_diff
+                .values()
+                .fold(0, |acc, c| acc + c.datasets.removed.len())
+    }
+    ///  The number of datasets modified across all sleds
+    pub fn total_datasets_modified(&self) -> usize {
+        self.modified_datasets_diff
+            .values()
+            .fold(0, |acc, c| acc + c.datasets.modified().count())
+    }
+
+    /// Return the `BlueprintZonesConfigDiff` for a modified sled
+    pub fn zones_on_modified_sled(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<&BlueprintZonesConfigDiff<'a>> {
+        self.modified_zones_diff.get(sled_id)
+    }
+
+    /// Return the `BlueprintDisksConfigDiff` for a modified sled
+    pub fn disks_on_modified_sled(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<&BlueprintPhysicalDisksConfigDiff<'a>> {
+        self.modified_disks_diff.get(sled_id)
+    }
+
+    /// Return the `BlueprintDatasetsConfigDiff` for a modified sled
+    pub fn datasets_on_modified_sled(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<&BlueprintDatasetsConfigDiff<'a>> {
+        self.modified_datasets_diff.get(sled_id)
+    }
+
+    /// Iterate over all added zones on a sled
+    pub fn added_zones(&self, sled_id: &SledUuid) -> Option<BpDiffZoneDetails> {
+        // First check if the sled is added
+        if let Some(&zones_cfg) = self.diff.blueprint_zones.added.get(sled_id) {
+            if zones_cfg.zones.is_empty() {
+                return None;
+            }
+            return Some(BpDiffZoneDetails::new(
+                None,
+                Some(zones_cfg.generation),
+                zones_cfg.zones.iter(),
+            ));
+        }
+
+        // Then check if the sled is modified and there are any added zones
+        let zones_cfg_diff = self.modified_zones_diff.get(sled_id)?;
+        if zones_cfg_diff.zones.added.is_empty() {
+            return None;
+        }
+        Some(BpDiffZoneDetails::new(
+            Some(*zones_cfg_diff.generation.before),
+            Some(*zones_cfg_diff.generation.after),
+            zones_cfg_diff.zones.added.values().map(|z| *z),
+        ))
+    }
+
+    /// Iterate over all removed zones on a sled
+    pub fn removed_zones(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<BpDiffZoneDetails> {
+        // First check if the sled is removed
+        if let Some(&zones_cfg) = self.diff.blueprint_zones.removed.get(sled_id)
+        {
+            if zones_cfg.zones.is_empty() {
+                return None;
+            }
+            return Some(BpDiffZoneDetails::new(
+                Some(zones_cfg.generation),
+                None,
+                zones_cfg.zones.iter(),
+            ));
+        }
+
+        // Then check if the sled is modified and there are any removed zones
+        let zones_cfg_diff = self.modified_zones_diff.get(sled_id)?;
+        if zones_cfg_diff.zones.removed.is_empty() {
+            return None;
+        }
+        Some(BpDiffZoneDetails::new(
+            Some(*zones_cfg_diff.generation.before),
+            Some(*zones_cfg_diff.generation.after),
+            zones_cfg_diff.zones.removed.values().map(|z| *z),
+        ))
+    }
+
+    /// Iterate over all modified zones on a sled
+    pub fn modified_zones(
+        &'a self,
+        sled_id: &SledUuid,
+    ) -> Option<(BpDiffZonesModified, BpDiffZoneErrors)> {
+        // Then check if the sled is modified and there are any modified zones
+        let zones_cfg_diff = self.modified_zones_diff.get(sled_id)?;
+        let mut modified_zones =
+            zones_cfg_diff.zones.modified_values_diff().peekable();
+        if modified_zones.peek().is_none() {
+            return None;
+        }
+        Some(BpDiffZonesModified::new(
+            *zones_cfg_diff.generation.before,
+            *zones_cfg_diff.generation.after,
+            modified_zones,
+        ))
+    }
+
+    /// Iterate over all unchanged zones on a sled
+    pub fn unchanged_zones(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<BpDiffZoneDetails> {
+        // First check if the sled is unchanged
+        if let Some(zones_cfg) =
+            self.diff.blueprint_zones.get_unchanged(sled_id)
+        {
+            if zones_cfg.zones.is_empty() {
+                return None;
+            }
+            return Some(BpDiffZoneDetails::new(
+                None,
+                Some(zones_cfg.generation),
+                zones_cfg.zones.iter(),
+            ));
+        }
+
+        // Then check if the sled is modified and there are any unchanged zones
+        let zones_cfg_diff = self.modified_zones_diff.get(sled_id)?;
+        let mut unchanged_zones =
+            zones_cfg_diff.zones.unchanged_values().peekable();
+        if unchanged_zones.peek().is_none() {
+            return None;
+        }
+        Some(BpDiffZoneDetails::new(
+            Some(*zones_cfg_diff.generation.before),
+            Some(*zones_cfg_diff.generation.after),
+            unchanged_zones,
+        ))
+    }
+
+    /// Iterate over all added disks on a sled
+    pub fn added_disks(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<DiffPhysicalDisksDetails> {
+        // First check if the sled is added
+        if let Some(&disks_cfg) = self.diff.blueprint_disks.added.get(sled_id) {
+            if disks_cfg.disks.is_empty() {
+                return None;
+            }
+            return Some(DiffPhysicalDisksDetails::new(
+                None,
+                Some(disks_cfg.generation),
+                disks_cfg.disks.iter(),
+            ));
+        }
+
+        // Then check if the sled is modified and there are any added disks
+        let disks_cfg_diff = self.modified_disks_diff.get(sled_id)?;
+        if disks_cfg_diff.disks.added.is_empty() {
+            return None;
+        }
+        Some(DiffPhysicalDisksDetails::new(
+            Some(*disks_cfg_diff.generation.before),
+            Some(*disks_cfg_diff.generation.after),
+            disks_cfg_diff.disks.added.values().map(|z| *z),
+        ))
+    }
+
+    /// Iterate over all removed disks on a sled
+    pub fn removed_disks(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<DiffPhysicalDisksDetails> {
+        // First check if the sled is removed
+        if let Some(&disks_cfg) = self.diff.blueprint_disks.removed.get(sled_id)
+        {
+            if disks_cfg.disks.is_empty() {
+                return None;
+            }
+            return Some(DiffPhysicalDisksDetails::new(
+                Some(disks_cfg.generation),
+                None,
+                disks_cfg.disks.iter(),
+            ));
+        }
+
+        // Then check if the sled is modified and there are any removed disks
+        let disks_cfg_diff = self.modified_disks_diff.get(sled_id)?;
+        if disks_cfg_diff.disks.removed.is_empty() {
+            return None;
+        }
+        Some(DiffPhysicalDisksDetails::new(
+            Some(*disks_cfg_diff.generation.before),
+            Some(*disks_cfg_diff.generation.after),
+            disks_cfg_diff.disks.removed.values().map(|z| *z),
+        ))
+    }
+
+    /// Iterate over all unchanged disks on a sled
+    pub fn unchanged_disks(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<DiffPhysicalDisksDetails> {
+        // First check if the sled is unchanged
+        if let Some(disks_cfg) =
+            self.diff.blueprint_disks.get_unchanged(sled_id)
+        {
+            if disks_cfg.disks.is_empty() {
+                return None;
+            }
+            return Some(DiffPhysicalDisksDetails::new(
+                None,
+                Some(disks_cfg.generation),
+                disks_cfg.disks.iter(),
+            ));
+        }
+
+        // Then check if the sled is modified and there are any unchanged disks
+        let disks_cfg_diff = self.modified_disks_diff.get(sled_id)?;
+        let mut unchanged_disks =
+            disks_cfg_diff.disks.unchanged_values().peekable();
+        if unchanged_disks.peek().is_none() {
+            return None;
+        }
+        Some(DiffPhysicalDisksDetails::new(
+            Some(*disks_cfg_diff.generation.before),
+            Some(*disks_cfg_diff.generation.after),
+            unchanged_disks,
+        ))
+    }
+
+    /// Iterate over all added datasets on a sled
+    pub fn added_datasets(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<DiffDatasetsDetails> {
+        // First check if the sled is added
+        if let Some(&datasets_cfg) =
+            self.diff.blueprint_datasets.added.get(sled_id)
+        {
+            if datasets_cfg.datasets.is_empty() {
+                return None;
+            }
+            return Some(DiffDatasetsDetails::new(
+                None,
+                Some(datasets_cfg.generation),
+                datasets_cfg.datasets.iter(),
+            ));
+        }
+
+        // Then check if the sled is modified and there are any added datasets
+        let datasets_cfg_diff = self.modified_datasets_diff.get(sled_id)?;
+        if datasets_cfg_diff.datasets.added.is_empty() {
+            return None;
+        }
+        Some(DiffDatasetsDetails::new(
+            Some(*datasets_cfg_diff.generation.before),
+            Some(*datasets_cfg_diff.generation.after),
+            datasets_cfg_diff.datasets.added.values().map(|z| *z),
+        ))
+    }
+
+    /// Iterate over all removed datasets on a sled
+    pub fn removed_datasets(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<DiffDatasetsDetails> {
+        // First check if the sled is removed
+        if let Some(&datasets_cfg) =
+            self.diff.blueprint_datasets.removed.get(sled_id)
+        {
+            if datasets_cfg.datasets.is_empty() {
+                return None;
+            }
+            return Some(DiffDatasetsDetails::new(
+                Some(datasets_cfg.generation),
+                None,
+                datasets_cfg.datasets.iter(),
+            ));
+        }
+
+        // Then check if the sled is modified and there are any removed datasets
+        let datasets_cfg_diff = self.modified_datasets_diff.get(sled_id)?;
+        if datasets_cfg_diff.datasets.removed.is_empty() {
+            return None;
+        }
+        Some(DiffDatasetsDetails::new(
+            Some(*datasets_cfg_diff.generation.before),
+            Some(*datasets_cfg_diff.generation.after),
+            datasets_cfg_diff.datasets.removed.values().map(|z| *z),
+        ))
+    }
+
+    /// Iterate over all unchanged datasets on a sled
+    pub fn unchanged_datasets(
+        &self,
+        sled_id: &SledUuid,
+    ) -> Option<DiffDatasetsDetails> {
+        // First check if the sled is unchanged
+        if let Some(datasets_cfg) =
+            self.diff.blueprint_datasets.get_unchanged(sled_id)
+        {
+            if datasets_cfg.datasets.is_empty() {
+                return None;
+            }
+            return Some(DiffDatasetsDetails::new(
+                None,
+                Some(datasets_cfg.generation),
+                datasets_cfg.datasets.iter(),
+            ));
+        }
+
+        // Then check if the sled is modified and there are any unchanged datasets
+        let datasets_cfg_diff = self.modified_datasets_diff.get(sled_id)?;
+        let mut unchanged_datasets =
+            datasets_cfg_diff.datasets.unchanged_values().peekable();
+        if unchanged_datasets.peek().is_none() {
+            return None;
+        }
+        Some(DiffDatasetsDetails::new(
+            Some(*datasets_cfg_diff.generation.before),
+            Some(*datasets_cfg_diff.generation.after),
+            unchanged_datasets,
+        ))
+    }
+
+    /// Iterate over all modified datasets on a sled
+    pub fn modified_datasets(
+        &'a self,
+        sled_id: &SledUuid,
+    ) -> Option<(BpDiffDatasetsModified, BpDiffDatasetErrors)> {
+        // Check if the sled is modified and there are any modified datasets
+        let datasets_cfg_diff = self.modified_datasets_diff.get(sled_id)?;
+        let mut modified_datasets =
+            datasets_cfg_diff.datasets.modified_values_diff().peekable();
+        if modified_datasets.peek().is_none() {
+            return None;
+        }
+        Some(BpDiffDatasetsModified::new(
+            *datasets_cfg_diff.generation.before,
+            *datasets_cfg_diff.generation.after,
+            modified_datasets,
+        ))
+    }
+}
 
 /// Diffs for omicron zones on a given sled with a given `BpDiffState`
 #[derive(Debug)]
@@ -38,6 +637,18 @@ pub struct BpDiffZoneDetails {
     pub generation_before: Option<Generation>,
     pub generation_after: Option<Generation>,
     pub zones: Vec<BlueprintZoneConfig>,
+}
+
+impl BpDiffZoneDetails {
+    pub fn new<'a>(
+        generation_before: Option<Generation>,
+        generation_after: Option<Generation>,
+        zones_iter: impl Iterator<Item = &'a BlueprintZoneConfig>,
+    ) -> Self {
+        let mut zones: Vec<_> = zones_iter.cloned().collect();
+        zones.sort_unstable_by_key(zone_sort_key);
+        BpDiffZoneDetails { generation_before, generation_after, zones }
+    }
 }
 
 impl BpTableData for BpDiffZoneDetails {
@@ -85,45 +696,52 @@ impl ZoneSortKey for ModifiedZone {
 }
 
 impl ModifiedZone {
-    #[allow(clippy::result_large_err)]
-    pub fn new(
-        before: BlueprintZoneConfig,
-        after: BlueprintZoneConfig,
+    pub fn from_diff(
+        diff: &BlueprintZoneConfigDiff,
     ) -> Result<ModifiedZone, BpDiffZoneError> {
         // Do we have any errors? If so, create a "reason" string.
         let mut reason = String::new();
-        if before.kind() != after.kind() {
+        // These first two checks are only for backwards compatibility. They are
+        // all included in the zone_type comparison below.
+        if diff.zone_type.before.kind() != diff.zone_type.after.kind() {
             let msg = format!(
                 "mismatched zone kind: before: {}, after: {}\n",
-                before.kind().report_str(),
-                after.kind().report_str(),
+                diff.zone_type.before.kind().report_str(),
+                diff.zone_type.after.kind().report_str(),
             );
             reason.push_str(&msg);
         }
-        if before.underlay_ip() != after.underlay_ip() {
+        if diff.zone_type.before.underlay_ip()
+            != diff.zone_type.after.underlay_ip()
+        {
             let msg = format!(
                 "mismatched underlay IP: before: {}, after: {}\n",
-                before.underlay_ip(),
-                after.underlay_ip()
+                diff.zone_type.before.underlay_ip(),
+                diff.zone_type.after.underlay_ip()
             );
             reason.push_str(&msg);
         }
-        if before.zone_type != after.zone_type {
+        if diff.zone_type.before != diff.zone_type.after {
             let msg = format!(
                 "mismatched zone type: after: {:#?}\n",
-                after.zone_type
+                diff.zone_type.after
             );
             reason.push_str(&msg);
         }
         if reason.is_empty() {
             Ok(ModifiedZone {
-                prior_disposition: before.disposition,
-                zone: after,
+                prior_disposition: *diff.disposition.before,
+                zone: BlueprintZoneConfig {
+                    disposition: *diff.disposition.after,
+                    id: *diff.id.after,
+                    filesystem_pool: diff.filesystem_pool.after.cloned(),
+                    zone_type: diff.zone_type.after.clone(),
+                },
             })
         } else {
             Err(BpDiffZoneError {
-                zone_before: before,
-                zone_after: after,
+                zone_before_id: *diff.id.before,
+                zone_after_id: *diff.id.after,
                 reason,
             })
         }
@@ -136,6 +754,28 @@ pub struct BpDiffZonesModified {
     pub generation_before: Generation,
     pub generation_after: Generation,
     pub zones: Vec<ModifiedZone>,
+}
+
+impl BpDiffZonesModified {
+    pub fn new<'a>(
+        generation_before: Generation,
+        generation_after: Generation,
+        zone_diffs: impl Iterator<Item = BlueprintZoneConfigDiff<'a>>,
+    ) -> (BpDiffZonesModified, BpDiffZoneErrors) {
+        let mut zones = vec![];
+        let mut errors = vec![];
+        for diff in zone_diffs {
+            match ModifiedZone::from_diff(&diff) {
+                Ok(modified_zone) => zones.push(modified_zone),
+                Err(error) => errors.push(error),
+            }
+        }
+        zones.sort_unstable_by_key(zone_sort_key);
+        (
+            BpDiffZonesModified { generation_before, generation_after, zones },
+            BpDiffZoneErrors { generation_before, generation_after, errors },
+        )
+    }
 }
 
 impl BpTableData for BpDiffZonesModified {
@@ -166,8 +806,8 @@ impl BpTableData for BpDiffZonesModified {
     }
 }
 
-#[derive(Debug)]
 /// Errors arising from illegally modified zone fields
+#[derive(Debug)]
 pub struct BpDiffZoneErrors {
     pub generation_before: Generation,
     pub generation_after: Generation,
@@ -176,8 +816,8 @@ pub struct BpDiffZoneErrors {
 
 #[derive(Debug)]
 pub struct BpDiffZoneError {
-    pub zone_before: BlueprintZoneConfig,
-    pub zone_after: BlueprintZoneConfig,
+    pub zone_before_id: OmicronZoneUuid,
+    pub zone_after_id: OmicronZoneUuid,
     pub reason: String,
 }
 
@@ -192,150 +832,29 @@ pub struct BpDiffZones {
 }
 
 impl BpDiffZones {
-    pub fn new(
-        before: BTreeMap<SledUuid, BlueprintZonesConfig>,
-        mut after: BTreeMap<SledUuid, BlueprintZonesConfig>,
+    /// Convert from our diff summary to our display compatibility layer
+    /// from the prior version of code.
+    pub fn from_diff_summary<'a>(
+        summary: &'a BlueprintDiffSummary<'a>,
     ) -> Self {
         let mut diffs = BpDiffZones::default();
-        for (sled_id, before_zones) in before {
-            let before_generation = before_zones.generation;
-            let mut removed = vec![];
-            if let Some(after_zones) = after.remove(&sled_id) {
-                let after_generation = after_zones.generation;
-                let mut unchanged = vec![];
-                let mut modified = vec![];
-                let mut errors = vec![];
-                let mut added = vec![];
-
-                // Compare `before_zones` and `after_zones` to look
-                // for additions, deletions, modifications, and errors.
-                let before_by_id: BTreeMap<_, BlueprintZoneConfig> =
-                    before_zones
-                        .zones
-                        .into_iter()
-                        .map(|z| (z.id(), z))
-                        .collect();
-                let mut after_by_id: BTreeMap<_, BlueprintZoneConfig> =
-                    after_zones.zones.into_iter().map(|z| (z.id, z)).collect();
-
-                for (zone_id, zone_before) in before_by_id {
-                    if let Some(zone_after) = after_by_id.remove(&zone_id) {
-                        // Are the zones equal?
-                        if zone_before == zone_after {
-                            unchanged.push(zone_after);
-                        } else {
-                            // The zones are different. They are only allowed to differ in terms
-                            // of `disposition`, otherwise we have an error.
-                            match ModifiedZone::new(zone_before, zone_after) {
-                                Ok(modified_zone) => {
-                                    modified.push(modified_zone)
-                                }
-                                Err(error) => errors.push(error),
-                            }
-                        }
-                    } else {
-                        // This zone doesn't exist in `zone_after` so it must have
-                        // been removed.
-                        removed.push(zone_before);
-                    }
-                }
-                // Any remaining zones in `after_by_id` are newly added
-                for (_, zone_after) in after_by_id {
-                    added.push(zone_after);
-                }
-
-                // Add all records to `diffs` that come from either `before` or `after`
-                // for this `sled_id`.
-                if !unchanged.is_empty() {
-                    unchanged.sort_unstable_by_key(zone_sort_key);
-                    diffs.unchanged.insert(
-                        sled_id,
-                        BpDiffZoneDetails {
-                            generation_before: Some(before_generation),
-                            generation_after: Some(after_generation),
-                            zones: unchanged,
-                        },
-                    );
-                }
-                if !removed.is_empty() {
-                    removed.sort_unstable_by_key(zone_sort_key);
-                    diffs.removed.insert(
-                        sled_id,
-                        BpDiffZoneDetails {
-                            generation_before: Some(before_generation),
-                            generation_after: Some(after_generation),
-                            zones: removed,
-                        },
-                    );
-                }
-                if !added.is_empty() {
-                    added.sort_unstable_by_key(zone_sort_key);
-                    diffs.added.insert(
-                        sled_id,
-                        BpDiffZoneDetails {
-                            generation_before: Some(before_generation),
-                            generation_after: Some(after_generation),
-                            zones: added,
-                        },
-                    );
-                }
-                if !modified.is_empty() {
-                    modified.sort_unstable_by_key(zone_sort_key);
-                    diffs.modified.insert(
-                        sled_id,
-                        BpDiffZonesModified {
-                            generation_before: before_generation,
-                            generation_after: after_generation,
-                            zones: modified,
-                        },
-                    );
-                }
-                if !errors.is_empty() {
-                    diffs.errors.insert(
-                        sled_id,
-                        BpDiffZoneErrors {
-                            generation_before: before_generation,
-                            generation_after: after_generation,
-                            errors,
-                        },
-                    );
-                }
-            } else {
-                // No `after_zones` for this `sled_id`, so `before_zones` are removed
-                assert!(removed.is_empty());
-                for zone in before_zones.zones {
-                    removed.push(zone);
-                }
-
-                if !removed.is_empty() {
-                    removed.sort_unstable_by_key(zone_sort_key);
-                    diffs.removed.insert(
-                        sled_id,
-                        BpDiffZoneDetails {
-                            generation_before: Some(before_generation),
-                            generation_after: None,
-                            zones: removed,
-                        },
-                    );
+        for sled_id in &summary.all_sleds {
+            if let Some(added) = summary.added_zones(sled_id) {
+                diffs.added.insert(*sled_id, added);
+            }
+            if let Some(removed) = summary.removed_zones(sled_id) {
+                diffs.removed.insert(*sled_id, removed);
+            }
+            if let Some(unchanged) = summary.unchanged_zones(sled_id) {
+                diffs.unchanged.insert(*sled_id, unchanged);
+            }
+            if let Some((modified, errors)) = summary.modified_zones(sled_id) {
+                diffs.modified.insert(*sled_id, modified);
+                if !errors.errors.is_empty() {
+                    diffs.errors.insert(*sled_id, errors);
                 }
             }
         }
-
-        // Any sleds remaining in `after` have just been added, since we remove
-        // sleds from `after`, that were also in `before`, in the above loop.
-        for (sled_id, after_zones) in after {
-            if !after_zones.zones.is_empty() {
-                diffs.added.insert(
-                    sled_id,
-                    BpDiffZoneDetails {
-                        generation_before: None,
-                        generation_after: Some(after_zones.generation),
-                        zones: after_zones.zones.into_iter().collect(),
-                    },
-                );
-            }
-        }
-
         diffs
     }
 
@@ -397,7 +916,22 @@ pub struct DiffPhysicalDisksDetails {
     pub after_generation: Option<Generation>,
 
     // Disks added, removed, or unmodified
-    pub disks: BTreeSet<DiskIdentity>,
+    pub disks: Vec<DiskIdentity>,
+}
+
+impl DiffPhysicalDisksDetails {
+    pub fn new<'a>(
+        before_generation: Option<Generation>,
+        after_generation: Option<Generation>,
+        disks_iter: impl Iterator<Item = &'a BlueprintPhysicalDiskConfig>,
+    ) -> Self {
+        let mut disks: Vec<_> = disks_iter
+            .map(|disk_config| &disk_config.identity)
+            .cloned()
+            .collect();
+        disks.sort_unstable();
+        DiffPhysicalDisksDetails { before_generation, after_generation, disks }
+    }
 }
 
 impl BpTableData for DiffPhysicalDisksDetails {
@@ -426,89 +960,19 @@ pub struct BpDiffPhysicalDisks {
 }
 
 impl BpDiffPhysicalDisks {
-    pub fn new(
-        before: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
-        mut after: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
-    ) -> Self {
+    pub fn from_diff_summary(summary: &BlueprintDiffSummary<'_>) -> Self {
         let mut diffs = BpDiffPhysicalDisks::default();
-        for (sled_id, before_disks) in before {
-            let before_generation = Some(before_disks.generation);
-            if let Some(after_disks) = after.remove(&sled_id) {
-                let after_generation = Some(after_disks.generation);
-                let a: BTreeSet<DiskIdentity> =
-                    after_disks.disks.into_iter().map(|d| d.identity).collect();
-                let b = before_disks
-                    .disks
-                    .iter()
-                    .map(|d| d.identity.clone())
-                    .collect();
-                let added: BTreeSet<_> = a.difference(&b).cloned().collect();
-                let removed: BTreeSet<_> = b.difference(&a).cloned().collect();
-                let unchanged: BTreeSet<_> =
-                    a.intersection(&b).cloned().collect();
-                if !added.is_empty() {
-                    diffs.added.insert(
-                        sled_id,
-                        DiffPhysicalDisksDetails {
-                            before_generation,
-                            after_generation,
-                            disks: added,
-                        },
-                    );
-                }
-                if !removed.is_empty() {
-                    diffs.removed.insert(
-                        sled_id,
-                        DiffPhysicalDisksDetails {
-                            before_generation,
-                            after_generation,
-                            disks: removed,
-                        },
-                    );
-                }
-                if !unchanged.is_empty() {
-                    diffs.unchanged.insert(
-                        sled_id,
-                        DiffPhysicalDisksDetails {
-                            before_generation,
-                            after_generation,
-                            disks: unchanged,
-                        },
-                    );
-                }
-            } else {
-                diffs.removed.insert(
-                    sled_id,
-                    DiffPhysicalDisksDetails {
-                        before_generation,
-                        after_generation: None,
-                        disks: before_disks
-                            .disks
-                            .into_iter()
-                            .map(|d| d.identity)
-                            .collect(),
-                    },
-                );
+        for sled_id in &summary.all_sleds {
+            if let Some(added) = summary.added_disks(sled_id) {
+                diffs.added.insert(*sled_id, added);
+            }
+            if let Some(removed) = summary.removed_disks(sled_id) {
+                diffs.removed.insert(*sled_id, removed);
+            }
+            if let Some(unchanged) = summary.unchanged_disks(sled_id) {
+                diffs.unchanged.insert(*sled_id, unchanged);
             }
         }
-
-        // Any sleds remaining in `after` have just been added, since we remove
-        // sleds from `after`, that were also in `before`, in the above loop.
-        for (sled_id, after_disks) in after {
-            let added: BTreeSet<DiskIdentity> =
-                after_disks.disks.into_iter().map(|d| d.identity).collect();
-            if !added.is_empty() {
-                diffs.added.insert(
-                    sled_id,
-                    DiffPhysicalDisksDetails {
-                        before_generation: None,
-                        after_generation: Some(after_disks.generation),
-                        disks: added,
-                    },
-                );
-            }
-        }
-
         diffs
     }
 
@@ -553,6 +1017,24 @@ pub struct DiffDatasetsDetails {
     pub datasets: BTreeMap<CollectionDatasetIdentifier, BlueprintDatasetConfig>,
 }
 
+impl DiffDatasetsDetails {
+    pub fn new<'a>(
+        before_generation: Option<Generation>,
+        after_generation: Option<Generation>,
+        datasets_iter: impl Iterator<Item = &'a BlueprintDatasetConfig>,
+    ) -> Self {
+        DiffDatasetsDetails {
+            before_generation,
+            after_generation,
+            datasets: datasets_iter
+                .map(|dataset_config| {
+                    (dataset_config.into(), dataset_config.clone())
+                })
+                .collect(),
+        }
+    }
+}
+
 impl BpTableData for DiffDatasetsDetails {
     fn bp_generation(&self) -> BpGeneration {
         BpGeneration::Diff {
@@ -576,44 +1058,192 @@ impl BpTableData for DiffDatasetsDetails {
     }
 }
 
+/// Properties of a dataset that may change from one blueprint to another.
+///
+/// Other properties of a dataset (e.g., its `pool`, `kind`, and `address`) are
+/// not expected to change, and we'll record an error if they do.
+#[derive(Debug)]
+pub struct ModifiableDatasetProperties {
+    pub disposition: BlueprintDatasetDisposition,
+    pub quota: Option<ByteCount>,
+    pub reservation: Option<ByteCount>,
+    pub compression: CompressionAlgorithm,
+}
+
+/// Errors arising from illegally modified dataset fields
+#[derive(Debug)]
+pub struct BpDiffDatasetErrors {
+    pub generation_before: Generation,
+    pub generation_after: Generation,
+    pub errors: Vec<BpDiffDatasetError>,
+}
+
+#[derive(Debug)]
+pub struct BpDiffDatasetError {
+    pub dataset_id: DatasetUuid,
+    pub reason: String,
+}
+
 #[derive(Debug)]
 pub struct ModifiedDataset {
-    pub before: BlueprintDatasetConfig,
-    pub after: BlueprintDatasetConfig,
+    pub prior_properties: ModifiableDatasetProperties,
+    pub dataset: BlueprintDatasetConfig,
+}
+
+impl ModifiedDataset {
+    pub fn from_diff(
+        diff: &BlueprintDatasetConfigDiff,
+    ) -> Result<Self, BpDiffDatasetError> {
+        // Do we have any errors? If so, create a "reason" string.
+        let mut reason = String::new();
+        let BlueprintDatasetConfigDiff {
+            disposition,
+            id,
+            pool,
+            kind,
+            address,
+            quota,
+            reservation,
+            compression,
+        } = diff;
+
+        // If we're a "modified" dataset, we must have the same ID before and
+        // after. (Otherwise our "before" or "after" should've been recorded as
+        // removed/added.)
+        debug_assert_eq!(id.before, id.after);
+
+        let prior_properties = ModifiableDatasetProperties {
+            disposition: *disposition.before,
+            quota: quota.before.copied(),
+            reservation: reservation.before.copied(),
+            compression: *compression.before,
+        };
+        if pool.before != pool.after {
+            writeln!(
+                &mut reason,
+                "mismatched zpool: before: {}, after: {}",
+                pool.before, pool.after
+            )
+            .expect("write to String is infallible");
+        }
+        if kind.before != kind.after {
+            writeln!(
+                &mut reason,
+                "mismatched kind: before: {}, after: {}",
+                kind.before, kind.after
+            )
+            .expect("write to String is infallible");
+        }
+        if address.before != address.after {
+            writeln!(
+                &mut reason,
+                "mismatched address: before: {:?}, after: {:?}",
+                address.before, address.after
+            )
+            .expect("write to String is infallible");
+        }
+
+        if reason.is_empty() {
+            Ok(Self {
+                prior_properties,
+                dataset: BlueprintDatasetConfig {
+                    disposition: *disposition.after,
+                    id: *id.after,
+                    pool: pool.after.clone(),
+                    kind: kind.after.clone(),
+                    address: address.after.copied(),
+                    quota: quota.after.copied(),
+                    reservation: reservation.after.copied(),
+                    compression: *compression.after,
+                },
+            })
+        } else {
+            Err(BpDiffDatasetError { dataset_id: *id.after, reason })
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct BpDiffDatasetsModified {
-    pub generation_before: Option<Generation>,
-    pub generation_after: Option<Generation>,
+    pub generation_before: Generation,
+    pub generation_after: Generation,
     pub datasets: Vec<ModifiedDataset>,
+}
+
+impl BpDiffDatasetsModified {
+    pub fn new<'a>(
+        generation_before: Generation,
+        generation_after: Generation,
+        dataset_diffs: impl Iterator<Item = BlueprintDatasetConfigDiff<'a>>,
+    ) -> (BpDiffDatasetsModified, BpDiffDatasetErrors) {
+        let mut datasets = vec![];
+        let mut errors = vec![];
+        for diff in dataset_diffs {
+            match ModifiedDataset::from_diff(&diff) {
+                Ok(modified_zone) => datasets.push(modified_zone),
+                Err(error) => errors.push(error),
+            }
+        }
+        datasets.sort_unstable_by_key(|d| {
+            (d.dataset.kind.clone(), d.dataset.pool.clone())
+        });
+        (
+            BpDiffDatasetsModified {
+                generation_before,
+                generation_after,
+                datasets,
+            },
+            BpDiffDatasetErrors { generation_before, generation_after, errors },
+        )
+    }
 }
 
 impl BpTableData for BpDiffDatasetsModified {
     fn bp_generation(&self) -> BpGeneration {
         BpGeneration::Diff {
-            before: self.generation_before,
-            after: self.generation_after,
+            before: Some(self.generation_before),
+            after: Some(self.generation_after),
         }
     }
 
     fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
         self.datasets.iter().map(move |dataset| {
-            let before_strings = dataset.before.as_strings();
-            let after_strings = dataset.after.as_strings();
+            let ModifiableDatasetProperties {
+                disposition: before_disposition,
+                quota: before_quota,
+                reservation: before_reservation,
+                compression: before_compression,
+            } = &dataset.prior_properties;
 
-            let mut columns = vec![];
-            for (before, after) in std::iter::zip(before_strings, after_strings)
-            {
-                let column = if before != after {
-                    BpTableColumn::diff(before, after)
-                } else {
-                    BpTableColumn::value(before)
-                };
-                columns.push(column);
-            }
-
-            BpTableRow::new(state, columns)
+            BpTableRow::new(
+                state,
+                vec![
+                    BpTableColumn::value(
+                        DatasetName::new(
+                            dataset.dataset.pool.clone(),
+                            dataset.dataset.kind.clone(),
+                        )
+                        .full_name(),
+                    ),
+                    BpTableColumn::value(dataset.dataset.id.to_string()),
+                    BpTableColumn::new(
+                        before_disposition.to_string(),
+                        dataset.dataset.disposition.to_string(),
+                    ),
+                    BpTableColumn::new(
+                        unwrap_or_none(&before_quota),
+                        unwrap_or_none(&dataset.dataset.quota),
+                    ),
+                    BpTableColumn::new(
+                        unwrap_or_none(&before_reservation),
+                        unwrap_or_none(&dataset.dataset.reservation),
+                    ),
+                    BpTableColumn::new(
+                        before_compression.to_string(),
+                        dataset.dataset.compression.to_string(),
+                    ),
+                ],
+            )
         })
     }
 }
@@ -624,144 +1254,34 @@ pub struct BpDiffDatasets {
     pub removed: BTreeMap<SledUuid, DiffDatasetsDetails>,
     pub modified: BTreeMap<SledUuid, BpDiffDatasetsModified>,
     pub unchanged: BTreeMap<SledUuid, DiffDatasetsDetails>,
+    pub errors: BTreeMap<SledUuid, BpDiffDatasetErrors>,
 }
 
 impl BpDiffDatasets {
-    pub fn new(
-        before: BTreeMap<SledUuid, BlueprintDatasetsConfig>,
-        mut after: BTreeMap<SledUuid, BlueprintDatasetsConfig>,
+    pub fn from_diff_summary<'a>(
+        summary: &'a BlueprintDiffSummary<'a>,
     ) -> Self {
         let mut diffs = BpDiffDatasets::default();
-
-        // Observe the set of old sleds first
-        for (sled_id, before_datasets) in before {
-            let before_generation = before_datasets.generation;
-
-            // If the sled exists in both the old and new set, compare
-            // the set of datasets to identify which "grouping" they should
-            // land in.
-            if let Some(after_datasets) = after.remove(&sled_id) {
-                let after_generation = Some(after_datasets.generation);
-
-                let mut unchanged = BTreeMap::new();
-                let mut modified = BTreeMap::new();
-                let mut removed = BTreeMap::new();
-
-                // Normalize the "before" and "after" data to compare individual
-                // datasets.
-
-                let b = before_datasets
-                    .datasets
-                    .iter()
-                    .map(|d| (CollectionDatasetIdentifier::from(d), d.clone()));
-                let mut added: BTreeMap<
-                    CollectionDatasetIdentifier,
-                    BlueprintDatasetConfig,
-                > = after_datasets
-                    .datasets
-                    .iter()
-                    .map(|d| (d.into(), d.clone()))
-                    .collect();
-
-                for (id, dataset_before) in b {
-                    if let Some(dataset_after) = added.remove(&id) {
-                        if dataset_before == dataset_after {
-                            unchanged.insert(id, dataset_after);
-                        } else {
-                            modified
-                                .insert(id, (dataset_before, dataset_after));
-                        }
-                    } else {
-                        removed.insert(id, dataset_before);
-                    }
+        for sled_id in &summary.all_sleds {
+            if let Some(added) = summary.added_datasets(sled_id) {
+                diffs.added.insert(*sled_id, added);
+            }
+            if let Some(removed) = summary.removed_datasets(sled_id) {
+                diffs.removed.insert(*sled_id, removed);
+            }
+            if let Some(unchanged) = summary.unchanged_datasets(sled_id) {
+                diffs.unchanged.insert(*sled_id, unchanged);
+            }
+            if let Some((modified, errors)) = summary.modified_datasets(sled_id)
+            {
+                diffs.modified.insert(*sled_id, modified);
+                if !errors.errors.is_empty() {
+                    diffs.errors.insert(*sled_id, errors);
                 }
-
-                if !added.is_empty() {
-                    diffs.added.insert(
-                        sled_id,
-                        DiffDatasetsDetails {
-                            before_generation: Some(before_generation),
-                            after_generation,
-                            datasets: added,
-                        },
-                    );
-                }
-                if !removed.is_empty() {
-                    diffs.removed.insert(
-                        sled_id,
-                        DiffDatasetsDetails {
-                            before_generation: Some(before_generation),
-                            after_generation,
-                            datasets: removed,
-                        },
-                    );
-                }
-                if !modified.is_empty() {
-                    diffs.modified.insert(
-                        sled_id,
-                        BpDiffDatasetsModified {
-                            generation_before: Some(before_generation),
-                            generation_after: after_generation,
-                            datasets: modified
-                                .into_values()
-                                .map(|(before, after)| ModifiedDataset {
-                                    before,
-                                    after,
-                                })
-                                .collect(),
-                        },
-                    );
-                }
-                if !unchanged.is_empty() {
-                    diffs.unchanged.insert(
-                        sled_id,
-                        DiffDatasetsDetails {
-                            before_generation: Some(before_generation),
-                            after_generation,
-                            datasets: unchanged,
-                        },
-                    );
-                }
-            } else {
-                diffs.removed.insert(
-                    sled_id,
-                    DiffDatasetsDetails {
-                        before_generation: Some(before_generation),
-                        after_generation: None,
-                        datasets: before_datasets
-                            .datasets
-                            .into_iter()
-                            .map(|d| (CollectionDatasetIdentifier::from(&d), d))
-                            .collect(),
-                    },
-                );
             }
         }
-
-        // Any sleds remaining in `after` have just been added, since we remove
-        // sleds from `after`, that were also in `before`, in the above loop.
-        for (sled_id, after_datasets) in after {
-            let added: BTreeMap<CollectionDatasetIdentifier, _> =
-                after_datasets
-                    .datasets
-                    .into_iter()
-                    .map(|d| (CollectionDatasetIdentifier::from(&d), d))
-                    .collect();
-            if !added.is_empty() {
-                diffs.added.insert(
-                    sled_id,
-                    DiffDatasetsDetails {
-                        before_generation: None,
-                        after_generation: Some(after_datasets.generation),
-                        datasets: added,
-                    },
-                );
-            }
-        }
-
         diffs
     }
-
     /// Return a [`BpTable`] for the given `sled_id`
     pub fn to_bp_sled_subtable(&self, sled_id: &SledUuid) -> Option<BpTable> {
         let mut generation = BpGeneration::Diff { before: None, after: None };
@@ -790,192 +1310,6 @@ impl BpDiffDatasets {
             None
         } else {
             Some(BpTable::new(BpDatasetsTableSchema {}, generation, rows))
-        }
-    }
-}
-
-/// Summarizes the differences between two blueprints
-#[derive(Debug)]
-pub struct BlueprintDiff {
-    pub before_meta: DiffBeforeMetadata,
-    pub after_meta: BlueprintMetadata,
-    pub before_state: BTreeMap<SledUuid, SledState>,
-    pub after_state: BTreeMap<SledUuid, SledState>,
-    pub zones: BpDiffZones,
-    pub physical_disks: BpDiffPhysicalDisks,
-    pub datasets: BpDiffDatasets,
-    pub sleds_added: BTreeSet<SledUuid>,
-    pub sleds_removed: BTreeSet<SledUuid>,
-    pub sleds_unchanged: BTreeSet<SledUuid>,
-    pub sleds_modified: BTreeSet<SledUuid>,
-    pub before_clickhouse_cluster_config: DiffBeforeClickhouseClusterConfig,
-    pub after_clickhouse_cluster_config: Option<ClickhouseClusterConfig>,
-}
-
-impl BlueprintDiff {
-    /// Build a diff with the provided contents, verifying that the provided
-    /// data is valid.
-    pub fn new(
-        before_meta: DiffBeforeMetadata,
-        before_clickhouse_cluster_config: DiffBeforeClickhouseClusterConfig,
-        before_state: BTreeMap<SledUuid, SledState>,
-        before_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
-        before_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
-        before_datasets: BTreeMap<SledUuid, BlueprintDatasetsConfig>,
-        after_blueprint: &Blueprint,
-    ) -> Self {
-        let mut after_state = after_blueprint.sled_state.clone();
-        let after_zones = after_blueprint.blueprint_zones.clone();
-        let after_disks = after_blueprint.blueprint_disks.clone();
-        let after_datasets = after_blueprint.blueprint_datasets.clone();
-
-        // Work around a quirk of sled decommissioning. If a sled has a before
-        // state of `decommissioned`, it may or may not be present in
-        // `after_state` (presence will depend on whether or not the sled was
-        // present in the `PlanningInput`). However, we may still have entries
-        // in `after_zones` or `after_disks` due to expunged zones/disks that
-        // haven't been fully cleaned up yet. Without this workaround, this may
-        // produce confusing results: the sled might appear to be modified only
-        // because the state went from `decommissioned` to "missing entirely".
-        // We'll patch this up here: if we have a decommissioned sled that has
-        // no `after_state` entry but _does_ still have a corresponding zones or
-        // disks entry, we'll artificially insert `decommissioned` to avoid
-        // misleading output.
-        for (sled_id, _) in before_state
-            .iter()
-            .filter(|&(_, &state)| state == SledState::Decommissioned)
-        {
-            if !after_state.contains_key(sled_id)
-                && (after_zones.contains_key(sled_id)
-                    || after_disks.contains_key(sled_id))
-            {
-                after_state.insert(*sled_id, SledState::Decommissioned);
-            }
-        }
-
-        let before_sleds: BTreeSet<_> = before_state
-            .keys()
-            .chain(before_zones.keys())
-            .chain(before_disks.keys())
-            .chain(before_datasets.keys())
-            .collect();
-        let after_sleds: BTreeSet<_> = after_state
-            .keys()
-            .chain(after_zones.keys())
-            .chain(after_disks.keys())
-            .chain(after_datasets.keys())
-            .collect();
-        let all_sleds: BTreeSet<_> =
-            before_sleds.union(&after_sleds).map(|&sled_id| *sled_id).collect();
-
-        // All sleds that have state, zones, disks or datasets in `after_*`, but not
-        // `before_*` have been added.
-        let sleds_added: BTreeSet<_> = after_sleds
-            .difference(&before_sleds)
-            .map(|&sled_id| *sled_id)
-            .collect();
-
-        // All sleds that have state, zones, disks or datasets in `before_*`, but not
-        // `after_*` have been removed.
-        let sleds_removed: BTreeSet<_> = before_sleds
-            .difference(&after_sleds)
-            .map(|&sled_id| *sled_id)
-            .collect();
-
-        let zones = BpDiffZones::new(before_zones, after_zones);
-        let physical_disks =
-            BpDiffPhysicalDisks::new(before_disks, after_disks);
-        let datasets = BpDiffDatasets::new(before_datasets, after_datasets);
-
-        // Sleds that haven't been added or removed are either unchanged or
-        // modified.
-        let sleds_unchanged_or_modified: BTreeSet<_> = all_sleds
-            .iter()
-            .filter(|&sled_id| {
-                !sleds_added.contains(sled_id)
-                    && !sleds_removed.contains(sled_id)
-            })
-            .map(|s| *s)
-            .collect();
-
-        // Sleds are modified if their state changed or any zones or disks on
-        // those sleds are anything other than unchanged.
-        let mut sleds_modified = sleds_unchanged_or_modified.clone();
-        sleds_modified.retain(|sled_id| {
-            before_state.get(sled_id) != after_state.get(sled_id)
-                || physical_disks.added.contains_key(sled_id)
-                || physical_disks.removed.contains_key(sled_id)
-                || datasets.added.contains_key(sled_id)
-                || datasets.modified.contains_key(sled_id)
-                || datasets.removed.contains_key(sled_id)
-                || zones.added.contains_key(sled_id)
-                || zones.removed.contains_key(sled_id)
-                || zones.modified.contains_key(sled_id)
-                || zones.errors.contains_key(sled_id)
-        });
-
-        // The rest of the sleds must be unchanged.
-        let unchanged_sleds: BTreeSet<_> = sleds_unchanged_or_modified
-            .difference(&sleds_modified)
-            .map(|sled_id| *sled_id)
-            .collect();
-
-        BlueprintDiff {
-            before_meta,
-            after_meta: after_blueprint.metadata(),
-            before_state,
-            after_state,
-            zones,
-            physical_disks,
-            datasets,
-            sleds_added,
-            sleds_removed,
-            sleds_unchanged: unchanged_sleds,
-            sleds_modified,
-            before_clickhouse_cluster_config,
-            after_clickhouse_cluster_config: after_blueprint
-                .clickhouse_cluster_config
-                .clone(),
-        }
-    }
-
-    /// Return a struct that can be used to display the diff.
-    pub fn display(&self) -> BlueprintDiffDisplay<'_> {
-        BlueprintDiffDisplay::new(self)
-    }
-
-    /// Returns whether the diff reflects any changes or if the blueprints are
-    /// equivalent.
-    pub fn has_changes(&self) -> bool {
-        // Any changes to physical disks, datasets, or zones would be reflected
-        // in `self.sleds_modified`, `self.sleds_added`, or
-        // `self.sleds_removed`.
-        if !self.sleds_modified.is_empty()
-            || !self.sleds_added.is_empty()
-            || !self.sleds_removed.is_empty()
-        {
-            return true;
-        }
-
-        // The clickhouse cluster config has changed if:
-        // - there was one before and now there isn't
-        // - there wasn't one before and now there is
-        // - there's one both before and after and their generation has changed
-        match (
-            &self.before_clickhouse_cluster_config,
-            &self.after_clickhouse_cluster_config,
-        ) {
-            (DiffBeforeClickhouseClusterConfig::Blueprint(None), None) => false,
-            (DiffBeforeClickhouseClusterConfig::Blueprint(None), Some(_)) => {
-                true
-            }
-            (DiffBeforeClickhouseClusterConfig::Blueprint(Some(_)), None) => {
-                true
-            }
-            (
-                DiffBeforeClickhouseClusterConfig::Blueprint(Some(before)),
-                Some(after),
-            ) => before.diff(&after).is_change(),
         }
     }
 }
@@ -1188,12 +1522,8 @@ impl ClickhouseClusterConfigDiffTables {
                 BpTableRow::new(
                     BpDiffState::Added,
                     vec![
-                        BpTableColumn::CollectionNotPresentDiff {
-                            after: zone_id.to_string(),
-                        },
-                        BpTableColumn::CollectionNotPresentDiff {
-                            after: server_id.to_string(),
-                        },
+                        BpTableColumn::Value(zone_id.to_string()),
+                        BpTableColumn::Value(server_id.to_string()),
                     ],
                 )
             })
@@ -1376,18 +1706,29 @@ impl ClickhouseClusterConfigDiffTables {
 
 /// Wrapper to allow a [`BlueprintDiff`] to be displayed.
 ///
-/// Returned by [`BlueprintDiff::display()`].
-#[derive(Clone, Debug)]
+/// Returned by [`BlueprintDiffSummary::display()`].
+#[derive(Debug)]
 #[must_use = "this struct does nothing unless displayed"]
 pub struct BlueprintDiffDisplay<'diff> {
-    pub diff: &'diff BlueprintDiff,
-    // TODO: add colorization with a stylesheet
+    summary: &'diff BlueprintDiffSummary<'diff>,
+    // These structures are intermediate structures that we generate displayable
+    // tables from.
+    before_meta: BlueprintMetadata,
+    after_meta: BlueprintMetadata,
+    zones: BpDiffZones,
+    disks: BpDiffPhysicalDisks,
+    datasets: BpDiffDatasets,
 }
 
 impl<'diff> BlueprintDiffDisplay<'diff> {
     #[inline]
-    fn new(diff: &'diff BlueprintDiff) -> Self {
-        Self { diff }
+    fn new(summary: &'diff BlueprintDiffSummary<'diff>) -> Self {
+        let before_meta = summary.before.metadata();
+        let after_meta = summary.after.metadata();
+        let zones = BpDiffZones::from_diff_summary(summary);
+        let disks = BpDiffPhysicalDisks::from_diff_summary(summary);
+        let datasets = BpDiffDatasets::from_diff_summary(summary);
+        Self { summary, before_meta, after_meta, zones, disks, datasets }
     }
 
     pub fn make_metadata_diff_tables(
@@ -1399,38 +1740,23 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
             };
 
             ($member:ident, $label:expr, $display:expr) => {
-                match &self.diff.before_meta {
-                    DiffBeforeMetadata::Collection { .. } => {
-                        // Collections have no metadata, so this is new
-                        KvPair::new(
-                            BpDiffState::Added,
-                            $label,
-                            linear_table_modified(
-                                &NOT_PRESENT_IN_COLLECTION_PARENS,
-                                &$display(&self.diff.after_meta.$member),
-                            ),
-                        )
-                    }
-                    DiffBeforeMetadata::Blueprint(before) => {
-                        if before.$member == self.diff.after_meta.$member {
-                            KvPair::new(
-                                BpDiffState::Unchanged,
-                                $label,
-                                linear_table_unchanged(&$display(
-                                    &self.diff.after_meta.$member,
-                                )),
-                            )
-                        } else {
-                            KvPair::new(
-                                BpDiffState::Modified,
-                                $label,
-                                linear_table_modified(
-                                    &$display(&before.$member),
-                                    &$display(&self.diff.after_meta.$member),
-                                ),
-                            )
-                        }
-                    }
+                if self.before_meta.$member == self.after_meta.$member {
+                    KvPair::new(
+                        BpDiffState::Unchanged,
+                        $label,
+                        linear_table_unchanged(&$display(
+                            &self.after_meta.$member,
+                        )),
+                    )
+                } else {
+                    KvPair::new(
+                        BpDiffState::Modified,
+                        $label,
+                        linear_table_modified(
+                            &$display(&self.before_meta.$member),
+                            &$display(&self.after_meta.$member),
+                        ),
+                    )
                 }
             };
         }
@@ -1465,60 +1791,51 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
         &self,
     ) -> Option<ClickhouseClusterConfigDiffTables> {
         match (
-            &self.diff.before_clickhouse_cluster_config,
-            &self.diff.after_clickhouse_cluster_config,
+            &self.summary.diff.clickhouse_cluster_config.before,
+            &self.summary.diff.clickhouse_cluster_config.after,
         ) {
             // Before blueprint + after blueprint
-            (
-                DiffBeforeClickhouseClusterConfig::Blueprint(Some(before)),
-                Some(after),
-            ) => Some(ClickhouseClusterConfigDiffTables::diff_blueprints(
-                before, after,
-            )),
+            (Some(before), Some(after)) => {
+                Some(ClickhouseClusterConfigDiffTables::diff_blueprints(
+                    before, after,
+                ))
+            }
 
             // Before blueprint only
-            (
-                DiffBeforeClickhouseClusterConfig::Blueprint(Some(before)),
-                None,
-            ) => {
+            (Some(before), None) => {
                 Some(ClickhouseClusterConfigDiffTables::removed_from_blueprint(
                     before,
                 ))
             }
 
             // After blueprint only
-            (
-                DiffBeforeClickhouseClusterConfig::Blueprint(None),
-                Some(after),
-            ) => Some(ClickhouseClusterConfigDiffTables::added_to_blueprint(
-                after,
-            )),
+            (None, Some(after)) => Some(
+                ClickhouseClusterConfigDiffTables::added_to_blueprint(after),
+            ),
 
             // No before or after
-            (DiffBeforeClickhouseClusterConfig::Blueprint(None), None) => None,
+            (None, None) => None,
         }
     }
 
-    /// Write out physical disk and zone tables for a given `sled_id`
+    /// Write out disk, dataset, and zone tables for a given `sled_id`
     fn write_tables(
         &self,
         f: &mut fmt::Formatter<'_>,
         sled_id: &SledUuid,
     ) -> fmt::Result {
-        // Write the physical disks table if it exists
-        if let Some(table) =
-            self.diff.physical_disks.to_bp_sled_subtable(sled_id)
-        {
+        // Write the physical disks table if needed
+        if let Some(table) = self.disks.to_bp_sled_subtable(sled_id) {
             writeln!(f, "{table}\n")?;
         }
 
         // Write the datasets table if it exists
-        if let Some(table) = self.diff.datasets.to_bp_sled_subtable(sled_id) {
+        if let Some(table) = self.datasets.to_bp_sled_subtable(sled_id) {
             writeln!(f, "{table}\n")?;
         }
 
         // Write the zones table if it exists
-        if let Some(table) = self.diff.zones.to_bp_sled_subtable(sled_id) {
+        if let Some(table) = self.zones.to_bp_sled_subtable(sled_id) {
             writeln!(f, "{table}\n")?;
         }
 
@@ -1530,90 +1847,59 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
     /// before and after should be that can only be wrong if we have a bug
     /// constructing the diff.
     fn sled_state_unchanged(&self, sled_id: &SledUuid) -> String {
-        let before = self.diff.before_state.get(sled_id);
-        let after = self.diff.after_state.get(sled_id);
-        if before == after {
-            after
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "state unknown".to_string())
-        } else {
-            format!(
-                "blueprint diff error: unchanged sled changed state from \
-                 {before:?} to {after:?}"
-            )
-        }
+        self.summary
+            .diff
+            .sled_state
+            .get_unchanged(sled_id)
+            .map(|before| before.to_string())
+            .unwrap_or("unknown".to_string())
     }
     fn sled_state_added(&self, sled_id: &SledUuid) -> String {
-        let before = self.diff.before_state.get(sled_id);
-        let after = self.diff.after_state.get(sled_id);
-        if before.is_none() {
-            after
-                .map(|s| format!("{s}"))
-                .unwrap_or_else(|| "unknown".to_string())
-        } else {
-            format!(
-                "blueprint diff error: added sled has old state \
-                 {before:?} (now {after:?})"
-            )
-        }
+        let after = self.summary.diff.sled_state.added.get(sled_id).unwrap();
+        format!("{after}")
     }
     fn sled_state_removed(&self, sled_id: &SledUuid) -> String {
-        let before = self.diff.before_state.get(sled_id);
-        let after = self.diff.after_state.get(sled_id);
-        if after.is_none() {
-            before
-                .map(|s| format!("was {s}"))
-                .unwrap_or_else(|| "state was unknown".to_string())
-        } else {
-            format!(
-                "blueprint diff error: removed sled has new state \
-                 {after:?} (was {before:?})"
-            )
-        }
+        let before = self.summary.diff.sled_state.removed.get(sled_id).unwrap();
+        format!("was {before}")
     }
     fn sled_state_modified(&self, sled_id: &SledUuid) -> String {
-        let before = self.diff.before_state.get(sled_id);
-        let after = self.diff.after_state.get(sled_id);
-        match (before, after) {
-            (Some(before), Some(after)) if before != after => {
-                format!("{before} -> {after}")
+        let modified_sled_state =
+            self.summary.diff.sled_state.get_modified(sled_id);
+        match modified_sled_state {
+            None => {
+                // The sled_state itself wasn't modified. It must be unchanged.
+                match self.summary.diff.sled_state.get_unchanged(sled_id) {
+                    Some(state) => {
+                        format!("{state}")
+                    }
+                    None => "unknown".to_string(),
+                }
             }
-            (Some(state), Some(_)) => {
-                // states are equal; the sled was presumably modified some other
-                // way
-                format!("{state}")
+            Some(diff) => {
+                let before = diff.before;
+                let after = diff.after;
+                if before != after {
+                    format!("{before} -> {after}")
+                } else {
+                    format!("{before}")
+                }
             }
-            (None, Some(after)) => format!("unknown -> {after}"),
-            (Some(before), None) => format!("{before} -> unknown"),
-            (None, None) => "unknown".to_string(),
         }
     }
 }
 
 impl fmt::Display for BlueprintDiffDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let diff = self.diff;
+        let summary = self.summary;
+        let before_metadata = self.summary.before.metadata();
+        let after_metadata = self.summary.after.metadata();
 
-        // Print things differently based on whether the diff is between a
-        // collection and a blueprint, or a blueprint and a blueprint.
-        match &diff.before_meta {
-            DiffBeforeMetadata::Collection { id } => {
-                writeln!(
-                    f,
-                    "from: collection {}\n\
-                     to:   blueprint  {}",
-                    id, diff.after_meta.id,
-                )?;
-            }
-            DiffBeforeMetadata::Blueprint(before) => {
-                writeln!(
-                    f,
-                    "from: blueprint {}\n\
-                     to:   blueprint {}\n",
-                    before.id, diff.after_meta.id
-                )?;
-            }
-        }
+        writeln!(
+            f,
+            "from: blueprint {}\n\
+             to:   blueprint {}\n",
+            before_metadata.id, after_metadata.id
+        )?;
 
         // Write out sled information
         //
@@ -1632,9 +1918,9 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
         // We put errors at the bottom to ensure they are seen immediately.
 
         // Write out tables for unchanged sleds
-        if !diff.sleds_unchanged.is_empty() {
+        if !summary.sleds_unchanged.is_empty() {
             writeln!(f, " UNCHANGED SLEDS:\n")?;
-            for sled_id in &diff.sleds_unchanged {
+            for sled_id in &summary.sleds_unchanged {
                 writeln!(
                     f,
                     "  sled {sled_id} ({}):\n",
@@ -1645,9 +1931,9 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
         }
 
         // Write out tables for removed sleds
-        if !diff.sleds_removed.is_empty() {
+        if !summary.sleds_removed.is_empty() {
             writeln!(f, " REMOVED SLEDS:\n")?;
-            for sled_id in &diff.sleds_removed {
+            for sled_id in &summary.sleds_removed {
                 writeln!(
                     f,
                     "  sled {sled_id} ({}):\n",
@@ -1658,9 +1944,9 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
         }
 
         // Write out tables for modified sleds
-        if !diff.sleds_modified.is_empty() {
+        if !summary.sleds_modified.is_empty() {
             writeln!(f, " MODIFIED SLEDS:\n")?;
-            for sled_id in &diff.sleds_modified {
+            for sled_id in &summary.sleds_modified {
                 writeln!(
                     f,
                     "  sled {sled_id} ({}):\n",
@@ -1671,9 +1957,9 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
         }
 
         // Write out tables for added sleds
-        if !diff.sleds_added.is_empty() {
+        if !summary.sleds_added.is_empty() {
             writeln!(f, " ADDED SLEDS:\n")?;
-            for sled_id in &diff.sleds_added {
+            for sled_id in &summary.sleds_added {
                 writeln!(
                     f,
                     "  sled {sled_id} ({}):\n",
@@ -1684,9 +1970,9 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
         }
 
         // Write out zone errors.
-        if !diff.zones.errors.is_empty() {
-            writeln!(f, "ERRORS:")?;
-            for (sled_id, errors) in &diff.zones.errors {
+        if !self.zones.errors.is_empty() {
+            writeln!(f, "ZONE ERRORS:")?;
+            for (sled_id, errors) in &self.zones.errors {
                 writeln!(f, "\n  sled {sled_id}\n")?;
                 writeln!(
                     f,
@@ -1695,7 +1981,25 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
                 )?;
 
                 for err in &errors.errors {
-                    writeln!(f, "      zone id: {}", err.zone_before.id())?;
+                    writeln!(f, "      zone id: {}", err.zone_before_id)?;
+                    writeln!(f, "      reason: {}", err.reason)?;
+                }
+            }
+        }
+
+        // Write out dataset errors.
+        if !self.datasets.errors.is_empty() {
+            writeln!(f, "DATASET ERRORS:")?;
+            for (sled_id, errors) in &self.datasets.errors {
+                writeln!(f, "\n  sled {sled_id}\n")?;
+                writeln!(
+                    f,
+                    "    dataset diff errors: before gen {}, after gen {}\n",
+                    errors.generation_before, errors.generation_after
+                )?;
+
+                for err in &errors.errors {
+                    writeln!(f, "      dataset id: {}", err.dataset_id)?;
                     writeln!(f, "      reason: {}", err.reason)?;
                 }
             }

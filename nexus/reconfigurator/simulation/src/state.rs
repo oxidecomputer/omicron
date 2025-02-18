@@ -136,6 +136,7 @@ impl SimState {
         Ok(UnstableReconfiguratorState {
             planning_input,
             collections: self.system.all_collections().cloned().collect(),
+            target_blueprint: self.system().target_blueprint(),
             blueprints: self.system.all_blueprints().cloned().collect(),
             internal_dns: self
                 .system
