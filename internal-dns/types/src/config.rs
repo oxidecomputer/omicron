@@ -419,6 +419,8 @@ impl DnsConfigBuilder {
     /// This fails if the provided `http_service` is not for a ClickHouse
     /// replica server. It also fails if the given zone has already been added
     /// to the configuration.
+    ///
+    // TODO: Bookmark to relevant code
     pub fn host_zone_clickhouse(
         &mut self,
         zone_id: OmicronZoneUuid,
@@ -440,6 +442,7 @@ impl DnsConfigBuilder {
         )?;
 
         if http_service == ServiceName::ClickhouseServer {
+        // TODO: Create a ServiceName::ClickhouseClusterNative here
             self.service_backend_zone(
                 ServiceName::ClickhouseAdminServer,
                 &zone,

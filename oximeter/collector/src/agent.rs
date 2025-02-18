@@ -70,12 +70,18 @@ pub struct OximeterAgent {
 
 impl OximeterAgent {
     /// Construct a new agent with the given ID and logger.
+    // TODO: Remove this linter exception once we only write to a
+    // single database
+    #[allow(clippy::too_many_arguments)]
     pub async fn with_id(
         id: Uuid,
         address: SocketAddrV6,
         refresh_interval: Duration,
         db_config: DbConfig,
         native_resolver: BoxedResolver,
+        // Temporary resolver to write to a ClickHouse
+        // cluster as well as a single-node installation.
+        cluster_resolver: BoxedResolver,
         log: &Logger,
         replicated: bool,
     ) -> Result<Self, Error> {
@@ -101,6 +107,9 @@ impl OximeterAgent {
         // - The DB doesn't exist at all. This reports a version number of 0. We
         // need to create the DB here, at the latest version. This is used in
         // fresh installations and tests.
+        //
+        // TODO: Create a second client with its own resolver and create same
+        // checks
         let client = Client::new_with_pool(native_resolver, &log);
         match client.check_db_is_at_expected_version().await {
             Ok(_) => {}
@@ -119,6 +128,30 @@ impl OximeterAgent {
             Err(e) => return Err(Error::from(e)),
         }
 
+        // Temporary additional client that writes to a replicated cluster
+        // This will be removed once we move to solely using a replicated cluster
+        // (Make this comment better)
+        //
+        let cluster_client = Client::new_with_pool(cluster_resolver, &log);
+        // TODO: I don't think this check is necessary
+        //match cluster_client.check_db_is_at_expected_version().await {
+        //    Ok(_) => {}
+        //    Err(oximeter_db::Error::DatabaseVersionMismatch {
+        //        found: 0,
+        //        ..
+        //    }) => {
+        //        debug!(log, "oximeter database does not exist, creating");
+        //        client
+        //            .initialize_db_with_version(
+        //                // Set true directly as we know this is a cluster
+        //                true,
+        //                oximeter_db::OXIMETER_VERSION,
+        //            )
+        //            .await?;
+        //    }
+        //    Err(e) => return Err(Error::from(e)),
+        //}
+
         // Set up tracking of statistics about ourselves.
         let collection_target = self_stats::OximeterCollector {
             collector_id: id,
@@ -126,17 +159,34 @@ impl OximeterAgent {
             collector_port: address.port(),
         };
 
+        // TODO: THis is where writes happen
         // Spawn the task for aggregating and inserting all metrics
         tokio::spawn(async move {
             crate::results_sink::database_inserter(
                 insertion_log,
+                // TODO: Pass a second client here to write to cluster
                 client,
+                Some(cluster_client),
                 db_config.batch_size,
                 Duration::from_secs(db_config.batch_interval),
                 result_receiver,
             )
             .await
         });
+
+        // TODO: We don't want to do this because it fundamentally changes how the agent works
+        // and the other way is way less intrusive?
+        // tokio::spawn(async move {
+        //     crate::results_sink::database_inserter(
+        //         cluster_insertion_log,
+        //         // TODO: Pass a second client here to write to cluster
+        //         cluster_client,
+        //         db_config.batch_size,
+        //         Duration::from_secs(db_config.batch_interval),
+        //         cluster_result_receiver,
+        //     )
+        //     .await
+        // });
 
         let self_ = Self {
             id,
@@ -216,6 +266,7 @@ impl OximeterAgent {
                 results_sink::database_inserter(
                     insertion_log,
                     client,
+                    None,
                     db_config.batch_size,
                     Duration::from_secs(db_config.batch_interval),
                     result_receiver,

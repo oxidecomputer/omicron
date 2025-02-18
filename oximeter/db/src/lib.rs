@@ -226,6 +226,7 @@ pub async fn make_client(
     log: &Logger,
 ) -> Result<Client, anyhow::Error> {
     let client = Client::new(SocketAddr::new(address, port), &log);
+    // TODO: There is a db being initialised here (!!)
     client
         .init_single_node_db()
         .await
