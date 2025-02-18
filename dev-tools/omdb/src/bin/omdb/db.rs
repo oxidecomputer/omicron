@@ -27,7 +27,6 @@ use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::AsyncSimpleConnection;
-use camino::Utf8PathBuf;
 use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
@@ -77,6 +76,7 @@ use nexus_db_model::NetworkInterfaceKind;
 use nexus_db_model::PhysicalDisk;
 use nexus_db_model::Probe;
 use nexus_db_model::Project;
+use nexus_db_model::ReadOnlyTargetReplacement;
 use nexus_db_model::Region;
 use nexus_db_model::RegionReplacement;
 use nexus_db_model::RegionReplacementState;
@@ -94,6 +94,7 @@ use nexus_db_model::UpstairsRepairNotification;
 use nexus_db_model::UpstairsRepairProgress;
 use nexus_db_model::Vmm;
 use nexus_db_model::Volume;
+use nexus_db_model::VolumeRepair;
 use nexus_db_model::VpcSubnet;
 use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
@@ -144,6 +145,7 @@ use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Display;
+use std::future::Future;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
@@ -269,6 +271,23 @@ impl DbUrlOptions {
         check_schema_version(&datastore).await;
         Ok(datastore)
     }
+
+    pub async fn with_datastore<F, Fut, T>(
+        &self,
+        omdb: &Omdb,
+        log: &slog::Logger,
+        f: F,
+    ) -> anyhow::Result<T>
+    where
+        F: FnOnce(OpContext, Arc<DataStore>) -> Fut,
+        Fut: Future<Output = anyhow::Result<T>>,
+    {
+        let datastore = self.connect(omdb, log).await?;
+        let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+        let result = f(opctx, datastore.clone()).await;
+        datastore.terminate().await;
+        result
+    }
 }
 
 #[derive(Debug, Args, Clone)]
@@ -297,6 +316,8 @@ pub struct DbFetchOptions {
 /// Subcommands that query or update the database
 #[derive(Debug, Subcommand, Clone)]
 enum DbCommands {
+    /// Print any Crucible resources that are located on expunged physical disks
+    ReplacementsToDo,
     /// Print information about the rack
     Rack(RackArgs),
     /// Print information about virtual disks
@@ -307,8 +328,6 @@ enum DbCommands {
     Inventory(InventoryArgs),
     /// Print information about physical disks
     PhysicalDisks(PhysicalDisksArgs),
-    /// Save the current Reconfigurator inputs to a file
-    ReconfiguratorSave(ReconfiguratorSaveArgs),
     /// Print information about regions
     Region(RegionArgs),
     /// Query for information about region replacements, optionally manually
@@ -544,12 +563,6 @@ struct PhysicalDisksArgs {
     /// Show disks that match the given filter
     #[clap(short = 'F', long, value_enum)]
     filter: Option<DiskFilter>,
-}
-
-#[derive(Debug, Args, Clone)]
-struct ReconfiguratorSaveArgs {
-    /// where to save the output
-    output_file: Utf8PathBuf,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -827,10 +840,18 @@ enum VolumeCommands {
     Info(VolumeInfoArgs),
     /// Summarize current volumes
     List,
+    /// What is holding the lock?
+    LockHolder(VolumeLockHolderArgs),
 }
 
 #[derive(Debug, Args, Clone)]
 struct VolumeInfoArgs {
+    /// The UUID of the volume
+    uuid: Uuid,
+}
+
+#[derive(Debug, Args, Clone)]
+struct VolumeLockHolderArgs {
     /// The UUID of the volume
     uuid: Uuid,
 }
@@ -892,14 +913,13 @@ impl DbArgs {
         omdb: &Omdb,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
-        let datastore = self.db_url_opts.connect(omdb, log).await?;
-        let opctx = OpContext::for_tests(log.clone(), datastore.clone());
-        let res = {
-            let command = self.command.clone();
-            let fetch_opts = self.fetch_opts.clone();
-            let datastore = datastore.clone();
+        let fetch_opts = &self.fetch_opts;
+        self.db_url_opts.with_datastore(omdb, log, |opctx, datastore| {
             async move {
-                match &command {
+                match &self.command {
+                    DbCommands::ReplacementsToDo => {
+                        replacements_to_do(&opctx, &datastore).await
+                    }
                     DbCommands::Rack(RackArgs { command: RackCommands::List }) => {
                         cmd_db_rack_list(&opctx, &datastore, &fetch_opts).await
                     }
@@ -941,14 +961,6 @@ impl DbArgs {
                             &datastore,
                             &fetch_opts,
                             args,
-                        )
-                        .await
-                    }
-                    DbCommands::ReconfiguratorSave(reconfig_save_args) => {
-                        cmd_db_reconfigurator_save(
-                            &opctx,
-                            &datastore,
-                            reconfig_save_args,
                         )
                         .await
                     }
@@ -1131,11 +1143,14 @@ impl DbArgs {
                         command: ValidateCommands::ValidateRegionSnapshots,
                     }) => cmd_db_validate_region_snapshots(&datastore).await,
                     DbCommands::Volumes(VolumeArgs {
-                        command: VolumeCommands::Info(uuid),
-                    }) => cmd_db_volume_info(&datastore, uuid).await,
+                        command: VolumeCommands::Info(args),
+                    }) => cmd_db_volume_info(&datastore, args).await,
                     DbCommands::Volumes(VolumeArgs {
                         command: VolumeCommands::List,
                     }) => cmd_db_volume_list(&datastore, &fetch_opts).await,
+                    DbCommands::Volumes(VolumeArgs {
+                        command: VolumeCommands::LockHolder(args),
+                    }) => cmd_db_volume_lock_holder(&datastore, args).await,
 
                     DbCommands::Vmm(VmmArgs { command: VmmCommands::Info(args) }) => {
                         cmd_db_vmm_info(&opctx, &datastore, &fetch_opts, &args)
@@ -1147,9 +1162,7 @@ impl DbArgs {
                     }
                 }
             }
-        }.await;
-        datastore.terminate().await;
-        res
+        }).await
     }
 }
 
@@ -1402,6 +1415,77 @@ async fn cmd_db_disk_list(
 
     let rows = disks.iter().map(DiskRow::from);
     let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+async fn replacements_to_do(
+    opctx: &OpContext,
+    datastore: &DataStore,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct RegionRow {
+        id: String,
+        dataset_id: String,
+        resource: String,
+    }
+
+    let region_rows: Vec<RegionRow> = vec![
+        datastore
+            .find_read_only_regions_on_expunged_physical_disks(opctx)
+            .await?,
+        datastore
+            .find_read_write_regions_on_expunged_physical_disks(opctx)
+            .await?,
+    ]
+    .into_iter()
+    .flatten()
+    .map(|region| RegionRow {
+        id: region.id().to_string(),
+        dataset_id: region.dataset_id().to_string(),
+        resource: if region.read_only() {
+            String::from("read-only region")
+        } else {
+            String::from("read/write region")
+        },
+    })
+    .collect();
+
+    let table = tabled::Table::new(region_rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    println!("");
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct RegionSnapshotRow {
+        dataset_id: String,
+        region_id: String,
+        snapshot_id: String,
+    }
+
+    let rs_rows: Vec<RegionSnapshotRow> = datastore
+        .find_region_snapshots_on_expunged_physical_disks(opctx)
+        .await?
+        .into_iter()
+        .map(|rs| RegionSnapshotRow {
+            dataset_id: rs.dataset_id().to_string(),
+            region_id: rs.region_id.to_string(),
+            snapshot_id: rs.snapshot_id.to_string(),
+        })
+        .collect();
+
+    let table = tabled::Table::new(rs_rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
         .to_string();
@@ -2329,6 +2413,102 @@ fn print_vcr(vcr: VolumeConstructionRequest, pad: usize) {
     }
 }
 
+/// What is holding the volume lock?
+async fn cmd_db_volume_lock_holder(
+    datastore: &DataStore,
+    args: &VolumeLockHolderArgs,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct HolderRow {
+        volume_id: String,
+        lock_id: String,
+        holder_type: String,
+    }
+
+    let mut rows = vec![];
+
+    let volume_id = VolumeUuid::from_untyped_uuid(args.uuid);
+
+    let maybe_volume_repair_record = datastore
+        .pool_connection_for_tests()
+        .await?
+        .transaction_async(|conn| async move {
+            use db::schema::volume_repair::dsl;
+
+            conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+            dsl::volume_repair
+                .filter(dsl::volume_id.eq(to_db_typed_uuid(volume_id)))
+                .select(VolumeRepair::as_select())
+                .first_async(&conn)
+                .await
+        })
+        .await
+        .optional()?;
+
+    if let Some(volume_repair_record) = maybe_volume_repair_record {
+        let conn = datastore.pool_connection_for_tests().await?;
+
+        let is_region_replacement = {
+            use db::schema::region_replacement::dsl;
+
+            dsl::region_replacement
+                .filter(dsl::id.eq(volume_repair_record.repair_id))
+                .select(RegionReplacement::as_select())
+                .load_async(&*conn)
+                .await
+                .optional()?
+                .is_some()
+        };
+
+        let is_region_snapshot_replacement = {
+            use db::schema::region_snapshot_replacement::dsl;
+
+            dsl::region_snapshot_replacement
+                .filter(dsl::id.eq(volume_repair_record.repair_id))
+                .select(RegionSnapshotReplacement::as_select())
+                .load_async(&*conn)
+                .await
+                .optional()?
+                .is_some()
+        };
+
+        let holder_type = if is_region_replacement {
+            String::from("region replacement")
+        } else if is_region_snapshot_replacement {
+            String::from("region snapshot replacement")
+        } else {
+            // It's possible that the `snapshot_create` saga has taken the lock,
+            // but there's no way to know what that lock id is as it is randomly
+            // generated during the saga.
+            //
+            // TODO with a better interface for querying sagas, one could:
+            //
+            // - scan for all the currently running `snapshot_create` sagas
+            // - deserialize the output (if it's there) of the "lock_id" nodes
+            // - match against that
+            //
+            String::from("unknown (could be snapshot?)")
+        };
+
+        rows.push(HolderRow {
+            volume_id: volume_id.to_string(),
+            lock_id: volume_repair_record.repair_id.to_string(),
+            holder_type,
+        });
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
 /// List all regions still missing ports
 async fn cmd_db_region_missing_porst(
     opctx: &OpContext,
@@ -2965,11 +3145,19 @@ async fn cmd_db_region_replacement_request(
 ) -> Result<(), anyhow::Error> {
     let region = datastore.get_region(args.region_id).await?;
 
-    let request_id = datastore
-        .create_region_replacement_request_for_region(opctx, &region)
-        .await?;
+    if region.read_only() {
+        let request_id = datastore
+            .create_read_only_region_replacement_request(opctx, region.id())
+            .await?;
 
-    println!("region replacement {request_id} created");
+        println!("region snapshot replacement {request_id} created");
+    } else {
+        let request_id = datastore
+            .create_region_replacement_request_for_region(opctx, &region)
+            .await?;
+
+        println!("region replacement {request_id} created");
+    }
 
     Ok(())
 }
@@ -4345,12 +4533,22 @@ async fn cmd_db_region_snapshot_replacement_status(
             "                      state: {:?}",
             request.replacement_state
         );
-        println!(
-            "            region snapshot: {} {} {}",
-            request.old_dataset_id,
-            request.old_region_id,
-            request.old_snapshot_id,
-        );
+        match request.replacement_type() {
+            ReadOnlyTargetReplacement::RegionSnapshot {
+                dataset_id,
+                region_id,
+                snapshot_id,
+            } => {
+                println!(
+                    "            region snapshot: {} {} {}",
+                    dataset_id, region_id, snapshot_id,
+                );
+            }
+
+            ReadOnlyTargetReplacement::ReadOnlyRegion { region_id } => {
+                println!("           read-only region: {}", region_id);
+            }
+        }
         println!("              new region id: {:?}", request.new_region_id);
         println!("     in-progress steps left: {:?}", steps_left);
         println!();
@@ -4382,10 +4580,22 @@ async fn cmd_db_region_snapshot_replacement_info(
 
     println!("                    started: {}", request.request_time);
     println!("                      state: {:?}", request.replacement_state);
-    println!(
-        "            region snapshot: {} {} {}",
-        request.old_dataset_id, request.old_region_id, request.old_snapshot_id,
-    );
+    match request.replacement_type() {
+        ReadOnlyTargetReplacement::RegionSnapshot {
+            dataset_id,
+            region_id,
+            snapshot_id,
+        } => {
+            println!(
+                "            region snapshot: {} {} {}",
+                dataset_id, region_id, snapshot_id,
+            );
+        }
+
+        ReadOnlyTargetReplacement::ReadOnlyRegion { region_id } => {
+            println!("           read-only region: {}", region_id);
+        }
+    }
     println!("              new region id: {:?}", request.new_region_id);
     println!("     in-progress steps left: {:?}", steps_left);
     println!();
@@ -5924,35 +6134,6 @@ impl LongStringFormatter {
         // wide, so return it as-is
         s.into()
     }
-}
-
-// Reconfigurator
-
-/// Packages up database state that's used as input to the Reconfigurator
-/// planner into a file so that it can be loaded into `reconfigurator-cli`
-async fn cmd_db_reconfigurator_save(
-    opctx: &OpContext,
-    datastore: &DataStore,
-    reconfig_save_args: &ReconfiguratorSaveArgs,
-) -> Result<(), anyhow::Error> {
-    // See Nexus::blueprint_planning_context().
-    eprint!("assembling reconfigurator state ... ");
-    let state = nexus_reconfigurator_preparation::reconfigurator_state_load(
-        opctx, datastore,
-    )
-    .await?;
-    eprintln!("done");
-
-    let output_path = &reconfig_save_args.output_file;
-    let file = std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&output_path)
-        .with_context(|| format!("open {:?}", output_path))?;
-    serde_json::to_writer_pretty(&file, &state)
-        .with_context(|| format!("write {:?}", output_path))?;
-    eprintln!("wrote {}", output_path);
-    Ok(())
 }
 
 // Migrations

@@ -1115,6 +1115,7 @@ impl InstanceRunner {
                     cpus: self.vcpus,
                     memory_mb: self.memory_mib,
                     cpuid: None,
+                    guest_hv_interface: None,
                 },
                 components: Default::default(),
             };

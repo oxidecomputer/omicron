@@ -13,7 +13,9 @@ use nexus_reconfigurator_planning::{
     system::{SledHwInventory, SystemDescription},
 };
 use nexus_types::{
-    deployment::{Blueprint, SledFilter, UnstableReconfiguratorState},
+    deployment::{
+        Blueprint, BlueprintTarget, SledFilter, UnstableReconfiguratorState,
+    },
     internal_api::params::{DnsConfigParams, DnsConfigZone},
     inventory::Collection,
 };
@@ -77,6 +79,9 @@ pub struct SimSystem {
     /// Stored with `Arc` to allow cheap cloning.
     blueprints: IndexMap<BlueprintUuid, Arc<Blueprint>>,
 
+    /// Current target blueprint.
+    target_blueprint: Option<BlueprintTarget>,
+
     /// Internal DNS configurations.
     ///
     /// Stored with `Arc` to allow cheap cloning.
@@ -94,6 +99,7 @@ impl SimSystem {
             description: SystemDescription::new(),
             collections: IndexMap::new(),
             blueprints: IndexMap::new(),
+            target_blueprint: None,
             internal_dns: BTreeMap::new(),
             external_dns: BTreeMap::new(),
         }
@@ -103,6 +109,7 @@ impl SimSystem {
         !self.description.has_sleds()
             && self.collections.is_empty()
             && self.blueprints.is_empty()
+            && self.target_blueprint.is_none()
             && self.internal_dns.is_empty()
             && self.external_dns.is_empty()
     }
@@ -136,6 +143,10 @@ impl SimSystem {
             Some(b) => Ok(&**b),
             None => Err(KeyError::blueprint(id)),
         }
+    }
+
+    pub fn target_blueprint(&self) -> Option<BlueprintTarget> {
+        self.target_blueprint
     }
 
     pub fn all_blueprints(&self) -> impl ExactSizeIterator<Item = &Blueprint> {
@@ -529,6 +540,11 @@ impl SimSystemBuilderInner {
             example.initial_blueprint.id,
             Arc::new(example.initial_blueprint),
         );
+        self.system.target_blueprint = Some(BlueprintTarget {
+            target_id: blueprint.id,
+            enabled: true,
+            time_made_target: blueprint.time_created,
+        });
         self.system.blueprints.insert(blueprint.id, Arc::new(blueprint));
     }
 
@@ -621,6 +637,8 @@ impl SimSystemBuilderInner {
                 }
             }
         }
+
+        self.system.target_blueprint = state.target_blueprint;
 
         for blueprint in state.blueprints {
             let blueprint_id = blueprint.id;

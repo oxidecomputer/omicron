@@ -1429,11 +1429,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.snapshot (
     size_bytes INT NOT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_snapshot_by_project ON omicron.public.snapshot (
-    project_id,
-    name
-) WHERE
-    time_deleted IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_snapshot_by_project
+    ON omicron.public.snapshot (
+        project_id,
+        name
+    ) WHERE
+        time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS lookup_snapshot_by_destination_volume_id
+    ON omicron.public.snapshot ( destination_volume_id );
+
+CREATE INDEX IF NOT EXISTS lookup_snapshot_by_volume_id
+    ON omicron.public.snapshot ( volume_id );
 
 /*
  * Oximeter collector servers.
@@ -1843,7 +1850,22 @@ CREATE TABLE IF NOT EXISTS omicron.public.router_route (
     vpc_router_id UUID NOT NULL,
     kind omicron.public.router_route_kind NOT NULL,
     target STRING(128) NOT NULL,
-    destination STRING(128) NOT NULL
+    destination STRING(128) NOT NULL,
+
+    /* FK to the `vpc_subnet` table. See constraints below */
+    vpc_subnet_id UUID,
+
+    /*
+     * Only nullable if this is rule is not, in-fact, virtual and tightly coupled to a
+     * linked item. Today, these are 'vpc_subnet' rules and their parent subnets.
+     * 'vpc_peering' routes may also fall into this category in future.
+     *
+     * User-created/modifiable routes must have this field as NULL.
+     */
+    CONSTRAINT non_null_vpc_subnet CHECK (
+        (kind = 'vpc_subnet' AND vpc_subnet_id IS NOT NULL) OR
+        (kind != 'vpc_subnet' AND vpc_subnet_id IS NULL)
+    )
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_route_by_router ON omicron.public.router_route (
@@ -1851,6 +1873,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_route_by_router ON omicron.public.route
     name
 ) WHERE
     time_deleted IS NULL;
+
+-- Enforce uniqueness of 'vpc_subnet' routes on parent (and help add/delete).
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_subnet_route_by_id ON omicron.public.router_route (
+    vpc_subnet_id
+) WHERE
+    time_deleted IS NULL AND kind = 'vpc_subnet';
 
 CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway (
     id UUID PRIMARY KEY,
@@ -4624,8 +4652,6 @@ CREATE INDEX IF NOT EXISTS lookup_any_disk_by_volume_id ON omicron.public.disk (
     volume_id
 );
 
-CREATE INDEX IF NOT EXISTS lookup_snapshot_by_destination_volume_id ON omicron.public.snapshot ( destination_volume_id );
-
 CREATE TYPE IF NOT EXISTS omicron.public.region_snapshot_replacement_state AS ENUM (
   'requested',
   'allocating',
@@ -4636,14 +4662,19 @@ CREATE TYPE IF NOT EXISTS omicron.public.region_snapshot_replacement_state AS EN
   'completing'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.read_only_target_replacement_type AS ENUM (
+  'region_snapshot',
+  'read_only_region'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.region_snapshot_replacement (
     id UUID PRIMARY KEY,
 
     request_time TIMESTAMPTZ NOT NULL,
 
-    old_dataset_id UUID NOT NULL,
+    old_dataset_id UUID,
     old_region_id UUID NOT NULL,
-    old_snapshot_id UUID NOT NULL,
+    old_snapshot_id UUID,
 
     old_snapshot_volume_id UUID,
 
@@ -4653,10 +4684,23 @@ CREATE TABLE IF NOT EXISTS omicron.public.region_snapshot_replacement (
 
     operating_saga_id UUID,
 
-    new_region_volume_id UUID
+    new_region_volume_id UUID,
+
+    replacement_type omicron.public.read_only_target_replacement_type NOT NULL,
+
+    CONSTRAINT proper_replacement_fields CHECK (
+      (
+       (replacement_type = 'region_snapshot') AND
+       ((old_dataset_id IS NOT NULL) AND (old_snapshot_id IS NOT NULL))
+      ) OR (
+       (replacement_type = 'read_only_region') AND
+       ((old_dataset_id IS NULL) AND (old_snapshot_id IS NULL))
+      )
+    )
 );
 
-CREATE INDEX IF NOT EXISTS lookup_region_snapshot_replacement_by_state on omicron.public.region_snapshot_replacement (replacement_state);
+CREATE INDEX IF NOT EXISTS lookup_region_snapshot_replacement_by_state
+ON omicron.public.region_snapshot_replacement (replacement_state);
 
 CREATE TYPE IF NOT EXISTS omicron.public.region_snapshot_replacement_step_state AS ENUM (
   'requested',
@@ -4902,7 +4946,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '124.0.0', NULL)
+    (TRUE, NOW(), NOW(), '126.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

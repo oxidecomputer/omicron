@@ -1487,6 +1487,78 @@ fn after_107_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
+fn before_124_0_0(client: &Client) -> BoxFuture<'_, ()> {
+    Box::pin(async {
+        // Insert a region snapshot replacement record
+        let request_id: Uuid =
+            "5f867d89-a61f-48cd-ac7d-aecbcb23c2f9".parse().unwrap();
+        let dataset_id: Uuid =
+            "c625d694-185b-4c64-9369-402b7ba1362e".parse().unwrap();
+        let region_id: Uuid =
+            "bda60191-05a0-4881-8bca-0855464ecd9f".parse().unwrap();
+        let snapshot_id: Uuid =
+            "0b8382de-d787-450a-8516-235f33eb0946".parse().unwrap();
+
+        client
+            .batch_execute(&format!(
+                "
+        INSERT INTO region_snapshot_replacement (
+            id,
+            request_time,
+            old_dataset_id,
+            old_region_id,
+            old_snapshot_id,
+            old_snapshot_volume_id,
+            new_region_id,
+            replacement_state,
+            operating_saga_id,
+            new_region_volume_id
+        ) VALUES (
+            '{request_id}',
+            now(),
+            '{dataset_id}',
+            '{region_id}',
+            '{snapshot_id}',
+            NULL,
+            NULL,
+            'requested',
+            NULL,
+            NULL
+        );"
+            ))
+            .await
+            .expect("failed to insert record");
+    })
+}
+
+fn after_124_0_0(client: &Client) -> BoxFuture<'_, ()> {
+    Box::pin(async {
+        let rows = client
+            .query(
+                "SELECT replacement_type FROM region_snapshot_replacement;",
+                &[],
+            )
+            .await
+            .expect("failed to load region snapshot replacements");
+
+        let records = process_rows(&rows);
+
+        assert_eq!(records.len(), 1);
+
+        assert_eq!(
+            records[0].values,
+            vec![ColumnValue::new(
+                "replacement_type",
+                SqlEnum::from((
+                    "read_only_target_replacement_type",
+                    "region_snapshot"
+                )),
+            )],
+            "existing region snapshot replacement should have replacement type",
+        );
+    })
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -1526,6 +1598,11 @@ fn get_migration_checks() -> BTreeMap<SemverVersion, DataMigrationFns> {
     map.insert(
         SemverVersion(semver::Version::parse("107.0.0").unwrap()),
         DataMigrationFns::new().before(before_107_0_0).after(after_107_0_0),
+    );
+
+    map.insert(
+        SemverVersion::new(124, 0, 0),
+        DataMigrationFns::new().before(before_124_0_0).after(after_124_0_0),
     );
 
     map
