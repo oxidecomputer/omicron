@@ -18,6 +18,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum NetworkConfig {
     /// Listen address for a fake KSZ8463 port
     Simulated { bind_addr: SocketAddrV6 },
