@@ -117,7 +117,14 @@ pub(crate) async fn clean_up_expunged_zones<R: CleanupResolver>(
         .filter_map(|(sled_id, config)| async move {
             // We expect to only be called with expunged zones; skip any with a
             // different disposition.
-            if config.disposition != BlueprintZoneDisposition::Expunged {
+            //
+            // TODO We should be looking at `confirmed_shut_down` here! But
+            // currently the planner never sets it to true, so we're dependent
+            // on `DeployZonesDone` instead.
+            if !matches!(
+                config.disposition,
+                BlueprintZoneDisposition::Expunged { .. }
+            ) {
                 return None;
             }
 
@@ -565,12 +572,25 @@ mod test {
             });
         }
 
-        // Both in-service and quiesced zones should be deployed.
+        // In-service zones should be deployed.
         //
-        // The expunged zone should not be deployed.
+        // The expunged zones should not be deployed.
         append_zone(&mut zones1, BlueprintZoneDisposition::InService);
-        append_zone(&mut zones1, BlueprintZoneDisposition::Expunged);
-        append_zone(&mut zones2, BlueprintZoneDisposition::Quiesced);
+        append_zone(
+            &mut zones1,
+            BlueprintZoneDisposition::Expunged {
+                as_of_generation: Generation::new(),
+                confirmed_shut_down: false,
+            },
+        );
+        append_zone(&mut zones2, BlueprintZoneDisposition::InService);
+        append_zone(
+            &mut zones2,
+            BlueprintZoneDisposition::Expunged {
+                as_of_generation: Generation::new(),
+                confirmed_shut_down: false,
+            },
+        );
         // Bump the generation for each config
         zones1.generation = zones1.generation.next();
         zones2.generation = zones2.generation.next();
@@ -618,7 +638,10 @@ mod test {
         // Construct the cockroach zone we're going to try to clean up.
         let any_sled_id = SledUuid::new_v4();
         let crdb_zone = BlueprintZoneConfig {
-            disposition: BlueprintZoneDisposition::Expunged,
+            disposition: BlueprintZoneDisposition::Expunged {
+                as_of_generation: Generation::new(),
+                confirmed_shut_down: false,
+            },
             id: OmicronZoneUuid::new_v4(),
             filesystem_pool: Some(ZpoolName::new_external(ZpoolUuid::new_v4())),
             zone_type: BlueprintZoneType::CockroachDb(

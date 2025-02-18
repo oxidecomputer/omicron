@@ -241,6 +241,7 @@ mod tests {
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::SledUuid;
@@ -299,7 +300,10 @@ mod tests {
             crdb_addr1,
         ));
         bp_zones.zones.insert(make_crdb_zone_config(
-            BlueprintZoneDisposition::Expunged,
+            BlueprintZoneDisposition::Expunged {
+                as_of_generation: Generation::new(),
+                confirmed_shut_down: false,
+            },
             crdb_id2,
             crdb_addr2,
         ));

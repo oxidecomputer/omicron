@@ -297,7 +297,7 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
     internal_dns      4fd906d8-94cd-44b3-ad5e-34b4d193bd3c   in service     fd00:1122:3344:1::1   
 -   crucible          0e8e9f2d-291d-47fc-ba0f-84cb50e713fd   in service     fd00:1122:3344:105::2c
 *   crucible          0ce2b998-f5ad-4dc5-b2ec-5250a308506d   - in service   fd00:1122:3344:105::25
-     └─                                                      + quiesced                           
+     └─                                                      + expunged                           
 
 
   sled 48d95fef-bc9f-4f50-9a53-1e075836291d (decommissioned):

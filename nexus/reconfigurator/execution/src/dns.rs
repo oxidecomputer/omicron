@@ -681,7 +681,10 @@ mod test {
         let out_of_service_addr = Ipv6Addr::LOCALHOST;
         blueprint.blueprint_zones.values_mut().next().unwrap().zones.insert(
             BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::Quiesced,
+                disposition: BlueprintZoneDisposition::Expunged {
+                    as_of_generation: Generation::new(),
+                    confirmed_shut_down: false,
+                },
                 id: out_of_service_id,
                 filesystem_pool: Some(ZpoolName::new_external(
                     ZpoolUuid::new_v4(),
@@ -760,7 +763,7 @@ mod test {
             .collect();
         println!("omicron zones by IP: {:#?}", omicron_zones_by_ip);
 
-        // Check to see that the quiesced zone was actually excluded
+        // Check to see that the out-of-service zone was actually excluded
         assert!(omicron_zones_by_ip
             .values()
             .all(|id| *id != out_of_service_id));
@@ -1025,7 +1028,7 @@ mod test {
             ]
         );
 
-        // Change the zone disposition to quiesced for the nexus zone on the
+        // Change the zone disposition to expunged for the nexus zone on the
         // first sled. This should ensure we don't get an external DNS record
         // back for that sled.
         let (_, bp_zones_config) =
@@ -1035,7 +1038,10 @@ mod test {
             .iter_mut()
             .find(|z| z.zone_type.is_nexus())
             .unwrap();
-        nexus_zone.disposition = BlueprintZoneDisposition::Quiesced;
+        nexus_zone.disposition = BlueprintZoneDisposition::Expunged {
+            as_of_generation: Generation::new(),
+            confirmed_shut_down: false,
+        };
         mem::drop(nexus_zone);
 
         // Retrieve the DNS config based on the modified blueprint

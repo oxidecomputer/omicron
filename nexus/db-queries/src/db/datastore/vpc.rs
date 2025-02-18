@@ -16,7 +16,6 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
-use crate::db::model::ApplyBlueprintZoneFilterExt;
 use crate::db::model::ApplySledFilterExt;
 use crate::db::model::IncompleteVpc;
 use crate::db::model::InstanceNetworkInterface;
@@ -55,13 +54,13 @@ use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V4;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V6;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_ID;
 use nexus_db_fixed_data::vpc::SERVICES_VPC_ID;
+use nexus_db_model::DbBpZoneDisposition;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::InternetGateway;
 use nexus_db_model::InternetGatewayIpAddress;
 use nexus_db_model::InternetGatewayIpPool;
 use nexus_db_model::IpPoolRange;
 use nexus_db_model::NetworkInterfaceKind;
-use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::SledFilter;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
@@ -798,8 +797,11 @@ impl DataStore {
             )
             // Filter out services that are expunged and shouldn't be resolved
             // here.
-            .blueprint_zone_filter(
-                BlueprintZoneFilter::ShouldDeployVpcFirewallRules,
+            //
+            // TODO: We should reference a rendezvous table instead of filtering
+            // for in-service zones.
+            .filter(
+                bp_omicron_zone::disposition.eq(DbBpZoneDisposition::InService),
             )
             .filter(service_network_interface::vpc_id.eq(vpc_id))
             .filter(service_network_interface::time_deleted.is_null())
@@ -3332,23 +3334,13 @@ mod tests {
             .expect("failed to undo ineligible sleds");
         assert_service_sled_ids(&datastore, &sled_ids).await;
 
-        // Make a new blueprint marking one of the zones as quiesced and one as
-        // expunged. Ensure that the sled with *quiesced* zone is returned by
-        // vpc_resolve_to_sleds, but the sled with the *expunged* zone is not.
-        // (But other services are still running.)
+        // Make a new blueprint marking one of the zones as expunged. Ensure
+        // that the sled  the expunged zone is not returned by
+        // vpc_resolve_to_sleds. (But other services are still running.)
         let bp4 = {
             let mut bp4 = bp3.clone();
             bp4.id = BlueprintUuid::new_v4();
             bp4.parent_blueprint_id = Some(bp3.id);
-
-            // Sled index 2's Nexus is quiesced (should be included).
-            let sled2 = bp4
-                .blueprint_zones
-                .get_mut(&sled_ids[2])
-                .expect("zones for sled");
-            sled2.zones.iter_mut().next().unwrap().disposition =
-                BlueprintZoneDisposition::Quiesced;
-            sled2.generation = sled2.generation.next();
 
             // Sled index 3's zone is expunged (should be excluded).
             let sled3 = bp4
@@ -3356,7 +3348,10 @@ mod tests {
                 .get_mut(&sled_ids[3])
                 .expect("zones for sled");
             sled3.zones.iter_mut().next().unwrap().disposition =
-                BlueprintZoneDisposition::Expunged;
+                BlueprintZoneDisposition::Expunged {
+                    as_of_generation: Generation::new(),
+                    confirmed_shut_down: false,
+                };
             sled3.generation = sled3.generation.next();
 
             bp4

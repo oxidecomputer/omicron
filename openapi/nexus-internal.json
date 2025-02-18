@@ -2286,23 +2286,46 @@
         "oneOf": [
           {
             "description": "The zone is in-service.",
-            "type": "string",
-            "enum": [
-              "in_service"
-            ]
-          },
-          {
-            "description": "The zone is not in service.",
-            "type": "string",
-            "enum": [
-              "quiesced"
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "in_service"
+                ]
+              }
+            },
+            "required": [
+              "kind"
             ]
           },
           {
             "description": "The zone is permanently gone.",
-            "type": "string",
-            "enum": [
-              "expunged"
+            "type": "object",
+            "properties": {
+              "as_of_generation": {
+                "description": "Generation of the parent config in which this zone became expunged.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Generation"
+                  }
+                ]
+              },
+              "confirmed_shut_down": {
+                "description": "True if Reconfiguration knows that this zone has been shut down and will not be restarted.\n\nIn the current implementation, this means the planner has observed an inventory collection where the sled on which this zone was running (a) is no longer running the zone and (b) has a config generation at least as high as `as_of_generation`, indicating it will not try to start the zone on a cold boot based on an older config.",
+                "type": "boolean"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "expunged"
+                ]
+              }
+            },
+            "required": [
+              "as_of_generation",
+              "confirmed_shut_down",
+              "kind"
             ]
           }
         ]
