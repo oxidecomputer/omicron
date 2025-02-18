@@ -2070,8 +2070,9 @@ dependencies = [
 
 [[package]]
 name = "daft"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/daft?branch=main#9e7b55349f61bded974cba9c1727a70a62586a37"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a75caf1eeef382d47bf5d3012b5ec521311cd876a1304ac8807ec86d4df42a7"
 dependencies = [
  "daft-derive",
  "newtype-uuid",
@@ -2082,8 +2083,9 @@ dependencies = [
 
 [[package]]
 name = "daft-derive"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/daft?branch=main#9e7b55349f61bded974cba9c1727a70a62586a37"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a851e4efac7afda4a5e1a11fea1d65ef528dbdcff08177d7087e4bb6225e60a9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2183,7 +2185,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=93cd0d642cf1b58f9f4528275e2a2aa758e9feb3#93cd0d642cf1b58f9f4528275e2a2aa758e9feb3"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=cb2b592e890ca9e93d8193e9765e2a62459d5fa8#cb2b592e890ca9e93d8193e9765e2a62459d5fa8"
 dependencies = [
  "oxnet",
  "percent-encoding",
@@ -2383,9 +2385,9 @@ dependencies = [
 
 [[package]]
 name = "diesel"
-version = "2.2.6"
+version = "2.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ccf1bedf64cdb9643204a36dd15b19a6ce8e7aa7f7b105868e9f1fad5ffa7d12"
+checksum = "04001f23ba8843dc315804fa324000376084dfb1c30794ff68dd279e6e5696d5"
 dependencies = [
  "bitflags 2.6.0",
  "byteorder",
@@ -2636,7 +2638,6 @@ dependencies = [
  "serde_json",
  "slog",
  "toml 0.8.19",
- "transceiver-decode",
  "typify 0.3.0",
  "uuid",
 ]
@@ -3903,9 +3904,9 @@ checksum = "6fe2267d4ed49bc07b63801559be28c718ea06c4738b7a03c94df7386d2cde46"
 
 [[package]]
 name = "hickory-client"
-version = "0.24.2"
+version = "0.24.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "949d2fef0bbdd31a0f6affc6bf390b4a0017492903eff6f7516cb382d9e85536"
+checksum = "2ea0169f8b21726527197c7190e5a23b7fd514a3e04f99c571e05631e1f8a9c8"
 dependencies = [
  "cfg-if",
  "data-encoding",
@@ -3946,9 +3947,9 @@ dependencies = [
 
 [[package]]
 name = "hickory-resolver"
-version = "0.24.2"
+version = "0.24.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a2e2aba9c389ce5267d31cf1e4dace82390ae276b0b364ea55630b1fa1b44b4"
+checksum = "dcf287bde7b776e85d7188e6e5db7cf410a2f9531fe82817eb87feed034c8d14"
 dependencies = [
  "cfg-if",
  "futures-util",
@@ -3967,9 +3968,9 @@ dependencies = [
 
 [[package]]
 name = "hickory-server"
-version = "0.24.2"
+version = "0.24.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35e6d1c2df0614595224b32479c72dd6fc82c9bda85962907c45fdb95a691489"
+checksum = "7b75179158e7267618f0a587d2337f05e9d71ab3cb03ac2bde2ea5969bc65695"
 dependencies = [
  "async-trait",
  "bytes",
@@ -4492,7 +4493,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=b56afeeb14e0042cbd7bda85b166ed86ee17820e#b56afeeb14e0042cbd7bda85b166ed86ee17820e"
+source = "git+https://github.com/oxidecomputer/opte?rev=cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa#cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa"
 
 [[package]]
 name = "illumos-utils"
@@ -4871,9 +4872,9 @@ checksum = "ddc24109865250148c2e0f3d25d4f0f479571723792d3802153c60922a4fb708"
 
 [[package]]
 name = "ipnetwork"
-version = "0.20.0"
+version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf466541e9d546596ee94f9f69590f89473455f88372423e0008fc1a7daf100e"
+checksum = "cf370abdafd54d13e54a620e8c3e1145f28e46cc9d704bc6d94414559df41763"
 dependencies = [
  "schemars",
  "serde",
@@ -4989,7 +4990,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=b56afeeb14e0042cbd7bda85b166ed86ee17820e#b56afeeb14e0042cbd7bda85b166ed86ee17820e"
+source = "git+https://github.com/oxidecomputer/opte?rev=cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa#cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa"
 dependencies = [
  "quote",
  "syn 2.0.96",
@@ -5088,7 +5089,7 @@ checksum = "b024e211b1b371da58cd69e4fb8fa4ed16915edcc0e2e1fb04ac4bad61959f25"
 [[package]]
 name = "libfalcon"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/falcon?branch=main#651fb5889d66be90ac1afa4a730c573b643aef1e"
+source = "git+https://github.com/oxidecomputer/falcon?branch=main#f3fe0542198c08bbb82d16f168e6482db9bec5b9"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -5098,7 +5099,7 @@ dependencies = [
  "futures",
  "indicatif",
  "libc",
- "libnet 0.1.0 (git+https://github.com/oxidecomputer/netadm-sys?branch=main)",
+ "libnet",
  "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=fae5334bcad5e864794332c6fed5e6bb9ec88831)",
  "propolis-server-config",
  "rand",
@@ -5150,7 +5151,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -5162,29 +5163,7 @@ checksum = "4ec2a862134d2a7d32d7983ddcdd1c4923530833c9f2ea1a44fc5fa473989058"
 [[package]]
 name = "libnet"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/netadm-sys?branch=main#e07ad76458eb50601e0da4f9da16dbc942bfc2ba"
-dependencies = [
- "anyhow",
- "cfg-if",
- "colored",
- "dlpi",
- "libc",
- "num_enum",
- "nvpair",
- "nvpair-sys",
- "oxnet",
- "rand",
- "rusty-doors",
- "socket2",
- "thiserror 1.0.69",
- "tracing",
- "winnow 0.6.20",
-]
-
-[[package]]
-name = "libnet"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/netadm-sys#e07ad76458eb50601e0da4f9da16dbc942bfc2ba"
+source = "git+https://github.com/oxidecomputer/netadm-sys?branch=main#f4eae3d8070760922da93b9edd56ca4103b4c390"
 dependencies = [
  "anyhow",
  "cfg-if",
@@ -5518,7 +5497,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=93cd0d642cf1b58f9f4528275e2a2aa758e9feb3#93cd0d642cf1b58f9f4528275e2a2aa758e9feb3"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=cb2b592e890ca9e93d8193e9765e2a62459d5fa8#cb2b592e890ca9e93d8193e9765e2a62459d5fa8"
 dependencies = [
  "anyhow",
  "chrono",
@@ -7545,7 +7524,6 @@ dependencies = [
  "getrandom",
  "group",
  "hashbrown 0.15.1",
- "heck 0.4.1",
  "hex",
  "hickory-proto",
  "hmac",
@@ -7795,7 +7773,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=b56afeeb14e0042cbd7bda85b166ed86ee17820e#b56afeeb14e0042cbd7bda85b166ed86ee17820e"
+source = "git+https://github.com/oxidecomputer/opte?rev=cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa#cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa"
 dependencies = [
  "bitflags 2.6.0",
  "cfg-if",
@@ -7814,7 +7792,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=b56afeeb14e0042cbd7bda85b166ed86ee17820e#b56afeeb14e0042cbd7bda85b166ed86ee17820e"
+source = "git+https://github.com/oxidecomputer/opte?rev=cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa#cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa"
 dependencies = [
  "illumos-sys-hdrs",
  "ingot",
@@ -7827,10 +7805,10 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=b56afeeb14e0042cbd7bda85b166ed86ee17820e#b56afeeb14e0042cbd7bda85b166ed86ee17820e"
+source = "git+https://github.com/oxidecomputer/opte?rev=cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa#cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa"
 dependencies = [
  "libc",
- "libnet 0.1.0 (git+https://github.com/oxidecomputer/netadm-sys)",
+ "libnet",
  "opte",
  "oxide-vpc",
  "postcard",
@@ -7896,7 +7874,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=b56afeeb14e0042cbd7bda85b166ed86ee17820e#b56afeeb14e0042cbd7bda85b166ed86ee17820e"
+source = "git+https://github.com/oxidecomputer/opte?rev=cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa#cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa"
 dependencies = [
  "cfg-if",
  "illumos-sys-hdrs",
@@ -8218,7 +8196,8 @@ dependencies = [
 [[package]]
 name = "oxnet"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/oxnet#49ee85dcd294901031c3395ee773363db1cdc289"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff7aba867c36df803039621068faf1630d3039eb999c2f6c3950d1064d4fbbdf"
 dependencies = [
  "ipnetwork",
  "schemars",
@@ -11237,7 +11216,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.96",
@@ -12382,30 +12361,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c06d3da6113f116aaee68e4d601191614c9053067f9ab7f6edbcb161237daa54"
 dependencies = [
  "once_cell",
-]
-
-[[package]]
-name = "transceiver-decode"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/transceiver-control#9ff89d72aec7848552b595e44e1fdb508f82ddfa"
-dependencies = [
- "schemars",
- "serde",
- "static_assertions",
- "thiserror 2.0.11",
- "transceiver-messages",
-]
-
-[[package]]
-name = "transceiver-messages"
-version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/transceiver-control#9ff89d72aec7848552b595e44e1fdb508f82ddfa"
-dependencies = [
- "bitflags 2.6.0",
- "clap",
- "hubpack",
- "serde",
- "thiserror 2.0.11",
 ]
 
 [[package]]
