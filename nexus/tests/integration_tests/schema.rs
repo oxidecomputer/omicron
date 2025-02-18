@@ -1487,7 +1487,7 @@ fn after_107_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn before_124_0_0(client: &Client) -> BoxFuture<'_, ()> {
+fn before_124_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async {
         // Insert a region snapshot replacement record
         let request_id: Uuid =
@@ -1499,7 +1499,7 @@ fn before_124_0_0(client: &Client) -> BoxFuture<'_, ()> {
         let snapshot_id: Uuid =
             "0b8382de-d787-450a-8516-235f33eb0946".parse().unwrap();
 
-        client
+        ctx.client
             .batch_execute(&format!(
                 "
         INSERT INTO region_snapshot_replacement (
@@ -1531,9 +1531,10 @@ fn before_124_0_0(client: &Client) -> BoxFuture<'_, ()> {
     })
 }
 
-fn after_124_0_0(client: &Client) -> BoxFuture<'_, ()> {
+fn after_124_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async {
-        let rows = client
+        let rows = ctx
+            .client
             .query(
                 "SELECT replacement_type FROM region_snapshot_replacement;",
                 &[],
