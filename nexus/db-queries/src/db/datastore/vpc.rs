@@ -78,6 +78,7 @@ use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRouteKind as ExternalRouteKind;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni as ExternalVni;
+use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterTarget;
 use oxnet::IpNet;
@@ -2755,10 +2756,14 @@ impl DataStore {
                 (RouteTarget::InternetGateway(n), _) => inetgws
                     .get(&n)
                     .map(|igw| {
-                        (
-                            Some(RouterTarget::InternetGateway(Some(igw.id()))),
-                            Some(RouterTarget::InternetGateway(Some(igw.id()))),
-                        )
+                        let gateway_target = if is_services_vpc_gateway(igw) {
+                            InternetGatewayRouterTarget::System
+                        } else {
+                            InternetGatewayRouterTarget::Instance(igw.id())
+                        };
+                        let target =
+                            RouterTarget::InternetGateway(gateway_target);
+                        (Some(target), Some(target))
                     })
                     .unwrap_or_default(),
 
@@ -2826,6 +2831,11 @@ impl DataStore {
 
         Ok(())
     }
+}
+
+// Return true if this gateway belongs to the internal services VPC.
+fn is_services_vpc_gateway(igw: &InternetGateway) -> bool {
+    igw.vpc_id == *SERVICES_VPC_ID
 }
 
 #[cfg(test)]

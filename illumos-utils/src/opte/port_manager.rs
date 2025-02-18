@@ -16,6 +16,7 @@ use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 use omicron_common::api::external;
 use omicron_common::api::internal::shared::ExternalIpGatewayMap;
+use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
@@ -42,6 +43,9 @@ use oxide_vpc::api::SNat4Cfg;
 use oxide_vpc::api::SNat6Cfg;
 use oxide_vpc::api::SetExternalIpsReq;
 use oxide_vpc::api::VpcCfg;
+use oxnet::IpNet;
+use oxnet::Ipv4Net;
+use oxnet::Ipv6Net;
 use slog::debug;
 use slog::error;
 use slog::info;
@@ -50,6 +54,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -58,7 +63,7 @@ use std::sync::Mutex;
 use uuid::Uuid;
 
 /// Stored routes (and usage count) for a given VPC/subnet.
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 struct RouteSet {
     version: Option<RouterVersion>,
     routes: HashSet<ResolvedVpcRoute>,
@@ -391,10 +396,7 @@ impl PortManager {
                     class,
                     port_name: port_name.clone(),
                     dest: super::net_to_cidr(route.dest),
-                    target: super::router_target_opte(
-                        &route.target,
-                        is_instance,
-                    ),
+                    target: super::router_target_opte(&route.target),
                 };
 
                 hdl.add_router_entry(&route)?;
@@ -511,15 +513,12 @@ impl PortManager {
         let hdl = Handle::new()?;
 
         // Propagate deltas out to all ports.
-        for (interface_id, port) in ports.iter() {
+        for port in ports.values() {
             let system_id = port.system_router_key();
             let system_delta = deltas.get(&system_id);
 
             let custom_id = port.custom_router_key();
             let custom_delta = deltas.get(&custom_id);
-
-            let is_instance =
-                matches!(interface_id.1, NetworkInterfaceKind::Instance { .. });
 
             for (class, delta) in [
                 (RouterClass::System, system_delta),
@@ -541,10 +540,7 @@ impl PortManager {
                         class,
                         port_name: port.name().into(),
                         dest: super::net_to_cidr(route.dest),
-                        target: super::router_target_opte(
-                            &route.target,
-                            is_instance,
-                        ),
+                        target: super::router_target_opte(&route.target),
                     };
 
                     hdl.del_router_entry(&route)?;
@@ -562,10 +558,7 @@ impl PortManager {
                         class,
                         port_name: port.name().into(),
                         dest: super::net_to_cidr(route.dest),
-                        target: super::router_target_opte(
-                            &route.target,
-                            is_instance,
-                        ),
+                        target: super::router_target_opte(&route.target),
                     };
 
                     hdl.add_router_entry(&route)?;
@@ -959,19 +952,12 @@ fn system_routes_v4<'a>(
     routes: &'a mut HashMap<RouterId, RouteSet>,
     port: &Port,
 ) -> &'a mut RouteSet {
-    let routes = routes.entry(port.system_router_key()).or_insert_with(|| {
-        let routes = HashSet::new();
-        RouteSet { version: None, routes, active_ports: 0 }
-    });
-
-    if is_service {
-        routes.routes.insert(ResolvedVpcRoute {
-            dest: "0.0.0.0/0".parse().unwrap(),
-            target: ApiRouterTarget::InternetGateway(None),
-        });
-    }
-
-    routes
+    let maybe_default_dest = if is_service {
+        Some(IpNet::V4(Ipv4Net::new(Ipv4Addr::UNSPECIFIED, 0).unwrap()))
+    } else {
+        None
+    };
+    fetch_or_insert_system_routes(routes, port, maybe_default_dest)
 }
 
 fn system_routes_v6<'a>(
@@ -979,18 +965,32 @@ fn system_routes_v6<'a>(
     routes: &'a mut HashMap<RouterId, RouteSet>,
     port: &Port,
 ) -> &'a mut RouteSet {
-    let routes = routes.entry(port.system_router_key()).or_insert_with(|| {
-        let routes = HashSet::new();
-        RouteSet { version: None, routes, active_ports: 0 }
-    });
+    let maybe_default_dest = if is_service {
+        Some(IpNet::V6(Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 0).unwrap()))
+    } else {
+        None
+    };
+    fetch_or_insert_system_routes(routes, port, maybe_default_dest)
+}
 
-    if is_service {
+fn fetch_or_insert_system_routes<'a>(
+    routes: &'a mut HashMap<RouterId, RouteSet>,
+    port: &Port,
+    maybe_default_dest: Option<IpNet>,
+) -> &'a mut RouteSet {
+    let routes = routes.entry(port.system_router_key()).or_default();
+    if let Some(dest) = maybe_default_dest {
         routes.routes.insert(ResolvedVpcRoute {
-            dest: "::/0".parse().unwrap(),
-            target: ApiRouterTarget::InternetGateway(None),
+            dest,
+            // Always insert a rule targeting the _system VPC Internet Gateway_.
+            // This may be sent later from Nexus, but we need it during
+            // bootstrapping NTP or other very early services, before the
+            // control plane database has been started.
+            target: ApiRouterTarget::InternetGateway(
+                InternetGatewayRouterTarget::System,
+            ),
         });
     }
-
     routes
 }
 
@@ -1003,8 +1003,9 @@ mod tests {
     use omicron_common::api::{
         external::{MacAddr, Vni},
         internal::shared::{
-            NetworkInterface, NetworkInterfaceKind, ResolvedVpcRoute,
-            ResolvedVpcRouteSet, RouterTarget, RouterVersion, SourceNatConfig,
+            InternetGatewayRouterTarget, NetworkInterface,
+            NetworkInterfaceKind, ResolvedVpcRoute, ResolvedVpcRouteSet,
+            RouterTarget, RouterVersion, SourceNatConfig,
         },
     };
     use omicron_test_utils::dev::test_setup_log;
@@ -1107,9 +1108,9 @@ mod tests {
         );
         assert_eq!(
             route.target,
-            RouterTarget::InternetGateway(None),
-            "VPC System Router default route should target the `None` \
-            Internet Gateway"
+            RouterTarget::InternetGateway(InternetGatewayRouterTarget::System),
+            "VPC System Router default route should target the \
+            System Internet Gateway"
         );
 
         // In OPTE, we should have one route, also squished down to this
@@ -1155,9 +1156,9 @@ mod tests {
             }),
             routes: HashSet::from([ResolvedVpcRoute {
                 dest: default_ipv4_route,
-                target: RouterTarget::InternetGateway(Some(
-                    SERVICES_INTERNET_GATEWAY_ID,
-                )),
+                target: RouterTarget::InternetGateway(
+                    InternetGatewayRouterTarget::System,
+                ),
             }]),
         }];
         manager.vpc_routes_ensure(new_routes.clone()).unwrap();
@@ -1186,9 +1187,9 @@ mod tests {
         );
         assert_eq!(
             route.target,
-            RouterTarget::InternetGateway(Some(SERVICES_INTERNET_GATEWAY_ID)),
+            RouterTarget::InternetGateway(InternetGatewayRouterTarget::System),
             "VPC System Router default route should target the explicit \
-            services Internet Gateway by ID after vpc_routes_ensure"
+            services Internet Gateway after vpc_routes_ensure"
         );
 
         {
@@ -1271,18 +1272,6 @@ mod tests {
             1,
             "We should always have 1 default route, pointing to the services \
             VPC System Router's IGW, even after adding a new port",
-            /*
-             * TODO(ben): Remove this.
-             *
-             * This is the current behavior which is incorrect. All the sections
-             * below commented with TODO(ben) are also wrong, but can be
-             * uncommented to show each stage of the system while it goes off
-             * the rails. This is useful to write the regression test itself.
-            2,
-            "We should now have 2 default routes. One routing to the \
-            explicitly-named IGW, and one to IGW(None), for the new port \
-            we just added."
-            */
         );
         let _ = system_routes
             .routes
@@ -1290,22 +1279,13 @@ mod tests {
             .find(|rt| {
                 rt.dest == default_ipv4_route
                     && rt.target
-                        == RouterTarget::InternetGateway(Some(
-                            SERVICES_INTERNET_GATEWAY_ID,
-                        ))
+                        == RouterTarget::InternetGateway(
+                            InternetGatewayRouterTarget::System,
+                        )
             })
             .expect(
-                "Should have default route targeting the \
-                explicitly-named services IGW",
+                "Should have default route targeting the explicit services IGW",
             );
-        let _ = system_routes
-            .routes
-            .iter()
-            .find(|rt| {
-                rt.dest == default_ipv4_route
-                    && rt.target == RouterTarget::InternetGateway(None)
-            })
-            .expect("Should have default route targeting the IGW(None)");
 
         {
             let state = handle.state().lock().unwrap();
@@ -1327,37 +1307,6 @@ mod tests {
                     pointing to the IGW(None), after creating the second port",
                 );
             }
-            /*
-             * TODO(ben): Remove this.
-            let rt = state
-                .ports
-                .get("opte0")
-                .unwrap()
-                .routes
-                .iter()
-                .filter(|rt| rt.is_system_default_ipv4_route())
-                .collect::<Vec<_>>();
-            assert_eq!(
-                rt.len(),
-                1,
-                "opte0 should have exactly one default system route \
-                pointing to the IGW(None), after creating the second port",
-            );
-            let rt = state
-                .ports
-                .get("opte1")
-                .unwrap()
-                .routes
-                .iter()
-                .filter(|rt| rt.is_system_default_ipv4_route())
-                .collect::<Vec<_>>();
-            assert_eq!(
-                rt.len(),
-                2,
-                "opte1 should have exactly two default system routes \
-                pointing to the IGW(None), after creating it",
-            );
-            */
         }
 
         // Now, PUT /vpc-routes again, but with a higher version so that things
@@ -1390,23 +1339,18 @@ mod tests {
             us a request with an explicit IGW. We should have deleted \
             the one pointing to IGW(None)."
         );
-        /*
-         * TODO(ben): Update this to point to the new internet gateway target
-         * variant, rather than the current optional one.
-         */
         let _ = system_routes
             .routes
             .iter()
             .find(|rt| {
                 rt.dest == default_ipv4_route
                     && rt.target
-                        == RouterTarget::InternetGateway(Some(
-                            SERVICES_INTERNET_GATEWAY_ID,
-                        ))
+                        == RouterTarget::InternetGateway(
+                            InternetGatewayRouterTarget::System,
+                        )
             })
             .expect(
-                "Should have default route targeting the \
-                explicitly-named services IGW",
+                "Should have default route targeting the explicit services IGW",
             );
 
         // As before, we should still have a default route pointing to IGW(None)
@@ -1429,40 +1373,9 @@ mod tests {
                     rt.len(),
                     1,
                     "{port_name} should have exactly one default system route \
-                    pointing to the IGW(None), after creating the second port",
+                    target the services IGW, after creating the second port",
                 );
             }
-            /*
-             * TODO(ben): Remove this.
-            let rt = state
-                .ports
-                .get("opte0")
-                .unwrap()
-                .routes
-                .iter()
-                .filter(|rt| rt.is_system_default_ipv4_route())
-                .collect::<Vec<_>>();
-            assert_eq!(
-                rt.len(),
-                0,
-                "We should have asked OPTE to delete the only remaining \
-                default route for the first port."
-            );
-            let rt = state
-                .ports
-                .get("opte1")
-                .unwrap()
-                .routes
-                .iter()
-                .filter(|rt| rt.is_system_default_ipv4_route())
-                .collect::<Vec<_>>();
-            assert_eq!(
-                rt.len(),
-                1,
-                "We should have asked OPTE to delete the only remaining \
-                default route for the first port."
-            );
-            */
         }
 
         logctx.cleanup_successful();
