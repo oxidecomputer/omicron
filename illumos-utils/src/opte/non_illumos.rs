@@ -27,6 +27,7 @@ use oxide_vpc::api::SetFwRulesReq;
 use oxide_vpc::api::SetVirt2PhysReq;
 use oxide_vpc::api::VpcCfg;
 use slog::Logger;
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Mutex;
@@ -214,13 +215,14 @@ impl Handle {
             state.underlay_initialized,
             "Underlay is not initialized"
         );
-        assert!(
-            state
-                .ports
-                .insert(name, PortData { port, routes: Vec::new() })
-                .is_none(),
-            "duplicate OPTE ports"
-        );
+        match state.ports.entry(name) {
+            Entry::Occupied(entry) => {
+                anyhow::bail!("Duplicate OPTE port: '{}'", entry.key());
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(PortData { port, routes: Vec::new() });
+            }
+        }
         Ok(NO_RESPONSE)
     }
 
