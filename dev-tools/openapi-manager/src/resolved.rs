@@ -78,10 +78,6 @@ pub enum Note {
 /// Describes the result of resolving the blessed spec(s), generated spec(s),
 /// and local spec files for a particular API
 pub struct Resolution<'a> {
-    #[allow(dead_code)]
-    // This field is not currently used, but it's logically very significant.
-    // The set of problems that can appear in `problems` depends on this `kind`.
-    // It's clearer to have this here and may also be useful in the future.
     kind: ResolutionKind,
     problems: Vec<Problem<'a>>,
 }
@@ -110,9 +106,13 @@ impl<'a> Resolution<'a> {
     pub fn problems(&self) -> impl Iterator<Item = &'_ Problem<'a>> + '_ {
         self.problems.iter()
     }
+
+    pub fn kind(&self) -> ResolutionKind {
+        self.kind
+    }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolutionKind {
     /// This is a lockstep API
     Lockstep,
@@ -121,6 +121,16 @@ pub enum ResolutionKind {
     /// This version is new to the current workspace (i.e., not present
     /// upstream)
     NewLocally,
+}
+
+impl Display for ResolutionKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            ResolutionKind::Lockstep => "lockstep",
+            ResolutionKind::Blessed => "blessed",
+            ResolutionKind::NewLocally => "added locally",
+        })
+    }
 }
 
 /// Describes a problem resolving the blessed spec(s), generated spec(s), and

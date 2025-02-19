@@ -4,7 +4,7 @@
 
 use crate::apis::{ManagedApi, ManagedApis};
 use crate::environment::{Environment, ErrorAccumulator};
-use crate::resolved::{Problem, Resolution, Resolved};
+use crate::resolved::{Problem, Resolution, ResolutionKind, Resolved};
 use crate::validation::CheckStale;
 use anyhow::bail;
 use camino::Utf8Path;
@@ -137,8 +137,10 @@ pub(crate) fn display_api_spec_version(
     api: &ManagedApi,
     version: &semver::Version,
     styles: &Styles,
+    resolution: &Resolution<'_>,
 ) -> String {
     if api.is_lockstep() {
+        assert_eq!(resolution.kind(), ResolutionKind::Lockstep);
         format!(
             "{} (lockstep v{}): {}",
             api.ident().style(styles.filename),
@@ -147,9 +149,10 @@ pub(crate) fn display_api_spec_version(
         )
     } else {
         format!(
-            "{} (versioned v{}): {}",
+            "{} (versioned v{} ({})): {}",
             api.ident().style(styles.filename),
             version,
+            resolution.kind(),
             api.title(),
         )
     }
@@ -407,7 +410,7 @@ fn summarize_one(
         eprintln!(
             "{:>HEADER_WIDTH$} {}",
             FRESH.style(styles.success_header),
-            display_api_spec_version(api, version, &styles),
+            display_api_spec_version(api, version, &styles, resolution),
         );
     } else {
         // There were one or more problems, some of which may be unfixable.
@@ -419,7 +422,7 @@ fn summarize_one(
                 assert!(resolution.has_problems());
                 STALE.style(styles.warning_header)
             },
-            display_api_spec_version(api, version, &styles),
+            display_api_spec_version(api, version, &styles, resolution),
         );
 
         display_resolution_problems(env, problems, styles);

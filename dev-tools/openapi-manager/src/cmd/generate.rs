@@ -98,14 +98,14 @@ pub(crate) fn generate_impl(
                 eprintln!(
                     "{:>HEADER_WIDTH$} {}",
                     UNCHANGED.style(styles.unchanged_header),
-                    display_api_spec_version(api, version, &styles),
+                    display_api_spec_version(api, version, &styles, resolution),
                 );
                 num_unchanged += 1;
             } else {
                 eprintln!(
                     "{:>HEADER_WIDTH$} {}",
                     STALE.style(styles.warning_header),
-                    display_api_spec_version(api, version, &styles),
+                    display_api_spec_version(api, version, &styles, resolution),
                 );
 
                 fix_problems(
