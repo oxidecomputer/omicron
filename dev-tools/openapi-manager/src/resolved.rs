@@ -542,8 +542,6 @@ impl<'a> Resolved<'a> {
         self.notes.iter()
     }
 
-    // XXX-dap we should have one of these for unrecognized local files
-    // XXX-dap is this where we should put the errors or warnings from loading?
     pub fn general_problems(&self) -> impl Iterator<Item = &Problem<'a>> + '_ {
         self.non_version_problems.iter()
     }
