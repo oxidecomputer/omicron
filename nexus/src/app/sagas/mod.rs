@@ -50,6 +50,9 @@ pub mod test_saga;
 pub mod volume_delete;
 pub mod volume_remove_rop;
 pub mod vpc_create;
+pub mod vpc_subnet_create;
+pub mod vpc_subnet_delete;
+pub mod vpc_subnet_update;
 
 pub mod common_storage;
 
@@ -167,6 +170,9 @@ fn make_action_registry() -> ActionRegistry {
         volume_delete::SagaVolumeDelete,
         volume_remove_rop::SagaVolumeRemoveROP,
         vpc_create::SagaVpcCreate,
+        vpc_subnet_create::SagaVpcSubnetCreate,
+        vpc_subnet_delete::SagaVpcSubnetDelete,
+        vpc_subnet_update::SagaVpcSubnetUpdate,
         image_delete::SagaImageDelete,
         region_replacement_start::SagaRegionReplacementStart,
         region_replacement_drive::SagaRegionReplacementDrive,

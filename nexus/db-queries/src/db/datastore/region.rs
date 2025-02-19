@@ -457,6 +457,42 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// Find read-only regions on expunged disks
+    pub async fn find_read_only_regions_on_expunged_physical_disks(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<Vec<Region>> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use db::schema::crucible_dataset::dsl as dataset_dsl;
+        use db::schema::physical_disk::dsl as physical_disk_dsl;
+        use db::schema::region::dsl as region_dsl;
+        use db::schema::zpool::dsl as zpool_dsl;
+
+        region_dsl::region
+            .filter(region_dsl::dataset_id.eq_any(
+                dataset_dsl::crucible_dataset
+                    .filter(dataset_dsl::time_deleted.is_null())
+                    .filter(dataset_dsl::pool_id.eq_any(
+                        zpool_dsl::zpool
+                            .filter(zpool_dsl::time_deleted.is_null())
+                            .filter(zpool_dsl::physical_disk_id.eq_any(
+                                physical_disk_dsl::physical_disk
+                                    .filter(physical_disk_dsl::disk_policy.eq(PhysicalDiskPolicy::Expunged))
+                                    .select(physical_disk_dsl::id)
+                            ))
+                            .select(zpool_dsl::id)
+                    ))
+                    .select(dataset_dsl::id)
+            ))
+            // only return read-only regions here
+            .filter(region_dsl::read_only.eq(true))
+            .select(Region::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     pub async fn region_set_port(
         &self,
         region_id: Uuid,

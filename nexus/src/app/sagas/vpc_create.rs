@@ -12,6 +12,7 @@ use nexus_db_model::InternetGatewayIpPool;
 use nexus_db_queries::db::queries::vpc_subnet::InsertVpcSubnetError;
 use nexus_db_queries::{authn, authz, db};
 use nexus_defaults as defaults;
+use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::LookupType;
@@ -59,6 +60,10 @@ declare_saga_actions! {
         + svc_create_subnet
         - svc_create_subnet_undo
     }
+    VPC_CREATE_SUBNET_ROUTE -> "route" {
+        + svc_create_subnet_route
+        - svc_create_subnet_route_undo
+    }
     VPC_UPDATE_FIREWALL -> "firewall" {
         + svc_update_firewall
         - svc_update_firewall_undo
@@ -96,6 +101,11 @@ pub fn create_dag(
         ACTION_GENERATE_ID.as_ref(),
     ));
     builder.append(Node::action(
+        "subnet_route_id",
+        "GenerateSubnetRouteId",
+        ACTION_GENERATE_ID.as_ref(),
+    ));
+    builder.append(Node::action(
         "default_subnet_id",
         "GenerateDefaultSubnetId",
         ACTION_GENERATE_ID.as_ref(),
@@ -110,6 +120,7 @@ pub fn create_dag(
     builder.append(vpc_create_v4_route_action());
     builder.append(vpc_create_v6_route_action());
     builder.append(vpc_create_subnet_action());
+    builder.append(vpc_create_subnet_route_action());
     builder.append(vpc_update_firewall_action());
     builder.append(vpc_create_gateway_action());
     builder.append(vpc_notify_sleds_action());
@@ -416,10 +427,59 @@ async fn svc_create_subnet_undo(
     let (authz_subnet, db_subnet) =
         sagactx.lookup::<(authz::VpcSubnet, db::model::VpcSubnet)>("subnet")?;
 
+    let res = osagactx
+        .datastore()
+        .vpc_delete_subnet_raw(&opctx, &db_subnet, &authz_subnet)
+        .await;
+
+    match res {
+        Ok(_) | Err(external::Error::ObjectNotFound { .. }) => Ok(()),
+        Err(e) => Err(e.into()),
+    }
+}
+
+async fn svc_create_subnet_route(
+    sagactx: NexusActionContext,
+) -> Result<authz::RouterRoute, ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let route_id = sagactx.lookup::<Uuid>("subnet_route_id")?;
+    let (.., db_subnet) =
+        sagactx.lookup::<(authz::VpcSubnet, db::model::VpcSubnet)>("subnet")?;
+    let authz_system_router = sagactx.lookup::<authz::VpcRouter>("router")?;
+
     osagactx
         .datastore()
-        .vpc_delete_subnet(&opctx, &db_subnet, &authz_subnet)
-        .await?;
+        .vpc_create_subnet_route(
+            &opctx,
+            &authz_system_router,
+            &db_subnet,
+            route_id,
+        )
+        .await
+        .map_err(ActionError::action_failed)
+        .map(|(auth, ..)| auth)
+}
+
+async fn svc_create_subnet_route_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let authz_route = sagactx.lookup::<authz::RouterRoute>("route")?;
+
+    osagactx.datastore().router_delete_route(&opctx, &authz_route).await?;
+
     Ok(())
 }
 
@@ -573,6 +633,12 @@ async fn svc_notify_sleds(
     osagactx
         .nexus()
         .send_sled_agents_firewall_rules(&opctx, &db_vpc, &rules, &[])
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    osagactx
+        .datastore()
+        .vpc_increment_rpw_version(&opctx, db_vpc.id())
         .await
         .map_err(ActionError::action_failed)?;
 

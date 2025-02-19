@@ -131,6 +131,27 @@ async fn test_repo_upload() -> Result<()> {
         .map(|artifact| artifact.hash)
         .collect::<HashSet<_>>()
         .len();
+    // The repository description should have `Zone` artifacts instead of the
+    // composite `ControlPlane` artifact.
+    assert_eq!(
+        initial_description
+            .artifacts
+            .iter()
+            .filter_map(|artifact| {
+                if artifact.id.kind == KnownArtifactKind::Zone.into() {
+                    Some(&artifact.id.name)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>(),
+        ["zone1", "zone2"]
+    );
+    assert!(!initial_description
+        .artifacts
+        .iter()
+        .any(|artifact| artifact.id.kind
+            == KnownArtifactKind::ControlPlane.into()));
 
     // The artifact replication background task should have been activated, and
     // we should see a local repo and successful PUTs.
