@@ -930,7 +930,7 @@ pub mod test {
             1,
             BlueprintZoneDisposition::Expunged {
                 as_of_generation: Generation::new(),
-                confirmed_shut_down: false,
+                ready_for_cleanup: false,
             },
         );
 
@@ -1022,7 +1022,7 @@ pub mod test {
             1,
             BlueprintZoneDisposition::Expunged {
                 as_of_generation: Generation::new(),
-                confirmed_shut_down: false,
+                ready_for_cleanup: false,
             },
         );
         let mut builder = ExternalNetworkingAllocator::new(

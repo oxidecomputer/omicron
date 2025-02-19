@@ -2284,7 +2284,7 @@ pub mod test {
         {
             zone.disposition = BlueprintZoneDisposition::Expunged {
                 as_of_generation: Generation::new(),
-                confirmed_shut_down: false,
+                ready_for_cleanup: false,
             };
         }
         blueprint1.blueprint_datasets.remove(&decommision_sled_id);
@@ -2334,7 +2334,7 @@ pub mod test {
         {
             z.disposition = BlueprintZoneDisposition::Expunged {
                 as_of_generation: Generation::new(),
-                confirmed_shut_down: false,
+                ready_for_cleanup: false,
             };
         }
 

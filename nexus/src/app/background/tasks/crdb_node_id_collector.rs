@@ -302,7 +302,7 @@ mod tests {
         bp_zones.zones.insert(make_crdb_zone_config(
             BlueprintZoneDisposition::Expunged {
                 as_of_generation: Generation::new(),
-                confirmed_shut_down: false,
+                ready_for_cleanup: false,
             },
             crdb_id2,
             crdb_addr2,

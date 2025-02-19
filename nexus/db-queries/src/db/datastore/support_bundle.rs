@@ -985,7 +985,7 @@ mod test {
                 if zone.id == bundle.assigned_nexus.unwrap().into() {
                     zone.disposition = BlueprintZoneDisposition::Expunged {
                         as_of_generation: *Generation::new(),
-                        confirmed_shut_down: false,
+                        ready_for_cleanup: false,
                     };
                 }
             }

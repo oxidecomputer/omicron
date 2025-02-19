@@ -1453,7 +1453,7 @@ pub(crate) mod test {
             BlueprintZoneDisposition::Expunged {
                 as_of_generation: blueprint2.blueprint_zones[&sled_id]
                     .generation,
-                confirmed_shut_down: false,
+                ready_for_cleanup: false,
             }
         );
 
@@ -1655,7 +1655,7 @@ pub(crate) mod test {
                             as_of_generation: blueprint3.blueprint_zones
                                 [&sled_id]
                                 .generation,
-                            confirmed_shut_down: false,
+                            ready_for_cleanup: false,
                         }
                         && zone.zone_type.is_external_dns()
                 })
@@ -2004,7 +2004,7 @@ pub(crate) mod test {
             *modified_zone.disposition.after,
             BlueprintZoneDisposition::Expunged {
                 as_of_generation: *modified_zones.generation.after,
-                confirmed_shut_down: false,
+                ready_for_cleanup: false,
             },
             "Should have expunged this zone"
         );
@@ -2124,7 +2124,7 @@ pub(crate) mod test {
                     z.after.disposition,
                     BlueprintZoneDisposition::Expunged {
                         as_of_generation: *zones.generation.diff_pair().after,
-                        confirmed_shut_down: false,
+                        ready_for_cleanup: false,
                     },
                     "Should have expunged this zone"
                 );
@@ -2223,7 +2223,7 @@ pub(crate) mod test {
             {
                 zone.disposition = BlueprintZoneDisposition::Expunged {
                     as_of_generation: Generation::new(),
-                    confirmed_shut_down: false,
+                    ready_for_cleanup: false,
                 };
             }
 
@@ -2382,7 +2382,7 @@ pub(crate) mod test {
                     NextCrucibleMutate::Modify => {
                         zone.disposition = BlueprintZoneDisposition::Expunged {
                             as_of_generation: Generation::new(),
-                            confirmed_shut_down: false,
+                            ready_for_cleanup: false,
                         };
                         next = NextCrucibleMutate::Remove;
                         true
@@ -2476,7 +2476,7 @@ pub(crate) mod test {
                 *modified_zone.disposition.after,
                 BlueprintZoneDisposition::Expunged {
                     as_of_generation: *modified_zones.generation.after,
-                    confirmed_shut_down: false,
+                    ready_for_cleanup: false,
                 },
                 "for {desc}, zone {} should have been marked expunged",
                 modified_zone.id.after

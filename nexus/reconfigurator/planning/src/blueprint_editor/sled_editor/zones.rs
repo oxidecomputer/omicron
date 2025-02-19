@@ -147,7 +147,7 @@ impl ZonesEditor {
             BlueprintZoneDisposition::InService => {
                 config.disposition = BlueprintZoneDisposition::Expunged {
                     as_of_generation: current_generation.next(),
-                    confirmed_shut_down: false,
+                    ready_for_cleanup: false,
                 };
                 counts.expunged += 1;
                 true

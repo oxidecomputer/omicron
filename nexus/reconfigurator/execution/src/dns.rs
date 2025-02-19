@@ -683,7 +683,7 @@ mod test {
             BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::Expunged {
                     as_of_generation: Generation::new(),
-                    confirmed_shut_down: false,
+                    ready_for_cleanup: false,
                 },
                 id: out_of_service_id,
                 filesystem_pool: Some(ZpoolName::new_external(
@@ -1040,7 +1040,7 @@ mod test {
             .unwrap();
         nexus_zone.disposition = BlueprintZoneDisposition::Expunged {
             as_of_generation: Generation::new(),
-            confirmed_shut_down: false,
+            ready_for_cleanup: false,
         };
         mem::drop(nexus_zone);
 

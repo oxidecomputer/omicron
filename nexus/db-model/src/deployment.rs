@@ -468,7 +468,7 @@ pub struct BpOmicronZone {
 
     disposition: DbBpZoneDisposition,
     expunged_as_of_generation: Option<Generation>,
-    expunged_confirmed_shut_down: bool,
+    expunged_ready_for_cleanup: bool,
 
     pub external_ip_id: Option<DbTypedUuid<ExternalIpKind>>,
     pub filesystem_pool: Option<DbTypedUuid<ZpoolKind>>,
@@ -488,7 +488,7 @@ impl BpOmicronZone {
         let DbBpZoneDispositionColumns {
             disposition,
             expunged_as_of_generation,
-            expunged_confirmed_shut_down,
+            expunged_ready_for_cleanup,
         } = blueprint_zone.disposition.into();
 
         // Create a dummy record to start, then fill in the rest
@@ -505,7 +505,7 @@ impl BpOmicronZone {
                 .map(|pool| pool.id().into()),
             disposition,
             expunged_as_of_generation,
-            expunged_confirmed_shut_down,
+            expunged_ready_for_cleanup,
             zone_type: blueprint_zone.zone_type.kind().into(),
 
             // Set the remainder of the fields to a default
@@ -892,7 +892,7 @@ impl BpOmicronZone {
         let disposition_cols = DbBpZoneDispositionColumns {
             disposition: self.disposition,
             expunged_as_of_generation: self.expunged_as_of_generation,
-            expunged_confirmed_shut_down: self.expunged_confirmed_shut_down,
+            expunged_ready_for_cleanup: self.expunged_ready_for_cleanup,
         };
 
         Ok(BlueprintZoneConfig {
@@ -929,7 +929,7 @@ impl_enum_type!(
 struct DbBpZoneDispositionColumns {
     disposition: DbBpZoneDisposition,
     expunged_as_of_generation: Option<Generation>,
-    expunged_confirmed_shut_down: bool,
+    expunged_ready_for_cleanup: bool,
 }
 
 impl From<BlueprintZoneDisposition> for DbBpZoneDispositionColumns {
@@ -937,24 +937,24 @@ impl From<BlueprintZoneDisposition> for DbBpZoneDispositionColumns {
         let (
             disposition,
             expunged_as_of_generation,
-            expunged_confirmed_shut_down,
+            expunged_ready_for_cleanup,
         ) = match value {
             BlueprintZoneDisposition::InService => {
                 (DbBpZoneDisposition::InService, None, false)
             }
             BlueprintZoneDisposition::Expunged {
                 as_of_generation,
-                confirmed_shut_down,
+                ready_for_cleanup,
             } => (
                 DbBpZoneDisposition::Expunged,
                 Some(Generation(as_of_generation)),
-                confirmed_shut_down,
+                ready_for_cleanup,
             ),
         };
         Self {
             disposition,
             expunged_as_of_generation,
-            expunged_confirmed_shut_down,
+            expunged_ready_for_cleanup,
         }
     }
 }
@@ -970,7 +970,7 @@ impl TryFrom<DbBpZoneDispositionColumns> for BlueprintZoneDisposition {
             (DbBpZoneDisposition::Expunged, Some(as_of_generation)) => {
                 Ok(Self::Expunged {
                     as_of_generation: *as_of_generation,
-                    confirmed_shut_down: value.expunged_confirmed_shut_down,
+                    ready_for_cleanup: value.expunged_ready_for_cleanup,
                 })
             }
             (DbBpZoneDisposition::InService, Some(_))

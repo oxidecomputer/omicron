@@ -3350,7 +3350,7 @@ mod tests {
             sled3.zones.iter_mut().next().unwrap().disposition =
                 BlueprintZoneDisposition::Expunged {
                     as_of_generation: Generation::new(),
-                    confirmed_shut_down: false,
+                    ready_for_cleanup: false,
                 };
             sled3.generation = sled3.generation.next();
 

@@ -118,7 +118,7 @@ pub(crate) async fn clean_up_expunged_zones<R: CleanupResolver>(
             // We expect to only be called with expunged zones; skip any with a
             // different disposition.
             //
-            // TODO We should be looking at `confirmed_shut_down` here! But
+            // TODO We should be looking at `ready_for_cleanup` here! But
             // currently the planner never sets it to true, so we're dependent
             // on `DeployZonesDone` instead.
             if !matches!(
@@ -580,7 +580,7 @@ mod test {
             &mut zones1,
             BlueprintZoneDisposition::Expunged {
                 as_of_generation: Generation::new(),
-                confirmed_shut_down: false,
+                ready_for_cleanup: false,
             },
         );
         append_zone(&mut zones2, BlueprintZoneDisposition::InService);
@@ -588,7 +588,7 @@ mod test {
             &mut zones2,
             BlueprintZoneDisposition::Expunged {
                 as_of_generation: Generation::new(),
-                confirmed_shut_down: false,
+                ready_for_cleanup: false,
             },
         );
         // Bump the generation for each config
@@ -640,7 +640,7 @@ mod test {
         let crdb_zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::Expunged {
                 as_of_generation: Generation::new(),
-                confirmed_shut_down: false,
+                ready_for_cleanup: false,
             },
             id: OmicronZoneUuid::new_v4(),
             filesystem_pool: Some(ZpoolName::new_external(ZpoolUuid::new_v4())),

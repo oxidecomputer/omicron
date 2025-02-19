@@ -793,7 +793,7 @@ pub enum BlueprintZoneDisposition {
         /// generation at least as high as `as_of_generation`, indicating it
         /// will not try to start the zone on a cold boot based on an older
         /// config.
-        confirmed_shut_down: bool,
+        ready_for_cleanup: bool,
     },
 }
 
