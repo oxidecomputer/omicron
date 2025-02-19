@@ -78,6 +78,8 @@ pub use planning_input::CockroachDbClusterVersion;
 pub use planning_input::CockroachDbPreserveDowngrade;
 pub use planning_input::CockroachDbSettings;
 pub use planning_input::DiskFilter;
+pub use planning_input::OximeterReadMode;
+pub use planning_input::OximeterReadPolicy;
 pub use planning_input::PlanningInput;
 pub use planning_input::PlanningInputBuildError;
 pub use planning_input::PlanningInputBuilder;

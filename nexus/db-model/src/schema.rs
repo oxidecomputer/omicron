@@ -864,6 +864,14 @@ table! {
 }
 
 table! {
+    oximeter_read_policy (version) {
+        version -> Int8,
+        oximeter_read_mode -> crate::oximeter_read_policy::OximeterReadModeEnum,
+        time_created -> Timestamptz,
+    }
+}
+
+table! {
     rack (id) {
         id -> Uuid,
         time_created -> Timestamptz,
