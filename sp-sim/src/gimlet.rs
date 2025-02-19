@@ -194,10 +194,10 @@ impl Gimlet {
         let (commands, commands_rx) = mpsc::unbounded_channel();
         let last_request_handled = Arc::default();
 
-        // Weird case - if we don't have any bind addresses, we're only being
+        // Weird case - if we don't have any network config, we're only being
         // created to simulate an RoT, so go ahead and return without actually
         // starting a simulated SP.
-        let Some(bind_addrs) = gimlet.common.bind_addrs else {
+        let Some(network_config) = &gimlet.common.network_config else {
             return Ok(Self {
                 local_addrs: None,
                 handler: None,
@@ -210,12 +210,14 @@ impl Gimlet {
         };
 
         // bind to our two local "KSZ" ports
-        assert_eq!(bind_addrs.len(), 2); // gimlet SP always has 2 ports
+        assert_eq!(network_config.len(), 2); // gimlet SP always has 2 ports
+
         let servers = future::try_join(
-            UdpServer::new(bind_addrs[0], gimlet.common.multicast_addr, &log),
-            UdpServer::new(bind_addrs[1], gimlet.common.multicast_addr, &log),
+            UdpServer::new(&network_config[0], &log),
+            UdpServer::new(&network_config[1], &log),
         )
         .await?;
+
         let servers = [servers.0, servers.1];
 
         for component_config in &gimlet.common.components {
