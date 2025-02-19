@@ -86,7 +86,7 @@ impl GeneratedFiles {
             if api.is_lockstep() {
                 for version in api.iter_versions_semver() {
                     let contents = api.generate_spec_bytes(version)?;
-                    let file_name = ApiSpecFileName::for_lockstep(api);
+                    let file_name = ApiSpecFileName::new_lockstep(api);
                     api_files.load_contents(file_name, contents);
                 }
             } else {
@@ -96,7 +96,7 @@ impl GeneratedFiles {
                 for supported_version in supported_versions {
                     let version = supported_version.semver();
                     let contents = api.generate_spec_bytes(version)?;
-                    let file_name = ApiSpecFileName::for_versioned(
+                    let file_name = ApiSpecFileName::new_versioned(
                         api,
                         version.clone(),
                         &contents,

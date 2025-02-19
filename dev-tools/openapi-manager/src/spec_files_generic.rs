@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Working with OpenAPI specification files in the repository
-//! XXX-dap TODO-doc needs update
+//! Working with OpenAPI documents, whether generated, blessed, or local to this
+//! repository
 
 use crate::apis::{ApiIdent, ManagedApi, ManagedApis};
 use crate::environment::ErrorAccumulator;
@@ -17,7 +17,8 @@ use std::fmt::{Debug, Display};
 use std::{collections::BTreeMap, ops::Deref};
 use thiserror::Error;
 
-/// Describes the path to an OpenAPI document file
+/// Describes the path to an OpenAPI document file, relative to some root where
+/// similar documents are found
 #[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub struct ApiSpecFileName {
     ident: ApiIdent,
@@ -34,8 +35,8 @@ impl ApiSpecFileName {
     /// Attempts to parse the given file basename as an ApiSpecFileName of kind
     /// `Versioned`.  These look like:
     ///
-    ///     ident-SEMVER-LABEL.json
-    fn new_versioned(
+    ///     ident-SEMVER-HASH.json
+    fn parse_versioned(
         apis: &ManagedApis,
         ident: &str,
         basename: &str,
@@ -118,7 +119,7 @@ impl ApiSpecFileName {
 
     /// Attempts to parse the given file basename as an ApiSpecFileName of kind
     /// `Lockstep`
-    fn new_lockstep(
+    fn parse_lockstep(
         apis: &ManagedApis,
         basename: &str,
     ) -> Result<ApiSpecFileName, BadLockstepFileName> {
@@ -136,18 +137,20 @@ impl ApiSpecFileName {
         Ok(ApiSpecFileName { ident, kind: ApiSpecFileNameKind::Lockstep })
     }
 
-    pub fn for_lockstep(api: &ManagedApi) -> ApiSpecFileName {
+    pub fn new_lockstep(api: &ManagedApi) -> ApiSpecFileName {
+        assert!(api.is_lockstep());
         ApiSpecFileName {
             ident: api.ident().clone(),
             kind: ApiSpecFileNameKind::Lockstep,
         }
     }
 
-    pub fn for_versioned(
+    pub fn new_versioned(
         api: &ManagedApi,
         version: semver::Version,
         contents: &[u8],
     ) -> ApiSpecFileName {
+        assert!(api.is_versioned());
         let hash = hash_contents(contents);
         ApiSpecFileName {
             ident: api.ident().clone(),
@@ -159,7 +162,8 @@ impl ApiSpecFileName {
         &self.ident
     }
 
-    /// Returns the path of this file relative to the root of the OpenAPI specs
+    /// Returns the path of this file relative to the root of the OpenAPI
+    /// documents
     pub fn path(&self) -> Utf8PathBuf {
         match &self.kind {
             ApiSpecFileNameKind::Lockstep => {
@@ -172,6 +176,7 @@ impl ApiSpecFileName {
         }
     }
 
+    /// Returns the base name of this file path
     pub fn basename(&self) -> String {
         match &self.kind {
             ApiSpecFileNameKind::Lockstep => format!("{}.json", self.ident),
@@ -181,6 +186,7 @@ impl ApiSpecFileName {
         }
     }
 
+    /// For versioned APIs, returns the hash part of the filename
     pub fn hash(&self) -> Option<&str> {
         match &self.kind {
             ApiSpecFileNameKind::Lockstep => None,
@@ -189,13 +195,21 @@ impl ApiSpecFileName {
     }
 }
 
-/// Describes how this API's specification file is named
+/// Describes how this OpenAPI document is named
 #[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
 enum ApiSpecFileNameKind {
+    /// the file's path implies a lockstep API
     Lockstep,
-    Versioned { version: semver::Version, hash: String },
+    /// the file's path implies a versioned API
+    Versioned {
+        /// the version of the API this document describes
+        version: semver::Version,
+        /// the hash of the file contents
+        hash: String,
+    },
 }
 
+/// Describes a failure to parse a file name for a lockstep API
 #[derive(Debug, Error)]
 enum BadLockstepFileName {
     #[error("expected lockstep API file name to end in \".json\"")]
@@ -206,6 +220,7 @@ enum BadLockstepFileName {
     NotLockstep,
 }
 
+/// Describes a failure to parse a file name for a versioned API
 #[derive(Debug, Error)]
 enum BadVersionedFileName {
     #[error("does not match a known API")]
@@ -219,12 +234,16 @@ enum BadVersionedFileName {
     UnexpectedName { ident: ApiIdent, source: anyhow::Error },
 }
 
-/// Describes an OpenAPI document found on disk
+/// Describes an OpenAPI document
 #[derive(Debug)]
 pub struct ApiSpecFile {
+    /// describes how the document should be named on disk
     name: ApiSpecFileName,
+    /// parsed contents of the document
     contents: DebugIgnore<OpenAPI>,
+    /// raw contents of the document
     contents_buf: DebugIgnore<Vec<u8>>,
+    /// version of the API described in the document
     version: semver::Version,
 }
 
@@ -274,18 +293,22 @@ impl ApiSpecFile {
         })
     }
 
+    /// Returns the name of the OpenAPI document
     pub fn spec_file_name(&self) -> &ApiSpecFileName {
         &self.name
     }
 
+    /// Returns the version of the API described in the document
     pub fn version(&self) -> &semver::Version {
         &self.version
     }
 
+    /// Returns a parsed representation of the document itself
     pub fn openapi(&self) -> &OpenAPI {
         &self.contents
     }
 
+    /// Returns the raw (byte) representation of the document itself
     pub fn contents(&self) -> &[u8] {
         &self.contents_buf
     }
@@ -301,7 +324,7 @@ impl ApiSpecFile {
 ///
 /// The source `T` is generally a Newtype wrapper around `ApiSpecFile`.  `T`
 /// must impl `ApiLoad` (which applies constraints on loading these documents)
-/// and `AsRawFiles` (which converts the Newtype bak to `ApiSpecFile` for
+/// and `AsRawFiles` (which converts the Newtype back to `ApiSpecFile` for
 /// consumers that don't care which Newtype they're dealing with).  There are
 /// three values of `T` that get used here:
 ///
@@ -351,19 +374,32 @@ impl<'a, T: ApiLoad + AsRawFiles> ApiSpecFilesBuilder<'a, T> {
         }
     }
 
+    /// Report an error loading OpenAPI documents
+    ///
+    /// Errors imply that the caller can't assume the returned documents are
+    /// complete or correct.
     pub fn load_error(&mut self, error: anyhow::Error) {
         self.error_accumulator.error(error);
     }
 
+    /// Report a warning loading OpenAPI documents
+    ///
+    /// Warnings generally do not affect correctness.  An example warning would
+    /// be an extra unexpected file.
     pub fn load_warning(&mut self, error: anyhow::Error) {
         self.error_accumulator.warning(error);
     }
 
+    /// Returns an `ApiSpecFileName` for the given lockstep API
+    ///
+    /// On success, this does not load anything into `self`.  Callers generally
+    /// invoke `load_contents()` with the returned value.  On failure, warnings
+    /// or errors will be recorded.
     pub fn lockstep_file_name(
         &mut self,
         basename: &str,
     ) -> Option<ApiSpecFileName> {
-        match ApiSpecFileName::new_lockstep(&self.apis, basename) {
+        match ApiSpecFileName::parse_lockstep(&self.apis, basename) {
             Err(
                 warning @ (BadLockstepFileName::NoSuchApi
                 | BadLockstepFileName::NotLockstep),
@@ -400,6 +436,11 @@ impl<'a, T: ApiLoad + AsRawFiles> ApiSpecFilesBuilder<'a, T> {
         }
     }
 
+    /// Returns an identifier for the versioned API identified by `basename`.
+    ///
+    /// On success, this does not load anything into `self`.  Callers generally
+    /// invoke `versioned_file_name()` with the returned value.  On failure,
+    /// warnings or errors will be recorded.
     pub fn versioned_directory(&mut self, basename: &str) -> Option<ApiIdent> {
         let ident = ApiIdent::from(basename.to_owned());
         match self.apis.api(&ident) {
@@ -432,12 +473,17 @@ impl<'a, T: ApiLoad + AsRawFiles> ApiSpecFilesBuilder<'a, T> {
         }
     }
 
+    /// Returns an `ApiSpecFileName` for the given versioned API
+    ///
+    /// On success, this does not load anything into `self`.  Callers generally
+    /// invoke `load_contents()` with the returned value.  On failure, warnings
+    /// or errors will be recorded.
     pub fn versioned_file_name(
         &mut self,
         ident: &ApiIdent,
         basename: &str,
     ) -> Option<ApiSpecFileName> {
-        match ApiSpecFileName::new_versioned(&self.apis, ident, basename) {
+        match ApiSpecFileName::parse_versioned(&self.apis, ident, basename) {
             Ok(file_name) => Some(file_name),
             Err(
                 warning @ (BadVersionedFileName::NoSuchApi
@@ -467,6 +513,9 @@ impl<'a, T: ApiLoad + AsRawFiles> ApiSpecFilesBuilder<'a, T> {
         }
     }
 
+    /// Load an API document
+    ///
+    /// On failure, records errors or warnings.
     pub fn load_contents(
         &mut self,
         file_name: ApiSpecFileName,
@@ -506,6 +555,9 @@ impl<'a, T: ApiLoad + AsRawFiles> ApiSpecFilesBuilder<'a, T> {
         }
     }
 
+    /// Load the "latest" symlink for a versioned API
+    ///
+    /// On failure, warnings or errors are recorded.
     pub fn load_latest_link(
         &mut self,
         ident: &ApiIdent,
@@ -551,11 +603,17 @@ impl<'a, T: ApiLoad + AsRawFiles> ApiSpecFilesBuilder<'a, T> {
         }
     }
 
+    /// Returns the underlying set of files loaded
     pub fn into_map(self) -> BTreeMap<ApiIdent, ApiFiles<T>> {
         self.spec_files
     }
 }
 
+/// Describes a set of OpenAPI documents and associated "latest" symlink for a
+/// given API
+///
+/// Parametrized by `T` because callers use newtypes around `ApiSpecFile` to
+/// avoid confusing them.  See the documentation on [`ApiSpecFilesBuilder`].
 #[derive(Debug)]
 pub struct ApiFiles<T> {
     spec_files: BTreeMap<semver::Version, T>,
@@ -576,6 +634,12 @@ impl<T: AsRawFiles> ApiFiles<T> {
     }
 }
 
+/// Implemented by Newtype wrappers around `ApiSpecFile` to convert back to an
+/// iterator of `&'a ApiSpecFile` for callers that do not care which Newtype
+/// they're operating on.
+///
+/// This is sort of like `Deref` except that some of the implementors are
+/// collections.  See [`ApiSpecFilesBuilder`] for more on this.
 pub trait AsRawFiles: Debug {
     fn as_raw_files<'a>(
         &'a self,
@@ -590,24 +654,51 @@ impl AsRawFiles for Vec<ApiSpecFile> {
     }
 }
 
+/// Implemented by Newtype wrappers around `ApiSpecFile` to load the newtype
+/// from an `ApiSpecFile`.
+///
+/// This is a bit like `TryFrom<Vec<ApiSpecFile>>` but we cannot use that
+/// directly because of the orphan rules (neither `TryFrom` nor `Vec` is defined
+/// in this package).
 pub trait ApiLoad {
+    /// Determines whether it's allowed in this context to load the wrong kind
+    /// of file for an API
+    ///
+    /// Recall that there are basically three implementors here:
+    ///
+    /// * Local files (from the local filesystem)
+    /// * Generated files (generated from Rust source)
+    /// * Blessed files (generally from Git)
+    ///
+    /// For blessed files (and only blessed files), it is okay to find a
+    /// lockstep file for an API that we think is versioned because this is
+    /// necessary in order to convert an API from lockstep to versioned.
     const MISCONFIGURATIONS_ALLOWED: bool;
 
+    /// Record having loaded a single OpenAPI document for an API
     fn make_item(raw: ApiSpecFile) -> Self;
+
+    /// Try to record additional OpenAPI documents for an API
+    ///
+    /// (This trait API might seem a little strange.  It looks this way because
+    /// every implementor supports loading a single OpenAPI document, but only
+    /// some allow more than one.)
     fn try_extend(&mut self, raw: ApiSpecFile) -> anyhow::Result<()>;
 }
 
+/// Return the hash of an OpenAPI document file for the purposes of this tool
+///
+/// The purpose of this hash is to isolate distinct versions of a given API
+/// version, as might happen if two people both try to create the the same
+/// (semver) version in two different branches.  By putting these into
+/// separate files, when one person merges with the other's changes, they'll
+/// wind up with two distinct files rather than having a ton of merge
+/// conflicts in one file.  This tool can then fix things up.
+///
+/// The upshot is: this hash is not required for security or even data
+/// integrity.  We use SHA-256 and truncate it to just the first four bytes
+/// to avoid the annoyance of super long filenames.
 fn hash_contents(contents: &[u8]) -> String {
-    // The purpose of this hash is to isolate distinct versions of a given API
-    // version, as might happen if two people both try to create the the same
-    // (semver) version in two different branches.  By putting these into
-    // separate files, when one person merges with the other's changes, they'll
-    // wind up with two distinct files rather than having a ton of merge
-    // conflicts in one file.  This tool can then fix things up.
-    //
-    // The upshot is: this hash is not required for security or even data
-    // integrity.  We use SHA-256 and truncate it to just the first four bytes
-    // to avoid the annoyance of super long filenames.
     let mut hasher = Sha256::new();
     hasher.update(contents);
     let computed_hash = hasher.finalize();

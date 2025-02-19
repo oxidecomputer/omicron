@@ -47,7 +47,7 @@ pub struct ManagedApiConfig {
     pub extra_validation: Option<fn(&OpenAPI, ValidationContext<'_>)>,
 }
 
-// XXX-dap rip this out and convert callers
+// XXX-dap-last-step rip this out and convert callers
 impl From<crate::spec::ApiSpec> for ManagedApiConfig {
     fn from(value: crate::spec::ApiSpec) -> Self {
         ManagedApiConfig {
