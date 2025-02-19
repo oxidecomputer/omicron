@@ -593,12 +593,28 @@ impl ZoneKind {
     }
 }
 
+/// Where Sled Agent should get the image for a zone.
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OmicronZoneImageSource {
+    /// This zone's image source is whatever happens to be on the sled's
+    /// "install" dataset.
+    ///
+    /// This is whatever was put in place at the factory or by the latest
+    /// MUPdate. The image used here can vary by sled and even over time (if the
+    /// sled gets MUPdated again).
+    ///
+    /// Historically, this was the only source for zone images. In an system
+    /// with automated control-plane-driven update we expect to only use this
+    /// variant in emergencies where the system had to be recovered via MUPdate.
     InstallDataset,
+    /// This zone's image source is the artifact matching this hash from the TUF
+    /// artifact store (aka "TUF repo depot").
+    ///
+    /// This originates from TUF repos uploaded to Nexus which are then
+    /// replicated out to all sleds.
     Artifact { hash: ArtifactHash },
 }
 

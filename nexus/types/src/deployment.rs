@@ -751,10 +751,16 @@ impl BlueprintZoneConfig {
 
 impl From<BlueprintZoneConfig> for OmicronZoneConfig {
     fn from(z: BlueprintZoneConfig) -> Self {
+        let BlueprintZoneConfig {
+            id,
+            filesystem_pool,
+            zone_type,
+            disposition: _disposition,
+        } = z;
         Self {
-            id: z.id,
-            filesystem_pool: z.filesystem_pool,
-            zone_type: z.zone_type.into(),
+            id,
+            filesystem_pool,
+            zone_type: zone_type.into(),
             image_source: OmicronZoneImageSource::InstallDataset,
         }
     }
