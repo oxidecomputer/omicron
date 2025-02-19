@@ -107,7 +107,6 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
-    (2, DEMO),
     (1, INITIAL),
 ]);
 
