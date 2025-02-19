@@ -739,14 +739,6 @@ impl<'a> BlueprintBuilder<'a> {
                 );
             }
         }
-        // Preserving backwards compatibility, for now: datasets should only
-        // have entries for in-service sleds.
-        let in_service_sled_ids = self
-            .input
-            .all_sled_ids(SledFilter::InService)
-            .collect::<BTreeSet<_>>();
-        blueprint_datasets
-            .retain(|sled_id, _| in_service_sled_ids.contains(sled_id));
 
         // If we have the clickhouse cluster setup enabled via policy and we
         // don't yet have a `ClickhouseClusterConfiguration`, then we must
