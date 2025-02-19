@@ -1563,7 +1563,7 @@ async fn cmd_db_disk_info(
     struct DownstairsRow {
         host_serial: String,
         region: String,
-        zone: String,
+        dataset: String,
         physical_disk: String,
     }
 
@@ -1688,7 +1688,7 @@ async fn cmd_db_disk_info(
         rows.push(DownstairsRow {
             host_serial: my_sled.serial_number().to_string(),
             region: region.id().to_string(),
-            zone: format!("oxz_crucible_{}", dataset.id()),
+            dataset: dataset.id().to_string(),
             physical_disk: my_zpool.physical_disk_id.to_string(),
         });
     }
@@ -1724,7 +1724,7 @@ async fn get_and_display_vcr(
     for v in volumes {
         match serde_json::from_str(&v.data()) {
             Ok(vcr) => {
-                println!("\nVCR from volume ID {volume_id}");
+                println!("VCR from volume ID {volume_id}");
                 print_vcr(vcr, 0);
             }
             Err(e) => {
@@ -2125,12 +2125,12 @@ async fn cmd_db_snapshot_info(
     struct DownstairsRow {
         host_serial: String,
         region: String,
-        zone: String,
+        dataset: String,
         physical_disk: String,
     }
 
     use db::schema::snapshot::dsl as snapshot_dsl;
-    let snapshots = snapshot_dsl::snapshot
+    let mut snapshots = snapshot_dsl::snapshot
         .filter(snapshot_dsl::id.eq(args.uuid))
         .limit(1)
         .select(Snapshot::as_select())
@@ -2138,32 +2138,75 @@ async fn cmd_db_snapshot_info(
         .await
         .context("loading requested snapshot")?;
 
-    let mut dest_volume_ids = Vec::new();
-    let mut source_volume_ids = Vec::new();
-    let rows = snapshots.into_iter().map(|snapshot| {
-        dest_volume_ids.push(snapshot.destination_volume_id());
-        source_volume_ids.push(snapshot.volume_id());
-        SnapshotRow::from(snapshot)
-    });
-    if rows.len() == 0 {
-        bail!("No snapshout with UUID: {} found", args.uuid);
+    if snapshots.is_empty() {
+        bail!("No snapshot with UUID: {} found", args.uuid);
+    }
+    let snap = snapshots.pop().expect("Found more that one snapshot");
+
+    let dest_vol_id = snap.destination_volume_id;
+    let source_vol_id = snap.volume_id;
+    let snap = SnapshotRow::from(snap);
+
+    println!("                 Name: {}", snap.snap_name);
+    println!("                   id: {}", snap.id);
+    println!("                state: {}", snap.state);
+    println!("                 size: {}", snap.size);
+    println!("       source_disk_id: {}", snap.source_disk_id);
+    println!("     source_volume_id: {}", snap.source_volume_id);
+    println!("destination_volume_id: {}", snap.destination_volume_id);
+
+    use db::schema::region_snapshot::dsl as region_snapshot_dsl;
+    let region_snapshots = region_snapshot_dsl::region_snapshot
+        .filter(region_snapshot_dsl::snapshot_id.eq(args.uuid))
+        .select(RegionSnapshot::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .context("loading region snapshots")?;
+
+    println!();
+    if region_snapshots.is_empty() {
+        println!("No region snapshot info found");
+    } else {
+        // The row describing the region_snapshot.
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct RegionSnapshotRow {
+            dataset_id: String,
+            region_id: String,
+            snapshot_id: String,
+            snapshot_addr: String,
+            volume_references: String,
+        }
+        let mut rsnap = Vec::new();
+
+        // From each region snapshot:
+        // Collect the snapshot IDs for later use.
+        // Display the region snapshot rows.
+        let mut snapshot_ids = HashSet::new();
+        for rs in region_snapshots {
+            snapshot_ids.insert(rs.snapshot_id);
+            let rs = RegionSnapshotRow {
+                dataset_id: rs.dataset_id.to_string(),
+                region_id: rs.region_id.to_string(),
+                snapshot_id: rs.snapshot_id.to_string(),
+                snapshot_addr: rs.snapshot_addr.to_string(),
+                volume_references: rs.volume_references.to_string(),
+            };
+            rsnap.push(rs);
+        }
+        let table = tabled::Table::new(rsnap)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string();
+
+        println!("REGION SNAPSHOT INFO:");
+        println!("{}", table);
     }
 
-    let table = tabled::Table::new(rows)
-        .with(tabled::settings::Style::empty())
-        .with(tabled::settings::Padding::new(0, 1, 0, 0))
-        .to_string();
-
-    println!("{}", table);
-
-    println!("SOURCE VOLUME VCR:");
-    for vol in source_volume_ids {
-        get_and_display_vcr(vol, datastore).await?;
-    }
-    for vol_id in dest_volume_ids {
-        // Get the dataset backing this volume.
-        let regions = datastore.get_allocated_regions(vol_id).await?;
-
+    let regions = datastore.get_allocated_regions(source_vol_id.into()).await?;
+    if regions.is_empty() {
+        println!("\nNo source region info found");
+    } else {
         let mut rows = Vec::with_capacity(3);
         for (dataset, region) in regions {
             let my_pool_id = dataset.pool_id;
@@ -2184,7 +2227,7 @@ async fn cmd_db_snapshot_info(
             rows.push(DownstairsRow {
                 host_serial: my_sled.serial_number().to_string(),
                 region: region.id().to_string(),
-                zone: format!("oxz_crucible_{}", dataset.id()),
+                dataset: dataset.id().to_string(),
                 physical_disk: my_zpool.physical_disk_id.to_string(),
             });
         }
@@ -2194,11 +2237,50 @@ async fn cmd_db_snapshot_info(
             .with(tabled::settings::Padding::new(0, 1, 0, 0))
             .to_string();
 
-        println!("DESTINATION REGION INFO:");
+        println!("\nSOURCE REGION INFO:");
         println!("{}", table);
-        println!("DESTINATION VOLUME VCR:");
-        get_and_display_vcr(vol_id, datastore).await?;
     }
+
+    println!("SOURCE VOLUME VCR:");
+    get_and_display_vcr(source_vol_id.into(), datastore).await?;
+
+    // Get the dataset backing this volume.
+    let regions = datastore.get_allocated_regions(dest_vol_id.into()).await?;
+
+    let mut rows = Vec::with_capacity(3);
+    for (dataset, region) in regions {
+        let my_pool_id = dataset.pool_id;
+        let (_, my_zpool) = LookupPath::new(opctx, datastore)
+            .zpool_id(my_pool_id)
+            .fetch()
+            .await
+            .context("failed to look up zpool")?;
+
+        let my_sled_id = my_zpool.sled_id;
+
+        let (_, my_sled) = LookupPath::new(opctx, datastore)
+            .sled_id(my_sled_id)
+            .fetch()
+            .await
+            .context("failed to look up sled")?;
+
+        rows.push(DownstairsRow {
+            host_serial: my_sled.serial_number().to_string(),
+            region: region.id().to_string(),
+            dataset: dataset.id().to_string(),
+            physical_disk: my_zpool.physical_disk_id.to_string(),
+        });
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("DESTINATION REGION INFO:");
+    println!("{}", table);
+    println!("DESTINATION VOLUME VCR:");
+    get_and_display_vcr(dest_vol_id.into(), datastore).await?;
 
     Ok(())
 }
