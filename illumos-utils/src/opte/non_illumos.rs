@@ -15,8 +15,6 @@ use oxide_vpc::api::DumpVirt2PhysReq;
 use oxide_vpc::api::DumpVirt2PhysResp;
 use oxide_vpc::api::IpCfg;
 use oxide_vpc::api::IpCidr;
-use oxide_vpc::api::Ipv4Addr;
-use oxide_vpc::api::Ipv4Cidr;
 use oxide_vpc::api::ListPortsResp;
 use oxide_vpc::api::NoResp;
 use oxide_vpc::api::PortInfo;
@@ -123,8 +121,8 @@ impl RouteInfo {
     #[cfg(test)]
     pub fn is_system_default_ipv4_route(&self) -> bool {
         let system_default_route = RouteInfo {
-            dest: IpCidr::Ip4(Ipv4Cidr::new(
-                Ipv4Addr::ANY_ADDR,
+            dest: IpCidr::Ip4(oxide_vpc::api::Ipv4Cidr::new(
+                oxide_vpc::api::Ipv4Addr::ANY_ADDR,
                 0.try_into().unwrap(),
             )),
             target: RouterTarget::InternetGateway(None),
