@@ -239,7 +239,7 @@ An existing lockstep API can be made versioned.  We'll use the example of `dns-s
 . Run `git rm -f openapi/dns-server.json`.
 . Run `mkdir openapi/dns-server`.
 . Update the API crate (`dns-server-api/src/lib.rs`) to use the new `api_versions!` macro.  See the instructions under <<_adding_new_openapi_documents>> above.
-// XXX-dap
+// XXX-dap-last-step
 . Update the OpenAPI manager configuration in `src/spec.rs` (in this directory) to specify that the API is now versioned.  You'll use the `supported_versions()` function defined by the `api_versions!` macro.
 . Run `cargo xtask openapi generate`.  This will generate a new file under `openapi/dns-server` for your initial server version, along with a "latest" symlink.
 +

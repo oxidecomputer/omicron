@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// XXX-dap-last-minute delete me
+// XXX-dap-last-step delete me
 
 use crate::apis::{ApiBoundary, Versions};
 use anyhow::Result;
