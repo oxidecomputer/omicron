@@ -11,11 +11,22 @@
 //! This is meant to be invoked as `cargo xtask openapi`, but is a separate
 //! binary to avoid compiling a bunch of extra code when running `cargo xtask`.
 
-mod check;
-mod dispatch;
-mod generate;
-mod list;
+mod apis;
+mod cmd;
+mod compatibility;
+mod environment;
+mod git;
+mod iter_only;
 mod output;
+mod resolved;
 mod spec;
+mod spec_files_blessed;
+mod spec_files_generated;
+mod spec_files_generic;
+mod spec_files_local;
+mod validation;
 
-pub use dispatch::*;
+#[macro_use]
+extern crate newtype_derive;
+
+pub use cmd::dispatch::*;
