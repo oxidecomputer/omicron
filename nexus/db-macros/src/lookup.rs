@@ -34,13 +34,6 @@ pub struct Input {
     /// with the top of the hierarchy
     /// (e.g., for an Instance, this would be `[ "Silo", "Project" ]`
     ancestors: Vec<String>,
-    /// unordered list of resources that are direct children of this resource
-    /// (e.g., for a Project, these would include "Instance" and "Disk")
-    // N.B. that this is no longer used by the the parent's resource codegen,
-    // but it may be again in future.  Therefore, continue parsing it so that
-    // the resource definitions don't change, but allow it to be unused.
-    #[allow(dead_code)]
-    children: Vec<String>,
     /// whether lookup by name is supported (usually within the parent collection)
     lookup_by_name: bool,
     /// Description of the primary key columns
@@ -995,7 +988,6 @@ mod test {
         let output = lookup_resource(quote! {
             name = "Project",
             ancestors = ["Silo"],
-            children = [ "Disk", "Instance" ],
             lookup_by_name = true,
             soft_deletes = true,
             primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -1006,7 +998,6 @@ mod test {
         let output = lookup_resource(quote! {
             name = "SiloUser",
             ancestors = [],
-            children = [],
             lookup_by_name = false,
             soft_deletes = true,
             primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -1017,7 +1008,6 @@ mod test {
         let output = lookup_resource(quote! {
             name = "Sled",
             ancestors = [],
-            children = [],
             lookup_by_name = false,
             soft_deletes = true,
             primary_key_columns = [ { column_name = "id", uuid_kind = SledKind } ]
@@ -1028,7 +1018,6 @@ mod test {
         let output = lookup_resource(quote! {
             name = "UpdateArtifact",
             ancestors = [],
-            children = [],
             lookup_by_name = false,
             soft_deletes = false,
             primary_key_columns = [
