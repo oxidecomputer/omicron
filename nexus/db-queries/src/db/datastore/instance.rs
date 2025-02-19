@@ -1374,7 +1374,8 @@ impl DataStore {
     // Marks the instance "Destroyed" and detaches disks.
     //
     // This is only one internal part of destroying an instance, see:
-    // [`project_delete_instance`] for a more holistic usage.
+    // [`project_delete_instance`] for a more holistic usage. It is has been
+    // factored out for readability.
     //
     // This function is idempotent, and should return "Ok(())" on repeated
     // invocations.
