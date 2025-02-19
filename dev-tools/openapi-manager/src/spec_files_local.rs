@@ -202,11 +202,11 @@ fn load_versioned_directory<T: ApiLoad + AsRawFiles>(
                 }
             };
 
-            // XXX-dap this error message will be confusing because the user
-            // won't know why we're looking at this path
-            if let Some(v) =
-                api_files.versioned_file_name(&ident, symlink.as_str())
-            {
+            if let Some(v) = api_files.symlink_contents(
+                entry.path(),
+                &ident,
+                symlink.as_str(),
+            ) {
                 api_files.load_latest_link(&ident, v);
             }
             continue;

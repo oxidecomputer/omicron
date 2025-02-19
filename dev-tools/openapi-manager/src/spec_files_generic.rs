@@ -8,7 +8,7 @@
 use crate::apis::{ApiIdent, ManagedApi, ManagedApis};
 use crate::environment::ErrorAccumulator;
 use anyhow::{anyhow, bail, Context};
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use debug_ignore::DebugIgnore;
 use openapiv3::OpenAPI;
 use sha2::{Digest, Sha256};
@@ -508,6 +508,45 @@ impl<'a, T: ApiLoad + AsRawFiles> ApiSpecFilesBuilder<'a, T> {
                 self.load_error(
                     anyhow!(error).context(format!("file {}", basename)),
                 );
+                None
+            }
+        }
+    }
+
+    /// Like `versioned_file_name()`, but the error message for a bogus path
+    /// better communicates that the problem is with the symlink
+    pub fn symlink_contents(
+        &mut self,
+        symlink_path: &Utf8Path,
+        ident: &ApiIdent,
+        basename: &str,
+    ) -> Option<ApiSpecFileName> {
+        match ApiSpecFileName::parse_versioned(&self.apis, ident, basename) {
+            Ok(file_name) => Some(file_name),
+            Err(
+                warning @ (BadVersionedFileName::NoSuchApi
+                | BadVersionedFileName::NotVersioned),
+            ) if T::MISCONFIGURATIONS_ALLOWED => {
+                // See lockstep_file_name().
+                self.load_warning(anyhow!(warning).context(format!(
+                    "ignoring symlink {} pointing to {}",
+                    symlink_path, basename
+                )));
+                None
+            }
+            Err(warning @ BadVersionedFileName::UnexpectedName { .. }) => {
+                // See lockstep_file_name().
+                self.load_warning(anyhow!(warning).context(format!(
+                    "ignoring symlink {} pointing to {}",
+                    symlink_path, basename
+                )));
+                None
+            }
+            Err(error) => {
+                self.load_error(anyhow!(error).context(format!(
+                    "bad symlink {} pointing to {}",
+                    symlink_path, basename
+                )));
                 None
             }
         }
