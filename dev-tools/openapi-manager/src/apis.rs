@@ -216,6 +216,20 @@ impl ManagedApis {
     pub fn new(api_list: Vec<ManagedApi>) -> anyhow::Result<ManagedApis> {
         let mut apis = BTreeMap::new();
         for api in api_list {
+            if api.extra_validation.is_some() && api.is_versioned() {
+                // Extra validation is not yet supported for versioned APIs.
+                // The reason is that extra validation can instruct this tool to
+                // check the contents of additional files (e.g.,
+                // nexus_tags.txt).  We'd need to figure out if we want to
+                // maintain expected output for each supported version, only
+                // check the latest version, or what.  (Since this is currenty
+                // only used for nexus_tags, it would probably be okay to just
+                // check the latest version.)  Rather than deal with any of
+                // this, we punt for now.  We can revisit this if/when it comes
+                // up.
+                bail!("extra validation is not supported for versioned APIs");
+            }
+
             if let Some(old) = apis.insert(api.ident.clone(), api) {
                 bail!("API is defined twice: {:?}", &old.ident);
             }
