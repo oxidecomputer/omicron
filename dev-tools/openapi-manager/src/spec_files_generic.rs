@@ -109,7 +109,7 @@ impl ApiSpecFileName {
         }
 
         Ok(ApiSpecFileName {
-            ident: ident,
+            ident,
             kind: ApiSpecFileNameKind::Versioned {
                 version,
                 hash: hash.to_string(),

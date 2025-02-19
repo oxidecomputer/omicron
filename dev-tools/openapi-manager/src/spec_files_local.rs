@@ -85,7 +85,7 @@ impl LocalFiles {
     }
 }
 
-impl<'a> From<ApiSpecFilesBuilder<'a, Vec<LocalApiSpecFile>>> for LocalFiles {
+impl From<ApiSpecFilesBuilder<'_, Vec<LocalApiSpecFile>>> for LocalFiles {
     fn from(api_files: ApiSpecFilesBuilder<Vec<LocalApiSpecFile>>) -> Self {
         LocalFiles(api_files.into_map())
     }

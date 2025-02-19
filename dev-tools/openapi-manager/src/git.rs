@@ -50,7 +50,7 @@ pub fn git_ls_tree(
         .arg(&directory);
     let label = cmd_label(&cmd);
     let stdout = do_run(&mut cmd)?;
-    Ok(stdout
+    stdout
         .trim()
         .split("\0")
         .filter(|s| !s.is_empty())
@@ -67,7 +67,7 @@ pub fn git_ls_tree(
             };
             Ok(relative.to_owned())
         })
-        .collect::<Result<Vec<_>, _>>()?)
+        .collect::<Result<Vec<_>, _>>()
 }
 
 /// Returns the contents of the file at the given path `path` in Git revision

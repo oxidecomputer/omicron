@@ -132,7 +132,6 @@ impl SupportedVersions {
 //   labels for their API version
 // - the consumer of this value will be able to do those checks that help make
 //   sure there wasn't a mismerge.
-
 #[macro_export]
 macro_rules! api_versions {
     ( [ $( (

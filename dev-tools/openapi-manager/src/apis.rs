@@ -184,10 +184,10 @@ impl ManagedApi {
         self.boundary
     }
 
-    pub fn extra_validation<'a>(
+    pub fn extra_validation(
         &self,
         openapi: &OpenAPI,
-        validation_context: ValidationContext<'a>,
+        validation_context: ValidationContext<'_>,
     ) {
         if let Some(extra_validation) = self.extra_validation {
             extra_validation(openapi, validation_context);

@@ -337,9 +337,9 @@ pub enum Fix<'a> {
     },
 }
 
-impl<'a> Display for Fix<'a> {
+impl Display for Fix<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Ok(match self {
+        match self {
             Fix::DeleteFiles { files } => {
                 writeln!(
                     f,
@@ -378,11 +378,12 @@ impl<'a> Display for Fix<'a> {
             Fix::FixSymlink { link, .. } => {
                 writeln!(f, "update symlink to point to {}", link.basename())?;
             }
-        })
+        };
+        Ok(())
     }
 }
 
-impl<'a> Fix<'a> {
+impl Fix<'_> {
     pub fn execute(&self, env: &Environment) -> anyhow::Result<Vec<String>> {
         let root = env.openapi_dir();
         match self {
@@ -433,7 +434,7 @@ impl<'a> Fix<'a> {
             Fix::FixSymlink { api_ident, link } => {
                 let path = root
                     .join(api_ident.to_string())
-                    .join(versioned_api_latest_symlink(*api_ident));
+                    .join(versioned_api_latest_symlink(api_ident));
                 // We want the link to contain a relative path to a file in the
                 // same directory so that it's correct no matter where it's
                 // resolved from.
@@ -579,7 +580,7 @@ struct ApiResolved<'a> {
     symlink: Option<Problem<'a>>,
 }
 
-impl<'a> ApiResolved<'a> {
+impl ApiResolved<'_> {
     fn has_unfixable_problems(&self) -> bool {
         self.symlink.as_ref().map_or(false, |f| !f.is_fixable())
             || self.by_version.values().any(|r| r.has_errors())
@@ -728,7 +729,7 @@ fn resolve_api_lockstep<'a>(
         None => problems.push(Problem::LockstepMissingLocal { generated }),
     };
 
-    BTreeMap::from([((version.clone(), Resolution::new_lockstep(problems)))])
+    BTreeMap::from([(version.clone(), Resolution::new_lockstep(problems))])
 }
 
 fn resolve_api_version<'a>(
