@@ -1,0 +1,4 @@
+# Helios should *not* be pinned except on release branches.
+#[helios]
+#commit = ""
+#incorporation = ""

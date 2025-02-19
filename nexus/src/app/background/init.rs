@@ -108,6 +108,7 @@ use super::tasks::metrics_producer_gc;
 use super::tasks::nat_cleanup;
 use super::tasks::phantom_disks;
 use super::tasks::physical_disk_adoption;
+use super::tasks::read_only_region_replacement_start::*;
 use super::tasks::region_replacement;
 use super::tasks::region_replacement_driver;
 use super::tasks::region_snapshot_replacement_finish::*;
@@ -182,6 +183,7 @@ pub struct BackgroundTasks {
     pub task_region_snapshot_replacement_step: Activator,
     pub task_region_snapshot_replacement_finish: Activator,
     pub task_tuf_artifact_replication: Activator,
+    pub task_read_only_region_replacement_start: Activator,
     pub task_webhook_dispatcher: Activator,
     pub task_webhook_deliverator: Activator,
 
@@ -274,6 +276,7 @@ impl BackgroundTasksInitializer {
             task_region_snapshot_replacement_step: Activator::new(),
             task_region_snapshot_replacement_finish: Activator::new(),
             task_tuf_artifact_replication: Activator::new(),
+            task_read_only_region_replacement_start: Activator::new(),
             task_webhook_dispatcher: Activator::new(),
             task_webhook_deliverator: Activator::new(),
 
@@ -345,6 +348,7 @@ impl BackgroundTasksInitializer {
             task_region_snapshot_replacement_step,
             task_region_snapshot_replacement_finish,
             task_tuf_artifact_replication,
+            task_read_only_region_replacement_start,
             task_webhook_dispatcher,
             task_webhook_deliverator,
             // Add new background tasks here.  Be sure to use this binding in a
@@ -904,6 +908,20 @@ impl BackgroundTasksInitializer {
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_tuf_artifact_replication,
+        });
+
+        driver.register(TaskDefinition {
+            name: "read_only_region_replacement_start",
+            description:
+                "detect if read-only regions need replacement and begin the \
+                process",
+            period: config.read_only_region_replacement_start.period_secs,
+            task_impl: Box::new(ReadOnlyRegionReplacementDetector::new(
+                datastore,
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_read_only_region_replacement_start,
         });
 
         driver.register(TaskDefinition {

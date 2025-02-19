@@ -15,7 +15,6 @@ use crate::system::SledBuilder;
 use crate::system::SystemDescription;
 use nexus_inventory::CollectionBuilderRng;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
@@ -405,7 +404,7 @@ impl ExampleSystemBuilder {
         // pick addresses in the TEST-NET-2 (RFC 5737) range.
         for i in 0..self.external_dns_count.0 {
             builder
-                .add_external_dns_ip(IpAddr::V4(Ipv4Addr::new(
+                .inject_untracked_external_dns_ip(IpAddr::V4(Ipv4Addr::new(
                     198,
                     51,
                     100,
@@ -490,9 +489,7 @@ impl ExampleSystemBuilder {
             system
                 .sled_set_omicron_zones(
                     *sled_id,
-                    zones.to_omicron_zones_config(
-                        BlueprintZoneFilter::ShouldBeRunning,
-                    ),
+                    zones.clone().into_running_omicron_zones_config(),
                 )
                 .unwrap();
         }
@@ -546,7 +543,7 @@ impl ZoneCount {
 mod tests {
     use chrono::{NaiveDateTime, TimeZone, Utc};
     use nexus_sled_agent_shared::inventory::{OmicronZoneConfig, ZoneKind};
-    use nexus_types::deployment::BlueprintZoneConfig;
+    use nexus_types::deployment::{BlueprintZoneConfig, BlueprintZoneFilter};
     use omicron_test_utils::dev::test_setup_log;
 
     use super::*;

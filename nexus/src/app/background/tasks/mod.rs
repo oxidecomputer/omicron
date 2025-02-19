@@ -25,6 +25,7 @@ pub mod nat_cleanup;
 pub mod networking;
 pub mod phantom_disks;
 pub mod physical_disk_adoption;
+pub mod read_only_region_replacement_start;
 pub mod region_replacement;
 pub mod region_replacement_driver;
 pub mod region_snapshot_replacement_finish;

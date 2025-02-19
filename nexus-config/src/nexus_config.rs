@@ -419,6 +419,9 @@ pub struct BackgroundTaskConfig {
         RegionSnapshotReplacementFinishConfig,
     /// configuration for TUF artifact replication task
     pub tuf_artifact_replication: TufArtifactReplicationConfig,
+    /// configuration for read-only region replacement start task
+    pub read_only_region_replacement_start:
+        ReadOnlyRegionReplacementStartConfig,
     /// configuration for webhook dispatcher task
     pub webhook_dispatcher: WebhookDispatcherConfig,
     /// configuration for webhook deliverator task
@@ -741,6 +744,14 @@ pub struct TufArtifactReplicationConfig {
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ReadOnlyRegionReplacementStartConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct WebhookDispatcherConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
@@ -1051,6 +1062,7 @@ mod test {
             region_snapshot_replacement_finish.period_secs = 30
             tuf_artifact_replication.period_secs = 300
             tuf_artifact_replication.min_sled_replication = 3
+            read_only_region_replacement_start.period_secs = 30
             webhook_dispatcher.period_secs = 42
             webhook_deliverator.period_secs = 43
             webhook_deliverator.lease_timeout_secs = 44
@@ -1257,6 +1269,10 @@ mod test {
                                 period_secs: Duration::from_secs(300),
                                 min_sled_replication: 3,
                             },
+                        read_only_region_replacement_start:
+                            ReadOnlyRegionReplacementStartConfig {
+                                period_secs: Duration::from_secs(30),
+                            },
                         webhook_dispatcher: WebhookDispatcherConfig {
                             period_secs: Duration::from_secs(42),
                         },
@@ -1265,7 +1281,7 @@ mod test {
                             lease_timeout_secs: 44,
                             first_retry_backoff_secs: 45,
                             second_retry_backoff_secs: 46,
-                        }
+                        },
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -1351,6 +1367,7 @@ mod test {
             region_snapshot_replacement_finish.period_secs = 30
             tuf_artifact_replication.period_secs = 300
             tuf_artifact_replication.min_sled_replication = 3
+            read_only_region_replacement_start.period_secs = 30
             webhook_dispatcher.period_secs = 42
             webhook_deliverator.period_secs = 43
             [default_region_allocation_strategy]
