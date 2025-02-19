@@ -85,8 +85,8 @@ impl From<Error> for HttpError {
 /// Configuration for interacting with the metric database.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub struct DbConfig {
-    // TODO: Bookmark to relevant code
-    // TODO: Add the other cluster address here?
+    // TODO-K: Bookmark to relevant code
+    // TODO-K: Add the other cluster address here?
     /// Optional address of the ClickHouse server's native TCP interface.
     ///
     /// If None, will be inferred from DNS.
@@ -261,15 +261,14 @@ impl Oximeter {
                 }
             };
 
-        // TODO: Bookmark to relevant code
+        // TODO-K: Bookmark to relevant code
         let make_agent = || async {
             debug!(log, "creating ClickHouse client");
             let resolver =
                 make_resolver(config.db.address, ServiceName::ClickhouseNative);
-            // TODO: change maybe address to cluster_address? us ServiceName::ClickhouseClusterNative?
-            // don't use make_resolver?
+            // TODO-K: change maybe address to config.db.cluster_address. Maybe I don't even need that?
             let cluster_resolver =
-                make_resolver(config.db.address, ServiceName::ClickhouseNative);
+                make_resolver(config.db.address, ServiceName::ClickhouseClusterNative);
             Ok(Arc::new(
                 OximeterAgent::with_id(
                     args.id,

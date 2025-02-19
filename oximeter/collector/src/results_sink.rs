@@ -91,7 +91,6 @@ pub async fn database_inserter(
 
         if insert {
             debug!(log, "inserting {} samples into database", batch.len());
-            // TODO: Do a second insert there
             match client.insert_samples(&batch).await {
                 Ok(()) => trace!(log, "successfully inserted samples"),
                 Err(e) => {
@@ -103,14 +102,15 @@ pub async fn database_inserter(
                 }
             }
 
-            // TODO: If the above failed we don't attempt here either?
+            // TODO-K: Only attempt if the cluster exists
+            // TODO-K: If the above failed we don't attempt here either?
             if let Some(c) = &cluster_client {
                 match c.insert_samples(&batch).await {
                     Ok(()) => trace!(log, "successfully inserted samples"),
                     Err(e) => {
                         warn!(
                             log,
-                            "failed to insert some results into metric DB: {}",
+                            "failed to insert some results into metric DB (cluster): {}",
                             e.to_string()
                         );
                     }

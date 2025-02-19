@@ -435,6 +435,7 @@ impl DnsConfigBuilder {
         );
         let zone = self.host_zone(zone_id, *http_address.ip())?;
         self.service_backend_zone(http_service, &zone, http_address.port())?;
+        // TODO-K: should this only exist for single node for the time being? 
         self.service_backend_zone(
             ServiceName::ClickhouseNative,
             &zone,
@@ -442,7 +443,11 @@ impl DnsConfigBuilder {
         )?;
 
         if http_service == ServiceName::ClickhouseServer {
-        // TODO: Create a ServiceName::ClickhouseClusterNative here
+            self.service_backend_zone(
+                ServiceName::ClickhouseClusterNative,
+                &zone,
+                CLICKHOUSE_TCP_PORT,
+            )?;
             self.service_backend_zone(
                 ServiceName::ClickhouseAdminServer,
                 &zone,

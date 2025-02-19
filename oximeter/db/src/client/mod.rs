@@ -145,7 +145,6 @@ impl Client {
             "id" => id.to_string(),
         ));
         let schema = Mutex::new(BTreeMap::new());
-        // TODO: Add a separate pool for cluster here?
         let native_pool = match Pool::new(
             Box::new(SingleHostResolver::new(address)),
             Arc::new(native::connection::Connector),
@@ -422,7 +421,7 @@ impl Client {
             }
             match name.parse() {
                 Ok(ver) => {
-                    debug!(log, "valid version dir"; "ver" => ver);
+                    debug!(log, "valid version dir"; "ver" => ?ver);
                     assert!(versions.insert(ver), "Versions should be unique");
                 }
                 Err(e) => warn!(
@@ -1038,7 +1037,6 @@ impl Client {
             "n_rows" => block.n_rows(),
             "n_columns" => block.n_columns(),
         );
-        // TODO: Change here to write to two databases
         let mut handle = self.pool.claim().await?;
         let id = usdt::UniqueId::new();
         probes::sql__query__start!(|| (&id, sql));
@@ -1171,7 +1169,7 @@ impl Client {
                 self.log,
                 "failed to delete some timeseries";
                 "error" => ?error,
-                "call_count" => count,
+                "call_count" => ?count,
                 "retry_after" => ?delay,
             );
         };

@@ -615,7 +615,7 @@ async fn claim_nexus_with_backoff(
             "failed to lookup Nexus IP, will retry";
             "delay" => ?delay,
             // No `InlineErrorChain` here: `error` is a string
-            "error" => error,
+            "error" => ?error,
         );
     };
     let do_lookup = || async {
