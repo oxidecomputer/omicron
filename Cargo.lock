@@ -6429,6 +6429,7 @@ dependencies = [
  "cfg-if",
  "cfg_aliases 0.2.1",
  "libc",
+ "memoffset",
 ]
 
 [[package]]
@@ -7545,6 +7546,7 @@ dependencies = [
  "memchr",
  "mio",
  "newtype-uuid",
+ "nix 0.29.0",
  "nom",
  "num-bigint-dig",
  "num-integer",
@@ -11244,6 +11246,7 @@ dependencies = [
  "gateway-messages",
  "gateway-types",
  "hex",
+ "nix 0.29.0",
  "omicron-common",
  "omicron-workspace-hack",
  "serde",
