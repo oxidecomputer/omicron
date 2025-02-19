@@ -78,6 +78,8 @@ pub(crate) struct RouteInfo {
     pub class: RouterClass,
 }
 
+// NOTE: It would be nice to derive this, but `RouterTarget` and `RouterClass`
+// are in OPTE, and they don't currently implement this trait.
 impl PartialEq for RouteInfo {
     fn eq(&self, other: &Self) -> bool {
         if self.dest != other.dest {
@@ -86,7 +88,8 @@ impl PartialEq for RouteInfo {
         match (self.class, other.class) {
             (RouterClass::System, RouterClass::Custom) => return false,
             (RouterClass::Custom, RouterClass::System) => return false,
-            (_, _) => {}
+            (RouterClass::System, RouterClass::System)
+            | (RouterClass::Custom, RouterClass::Custom) => {}
         }
         match (self.target, other.target) {
             (RouterTarget::Drop, RouterTarget::Drop) => true,
@@ -99,26 +102,34 @@ impl PartialEq for RouteInfo {
                 RouterTarget::VpcSubnet(cidr0),
                 RouterTarget::VpcSubnet(cidr1),
             ) => cidr0 == cidr1,
-            (_, _) => false,
+            (RouterTarget::Drop, RouterTarget::InternetGateway(_))
+            | (RouterTarget::Drop, RouterTarget::Ip(_))
+            | (RouterTarget::Drop, RouterTarget::VpcSubnet(_))
+            | (RouterTarget::InternetGateway(_), RouterTarget::Drop)
+            | (RouterTarget::InternetGateway(_), RouterTarget::Ip(_))
+            | (RouterTarget::InternetGateway(_), RouterTarget::VpcSubnet(_))
+            | (RouterTarget::Ip(_), RouterTarget::Drop)
+            | (RouterTarget::Ip(_), RouterTarget::InternetGateway(_))
+            | (RouterTarget::Ip(_), RouterTarget::VpcSubnet(_))
+            | (RouterTarget::VpcSubnet(_), RouterTarget::Drop)
+            | (RouterTarget::VpcSubnet(_), RouterTarget::InternetGateway(_))
+            | (RouterTarget::VpcSubnet(_), RouterTarget::Ip(_)) => false,
         }
     }
 }
 
 impl RouteInfo {
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn is_system_default_ipv4_route(&self) -> bool {
-        if self.dest
-            != IpCidr::Ip4(Ipv4Cidr::new(
+        let system_default_route = RouteInfo {
+            dest: IpCidr::Ip4(Ipv4Cidr::new(
                 Ipv4Addr::ANY_ADDR,
                 0.try_into().unwrap(),
-            ))
-        {
-            return false;
-        }
-        if !matches!(self.target, RouterTarget::InternetGateway(None)) {
-            return false;
-        }
-        matches!(self.class, RouterClass::System)
+            )),
+            target: RouterTarget::InternetGateway(None),
+            class: RouterClass::System,
+        };
+        *self == system_default_route
     }
 }
 
@@ -154,7 +165,7 @@ static OPTE_STATE: OnceLock<Mutex<State>> = OnceLock::new();
 
 fn opte_state() -> &'static Mutex<State> {
     OPTE_STATE.get_or_init(|| {
-        Mutex::new(State { ports: HashMap::new(), underlay_initialized: true })
+        Mutex::new(State { ports: HashMap::new(), underlay_initialized: false })
     })
 }
 
@@ -244,7 +255,7 @@ impl Handle {
         _: IpCidr,
         _: Direction,
     ) -> Result<NoResp, OpteError> {
-        todo!()
+        unimplemented!("Not yet used in tests")
     }
 
     /// Delete a router entry from a port.

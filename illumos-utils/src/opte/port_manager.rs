@@ -952,12 +952,20 @@ fn system_routes_v4<'a>(
     routes: &'a mut HashMap<RouterId, RouteSet>,
     port: &Port,
 ) -> &'a mut RouteSet {
-    let maybe_default_dest = if is_service {
-        Some(IpNet::V4(Ipv4Net::new(Ipv4Addr::UNSPECIFIED, 0).unwrap()))
-    } else {
-        None
-    };
-    fetch_or_insert_system_routes(routes, port, maybe_default_dest)
+    let routes = routes.entry(port.system_router_key()).or_default();
+    if is_service {
+        routes.routes.insert(ResolvedVpcRoute {
+            dest: IpNet::V4(Ipv4Net::new(Ipv4Addr::UNSPECIFIED, 0).unwrap()),
+            // Always insert a rule targeting the _system VPC Internet Gateway_.
+            // This may be sent later from Nexus, but we need it during
+            // bootstrapping NTP or other very early services, before the
+            // control plane database has been started.
+            target: ApiRouterTarget::InternetGateway(
+                InternetGatewayRouterTarget::System,
+            ),
+        });
+    }
+    routes
 }
 
 fn system_routes_v6<'a>(
@@ -965,23 +973,10 @@ fn system_routes_v6<'a>(
     routes: &'a mut HashMap<RouterId, RouteSet>,
     port: &Port,
 ) -> &'a mut RouteSet {
-    let maybe_default_dest = if is_service {
-        Some(IpNet::V6(Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 0).unwrap()))
-    } else {
-        None
-    };
-    fetch_or_insert_system_routes(routes, port, maybe_default_dest)
-}
-
-fn fetch_or_insert_system_routes<'a>(
-    routes: &'a mut HashMap<RouterId, RouteSet>,
-    port: &Port,
-    maybe_default_dest: Option<IpNet>,
-) -> &'a mut RouteSet {
     let routes = routes.entry(port.system_router_key()).or_default();
-    if let Some(dest) = maybe_default_dest {
+    if is_service {
         routes.routes.insert(ResolvedVpcRoute {
-            dest,
+            dest: IpNet::V6(Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 0).unwrap()),
             // Always insert a rule targeting the _system VPC Internet Gateway_.
             // This may be sent later from Nexus, but we need it during
             // bootstrapping NTP or other very early services, before the
@@ -1034,6 +1029,9 @@ mod tests {
         const SERVICES_INTERNET_GATEWAY_ID: Uuid =
             uuid::uuid!("001de000-074c-4000-8000-000000000002");
         const SERVICES_VPC_VNI: Vni = Vni::SERVICES_VNI;
+
+        let handle = Handle::new().unwrap();
+        handle.set_xde_underlay("foo0", "foo1").unwrap();
 
         // First, create a port for a service.
         //
@@ -1119,7 +1117,6 @@ mod tests {
         // NOTE: When we're doing these assertions, we hold a lock on the OPTE
         // port state, so we need to do it in a scope before we do other
         // operations.
-        let handle = Handle::new().unwrap();
         {
             let state = handle.state().lock().unwrap();
             assert_eq!(state.ports.len(), 1);
