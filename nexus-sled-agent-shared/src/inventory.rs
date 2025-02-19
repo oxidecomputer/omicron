@@ -161,6 +161,9 @@ pub struct OmicronZoneConfig {
     /// permitted to destroy this dataset each time the zone is initialized.
     pub filesystem_pool: Option<ZpoolName>,
     pub zone_type: OmicronZoneType,
+    // Use `InstallDataset` if this field is not present in a deserialized
+    // blueprint or ledger.
+    #[serde(default = "deserialize_image_source_default")]
     pub image_source: OmicronZoneImageSource,
 }
 
@@ -616,6 +619,12 @@ pub enum OmicronZoneImageSource {
     /// This originates from TUF repos uploaded to Nexus which are then
     /// replicated out to all sleds.
     Artifact { hash: ArtifactHash },
+}
+
+// See `OmicronZoneConfig`. This is a separate function instead of being `impl
+// Default` because we don't want to accidentally use this default in Rust code.
+fn deserialize_image_source_default() -> OmicronZoneImageSource {
+    OmicronZoneImageSource::InstallDataset
 }
 
 #[cfg(test)]
