@@ -11,13 +11,13 @@ use anyhow::{anyhow, bail, Context};
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
 use openapiv3::OpenAPI;
+use sha2::{Digest, Sha256};
 use std::collections::btree_map::Entry;
 use std::fmt::{Debug, Display};
 use std::{collections::BTreeMap, ops::Deref};
 use thiserror::Error;
 
 /// Describes the path to an OpenAPI document file
-// XXX-dap spec -> document?
 #[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub struct ApiSpecFileName {
     ident: ApiIdent,
@@ -598,9 +598,18 @@ pub trait ApiLoad {
 }
 
 fn hash_contents(contents: &[u8]) -> String {
-    let hasher = crc::Crc::<u32>::new(&crc::CRC_32_CKSUM);
-    let computed_hash = hasher.checksum(contents);
-    // XXX-dap why does this differ from what cksum reports?
-    // eprintln!("dap: hashing: len = {}, first 4 = {} {} {} {}, result = {}", contents.len(), contents[0], contents[1], contents[2], contents[3], computed_hash);
-    hex::encode(computed_hash.to_be_bytes())
+    // The purpose of this hash is to isolate distinct versions of a given API
+    // version, as might happen if two people both try to create the the same
+    // (semver) version in two different branches.  By putting these into
+    // separate files, when one person merges with the other's changes, they'll
+    // wind up with two distinct files rather than having a ton of merge
+    // conflicts in one file.  This tool can then fix things up.
+    //
+    // The upshot is: this hash is not required for security or even data
+    // integrity.  We use SHA-256 and truncate it to just the first four bytes
+    // to avoid the annoyance of super long filenames.
+    let mut hasher = Sha256::new();
+    hasher.update(contents);
+    let computed_hash = hasher.finalize();
+    hex::encode(&computed_hash.as_slice()[0..3])
 }
