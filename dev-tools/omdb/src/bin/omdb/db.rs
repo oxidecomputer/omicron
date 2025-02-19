@@ -111,7 +111,6 @@ use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
-use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
@@ -1283,7 +1282,7 @@ async fn lookup_service_info(
     blueprint: &Blueprint,
 ) -> anyhow::Result<Option<ServiceInfo>> {
     let Some(zone_config) = blueprint
-        .all_omicron_zones(BlueprintZoneFilter::All)
+        .all_omicron_zones(|_disposition| true)
         .find_map(|(_sled_id, zone_config)| {
             if zone_config.id.into_untyped_uuid() == service_id {
                 Some(zone_config)

@@ -27,7 +27,7 @@ use nexus_reconfigurator_simulation::Simulator;
 use nexus_types::deployment::execution;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
-use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
@@ -124,7 +124,7 @@ impl ReconfiguratorSim {
         builder.set_external_dns_version(parent_blueprint.external_dns_version);
 
         for (_, zone) in parent_blueprint
-            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         {
             if let Some((external_ip, nic)) =
                 zone.zone_type.external_networking()
@@ -890,7 +890,7 @@ fn cmd_blueprint_edit(
             let mut parent_sled_id = None;
             for sled_id in builder.sled_ids_with_zones() {
                 if builder
-                    .current_sled_zones(sled_id, BlueprintZoneFilter::All)
+                    .current_sled_zones(sled_id, |_disposition| true)
                     .any(|z| z.id == zone_id)
                 {
                     parent_sled_id = Some(sled_id);
