@@ -132,10 +132,10 @@ pub enum Problem<'a> {
     #[error(
         "A local OpenAPI document was found that does not correspond to a \
          supported version of this API: {spec_file_name}.  This is unusual, \
-         but it could happen if you created this version of the API in this \
-         branch, then later changed it (maybe because you merged with upstream \
-         and had to adjust the version number for your changes).  In that \
-         case, this tool can remove the unused file for you."
+         but it could happen if you're either retiring an older version of \
+         this API or if you created this version in this branch and later \
+         merged with upstream and had to change your local version number.  \
+         In either case, this tool can remove the unused file for you."
     )]
     LocalSpecFileOrphaned { spec_file_name: ApiSpecFileName },
 

@@ -1,3 +1,5 @@
+:toc: left
+
 = OpenAPI manager
 
 This tool manages the OpenAPI documents (JSON files) checked into Omicron's `openapi` directory, using Dropshot's support for *API traits*.
@@ -52,7 +54,7 @@ Proceed to adding this API's OpenAPI document.
 When adding an API, you will need to decide how the API is versioned when it comes to system upgrade.  You have two choices:
 
 * **Lockstep**: the client and server are always deployed as a unit (e.g., Wicket and Wicketd).  It's impossible for versions to mismatch at runtime.  This is ideal when possible, but rare.
-* **Versioned**: the client and server may mismatch at runtime during an upgrade.  See <<rfd532>> for a more complete discussion of how this can work.  For our purposes, the upshot is that this repo stores not just the current OpenAPI document (generated from the API trait), but also historical versions that must still be supported.
+* **Versioned**: the client and server may mismatch at runtime during an upgrade.  See https://rfd.shared.oxide.computer/rfd/0532[RFD 532 ("Versioning for internal HTTP APIs")] for a more complete discussion of how this can work.  For our purposes, the upshot is that this repo stores not just the current OpenAPI document (generated from the API trait), but also historical versions that must still be supported.
 
 **For versioned APIs:** copy the following template into the **API crate** near the top, _above_ the `[dropshot::api_description]`:
 
@@ -115,7 +117,7 @@ Currently, the validator can do two things:
 
 For an example, see `validate_api` in the `nexus-external-api` crate.
 
-==== Iterating on lockstep APIs
+=== Iterating on lockstep APIs
 
 Assuming you're starting from a fresh branch from "main", the general workflow for making changes to a lockstep API looks like this:
 
@@ -123,9 +125,9 @@ Assuming you're starting from a fresh branch from "main", the general workflow f
 . In whichever order you want:
 .. Update the server(s) (the trait impl).  You can immediately see what's needed with `cargo check`.
 .. Update the client.  To do this, run `cargo xtask openapi generate` to regenerate the OpenAPI document.  Then `cargo check` will tell you how the client needs to be updated.
-. Repeat as needed.
+. Repeat steps 1-2 as needed.
 
-==== Iterating on versioned APIs
+=== Iterating on versioned APIs
 
 This workflow is modeled after the lockstep one, but it's a little trickier because of the considerations around online update.  **Check out the https://docs.rs/dropshot/latest/dropshot/index.html#api-versioning[Dropshot API Versioning] docs for important background.**
 
@@ -153,13 +155,18 @@ api_versions!([
 +
 Among other things, the `api_versions!` call defines constants like `VERSION_MY_CHANGE` that you'll use in the next step.
 . Also in the API crate, make your API changes.  However, you have to preserve the behavior of previous versions of the API.
-* If you're adding a new endpoint, then your new endpoint's `#[endpoint]` attribute should say `versions = VERSION_MY_CHANGE..` (meaning "introduced in version `VERSION_MY_CHANGE`).
-* If you're removing an endpoint, then you want to change the endpoint's `#[endpoint]` attribute to say `versions = ..VERSION_MY_CHANGE` (meaning "removed in version `VERSION_MY_CHANGE`).  (If the endpoint was previously introduced in some other version, then the new value might say `versions = VERSION_OTHER..VERSION_MY_CHANGE` instead of `..VERSION_MY_CHANGE`.)
++
+--
+* If you're adding a new endpoint, then your new endpoint's `#[endpoint]` attribute should say `versions = VERSION_MY_CHANGE..` (meaning "introduced in version `VERSION_MY_CHANGE`").
+* If you're removing an endpoint, then you want to change the endpoint's `#[endpoint]` attribute to say `versions = ..VERSION_MY_CHANGE` (meaning "removed in version `VERSION_MY_CHANGE`).  (If the endpoint was previously introduced in some other version, then the new value might say `versions = VERSION_OTHER..VERSION_MY_CHANGE` instead of `versions = ..VERSION_MY_CHANGE`.)
 * If you're changing the arguments or return type of an endpoint, you'll need to treat this as a separate add/remove:
 ** Do not change the existing endpoint's arguments or return type at all.
 ** Mark the existing endpoint as removed in `VERSION_MY_CHANGE` as described above.
-** Define new types for the new version's arguments or return type (whichever are changing).
+** Define new Rust types for the new version's arguments or return type (whichever are changing).
 ** Define a new endpoint using the new types and introduced in `VERSION_MY_CHANGE`, as described above.
+--
++
+For some examples, see https://github.com/oxidecomputer/dropshot/blob/main/dropshot/examples/versioning.rs[Dropshot's versioning example].
 . As with lockstep crates, you can do either of these in whichever order you want:
 .. Update the server(s) (the trait impl).  You can immediately see what's needed with `cargo check`.
 .. Update the client.  To do this, run `cargo xtask openapi generate` to regenerate the OpenAPI document(s).  Then `cargo check` will tell you how the client(s) need to be updated.
@@ -167,7 +174,64 @@ Among other things, the `api_versions!` call defines constants like `VERSION_MY_
 
 As of this writing, every API has exactly one Rust client package and it's always generated from the latest version of the API.  Per RFD 532, this is sufficient for APIs that are server-side-only versioned.  For APIs that will be client-side versioned, you may need to create additional Rust packages that use Progenitor to generate clients based on older OpenAPI documents.  This has not been done before but is believed to be straightforward.
 
-==== Converting lockstep APIs to be versioned
+== More about versioned APIs
+
+The idea behind versioned APIs is:
+
+* This is an API where the client and server can be mismatched at runtime when the system is upgraded.
+* Thus: for the system to keep working across an upgrade, the server _must_ support both the old and the new versions.
+* To ensure that the server supports older versions, we check those OpenAPI documents into source control and this tool verifies that the server remains compatible with these older versions.
+
+For much more on this, see https://rfd.shared.oxide.computer/rfd/0532[RFD 532 "Versioning for internal HTTP APIs"].
+
+For a versioned API, the set of all supported versions is defined by the `api_versions!` macro in the API crate.  More precisely: in configuring the OpenAPI manager tool to know about a versioned API, you use the `supported_versions()` function defined by the macro.  **This is critical: the OpenAPI documents in the `openapi` directory are _not_ the source of truth about what versions are supported.  The Rust `api_versions!` call is.**
+
+Each of these supported versions is either **blessed** (meaning it's been committed-to -- i.e., shipped, or potentially deployed on a system that we care about upgrading smoothly) or **locally-added**.  Currently, blessed versions are not allowed to change _at all_.  In the near future, we hope to relax this a bit so that they can be changed in ways that are provably compatible (e.g., doc changes).
+
+When you run `cargo xtask openapi check` or `cargo xtask openapi generate`, the tool loads OpenAPI documents from three sources:
+
+* **blessed** documents: these are generally the OpenAPI documents in "main" in the `openapi` directory.  (More precisely, by default, these are loaded from the merge-base between `HEAD` and `main`.  You can override this.)  By definition, these only contain blessed versions (since locally-added versions won't be present in "main").
+* **local** documents: these are the OpenAPI documents in `openapi` in your working tree.  These include both blessed versions and locally-added versions.
+* **generated** documents: these are the OpenAPI documents generated by Dropshot from your API traits.
+
+Putting all this together, the tool is pretty straightforward.  For each supported version of a versioned API:
+
+* If there is a blessed file for that version, then the version is blessed.  The generated file must exactly match the blessed one.  If not, the tool cannot fix this.  You have to undo whatever changes you made that affected the blessed version.  (See above on how to make changes to the API trait without affecting older versions.)
+* If there is no blessed file for that version, then the version is locally-added.  There should be exactly one local file for it and it should exactly match the generated file.  The tool can fix any problems here by removing all local files and generating a new one based on the generated one.
+* The tool also ensures that a "latest" symlink exists and points to the highest-numbered OpenAPI document.
+
+You generally don't need to think about any of this to use the tool.  Like with lockstep APIs, you just use `cargo xtask openapi generate` to update the local files.  The only ways you're likely to run into trouble are:
+
+1. You forgot to define a new version.  In this case, you'll get an error about having changed a blessed version.  To fix this, you'll need to follow the steps above to make changes that don't affect older versions.
+2. You defined a new version, but forgot to annotate the API endpoints with what version they were added or removed in.  Again, you'll get an error about having changed a blessed version and you'll need to follow the steps above to fix it.
+3. You merge with an upstream that adds new versions.
+
+=== Merging with upstream changes to versioned APIs
+
+When you merge with commits that added one or more versions to the same API that you also changed locally:
+
+* Git will report a merge conflict in the "latest" symlink.  Just remove the symlink altogether (with `rm`).  This will be regenerated correctly below.
+* Git will report a merge conflict in the API crate in the `api_versions!` call.  You will need to resolve this by hand.  **This is the most important part to get right.**  Generally, this is easy: you'll take all the versions that are present upstream, choose a new number for your locally-added version, and make sure that your locally-added one remains the latest one (first in the list).
+* Less commonly: you may have other merge conflicts in the API crate or the server implementation.  This would happen if specific endpoints were changed both upstream and locally.  The details here are situation-dependent.  You'll have to resolve these by hand.
++
+Aside from merge conflicts from specific endpoints that were changed both upstream and in your local version, you generally should _not_ need to change any of the API crate as part of the merge.  (This is why we use identifiers for the semvers that go in the `versions` argument -- so that the value can change after a merge without having to go update all the endpoints you changed.)
+* When you've resolved all conflicts, run `cargo xtask openapi generate` to regenerate files for locally-added versions and clean up any stale files.
+
+Most commonly, this boils down to:
+
+* `rm` the "latest" symlink
+* fix up the `api_versions!` call in the API crate
+* run `cargo xtask openapi generate`
+
+If you get any of this wrong, the tool should clearly report the problem.  For example, if you mis-order the versions in the list, you'll get an error about them not being sequential.  If you mismerge the API trait in such a way that changes a blessed version, as always, the tool will detect that and report it.
+
+=== Retiring old versions of versioned APIs
+
+Of course, we don't need or want to support each version of an API forever.  RFD 532 proposes supporting the one shipped in the last release, plus all the intermediate ones shipped in the current release.  The specific policy doesn't really matter here.
+
+To retire an old version, simply remove it from `api_versions!` and run `cargo xtask openapi generate`.
+
+=== Converting lockstep APIs to be versioned
 
 An existing lockstep API can be made versioned.  We'll use the example of `dns-server`:
 
