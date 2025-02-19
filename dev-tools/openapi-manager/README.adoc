@@ -1,7 +1,5 @@
 = OpenAPI manager
 
-// XXX-dap review this
-
 This tool manages the OpenAPI documents (JSON files) checked into Omicron's `openapi` directory, using Dropshot's support for *API traits*.
 
 NOTE: For more information about API traits, see https://rfd.shared.oxide.computer/rfd/0479[RFD 479].
@@ -35,7 +33,7 @@ For OpenAPI documents to be managed by this tool, the corresponding interfaces m
 
 TIP: For examples within Omicron, search the repo for `dropshot::api_description`.
 
-=== Adding new documents
+=== Adding new APIs
 
 If you're defining a new service fronted by OpenAPI, first create an API crate (see <<api_crates>> above).
 
@@ -47,10 +45,53 @@ In the implementation crate:
 . Add a dependency on the API crate.
 . Following the example in https://rfd.shared.oxide.computer/rfd/0479#guide_api_implementation[RFD 479's _API implementation_], provide an implementation of the trait.
 
-Once the API crate is defined, inform the OpenAPI manager of its existence. Within this directory:
+Proceed to adding this API's OpenAPI document.
+
+=== Adding new OpenAPI documents
+
+When adding an API, you will need to decide how the API is versioned when it comes to system upgrade.  You have two choices:
+
+* **Lockstep**: the client and server are always deployed as a unit (e.g., Wicket and Wicketd).  It's impossible for versions to mismatch at runtime.  This is ideal when possible, but rare.
+* **Versioned**: the client and server may mismatch at runtime during an upgrade.  See <<rfd532>> for a more complete discussion of how this can work.  For our purposes, the upshot is that this repo stores not just the current OpenAPI document (generated from the API trait), but also historical versions that must still be supported.
+
+**For versioned APIs:** copy the following template into the **API crate** near the top, _above_ the `[dropshot::api_description]`:
+
+```rust
+api_versions!([
+    // WHEN CHANGING THE API (part 1 of 2):
+    //
+    // +- Pick a new semver and define it in the list below.  The list MUST
+    // |  remain sorted, which generally means that your version should go at
+    // |  the very top.
+    // |
+    // |  Duplicate this line, uncomment the *second* copy, update that copy for
+    // |  your new API version, and leave the first copy commented out as an
+    // |  example for the next person.
+    // v
+    // (next_int, IDENT),
+    (1, INITIAL),
+]);
+
+// WHEN CHANGING THE API (part 2 of 2):
+//
+// The call to `api_versions!` above defines constants of type
+// `semver::Version` that you can use in your Dropshot API definition to specify
+// the version when a particular endpoint was added or removed.  For example, if
+// you used:
+//
+//     (1, INITIAL)
+//
+// Then you could use `VERSION_INITIAL` as the version in which endpoints were
+// added or removed.
+```
+
+If in doubt, look at an existing versioned API crate (e.g., `dns-server-api/src/lib.rs`).
+
+**For both lockstep and versioned APIs:** once the API crate is defined, update the OpenAPI manager to manage the new OpenAPI document(s). Within this directory:
 
 . In `Cargo.toml`, add a dependency on the API crate.
-. In `src/spec.rs`, add the crate to the `all_apis` function. (Please keep the list sorted by filename.)
+// XXX-dap-last-step this will need an update
+. In `src/spec.rs`, add the crate to the `all_apis` function. (Please keep the list sorted by filename.)  For versioned crates, you'll use the `supported_versions()` function defined by the `api_versions!` macro.  Again, use one of the existing examples as a guide.
 
 To ensure everything works well, run `cargo xtask openapi generate`. Your
 OpenAPI document should be generated on disk and listed in the output.
@@ -73,6 +114,85 @@ Currently, the validator can do two things:
 (This can be made richer as needed.)
 
 For an example, see `validate_api` in the `nexus-external-api` crate.
+
+==== Iterating on lockstep APIs
+
+Assuming you're starting from a fresh branch from "main", the general workflow for making changes to a lockstep API looks like this:
+
+. Make whatever changes you want to the API crate (the trait definition)
+. In whichever order you want:
+.. Update the server(s) (the trait impl).  You can immediately see what's needed with `cargo check`.
+.. Update the client.  To do this, run `cargo xtask openapi generate` to regenerate the OpenAPI document.  Then `cargo check` will tell you how the client needs to be updated.
+. Repeat as needed.
+
+==== Iterating on versioned APIs
+
+This workflow is modeled after the lockstep one, but it's a little trickier because of the considerations around online update.  **Check out the https://docs.rs/dropshot/latest/dropshot/index.html#api-versioning[Dropshot API Versioning] docs for important background.**
+
+Again, we assume you're starting from a fresh branch from "main".
+
+. Pull up the `api_versions!` call for your API, in the root of the API crate.
+. Follow the instructions there to pick a new version number (the next unused integer) and an identifier.  For this example, suppose you find:
++
+[source,rust]
+----
+api_versions!([
+    (1, INITIAL),
+])
+----
++
+You'll change this to:
++
+[source,rust]
+----
+api_versions!([
+    (2, MY_CHANGE),
+    (1, INITIAL),
+])
+----
++
+Among other things, the `api_versions!` call defines constants like `VERSION_MY_CHANGE` that you'll use in the next step.
+. Also in the API crate, make your API changes.  However, you have to preserve the behavior of previous versions of the API.
+* If you're adding a new endpoint, then your new endpoint's `#[endpoint]` attribute should say `versions = VERSION_MY_CHANGE..` (meaning "introduced in version `VERSION_MY_CHANGE`).
+* If you're removing an endpoint, then you want to change the endpoint's `#[endpoint]` attribute to say `versions = ..VERSION_MY_CHANGE` (meaning "removed in version `VERSION_MY_CHANGE`).  (If the endpoint was previously introduced in some other version, then the new value might say `versions = VERSION_OTHER..VERSION_MY_CHANGE` instead of `..VERSION_MY_CHANGE`.)
+* If you're changing the arguments or return type of an endpoint, you'll need to treat this as a separate add/remove:
+** Do not change the existing endpoint's arguments or return type at all.
+** Mark the existing endpoint as removed in `VERSION_MY_CHANGE` as described above.
+** Define new types for the new version's arguments or return type (whichever are changing).
+** Define a new endpoint using the new types and introduced in `VERSION_MY_CHANGE`, as described above.
+. As with lockstep crates, you can do either of these in whichever order you want:
+.. Update the server(s) (the trait impl).  You can immediately see what's needed with `cargo check`.
+.. Update the client.  To do this, run `cargo xtask openapi generate` to regenerate the OpenAPI document(s).  Then `cargo check` will tell you how the client(s) need to be updated.
+. Repeat steps 3-4 as needed.  You should **not** repeat steps 1-2 as you iterate.
+
+As of this writing, every API has exactly one Rust client package and it's always generated from the latest version of the API.  Per RFD 532, this is sufficient for APIs that are server-side-only versioned.  For APIs that will be client-side versioned, you may need to create additional Rust packages that use Progenitor to generate clients based on older OpenAPI documents.  This has not been done before but is believed to be straightforward.
+
+==== Converting lockstep APIs to be versioned
+
+An existing lockstep API can be made versioned.  We'll use the example of `dns-server`:
+
+. Initially, its OpenAPI document is stored in `openapi/dns-server.json`.
+. Run `git rm -f openapi/dns-server.json`.
+. Run `mkdir openapi/dns-server`.
+. Update the API crate (`dns-server-api/src/lib.rs`) to use the new `api_versions!` macro.  See the instructions under <<_adding_new_openapi_documents>> above.
+// XXX-dap
+. Update the OpenAPI manager configuration in `src/spec.rs` (in this directory) to specify that the API is now versioned.  You'll use the `supported_versions()` function defined by the `api_versions!` macro.
+. Run `cargo xtask openapi generate`.  This will generate a new file under `openapi/dns-server` for your initial server version, along with a "latest" symlink.
++
+You will probably see this warning:
++
+[source,text]
+----
+     Loading blessed OpenAPI documents from git revision "main" path "openapi"
+     Warning skipping file "dns-server.json": this API is not a lockstep API
+----
++
+This is okay.  It's saying: this is a versioned API, but the file we found upstream (i.e., in "main") suggests it's lockstep.  That's expected when you're doing this conversion.
+. Update the client package (`clients/dns-service-client/src/lib.rs`).  It was previously generating its client from `openapi/dns-server.json`.  It should now generate it from `openapi/dns-server/dns-server-latest.json`.
+
+That should be it!  Now, when iterating on the API, you'll need to follow the procedure described above for versioned APIs (which is slightly more complicated than the one for lockstep APIs).
+
+In principle, this process could be reversed to convert an API from versioned to lockstep, but this almost certainly has runtime implications that would need to be considered.
 
 == Design notes
 
