@@ -690,7 +690,7 @@ mod tests {
         kind: ZoneKind,
     ) -> Vec<&BlueprintZoneConfig> {
         blueprint
-            .all_omicron_zones(|_disposition| true)
+            .all_omicron_zones(BlueprintZoneDisposition::any)
             .filter_map(|(_, zone)| {
                 (zone.zone_type.kind() == kind).then_some(zone)
             })

@@ -152,7 +152,7 @@ impl<'a> Planner<'a> {
             // we ourselves have made this change, which is fine.
             let all_zones_expunged = self
                 .blueprint
-                .current_sled_zones(sled_id, |_disposition| true)
+                .current_sled_zones(sled_id, BlueprintZoneDisposition::any)
                 .all(|zone| {
                     matches!(
                         zone.disposition,
@@ -195,7 +195,7 @@ impl<'a> Planner<'a> {
             if !commissioned_sled_ids.contains(&sled_id) {
                 let num_zones = self
                     .blueprint
-                    .current_sled_zones(sled_id, |_disposition| true)
+                    .current_sled_zones(sled_id, BlueprintZoneDisposition::any)
                     .filter(|zone| {
                         !matches!(
                             zone.disposition,
@@ -2847,7 +2847,7 @@ pub(crate) mod test {
 
         // We should start with one ClickHouse zone. Find out which sled it's on.
         let clickhouse_sleds = blueprint1
-            .all_omicron_zones(|_disposition| true)
+            .all_omicron_zones(BlueprintZoneDisposition::any)
             .filter_map(|(sled, zone)| {
                 zone.zone_type.is_clickhouse().then(|| Some(sled))
             })

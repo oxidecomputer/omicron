@@ -447,7 +447,7 @@ mod test {
 
         // Insert records for the zpools backing the datasets in these zones.
         for (sled_id, config) in
-            blueprint.1.all_omicron_zones(|_disposition| true)
+            blueprint.1.all_omicron_zones(BlueprintZoneDisposition::any)
         {
             let Some(dataset) = config.zone_type.durable_dataset() else {
                 continue;

@@ -385,7 +385,7 @@ impl ActiveSledEditor {
         // some time after expungement, we may reuse its IP; reconfigurator must
         // know that's safe prior to pruning the expunged zone.
         let zone_ips =
-            zones.zones(|_disposition| true).map(|z| z.underlay_ip());
+            zones.zones(BlueprintZoneDisposition::any).map(|z| z.underlay_ip());
 
         Ok(Self {
             underlay_ip_allocator: SledUnderlayIpAllocator::new(

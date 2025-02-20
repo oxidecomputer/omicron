@@ -1282,7 +1282,7 @@ async fn lookup_service_info(
     blueprint: &Blueprint,
 ) -> anyhow::Result<Option<ServiceInfo>> {
     let Some(zone_config) = blueprint
-        .all_omicron_zones(|_disposition| true)
+        .all_omicron_zones(BlueprintZoneDisposition::any)
         .find_map(|(_sled_id, zone_config)| {
             if zone_config.id.into_untyped_uuid() == service_id {
                 Some(zone_config)

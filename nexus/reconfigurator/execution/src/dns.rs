@@ -1392,11 +1392,11 @@ mod test {
         eprintln!("blueprint2: {}", blueprint2.display());
         // Figure out the id of the new zone.
         let zones_before = blueprint
-            .all_omicron_zones(|_disposition| true)
+            .all_omicron_zones(BlueprintZoneDisposition::any)
             .filter_map(|(_, z)| z.zone_type.is_nexus().then_some(z.id))
             .collect::<BTreeSet<_>>();
         let zones_after = blueprint2
-            .all_omicron_zones(|_disposition| true)
+            .all_omicron_zones(BlueprintZoneDisposition::any)
             .filter_map(|(_, z)| z.zone_type.is_nexus().then_some(z.id))
             .collect::<BTreeSet<_>>();
         let new_zones: Vec<_> = zones_after.difference(&zones_before).collect();

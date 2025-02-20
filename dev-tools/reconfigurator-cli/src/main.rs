@@ -890,7 +890,7 @@ fn cmd_blueprint_edit(
             let mut parent_sled_id = None;
             for sled_id in builder.sled_ids_with_zones() {
                 if builder
-                    .current_sled_zones(sled_id, |_disposition| true)
+                    .current_sled_zones(sled_id, BlueprintZoneDisposition::any)
                     .any(|z| z.id == zone_id)
                 {
                     parent_sled_id = Some(sled_id);

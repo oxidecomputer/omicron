@@ -787,10 +787,27 @@ pub enum BlueprintZoneDisposition {
 }
 
 impl BlueprintZoneDisposition {
+    /// Always returns true.
+    ///
+    /// This is intended for use with methods that take a filtering closure
+    /// operating on a `BlueprintZoneDisposition` (e.g.,
+    /// `Blueprint::all_omicron_zones()`), allowing callers to make it clear
+    /// they accept any disposition via
+    ///
+    /// ```rust,ignore
+    /// blueprint.all_omicron_zones(BlueprintZoneDisposition::any)
+    /// ```
+    pub fn any(self) -> bool {
+        true
+    }
+
+    /// Returns true if `self` is `BlueprintZoneDisposition::InService`.
     pub fn is_in_service(self) -> bool {
         matches!(self, Self::InService)
     }
 
+    /// Returns true if `self` is `BlueprintZoneDisposition::Expunged { .. }`,
+    /// regardless of the details contained within that variant.
     pub fn is_expunged(self) -> bool {
         matches!(self, Self::Expunged { .. })
     }

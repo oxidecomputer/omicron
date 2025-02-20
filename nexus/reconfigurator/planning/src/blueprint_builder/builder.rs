@@ -923,7 +923,7 @@ impl<'a> BlueprintBuilder<'a> {
         // Expunging a disk expunges any datasets and zones that depend on it,
         // so expunging all in-service disks should have also expunged all
         // datasets and zones. Double-check that that's true.
-        for zone in editor.zones(|_disposition| true) {
+        for zone in editor.zones(BlueprintZoneDisposition::any) {
             match zone.disposition {
                 BlueprintZoneDisposition::Expunged { .. } => (),
                 BlueprintZoneDisposition::InService => {
@@ -1399,7 +1399,7 @@ impl<'a> BlueprintBuilder<'a> {
         // settings should be part of `Policy` instead?
         let (external_tls, external_dns_servers) = self
             .parent_blueprint
-            .all_omicron_zones(|_disposition| true)
+            .all_omicron_zones(BlueprintZoneDisposition::any)
             .find_map(|(_, z)| match &z.zone_type {
                 BlueprintZoneType::Nexus(nexus) => Some((
                     nexus.external_tls,
@@ -1639,7 +1639,7 @@ impl<'a> BlueprintBuilder<'a> {
         // from an existing one.
         let (ntp_servers, dns_servers, domain) = self
             .parent_blueprint
-            .all_omicron_zones(|_disposition| true)
+            .all_omicron_zones(BlueprintZoneDisposition::any)
             .find_map(|(_, z)| match &z.zone_type {
                 BlueprintZoneType::BoundaryNtp(zone_config) => Some((
                     zone_config.ntp_servers.clone(),
@@ -1884,7 +1884,7 @@ impl<'a> BlueprintBuilder<'a> {
     /// TODO-cleanup: Remove when external DNS addresses are in the policy.
     pub fn count_parent_external_dns_zones(&self) -> usize {
         self.parent_blueprint
-            .all_omicron_zones(|_disposition| true)
+            .all_omicron_zones(BlueprintZoneDisposition::any)
             .filter_map(|(_id, zone)| match &zone.zone_type {
                 BlueprintZoneType::ExternalDns(dns) => {
                     Some(dns.dns_address.addr.ip())
@@ -1964,7 +1964,9 @@ pub(super) fn ensure_input_networking_records_appear_in_parent_blueprint(
     // constructed above in `BuilderExternalNetworking::new()`, we do not
     // check for duplicates here: we could very well see reuse of IPs
     // between expunged zones or between expunged -> running zones.
-    for (_, z) in parent_blueprint.all_omicron_zones(|_disposition| true) {
+    for (_, z) in
+        parent_blueprint.all_omicron_zones(BlueprintZoneDisposition::any)
+    {
         let zone_type = &z.zone_type;
         match zone_type {
             BlueprintZoneType::BoundaryNtp(ntp) => {
@@ -2776,7 +2778,9 @@ pub mod test {
             // that are already in use by existing zones. Attempting to add a
             // Nexus with no remaining external IPs should fail.
             let mut used_ip_ranges = Vec::new();
-            for (_, z) in parent.all_omicron_zones(|_disposition| true) {
+            for (_, z) in
+                parent.all_omicron_zones(BlueprintZoneDisposition::any)
+            {
                 if let Some((external_ip, _)) =
                     z.zone_type.external_networking()
                 {

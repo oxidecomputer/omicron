@@ -1842,7 +1842,7 @@ mod test {
 
         // We should see both of the Nexus services we provisioned.
         let mut observed_zones: Vec<_> = observed_blueprint
-            .all_omicron_zones(|_disposition| true)
+            .all_omicron_zones(BlueprintZoneDisposition::any)
             .map(|(_, z)| z)
             .collect();
         observed_zones.sort_by_key(|z| z.id);
@@ -1870,7 +1870,7 @@ mod test {
                 external_ip,
                 ..
             }) = &blueprint
-                .all_omicron_zones(|_disposition| true)
+                .all_omicron_zones(BlueprintZoneDisposition::any)
                 .next()
                 .unwrap()
                 .1
@@ -1889,7 +1889,7 @@ mod test {
                 external_ip,
                 ..
             }) = &blueprint
-                .all_omicron_zones(|_disposition| true)
+                .all_omicron_zones(BlueprintZoneDisposition::any)
                 .nth(1)
                 .unwrap()
                 .1
