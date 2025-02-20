@@ -284,6 +284,8 @@ impl DataStore {
     }
 
     /// Decommissions a single expunged disk.
+    ///
+    /// This is a no-op if the disk is already decommissioned.
     pub async fn physical_disk_decommission(
         &self,
         opctx: &OpContext,
@@ -297,6 +299,7 @@ impl DataStore {
             .filter(dsl::id.eq(to_db_typed_uuid(id)))
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::disk_policy.eq(PhysicalDiskPolicy::Expunged))
+            .filter(dsl::disk_state.ne(PhysicalDiskState::Decommissioned))
             .set((
                 dsl::disk_state.eq(PhysicalDiskState::Decommissioned),
                 dsl::time_modified.eq(now),
