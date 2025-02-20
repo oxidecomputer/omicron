@@ -24,8 +24,6 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::interval;
 
-// TODO: This is what I need to change to get writes working
-//
 /// A sink that inserts all results into the ClickHouse database.
 ///
 /// This sink is used in production, when running the `oximeter` collector
@@ -34,7 +32,6 @@ use tokio::time::interval;
 pub async fn database_inserter(
     log: Logger,
     client: Client,
-  //  cluster_client: Option<Client>,
     batch_size: usize,
     batch_interval: Duration,
     mut rx: mpsc::Receiver<CollectionTaskOutput>,
@@ -101,21 +98,6 @@ pub async fn database_inserter(
                     );
                 }
             }
-
-        //    // TODO-K: Only attempt if the cluster exists
-        //    // TODO-K: If the above failed we don't attempt here either?
-        //    if let Some(c) = &cluster_client {
-        //        match c.insert_samples(&batch).await {
-        //            Ok(()) => trace!(log, "successfully inserted samples"),
-        //            Err(e) => {
-        //                warn!(
-        //                    log,
-        //                    "failed to insert some results into metric DB (cluster): {}",
-        //                    e.to_string()
-        //                );
-        //            }
-        //        }
-        //    }
             // TODO-correctness The `insert_samples` call above may fail. The method itself needs
             // better handling of partially-inserted results in that case, but we may need to retry
             // or otherwise handle an error here as well.

@@ -424,7 +424,6 @@ impl Nexus {
             .build()
             .map_err(|e| e.to_string())?;
 
-        // TODO: Bookmark to relevant code
         // Client to the ClickHouse database.
         let timeseries_client = match &config.pkg.timeseries_db.address {
             None => {
