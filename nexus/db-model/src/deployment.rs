@@ -467,8 +467,8 @@ pub struct BpOmicronZone {
     pub snat_last_port: Option<SqlU16>,
 
     disposition: DbBpZoneDisposition,
-    expunged_as_of_generation: Option<Generation>,
-    expunged_ready_for_cleanup: bool,
+    disposition_expunged_as_of_generation: Option<Generation>,
+    disposition_expunged_ready_for_cleanup: bool,
 
     pub external_ip_id: Option<DbTypedUuid<ExternalIpKind>>,
     pub filesystem_pool: Option<DbTypedUuid<ZpoolKind>>,
@@ -487,8 +487,8 @@ impl BpOmicronZone {
 
         let DbBpZoneDispositionColumns {
             disposition,
-            expunged_as_of_generation,
-            expunged_ready_for_cleanup,
+            expunged_as_of_generation: disposition_expunged_as_of_generation,
+            expunged_ready_for_cleanup: disposition_expunged_ready_for_cleanup,
         } = blueprint_zone.disposition.into();
 
         // Create a dummy record to start, then fill in the rest
@@ -504,8 +504,8 @@ impl BpOmicronZone {
                 .as_ref()
                 .map(|pool| pool.id().into()),
             disposition,
-            expunged_as_of_generation,
-            expunged_ready_for_cleanup,
+            disposition_expunged_as_of_generation,
+            disposition_expunged_ready_for_cleanup,
             zone_type: blueprint_zone.zone_type.kind().into(),
 
             // Set the remainder of the fields to a default
@@ -891,8 +891,10 @@ impl BpOmicronZone {
 
         let disposition_cols = DbBpZoneDispositionColumns {
             disposition: self.disposition,
-            expunged_as_of_generation: self.expunged_as_of_generation,
-            expunged_ready_for_cleanup: self.expunged_ready_for_cleanup,
+            expunged_as_of_generation: self
+                .disposition_expunged_as_of_generation,
+            expunged_ready_for_cleanup: self
+                .disposition_expunged_ready_for_cleanup,
         };
 
         Ok(BlueprintZoneConfig {
@@ -936,8 +938,8 @@ impl From<BlueprintZoneDisposition> for DbBpZoneDispositionColumns {
     fn from(value: BlueprintZoneDisposition) -> Self {
         let (
             disposition,
-            expunged_as_of_generation,
-            expunged_ready_for_cleanup,
+            disposition_expunged_as_of_generation,
+            disposition_expunged_ready_for_cleanup,
         ) = match value {
             BlueprintZoneDisposition::InService => {
                 (DbBpZoneDisposition::InService, None, false)
@@ -953,8 +955,8 @@ impl From<BlueprintZoneDisposition> for DbBpZoneDispositionColumns {
         };
         Self {
             disposition,
-            expunged_as_of_generation,
-            expunged_ready_for_cleanup,
+            expunged_as_of_generation: disposition_expunged_as_of_generation,
+            expunged_ready_for_cleanup: disposition_expunged_ready_for_cleanup,
         }
     }
 }
@@ -976,7 +978,7 @@ impl TryFrom<DbBpZoneDispositionColumns> for BlueprintZoneDisposition {
             (DbBpZoneDisposition::InService, Some(_))
             | (DbBpZoneDisposition::Expunged, None) => Err(anyhow!(
                 "illegal database state (CHECK constraint broken?!): \
-                 disposition {:?}, expunged_as_of_generation {:?}",
+                 disposition {:?}, disposition_expunged_as_of_generation {:?}",
                 value.disposition,
                 value.expunged_as_of_generation,
             )),

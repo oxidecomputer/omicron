@@ -1304,6 +1304,12 @@ impl DataStore {
         }
     }
 
+    /// Deletes the provided `authz_instance`, as long as it is eligible for
+    /// deletion (in either the [`InstanceState::NoVmm`] or
+    /// [`InstanceState::Failed`] state, or it has already started being
+    /// deleted successfully).
+    ///
+    /// This function is idempotent, but not atomic.
     pub async fn project_delete_instance(
         &self,
         opctx: &OpContext,
@@ -1321,8 +1327,9 @@ impl DataStore {
         .await
     }
 
-    /// Delete the provided `authz_instance`, as long as it is in one of the
-    /// provided set of [`InstanceState`]s.
+    /// Deletes the provided `authz_instance`, as long as it is in one of the
+    /// provided set of [`InstanceState`]s. This function is idempotent, but
+    /// not atomic.
     ///
     /// A.K.A. "[`project_delete_instance`], hard mode". Typically, instances
     /// may only be deleted if they are in the [`InstanceState::NoVmm`] or
@@ -1337,6 +1344,44 @@ impl DataStore {
     ///
     /// [`project_delete_instance`]: Self::project_delete_instance
     pub async fn project_delete_instance_in_states(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        ok_to_delete_instance_states: &'static [InstanceState],
+    ) -> DeleteResult {
+        // First, mark the instance record as destroyed and detach all disks.
+        //
+        // We do this before other cleanup to prevent concurrent operations from
+        // accessing and modifying the instance while it's being torn down.
+        self.instance_mark_destroyed_and_detach_disks(
+            opctx,
+            authz_instance,
+            ok_to_delete_instance_states,
+        )
+        .await?;
+
+        // Next, delete all other data associated with the instance.
+        //
+        // Note that due to idempotency of this function, it's possible that
+        // "authz_instance.id()" has already been deleted.
+        let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
+        self.instance_ssh_keys_delete(opctx, instance_id).await?;
+        self.instance_mark_migrations_deleted(opctx, instance_id).await?;
+
+        Ok(())
+    }
+
+    // Marks the instance "Destroyed" and detaches disks.
+    //
+    // This is only one internal part of destroying an instance, see:
+    // [`project_delete_instance`] for a more holistic usage. It is has been
+    // factored out for readability.
+    //
+    // This function is idempotent, and should return "Ok(())" on repeated
+    // invocations.
+    //
+    // [`project_delete_instance`]: Self::project_delete_instance
+    async fn instance_mark_destroyed_and_detach_disks(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
@@ -1377,44 +1422,43 @@ impl DataStore {
                 )),
             );
 
-        let _instance = stmt
-            .detach_and_get_result_async(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
-            .await
-            .map_err(|e| match e {
-                DetachManyError::CollectionNotFound => Error::not_found_by_id(
-                    ResourceType::Instance,
-                    &authz_instance.id(),
-                ),
-                DetachManyError::NoUpdate { collection } => {
-                    if collection.runtime_state.propolis_id.is_some() {
-                        return Error::invalid_request(
+        stmt.detach_and_get_result_async(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
+        .await
+        .map(|_instance| ())
+        .or_else(|e| match e {
+            // Note that if the instance is not found, we return "Ok" explicitly here.
+            //
+            // This is important for idempotency - if we crashed after setting the state,
+            // but before doing cleanup, we allow other cleanup to make progress.
+            //
+            // See also: "test_instance_deletion_is_idempotent".
+            DetachManyError::CollectionNotFound => Ok(()),
+            DetachManyError::NoUpdate { collection } => {
+                if collection.runtime_state.propolis_id.is_some() {
+                    return Err(Error::invalid_request(
                         "cannot delete instance: instance is running or has \
                                 not yet fully stopped",
-                    );
-                    }
-                    let instance_state =
-                        collection.runtime_state.nexus_state.state();
-                    match instance_state {
-                        api::external::InstanceState::Stopped
-                        | api::external::InstanceState::Failed => {
-                            Error::internal_error("cannot delete instance")
-                        }
-                        _ => Error::invalid_request(&format!(
-                            "instance cannot be deleted in state \"{}\"",
-                            instance_state,
-                        )),
-                    }
+                    ));
                 }
-                DetachManyError::DatabaseError(e) => {
-                    public_error_from_diesel(e, ErrorHandler::Server)
+                let instance_state =
+                    collection.runtime_state.nexus_state.state();
+                match instance_state {
+                    api::external::InstanceState::Stopped
+                    | api::external::InstanceState::Failed => {
+                        Err(Error::internal_error("cannot delete instance"))
+                    }
+                    _ => Err(Error::invalid_request(&format!(
+                        "instance cannot be deleted in state \"{}\"",
+                        instance_state,
+                    ))),
                 }
-            })?;
-
-        let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
-        self.instance_ssh_keys_delete(opctx, instance_id).await?;
-        self.instance_mark_migrations_deleted(opctx, instance_id).await?;
+            }
+            DetachManyError::DatabaseError(e) => {
+                Err(public_error_from_diesel(e, ErrorHandler::Server))
+            }
+        })?;
 
         Ok(())
     }
@@ -2376,6 +2420,60 @@ mod tests {
         )
         .unwrap();
         assert!(!unlocked);
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Validates idempotency of instance deletion.
+    //
+    // Instance deletion is invoked from a saga, so it must be idempotent.
+    // Additionally, to reduce database contention, we perform the steps of
+    // instance deletion non-atomically. However, this means that it must be
+    // possible to re-invoke instance deletion repeatedly to ensure that cleanup
+    // proceeds.
+    #[tokio::test]
+    async fn test_instance_deletion_is_idempotent() {
+        // Setup
+        let logctx =
+            dev::test_setup_log("test_instance_deletion_is_idempotent");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let authz_instance = create_test_instance(
+            &datastore,
+            &opctx,
+            &authz_project,
+            "my-great-instance",
+        )
+        .await;
+
+        // Move the instance into an "okay-to-delete" state...
+        datastore
+            .instance_update_runtime(
+                &InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                &InstanceRuntimeState {
+                    time_updated: Utc::now(),
+                    r#gen: Generation(external::Generation::from_u32(2)),
+                    propolis_id: None,
+                    dst_propolis_id: None,
+                    migration_id: None,
+                    nexus_state: InstanceState::NoVmm,
+                    time_last_auto_restarted: None,
+                },
+            )
+            .await
+            .expect("should update state successfully");
+
+        // This is the first "normal" deletion
+        dbg!(datastore.project_delete_instance(&opctx, &authz_instance).await)
+            .expect("instance should be deleted");
+
+        // The next deletion should also succeed, even though the instance has already
+        // been marked deleted.
+        dbg!(datastore.project_delete_instance(&opctx, &authz_instance).await)
+            .expect("instance should remain deleted");
 
         // Clean up.
         db.terminate().await;

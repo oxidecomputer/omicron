@@ -1,6 +1,6 @@
 SET LOCAL disallow_full_table_scans = off;
 UPDATE omicron.public.bp_omicron_zone
-    SET expunged_as_of_generation = (
+    SET disposition_expunged_as_of_generation = (
         SELECT generation
         FROM omicron.public.bp_sled_omicron_zones
         WHERE
