@@ -56,11 +56,14 @@ pub struct OximeterAgent {
     log: Logger,
     // Oximeter target used by this agent to produce metrics about itself.
     collection_target: self_stats::OximeterCollector,
-    // Handle to the TX-side of a channel for collecting results from the collection tasks
+    // Handle to the TX-side of a channel for collecting results from the collection tasks.
     result_sender: mpsc::Sender<CollectionTaskOutput>,
+    // Handle to the TX-side of a channel for collecting results from the collection tasks
+    // of a replicated ClickHouse cluster.
+    // cluster_result_sender: Option<mpsc::Sender<CollectionTaskOutput>>,
     // Handle to each Tokio task collection from a single producer.
     collection_tasks: Arc<Mutex<BTreeMap<Uuid, CollectionTaskHandle>>>,
-    // The interval on which we refresh our list of producers from Nexus
+    // The interval on which we refresh our list of producers from Nexus.
     refresh_interval: Duration,
     // Handle to the task used to periodically refresh the list of producers.
     refresh_task: Arc<StdMutex<Option<tokio::task::JoinHandle<()>>>>,
@@ -86,12 +89,14 @@ impl OximeterAgent {
         replicated: bool,
     ) -> Result<Self, Error> {
         let (result_sender, result_receiver) = mpsc::channel(8);
+        let (_cluster_result_sender, cluster_result_receiver) = mpsc::channel(8);
         let log = log.new(o!(
             "component" => "oximeter-agent",
             "collector_id" => id.to_string(),
             "collector_ip" => address.ip().to_string(),
         ));
         let insertion_log = log.new(o!("component" => "results-sink"));
+        let cluster_insertion_log = insertion_log.clone();
 
         // Determine the version of the database.
         //
@@ -165,7 +170,7 @@ impl OximeterAgent {
             crate::results_sink::database_inserter(
                 insertion_log,
                 client,
-                Some(cluster_client),
+             //   Some(cluster_client),
                 db_config.batch_size,
                 Duration::from_secs(db_config.batch_interval),
                 result_receiver,
@@ -175,23 +180,23 @@ impl OximeterAgent {
 
         // TODO: We don't want to do this because it fundamentally changes how the agent works
         // and the other way is way less intrusive?
-        // tokio::spawn(async move {
-        //     crate::results_sink::database_inserter(
-        //         cluster_insertion_log,
-        //         // TODO: Pass a second client here to write to cluster
-        //         cluster_client,
-        //         db_config.batch_size,
-        //         Duration::from_secs(db_config.batch_interval),
-        //         cluster_result_receiver,
-        //     )
-        //     .await
-        // });
+         tokio::spawn(async move {
+             crate::results_sink::database_inserter(
+                 cluster_insertion_log,
+                 cluster_client,
+                 db_config.batch_size,
+                 Duration::from_secs(db_config.batch_interval),
+                 cluster_result_receiver,
+             )
+             .await
+         });
 
         let self_ = Self {
             id,
             log,
             collection_target,
             result_sender,
+           // cluster_result_sender: Some(cluster_result_sender),
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
             refresh_interval,
             refresh_task: Arc::new(StdMutex::new(None)),
@@ -265,7 +270,7 @@ impl OximeterAgent {
                 results_sink::database_inserter(
                     insertion_log,
                     client,
-                    None,
+                //    None,
                     db_config.batch_size,
                     Duration::from_secs(db_config.batch_interval),
                     result_receiver,
@@ -293,6 +298,7 @@ impl OximeterAgent {
             log,
             collection_target,
             result_sender,
+          //  cluster_result_sender: None,
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
             refresh_interval,
             refresh_task: Arc::new(StdMutex::new(None)),
