@@ -2383,8 +2383,6 @@ mod tests {
 
     // note the "mock" here is different from the vnic/zone contexts above.
     // this is actually running code for a dropshot server from propolis.
-    // (might we want a locally-defined fake whose behavior we can control
-    // more directly from the test driver?)
     // TODO: factor out, this is also in sled-agent-sim.
     fn propolis_mock_server(
         log: &Logger,
@@ -2405,6 +2403,30 @@ mod tests {
         ));
 
         (srv, client)
+    }
+
+    async fn propolis_mock_set_mode(
+        client: &PropolisClient,
+        mode: propolis_mock_server::MockMode,
+    ) {
+        let url = format!("{}/mock/mode", client.baseurl());
+        client
+            .client()
+            .put(url)
+            .json(&mode)
+            .send()
+            .await
+            .expect("setting mock mode failed unexpectedly");
+    }
+
+    async fn propolis_mock_step(client: &PropolisClient) {
+        let url = format!("{}/mock/step", client.baseurl());
+        client
+            .client()
+            .put(url)
+            .send()
+            .await
+            .expect("single-stepping mock server failed unexpectedly");
     }
 
     async fn setup_storage_manager(log: &Logger) -> StorageManagerTestHarness {
@@ -2953,6 +2975,170 @@ mod tests {
         metrics_rx
             .try_recv()
             .expect_err("The metrics request queue should have one message");
+
+        storage_harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_instance_manager_stop_timeout() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_instance_manager_stop_timeout",
+        );
+        let log = logctx.log.new(o!(FileKv));
+
+        // automock'd things used during this test
+        let _mock_vnic_contexts = mock_vnic_contexts();
+        let _mock_zone_contexts = mock_zone_contexts();
+
+        let mut storage_harness = setup_storage_manager(&logctx.log).await;
+        let storage_handle = storage_harness.handle().clone();
+
+        let FakeNexusParts {
+            nexus_client,
+            mut state_rx,
+            _dns_server,
+            _nexus_server,
+        } = FakeNexusParts::new(&log).await;
+
+        let temp_guard = Utf8TempDir::new().unwrap();
+        let temp_dir = temp_guard.path().to_string();
+
+        let (services, _metrics_rx) = fake_instance_manager_services(
+            &log,
+            storage_handle,
+            nexus_client,
+            &temp_dir,
+        );
+        let InstanceManagerServices {
+            nexus_client,
+            vnic_allocator: _,
+            port_manager,
+            storage,
+            zone_bundler,
+            zone_builder_factory,
+            metrics_queue,
+        } = services;
+
+        let etherstub = Etherstub("mystub".to_string());
+
+        let vmm_reservoir_manager = VmmReservoirManagerHandle::stub_for_test();
+
+        let mgr = crate::instance_manager::InstanceManager::new(
+            logctx.log.new(o!("component" => "InstanceManager")),
+            nexus_client,
+            etherstub,
+            port_manager,
+            storage,
+            zone_bundler,
+            zone_builder_factory,
+            vmm_reservoir_manager,
+            metrics_queue,
+        )
+        .unwrap();
+
+        let (propolis_server, propolis_client) =
+            propolis_mock_server(&logctx.log);
+        let propolis_addr = propolis_server.local_addr();
+
+        let instance_id = InstanceUuid::new_v4();
+        let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
+        let InstanceInitialState {
+            hardware,
+            vmm_runtime,
+            propolis_addr,
+            migration_id: _,
+        } = fake_instance_initial_state(propolis_addr);
+
+        let metadata = InstanceMetadata {
+            silo_id: Uuid::new_v4(),
+            project_id: Uuid::new_v4(),
+        };
+        let sled_identifiers = SledIdentifiers {
+            rack_id: Uuid::new_v4(),
+            sled_id: Uuid::new_v4(),
+            model: "fake-model".into(),
+            revision: 1,
+            serial: "fake-serial".into(),
+        };
+
+        mgr.ensure_registered(
+            propolis_id,
+            InstanceEnsureBody {
+                instance_id,
+                migration_id: None,
+                hardware,
+                vmm_runtime,
+                propolis_addr,
+                metadata,
+            },
+            sled_identifiers,
+        )
+        .await
+        .unwrap();
+
+        mgr.ensure_state(propolis_id, VmmStateRequested::Running)
+            .await
+            .unwrap();
+
+        timeout(
+            TIMEOUT_DURATION,
+            state_rx.wait_for(|maybe_state| match maybe_state {
+                ReceivedInstanceState::InstancePut(sled_inst_state) => {
+                    sled_inst_state.vmm_state.state == VmmState::Running
+                }
+                _ => false,
+            }),
+        )
+        .await
+        .expect("timed out waiting for InstanceState::Running in FakeNexus")
+        .expect("failed to receive VmmState' InstanceState");
+
+        // Place the mock propolis in single-step mode.
+        propolis_mock_set_mode(
+            &propolis_client,
+            propolis_mock_server::MockMode::SingleStep,
+        )
+        .await;
+
+        // Request the VMM stop
+        mgr.ensure_state(propolis_id, VmmStateRequested::Stopped)
+            .await
+            .unwrap();
+
+        // Single-step once.
+        propolis_mock_step(&propolis_client).await;
+
+        timeout(
+            TIMEOUT_DURATION,
+            state_rx.wait_for(|maybe_state| match maybe_state {
+                ReceivedInstanceState::InstancePut(sled_inst_state) => {
+                    sled_inst_state.vmm_state.state == VmmState::Stopping
+                }
+                _ => false,
+            }),
+        )
+        .await
+        .expect("timed out waiting for VmmState::Stopping in FakeNexus")
+        .expect("failed to receive FakeNexus' InstanceState");
+
+        // NOW WE STOP ADVANCING THE MOCK --- IT WILL NEVER REACH STOPPED
+
+        // The timeout should now fire and sled-agent will murder propolis,
+        // allowing the zone to be destroyed.
+
+        timeout(
+            TIMEOUT_DURATION,
+            state_rx.wait_for(|maybe_state| match maybe_state {
+                ReceivedInstanceState::InstancePut(sled_inst_state) => {
+                    sled_inst_state.vmm_state.state == VmmState::Stopped
+                }
+                _ => false,
+            }),
+        )
+        .await
+        .expect("timed out waiting for VmmState::Stopped in FakeNexus")
+        .expect("failed to receive FakeNexus' InstanceState");
 
         storage_harness.cleanup().await;
         logctx.cleanup_successful();
