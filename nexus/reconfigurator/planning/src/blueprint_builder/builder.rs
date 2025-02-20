@@ -1166,7 +1166,7 @@ impl<'a> BlueprintBuilder<'a> {
                     ..
                 } = disk.disposition
                 {
-                    // Has the sled_agent seen this disks expungement yet as
+                    // Has the sled agent seen this disk's expungement yet as
                     // reflected in inventory?
                     if seen_generation >= Some(as_of_generation) {
                         editor.decommission_disk(&disk.id).map_err(|err| {

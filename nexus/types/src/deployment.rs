@@ -255,10 +255,10 @@ impl Blueprint {
     /// sled id.
     pub fn all_omicron_disks<F>(
         &self,
-        filter: F,
+        mut filter: F,
     ) -> impl Iterator<Item = (SledUuid, &BlueprintPhysicalDiskConfig)>
     where
-        F: Fn(BlueprintPhysicalDiskDisposition) -> bool,
+        F: FnMut(BlueprintPhysicalDiskDisposition) -> bool,
     {
         self.blueprint_disks
             .iter()
