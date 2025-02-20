@@ -49,6 +49,7 @@ use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use futures::stream::{self, StreamExt};
+use futures::TryStreamExt;
 use ipnetwork::IpNetwork;
 use nexus_auth::authz::ApiResource;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V4;
@@ -2560,6 +2561,21 @@ impl DataStore {
             }
         }
 
+        // Generally, we want all name lookups here to be fallible as we
+        // don't have strong links between destinations, targets, and their
+        // underlying resources. Such an error will be converted to a no-op
+        // for any child rules.
+        // However, we cannot allow 503s/CRDB communication failures to be
+        // be part of any router version -- we'll have omitted rules and
+        // sled-agent won't accept an update unless the version has bumped up.
+        // We'll eventually retry this router when the RPW is scheduled again.
+        fn allow_not_found<O>(e: Error) -> Option<Result<O, Error>> {
+            match e {
+                Error::ObjectNotFound { .. } | Error::NotFound { .. } => None,
+                e => Some(Err(e)),
+            }
+        }
+
         // VpcSubnet routes are control-plane managed, and have a foreign-key relationship
         // to subnets they mirror. Prefer this over name resolution when possible, knowing
         // that some user routes still require name resolution.
@@ -2571,11 +2587,12 @@ impl DataStore {
                     .vpc_subnet_id(id)
                     .fetch()
                     .await
-                    .ok()
-                    .map(|(.., subnet)| (id, subnet))
+                    .map_or_else(allow_not_found, |(.., subnet)| {
+                        Some(Ok((id, subnet)))
+                    })
             })
-            .collect::<HashMap<_, _>>()
-            .await;
+            .try_collect::<HashMap<_, _>>()
+            .await?;
 
         let mut subnets_by_name = subnets_by_id
             .values()
@@ -2588,15 +2605,17 @@ impl DataStore {
                 continue;
             }
 
-            let Some((.., subnet)) = db::lookup::LookupPath::new(opctx, self)
+            let Some(res) = db::lookup::LookupPath::new(opctx, self)
                 .vpc_id(vpc_id)
                 .vpc_subnet_name(Name::ref_cast(name))
                 .fetch()
                 .await
-                .ok()
+                .map_or_else(allow_not_found, |v| Some(Ok(v)))
             else {
                 continue;
             };
+
+            let (.., subnet) = res?;
 
             subnets_by_id.insert(subnet.id(), subnet.clone());
             subnets_by_name.insert(subnet.name().clone(), subnet);
@@ -2610,11 +2629,12 @@ impl DataStore {
                     .vpc_name(Name::ref_cast(&name))
                     .fetch()
                     .await
-                    .ok()
-                    .map(|(.., vpc)| (name, vpc))
+                    .map_or_else(allow_not_found, |(.., vpc)| {
+                        Some(Ok((name, vpc)))
+                    })
             })
-            .collect::<HashMap<_, _>>()
-            .await;
+            .try_collect::<HashMap<_, _>>()
+            .await?;
 
         let inetgws = stream::iter(inetgw_names)
             .filter_map(|name| async {
@@ -2623,11 +2643,12 @@ impl DataStore {
                     .internet_gateway_name(Name::ref_cast(&name))
                     .fetch()
                     .await
-                    .ok()
-                    .map(|(.., igw)| (name, igw))
+                    .map_or_else(allow_not_found, |(.., igw)| {
+                        Some(Ok((name, igw)))
+                    })
             })
-            .collect::<HashMap<_, _>>()
-            .await;
+            .try_collect::<HashMap<_, _>>()
+            .await?;
 
         let instances = stream::iter(instance_names)
             .filter_map(|name| async {
@@ -2636,10 +2657,11 @@ impl DataStore {
                     .instance_name(Name::ref_cast(&name))
                     .fetch()
                     .await
-                    .ok()
-                    .map(|(.., auth, inst)| (name, auth, inst))
+                    .map_or_else(allow_not_found, |(.., auth, inst)| {
+                        Some(Ok((name, auth, inst)))
+                    })
             })
-            .filter_map(|(name, authz_instance, instance)| async move {
+            .try_filter_map(|(name, authz_instance, instance)| async move {
                 // XXX: currently an instance can have one primary NIC,
                 //      and it is not dual-stack (v4 + v6). We need
                 //      to clarify what should be resolved in the v6 case.
@@ -2648,11 +2670,13 @@ impl DataStore {
                     &authz_instance,
                 )
                 .await
-                .ok()
-                .map(|primary_nic| (name, (instance, primary_nic)))
+                .map_or_else(allow_not_found, |primary_nic| {
+                    Some(Ok((name, (instance, primary_nic))))
+                })
+                .transpose()
             })
-            .collect::<HashMap<_, _>>()
-            .await;
+            .try_collect::<HashMap<_, _>>()
+            .await?;
 
         // See the discussion in `resolve_firewall_rules_for_sled_agent` on
         // how we should resolve name misses in route resolution.
@@ -3824,7 +3848,8 @@ mod tests {
             .unwrap();
 
         // Resolve the rules: we will have two entries generated by the
-        // VPC subnet (v4, v6).
+        // VPC subnet (v4, v6). The absence of an instance does not cause
+        // us to bail, it is simply a name resolution failure.
         let routes = datastore
             .vpc_resolve_router_rules(&opctx, authz_router.id())
             .await
