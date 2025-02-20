@@ -33,9 +33,9 @@ impl Display for ApiSpecFileName {
 
 impl ApiSpecFileName {
     /// Attempts to parse the given file basename as an ApiSpecFileName of kind
-    /// `Versioned`.  These look like:
+    /// `Versioned`
     ///
-    ///     ident-SEMVER-HASH.json
+    /// These look like: `ident-SEMVER-HASH.json`.
     fn parse_versioned(
         apis: &ManagedApis,
         ident: &str,
