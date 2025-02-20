@@ -1425,11 +1425,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.snapshot (
     size_bytes INT NOT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_snapshot_by_project ON omicron.public.snapshot (
-    project_id,
-    name
-) WHERE
-    time_deleted IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_snapshot_by_project
+    ON omicron.public.snapshot (
+        project_id,
+        name
+    ) WHERE
+        time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS lookup_snapshot_by_destination_volume_id
+    ON omicron.public.snapshot ( destination_volume_id );
+
+CREATE INDEX IF NOT EXISTS lookup_snapshot_by_volume_id
+    ON omicron.public.snapshot ( volume_id );
 
 /*
  * Oximeter collector servers.
@@ -4554,8 +4561,6 @@ CREATE INDEX IF NOT EXISTS lookup_any_disk_by_volume_id ON omicron.public.disk (
     volume_id
 );
 
-CREATE INDEX IF NOT EXISTS lookup_snapshot_by_destination_volume_id ON omicron.public.snapshot ( destination_volume_id );
-
 CREATE TYPE IF NOT EXISTS omicron.public.region_snapshot_replacement_state AS ENUM (
   'requested',
   'allocating',
@@ -4566,14 +4571,19 @@ CREATE TYPE IF NOT EXISTS omicron.public.region_snapshot_replacement_state AS EN
   'completing'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.read_only_target_replacement_type AS ENUM (
+  'region_snapshot',
+  'read_only_region'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.region_snapshot_replacement (
     id UUID PRIMARY KEY,
 
     request_time TIMESTAMPTZ NOT NULL,
 
-    old_dataset_id UUID NOT NULL,
+    old_dataset_id UUID,
     old_region_id UUID NOT NULL,
-    old_snapshot_id UUID NOT NULL,
+    old_snapshot_id UUID,
 
     old_snapshot_volume_id UUID,
 
@@ -4583,10 +4593,23 @@ CREATE TABLE IF NOT EXISTS omicron.public.region_snapshot_replacement (
 
     operating_saga_id UUID,
 
-    new_region_volume_id UUID
+    new_region_volume_id UUID,
+
+    replacement_type omicron.public.read_only_target_replacement_type NOT NULL,
+
+    CONSTRAINT proper_replacement_fields CHECK (
+      (
+       (replacement_type = 'region_snapshot') AND
+       ((old_dataset_id IS NOT NULL) AND (old_snapshot_id IS NOT NULL))
+      ) OR (
+       (replacement_type = 'read_only_region') AND
+       ((old_dataset_id IS NULL) AND (old_snapshot_id IS NULL))
+      )
+    )
 );
 
-CREATE INDEX IF NOT EXISTS lookup_region_snapshot_replacement_by_state on omicron.public.region_snapshot_replacement (replacement_state);
+CREATE INDEX IF NOT EXISTS lookup_region_snapshot_replacement_by_state
+ON omicron.public.region_snapshot_replacement (replacement_state);
 
 CREATE TYPE IF NOT EXISTS omicron.public.region_snapshot_replacement_step_state AS ENUM (
   'requested',

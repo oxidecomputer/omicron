@@ -566,7 +566,6 @@ impl<'a> Root<'a> {
 lookup_resource! {
     name = "Silo",
     ancestors = [],
-    children = [ "IdentityProvider", "SamlIdentityProvider", "Project", "SiloImage", "Certificate" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -575,7 +574,6 @@ lookup_resource! {
 lookup_resource! {
     name = "SiloUser",
     ancestors = [ "Silo" ],
-    children = [ "SshKey" ],
     lookup_by_name = false,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ],
@@ -585,7 +583,6 @@ lookup_resource! {
 lookup_resource! {
     name = "SiloGroup",
     ancestors = [ "Silo" ],
-    children = [],
     lookup_by_name = false,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -594,7 +591,6 @@ lookup_resource! {
 lookup_resource! {
     name = "SiloImage",
     ancestors = [ "Silo" ],
-    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -603,7 +599,6 @@ lookup_resource! {
 lookup_resource! {
     name = "IdentityProvider",
     ancestors = [ "Silo" ],
-    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [
@@ -615,7 +610,6 @@ lookup_resource! {
 lookup_resource! {
     name = "IpPool",
     ancestors = [],
-    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid }]
@@ -624,7 +618,6 @@ lookup_resource! {
 lookup_resource! {
     name = "SamlIdentityProvider",
     ancestors = [ "Silo" ],
-    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [
@@ -636,7 +629,6 @@ lookup_resource! {
 lookup_resource! {
     name = "SshKey",
     ancestors = [ "Silo", "SiloUser" ],
-    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -645,7 +637,6 @@ lookup_resource! {
 lookup_resource! {
     name = "Project",
     ancestors = [ "Silo" ],
-    children = [ "Disk", "Instance", "Vpc", "Snapshot", "ProjectImage", "FloatingIp" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -654,7 +645,6 @@ lookup_resource! {
 lookup_resource! {
     name = "Disk",
     ancestors = [ "Silo", "Project" ],
-    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -663,7 +653,6 @@ lookup_resource! {
 lookup_resource! {
     name = "Image",
     ancestors = ["Silo"],
-    children = [],
     lookup_by_name = false,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -672,7 +661,6 @@ lookup_resource! {
 lookup_resource! {
     name = "ProjectImage",
     ancestors = [ "Silo", "Project" ],
-    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -681,7 +669,6 @@ lookup_resource! {
 lookup_resource! {
     name = "Snapshot",
     ancestors = [ "Silo", "Project" ],
-    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -690,7 +677,6 @@ lookup_resource! {
 lookup_resource! {
     name = "Instance",
     ancestors = [ "Silo", "Project" ],
-    children = [ "InstanceNetworkInterface" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -699,7 +685,6 @@ lookup_resource! {
 lookup_resource! {
     name = "InstanceNetworkInterface",
     ancestors = [ "Silo", "Project", "Instance" ],
-    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -708,7 +693,6 @@ lookup_resource! {
 lookup_resource! {
     name = "Vpc",
     ancestors = [ "Silo", "Project" ],
-    children = [ "VpcRouter", "VpcSubnet", "InternetGateway" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -717,7 +701,6 @@ lookup_resource! {
 lookup_resource! {
     name = "VpcRouter",
     ancestors = [ "Silo", "Project", "Vpc" ],
-    children = [ "RouterRoute" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -726,7 +709,6 @@ lookup_resource! {
 lookup_resource! {
     name = "RouterRoute",
     ancestors = [ "Silo", "Project", "Vpc", "VpcRouter" ],
-    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -735,7 +717,6 @@ lookup_resource! {
 lookup_resource! {
     name = "VpcSubnet",
     ancestors = [ "Silo", "Project", "Vpc" ],
-    children = [ ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -744,7 +725,6 @@ lookup_resource! {
 lookup_resource! {
     name = "InternetGateway",
     ancestors = [ "Silo", "Project", "Vpc" ],
-    children = [ "InternetGatewayIpPool", "InternetGatewayIpAddress" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -753,7 +733,6 @@ lookup_resource! {
 lookup_resource! {
     name = "InternetGatewayIpPool",
     ancestors = [ "Silo", "Project", "Vpc", "InternetGateway" ],
-    children = [ ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -762,7 +741,6 @@ lookup_resource! {
 lookup_resource! {
     name = "InternetGatewayIpAddress",
     ancestors = [ "Silo", "Project", "Vpc", "InternetGateway" ],
-    children = [ ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -771,7 +749,6 @@ lookup_resource! {
 lookup_resource! {
     name = "FloatingIp",
     ancestors = [ "Silo", "Project" ],
-    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -782,7 +759,6 @@ lookup_resource! {
 lookup_resource! {
     name = "ConsoleSession",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [
@@ -793,7 +769,6 @@ lookup_resource! {
 lookup_resource! {
     name = "DeviceAuthRequest",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [
@@ -804,7 +779,6 @@ lookup_resource! {
 lookup_resource! {
     name = "DeviceAccessToken",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [
@@ -815,7 +789,6 @@ lookup_resource! {
 lookup_resource! {
     name = "RoleBuiltin",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [
@@ -827,7 +800,6 @@ lookup_resource! {
 lookup_resource! {
     name = "Rack",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -836,7 +808,6 @@ lookup_resource! {
 lookup_resource! {
     name = "Sled",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -845,7 +816,6 @@ lookup_resource! {
 lookup_resource! {
     name = "Zpool",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -854,7 +824,6 @@ lookup_resource! {
 lookup_resource! {
     name = "SledInstance",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ],
@@ -863,7 +832,6 @@ lookup_resource! {
 lookup_resource! {
     name = "Switch",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -872,7 +840,6 @@ lookup_resource! {
 lookup_resource! {
     name = "PhysicalDisk",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", uuid_kind = PhysicalDiskKind } ]
@@ -881,7 +848,6 @@ lookup_resource! {
 lookup_resource! {
     name = "SupportBundle",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [ { column_name = "id", uuid_kind = SupportBundleKind } ]
@@ -892,7 +858,6 @@ lookup_resource! {
     ancestors = [],
     // TODO: should this have TufArtifact as a child? This is a many-many
     // relationship.
-    children = [],
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [ { column_name = "id", uuid_kind = TufRepoKind } ]
@@ -901,7 +866,6 @@ lookup_resource! {
 lookup_resource! {
     name = "TufArtifact",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [ { column_name = "id", uuid_kind = TufArtifactKind } ]
@@ -910,7 +874,6 @@ lookup_resource! {
 lookup_resource! {
     name = "UserBuiltin",
     ancestors = [],
-    children = [],
     lookup_by_name = true,
     soft_deletes = false,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -919,7 +882,6 @@ lookup_resource! {
 lookup_resource! {
     name = "Certificate",
     ancestors = [ "Silo" ],
-    children = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -927,8 +889,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "AddressLot",
-    ancestors = [],
-    children = [], // TODO: Should this include AddressLotBlock?
+    ancestors = [], // TODO: Should this include AddressLotBlock?
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -937,7 +898,6 @@ lookup_resource! {
 lookup_resource! {
     name = "LoopbackAddress",
     ancestors = [],
-    children = [],
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [

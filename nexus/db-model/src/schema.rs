@@ -1945,14 +1945,15 @@ table! {
     region_snapshot_replacement (id) {
         id -> Uuid,
         request_time -> Timestamptz,
-        old_dataset_id -> Uuid,
+        old_dataset_id -> Nullable<Uuid>,
         old_region_id -> Uuid,
-        old_snapshot_id -> Uuid,
+        old_snapshot_id -> Nullable<Uuid>,
         old_snapshot_volume_id -> Nullable<Uuid>,
         new_region_id -> Nullable<Uuid>,
         replacement_state -> crate::RegionSnapshotReplacementStateEnum,
         operating_saga_id -> Nullable<Uuid>,
         new_region_volume_id -> Nullable<Uuid>,
+        replacement_type -> crate::ReadOnlyTargetReplacementTypeEnum,
     }
 }
 

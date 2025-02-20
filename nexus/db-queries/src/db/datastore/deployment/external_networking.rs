@@ -439,6 +439,7 @@ mod tests {
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use oxnet::IpNet;
+    use std::collections::BTreeSet;
     use std::net::IpAddr;
     use std::net::SocketAddr;
     use uuid::Uuid;
@@ -467,6 +468,31 @@ mod tests {
             .expect("bad IP range");
             let mut external_ips = external_ips_range.iter();
 
+            let mut random_system_mac_iter = {
+                // Avoid test flakes when we happen to generate two equal MACs
+                // at random by just retrying; we only generate a handful of
+                // MACs here so there's no concern with this getting stuck.
+                let mut already_seen = BTreeSet::new();
+                std::iter::from_fn(move || {
+                    // Some absurdly high number to bail out if somehow we're
+                    // not getting random MACs or we've generated so many that
+                    // we're not seeing unique values. Our test harness
+                    // currently only needs 3.
+                    const MAX_TRIES: usize = 10_000;
+                    for _ in 0..MAX_TRIES {
+                        let mac = MacAddr::random_system();
+                        if already_seen.insert(mac) {
+                            return Some(mac);
+                        }
+                    }
+                    panic!(
+                        "generated {MAX_TRIES} random mac addresses, \
+                         but only got {} unique values",
+                        already_seen.len()
+                    );
+                })
+            };
+
             let nexus_id = OmicronZoneUuid::new_v4();
             let nexus_external_ip = OmicronZoneExternalFloatingIp {
                 id: ExternalIpUuid::new_v4(),
@@ -482,7 +508,7 @@ mod tests {
                     .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
                     .unwrap()
                     .into(),
-                mac: MacAddr::random_system(),
+                mac: random_system_mac_iter.next().unwrap(),
                 subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
                 vni: Vni::SERVICES_VNI,
                 primary: true,
@@ -508,7 +534,7 @@ mod tests {
                     .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
                     .unwrap()
                     .into(),
-                mac: MacAddr::random_system(),
+                mac: random_system_mac_iter.next().unwrap(),
                 subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET),
                 vni: Vni::SERVICES_VNI,
                 primary: true,
@@ -537,7 +563,7 @@ mod tests {
                     .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
                     .unwrap()
                     .into(),
-                mac: MacAddr::random_system(),
+                mac: random_system_mac_iter.next().unwrap(),
                 subnet: IpNet::from(*NTP_OPTE_IPV4_SUBNET),
                 vni: Vni::SERVICES_VNI,
                 primary: true,

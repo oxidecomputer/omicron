@@ -362,14 +362,14 @@ crossterm = { version = "0.28.1", features = ["event-stream"] }
 # NOTE: if you change the pinned revision of the `crucible` dependencies, you
 # must also update the references in package-manifest.toml to match the new
 # revision.
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "03f940b8387750d8955b37e3cc31cc91a2727262" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "03f940b8387750d8955b37e3cc31cc91a2727262" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "03f940b8387750d8955b37e3cc31cc91a2727262" }
-crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "03f940b8387750d8955b37e3cc31cc91a2727262" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "d2d8f8ad449df7e2befb7ee2723a442dd74b9b72" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "d2d8f8ad449df7e2befb7ee2723a442dd74b9b72" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "d2d8f8ad449df7e2befb7ee2723a442dd74b9b72" }
+crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "d2d8f8ad449df7e2befb7ee2723a442dd74b9b72" }
 # NOTE: See above!
 csv = "1.3.1"
 curve25519-dalek = "4"
-daft = { git = "https://github.com/oxidecomputer/daft", branch = "main", features = ["newtype-uuid1", "oxnet01", "uuid1"] }
+daft = { version = "0.1.1", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
 datatest-stable = "0.2.9"
 display-error-chain = "0.2.2"
 omicron-ddm-admin-client = { path = "clients/ddm-admin-client" }
@@ -378,7 +378,7 @@ debug-ignore = "1.0.5"
 derive_more = "0.99.18"
 derive-where = "1.2.7"
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
-diesel = { version = "2.2.6", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+diesel = { version = "2.2.7", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = "0.4.2"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
@@ -417,10 +417,10 @@ headers = "0.4.0"
 heck = "0.5"
 hex = "0.4.3"
 hex-literal = "0.4.1"
-hickory-client = "0.24.2"
-hickory-proto = "0.24.2"
-hickory-resolver = "0.24.2"
-hickory-server = "0.24.2"
+hickory-client = "0.24.3"
+hickory-proto = "0.24.3"
+hickory-resolver = "0.24.3"
+hickory-server = "0.24.3"
 highway = "1.2.0"
 hkdf = "0.12.4"
 http = "1.2.0"
@@ -451,7 +451,7 @@ ipcc = { path = "ipcc" }
 ipnet = "2.9"
 itertools = "0.13.0"
 internet-checksum = "0.2"
-ipnetwork = { version = "0.20", features = ["schemars"] }
+ipnetwork = { version = "0.21", features = ["schemars", "serde"] }
 ispf = { git = "https://github.com/oxidecomputer/ispf" }
 key-manager = { path = "key-manager" }
 kstat-rs = "0.2.4"
@@ -466,8 +466,8 @@ macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 mockall = "0.13"
 newtype_derive = "0.1.6"
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "93cd0d642cf1b58f9f4528275e2a2aa758e9feb3" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "93cd0d642cf1b58f9f4528275e2a2aa758e9feb3" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "cb2b592e890ca9e93d8193e9765e2a62459d5fa8" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "cb2b592e890ca9e93d8193e9765e2a62459d5fa8" }
 multimap = "0.10.0"
 nexus-auth = { path = "nexus/auth" }
 nexus-client = { path = "clients/nexus-client" }
@@ -494,6 +494,7 @@ nexus-test-interface = { path = "nexus/test-interface" }
 nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
 nexus-types = { path = "nexus/types" }
+nix = { version = "0.29", features = ["net"] }
 nom = "7.1.3"
 num-integer = "0.1.46"
 num = { version = "0.4.3", default-features = false, features = [ "libm" ] }
@@ -515,9 +516,9 @@ omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.0"
 oxide-client = { path = "clients/oxide-client" }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "b56afeeb14e0042cbd7bda85b166ed86ee17820e", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
-oxnet = { git = "https://github.com/oxidecomputer/oxnet" }
+oxnet = "0.1.0"
 once_cell = "1.20.2"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapi-manager-types = { path = "dev-tools/openapi-manager/types" }
@@ -525,7 +526,7 @@ openapiv3 = "2.0.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "b56afeeb14e0042cbd7bda85b166ed86ee17820e" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa" }
 oso = "0.27"
 owo-colors = "4.1.0"
 oximeter = { path = "oximeter/oximeter" }
@@ -565,10 +566,10 @@ progenitor-client = "0.9.1"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "0c186579ba1fafc5a75d46d2ac8ab9ffa97fe309" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "0c186579ba1fafc5a75d46d2ac8ab9ffa97fe309" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "0c186579ba1fafc5a75d46d2ac8ab9ffa97fe309" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "0c186579ba1fafc5a75d46d2ac8ab9ffa97fe309" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "95d6a559890c94e3aa62c8adcd7c4e123ec4c6dc" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "95d6a559890c94e3aa62c8adcd7c4e123ec4c6dc" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "95d6a559890c94e3aa62c8adcd7c4e123ec4c6dc" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "95d6a559890c94e3aa62c8adcd7c4e123ec4c6dc" }
 # NOTE: see above!
 proptest = "1.5.0"
 qorb = "0.2.1"
@@ -670,7 +671,7 @@ tokio-util = { version = "0.7.12", features = ["io", "io-util"] }
 toml = "0.8.19"
 toml_edit = "0.22.22"
 tough = { version = "0.19.0", features = [ "http" ] }
-transceiver-decode = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
+transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
 trybuild = "1.0.101"
 tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }
