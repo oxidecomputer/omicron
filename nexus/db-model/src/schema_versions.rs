@@ -29,7 +29,7 @@ static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(125, "bp-physical-disk-state"),
+        KnownVersion::new(125, "bp-disk-disposition-expunged-cleanup"),
         KnownVersion::new(124, "support-read-only-region-replacement"),
         KnownVersion::new(123, "vpc-subnet-contention"),
         KnownVersion::new(122, "tuf-artifact-replication"),
