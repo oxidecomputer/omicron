@@ -402,7 +402,7 @@ pub async fn run_standalone_server(
             },
         ),
         // Co-locate the filesystem pool with the dataset
-        filesystem_pool: Some(pool_name),
+        filesystem_pool: pool_name,
     }];
 
     let mut internal_services_ip_pool_ranges = vec![];
@@ -440,7 +440,7 @@ pub async fn run_standalone_server(
                 external_tls: false,
                 external_dns_servers: vec![],
             }),
-            filesystem_pool: Some(get_random_zpool()),
+            filesystem_pool: get_random_zpool(),
         });
 
         internal_services_ip_pool_ranges.push(match ip {
@@ -491,7 +491,7 @@ pub async fn run_standalone_server(
                 },
             ),
             // Co-locate the filesystem pool with the dataset
-            filesystem_pool: Some(pool_name),
+            filesystem_pool: pool_name,
         });
 
         internal_services_ip_pool_ranges

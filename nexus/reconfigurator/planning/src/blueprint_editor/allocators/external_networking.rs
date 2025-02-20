@@ -884,7 +884,7 @@ pub mod test {
             BlueprintZoneConfig {
                 disposition,
                 id,
-                filesystem_pool: Some(pool_name.clone()),
+                filesystem_pool: pool_name.clone(),
                 zone_type: BlueprintZoneType::ExternalDns(
                     blueprint_zone_type::ExternalDns {
                         dataset: OmicronZoneDataset { pool_name },

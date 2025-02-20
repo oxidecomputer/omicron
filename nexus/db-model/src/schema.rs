@@ -1754,7 +1754,7 @@ table! {
         snat_last_port -> Nullable<Int4>,
         disposition -> crate::DbBpZoneDispositionEnum,
         external_ip_id -> Nullable<Uuid>,
-        filesystem_pool -> Nullable<Uuid>,
+        filesystem_pool -> Uuid,
     }
 }
 

@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::blueprint_builder::EditCounts;
-use illumos_utils::zpool::ZpoolName;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::id_map::Entry;
 use nexus_types::deployment::id_map::IdMap;
@@ -96,32 +95,6 @@ impl ZonesEditor {
         }
     }
 
-    /// Temporary method to backfill `filesystem_pool` properties for existing
-    /// zones.
-    ///
-    /// # Panics
-    ///
-    /// Panics if called with a nonexistent zone_id. This is not meant to be a
-    /// general-purpose method and should be removed entirely once all deployed
-    /// systems have this property backfilled successfully.
-    pub(super) fn backfill_filesystem_pool(
-        &mut self,
-        zone_id: OmicronZoneUuid,
-        filesystem_pool: ZpoolName,
-    ) {
-        let Some(mut zone) = self.zones.get_mut(&zone_id) else {
-            panic!(
-                "backfill_filesystem_pool called with \
-                 nonexistent zone id {zone_id}"
-            );
-        };
-
-        if zone.filesystem_pool.as_ref() != Some(&filesystem_pool) {
-            zone.filesystem_pool = Some(filesystem_pool);
-            self.counts.updated += 1;
-        }
-    }
-
     /// Expunge a zone, returning `true` if the zone was expunged and `false` if
     /// the zone was already expunged, along with the updated zone config.
     pub fn expunge(
@@ -162,10 +135,7 @@ impl ZonesEditor {
             // this zpool. (If it has both, they should be on the _same_ zpool,
             // but that's not strictly required by this method - we'll expunge a
             // zone that depends on this zpool in any way.)
-            let fs_is_on_zpool = config
-                .filesystem_pool
-                .as_ref()
-                .map_or(false, |pool| pool.id() == *zpool);
+            let fs_is_on_zpool = config.filesystem_pool.id() == *zpool;
             let dd_is_on_zpool = config
                 .zone_type
                 .durable_zpool()
