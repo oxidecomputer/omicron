@@ -38,7 +38,6 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
-use omicron_common::api::external::SemverVersion;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service, BackoffError,
 };
@@ -221,13 +220,14 @@ impl DataStore {
         config: Option<&AllSchemaVersions>,
         try_for: Option<std::time::Duration>,
     ) -> Result<Self, String> {
+        use nexus_db_model::SCHEMA_VERSION as EXPECTED_VERSION;
+
         let datastore =
             Self::new_unchecked(log.new(o!("component" => "datastore")), pool);
 
         let start = std::time::Instant::now();
 
         // Keep looping until we find that the schema matches our expectation.
-        const EXPECTED_VERSION: SemverVersion = nexus_db_model::SCHEMA_VERSION;
         retry_notify(
             retry_policy_internal_service(),
             || async {
@@ -262,9 +262,10 @@ impl DataStore {
         log: &Logger,
         pool: Arc<Pool>,
     ) -> Result<Self, anyhow::Error> {
+        use nexus_db_model::SCHEMA_VERSION as EXPECTED_VERSION;
+
         let datastore =
             Self::new_unchecked(log.new(o!("component" => "datastore")), pool);
-        const EXPECTED_VERSION: SemverVersion = nexus_db_model::SCHEMA_VERSION;
         let (found_version, found_target) = datastore
             .database_schema_version()
             .await

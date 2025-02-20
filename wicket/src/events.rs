@@ -4,6 +4,7 @@
 use crate::{keymap::Cmd, state::ComponentId, State};
 use camino::Utf8PathBuf;
 use humantime::format_rfc3339;
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
@@ -12,7 +13,7 @@ use wicket_common::inventory::RackV1Inventory;
 use wicket_common::update_events::EventReport;
 use wicketd_client::types::{
     ArtifactId, CurrentRssUserConfig, GetLocationResponse, IgnitionCommand,
-    RackOperationStatus, SemverVersion,
+    RackOperationStatus,
 };
 
 /// Event report type returned by the get_artifacts_and_event_reports API call.
@@ -40,7 +41,7 @@ pub enum Event {
 
     /// TUF repo artifacts unpacked by wicketd, and event reports
     ArtifactsAndEventReports {
-        system_version: Option<SemverVersion>,
+        system_version: Option<Version>,
         artifacts: Vec<ArtifactData>,
         event_reports: EventReportMap,
     },

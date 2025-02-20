@@ -11,12 +11,12 @@ use dropshot::RequestContext;
 use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use gateway_client::types::IgnitionCommand;
-use omicron_common::api::external::SemverVersion;
 use omicron_common::update::ArtifactHashId;
 use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
 use schemars::JsonSchema;
+use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_hardware_types::Baseboard;
@@ -473,7 +473,7 @@ pub struct InstallableArtifacts {
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct GetArtifactsAndEventReportsResponse {
-    pub system_version: Option<SemverVersion>,
+    pub system_version: Option<Version>,
 
     /// Map of artifacts we ingested from the most-recently-uploaded TUF
     /// repository to a list of artifacts we're serving over the bootstrap
