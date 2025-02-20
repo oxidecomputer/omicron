@@ -81,37 +81,37 @@ to:   blueprint 74f2e7fd-687e-4c9e-b5d8-e474a5bb8e7c
     zone type           zone id                                disposition      underlay IP           
     --------------------------------------------------------------------------------------------------
 *   clickhouse          96dcbb7a-0140-4590-801c-406866500995   - in service     fd00:1122:3344:101::23
-     └─                                                        + expunged ⏳                           
+     └─                                                        + expunged ✓                           
 *   clickhouse_keeper   1998de68-a305-44f7-8ebc-cc5613c9e6fb   - in service     fd00:1122:3344:101::2f
-     └─                                                        + expunged ⏳                           
+     └─                                                        + expunged ✓                           
 *   crucible            5366862d-0c9e-4c21-bd16-5599298e75bc   - in service     fd00:1122:3344:101::2b
-     └─                                                        + expunged ⏳                           
+     └─                                                        + expunged ✓                           
 *   crucible            63dcf460-2794-434c-b0e7-4e09ba0f3a3c   - in service     fd00:1122:3344:101::28
-     └─                                                        + expunged ⏳                           
+     └─                                                        + expunged ✓                           
 *   crucible            71f24994-337b-4c5f-9826-75f885a669e7   - in service     fd00:1122:3344:101::2e
-     └─                                                        + expunged ⏳                           
+     └─                                                        + expunged ✓                           
 *   crucible            726f6522-a359-4e6e-abe9-0de41979de91   - in service     fd00:1122:3344:101::26
-     └─                                                        + expunged ⏳                           
+     └─                                                        + expunged ✓                           
 *   crucible            a794a5cd-ec63-4fe4-a813-720d79dcd2ca   - in service     fd00:1122:3344:101::2d
-     └─                                                        + expunged ⏳                           
+     └─                                                        + expunged ✓                           
 *   crucible            ab480489-af1c-4446-8e95-da4a7e58df59   - in service     fd00:1122:3344:101::25
-     └─                                                        + expunged ⏳                           
+     └─                                                        + expunged ✓                           
 *   crucible            cc6e2a17-ba9b-4332-b869-e0ce204915cf   - in service     fd00:1122:3344:101::2c
-     └─                                                        + expunged ⏳                           
+     └─                                                        + expunged ✓                           
 *   crucible            e5cd215f-19c6-43ca-b31a-039319dd5dcf   - in service     fd00:1122:3344:101::29
-     └─                                                        + expunged ⏳                           
+     └─                                                        + expunged ✓                           
 *   crucible            e7bc709c-4ef2-4f1f-be78-494f53169554   - in service     fd00:1122:3344:101::2a
-     └─                                                        + expunged ⏳                           
+     └─                                                        + expunged ✓                           
 *   crucible            fbaea242-74a6-490f-9bc0-0710a40768f4   - in service     fd00:1122:3344:101::27
-     └─                                                        + expunged ⏳                           
+     └─                                                        + expunged ✓                           
 *   crucible_pantry     ed79fef8-6124-4ecc-aaa4-51cf9fcf58db   - in service     fd00:1122:3344:101::24
-     └─                                                        + expunged ⏳                           
+     └─                                                        + expunged ✓                           
 *   internal_dns        4d152a2b-089e-4fe2-89fa-76b53fa58773   - in service     fd00:1122:3344:1::1   
-     └─                                                        + expunged ⏳                           
+     └─                                                        + expunged ✓                           
 *   internal_ntp        89d38277-9743-491b-af94-714776657ce2   - in service     fd00:1122:3344:101::21
-     └─                                                        + expunged ⏳                           
+     └─                                                        + expunged ✓                           
 *   nexus               4cb9b6d5-fd52-4cfb-b630-59f80bd26615   - in service     fd00:1122:3344:101::22
-     └─                                                        + expunged ⏳                           
+     └─                                                        + expunged ✓                           
 
 
   sled cdba3bea-3407-4b6e-a029-19bf4a02fca7 (active):

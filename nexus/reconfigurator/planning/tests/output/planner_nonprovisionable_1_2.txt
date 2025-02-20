@@ -171,33 +171,33 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
     zone type         zone id                                disposition      underlay IP           
     ------------------------------------------------------------------------------------------------
 *   crucible          085d10cb-a6f0-46de-86bc-ad2f7f1defcf   - in service     fd00:1122:3344:103::2d
-     └─                                                      + expunged ⏳                           
+     └─                                                      + expunged ✓                           
 *   crucible          2bf62dfa-537a-4616-aad5-64447faaec53   - in service     fd00:1122:3344:103::2b
-     └─                                                      + expunged ⏳                           
+     └─                                                      + expunged ✓                           
 *   crucible          50d43a78-e9af-4051-9f5d-85410f44214b   - in service     fd00:1122:3344:103::27
-     └─                                                      + expunged ⏳                           
+     └─                                                      + expunged ✓                           
 *   crucible          6e7b5239-0d2e-42a5-80aa-51a3bc859318   - in service     fd00:1122:3344:103::2a
-     └─                                                      + expunged ⏳                           
+     └─                                                      + expunged ✓                           
 *   crucible          8d87b485-3fb4-480b-97ce-02d066b799d7   - in service     fd00:1122:3344:103::26
-     └─                                                      + expunged ⏳                           
+     └─                                                      + expunged ✓                           
 *   crucible          b3d757b8-033f-4a68-82db-6ff5331b9739   - in service     fd00:1122:3344:103::25
-     └─                                                      + expunged ⏳                           
+     └─                                                      + expunged ✓                           
 *   crucible          bcd98cf5-a798-4aa0-81cc-8972a376073c   - in service     fd00:1122:3344:103::28
-     └─                                                      + expunged ⏳                           
+     └─                                                      + expunged ✓                           
 *   crucible          bd12d9d5-bccf-433a-b078-794a69aeb89a   - in service     fd00:1122:3344:103::29
-     └─                                                      + expunged ⏳                           
+     └─                                                      + expunged ✓                           
 *   crucible          d283707c-1b8f-4cb9-946d-041b25a83967   - in service     fd00:1122:3344:103::2c
-     └─                                                      + expunged ⏳                           
+     └─                                                      + expunged ✓                           
 *   crucible          e362415d-2d54-4574-b823-3f01b9b751de   - in service     fd00:1122:3344:103::24
-     └─                                                      + expunged ⏳                           
+     └─                                                      + expunged ✓                           
 *   crucible_pantry   208c987a-ab33-47a3-a103-6108dd6dc4cb   - in service     fd00:1122:3344:103::23
-     └─                                                      + expunged ⏳                           
+     └─                                                      + expunged ✓                           
 *   internal_dns      c428175e-6a1c-40bf-aa36-f608a57431f5   - in service     fd00:1122:3344:2::1   
-     └─                                                      + expunged ⏳                           
+     └─                                                      + expunged ✓                           
 *   internal_ntp      a8f1b53a-4231-4f04-9939-29e50a0f0e2c   - in service     fd00:1122:3344:103::21
-     └─                                                      + expunged ⏳                           
+     └─                                                      + expunged ✓                           
 *   nexus             533416e6-d0bd-482d-b592-29346c8a3471   - in service     fd00:1122:3344:103::22
-     └─                                                      + expunged ⏳                           
+     └─                                                      + expunged ✓                           
 
 
   sled 68d24ac5-f341-49ea-a92a-0381b52ab387 (decommissioned):

@@ -1452,7 +1452,7 @@ pub(crate) mod test {
             BlueprintZoneDisposition::Expunged {
                 as_of_generation: blueprint2.blueprint_zones[&sled_id]
                     .generation,
-                ready_for_cleanup: false,
+                ready_for_cleanup: true,
             }
         );
 
@@ -1654,7 +1654,7 @@ pub(crate) mod test {
                             as_of_generation: blueprint3.blueprint_zones
                                 [&sled_id]
                                 .generation,
-                            ready_for_cleanup: false,
+                            ready_for_cleanup: true,
                         }
                         && zone.zone_type.is_external_dns()
                 })
@@ -2475,7 +2475,7 @@ pub(crate) mod test {
                 *modified_zone.disposition.after,
                 BlueprintZoneDisposition::Expunged {
                     as_of_generation: *modified_zones.generation.after,
-                    ready_for_cleanup: false,
+                    ready_for_cleanup: true,
                 },
                 "for {desc}, zone {} should have been marked expunged",
                 modified_zone.id.after

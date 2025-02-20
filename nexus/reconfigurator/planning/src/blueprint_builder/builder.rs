@@ -923,9 +923,21 @@ impl<'a> BlueprintBuilder<'a> {
         // Expunging a disk expunges any datasets and zones that depend on it,
         // so expunging all in-service disks should have also expunged all
         // datasets and zones. Double-check that that's true.
+        let mut zones_ready_for_cleanup = Vec::new();
         for zone in editor.zones(BlueprintZoneDisposition::any) {
             match zone.disposition {
-                BlueprintZoneDisposition::Expunged { .. } => (),
+                BlueprintZoneDisposition::Expunged {
+                    ready_for_cleanup,
+                    ..
+                } => {
+                    // Since this is a full sled expungement, we'll never see an
+                    // inventory collection indicating the zones are shut down,
+                    // nor do we need to: go ahead any expunged zones as ready
+                    // for cleanup, skipping those that are already marked.
+                    if !ready_for_cleanup {
+                        zones_ready_for_cleanup.push(zone.id);
+                    }
+                }
                 BlueprintZoneDisposition::InService => {
                     return Err(Error::Planner(anyhow!(
                         "expunged all disks but a zone \
@@ -944,6 +956,11 @@ impl<'a> BlueprintBuilder<'a> {
                     )));
                 }
             }
+        }
+        for zone_id in zones_ready_for_cleanup {
+            editor
+                .mark_expunged_zone_ready_for_cleanup(&zone_id)
+                .map_err(|err| Error::SledEditError { sled_id, err })?;
         }
 
         // If we didn't expunge anything, this sled was presumably expunged in a
