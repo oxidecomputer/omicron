@@ -435,7 +435,7 @@ impl DnsConfigBuilder {
         );
         let zone = self.host_zone(zone_id, *http_address.ip())?;
         self.service_backend_zone(http_service, &zone, http_address.port())?;
-        // TODO-K: should this only exist for single node for the time being? 
+        // TODO-K: should this only exist for single node for the time being?
         self.service_backend_zone(
             ServiceName::ClickhouseNative,
             &zone,

@@ -164,7 +164,6 @@ impl OximeterAgent {
         tokio::spawn(async move {
             crate::results_sink::database_inserter(
                 insertion_log,
-                // TODO: Pass a second client here to write to cluster
                 client,
                 Some(cluster_client),
                 db_config.batch_size,

@@ -267,8 +267,10 @@ impl Oximeter {
             let resolver =
                 make_resolver(config.db.address, ServiceName::ClickhouseNative);
             // TODO-K: change maybe address to config.db.cluster_address. Maybe I don't even need that?
-            let cluster_resolver =
-                make_resolver(config.db.address, ServiceName::ClickhouseClusterNative);
+            let cluster_resolver = make_resolver(
+                config.db.address,
+                ServiceName::ClickhouseClusterNative,
+            );
             Ok(Arc::new(
                 OximeterAgent::with_id(
                     args.id,
