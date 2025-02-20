@@ -4104,6 +4104,46 @@
           "ncpus"
         ]
       },
+      "InternetGatewayRouterTarget": {
+        "description": "An Internet Gateway router target.",
+        "oneOf": [
+          {
+            "description": "Targets the gateway for the system-internal services VPC.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "system"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Targets a gateway for an instance's VPC.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
       "Inventory": {
         "description": "Identity and basic status information about this sled agent",
         "type": "object",
@@ -5506,9 +5546,7 @@
                 ]
               },
               "value": {
-                "nullable": true,
-                "type": "string",
-                "format": "uuid"
+                "$ref": "#/components/schemas/InternetGatewayRouterTarget"
               }
             },
             "required": [

@@ -822,14 +822,26 @@ pub struct DhcpConfig {
 
 /// The target for a given router entry.
 #[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
 #[serde(tag = "type", rename_all = "snake_case", content = "value")]
 pub enum RouterTarget {
     Drop,
-    InternetGateway(Option<Uuid>),
+    InternetGateway(InternetGatewayRouterTarget),
     Ip(IpAddr),
     VpcSubnet(IpNet),
+}
+
+/// An Internet Gateway router target.
+#[derive(
+    Copy, Clone, Debug, Deserialize, Eq, Hash, JsonSchema, PartialEq, Serialize,
+)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum InternetGatewayRouterTarget {
+    /// Targets the gateway for the system-internal services VPC.
+    System,
+    /// Targets a gateway for an instance's VPC.
+    Instance(Uuid),
 }
 
 /// Information on the current parent router (and version) of a route set

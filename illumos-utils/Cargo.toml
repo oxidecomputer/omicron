@@ -49,6 +49,7 @@ opte-ioctl.workspace = true
 
 [dev-dependencies]
 mockall.workspace = true
+omicron-test-utils.workspace = true
 regress.workspace = true
 serde_json.workspace = true
 toml.workspace = true
