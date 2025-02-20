@@ -3955,18 +3955,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     disposition omicron.public.bp_zone_disposition NOT NULL,
 
     -- Specific properties of the `expunged` disposition
-    expunged_as_of_generation INT,
-    expunged_ready_for_cleanup BOOL NOT NULL,
+    disposition_expunged_as_of_generation INT,
+    disposition_expunged_ready_for_cleanup BOOL NOT NULL,
 
     PRIMARY KEY (blueprint_id, id),
 
     CONSTRAINT expunged_disposition_properties CHECK (
         (disposition != 'expunged'
-            AND expunged_as_of_generation IS NULL
-            AND NOT expunged_ready_for_cleanup)
+            AND disposition_expunged_as_of_generation IS NULL
+            AND NOT disposition_expunged_ready_for_cleanup)
         OR
         (disposition = 'expunged'
-            AND expunged_as_of_generation IS NOT NULL)
+            AND disposition_expunged_as_of_generation IS NOT NULL)
     )
 );
 

@@ -1753,8 +1753,8 @@ table! {
         snat_first_port -> Nullable<Int4>,
         snat_last_port -> Nullable<Int4>,
         disposition -> crate::DbBpZoneDispositionEnum,
-        expunged_as_of_generation -> Nullable<Int8>,
-        expunged_ready_for_cleanup -> Bool,
+        disposition_expunged_as_of_generation -> Nullable<Int8>,
+        disposition_expunged_ready_for_cleanup -> Bool,
         external_ip_id -> Nullable<Uuid>,
         filesystem_pool -> Nullable<Uuid>,
     }
