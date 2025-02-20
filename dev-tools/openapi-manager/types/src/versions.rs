@@ -87,10 +87,16 @@ impl SupportedVersions {
 /// Helper macro used to define API versions
 ///
 /// ```
+/// use openapi_manager_types::{
+///     api_versions,
+///     SupportedVersion,
+///     SupportedVersions
+/// };
+///
 /// api_versions!([
 ///     (2, ADD_FOOBAR_OPERATION),
 ///     (1, INITIAL),
-/// ])
+/// ]);
 /// ```
 ///
 /// This example says that there are two API versions: `1.0.0` (the initial
