@@ -81,7 +81,7 @@ impl WicketdApi for WicketdApiImpl {
         // We can't run RSS if we don't have an inventory from MGS yet; we always
         // need to fill in the bootstrap sleds first.
         let inventory =
-            inventory_or_unavail(&ctx.mgs_handle, &ctx.transceiver_handle)
+            mgs_inventory_or_unavail(&ctx.mgs_handle, &ctx.transceiver_handle)
                 .await?;
 
         let mut config = ctx.rss_config.lock().unwrap();
@@ -107,7 +107,7 @@ impl WicketdApi for WicketdApiImpl {
         // We can't run RSS if we don't have an inventory from MGS yet; we always
         // need to fill in the bootstrap sleds first.
         let inventory =
-            inventory_or_unavail(&ctx.mgs_handle, &ctx.transceiver_handle)
+            mgs_inventory_or_unavail(&ctx.mgs_handle, &ctx.transceiver_handle)
                 .await?;
 
         let mut config = ctx.rss_config.lock().unwrap();
@@ -455,9 +455,11 @@ impl WicketdApi for WicketdApiImpl {
         rqctx: RequestContext<ServerContext>,
     ) -> Result<HttpResponseOk<GetLocationResponse>, HttpError> {
         let rqctx = rqctx.context();
-        let inventory =
-            inventory_or_unavail(&rqctx.mgs_handle, &rqctx.transceiver_handle)
-                .await?;
+        let inventory = mgs_inventory_or_unavail(
+            &rqctx.mgs_handle,
+            &rqctx.transceiver_handle,
+        )
+        .await?;
 
         let switch_id = rqctx.local_switch_id().await;
         let sled_baseboard = rqctx.baseboard.clone();
@@ -918,7 +920,7 @@ impl WicketdApi for WicketdApiImpl {
 //
 // Note that 503 is returned if we can't get the MGS-based inventory. If we fail
 // to get the transceivers, that's not considered a fatal 503.
-async fn inventory_or_unavail(
+async fn mgs_inventory_or_unavail(
     mgs_handle: &MgsHandle,
     transceiver_handle: &TransceiverHandle,
 ) -> Result<RackV1Inventory, HttpError> {
