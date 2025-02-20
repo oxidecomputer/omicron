@@ -31,9 +31,18 @@ const CHANNEL_CAPACITY: usize = 4;
 const TRANSCEIVER_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 // IP interface we use when polling transceivers on the local switch.
+//
+// NOTE: This always refers to _our_ switch, the one we're currently on,
+// regardless of whether we're running on switch0 or switch1.
+//
+// We will need to change these if we address
+// https://github.com/oxidecomputer/dendrite/issues/221.
 const LOCAL_SWITCH_SP_INTERFACE: &str = "sidecar0";
 
 // IP interface we use when polling transceivers on the other switch.
+//
+// NOTE: This always refers to _the other_ switch, the one we're not currently
+// running on, regardless of whether we're running on switch0 or switch1.
 const OTHER_SWITCH_SP_INTERFACE: &str = "sidecar1";
 
 #[derive(Clone, Debug)]
@@ -64,9 +73,11 @@ impl Handle {
             1 => SwitchLocation::Switch1,
             _ => unreachable!(),
         };
+        println!("SENDING");
         self.switch_location_tx
             .send(Some(loc))
             .expect("Should always have a receiver");
+        println!("SENT");
     }
 
     /// Get the current transceiver state, if we know it.
@@ -101,17 +112,26 @@ impl Manager {
 
     pub(crate) async fn run(mut self) {
         // First, we need to wait until we know the switch location.
+        //
+        // The watch Receiver was created with `None`, which is considered seen.
+        // We've never called any other borrowing method between the creation
+        // and here, so changed() will wait until we get something new.
         debug!(self.log, "waiting to learn our switch location");
         let our_switch_location = loop {
+            if self.switch_location_rx.changed().await.is_err() {
+                slog::warn!(
+                    self.log,
+                    "failed to wait for new switch location change \
+                    notification, exiting";
+                );
+                return;
+            };
             match *self.switch_location_rx.borrow_and_update() {
                 Some(loc) => break loc,
                 None => continue,
             }
         };
-        let other_switch_location = match our_switch_location {
-            SwitchLocation::Switch0 => SwitchLocation::Switch1,
-            SwitchLocation::Switch1 => SwitchLocation::Switch0,
-        };
+        let other_switch_location = our_switch_location.other();
         debug!(
             self.log,
             "determined our switch locations, spawning transceiver fetch tasks";
@@ -313,6 +333,10 @@ async fn fetch_transceiver_state(
     // Start by fetching the status of all modules.
     //
     // As we ask for more data, the set of modules we address might get smaller.
+    // Each operation is fallible, and each module can fail independently. So we
+    // continually overwrite the set of modules we're considering at each
+    // operation, so that by the end, we have the modules for which we've
+    // successfully collected all the data.
     let mut modules = ModuleId::all();
     let all_status = controller.extended_status(modules).await?;
 
@@ -340,30 +364,18 @@ async fn fetch_transceiver_state(
     modules = all_monitors.modules;
 
     // Now, combine everything.
+    //
+    // If we failed any operation for a module, we'll insert `None` so that we
+    // still have whatever data we _could_ collect.
     let mut out = Vec::with_capacity(modules.selected_transceiver_count());
     for i in modules.to_indices() {
-        let Some(status) = all_status.nth(i) else {
-            continue;
-        };
-        let Some(power) = all_power.nth(i) else {
-            continue;
-        };
-        let Some(vendor_info) = all_vendor_info.nth(i) else {
-            continue;
-        };
-        let Some(datapath) = all_datapaths.nth(i) else {
-            continue;
-        };
-        let Some(monitors) = all_monitors.nth(i) else {
-            continue;
-        };
         let tr = Transceiver {
             port: format!("qsfp{i}"),
-            power: *power,
-            vendor: vendor_info.clone(),
-            status: *status,
-            datapath: datapath.clone(),
-            monitors: monitors.clone(),
+            power: all_power.nth(i).copied(),
+            vendor: all_vendor_info.nth(i).cloned(),
+            status: all_status.nth(i).copied(),
+            datapath: all_datapaths.nth(i).cloned(),
+            monitors: all_monitors.nth(i).cloned(),
         };
         out.push(tr);
     }

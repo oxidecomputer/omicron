@@ -13,6 +13,9 @@ use omicron_common::api::external::SwitchLocation;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, time::Duration};
+use transceiver_controller::{
+    message::ExtendedStatus, Datapath, Monitors, PowerMode, VendorInfo,
+};
 
 /// The current state of the v1 Rack as known to wicketd
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -93,10 +96,16 @@ pub struct TransceiverInventorySnapshot {
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 #[serde(tag = "transceiver", rename_all = "snake_case")]
 pub struct Transceiver {
+    /// The port in which the transceiver sits.
     pub port: String,
-    pub status: transceiver_controller::message::ExtendedStatus,
-    pub power: transceiver_controller::PowerMode,
-    pub vendor: transceiver_controller::VendorInfo,
-    pub datapath: transceiver_controller::Datapath,
-    pub monitors: transceiver_controller::Monitors,
+    /// The general status of the transceiver, such as presence and faults.
+    pub status: Option<ExtendedStatus>,
+    /// Information about the power state of the transceiver.
+    pub power: Option<PowerMode>,
+    /// Details about the vendor, part number, and serial number.
+    pub vendor: Option<VendorInfo>,
+    /// Status of the transceiver's machinery for carrying data, the "datapath".
+    pub datapath: Option<Datapath>,
+    /// Environmental monitoring data, such as temperature or optical power.
+    pub monitors: Option<Monitors>,
 }

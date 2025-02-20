@@ -30,6 +30,7 @@ use transceiver_controller::PowerMode;
 use transceiver_controller::PowerState;
 use transceiver_controller::ReceiverPower;
 use transceiver_controller::SffComplianceCode;
+use transceiver_controller::VendorInfo;
 use wicket_common::inventory::RotState;
 use wicket_common::inventory::SpComponentCaboose;
 use wicket_common::inventory::SpComponentInfo;
@@ -1147,48 +1148,22 @@ fn inventory_description(component: &Component) -> Text {
                 );
 
                 // Now print as much of the details for this transceiver as we
-                // can.
-                spans.push(
-                    vec![
-                        nest_bullet(),
-                        Span::styled("Vendor: ", label_style),
-                        Span::styled(&transceiver.vendor.vendor.name, ok_style),
-                    ]
-                    .into(),
-                );
-                spans.push(
-                    vec![
-                        nest_bullet(),
-                        Span::styled("Model: ", label_style),
-                        Span::styled(&transceiver.vendor.vendor.part, ok_style),
-                    ]
-                    .into(),
-                );
-                spans.push(
-                    vec![
-                        nest_bullet(),
-                        Span::styled("Serial: ", label_style),
-                        Span::styled(
-                            &transceiver.vendor.vendor.serial,
-                            ok_style,
-                        ),
-                    ]
-                    .into(),
-                );
-                spans.push(
-                    vec![
-                        nest_bullet(),
-                        Span::styled("Management interface: ", label_style),
-                        Span::styled(
-                            transceiver.vendor.identifier.to_string(),
-                            ok_style,
-                        ),
-                    ]
-                    .into(),
-                );
+                // can, starting with the vendor name.
+                let vendor_details =
+                    extract_vendor_details(transceiver.vendor.as_ref());
+                for detail in vendor_details {
+                    spans.push(
+                        vec![
+                            nest_bullet(),
+                            Span::styled(detail.label, label_style),
+                            Span::styled(detail.detail, detail.style),
+                        ]
+                        .into(),
+                    );
+                }
 
                 let (media_type_style, media_type) =
-                    extract_media_type(&transceiver.datapath);
+                    extract_media_type(transceiver.datapath.as_ref());
                 spans.push(
                     vec![
                         nest_bullet(),
@@ -1199,7 +1174,7 @@ fn inventory_description(component: &Component) -> Text {
                 );
 
                 let (fpga_power_style, fpga_power) =
-                    format_transceiver_status(&transceiver.status);
+                    format_transceiver_status(transceiver.status.as_ref());
                 spans.push(
                     vec![
                         nest_bullet(),
@@ -1210,7 +1185,7 @@ fn inventory_description(component: &Component) -> Text {
                 );
 
                 let (module_power_style, module_power) =
-                    format_transceiver_power_state(&transceiver.power);
+                    format_transceiver_power_state(transceiver.power.as_ref());
                 spans.push(
                     vec![
                         nest_bullet(),
@@ -1221,7 +1196,7 @@ fn inventory_description(component: &Component) -> Text {
                 );
 
                 let (temp_style, temp) = format_transceiver_temperature(
-                    &transceiver.monitors.temperature,
+                    transceiver.monitors.as_ref().map(|m| m.temperature),
                 );
                 spans.push(
                     vec![
@@ -1233,7 +1208,7 @@ fn inventory_description(component: &Component) -> Text {
                 );
 
                 let (voltage_style, voltage) = format_transceiver_voltage(
-                    &transceiver.monitors.supply_voltage,
+                    transceiver.monitors.as_ref().map(|m| m.supply_voltage),
                 );
                 spans.push(
                     vec![
@@ -1248,14 +1223,20 @@ fn inventory_description(component: &Component) -> Text {
                 let mut line = vec![nest_bullet()];
                 line.extend(format_transceiver_receive_power(
                     n_lanes,
-                    transceiver.monitors.receiver_power.as_deref(),
+                    transceiver
+                        .monitors
+                        .as_ref()
+                        .map(|m| m.receiver_power.as_deref()),
                 ));
                 spans.push(line.into());
 
                 let mut line = vec![nest_bullet()];
                 line.extend(format_transceiver_transmit_power(
                     n_lanes,
-                    transceiver.monitors.transmitter_power.as_deref(),
+                    transceiver
+                        .monitors
+                        .as_ref()
+                        .map(|m| m.transmitter_power.as_deref()),
                 ));
                 spans.push(line.into());
             }
@@ -1263,6 +1244,49 @@ fn inventory_description(component: &Component) -> Text {
     };
 
     Text::from(spans)
+}
+
+struct VendorLine {
+    label: String,
+    detail: String,
+    style: Style,
+}
+
+fn extract_vendor_details(vendor: Option<&VendorInfo>) -> Vec<VendorLine> {
+    let mut out = Vec::with_capacity(4);
+    if let Some(vendor) = &vendor {
+        out.push(VendorLine {
+            label: "Vendor: ".to_string(),
+            detail: vendor.vendor.name.clone(),
+            style: style::text_success(),
+        });
+        out.push(VendorLine {
+            label: "Model: ".to_string(),
+            detail: vendor.vendor.part.clone(),
+            style: style::text_success(),
+        });
+        out.push(VendorLine {
+            label: "Serial: ".to_string(),
+            detail: vendor.vendor.serial.clone(),
+            style: style::text_success(),
+        });
+        out.push(VendorLine {
+            label: "Management interface: ".to_string(),
+            detail: vendor.identifier.to_string(),
+            style: style::text_success(),
+        });
+    } else {
+        for label in
+            ["Vendor: ", "Model: ", "Serial: ", "Management interface: "]
+        {
+            out.push(VendorLine {
+                label: label.to_string(),
+                detail: "Failed to read!".to_string(),
+                style: style::text_warning(),
+            })
+        }
+    }
+    out
 }
 
 // Helper function for appending caboose details to a section of the
@@ -1331,7 +1355,12 @@ fn append_caboose(
 //
 // We know the transceiver is present by construction, so print the power state
 // and any faults.
-fn format_transceiver_status(status: &ExtendedStatus) -> (Style, String) {
+fn format_transceiver_status(
+    status: Option<&ExtendedStatus>,
+) -> (Style, String) {
+    let Some(status) = status else {
+        return (style::text_warning(), String::from("Failed to read!"));
+    };
     if status.contains(ExtendedStatus::ENABLED) {
         if status.contains(ExtendedStatus::POWER_GOOD) {
             return (style::text_success(), String::from("Enabled"));
@@ -1351,7 +1380,12 @@ fn format_transceiver_status(status: &ExtendedStatus) -> (Style, String) {
     }
 }
 
-fn format_transceiver_power_state(power: &PowerMode) -> (Style, String) {
+fn format_transceiver_power_state(
+    power: Option<&PowerMode>,
+) -> (Style, String) {
+    let Some(power) = power else {
+        return (style::text_warning(), String::from("Failed to read!"));
+    };
     let style = match power.state {
         PowerState::Off => style::text_warning(),
         PowerState::Low => style::text_warning(),
@@ -1362,8 +1396,11 @@ fn format_transceiver_power_state(power: &PowerMode) -> (Style, String) {
         format!(
             "{}{}",
             power.state,
+            // "Software override" means that the module's power is controlled
+            // by writing to a specific register, rather than through a hardware
+            // signal / pin.
             if matches!(power.software_override, Some(true)) {
-                " (Software override)"
+                " (Software control)"
             } else {
                 ""
             }
@@ -1371,45 +1408,75 @@ fn format_transceiver_power_state(power: &PowerMode) -> (Style, String) {
     )
 }
 
-fn format_transceiver_temperature(maybe_temp: &Option<f32>) -> (Style, String) {
+/// Format the transceiver temperature.
+///
+/// The outer option indicates whether we were able to read the module
+/// successfully at all. The inner indicates whether the module reported a value
+/// (they're not required to do so).
+fn format_transceiver_temperature(
+    maybe_temp: Option<Option<f32>>,
+) -> (Style, String) {
+    let Some(maybe_temp) = maybe_temp else {
+        return (style::text_warning(), String::from("Failed to read!"));
+    };
     const MIN_WARNING_TEMP: f32 = 15.0;
     const MAX_WARNING_TEMP: f32 = 50.0;
     match maybe_temp {
         Some(t) => {
             let temp = format!("{t:0.2} °C");
-            let style = if *t < MIN_WARNING_TEMP || *t > MAX_WARNING_TEMP {
+            let style = if t < MIN_WARNING_TEMP || t > MAX_WARNING_TEMP {
                 style::text_warning()
             } else {
                 style::text_success()
             };
             (style, temp)
         }
-        None => (style::text_dim(), String::from("Unavailable")),
+        None => (style::text_dim(), String::from("Unsupported")),
     }
 }
 
-fn format_transceiver_voltage(maybe_voltage: &Option<f32>) -> (Style, String) {
+/// Format the transceiver voltage.
+///
+/// The outer option indicates whether we were able to read the module
+/// successfully at all. The inner indicates whether the module reported a value
+/// (they're not required to do so).
+fn format_transceiver_voltage(
+    maybe_voltage: Option<Option<f32>>,
+) -> (Style, String) {
+    let Some(maybe_voltage) = maybe_voltage else {
+        return (style::text_warning(), String::from("Failed to read!"));
+    };
     const MIN_WARNING_VOLTAGE: f32 = 3.0;
     const MAX_WARNING_VOLTAGE: f32 = 3.7;
     match maybe_voltage {
         Some(v) => {
             let voltage = format!("{v:0.2} V");
-            let style = if *v < MIN_WARNING_VOLTAGE || *v > MAX_WARNING_VOLTAGE
-            {
+            let style = if v < MIN_WARNING_VOLTAGE || v > MAX_WARNING_VOLTAGE {
                 style::text_warning()
             } else {
                 style::text_success()
             };
             (style, voltage)
         }
-        None => (style::text_dim(), String::from("Unavailable")),
+        None => (style::text_dim(), String::from("Unsupported")),
     }
 }
 
+/// Format the transceiver received optical power.
+///
+/// The outer option indicates whether we were able to read the module
+/// successfully at all. The inner indicates whether the module reported a value
+/// (they're not required to do so).
 fn format_transceiver_receive_power(
     n_lanes: Option<usize>,
-    receiver_power: Option<&[ReceiverPower]>,
+    receiver_power: Option<Option<&[ReceiverPower]>>,
 ) -> Vec<Span> {
+    let Some(receiver_power) = receiver_power else {
+        return vec![
+            Span::styled("Rx power: ", style::text_label()),
+            Span::styled("Failed to read!", style::text_warning()),
+        ];
+    };
     const MIN_WARNING_POWER: f32 = 0.5;
     const MAX_WARNING_POWER: f32 = 2.5;
     let mut out = Vec::new();
@@ -1446,14 +1513,25 @@ fn format_transceiver_receive_power(
         }
     }
     out.push(Span::styled("Rx power: ", style::text_label()));
-    out.push(Span::styled("Unavailable", style::text_dim()));
+    out.push(Span::styled("Unsupported", style::text_dim()));
     out
 }
 
+/// Format the transceiver transmitted optical power.
+///
+/// The outer option indicates whether we were able to read the module
+/// successfully at all. The inner indicates whether the module reported a value
+/// (they're not required to do so).
 fn format_transceiver_transmit_power(
     n_lanes: Option<usize>,
-    transmitter_power: Option<&[f32]>,
+    transmitter_power: Option<Option<&[f32]>>,
 ) -> Vec<Span> {
+    let Some(transmitter_power) = transmitter_power else {
+        return vec![
+            Span::styled("Tx power: ", style::text_label()),
+            Span::styled("Failed to read!", style::text_warning()),
+        ];
+    };
     const MIN_WARNING_POWER: f32 = 0.5;
     const MAX_WARNING_POWER: f32 = 2.5;
     if let Some(pow) = transmitter_power {
@@ -1484,7 +1562,10 @@ fn format_transceiver_transmit_power(
     ]
 }
 
-fn extract_media_type(datapath: &Datapath) -> (Style, String) {
+fn extract_media_type(datapath: Option<&Datapath>) -> (Style, String) {
+    let Some(datapath) = datapath else {
+        return (style::text_warning(), String::from("Failed to read!"));
+    };
     match datapath {
         Datapath::Cmis { datapaths, .. } => {
             let Some(media_type) = datapaths.values().next().map(|p| {
@@ -1506,7 +1587,10 @@ fn extract_media_type(datapath: &Datapath) -> (Style, String) {
 ///
 /// If we aren't sure, return `None`.
 fn n_expected_lanes(tr: &Transceiver) -> Option<usize> {
-    match &tr.datapath {
+    let Some(datapath) = &tr.datapath else {
+        return None;
+    };
+    match datapath {
         Datapath::Cmis { datapaths, .. } => datapaths
             .values()
             .next()

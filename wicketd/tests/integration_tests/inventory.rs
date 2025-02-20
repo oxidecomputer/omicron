@@ -25,12 +25,14 @@ async fn test_inventory() {
 
     let inventory_fut = async {
         loop {
+            println!("HERE");
             let response = wicketd_testctx
                 .wicketd_client
                 .get_inventory(&params)
                 .await
                 .expect("get_inventory succeeded")
                 .into_inner();
+            println!("NOW HERE");
             match response {
                 GetInventoryResponse::Response { inventory, .. } => {
                     // Ensure that the SP state is populated -- if it's not,

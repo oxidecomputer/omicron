@@ -401,6 +401,9 @@ impl WicketdApi for WicketdApiImpl {
                 GetTransceiversResponse::Unavailable => None,
             };
 
+        dbg!(&maybe_mgs_inventory);
+        dbg!(&maybe_transceiver_inventory);
+
         // Return 503 if both MGS and transceiver inventory are missing,
         // otherwise return what we can.
         if maybe_mgs_inventory.is_none()
