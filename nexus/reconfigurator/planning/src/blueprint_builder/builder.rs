@@ -980,6 +980,23 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(())
     }
 
+    /// Mark expunged zones as ready for cleanup.
+    pub(crate) fn mark_expunged_zones_ready_for_cleanup(
+        &mut self,
+        sled_id: SledUuid,
+        zone_ids: &[OmicronZoneUuid],
+    ) -> Result<(), Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!("tried to expunge unknown sled {sled_id}"))
+        })?;
+        for zone_id in zone_ids {
+            editor
+                .mark_expunged_zone_ready_for_cleanup(zone_id)
+                .map_err(|err| Error::SledEditError { sled_id, err })?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn expunge_all_multinode_clickhouse(
         &mut self,
         sled_id: SledUuid,
