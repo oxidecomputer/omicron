@@ -35,7 +35,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintTarget;
-use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use omicron_common::address::COCKROACH_ADMIN_PORT;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -145,7 +145,7 @@ impl CockroachAdminFromBlueprint for CockroachAdminFromBlueprintViaFixedPort {
         // We can only actively collect from zones that should be running; if
         // there are CRDB zones in other states that still need their node ID
         // collected, we have to wait until they're running.
-        let zone_filter = BlueprintZoneFilter::ShouldBeRunning;
+        let zone_filter = BlueprintZoneDisposition::is_in_service;
 
         blueprint.all_omicron_zones(zone_filter).filter_map(
             |(_sled_id, zone)| match &zone.zone_type {

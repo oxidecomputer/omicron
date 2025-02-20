@@ -226,10 +226,13 @@ impl Blueprint {
 
     /// Iterate over the [`BlueprintZoneConfig`] instances in the blueprint
     /// that match the provided filter, along with the associated sled id.
-    pub fn all_omicron_zones(
+    pub fn all_omicron_zones<F>(
         &self,
-        filter: BlueprintZoneFilter,
-    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
+        filter: F,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)>
+    where
+        F: FnMut(BlueprintZoneDisposition) -> bool,
+    {
         Blueprint::filtered_zones(&self.blueprint_zones, filter)
     }
 
@@ -238,16 +241,19 @@ impl Blueprint {
     //
     // This is a scoped function so that it can be used in the
     // `BlueprintBuilder` during planning as well as in the `Blueprint`.
-    pub fn filtered_zones(
+    pub fn filtered_zones<F>(
         zones_by_sled_id: &BTreeMap<SledUuid, BlueprintZonesConfig>,
-        filter: BlueprintZoneFilter,
-    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
-        zones_by_sled_id.iter().flat_map(move |(sled_id, z)| {
-            z.zones
-                .iter()
-                .filter(move |z| z.disposition.matches(filter))
-                .map(|z| (*sled_id, z))
-        })
+        mut filter: F,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)>
+    where
+        F: FnMut(BlueprintZoneDisposition) -> bool,
+    {
+        zones_by_sled_id
+            .iter()
+            .flat_map(move |(sled_id, z)| {
+                z.zones.iter().map(move |z| (*sled_id, z))
+            })
+            .filter(move |(_, z)| filter(z.disposition))
     }
 
     /// Iterate over the [`BlueprintDatasetsConfig`] instances in the blueprint.
@@ -261,21 +267,6 @@ impl Blueprint {
                 datasets.datasets.iter().map(|dataset| (*sled_id, dataset))
             })
             .filter(move |(_, d)| d.disposition.matches(filter))
-    }
-
-    /// Iterate over the [`BlueprintZoneConfig`] instances in the blueprint
-    /// that do not match the provided filter, along with the associated sled
-    /// id.
-    pub fn all_omicron_zones_not_in(
-        &self,
-        filter: BlueprintZoneFilter,
-    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
-        self.blueprint_zones.iter().flat_map(move |(sled_id, z)| {
-            z.zones
-                .iter()
-                .filter(move |z| !z.disposition.matches(filter))
-                .map(|z| (*sled_id, z))
-        })
     }
 
     /// Iterate over the ids of all sleds in the blueprint
@@ -638,9 +629,7 @@ impl BlueprintZonesConfig {
                 .zones
                 .into_iter()
                 .filter_map(|z| {
-                    if z.disposition
-                        .matches(BlueprintZoneFilter::ShouldBeRunning)
-                    {
+                    if z.disposition.is_in_service() {
                         Some(z.into())
                     } else {
                         None
@@ -806,34 +795,29 @@ pub enum BlueprintZoneDisposition {
 }
 
 impl BlueprintZoneDisposition {
-    /// Returns true if the zone disposition matches this filter.
-    pub fn matches(self, filter: BlueprintZoneFilter) -> bool {
-        // This code could be written in three ways:
-        //
-        // 1. match self { match filter { ... } }
-        // 2. match filter { match self { ... } }
-        // 3. match (self, filter) { ... }
-        //
-        // We choose 1 here because we expect many filters and just a few
-        // dispositions, and 1 is the easiest form to represent that.
-        match self {
-            Self::InService => match filter {
-                BlueprintZoneFilter::All => true,
-                BlueprintZoneFilter::Expunged => false,
-                BlueprintZoneFilter::ShouldBeRunning => true,
-                BlueprintZoneFilter::ShouldBeExternallyReachable => true,
-                BlueprintZoneFilter::ShouldBeInInternalDns => true,
-                BlueprintZoneFilter::ShouldDeployVpcFirewallRules => true,
-            },
-            Self::Expunged { .. } => match filter {
-                BlueprintZoneFilter::All => true,
-                BlueprintZoneFilter::Expunged => true,
-                BlueprintZoneFilter::ShouldBeRunning => false,
-                BlueprintZoneFilter::ShouldBeExternallyReachable => false,
-                BlueprintZoneFilter::ShouldBeInInternalDns => false,
-                BlueprintZoneFilter::ShouldDeployVpcFirewallRules => false,
-            },
-        }
+    /// Always returns true.
+    ///
+    /// This is intended for use with methods that take a filtering closure
+    /// operating on a `BlueprintZoneDisposition` (e.g.,
+    /// `Blueprint::all_omicron_zones()`), allowing callers to make it clear
+    /// they accept any disposition via
+    ///
+    /// ```rust,ignore
+    /// blueprint.all_omicron_zones(BlueprintZoneDisposition::any)
+    /// ```
+    pub fn any(self) -> bool {
+        true
+    }
+
+    /// Returns true if `self` is `BlueprintZoneDisposition::InService`.
+    pub fn is_in_service(self) -> bool {
+        matches!(self, Self::InService)
+    }
+
+    /// Returns true if `self` is `BlueprintZoneDisposition::Expunged { .. }`,
+    /// regardless of the details contained within that variant.
+    pub fn is_expunged(self) -> bool {
+        matches!(self, Self::Expunged { .. })
     }
 }
 
@@ -854,38 +838,6 @@ impl fmt::Display for BlueprintZoneDisposition {
             }
         }
     }
-}
-
-/// Filters that apply to blueprint zones.
-///
-/// This logic lives here rather than within the individual components making
-/// decisions, so that this is easier to read.
-///
-/// The meaning of a particular filter should not be overloaded -- each time a
-/// new use case wants to make a decision based on the zone disposition, a new
-/// variant should be added to this enum.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub enum BlueprintZoneFilter {
-    // ---
-    // Prefer to keep this list in alphabetical order.
-    // ---
-    /// All zones.
-    All,
-
-    /// Zones that have been expunged.
-    Expunged,
-
-    /// Zones that are desired to be in the RUNNING state
-    ShouldBeRunning,
-
-    /// Filter by zones that should have external IP and DNS resources.
-    ShouldBeExternallyReachable,
-
-    /// Filter by zones that should be in internal DNS.
-    ShouldBeInInternalDns,
-
-    /// Filter by zones that should be sent VPC firewall rules.
-    ShouldDeployVpcFirewallRules,
 }
 
 /// Filters that apply to blueprint datasets.

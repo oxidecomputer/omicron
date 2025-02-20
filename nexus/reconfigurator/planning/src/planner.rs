@@ -18,7 +18,6 @@ use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
-use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::CockroachDbSettings;
@@ -153,7 +152,7 @@ impl<'a> Planner<'a> {
             // we ourselves have made this change, which is fine.
             let all_zones_expunged = self
                 .blueprint
-                .current_sled_zones(sled_id, BlueprintZoneFilter::All)
+                .current_sled_zones(sled_id, BlueprintZoneDisposition::any)
                 .all(|zone| {
                     matches!(
                         zone.disposition,
@@ -196,7 +195,7 @@ impl<'a> Planner<'a> {
             if !commissioned_sled_ids.contains(&sled_id) {
                 let num_zones = self
                     .blueprint
-                    .current_sled_zones(sled_id, BlueprintZoneFilter::All)
+                    .current_sled_zones(sled_id, BlueprintZoneDisposition::any)
                     .filter(|zone| {
                         !matches!(
                             zone.disposition,
@@ -377,7 +376,7 @@ impl<'a> Planner<'a> {
                     .blueprint
                     .current_sled_zones(
                         sled_id,
-                        BlueprintZoneFilter::ShouldBeRunning,
+                        BlueprintZoneDisposition::is_in_service,
                     )
                     .any(|z| {
                         OmicronZoneType::from(z.zone_type.clone())
@@ -557,7 +556,7 @@ impl<'a> Planner<'a> {
                                 .blueprint
                                 .current_sled_zones(
                                     sled_id,
-                                    BlueprintZoneFilter::ShouldBeRunning,
+                                    BlueprintZoneDisposition::is_in_service,
                                 )
                                 .filter_map(|zone| {
                                     DiscretionaryOmicronZone::from_zone_type(
@@ -1586,7 +1585,7 @@ pub(crate) mod test {
         let blueprint1a = blueprint_builder.build();
         assert_eq!(
             blueprint1a
-                .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .filter(|(_, zone)| zone.zone_type.is_external_dns())
                 .count(),
             3,
@@ -1614,7 +1613,7 @@ pub(crate) mod test {
         // The first sled should have three external DNS zones.
         assert_eq!(
             blueprint2
-                .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .filter(|(_, zone)| zone.zone_type.is_external_dns())
                 .count(),
             3,
@@ -1666,7 +1665,7 @@ pub(crate) mod test {
         // The IP addresses of the new external DNS zones should be the
         // same as the original set that we "found".
         let mut ips = blueprint3
-            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
             .filter_map(|(_id, zone)| {
                 zone.zone_type.is_external_dns().then(|| {
                     zone.zone_type.external_networking().unwrap().0.ip()
@@ -2057,8 +2056,8 @@ pub(crate) mod test {
         // Find all the zones using this same zpool.
         let mut zones_on_pool = BTreeSet::new();
         let mut zone_kinds_on_pool = BTreeMap::<_, usize>::new();
-        for (_, zone_config) in
-            blueprint1.all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+        for (_, zone_config) in blueprint1
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         {
             let mut on_pool = false;
             if let Some(pool) = &zone_config.filesystem_pool {
@@ -2775,7 +2774,7 @@ pub(crate) mod test {
         // We should start with CRUCIBLE_PANTRY_REDUNDANCY pantries spread out
         // to at most 1 per sled. Find one of the sleds running one.
         let pantry_sleds = blueprint1
-            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
             .filter_map(|(sled_id, zone)| {
                 zone.zone_type.is_crucible_pantry().then_some(sled_id)
             })
@@ -2815,7 +2814,7 @@ pub(crate) mod test {
         println!("1 -> 2 (expunged sled):\n{}", diff.display());
         assert_eq!(
             blueprint2
-                .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .filter(|(sled_id, zone)| *sled_id != expunged_sled_id
                     && zone.zone_type.is_crucible_pantry())
                 .count(),
@@ -2848,7 +2847,7 @@ pub(crate) mod test {
 
         // We should start with one ClickHouse zone. Find out which sled it's on.
         let clickhouse_sleds = blueprint1
-            .all_omicron_zones(BlueprintZoneFilter::All)
+            .all_omicron_zones(BlueprintZoneDisposition::any)
             .filter_map(|(sled, zone)| {
                 zone.zone_type.is_clickhouse().then(|| Some(sled))
             })
@@ -2885,7 +2884,7 @@ pub(crate) mod test {
         println!("1 -> 2 (expunged sled):\n{}", diff.display());
         assert_eq!(
             blueprint2
-                .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .filter(|(sled, zone)| *sled != clickhouse_sled
                     && zone.zone_type.is_clickhouse())
                 .count(),
@@ -2953,7 +2952,7 @@ pub(crate) mod test {
 
         // We should see zones for 3 clickhouse keepers, and 2 servers created
         let active_zones: Vec<_> = blueprint2
-            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
             .map(|(_, z)| z.clone())
             .collect();
 
@@ -3115,7 +3114,7 @@ pub(crate) mod test {
         );
 
         let active_zones: Vec<_> = blueprint5
-            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
             .map(|(_, z)| z.clone())
             .collect();
 
@@ -3290,7 +3289,7 @@ pub(crate) mod test {
 
         // We should see zones for 3 clickhouse keepers, and 2 servers created
         let active_zones: Vec<_> = blueprint2
-            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
             .map(|(_, z)| z.clone())
             .collect();
 
@@ -3353,7 +3352,7 @@ pub(crate) mod test {
 
         // Find the sled containing one of the keeper zones and expunge it
         let (sled_id, bp_zone_config) = blueprint3
-            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
             .find(|(_, z)| z.zone_type.is_clickhouse_keeper())
             .unwrap();
 
@@ -3510,7 +3509,7 @@ pub(crate) mod test {
 
         // We should see zones for 3 clickhouse keepers, and 2 servers created
         let active_zones: Vec<_> = blueprint2
-            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
             .map(|(_, z)| z.clone())
             .collect();
 
@@ -3557,7 +3556,7 @@ pub(crate) mod test {
 
         // We should have expunged our single-node clickhouse zone
         let expunged_zones: Vec<_> = blueprint3
-            .all_omicron_zones(BlueprintZoneFilter::Expunged)
+            .all_omicron_zones(BlueprintZoneDisposition::is_expunged)
             .map(|(_, z)| z.clone())
             .collect();
 
@@ -3592,7 +3591,7 @@ pub(crate) mod test {
         // All our clickhouse keeper and server zones that we created when we
         // enabled our clickhouse policy should be expunged when we disable it.
         let expunged_zones: Vec<_> = blueprint4
-            .all_omicron_zones(BlueprintZoneFilter::Expunged)
+            .all_omicron_zones(BlueprintZoneDisposition::is_expunged)
             .map(|(_, z)| z.clone())
             .collect();
 
@@ -3614,7 +3613,7 @@ pub(crate) mod test {
         assert_eq!(
             1,
             blueprint4
-                .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .filter(|(_, z)| z.zone_type.is_clickhouse())
                 .count()
         );

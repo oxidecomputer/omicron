@@ -180,7 +180,6 @@ mod test {
         EventBuffer, EventReport, ExecutionComponent, ExecutionStepId,
         ReconfiguratorExecutionSpec, StepInfo,
     };
-    use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::{
         blueprint_zone_type, Blueprint, BlueprintDatasetsConfig,
         BlueprintPhysicalDisksConfig, BlueprintTarget, BlueprintZoneConfig,
@@ -448,7 +447,7 @@ mod test {
 
         // Insert records for the zpools backing the datasets in these zones.
         for (sled_id, config) in
-            blueprint.1.all_omicron_zones(BlueprintZoneFilter::All)
+            blueprint.1.all_omicron_zones(BlueprintZoneDisposition::any)
         {
             let Some(dataset) = config.zone_type.durable_dataset() else {
                 continue;
