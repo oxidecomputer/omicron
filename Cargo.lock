@@ -9217,7 +9217,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=95d6a559890c94e3aa62c8adcd7c4e123ec4c6dc#95d6a559890c94e3aa62c8adcd7c4e123ec4c6dc"
+source = "git+https://github.com/oxidecomputer/propolis?rev=30e1fe25d093da04e2aeda397b27103743dd55fd#30e1fe25d093da04e2aeda397b27103743dd55fd"
 dependencies = [
  "anyhow",
  "atty",
@@ -9227,7 +9227,7 @@ dependencies = [
  "futures",
  "hyper",
  "progenitor 0.9.1",
- "propolis_types",
+ "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=30e1fe25d093da04e2aeda397b27103743dd55fd)",
  "rand",
  "reqwest",
  "schemars",
@@ -9262,12 +9262,21 @@ version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=95d6a559890c94e3aa62c8adcd7c4e123ec4c6dc#95d6a559890c94e3aa62c8adcd7c4e123ec4c6dc"
 dependencies = [
  "crucible-client-types",
- "propolis_types",
+ "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=95d6a559890c94e3aa62c8adcd7c4e123ec4c6dc)",
  "schemars",
  "serde",
  "serde_with",
  "thiserror 1.0.69",
  "uuid",
+]
+
+[[package]]
+name = "propolis_types"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=30e1fe25d093da04e2aeda397b27103743dd55fd#30e1fe25d093da04e2aeda397b27103743dd55fd"
+dependencies = [
+ "schemars",
+ "serde",
 ]
 
 [[package]]
