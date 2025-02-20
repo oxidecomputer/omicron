@@ -21,6 +21,7 @@ use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
 use blueprint_display::BpDatasetsTableSchema;
 use daft::Diffable;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
+use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::ByteCount;
@@ -749,10 +750,17 @@ impl BlueprintZoneConfig {
 
 impl From<BlueprintZoneConfig> for OmicronZoneConfig {
     fn from(z: BlueprintZoneConfig) -> Self {
+        let BlueprintZoneConfig {
+            id,
+            filesystem_pool,
+            zone_type,
+            disposition: _disposition,
+        } = z;
         Self {
-            id: z.id,
-            filesystem_pool: z.filesystem_pool,
-            zone_type: z.zone_type.into(),
+            id,
+            filesystem_pool,
+            zone_type: zone_type.into(),
+            image_source: OmicronZoneImageSource::InstallDataset,
         }
     }
 }
