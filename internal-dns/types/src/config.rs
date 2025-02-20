@@ -433,8 +433,6 @@ impl DnsConfigBuilder {
         );
         let zone = self.host_zone(zone_id, *http_address.ip())?;
         self.service_backend_zone(http_service, &zone, http_address.port())?;
-        // TODO: Should this only exist for single node until we completely
-        // roll out the replicated cluster?
         self.service_backend_zone(
             ServiceName::ClickhouseNative,
             &zone,
