@@ -835,7 +835,15 @@ impl fmt::Display for BlueprintZoneDisposition {
             // Neither `write!(f, "...")` nor `f.write_str("...")` obey fill
             // and alignment (used above), but this does.
             BlueprintZoneDisposition::InService => "in service".fmt(f),
-            BlueprintZoneDisposition::Expunged { .. } => "expunged".fmt(f),
+            BlueprintZoneDisposition::Expunged {
+                ready_for_cleanup, ..
+            } => {
+                if *ready_for_cleanup {
+                    "expunged ✓".fmt(f)
+                } else {
+                    "expunged ⌛".fmt(f)
+                }
+            }
         }
     }
 }

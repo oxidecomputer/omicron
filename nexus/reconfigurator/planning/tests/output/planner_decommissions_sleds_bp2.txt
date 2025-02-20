@@ -193,24 +193,24 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
 !a1b477db-b629-48eb-911d-1ccdafca75b9
 WARNING: Zones exist without physical disks!
     omicron zones at generation 3:
-    ---------------------------------------------------------------------------------------------
-    zone type         zone id                                disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------
-    clickhouse        3fd081ea-93f1-417e-bcb1-405854435f28   expunged      fd00:1122:3344:103::23
-    crucible          290e7e97-c4b3-47da-9f40-8d909397fbae   expunged      fd00:1122:3344:103::2e
-    crucible          29bbe4ad-e6e8-4e05-b188-a811a793ccbb   expunged      fd00:1122:3344:103::2a
-    crucible          8500a060-a426-4324-ba40-a66dd4b89bc6   expunged      fd00:1122:3344:103::29
-    crucible          92b7abd8-3e34-49dd-9c56-19a314e97d49   expunged      fd00:1122:3344:103::25
-    crucible          b320954e-6c66-4540-9bf4-3d976f21ee1b   expunged      fd00:1122:3344:103::26
-    crucible          bc3e4495-7e51-46b6-9f55-026ea1da39dd   expunged      fd00:1122:3344:103::27
-    crucible          cfb7595b-280c-40f5-b1aa-6e154adf280b   expunged      fd00:1122:3344:103::28
-    crucible          d6b6ea5a-3f29-4815-aa42-b1afeb11dfc5   expunged      fd00:1122:3344:103::2c
-    crucible          d6b77c1f-8c9e-406d-944e-c97a57b3984d   expunged      fd00:1122:3344:103::2b
-    crucible          ecc03801-b315-4495-9b2c-49e0eead1283   expunged      fd00:1122:3344:103::2d
-    crucible_pantry   ecebab45-11e7-47ab-8bc2-ab9114c6e2bc   expunged      fd00:1122:3344:103::24
-    internal_dns      96b7a45b-be74-44e8-b68a-e530cfa81830   expunged      fd00:1122:3344:1::1   
-    internal_ntp      b3dbc671-0e4d-49ff-9f4f-71b249d21f57   expunged      fd00:1122:3344:103::21
-    nexus             bc0f4342-f88d-49cc-bb44-b555d9b8ca12   expunged      fd00:1122:3344:103::22
+    ----------------------------------------------------------------------------------------------
+    zone type         zone id                                disposition    underlay IP           
+    ----------------------------------------------------------------------------------------------
+    clickhouse        3fd081ea-93f1-417e-bcb1-405854435f28   expunged ⌛     fd00:1122:3344:103::23
+    crucible          290e7e97-c4b3-47da-9f40-8d909397fbae   expunged ⌛     fd00:1122:3344:103::2e
+    crucible          29bbe4ad-e6e8-4e05-b188-a811a793ccbb   expunged ⌛     fd00:1122:3344:103::2a
+    crucible          8500a060-a426-4324-ba40-a66dd4b89bc6   expunged ⌛     fd00:1122:3344:103::29
+    crucible          92b7abd8-3e34-49dd-9c56-19a314e97d49   expunged ⌛     fd00:1122:3344:103::25
+    crucible          b320954e-6c66-4540-9bf4-3d976f21ee1b   expunged ⌛     fd00:1122:3344:103::26
+    crucible          bc3e4495-7e51-46b6-9f55-026ea1da39dd   expunged ⌛     fd00:1122:3344:103::27
+    crucible          cfb7595b-280c-40f5-b1aa-6e154adf280b   expunged ⌛     fd00:1122:3344:103::28
+    crucible          d6b6ea5a-3f29-4815-aa42-b1afeb11dfc5   expunged ⌛     fd00:1122:3344:103::2c
+    crucible          d6b77c1f-8c9e-406d-944e-c97a57b3984d   expunged ⌛     fd00:1122:3344:103::2b
+    crucible          ecc03801-b315-4495-9b2c-49e0eead1283   expunged ⌛     fd00:1122:3344:103::2d
+    crucible_pantry   ecebab45-11e7-47ab-8bc2-ab9114c6e2bc   expunged ⌛     fd00:1122:3344:103::24
+    internal_dns      96b7a45b-be74-44e8-b68a-e530cfa81830   expunged ⌛     fd00:1122:3344:1::1   
+    internal_ntp      b3dbc671-0e4d-49ff-9f4f-71b249d21f57   expunged ⌛     fd00:1122:3344:103::21
+    nexus             bc0f4342-f88d-49cc-bb44-b555d9b8ca12   expunged ⌛     fd00:1122:3344:103::22
 
 
 
