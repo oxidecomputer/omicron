@@ -364,21 +364,39 @@ impl PortManager {
         // control plane for this port already installed. If not,
         // create a record to show that we're interested in receiving
         // those routes.
-        let mut routes = self.inner.routes.lock().unwrap();
-        let system_routes = match &ip_cfg {
-            IpCfg::Ipv4(_) => system_routes_v4(is_service, &mut routes, &port),
-            IpCfg::Ipv6(_) => system_routes_v6(is_service, &mut routes, &port),
-            IpCfg::DualStack { .. } => {
-                system_routes_v4(is_service, &mut routes, &port);
-                system_routes_v6(is_service, &mut routes, &port)
-            }
-        };
-
+        let mut route_map = self.inner.routes.lock().unwrap();
+        let system_routes =
+            route_map.entry(port.system_router_key()).or_insert_with(|| {
+                let mut routes = HashSet::new();
+                if is_service {
+                    // Always insert a rule targeting the _system VPC Internet Gateway_.
+                    // This may be sent later from Nexus, but we need it during
+                    // bootstrapping NTP or other very early services, before the
+                    // control plane database has been started.
+                    let target = ApiRouterTarget::InternetGateway(
+                        InternetGatewayRouterTarget::System,
+                    );
+                    routes.insert(ResolvedVpcRoute {
+                        dest: IpNet::V4(
+                            Ipv4Net::new(Ipv4Addr::UNSPECIFIED, 0).unwrap(),
+                        ),
+                        target,
+                    });
+                    routes.insert(ResolvedVpcRoute {
+                        dest: IpNet::V6(
+                            Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 0).unwrap(),
+                        ),
+                        target,
+                    });
+                }
+                RouteSet { version: None, routes, active_ports: 0 }
+            });
         system_routes.active_ports += 1;
+
         // Clone is needed to get borrowck on our side, sadly.
         let system_routes = system_routes.clone();
 
-        let custom_routes = routes
+        let custom_routes = route_map
             .entry(port.custom_router_key())
             .or_insert_with(|| RouteSet {
                 version: None,
@@ -947,48 +965,6 @@ impl Drop for PortTicket {
     }
 }
 
-fn system_routes_v4<'a>(
-    is_service: bool,
-    routes: &'a mut HashMap<RouterId, RouteSet>,
-    port: &Port,
-) -> &'a mut RouteSet {
-    let routes = routes.entry(port.system_router_key()).or_default();
-    if is_service {
-        routes.routes.insert(ResolvedVpcRoute {
-            dest: IpNet::V4(Ipv4Net::new(Ipv4Addr::UNSPECIFIED, 0).unwrap()),
-            // Always insert a rule targeting the _system VPC Internet Gateway_.
-            // This may be sent later from Nexus, but we need it during
-            // bootstrapping NTP or other very early services, before the
-            // control plane database has been started.
-            target: ApiRouterTarget::InternetGateway(
-                InternetGatewayRouterTarget::System,
-            ),
-        });
-    }
-    routes
-}
-
-fn system_routes_v6<'a>(
-    is_service: bool,
-    routes: &'a mut HashMap<RouterId, RouteSet>,
-    port: &Port,
-) -> &'a mut RouteSet {
-    let routes = routes.entry(port.system_router_key()).or_default();
-    if is_service {
-        routes.routes.insert(ResolvedVpcRoute {
-            dest: IpNet::V6(Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 0).unwrap()),
-            // Always insert a rule targeting the _system VPC Internet Gateway_.
-            // This may be sent later from Nexus, but we need it during
-            // bootstrapping NTP or other very early services, before the
-            // control plane database has been started.
-            target: ApiRouterTarget::InternetGateway(
-                InternetGatewayRouterTarget::System,
-            ),
-        });
-    }
-    routes
-}
-
 #[cfg(test)]
 mod tests {
     use crate::opte::Handle;
@@ -1005,7 +981,7 @@ mod tests {
     };
     use omicron_test_utils::dev::test_setup_log;
     use oxide_vpc::api::DhcpCfg;
-    use oxnet::{IpNet, Ipv4Net};
+    use oxnet::{IpNet, Ipv4Net, Ipv6Net};
     use std::{
         collections::HashSet,
         net::{IpAddr, Ipv4Addr, Ipv6Addr},
@@ -1020,6 +996,8 @@ mod tests {
         let manager = PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST);
         let default_ipv4_route =
             IpNet::V4(Ipv4Net::new(Ipv4Addr::UNSPECIFIED, 0).unwrap());
+        let default_ipv6_route =
+            IpNet::V6(Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 0).unwrap());
 
         // Information about our builtin services VPC System Router.
         //
@@ -1096,20 +1074,24 @@ mod tests {
         // custom router. We're only interested in the former though.
         assert_eq!(
             system_routes.routes.len(),
-            1,
-            "We should have only a single route in the VPC's System Router"
+            2,
+            "We should have two default routes in the VPC's System Router"
         );
-        let route = system_routes.routes.iter().next().unwrap();
-        assert_eq!(
-            route.dest, default_ipv4_route,
-            "VPC System Router should have a default route"
-        );
-        assert_eq!(
-            route.target,
-            RouterTarget::InternetGateway(InternetGatewayRouterTarget::System),
-            "VPC System Router default route should target the \
-            System Internet Gateway"
-        );
+        for route in system_routes.routes.iter() {
+            assert!(
+                route.dest == default_ipv4_route
+                    || route.dest == default_ipv6_route,
+                "VPC System Router should have a default route"
+            );
+            assert_eq!(
+                route.target,
+                RouterTarget::InternetGateway(
+                    InternetGatewayRouterTarget::System
+                ),
+                "VPC System Router default route should target the \
+                System Internet Gateway"
+            );
+        }
 
         // In OPTE, we should have one route, also squished down to this
         // default route.
@@ -1311,7 +1293,7 @@ mod tests {
         new_routes[0].version.as_mut().expect("Set above").version = 2;
         manager.vpc_routes_ensure(new_routes).unwrap();
 
-        // Previously, this is were things blew up. Nexus told us to add a new
+        // Previously, this is where things blew up. Nexus told us to add a new
         // route to the explicit IGW, which we already have. That means our set
         // of routes to add is empty. But our set of routes to delete still has
         // the _implicit_ route we added when we created the second port, the
