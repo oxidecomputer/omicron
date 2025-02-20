@@ -983,7 +983,10 @@ mod test {
         for zones in bp.blueprint_zones.values_mut() {
             for mut zone in &mut zones.zones {
                 if zone.id == bundle.assigned_nexus.unwrap().into() {
-                    zone.disposition = BlueprintZoneDisposition::Expunged;
+                    zone.disposition = BlueprintZoneDisposition::Expunged {
+                        as_of_generation: *Generation::new(),
+                        ready_for_cleanup: false,
+                    };
                 }
             }
         }
