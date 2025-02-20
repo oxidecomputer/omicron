@@ -10,10 +10,10 @@ use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetFilter;
+use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
-use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::DnsSubnet;
@@ -462,8 +462,9 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
     let mut expected_datasets = BTreeSet::new();
 
     // All disks should have debug and zone root datasets.
-    for (sled_id, disk) in
-        blippy.blueprint().all_omicron_disks(DiskFilter::InService)
+    for (sled_id, disk) in blippy
+        .blueprint()
+        .all_omicron_disks(BlueprintPhysicalDiskDisposition::is_in_service)
     {
         // Note: This may be called multiple times per `sled_id`,
         // which is somewhat inefficient. However it will still only report

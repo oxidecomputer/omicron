@@ -839,7 +839,13 @@ impl DataStore {
                                 d.id, d.sled_id
                             ))
                         })?;
-                    sled_disks.disks.insert(d.into());
+                    let disk_id = d.id;
+                    sled_disks.disks.insert(d.try_into().map_err(|e| {
+                        Error::internal_error(&format!(
+                            "Cannot convert BpOmicronPhysicalDisk {}: {e}",
+                            disk_id
+                        ))
+                    })?);
                 }
             }
         }

@@ -52,7 +52,6 @@ use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
-use nexus_types::external_api::views::PhysicalDiskState;
 use nexus_types::external_api::views::SledState;
 use nexus_types::internal_api::params::DnsConfigParams;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
@@ -865,7 +864,6 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                             disks.insert(BlueprintPhysicalDiskConfig {
                                 disposition:
                                     BlueprintPhysicalDiskDisposition::InService,
-                                state: PhysicalDiskState::Active,
                                 identity: omicron_common::disk::DiskIdentity {
                                     vendor: "nexus-tests".to_string(),
                                     model: "nexus-test-model".to_string(),
@@ -912,7 +910,6 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         disks.insert(BlueprintPhysicalDiskConfig {
                             disposition:
                                 BlueprintPhysicalDiskDisposition::InService,
-                            state: PhysicalDiskState::Active,
                             identity: omicron_common::disk::DiskIdentity {
                                 vendor: "nexus-tests".to_string(),
                                 model: "nexus-test-model".to_string(),

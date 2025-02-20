@@ -12,6 +12,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::execution::*;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::SledState;
@@ -535,7 +536,7 @@ fn register_decommission_disks_step<'a>(
                     &opctx,
                     datastore,
                     blueprint
-                        .all_decommisioned_disks()
+                        .all_omicron_disks(BlueprintPhysicalDiskDisposition::is_ready_for_cleanup)
                         .map(|(sled_id, config)| (sled_id, config.id)),
                 )
                 .await

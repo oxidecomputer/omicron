@@ -1887,7 +1887,6 @@ pub(crate) mod test {
     }
 
     #[test]
-
     fn test_disk_add_expunge_decommission() {
         static TEST_NAME: &str = "planner_disk_add_expunge_decommission";
         let logctx = test_setup_log(TEST_NAME);
@@ -1918,7 +1917,6 @@ pub(crate) mod test {
                 disk.disposition,
                 BlueprintPhysicalDiskDisposition::InService
             );
-            assert_eq!(disk.state, PhysicalDiskState::Active);
         }
 
         let mut builder = input.into_builder();
@@ -1962,21 +1960,23 @@ pub(crate) mod test {
 
         // The disks generation goes from 2 -> 3
         assert_eq!(disks_config.generation, Generation::from_u32(3));
-        // One disk should have it's disposition set to `Expunged`. All disks
-        // should have their state remain `Active`.
+        // One disk should have it's disposition set to
+        // `Expunged{ready_for_cleanup: false, ..}`.
         for disk in &disks_config.disks {
             if disk.id == expunged_disk_id {
-                assert_eq!(
+                assert!(matches!(
                     disk.disposition,
-                    BlueprintPhysicalDiskDisposition::Expunged
-                );
+                    BlueprintPhysicalDiskDisposition::Expunged {
+                        ready_for_cleanup: false,
+                        ..
+                    }
+                ));
             } else {
                 assert_eq!(
                     disk.disposition,
                     BlueprintPhysicalDiskDisposition::InService
                 );
             }
-            assert_eq!(disk.state, PhysicalDiskState::Active);
             println!("{disk:?}");
         }
 
@@ -1985,6 +1985,7 @@ pub(crate) mod test {
             &logctx.log,
             &blueprint2,
             &input,
+            &collection,
             TEST_NAME,
         );
 
@@ -2016,21 +2017,22 @@ pub(crate) mod test {
 
         // The disks generation goes from 3 -> 4
         assert_eq!(disks_config.generation, Generation::from_u32(4));
-        // One disk should have its disposition set to `Expunged` and it's state
-        // set to 'Decommissioned'.
+        // One disk should have its disposition set to
+        // `Expunged{ready_for_cleanup: true, ..}`.
         for disk in &disks_config.disks {
             if disk.id == expunged_disk_id {
-                assert_eq!(
+                assert!(matches!(
                     disk.disposition,
-                    BlueprintPhysicalDiskDisposition::Expunged
-                );
-                assert_eq!(disk.state, PhysicalDiskState::Decommissioned);
+                    BlueprintPhysicalDiskDisposition::Expunged {
+                        ready_for_cleanup: true,
+                        ..
+                    }
+                ));
             } else {
                 assert_eq!(
                     disk.disposition,
                     BlueprintPhysicalDiskDisposition::InService
                 );
-                assert_eq!(disk.state, PhysicalDiskState::Active);
             }
             println!("{disk:?}");
         }
@@ -2072,14 +2074,16 @@ pub(crate) mod test {
         assert_eq!(disks_config.generation, Generation::from_u32(5));
         // We should still have 10 disks
         assert_eq!(disks_config.disks.len(), 10);
-        // All disks should have their disposition set to `Expunged` and their
-        // state set to 'Decommissioned'.
+        // All disks should have their disposition set to
+        // `Expunged{ready_for_cleanup: true, ..}`.
         for disk in &disks_config.disks {
-            assert_eq!(
+            assert!(matches!(
                 disk.disposition,
-                BlueprintPhysicalDiskDisposition::Expunged
-            );
-            assert_eq!(disk.state, PhysicalDiskState::Decommissioned);
+                BlueprintPhysicalDiskDisposition::Expunged {
+                    ready_for_cleanup: true,
+                    ..
+                }
+            ));
             println!("{disk:?}");
         }
 

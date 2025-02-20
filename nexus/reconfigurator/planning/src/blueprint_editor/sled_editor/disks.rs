@@ -6,8 +6,6 @@ use crate::blueprint_builder::EditCounts;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
-use nexus_types::deployment::DiskFilter;
-use nexus_types::external_api::views::PhysicalDiskState;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -72,13 +70,14 @@ impl DisksEditor {
         self.counts
     }
 
-    pub fn disks(
+    pub fn disks<F>(
         &self,
-        filter: DiskFilter,
-    ) -> impl Iterator<Item = &BlueprintPhysicalDiskConfig> {
-        self.disks
-            .values()
-            .filter(move |config| config.disposition.matches(filter))
+        mut filter: F,
+    ) -> impl Iterator<Item = &BlueprintPhysicalDiskConfig>
+    where
+        F: FnMut(BlueprintPhysicalDiskDisposition) -> bool,
+    {
+        self.disks.values().filter(move |config| filter(config.disposition))
     }
 
     pub fn contains_zpool(&self, zpool_id: &ZpoolUuid) -> bool {
@@ -100,7 +99,9 @@ impl DisksEditor {
                     match (existing.disposition, disk.disposition) {
                         // All other combinations are valid
                         (
-                            BlueprintPhysicalDiskDisposition::Expunged,
+                            BlueprintPhysicalDiskDisposition::Expunged {
+                                ..
+                            },
                             BlueprintPhysicalDiskDisposition::InService,
                         ) => {
                             return Err(DisksEditError::AddExpungedDisk {
@@ -109,8 +110,12 @@ impl DisksEditor {
                         }
                         // All following combinations are valid
                         (
-                            BlueprintPhysicalDiskDisposition::Expunged,
-                            BlueprintPhysicalDiskDisposition::Expunged,
+                            BlueprintPhysicalDiskDisposition::Expunged {
+                                ..
+                            },
+                            BlueprintPhysicalDiskDisposition::Expunged {
+                                ..
+                            },
                         ) => (),
                         (
                             BlueprintPhysicalDiskDisposition::InService,
@@ -118,7 +123,9 @@ impl DisksEditor {
                         ) => (),
                         (
                             BlueprintPhysicalDiskDisposition::InService,
-                            BlueprintPhysicalDiskDisposition::Expunged,
+                            BlueprintPhysicalDiskDisposition::Expunged {
+                                ..
+                            },
                         ) => (),
                     }
 
@@ -141,11 +148,18 @@ impl DisksEditor {
         let did_expunge: bool;
         match config.disposition {
             BlueprintPhysicalDiskDisposition::InService => {
-                config.disposition = BlueprintPhysicalDiskDisposition::Expunged;
+                config.disposition =
+                    BlueprintPhysicalDiskDisposition::Expunged {
+                        // We don't update the editor generation until the call
+                        // to `finalize` which occurs later. We bump it here
+                        // to compensate.
+                        as_of_generation: self.generation.next(),
+                        ready_for_cleanup: false,
+                    };
                 self.counts.expunged += 1;
                 did_expunge = true;
             }
-            BlueprintPhysicalDiskDisposition::Expunged => {
+            BlueprintPhysicalDiskDisposition::Expunged { .. } => {
                 // expunge is idempotent; do nothing
                 did_expunge = false;
             }
@@ -162,26 +176,30 @@ impl DisksEditor {
             DisksEditError::DecommissionNonexistentDisk { id: *disk_id }
         })?;
 
-        match (config.state, config.disposition) {
-            (
-                PhysicalDiskState::Active,
-                BlueprintPhysicalDiskDisposition::InService,
-            ) => {
+        match config.disposition {
+            BlueprintPhysicalDiskDisposition::InService => {
                 return Err(DisksEditError::DecommissionInServiceDisk {
                     id: *disk_id,
                 });
             }
-            (
-                PhysicalDiskState::Active,
-                BlueprintPhysicalDiskDisposition::Expunged,
-            ) => {
-                config.state = PhysicalDiskState::Decommissioned;
+            BlueprintPhysicalDiskDisposition::Expunged {
+                ready_for_cleanup: false,
+                as_of_generation,
+            } => {
+                config.disposition =
+                    BlueprintPhysicalDiskDisposition::Expunged {
+                        ready_for_cleanup: true,
+                        as_of_generation,
+                    };
                 self.counts.decommissioned += 1;
                 let did_decommission = true;
                 Ok(did_decommission)
             }
             // We've already decommissioned this disk
-            (PhysicalDiskState::Decommissioned, _) => {
+            BlueprintPhysicalDiskDisposition::Expunged {
+                ready_for_cleanup: true,
+                ..
+            } => {
                 let did_decommision = false;
                 Ok(did_decommision)
             }

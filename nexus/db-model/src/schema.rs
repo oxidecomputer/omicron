@@ -1686,7 +1686,8 @@ table! {
         pool_id -> Uuid,
 
         disposition -> crate::DbBpPhysicalDiskDispositionEnum,
-        state -> crate::PhysicalDiskStateEnum,
+        disposition_expunged_as_of_generation -> Nullable<Int8>,
+        disposition_expunged_ready_for_cleanup -> Bool,
     }
 }
 

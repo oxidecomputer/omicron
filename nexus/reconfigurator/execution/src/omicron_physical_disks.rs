@@ -268,7 +268,6 @@ mod test {
                 generation: Generation::new().next(),
                 disks: [BlueprintPhysicalDiskConfig {
                     disposition: BlueprintPhysicalDiskDisposition::InService,
-                    state: nexus_types::external_api::views::PhysicalDiskState::Active,
                     identity: DiskIdentity {
                         vendor: "test-vendor".to_string(),
                         serial: "test-serial".to_string(),

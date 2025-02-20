@@ -49,7 +49,6 @@ use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::ZpoolName;
-use nexus_types::external_api::views::PhysicalDiskState;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
@@ -904,12 +903,12 @@ impl<'a> BlueprintBuilder<'a> {
         let mut num_zones_expunged = 0;
 
         let mut disks_to_expunge = Vec::new();
-        for disk in editor.disks(DiskFilter::All) {
+        for disk in editor.disks(BlueprintPhysicalDiskDisposition::any) {
             match disk.disposition {
                 BlueprintPhysicalDiskDisposition::InService => {
                     disks_to_expunge.push(disk.id);
                 }
-                BlueprintPhysicalDiskDisposition::Expunged => (),
+                BlueprintPhysicalDiskDisposition::Expunged { .. } => (),
             }
         }
         for disk_id in disks_to_expunge {
@@ -1081,7 +1080,6 @@ impl<'a> BlueprintBuilder<'a> {
                     BlueprintPhysicalDiskConfig {
                         disposition:
                             BlueprintPhysicalDiskDisposition::InService,
-                        state: PhysicalDiskState::Active,
                         identity: disk.disk_identity.clone(),
                         id: disk_id,
                         pool_id: *zpool,
@@ -1161,21 +1159,16 @@ impl<'a> BlueprintBuilder<'a> {
                 .get(&sled_id)
                 .map(|sa| sa.omicron_physical_disks_generation);
 
-            // We can only check if the current generation has been seen.
-            // If a new generation has been seen then this blueprint is already
-            // out of date. If an old generation has been seen, the parent_blueprint
-            // has not been reflected in inventory.
-            //
-            // This means that many frequent expungements or additions will
-            // delay decommissioning, but we are limited by the total number of
-            // disks per sled that this will reasonably happen to in multiple
-            // passes.
-            if seen_generation == Some(parent_bp_config.generation) {
-                // Do we have any expunged disks in the parent blueprint?
-                for disk in &parent_bp_config.disks {
-                    if disk.disposition
-                        == BlueprintPhysicalDiskDisposition::Expunged
-                    {
+            // Do we have any expunged disks in the parent blueprint?
+            for disk in &parent_bp_config.disks {
+                if let BlueprintPhysicalDiskDisposition::Expunged {
+                    as_of_generation,
+                    ..
+                } = disk.disposition
+                {
+                    // Has the sled_agent seen this disks expungement yet as
+                    // reflected in inventory?
+                    if seen_generation >= Some(as_of_generation) {
                         editor.decommission_disk(&disk.id).map_err(|err| {
                             Error::SledEditError { sled_id, err }
                         })?;
@@ -1899,7 +1892,7 @@ impl<'a> BlueprintBuilder<'a> {
         // blueprint and the list of all in-service zpools on this sled per our
         // planning input, and only pick zpools that are available in both.
         let current_sled_disks = editor
-            .disks(DiskFilter::InService)
+            .disks(BlueprintPhysicalDiskDisposition::is_in_service)
             .map(|disk_config| disk_config.pool_id)
             .collect::<BTreeSet<_>>();
 
@@ -2485,7 +2478,7 @@ pub mod test {
                     .sled_editors
                     .get(&sled_id)
                     .unwrap()
-                    .disks(DiskFilter::All)
+                    .disks(BlueprintPhysicalDiskDisposition::any)
                     .collect::<Vec<_>>();
                 assert!(
                     disks.is_empty(),

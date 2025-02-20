@@ -948,7 +948,6 @@ impl BpTableData for DiffPhysicalDisksDetails {
                     d.identity.model.clone(),
                     d.identity.serial.clone(),
                     d.disposition.to_string(),
-                    d.state.to_string(),
                 ],
             )
         })

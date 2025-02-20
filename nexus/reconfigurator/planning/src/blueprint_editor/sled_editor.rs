@@ -14,13 +14,13 @@ use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetFilter;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
+use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
-use nexus_types::deployment::DiskFilter;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Dataset;
 use nexus_types::inventory::Zpool;
@@ -228,10 +228,13 @@ impl SledEditor {
             .ok_or(SledEditError::OutOfUnderlayIps)
     }
 
-    pub fn disks(
+    pub fn disks<F>(
         &self,
-        filter: DiskFilter,
-    ) -> impl Iterator<Item = &BlueprintPhysicalDiskConfig> {
+        mut filter: F,
+    ) -> impl Iterator<Item = &BlueprintPhysicalDiskConfig>
+    where
+        F: FnMut(BlueprintPhysicalDiskDisposition) -> bool,
+    {
         match &self.0 {
             InnerSledEditor::Active(editor) => {
                 Either::Left(editor.disks(filter))
@@ -241,7 +244,7 @@ impl SledEditor {
                     .disks
                     .disks
                     .iter()
-                    .filter(move |disk| disk.disposition.matches(filter)),
+                    .filter(move |disk| filter(disk.disposition)),
             ),
         }
     }
@@ -465,10 +468,13 @@ impl ActiveSledEditor {
         self.underlay_ip_allocator.alloc()
     }
 
-    pub fn disks(
+    pub fn disks<F>(
         &self,
-        filter: DiskFilter,
-    ) -> impl Iterator<Item = &BlueprintPhysicalDiskConfig> {
+        filter: F,
+    ) -> impl Iterator<Item = &BlueprintPhysicalDiskConfig>
+    where
+        F: FnMut(BlueprintPhysicalDiskDisposition) -> bool,
+    {
         self.disks.disks(filter)
     }
 
