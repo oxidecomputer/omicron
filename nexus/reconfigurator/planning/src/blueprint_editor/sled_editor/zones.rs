@@ -132,7 +132,8 @@ impl ZonesEditor {
             ZonesEditError::ExpungeNonexistentZone { id: *zone_id }
         })?;
 
-        let did_expunge = Self::expunge_impl(&mut config, &mut self.counts);
+        let did_expunge =
+            Self::expunge_impl(&mut config, &mut self.counts, self.generation);
 
         Ok((did_expunge, config.into_ref()))
     }
@@ -140,15 +141,18 @@ impl ZonesEditor {
     fn expunge_impl(
         config: &mut BlueprintZoneConfig,
         counts: &mut EditCounts,
+        current_generation: Generation,
     ) -> bool {
         match config.disposition {
-            BlueprintZoneDisposition::InService
-            | BlueprintZoneDisposition::Quiesced => {
-                config.disposition = BlueprintZoneDisposition::Expunged;
+            BlueprintZoneDisposition::InService => {
+                config.disposition = BlueprintZoneDisposition::Expunged {
+                    as_of_generation: current_generation.next(),
+                    ready_for_cleanup: false,
+                };
                 counts.expunged += 1;
                 true
             }
-            BlueprintZoneDisposition::Expunged => {
+            BlueprintZoneDisposition::Expunged { .. } => {
                 // expunge is idempotent; do nothing
                 false
             }
@@ -171,7 +175,11 @@ impl ZonesEditor {
                 .durable_zpool()
                 .map_or(false, |pool| pool.id() == *zpool);
             if fs_is_on_zpool || dd_is_on_zpool {
-                if Self::expunge_impl(&mut config, &mut self.counts) {
+                if Self::expunge_impl(
+                    &mut config,
+                    &mut self.counts,
+                    self.generation,
+                ) {
                     nexpunged += 1;
                 }
             }

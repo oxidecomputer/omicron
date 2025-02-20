@@ -21,6 +21,7 @@ use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
 use blueprint_display::BpDatasetsTableSchema;
 use daft::Diffable;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
+use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::ByteCount;
@@ -49,7 +50,6 @@ use std::fmt;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use strum::EnumIter;
-use strum::IntoEnumIterator;
 
 mod blueprint_diff;
 mod blueprint_display;
@@ -679,9 +679,9 @@ impl BlueprintZonesConfig {
     /// Returns true if all zones in the blueprint have a disposition of
     /// `Expunged`, false otherwise.
     pub fn are_all_zones_expunged(&self) -> bool {
-        self.zones
-            .iter()
-            .all(|c| c.disposition == BlueprintZoneDisposition::Expunged)
+        self.zones.iter().all(|c| {
+            matches!(c.disposition, BlueprintZoneDisposition::Expunged { .. })
+        })
     }
 }
 
@@ -776,10 +776,17 @@ impl BlueprintZoneConfig {
 
 impl From<BlueprintZoneConfig> for OmicronZoneConfig {
     fn from(z: BlueprintZoneConfig) -> Self {
+        let BlueprintZoneConfig {
+            id,
+            filesystem_pool,
+            zone_type,
+            disposition: _disposition,
+        } = z;
         Self {
-            id: z.id,
-            filesystem_pool: z.filesystem_pool,
-            zone_type: z.zone_type.into(),
+            id,
+            filesystem_pool,
+            zone_type: zone_type.into(),
+            image_source: OmicronZoneImageSource::InstallDataset,
         }
     }
 }
@@ -799,19 +806,29 @@ impl From<BlueprintZoneConfig> for OmicronZoneConfig {
     JsonSchema,
     Deserialize,
     Serialize,
-    EnumIter,
     Diffable,
 )]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BlueprintZoneDisposition {
     /// The zone is in-service.
     InService,
 
-    /// The zone is not in service.
-    Quiesced,
-
     /// The zone is permanently gone.
-    Expunged,
+    Expunged {
+        /// Generation of the parent config in which this zone became expunged.
+        as_of_generation: Generation,
+
+        /// True if Reconfiguration knows that this zone has been shut down and
+        /// will not be restarted.
+        ///
+        /// In the current implementation, this means the planner has observed
+        /// an inventory collection where the sled on which this zone was
+        /// running (a) is no longer running the zone and (b) has a config
+        /// generation at least as high as `as_of_generation`, indicating it
+        /// will not try to start the zone on a cold boot based on an older
+        /// config.
+        ready_for_cleanup: bool,
+    },
 }
 
 impl BlueprintZoneDisposition {
@@ -834,24 +851,7 @@ impl BlueprintZoneDisposition {
                 BlueprintZoneFilter::ShouldBeInInternalDns => true,
                 BlueprintZoneFilter::ShouldDeployVpcFirewallRules => true,
             },
-            Self::Quiesced => match filter {
-                BlueprintZoneFilter::All => true,
-                BlueprintZoneFilter::Expunged => false,
-
-                // Quiesced zones are still running.
-                BlueprintZoneFilter::ShouldBeRunning => true,
-
-                // Quiesced zones should not have external resources -- we do
-                // not want traffic to be directed to them.
-                BlueprintZoneFilter::ShouldBeExternallyReachable => false,
-
-                // Quiesced zones should not be exposed in DNS.
-                BlueprintZoneFilter::ShouldBeInInternalDns => false,
-
-                // Quiesced zones should get firewall rules.
-                BlueprintZoneFilter::ShouldDeployVpcFirewallRules => true,
-            },
-            Self::Expunged => match filter {
+            Self::Expunged { .. } => match filter {
                 BlueprintZoneFilter::All => true,
                 BlueprintZoneFilter::Expunged => true,
                 BlueprintZoneFilter::ShouldBeRunning => false,
@@ -861,13 +861,6 @@ impl BlueprintZoneDisposition {
             },
         }
     }
-
-    /// Returns all zone dispositions that match the given filter.
-    pub fn all_matching(
-        filter: BlueprintZoneFilter,
-    ) -> impl Iterator<Item = Self> {
-        BlueprintZoneDisposition::iter().filter(move |&d| d.matches(filter))
-    }
 }
 
 impl fmt::Display for BlueprintZoneDisposition {
@@ -876,8 +869,15 @@ impl fmt::Display for BlueprintZoneDisposition {
             // Neither `write!(f, "...")` nor `f.write_str("...")` obey fill
             // and alignment (used above), but this does.
             BlueprintZoneDisposition::InService => "in service".fmt(f),
-            BlueprintZoneDisposition::Quiesced => "quiesced".fmt(f),
-            BlueprintZoneDisposition::Expunged => "expunged".fmt(f),
+            BlueprintZoneDisposition::Expunged {
+                ready_for_cleanup, ..
+            } => {
+                if *ready_for_cleanup {
+                    "expunged ✓".fmt(f)
+                } else {
+                    "expunged ⏳".fmt(f)
+                }
+            }
         }
     }
 }

@@ -3695,7 +3695,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_clickhouse_keeper_membership (
 
 CREATE TYPE IF NOT EXISTS omicron.public.bp_zone_disposition AS ENUM (
     'in_service',
-    'quiesced',
     'expunged'
 );
 
@@ -3952,9 +3951,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     snat_last_port INT4
         CHECK (snat_last_port IS NULL OR snat_last_port BETWEEN 0 AND 65535),
 
-    -- Zone disposition
-    disposition omicron.public.bp_zone_disposition NOT NULL,
-
     -- For some zones, either primary_service_ip or second_service_ip (but not
     -- both!) is an external IP address. For such zones, this is the ID of that
     -- external IP. In general this is a foreign key into
@@ -3968,7 +3964,23 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     -- Eventually, that nullability should be removed.
     filesystem_pool UUID,
 
-    PRIMARY KEY (blueprint_id, id)
+    -- Zone disposition
+    disposition omicron.public.bp_zone_disposition NOT NULL,
+
+    -- Specific properties of the `expunged` disposition
+    disposition_expunged_as_of_generation INT,
+    disposition_expunged_ready_for_cleanup BOOL NOT NULL,
+
+    PRIMARY KEY (blueprint_id, id),
+
+    CONSTRAINT expunged_disposition_properties CHECK (
+        (disposition != 'expunged'
+            AND disposition_expunged_as_of_generation IS NULL
+            AND NOT disposition_expunged_ready_for_cleanup)
+        OR
+        (disposition = 'expunged'
+            AND disposition_expunged_as_of_generation IS NOT NULL)
+    )
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone_nic (
@@ -4867,7 +4879,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '125.0.0', NULL)
+    (TRUE, NOW(), NOW(), '126.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

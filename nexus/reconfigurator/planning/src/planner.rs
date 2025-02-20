@@ -185,7 +185,10 @@ impl<'a> Planner<'a> {
                 .blueprint
                 .current_sled_zones(sled_id, BlueprintZoneFilter::All)
                 .all(|zone| {
-                    zone.disposition == BlueprintZoneDisposition::Expunged
+                    matches!(
+                        zone.disposition,
+                        BlueprintZoneDisposition::Expunged { .. }
+                    )
                 });
 
             // Check 3: Are there any instances assigned to this sled? See
@@ -225,7 +228,10 @@ impl<'a> Planner<'a> {
                     .blueprint
                     .current_sled_zones(sled_id, BlueprintZoneFilter::All)
                     .filter(|zone| {
-                        zone.disposition != BlueprintZoneDisposition::Expunged
+                        !matches!(
+                            zone.disposition,
+                            BlueprintZoneDisposition::Expunged { .. }
+                        )
                     })
                     .count();
                 if num_zones > 0 {
@@ -1479,7 +1485,14 @@ pub(crate) mod test {
             .iter()
             .find(|zone| matches!(zone.zone_type, BlueprintZoneType::Nexus(_)))
             .expect("no nexus zone found");
-        assert_eq!(zone.disposition, BlueprintZoneDisposition::Expunged);
+        assert_eq!(
+            zone.disposition,
+            BlueprintZoneDisposition::Expunged {
+                as_of_generation: blueprint2.blueprint_zones[&sled_id]
+                    .generation,
+                ready_for_cleanup: false,
+            }
+        );
 
         // Set the target Nexus zone count to one that will completely exhaust
         // the service IP pool. This will force reuse of the IP that was
@@ -1670,7 +1683,13 @@ pub(crate) mod test {
                 .zones
                 .iter()
                 .filter(|zone| {
-                    zone.disposition == BlueprintZoneDisposition::Expunged
+                    zone.disposition
+                        == BlueprintZoneDisposition::Expunged {
+                            as_of_generation: blueprint3.blueprint_zones
+                                [&sled_id]
+                                .generation,
+                            ready_for_cleanup: false,
+                        }
                         && zone.zone_type.is_external_dns()
                 })
                 .count(),
@@ -2220,7 +2239,10 @@ pub(crate) mod test {
         );
         assert_eq!(
             *modified_zone.disposition.after,
-            BlueprintZoneDisposition::Expunged,
+            BlueprintZoneDisposition::Expunged {
+                as_of_generation: *modified_zones.generation.after,
+                ready_for_cleanup: false,
+            },
             "Should have expunged this zone"
         );
 
@@ -2337,7 +2359,10 @@ pub(crate) mod test {
             for (_, z) in zones.zones.modified() {
                 assert_eq!(
                     z.after.disposition,
-                    BlueprintZoneDisposition::Expunged,
+                    BlueprintZoneDisposition::Expunged {
+                        as_of_generation: *zones.generation.diff_pair().after,
+                        ready_for_cleanup: false,
+                    },
                     "Should have expunged this zone"
                 );
                 zones_expunged.insert(z.after.id);
@@ -2442,7 +2467,10 @@ pub(crate) mod test {
             for mut zone in
                 &mut blueprint1.blueprint_zones.get_mut(&sled_id).unwrap().zones
             {
-                zone.disposition = BlueprintZoneDisposition::Expunged;
+                zone.disposition = BlueprintZoneDisposition::Expunged {
+                    as_of_generation: Generation::new(),
+                    ready_for_cleanup: false,
+                };
             }
 
             // Similarly, a sled can only have gotten into the `Decommissioned`
@@ -2600,7 +2628,10 @@ pub(crate) mod test {
             } else if let BlueprintZoneType::Crucible(_) = zone.zone_type {
                 match next {
                     NextCrucibleMutate::Modify => {
-                        zone.disposition = BlueprintZoneDisposition::Quiesced;
+                        zone.disposition = BlueprintZoneDisposition::Expunged {
+                            as_of_generation: Generation::new(),
+                            ready_for_cleanup: false,
+                        };
                         next = NextCrucibleMutate::Remove;
                         true
                     }
@@ -2691,7 +2722,10 @@ pub(crate) mod test {
         for modified_zone in modified_zones.zones.modified_values_diff() {
             assert_eq!(
                 *modified_zone.disposition.after,
-                BlueprintZoneDisposition::Expunged,
+                BlueprintZoneDisposition::Expunged {
+                    as_of_generation: *modified_zones.generation.after,
+                    ready_for_cleanup: false,
+                },
                 "for {desc}, zone {} should have been marked expunged",
                 modified_zone.id.after
             );

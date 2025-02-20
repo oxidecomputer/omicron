@@ -442,9 +442,8 @@ impl ActiveSledEditor {
         // ... and all zones are expunged.
         if let Some(zone) = self.zones(BlueprintZoneFilter::All).find(|zone| {
             match zone.disposition {
-                BlueprintZoneDisposition::InService
-                | BlueprintZoneDisposition::Quiesced => true,
-                BlueprintZoneDisposition::Expunged => false,
+                BlueprintZoneDisposition::InService => true,
+                BlueprintZoneDisposition::Expunged { .. } => false,
             }
         }) {
             return Err(SledEditError::NonDecommissionableZoneNotExpunged {

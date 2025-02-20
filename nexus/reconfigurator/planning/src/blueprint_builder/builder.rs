@@ -927,9 +927,8 @@ impl<'a> BlueprintBuilder<'a> {
         // datasets and zones. Double-check that that's true.
         for zone in editor.zones(BlueprintZoneFilter::All) {
             match zone.disposition {
-                BlueprintZoneDisposition::Expunged => (),
-                BlueprintZoneDisposition::InService
-                | BlueprintZoneDisposition::Quiesced => {
+                BlueprintZoneDisposition::Expunged { .. } => (),
+                BlueprintZoneDisposition::InService => {
                     return Err(Error::Planner(anyhow!(
                         "expunged all disks but a zone \
                          is still in service: {zone:?}"
@@ -2354,7 +2353,10 @@ pub mod test {
             .expect("has zones")
             .zones
         {
-            zone.disposition = BlueprintZoneDisposition::Expunged;
+            zone.disposition = BlueprintZoneDisposition::Expunged {
+                as_of_generation: Generation::new(),
+                ready_for_cleanup: false,
+            };
         }
         blueprint1.blueprint_datasets.remove(&decommision_sled_id);
         blueprint1.blueprint_disks.remove(&decommision_sled_id);
@@ -2401,7 +2403,10 @@ pub mod test {
             .unwrap()
             .zones
         {
-            z.disposition = BlueprintZoneDisposition::Expunged;
+            z.disposition = BlueprintZoneDisposition::Expunged {
+                as_of_generation: Generation::new(),
+                ready_for_cleanup: false,
+            };
         }
 
         // Generate a new blueprint. This desired sled state should still be
