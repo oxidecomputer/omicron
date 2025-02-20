@@ -13,7 +13,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::execution::*;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
-use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::SledState;
 use nexus_types::identity::Asset;
@@ -479,7 +479,13 @@ fn register_cleanup_expunged_zones_step<'a>(
                     &opctx,
                     datastore,
                     resolver,
-                    blueprint.all_omicron_zones(BlueprintZoneFilter::Expunged),
+                    // TODO-correctness Once the planner fills in
+                    // `ready_for_cleanup`, we should filter on that here and
+                    // stop requiring `deploy_zones_done`. This is necessary to
+                    // fix omicron#6999.
+                    blueprint.all_omicron_zones(
+                        BlueprintZoneDisposition::is_expunged,
+                    ),
                     &done,
                 )
                 .await

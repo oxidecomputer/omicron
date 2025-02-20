@@ -12,7 +12,7 @@ use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetFilter;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintZoneConfig;
-use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::external_api::views::SledState;
@@ -145,7 +145,7 @@ fn check_underlay_ips(blippy: &mut Blippy<'_>) {
 
     for (sled_id, zone) in blippy
         .blueprint()
-        .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
     {
         let ip = zone.underlay_ip();
 
@@ -238,7 +238,7 @@ fn check_external_networking(blippy: &mut Blippy<'_>) {
 
     for (sled_id, zone, external_ip, nic) in blippy
         .blueprint()
-        .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         .filter_map(|(sled_id, zone)| {
             zone.zone_type
                 .external_networking()
@@ -326,7 +326,7 @@ fn check_dataset_zpool_uniqueness(blippy: &mut Blippy<'_>) {
     // kind.
     for (sled_id, zone) in blippy
         .blueprint()
-        .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
     {
         // Check "one kind per zpool" for durable datasets...
         if let Some(dataset) = zone.zone_type.durable_dataset() {
@@ -520,7 +520,7 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
     // (filesystem or durable).
     for (sled_id, zone_config) in blippy
         .blueprint()
-        .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
     {
         let Some(sled_datasets) = datasets.get_sled_or_note_missing(
             blippy,
@@ -1755,7 +1755,7 @@ mod tests {
         let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
 
         let crucible_addr_by_zpool = blueprint
-            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
             .filter_map(|(_, z)| match z.zone_type {
                 BlueprintZoneType::Crucible(
                     blueprint_zone_type::Crucible { address, .. },

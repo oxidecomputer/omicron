@@ -9,7 +9,6 @@ use nexus_types::deployment::id_map::Entry;
 use nexus_types::deployment::id_map::IdMap;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
-use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -65,13 +64,14 @@ impl ZonesEditor {
         self.counts
     }
 
-    pub fn zones(
+    pub fn zones<F>(
         &self,
-        filter: BlueprintZoneFilter,
-    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
-        self.zones
-            .iter()
-            .filter(move |config| config.disposition.matches(filter))
+        mut filter: F,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig>
+    where
+        F: FnMut(BlueprintZoneDisposition) -> bool,
+    {
+        self.zones.iter().filter(move |config| filter(config.disposition))
     }
 
     pub fn add_zone(
