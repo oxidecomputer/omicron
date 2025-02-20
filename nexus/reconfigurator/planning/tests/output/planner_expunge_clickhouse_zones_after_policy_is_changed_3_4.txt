@@ -82,7 +82,7 @@ to:   blueprint d895ef50-9978-454c-bdfb-b8dbe2c9a918
     --------------------------------------------------------------------------------------------------
     zone type           zone id                                disposition      underlay IP           
     --------------------------------------------------------------------------------------------------
-    clickhouse          c3d4b77c-2e77-45ef-9764-5f45723f1e6e   expunged ⌛       fd00:1122:3344:102::23
+    clickhouse          c3d4b77c-2e77-45ef-9764-5f45723f1e6e   expunged ⏳       fd00:1122:3344:102::23
     crucible            060bee8a-a830-4db9-b43f-d2d4d651460f   in service       fd00:1122:3344:102::28
     crucible            14b40b41-0679-4a97-abb9-670d4a014168   in service       fd00:1122:3344:102::2c
     crucible            2d00b429-277a-4670-9841-59dfe36418f5   in service       fd00:1122:3344:102::2e
@@ -98,7 +98,7 @@ to:   blueprint d895ef50-9978-454c-bdfb-b8dbe2c9a918
     internal_ntp        ac14e7ae-b9d4-455b-9400-89931771987c   in service       fd00:1122:3344:102::21
     nexus               254bd45b-ef24-4ce2-812b-9e825d11da65   in service       fd00:1122:3344:102::22
 *   clickhouse_keeper   14b84b08-598b-4756-99ec-eea98f8fa46e   - in service     fd00:1122:3344:102::2f
-     └─                                                        + expunged ⌛                           
+     └─                                                        + expunged ⏳                           
 
 
   sled aae6114d-956b-4980-9759-b00b1ed893ee (active):
@@ -197,9 +197,9 @@ to:   blueprint d895ef50-9978-454c-bdfb-b8dbe2c9a918
     internal_ntp        b03bea01-5e98-4aaf-a886-c7498ff42012   in service       fd00:1122:3344:103::21
     nexus               5e3bbe2e-34ed-4461-bb25-d0e9773a6b17   in service       fd00:1122:3344:103::22
 *   clickhouse_keeper   10db7ee4-04bb-430a-836d-c4308716e995   - in service     fd00:1122:3344:103::2e
-     └─                                                        + expunged ⌛                           
+     └─                                                        + expunged ⏳                           
 *   clickhouse_server   fe8b84ef-ee63-4dd9-9110-4a8dd696b5c4   - in service     fd00:1122:3344:103::2f
-     └─                                                        + expunged ⌛                           
+     └─                                                        + expunged ⏳                           
 
 
   sled be4a3b25-dde1-40a4-b909-9fa4379a8510 (active):
@@ -300,9 +300,9 @@ to:   blueprint d895ef50-9978-454c-bdfb-b8dbe2c9a918
     internal_ntp        db6ac8f4-eeba-4dad-81b5-dbac0dbf3529   in service       fd00:1122:3344:101::21
     nexus               5424157d-fb7c-4816-9fd1-fedea5eaa4d8   in service       fd00:1122:3344:101::22
 *   clickhouse_keeper   0326e8e8-1d52-495e-9773-cd3fa559edbe   - in service     fd00:1122:3344:101::2e
-     └─                                                        + expunged ⌛                           
+     └─                                                        + expunged ⏳                           
 *   clickhouse_server   1b6b784b-d157-4544-b7ff-6c71f3622a0f   - in service     fd00:1122:3344:101::2f
-     └─                                                        + expunged ⌛                           
+     └─                                                        + expunged ⏳                           
 +   clickhouse          bf9a0f08-fd0d-480c-ae73-3d7507a52b1d   in service       fd00:1122:3344:101::30
 
 

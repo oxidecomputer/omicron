@@ -9,22 +9,22 @@ to:   blueprint df68d4d4-5af4-4b56-95bb-1654a6957d4f
     ------------------------------------------------------------------------------------------------
     zone type           zone id                                disposition    underlay IP           
     ------------------------------------------------------------------------------------------------
-    clickhouse          96dcbb7a-0140-4590-801c-406866500995   expunged ⌛     fd00:1122:3344:101::23
-    clickhouse_keeper   1998de68-a305-44f7-8ebc-cc5613c9e6fb   expunged ⌛     fd00:1122:3344:101::2f
-    crucible            5366862d-0c9e-4c21-bd16-5599298e75bc   expunged ⌛     fd00:1122:3344:101::2b
-    crucible            63dcf460-2794-434c-b0e7-4e09ba0f3a3c   expunged ⌛     fd00:1122:3344:101::28
-    crucible            71f24994-337b-4c5f-9826-75f885a669e7   expunged ⌛     fd00:1122:3344:101::2e
-    crucible            726f6522-a359-4e6e-abe9-0de41979de91   expunged ⌛     fd00:1122:3344:101::26
-    crucible            a794a5cd-ec63-4fe4-a813-720d79dcd2ca   expunged ⌛     fd00:1122:3344:101::2d
-    crucible            ab480489-af1c-4446-8e95-da4a7e58df59   expunged ⌛     fd00:1122:3344:101::25
-    crucible            cc6e2a17-ba9b-4332-b869-e0ce204915cf   expunged ⌛     fd00:1122:3344:101::2c
-    crucible            e5cd215f-19c6-43ca-b31a-039319dd5dcf   expunged ⌛     fd00:1122:3344:101::29
-    crucible            e7bc709c-4ef2-4f1f-be78-494f53169554   expunged ⌛     fd00:1122:3344:101::2a
-    crucible            fbaea242-74a6-490f-9bc0-0710a40768f4   expunged ⌛     fd00:1122:3344:101::27
-    crucible_pantry     ed79fef8-6124-4ecc-aaa4-51cf9fcf58db   expunged ⌛     fd00:1122:3344:101::24
-    internal_dns        4d152a2b-089e-4fe2-89fa-76b53fa58773   expunged ⌛     fd00:1122:3344:1::1   
-    internal_ntp        89d38277-9743-491b-af94-714776657ce2   expunged ⌛     fd00:1122:3344:101::21
-    nexus               4cb9b6d5-fd52-4cfb-b630-59f80bd26615   expunged ⌛     fd00:1122:3344:101::22
+    clickhouse          96dcbb7a-0140-4590-801c-406866500995   expunged ⏳     fd00:1122:3344:101::23
+    clickhouse_keeper   1998de68-a305-44f7-8ebc-cc5613c9e6fb   expunged ⏳     fd00:1122:3344:101::2f
+    crucible            5366862d-0c9e-4c21-bd16-5599298e75bc   expunged ⏳     fd00:1122:3344:101::2b
+    crucible            63dcf460-2794-434c-b0e7-4e09ba0f3a3c   expunged ⏳     fd00:1122:3344:101::28
+    crucible            71f24994-337b-4c5f-9826-75f885a669e7   expunged ⏳     fd00:1122:3344:101::2e
+    crucible            726f6522-a359-4e6e-abe9-0de41979de91   expunged ⏳     fd00:1122:3344:101::26
+    crucible            a794a5cd-ec63-4fe4-a813-720d79dcd2ca   expunged ⏳     fd00:1122:3344:101::2d
+    crucible            ab480489-af1c-4446-8e95-da4a7e58df59   expunged ⏳     fd00:1122:3344:101::25
+    crucible            cc6e2a17-ba9b-4332-b869-e0ce204915cf   expunged ⏳     fd00:1122:3344:101::2c
+    crucible            e5cd215f-19c6-43ca-b31a-039319dd5dcf   expunged ⏳     fd00:1122:3344:101::29
+    crucible            e7bc709c-4ef2-4f1f-be78-494f53169554   expunged ⏳     fd00:1122:3344:101::2a
+    crucible            fbaea242-74a6-490f-9bc0-0710a40768f4   expunged ⏳     fd00:1122:3344:101::27
+    crucible_pantry     ed79fef8-6124-4ecc-aaa4-51cf9fcf58db   expunged ⏳     fd00:1122:3344:101::24
+    internal_dns        4d152a2b-089e-4fe2-89fa-76b53fa58773   expunged ⏳     fd00:1122:3344:1::1   
+    internal_ntp        89d38277-9743-491b-af94-714776657ce2   expunged ⏳     fd00:1122:3344:101::21
+    nexus               4cb9b6d5-fd52-4cfb-b630-59f80bd26615   expunged ⏳     fd00:1122:3344:101::22
 
 
   sled cdba3bea-3407-4b6e-a029-19bf4a02fca7 (active):

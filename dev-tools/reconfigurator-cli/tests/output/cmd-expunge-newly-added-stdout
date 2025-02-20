@@ -588,7 +588,7 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
     crucible          f055a042-9d1b-4931-8268-d94cac801d7e   in service     fd00:1122:3344:101::29
     crucible          f33e09d1-e3d7-4341-baf2-5f079f3679e5   in service     fd00:1122:3344:101::2c
     crucible_pantry   100e20aa-1816-4195-8d76-08beace10332   in service     fd00:1122:3344:101::24
-    external_dns      9995de32-dd52-4eb1-b0eb-141eb84bc739   expunged ⌛     fd00:1122:3344:101::23
+    external_dns      9995de32-dd52-4eb1-b0eb-141eb84bc739   expunged ⏳     fd00:1122:3344:101::23
     internal_dns      171cabf0-8635-42e7-8ea1-2a1d2a2daf55   in service     fd00:1122:3344:3::1   
     internal_ntp      7b4bccad-9869-48da-8320-2dc82752deea   in service     fd00:1122:3344:101::21
     nexus             5b01b0e0-5cdf-4b34-b0a6-c947cbbdb8be   in service     fd00:1122:3344:101::22
@@ -904,7 +904,7 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
     crucible          f055a042-9d1b-4931-8268-d94cac801d7e   in service     fd00:1122:3344:101::29
     crucible          f33e09d1-e3d7-4341-baf2-5f079f3679e5   in service     fd00:1122:3344:101::2c
     crucible_pantry   100e20aa-1816-4195-8d76-08beace10332   in service     fd00:1122:3344:101::24
-    external_dns      9995de32-dd52-4eb1-b0eb-141eb84bc739   expunged ⌛     fd00:1122:3344:101::23
+    external_dns      9995de32-dd52-4eb1-b0eb-141eb84bc739   expunged ⏳     fd00:1122:3344:101::23
     external_dns      d786ef4a-5acb-4f5d-a732-a00addf986b5   in service     fd00:1122:3344:101::2f
     internal_dns      171cabf0-8635-42e7-8ea1-2a1d2a2daf55   in service     fd00:1122:3344:3::1   
     internal_ntp      7b4bccad-9869-48da-8320-2dc82752deea   in service     fd00:1122:3344:101::21

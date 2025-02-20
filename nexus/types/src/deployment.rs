@@ -841,7 +841,7 @@ impl fmt::Display for BlueprintZoneDisposition {
                 if *ready_for_cleanup {
                     "expunged ✓".fmt(f)
                 } else {
-                    "expunged ⌛".fmt(f)
+                    "expunged ⏳".fmt(f)
                 }
             }
         }
