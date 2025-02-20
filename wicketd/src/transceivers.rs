@@ -73,11 +73,9 @@ impl Handle {
             1 => SwitchLocation::Switch1,
             _ => unreachable!(),
         };
-        println!("SENDING");
         self.switch_location_tx
             .send(Some(loc))
             .expect("Should always have a receiver");
-        println!("SENT");
     }
 
     /// Get the current transceiver state, if we know it.

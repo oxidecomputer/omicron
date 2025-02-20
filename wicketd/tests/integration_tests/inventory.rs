@@ -9,12 +9,14 @@ use std::time::Duration;
 use super::setup::WicketdTestContext;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
+use http::StatusCode;
 use sled_hardware_types::Baseboard;
 use slog::{info, warn};
 use wicket::OutputKind;
 use wicket_common::inventory::{SpIdentifier, SpType};
 use wicket_common::rack_setup::BootstrapSledDescription;
 use wicketd_client::types::{GetInventoryParams, GetInventoryResponse};
+use wicketd_client::Error;
 
 #[tokio::test]
 async fn test_inventory() {
@@ -25,16 +27,13 @@ async fn test_inventory() {
 
     let inventory_fut = async {
         loop {
-            println!("HERE");
             let response = wicketd_testctx
                 .wicketd_client
                 .get_inventory(&params)
                 .await
-                .expect("get_inventory succeeded")
-                .into_inner();
-            println!("NOW HERE");
+                .map(|r| r.into_inner());
             match response {
-                GetInventoryResponse::Response { inventory, .. } => {
+                Ok(GetInventoryResponse::Response { inventory, .. }) => {
                     // Ensure that the SP state is populated -- if it's not,
                     // then the `configured-bootstrap-sleds` command below
                     // might return an empty list.
@@ -60,7 +59,17 @@ async fn test_inventory() {
                         );
                     }
                 }
-                GetInventoryResponse::Unavailable => {}
+                // Successful response, but the MGS inventory isn't available.
+                Ok(GetInventoryResponse::Unavailable) => {}
+
+                // 503 means neither MGS nor transceiver inventory is available.
+                Err(Error::ErrorResponse(rv))
+                    if rv.status() == StatusCode::SERVICE_UNAVAILABLE => {}
+
+                // Anything else is unexpected.
+                Err(e) => panic!(
+                    "get_inventory failed with unexpected response: {e:?}"
+                ),
             }
 
             // Keep polling wicketd until it receives its first results from MGS.
