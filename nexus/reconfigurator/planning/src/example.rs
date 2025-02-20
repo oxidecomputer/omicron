@@ -544,6 +544,7 @@ mod tests {
     use chrono::{NaiveDateTime, TimeZone, Utc};
     use nexus_sled_agent_shared::inventory::{OmicronZoneConfig, ZoneKind};
     use nexus_types::deployment::BlueprintZoneConfig;
+    use nexus_types::deployment::BlueprintZoneDisposition;
     use omicron_test_utils::dev::test_setup_log;
 
     use super::*;
