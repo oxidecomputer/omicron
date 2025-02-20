@@ -326,6 +326,13 @@ impl SledEditor {
         self.as_active_mut()?.expunge_zone(zone_id)
     }
 
+    pub fn mark_expunged_zone_ready_for_cleanup(
+        &mut self,
+        zone_id: &OmicronZoneUuid,
+    ) -> Result<bool, SledEditError> {
+        self.as_active_mut()?.mark_expunged_zone_ready_for_cleanup(zone_id)
+    }
+
     /// Backwards compatibility / test helper: If we're given a blueprint that
     /// has zones but wasn't created via `SledEditor`, it might not have
     /// datasets for all its zones. This method backfills them.
@@ -575,6 +582,15 @@ impl ActiveSledEditor {
         }
 
         Ok(did_expunge)
+    }
+
+    pub fn mark_expunged_zone_ready_for_cleanup(
+        &mut self,
+        zone_id: &OmicronZoneUuid,
+    ) -> Result<bool, SledEditError> {
+        let did_mark_ready =
+            self.zones.mark_expunged_zone_ready_for_cleanup(zone_id)?;
+        Ok(did_mark_ready)
     }
 
     /// Backwards compatibility / test helper: If we're given a blueprint that
