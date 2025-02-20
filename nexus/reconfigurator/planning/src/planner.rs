@@ -357,7 +357,6 @@ impl<'a> Planner<'a> {
                 added,
                 updated,
                 expunged: _,
-                decommissioned: _,
                 removed,
             } = sled_edits.disks.into()
             {
@@ -516,8 +515,6 @@ impl<'a> Planner<'a> {
                 added,
                 updated,
                 expunged,
-                // Datasets don't get decommissioned
-                decommissioned: _,
                 removed,
             } = self.blueprint.sled_ensure_zone_datasets(sled_id)?
             {
@@ -2034,8 +2031,13 @@ pub(crate) mod test {
         let (_, disks_config) =
             blueprint3.blueprint_disks.first_key_value().unwrap();
 
-        // The disks generation goes from 3 -> 4
-        assert_eq!(disks_config.generation, Generation::from_u32(4));
+        // The disks generation does not change, as decommissioning doesn't bump
+        // the generation.
+        //
+        // The reason for this is because the generation is there primarily to
+        // inform the sled-agent that it has work to do, but decommissioning
+        // doesn't trigger any sled-agent changes.
+        assert_eq!(disks_config.generation, Generation::from_u32(3));
         // One disk should have its disposition set to
         // `Expunged{ready_for_cleanup: true, ..}`.
         for disk in &disks_config.disks {
@@ -2089,8 +2091,8 @@ pub(crate) mod test {
         let (_, disks_config) =
             blueprint4.blueprint_disks.first_key_value().unwrap();
 
-        // The disks generation goes from 4 -> 5
-        assert_eq!(disks_config.generation, Generation::from_u32(5));
+        // The disks generation goes from 3 -> 4
+        assert_eq!(disks_config.generation, Generation::from_u32(4));
         // We should still have 10 disks
         assert_eq!(disks_config.disks.len(), 10);
         // All disks should have their disposition set to

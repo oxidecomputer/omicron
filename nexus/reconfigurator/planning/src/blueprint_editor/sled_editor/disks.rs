@@ -191,7 +191,6 @@ impl DisksEditor {
                         ready_for_cleanup: true,
                         as_of_generation,
                     };
-                self.counts.decommissioned += 1;
                 let did_decommission = true;
                 Ok(did_decommission)
             }

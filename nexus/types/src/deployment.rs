@@ -957,7 +957,7 @@ pub enum BlueprintPhysicalDiskDisposition {
 
         /// True if Reconfiguration knows that this disk has been expunged.
         ///
-        /// In the current implementation, this means:
+        /// In the current implementation, this means either:
         ///
         /// a) the sled where the disk was residing has been expunged.
         ///

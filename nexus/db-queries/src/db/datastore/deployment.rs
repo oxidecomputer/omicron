@@ -2366,7 +2366,6 @@ mod tests {
                 added: 4,
                 updated: 0,
                 expunged: 0,
-                decommissioned: 0,
                 removed: 0
             }
         );

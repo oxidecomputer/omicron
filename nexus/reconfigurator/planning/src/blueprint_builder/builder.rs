@@ -144,8 +144,6 @@ pub enum EnsureMultiple {
         updated: usize,
         /// An item was expunged in the blueprint
         expunged: usize,
-        /// An item was decommissioned in the blueprint
-        decommissioned: usize,
         /// An item was removed from the blueprint.
         ///
         /// This happens after expungement or decommissioning has completed
@@ -159,17 +157,11 @@ pub enum EnsureMultiple {
 
 impl From<EditCounts> for EnsureMultiple {
     fn from(value: EditCounts) -> Self {
-        let EditCounts { added, updated, expunged, decommissioned, removed } =
-            value;
-        if added == 0
-            && updated == 0
-            && expunged == 0
-            && decommissioned == 0
-            && removed == 0
-        {
+        let EditCounts { added, updated, expunged, removed } = value;
+        if added == 0 && updated == 0 && expunged == 0 && removed == 0 {
             Self::NotNeeded
         } else {
-            Self::Changed { added, updated, expunged, decommissioned, removed }
+            Self::Changed { added, updated, expunged, removed }
         }
     }
 }
@@ -183,8 +175,6 @@ pub struct EditCounts {
     pub updated: usize,
     /// An item was expunged in the blueprint
     pub expunged: usize,
-    /// An item was decommissioned in the blueprint
-    pub decommissioned: usize,
     /// An item was removed from the blueprint.
     ///
     /// This happens after expungement or decommissioning has completed
@@ -206,7 +196,6 @@ impl EditCounts {
             added: self.added - other.added,
             updated: self.updated - other.updated,
             expunged: self.expunged - other.expunged,
-            decommissioned: self.decommissioned - other.decommissioned,
             removed: self.removed - other.removed,
         }
     }
@@ -903,13 +892,10 @@ impl<'a> BlueprintBuilder<'a> {
         let mut num_zones_expunged = 0;
 
         let mut disks_to_expunge = Vec::new();
-        for disk in editor.disks(BlueprintPhysicalDiskDisposition::any) {
-            match disk.disposition {
-                BlueprintPhysicalDiskDisposition::InService => {
-                    disks_to_expunge.push(disk.id);
-                }
-                BlueprintPhysicalDiskDisposition::Expunged { .. } => (),
-            }
+        for disk in
+            editor.disks(BlueprintPhysicalDiskDisposition::is_in_service)
+        {
+            disks_to_expunge.push(disk.id);
         }
         for disk_id in disks_to_expunge {
             let details = editor
@@ -1146,9 +1132,7 @@ impl<'a> BlueprintBuilder<'a> {
                     .decommission_disk(&disk.disk_id)
                     .map_err(|err| Error::SledEditError { sled_id, err })?;
             }
-        } else if let Some(parent_bp_config) =
-            self.parent_blueprint.blueprint_disks.get(&sled_id)
-        {
+        } else {
             // The sled is not expunged. We have to see if the inventory
             // reflects the parent blueprint disk generation. If it does
             // then we mark any expunged disks decommissioned.
@@ -1158,8 +1142,12 @@ impl<'a> BlueprintBuilder<'a> {
                 .get(&sled_id)
                 .map(|sa| sa.omicron_physical_disks_generation);
 
-            // Do we have any expunged disks in the parent blueprint?
-            for disk in &parent_bp_config.disks {
+            // Do we have any expunged disks?
+            let expunged_disks: Vec<_> = editor
+                .disks(BlueprintPhysicalDiskDisposition::is_expunged)
+                .cloned()
+                .collect();
+            for disk in expunged_disks {
                 if let BlueprintPhysicalDiskDisposition::Expunged {
                     as_of_generation,
                     ..
@@ -2502,7 +2490,6 @@ pub mod test {
                         added: usize::from(SledBuilder::DEFAULT_NPOOLS),
                         updated: 0,
                         expunged: 0,
-                        decommissioned: 0,
                         removed: 0
                     }
                 );
@@ -2514,7 +2501,6 @@ pub mod test {
                         added: 2 * usize::from(SledBuilder::DEFAULT_NPOOLS),
                         updated: 0,
                         expunged: 0,
-                        decommissioned: 0,
                         removed: 0
                     }
                 );
@@ -2620,13 +2606,7 @@ pub mod test {
         // zone filesystem, so we expect two datasets to be expunged.
         assert_eq!(
             changed_counts.datasets,
-            EditCounts {
-                added: 0,
-                updated: 0,
-                expunged: 2,
-                decommissioned: 0,
-                removed: 0
-            }
+            EditCounts { added: 0, updated: 0, expunged: 2, removed: 0 }
         );
         // Once the datasets are expunged, no further changes will be proposed.
         let r = builder.sled_ensure_zone_datasets(sled_id).unwrap();
