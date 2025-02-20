@@ -10,7 +10,6 @@ use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::{authn, authz, db};
-use omicron_common::api::external::{Error, ResourceType};
 use omicron_common::api::internal::shared::SwitchLocation;
 use serde::Deserialize;
 use serde::Serialize;
@@ -84,16 +83,6 @@ async fn sid_delete_instance_record(
         .datastore()
         .project_delete_instance(&opctx, &params.authz_instance)
         .await
-        .or_else(|err| {
-            // Necessary for idempotency
-            match err {
-                Error::ObjectNotFound {
-                    type_name: ResourceType::Instance,
-                    lookup_type: _,
-                } => Ok(()),
-                _ => Err(err),
-            }
-        })
         .map_err(ActionError::action_failed)?;
     Ok(())
 }
