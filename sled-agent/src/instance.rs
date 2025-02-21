@@ -3040,6 +3040,11 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    // Tests a scenario in which a propolis-server process fails to stop in a
+    // timely manner (i.e. it's gotten stuck somehow). This test asserts that
+    // the sled-agent will eventually forcibly terminate the VMM process, tear
+    // down the zone, and tell Nexus that the VMM has been destroyed, even
+    // if Propolis can't shut itself down nicely.
     #[tokio::test]
     async fn test_instance_manager_stop_timeout() {
         let logctx = omicron_test_utils::dev::test_setup_log(
