@@ -36,6 +36,7 @@ pub struct SupportedVersions {
 }
 
 impl SupportedVersions {
+    #[track_caller]
     pub fn new(versions: Vec<SupportedVersion>) -> SupportedVersions {
         assert!(
             !versions.is_empty(),
@@ -181,6 +182,7 @@ macro_rules! api_versions_picky {
                     semver::Version::new($major, $minor, $patch);
             )*
 
+            #[track_caller]
             pub fn supported_versions() -> SupportedVersions {
                 let mut literal_versions = vec![
                     $( SupportedVersion::new([<VERSION_ $name>], $desc) ),*
