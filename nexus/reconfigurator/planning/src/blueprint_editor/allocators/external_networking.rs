@@ -683,6 +683,7 @@ pub mod test {
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::inventory::NetworkInterface;
     use nexus_types::inventory::NetworkInterfaceKind;
+    use omicron_common::api::external::Generation;
     use omicron_common::api::external::Vni;
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::GenericUuid;
@@ -925,8 +926,13 @@ pub mod test {
         // being set aside for other services (e.g., Nexus).
         let running_external_dns =
             make_external_dns(0, BlueprintZoneDisposition::InService);
-        let expunged_external_dns =
-            make_external_dns(1, BlueprintZoneDisposition::Expunged);
+        let expunged_external_dns = make_external_dns(
+            1,
+            BlueprintZoneDisposition::Expunged {
+                as_of_generation: Generation::new(),
+                ready_for_cleanup: false,
+            },
+        );
 
         // Construct a builder; ask for external DNS IPs first (we should get IP
         // 1 then "none available") then Nexus IPs (we should get IP 2 then
@@ -1012,8 +1018,13 @@ pub mod test {
         // (different IDs, but both assigned the same IP, which is perfectly
         // reasonable for expunged zones if they were never in service at the
         // same time).
-        let expunged_external_dns2 =
-            make_external_dns(1, BlueprintZoneDisposition::Expunged);
+        let expunged_external_dns2 = make_external_dns(
+            1,
+            BlueprintZoneDisposition::Expunged {
+                as_of_generation: Generation::new(),
+                ready_for_cleanup: false,
+            },
+        );
         let mut builder = ExternalNetworkingAllocator::new(
             [&running_external_dns].iter().copied(),
             [&expunged_external_dns, &expunged_external_dns2].iter().copied(),

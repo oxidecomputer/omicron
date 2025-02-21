@@ -10,8 +10,8 @@
 // easier it will be to test, version, and update in deployed systems.
 
 use crate::saga_interface::SagaContext;
-use once_cell::sync::Lazy;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use steno::new_action_noop_undo;
 use steno::ActionContext;
 use steno::ActionError;
@@ -133,11 +133,12 @@ impl From<SagaInitError> for omicron_common::api::external::Error {
     }
 }
 
-pub(super) static ACTION_GENERATE_ID: Lazy<NexusAction> = Lazy::new(|| {
-    new_action_noop_undo("common.uuid_generate", saga_generate_uuid)
-});
-pub(crate) static ACTION_REGISTRY: Lazy<Arc<ActionRegistry>> =
-    Lazy::new(|| Arc::new(make_action_registry()));
+pub(super) static ACTION_GENERATE_ID: LazyLock<NexusAction> =
+    LazyLock::new(|| {
+        new_action_noop_undo("common.uuid_generate", saga_generate_uuid)
+    });
+pub(crate) static ACTION_REGISTRY: LazyLock<Arc<ActionRegistry>> =
+    LazyLock::new(|| Arc::new(make_action_registry()));
 
 macro_rules! register_actions {
     ( $registry:ident, $( $saga: ty ),* ) => {
@@ -289,8 +290,8 @@ macro_rules! declare_saga_actions {
     // Basically, everything to the left of "<>" is just us propagating state
     // through the macro, and everything to the right of it is user input.
     (S = $saga:ident $($nodes:ident),* <> $node:ident -> $out:literal { + $a:ident - $u:ident } $($tail:tt)*) => {
-        static $node: ::once_cell::sync::Lazy<crate::app::sagas::NexusAction> =
-            ::once_cell::sync::Lazy::new(|| {
+        static $node: ::std::sync::LazyLock<crate::app::sagas::NexusAction> =
+            ::std::sync::LazyLock::new(|| {
                 ::steno::ActionFunc::new_action(
                     crate::app::sagas::__action_name!($saga, $node), $a, $u,
                 )
@@ -300,8 +301,8 @@ macro_rules! declare_saga_actions {
     };
     // Same as the prior match, but without the undo action.
     (S = $saga:ident $($nodes:ident),* <> $node:ident -> $out:literal { + $a:ident } $($tail:tt)*) => {
-        static $node: ::once_cell::sync::Lazy<crate::app::sagas::NexusAction> =
-            ::once_cell::sync::Lazy::new(|| {
+        static $node: ::std::sync::LazyLock<crate::app::sagas::NexusAction> =
+            ::std::sync::LazyLock::new(|| {
                 ::steno::new_action_noop_undo(
                     crate::app::sagas::__action_name!($saga, $node), $a,
                 )

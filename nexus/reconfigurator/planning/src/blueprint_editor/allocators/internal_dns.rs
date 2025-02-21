@@ -113,7 +113,7 @@ pub mod test {
     use super::*;
     use crate::blueprint_builder::test::verify_blueprint;
     use crate::example::ExampleSystemBuilder;
-    use nexus_types::deployment::BlueprintZoneFilter;
+    use nexus_types::deployment::BlueprintZoneDisposition;
     use omicron_common::disk::DatasetKind;
     use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
     use omicron_test_utils::dev::test_setup_log;
@@ -164,7 +164,7 @@ pub mod test {
         // Create an allocator.
         let mut allocator = InternalDnsSubnetAllocator::new(
             blueprint1
-                .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .map(|(_sled_id, zone_config)| zone_config),
             example.input.target_internal_dns_zone_count(),
         )

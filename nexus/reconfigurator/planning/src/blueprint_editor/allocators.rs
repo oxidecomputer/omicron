@@ -7,7 +7,7 @@
 use std::net::IpAddr;
 
 use super::SledEditor;
-use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::IpRange;
 use omicron_common::address::ReservedRackSubnet;
@@ -51,17 +51,17 @@ impl BlueprintResourceAllocator {
     {
         let internal_dns = InternalDnsSubnetAllocator::new(
             all_sleds.clone().flat_map(|(_, editor)| {
-                editor.zones(BlueprintZoneFilter::ShouldBeRunning)
+                editor.zones(BlueprintZoneDisposition::is_in_service)
             }),
             target_internal_dns_redundancy,
         )?;
 
         let external_networking = ExternalNetworkingAllocator::new(
             all_sleds.clone().flat_map(|(_, editor)| {
-                editor.zones(BlueprintZoneFilter::ShouldBeRunning)
+                editor.zones(BlueprintZoneDisposition::is_in_service)
             }),
             all_sleds.flat_map(|(_, editor)| {
-                editor.zones(BlueprintZoneFilter::Expunged)
+                editor.zones(BlueprintZoneDisposition::is_expunged)
             }),
             service_ip_pool_ranges,
         )
