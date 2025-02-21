@@ -897,7 +897,7 @@ pub enum BlueprintDatasetFilter {
     Serialize,
     Diffable,
 )]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BlueprintPhysicalDiskDisposition {
     /// The physical disk is in-service.
     InService,
@@ -951,6 +951,18 @@ impl BlueprintPhysicalDiskDisposition {
     /// {ready_for_cleanup: true, ..}`
     pub fn is_ready_for_cleanup(self) -> bool {
         matches!(self, Self::Expunged { ready_for_cleanup: true, .. })
+    }
+
+    /// Return the generation when a disk was expunged or `None` if the disk
+    /// was not expunged.
+    pub fn expunged_as_of_generation(&self) -> Option<Generation> {
+        match self {
+            BlueprintPhysicalDiskDisposition::Expunged {
+                as_of_generation,
+                ..
+            } => Some(*as_of_generation),
+            _ => None,
+        }
     }
 }
 

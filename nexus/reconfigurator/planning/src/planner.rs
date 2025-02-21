@@ -17,6 +17,7 @@ use crate::planner::omicron_zone_placement::PlacementError;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
@@ -30,6 +31,7 @@ use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::error;
 use slog::{info, warn, Logger};
@@ -140,8 +142,7 @@ impl<'a> Planner<'a> {
                 // possible though. For example, we can expunge disks on active
                 // sleds if they are faulty.
                 (SledPolicy::InService { .. }, _) => {
-                    self.blueprint
-                        .sled_decommision_disks(sled_id, sled_details)?;
+                    self.do_plan_decommission_expunged_disks_for_in_service_sled(sled_id)?;
                     continue;
                 }
                 // If the sled is already decommissioned it... why is it showing
@@ -170,14 +171,6 @@ impl<'a> Planner<'a> {
                 }
             }
 
-            // Decommission any disks that need it
-            //
-            // This call must live here so that we don't try to decommission
-            // disks on an already decommissioned sled. That violates editor
-            // invariants, as the planner should not be trying to edit sleds
-            // that have been decommissioned.
-            self.blueprint.sled_decommision_disks(sled_id, sled_details)?;
-
             // Check 2: have all this sled's zones been expunged? It's possible
             // we ourselves have made this change, which is fine.
             let all_zones_expunged = self
@@ -201,6 +194,51 @@ impl<'a> Planner<'a> {
         }
 
         Ok(())
+    }
+
+    fn do_plan_decommission_expunged_disks_for_in_service_sled(
+        &mut self,
+        sled_id: SledUuid,
+    ) -> Result<(), Error> {
+        // The sled is not expunged. We have to see if the inventory
+        // reflects the parent blueprint disk generation. If it does
+        // then we mark any expunged disks decommissioned.
+        let Some(seen_generation) = self
+            .inventory
+            .sled_agents
+            .get(&sled_id)
+            .map(|sa| sa.omicron_physical_disks_generation)
+        else {
+            // There is no current inventory for the sled agent, so we cannot
+            // decommission any disks.
+            return Ok(());
+        };
+
+        let disks_to_decommission: Vec<PhysicalDiskUuid> = self
+            .blueprint
+            .current_sled_disks(sled_id, |disposition| match disposition {
+                BlueprintPhysicalDiskDisposition::Expunged {
+                    ready_for_cleanup,
+                    ..
+                } => !ready_for_cleanup,
+                BlueprintPhysicalDiskDisposition::InService => false,
+            })
+            .filter_map(|disk| {
+                // Has the sled agent seen this disk's expungement yet as
+                // reflected in inventory?
+                //
+                // SAFETY: We filtered to only have expunged disks above
+                if seen_generation
+                    >= disk.disposition.expunged_as_of_generation().unwrap()
+                {
+                    Some(disk.id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        self.blueprint.sled_decommission_disks(sled_id, disks_to_decommission)
     }
 
     fn do_plan_expunge(&mut self) -> Result<(), Error> {
