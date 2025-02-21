@@ -9,8 +9,7 @@
 use anyhow::{bail, ensure, Context};
 use camino::Utf8Path;
 use omicron_common::api::external::SemverVersion;
-use once_cell::sync::Lazy;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::LazyLock};
 
 /// The version of the database schema this particular version of Nexus was
 /// built against
@@ -22,7 +21,7 @@ pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(126, 0, 0);
 /// List of all past database schema versions, in *reverse* order
 ///
 /// If you want to change the Omicron database schema, you must update this.
-static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
+static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
     vec![
         // +- The next version goes here!  Duplicate this line, uncomment
         // |  the *second* copy, then update that copy for your version,
