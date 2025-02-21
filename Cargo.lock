@@ -9217,7 +9217,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=4f80f53b6fd1858e812bb81613dccf4e981726a2#4f80f53b6fd1858e812bb81613dccf4e981726a2"
+source = "git+https://github.com/oxidecomputer/propolis?rev=2652487c19ede2db2cbc634b0dee3a78848dfea1#2652487c19ede2db2cbc634b0dee3a78848dfea1"
 dependencies = [
  "anyhow",
  "atty",
@@ -9227,7 +9227,7 @@ dependencies = [
  "futures",
  "hyper",
  "progenitor 0.9.1",
- "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=4f80f53b6fd1858e812bb81613dccf4e981726a2)",
+ "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=2652487c19ede2db2cbc634b0dee3a78848dfea1)",
  "rand",
  "reqwest",
  "schemars",
@@ -9273,7 +9273,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=4f80f53b6fd1858e812bb81613dccf4e981726a2#4f80f53b6fd1858e812bb81613dccf4e981726a2"
+source = "git+https://github.com/oxidecomputer/propolis?rev=2652487c19ede2db2cbc634b0dee3a78848dfea1#2652487c19ede2db2cbc634b0dee3a78848dfea1"
 dependencies = [
  "schemars",
  "serde",
