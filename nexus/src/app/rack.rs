@@ -22,7 +22,7 @@ use nexus_db_queries::db::datastore::RackInit;
 use nexus_db_queries::db::datastore::SledUnderlayAllocationResult;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::deployment::blueprint_zone_type;
-use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::SledFilter;
@@ -204,7 +204,7 @@ impl super::Nexus {
         let silo_name = &request.recovery_silo.silo_name;
         let dns_records = request
             .blueprint
-            .all_omicron_zones(BlueprintZoneFilter::ShouldBeExternallyReachable)
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
             .filter_map(|(_, zc)| match zc.zone_type {
                 BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                     external_ip,

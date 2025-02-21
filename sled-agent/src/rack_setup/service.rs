@@ -972,12 +972,7 @@ impl ServiceInner {
                     .iter()
                     .map(|config| NexusTypes::BgpConfig {
                         asn: config.asn,
-                        originate: config
-                            .originate
-                            .iter()
-                            .cloned()
-                            .map(Into::into)
-                            .collect(),
+                        originate: config.originate.to_vec(),
                         shaper: config.shaper.clone(),
                         checker: config.checker.clone(),
                     })
