@@ -382,6 +382,9 @@ pub struct BlueprintBuilder<'a> {
     // adding zones, so this delay allows us to reuse resources that just came
     // free. (This is implicit and awkward; as we rework the builder we should
     // rework this to make it more explicit.)
+    //
+    // Note: this is currently still a `once_cell` `OnceCell` rather than a std
+    // `OnceCell`, because `get_or_try_init` isn't stable yet.
     resource_allocator: OnceCell<BlueprintResourceAllocator>,
 
     // These fields will become part of the final blueprint.  See the

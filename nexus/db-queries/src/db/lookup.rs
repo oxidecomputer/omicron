@@ -175,6 +175,16 @@ impl<'a> LookupPath<'a> {
         Instance::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select a resource of type AffinityGroup, identified by its id
+    pub fn affinity_group_id(self, id: Uuid) -> AffinityGroup<'a> {
+        AffinityGroup::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type AntiAffinityGroup, identified by its id
+    pub fn anti_affinity_group_id(self, id: Uuid) -> AntiAffinityGroup<'a> {
+        AntiAffinityGroup::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
     /// Select a resource of type IpPool, identified by its name
     pub fn ip_pool_name<'b, 'c>(self, name: &'b Name) -> IpPool<'c>
     where
@@ -676,6 +686,22 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Instance",
+    ancestors = [ "Silo", "Project" ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "AffinityGroup",
+    ancestors = [ "Silo", "Project" ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "AntiAffinityGroup",
     ancestors = [ "Silo", "Project" ],
     lookup_by_name = true,
     soft_deletes = true,
