@@ -844,6 +844,7 @@ async fn test_mgs_metrics(
                             temp += 1;
                         }
                     }
+                    Kind::CpuTctl => cpu_tctl += 1,
                     Kind::Current => current += 1,
                     Kind::Voltage => voltage += 1,
                     Kind::InputVoltage => input_voltage += 1,
