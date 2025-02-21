@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 ///
 /// This must be updated when you change the database schema.  Refer to
 /// schema/crdb/README.adoc in the root of this repository for details.
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(125, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(126, 0, 0);
 
 /// List of all past database schema versions, in *reverse* order
 ///
@@ -29,7 +29,8 @@ static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(125, "affinity"),
+        KnownVersion::new(126, "affinity"),
+        KnownVersion::new(125, "blueprint-disposition-expunged-cleanup"),
         KnownVersion::new(124, "support-read-only-region-replacement"),
         KnownVersion::new(123, "vpc-subnet-contention"),
         KnownVersion::new(122, "tuf-artifact-replication"),

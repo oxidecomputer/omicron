@@ -4940,6 +4940,7 @@ mod illumos_tests {
         zone::MockZones,
     };
 
+    use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use std::os::unix::process::ExitStatusExt;
@@ -5176,6 +5177,7 @@ mod illumos_tests {
                         id,
                         zone_type,
                         filesystem_pool: None,
+                        image_source: OmicronZoneImageSource::InstallDataset,
                     }],
                 },
                 Some(&tmp_dir),
@@ -5202,6 +5204,7 @@ mod illumos_tests {
                     id,
                     zone_type: OmicronZoneType::InternalNtp { address },
                     filesystem_pool: None,
+                    image_source: OmicronZoneImageSource::InstallDataset,
                 }],
             },
             Some(&tmp_dir),
@@ -5784,6 +5787,7 @@ mod illumos_tests {
             id: id1,
             zone_type: OmicronZoneType::InternalNtp { address },
             filesystem_pool: None,
+            image_source: OmicronZoneImageSource::InstallDataset,
         }];
 
         let tmp_dir = String::from(test_config.config_dir.path().as_str());
@@ -5806,6 +5810,7 @@ mod illumos_tests {
             id: id2,
             zone_type: OmicronZoneType::InternalNtp { address },
             filesystem_pool: None,
+            image_source: OmicronZoneImageSource::InstallDataset,
         });
 
         // Now try to apply that list with an older generation number.  This
@@ -5869,6 +5874,7 @@ mod illumos_tests {
 
 #[cfg(test)]
 mod test {
+    use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use omicron_uuid_kinds::ZpoolUuid;
 
     use super::*;
@@ -5915,6 +5921,7 @@ mod test {
                 zone_type: OmicronZoneType::Oximeter {
                     address: "[::1]:0".parse().unwrap(),
                 },
+                image_source: OmicronZoneImageSource::InstallDataset,
             }
         }
 
