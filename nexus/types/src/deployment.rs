@@ -990,6 +990,7 @@ impl fmt::Display for BlueprintPhysicalDiskDisposition {
 )]
 pub struct BlueprintPhysicalDiskConfig {
     pub disposition: BlueprintPhysicalDiskDisposition,
+    #[daft(leaf)]
     pub identity: DiskIdentity,
     pub id: PhysicalDiskUuid,
     pub pool_id: ZpoolUuid,

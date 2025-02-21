@@ -5,6 +5,32 @@ to:   blueprint 74f2e7fd-687e-4c9e-b5d8-e474a5bb8e7c
 
   sled b340c044-bd87-4a3b-aee3-e6ccd9d3ff02 (active -> decommissioned):
 
+    physical disks generation 2 -> 3:
+    ---------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition   
+    ---------------------------------------------------------------------------------------
+*   fake-vendor   fake-model   serial-fcca32b6-9629-468f-a282-63d7da992447   - in service  
+     └─                                                                      + expunged ✓  
+*   fake-vendor   fake-model   serial-188c3b95-16fa-45ea-b9f7-e987560b4d62   - in service  
+     └─                                                                      + expunged ✓  
+*   fake-vendor   fake-model   serial-45a81e70-03bb-4c53-bf49-d598c9fb8d34   - in service  
+     └─                                                                      + expunged ✓  
+*   fake-vendor   fake-model   serial-96f1615c-3dda-427f-8132-408b2fad24e0   - in service  
+     └─                                                                      + expunged ✓  
+*   fake-vendor   fake-model   serial-a9ef71b2-ec22-421c-adc9-bddc4c0641c4   - in service  
+     └─                                                                      + expunged ✓  
+*   fake-vendor   fake-model   serial-b9f9c626-3293-48eb-a475-1debaaccdf6c   - in service  
+     └─                                                                      + expunged ✓  
+*   fake-vendor   fake-model   serial-d563fd5f-9306-49b4-8511-78a2f64733ce   - in service  
+     └─                                                                      + expunged ✓  
+*   fake-vendor   fake-model   serial-03a84dd2-e0a4-435d-96de-67bfe2674f4e   - in service  
+     └─                                                                      + expunged ✓  
+*   fake-vendor   fake-model   serial-1f3bbc7c-888f-40fa-b705-fab3f148b147   - in service  
+     └─                                                                      + expunged ✓  
+*   fake-vendor   fake-model   serial-56c3f0ef-fac1-473d-9317-0e3668aa7e88   - in service  
+     └─                                                                      + expunged ✓  
+
+
     datasets from generation 3:
     ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                     dataset id                             disposition   quota     reservation   compression
