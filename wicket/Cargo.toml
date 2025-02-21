@@ -23,7 +23,6 @@ indexmap.workspace = true
 indicatif.workspace = true
 itertools.workspace = true
 omicron-common.workspace = true
-once_cell.workspace = true
 owo-colors.workspace = true
 ratatui.workspace = true
 reqwest.workspace = true
