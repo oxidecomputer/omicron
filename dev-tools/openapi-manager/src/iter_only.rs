@@ -37,3 +37,22 @@ pub fn iter_only<T: Debug>(
         )),
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use assert_matches::assert_matches;
+
+    #[test]
+    fn test_basic() {
+        assert_matches!(
+            iter_only::<u8>(std::iter::empty()),
+            Err(OnlyError::Empty)
+        );
+        assert_matches!(
+            iter_only([8u8, 12, 15].iter()),
+            Err(OnlyError::Extra(one, two)) if one == "8" && two == "12"
+        );
+        assert_eq!(*iter_only([8].iter()).unwrap(), 8);
+    }
+}

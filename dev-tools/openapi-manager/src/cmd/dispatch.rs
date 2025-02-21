@@ -263,7 +263,7 @@ mod test {
             blessed:
                 BlessedSourceArgs { blessed_from_git: None, blessed_from_dir: None },
             generated: GeneratedSourceArgs { generated_from_dir: None },
-        }) if local_dir == Utf8PathBuf::from("foo"));
+        }) if local_dir == "foo");
 
         // Override generated dir differently
         let app = App::parse_from(&[
@@ -279,7 +279,7 @@ mod test {
             blessed:
                 BlessedSourceArgs { blessed_from_git: None, blessed_from_dir: None },
             generated: GeneratedSourceArgs { generated_from_dir: Some(generated_dir) },
-        }) if local_dir == Utf8PathBuf::from("foo") && generated_dir == Utf8PathBuf::from("bar"));
+        }) if local_dir == "foo" && generated_dir == "bar");
 
         // Override blessed with a local directory.
         let app = App::parse_from(&[
@@ -297,7 +297,7 @@ mod test {
             blessed:
                 BlessedSourceArgs { blessed_from_git: None, blessed_from_dir: Some(blessed_dir) },
             generated: GeneratedSourceArgs { generated_from_dir: Some(generated_dir) },
-        }) if local_dir == Utf8PathBuf::from("foo") && generated_dir == Utf8PathBuf::from("bar") && blessed_dir == Utf8PathBuf::from("baz"));
+        }) if local_dir == "foo" && generated_dir == "bar" && blessed_dir == "baz");
 
         // Override blessed from Git.
         let app = App::parse_from(&[

@@ -887,3 +887,20 @@ fn validate_generated(
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::DisplayableVec;
+
+    #[test]
+    fn test_displayable_vec() {
+        let v = DisplayableVec(Vec::<usize>::new());
+        assert_eq!(v.to_string(), "");
+
+        let v = DisplayableVec(vec![8]);
+        assert_eq!(v.to_string(), "8");
+
+        let v = DisplayableVec(vec![8, 12, 14]);
+        assert_eq!(v.to_string(), "8, 12, 14");
+    }
+}
