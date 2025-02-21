@@ -579,7 +579,8 @@ impl InstanceRunner {
                         "Instance failed to stop within the grace period, \
                          terminating it violently!",
                     );
-                    self.terminate(false).await;
+                    let mark_failed = false;
+                    self.terminate(mark_failed).await;
                 }
 
                 // Requests to terminate the instance take priority over any
@@ -697,6 +698,7 @@ impl InstanceRunner {
 
             }
         }
+
         self.publish_state_to_nexus().await;
 
         // Okay, now that we've terminated the instance, drain any outstanding
@@ -3101,6 +3103,7 @@ mod tests {
 
         let instance_id = InstanceUuid::new_v4();
         let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
+        let zone_name = propolis_zone_name(&propolis_id);
         let InstanceInitialState {
             hardware,
             vmm_runtime,
@@ -3180,7 +3183,26 @@ mod tests {
         .expect("timed out waiting for VmmState::Stopping in FakeNexus")
         .expect("failed to receive FakeNexus' InstanceState");
 
-        // NOW WE STOP ADVANCING THE MOCK --- IT WILL NEVER REACH STOPPED
+        // NOW WE STOP ADVANCING THE MOCK PROPOLIS STATE MACHINE --- IT WILL
+        // NEVER REACH `Stopped`.
+
+        // Expect that the `InstanceRunner` will attempt to halt and remove the
+        // zone.
+        let halt_ctx = MockZones::halt_and_remove_logged_context();
+        halt_ctx.expect().returning(move |_, name| {
+            assert_eq!(name, &zone_name);
+            Ok(())
+        });
+
+        // Now, pause time and advance the Tokio clock past the stop grace
+        // period. This should casue the stop timeout to fire, without requiring
+        // the test to actually wait for ten minutes.
+        tokio::time::pause();
+        tokio::time::advance(
+            super::InstanceRunner::STOP_GRACE_PERIOD + Duration::from_secs(1),
+        )
+        .await;
+        tokio::time::resume();
 
         // The timeout should now fire and sled-agent will murder propolis,
         // allowing the zone to be destroyed.
@@ -3189,7 +3211,7 @@ mod tests {
             TIMEOUT_DURATION,
             state_rx.wait_for(|maybe_state| match maybe_state {
                 ReceivedInstanceState::InstancePut(sled_inst_state) => {
-                    sled_inst_state.vmm_state.state == VmmState::Stopped
+                    sled_inst_state.vmm_state.state == VmmState::Destroyed
                 }
                 _ => false,
             }),
