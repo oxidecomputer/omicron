@@ -107,21 +107,21 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
      └─                                                                      + expunged ✓  
 *   fake-vendor   fake-model   serial-24155070-8a43-4244-a3ba-853d8c71972d   - in service  
      └─                                                                      + expunged ✓  
-*   fake-vendor   fake-model   serial-a42c5a67-6e10-4586-a56e-48bb8260e75f   - in service  
-     └─                                                                      + expunged ✓  
-*   fake-vendor   fake-model   serial-8746874c-dc3b-4454-93cd-2a8fc13720fe   - in service  
-     └─                                                                      + expunged ✓  
-*   fake-vendor   fake-model   serial-ef64ff6d-250d-47ac-8686-e696cfb46966   - in service  
-     └─                                                                      + expunged ✓  
-*   fake-vendor   fake-model   serial-ca89b120-7bcd-4eeb-baa7-71031fbd103b   - in service  
-     └─                                                                      + expunged ✓  
-*   fake-vendor   fake-model   serial-77565d57-c235-4905-b3c7-32d1c2ca2c44   - in service  
-     └─                                                                      + expunged ✓  
 *   fake-vendor   fake-model   serial-494782c7-3821-4f49-918b-ce42cc4d18ad   - in service  
      └─                                                                      + expunged ✓  
 *   fake-vendor   fake-model   serial-6ea8a67f-d27d-472b-844c-6c8245b00e2b   - in service  
      └─                                                                      + expunged ✓  
+*   fake-vendor   fake-model   serial-77565d57-c235-4905-b3c7-32d1c2ca2c44   - in service  
+     └─                                                                      + expunged ✓  
+*   fake-vendor   fake-model   serial-8746874c-dc3b-4454-93cd-2a8fc13720fe   - in service  
+     └─                                                                      + expunged ✓  
+*   fake-vendor   fake-model   serial-a42c5a67-6e10-4586-a56e-48bb8260e75f   - in service  
+     └─                                                                      + expunged ✓  
+*   fake-vendor   fake-model   serial-ca89b120-7bcd-4eeb-baa7-71031fbd103b   - in service  
+     └─                                                                      + expunged ✓  
 *   fake-vendor   fake-model   serial-ef61aa97-c862-428c-82f3-0a69a50d6155   - in service  
+     └─                                                                      + expunged ✓  
+*   fake-vendor   fake-model   serial-ef64ff6d-250d-47ac-8686-e696cfb46966   - in service  
      └─                                                                      + expunged ✓  
 
 

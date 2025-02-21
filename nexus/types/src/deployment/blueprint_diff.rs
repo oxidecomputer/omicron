@@ -1062,6 +1062,7 @@ impl<'a> BpDiffPhysicalDisksModified<'a> {
                 Err(error) => errors.push(error),
             }
         }
+        disks.sort_unstable_by_key(|d| d.diff.identity.before.clone());
         (
             BpDiffPhysicalDisksModified {
                 generation_before,
