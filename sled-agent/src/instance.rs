@@ -3200,7 +3200,7 @@ mod tests {
         });
 
         // Now, pause time and advance the Tokio clock past the stop grace
-        // period. This should casue the stop timeout to fire, without requiring
+        // period. This should cause the stop timeout to fire, without requiring
         // the test to actually wait for ten minutes.
         tokio::time::pause();
         tokio::time::advance(
