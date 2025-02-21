@@ -6,23 +6,24 @@
 
 use anyhow::{bail, Result};
 use omicron_common::api::internal::nexus::KnownArtifactKind;
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::iter::Iterator;
+use std::sync::LazyLock;
 use wicket_common::inventory::{
     RackV1Inventory, RotInventory, RotSlot, SpComponentCaboose,
     SpComponentInfo, SpIgnition, SpState, SpType,
 };
 
-pub static ALL_COMPONENT_IDS: Lazy<Vec<ComponentId>> = Lazy::new(|| {
-    (0..=31u8)
-        .map(ComponentId::Sled)
-        .chain((0..=1u8).map(ComponentId::Switch))
-        .chain((0..=1u8).map(ComponentId::Psc))
-        .collect()
-});
+pub static ALL_COMPONENT_IDS: LazyLock<Vec<ComponentId>> =
+    LazyLock::new(|| {
+        (0..=31u8)
+            .map(ComponentId::Sled)
+            .chain((0..=1u8).map(ComponentId::Switch))
+            .chain((0..=1u8).map(ComponentId::Psc))
+            .collect()
+    });
 
 /// Inventory is the most recent information about rack composition as
 /// received from MGS.

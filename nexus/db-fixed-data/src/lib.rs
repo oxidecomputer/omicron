@@ -32,7 +32,7 @@
 //    001de000-c470   built-in services vpc subnets
 //    001de000-all0   singleton ID for source IP allowlist ("all0" is like "allow")
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 pub mod allow_list;
 pub mod project;
@@ -46,7 +46,7 @@ pub mod vpc_firewall_rule;
 pub mod vpc_subnet;
 
 /* See above for where this uuid comes from. */
-pub static FLEET_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
+pub static FLEET_ID: LazyLock<uuid::Uuid> = LazyLock::new(|| {
     "001de000-1334-4000-8000-000000000000"
         .parse()
         .expect("invalid uuid for builtin fleet id")

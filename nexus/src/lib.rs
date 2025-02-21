@@ -29,7 +29,7 @@ use nexus_config::NexusConfig;
 use nexus_db_model::RendezvousDebugDataset;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::internal_api::params::{
     PhysicalDiskPutRequest, ZpoolPutRequest,
@@ -283,7 +283,7 @@ impl nexus_test_interface::NexusServer for Server {
         // file.  Whatever it is, we fake up an IP pool range for use by system
         // services that includes solely this IP.
         let internal_services_ip_pool_ranges = blueprint
-            .all_omicron_zones(BlueprintZoneFilter::ShouldBeExternallyReachable)
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
             .filter_map(|(_, zc)| match &zc.zone_type {
                 BlueprintZoneType::ExternalDns(
                     blueprint_zone_type::ExternalDns { dns_address, .. },

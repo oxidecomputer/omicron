@@ -23,7 +23,7 @@ use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use nexus_db_queries::context::OpContext;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use omicron_common::address::CLICKHOUSE_ADMIN_PORT;
@@ -182,9 +182,11 @@ pub(crate) async fn deploy_single_node(
     opctx: &OpContext,
     zones: &BTreeMap<SledUuid, BlueprintZonesConfig>,
 ) -> Result<(), anyhow::Error> {
-    if let Some((_, zone)) =
-        Blueprint::filtered_zones(zones, BlueprintZoneFilter::ShouldBeRunning)
-            .find(|(_, zone)| zone.zone_type.is_clickhouse())
+    if let Some((_, zone)) = Blueprint::filtered_zones(
+        zones,
+        BlueprintZoneDisposition::is_in_service,
+    )
+    .find(|(_, zone)| zone.zone_type.is_clickhouse())
     {
         let admin_addr = SocketAddr::V6(SocketAddrV6::new(
             zone.underlay_ip(),
