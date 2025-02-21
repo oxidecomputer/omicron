@@ -29,7 +29,6 @@ use gateway_sp_comms::HostPhase2Provider;
 use gateway_sp_comms::SharedSocket;
 use gateway_sp_comms::SingleSp;
 use gateway_sp_comms::SpRetryConfig;
-use once_cell::sync::OnceCell;
 use serde::Deserialize;
 use serde::Serialize;
 use slog::o;
@@ -39,6 +38,7 @@ use std::collections::HashMap;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::net::UdpSocket;
 use tokio::task::JoinHandle;
@@ -162,7 +162,7 @@ pub struct ManagementSwitch {
     // When it's dropped, it cancels the background tokio task that loops on
     // that socket receiving incoming packets.
     _shared_socket: Option<SharedSocket>,
-    location_map: Arc<OnceCell<Result<LocationMap, String>>>,
+    location_map: Arc<OnceLock<Result<LocationMap, String>>>,
     discovery_task: JoinHandle<()>,
     log: Logger,
 }
@@ -290,7 +290,7 @@ impl ManagementSwitch {
         // completes (because we won't be able to map "the SP of sled 7" to a
         // correct switch port).
         let port_to_handle = Arc::new(port_to_handle);
-        let location_map = Arc::new(OnceCell::new());
+        let location_map = Arc::new(OnceLock::new());
         let discovery_task = {
             let log = log.clone();
             let port_to_handle = Arc::clone(&port_to_handle);
