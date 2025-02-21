@@ -579,7 +579,7 @@ rand_core = "0.6.4"
 rand_distr = "0.4.3"
 rand_seeder = "0.3.0"
 range-requests = { path = "range-requests" }
-ratatui = "0.28.1"
+ratatui = "0.29.0"
 rayon = "1.10"
 rcgen = "0.12.1"
 reedline = "0.35.0"
@@ -675,7 +675,7 @@ transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-c
 trybuild = "1.0.101"
 tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }
-tui-tree-widget = "0.22.0"
+tui-tree-widget = "0.23.0"
 typed-rng = { path = "typed-rng" }
 typify = "0.3.0"
 unicode-width = "0.1.13"
