@@ -7,7 +7,7 @@ use std::{
     path::Path,
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use buf_list::BufList;
 use bytes::Bytes;
 use camino::Utf8PathBuf;

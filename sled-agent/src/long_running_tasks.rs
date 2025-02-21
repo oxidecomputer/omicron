@@ -29,7 +29,7 @@ use sled_hardware::{HardwareManager, SledMode, UnparsedDisk};
 use sled_storage::config::MountConfig;
 use sled_storage::disk::RawSyntheticDisk;
 use sled_storage::manager::{StorageHandle, StorageManager};
-use slog::{info, Logger};
+use slog::{Logger, info};
 use std::net::Ipv6Addr;
 use tokio::sync::oneshot;
 

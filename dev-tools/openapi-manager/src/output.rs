@@ -256,34 +256,18 @@ pub(crate) mod headers {
 
 pub(crate) mod plural {
     pub(crate) fn files(count: usize) -> &'static str {
-        if count == 1 {
-            "file"
-        } else {
-            "files"
-        }
+        if count == 1 { "file" } else { "files" }
     }
 
     pub(crate) fn documents(count: usize) -> &'static str {
-        if count == 1 {
-            "document"
-        } else {
-            "documents"
-        }
+        if count == 1 { "document" } else { "documents" }
     }
 
     pub(crate) fn paths(count: usize) -> &'static str {
-        if count == 1 {
-            "path"
-        } else {
-            "paths"
-        }
+        if count == 1 { "path" } else { "paths" }
     }
 
     pub(crate) fn schemas(count: usize) -> &'static str {
-        if count == 1 {
-            "schema"
-        } else {
-            "schemas"
-        }
+        if count == 1 { "schema" } else { "schemas" }
     }
 }

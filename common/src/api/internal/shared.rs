@@ -11,7 +11,7 @@ use crate::{
 use daft::Diffable;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::{
     collections::{HashMap, HashSet},
     fmt,

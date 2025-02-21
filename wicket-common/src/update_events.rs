@@ -12,8 +12,8 @@ use serde::Serialize;
 use std::fmt;
 use std::sync::Arc;
 use thiserror::Error;
-use update_engine::errors::NestedEngineError;
 use update_engine::StepSpec;
+use update_engine::errors::NestedEngineError;
 
 #[derive(JsonSchema)]
 pub enum WicketdEngineSpec {}
@@ -205,7 +205,9 @@ pub enum UpdateTerminalError {
         #[source]
         error: Arc<anyhow::Error>,
     },
-    #[error("uploading trampoline phase 2 to MGS cancelled (was a new TUF repo uploaded?)")]
+    #[error(
+        "uploading trampoline phase 2 to MGS cancelled (was a new TUF repo uploaded?)"
+    )]
     TrampolinePhase2UploadCancelled,
     #[error("downloading installinator failed")]
     DownloadingInstallinatorFailed {

@@ -5,14 +5,14 @@
 //! Background task for realizing a plan blueprint
 
 use crate::app::background::{Activator, BackgroundTask};
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_execution::RealizeBlueprintOutput;
 use nexus_types::deployment::{
-    execution::EventBuffer, Blueprint, BlueprintTarget,
+    Blueprint, BlueprintTarget, execution::EventBuffer,
 };
 use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
@@ -165,9 +165,9 @@ impl BackgroundTask for BlueprintExecutor {
 mod test {
     use super::BlueprintExecutor;
     use crate::app::background::{Activator, BackgroundTask};
+    use httptest::Expectation;
     use httptest::matchers::{not, request};
     use httptest::responders::status_code;
-    use httptest::Expectation;
     use nexus_db_model::{
         ByteCount, SledBaseboard, SledSystemHardware, SledUpdate, Zpool,
     };
@@ -181,10 +181,10 @@ mod test {
         ReconfiguratorExecutionSpec, StepInfo,
     };
     use nexus_types::deployment::{
-        blueprint_zone_type, Blueprint, BlueprintDatasetsConfig,
-        BlueprintPhysicalDisksConfig, BlueprintTarget, BlueprintZoneConfig,
-        BlueprintZoneDisposition, BlueprintZoneType, BlueprintZonesConfig,
-        CockroachDbPreserveDowngrade,
+        Blueprint, BlueprintDatasetsConfig, BlueprintPhysicalDisksConfig,
+        BlueprintTarget, BlueprintZoneConfig, BlueprintZoneDisposition,
+        BlueprintZoneType, BlueprintZonesConfig, CockroachDbPreserveDowngrade,
+        blueprint_zone_type,
     };
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external::Generation;

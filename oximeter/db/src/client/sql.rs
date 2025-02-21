@@ -18,11 +18,11 @@
 
 // Copyright 2024 Oxide Computer Company
 
+use crate::Error;
 use crate::client::Client;
 use crate::sql::QueryResult;
 pub use crate::sql::RestrictedQuery;
 use crate::sql::Table;
-use crate::Error;
 use slog::debug;
 
 impl Client {

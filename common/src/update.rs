@@ -7,9 +7,9 @@ use std::{borrow::Cow, convert::Infallible, fmt, str::FromStr};
 use crate::api::{external::SemverVersion, internal::nexus::KnownArtifactKind};
 use hex::FromHexError;
 use schemars::{
+    JsonSchema,
     gen::SchemaGenerator,
     schema::{Schema, SchemaObject},
-    JsonSchema,
 };
 use serde::{Deserialize, Serialize};
 

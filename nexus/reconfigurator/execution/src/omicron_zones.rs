@@ -5,18 +5,18 @@
 //! Manages deployment of Omicron zones to Sled Agents
 
 use crate::Sled;
+use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
-use anyhow::Context;
 use cockroach_admin_client::types::NodeDecommission;
 use cockroach_admin_client::types::NodeId;
-use futures::stream;
 use futures::StreamExt;
+use futures::stream;
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::datastore::CollectorReassignment;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::CollectorReassignment;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
@@ -25,9 +25,9 @@ use omicron_common::address::COCKROACH_ADMIN_PORT;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
+use slog::Logger;
 use slog::info;
 use slog::warn;
-use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -98,11 +98,7 @@ pub(crate) async fn deploy_zones(
         .collect()
         .await;
 
-    if errors.is_empty() {
-        Ok(DeployZonesDone(()))
-    } else {
-        Err(errors)
-    }
+    if errors.is_empty() { Ok(DeployZonesDone(())) } else { Err(errors) }
 }
 
 /// Idempontently perform any cleanup actions necessary for expunged zones.
@@ -186,11 +182,7 @@ pub(crate) async fn clean_up_expunged_zones<R: CleanupResolver>(
         .collect()
         .await;
 
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors)
-    }
+    if errors.is_empty() { Ok(()) } else { Err(errors) }
 }
 
 async fn oximeter_cleanup(
@@ -358,16 +350,16 @@ mod test {
     use super::*;
     use crate::Sled;
     use cockroach_admin_client::types::NodeMembership;
+    use httptest::Expectation;
     use httptest::matchers::{all_of, json_decoded, request};
     use httptest::responders::{json_encoded, status_code};
-    use httptest::Expectation;
     use nexus_sled_agent_shared::inventory::{
         OmicronZoneDataset, OmicronZonesConfig, SledRole,
     };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
-        blueprint_zone_type, Blueprint, BlueprintTarget,
-        CockroachDbPreserveDowngrade,
+        Blueprint, BlueprintTarget, CockroachDbPreserveDowngrade,
+        blueprint_zone_type,
     };
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
@@ -547,9 +539,11 @@ mod test {
 
         println!("{:?}", errors);
         assert_eq!(errors.len(), 1);
-        assert!(errors[0]
-            .to_string()
-            .starts_with("Failed to put OmicronZonesConfig"));
+        assert!(
+            errors[0]
+                .to_string()
+                .starts_with("Failed to put OmicronZonesConfig")
+        );
         s1.verify_and_clear();
         s2.verify_and_clear();
 

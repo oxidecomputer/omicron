@@ -16,7 +16,6 @@ use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::IpKind;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -24,6 +23,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 
@@ -61,9 +61,12 @@ impl super::Nexus {
         fip_selector: params::FloatingIpSelector,
     ) -> LookupResult<lookup::FloatingIp<'a>> {
         match fip_selector {
-            params::FloatingIpSelector { floating_ip: NameOrId::Id(id), project: None } => {
-                let floating_ip =
-                    LookupPath::new(opctx, &self.db_datastore).floating_ip_id(id);
+            params::FloatingIpSelector {
+                floating_ip: NameOrId::Id(id),
+                project: None,
+            } => {
+                let floating_ip = LookupPath::new(opctx, &self.db_datastore)
+                    .floating_ip_id(id);
                 Ok(floating_ip)
             }
             params::FloatingIpSelector {
@@ -76,8 +79,7 @@ impl super::Nexus {
                 Ok(floating_ip)
             }
             params::FloatingIpSelector {
-                floating_ip: NameOrId::Id(_),
-                ..
+                floating_ip: NameOrId::Id(_), ..
             } => Err(Error::invalid_request(
                 "when providing Floating IP as an ID project should not be specified",
             )),

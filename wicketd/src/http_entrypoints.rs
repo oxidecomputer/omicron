@@ -4,12 +4,12 @@
 
 //! HTTP entrypoint functions for wicketd
 
-use crate::helpers::sps_to_string;
+use crate::SmfConfigValues;
 use crate::helpers::SpIdentifierDisplay;
+use crate::helpers::sps_to_string;
 use crate::mgs::GetInventoryError;
 use crate::mgs::MgsHandle;
 use crate::mgs::ShutdownInProgress;
-use crate::SmfConfigValues;
 use bootstrap_agent_client::types::RackOperationStatus;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -27,6 +27,7 @@ use sled_hardware_types::Baseboard;
 use slog::o;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use wicket_common::WICKETD_TIMEOUT;
 use wicket_common::inventory::RackV1Inventory;
 use wicket_common::inventory::SpIdentifier;
 use wicket_common::inventory::SpType;
@@ -35,7 +36,6 @@ use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 use wicket_common::rack_update::AbortUpdateOptions;
 use wicket_common::rack_update::ClearUpdateStateResponse;
 use wicket_common::update_events::EventReport;
-use wicket_common::WICKETD_TIMEOUT;
 use wicketd_api::*;
 
 use crate::ServerContext;

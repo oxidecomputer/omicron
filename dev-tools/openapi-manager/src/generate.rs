@@ -9,12 +9,12 @@ use indent_write::io::IndentWriter;
 use owo_colors::OwoColorize;
 
 use crate::{
-    output::{
-        display_api_spec, display_error, display_summary, headers::*, plural,
-        OutputOpts, Styles,
-    },
-    spec::{all_apis, Environment},
     FAILURE_EXIT_CODE,
+    output::{
+        OutputOpts, Styles, display_api_spec, display_error, display_summary,
+        headers::*, plural,
+    },
+    spec::{Environment, all_apis},
 };
 
 #[derive(Clone, Copy, Debug)]

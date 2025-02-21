@@ -16,15 +16,15 @@ use super::server::StartError;
 use crate::config::Config;
 use crate::config::SidecarRevision;
 use crate::long_running_tasks::{
-    spawn_all_longrunning_tasks, LongRunningTaskHandles,
+    LongRunningTaskHandles, spawn_all_longrunning_tasks,
 };
 use crate::services::ServiceManager;
 use crate::services::TimeSyncConfig;
 use crate::sled_agent::SledAgent;
 use camino::Utf8PathBuf;
 use cancel_safe_futures::TryStreamExt;
-use futures::stream;
 use futures::StreamExt;
+use futures::stream;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm;
 use illumos_utils::dladm::Dladm;
@@ -32,12 +32,12 @@ use illumos_utils::zfs;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zone;
 use illumos_utils::zone::Zones;
-use omicron_common::address::Ipv6Subnet;
 use omicron_common::FileKv;
+use omicron_common::address::Ipv6Subnet;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
-use sled_hardware::underlay;
 use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
+use sled_hardware::underlay;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Drain;
 use slog::Logger;
@@ -318,10 +318,12 @@ fn sled_mode_from_config(config: &Config) -> Result<SledMode, StartError> {
                     SidecarRevision::SoftPropolis(_) => {
                         DendriteAsic::SoftNpuPropolisDevice
                     }
-                    _ => return Err(StartError::IncorrectBuildPackaging(
-                        "sled-agent configured to run on softnpu zone but dosen't \
+                    _ => {
+                        return Err(StartError::IncorrectBuildPackaging(
+                            "sled-agent configured to run on softnpu zone but dosen't \
                          have a softnpu sidecar revision",
-                    )),
+                        ));
+                    }
                 }
             } else {
                 return Err(StartError::IncorrectBuildPackaging(

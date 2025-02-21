@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use camino::{Utf8Path, Utf8PathBuf};
 use omicron_common::api::{
     external::SemverVersion, internal::nexus::KnownArtifactKind,
@@ -13,9 +13,9 @@ use parse_size::parse_size;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    make_filler_text, ArtifactSource, CompositeControlPlaneArchiveBuilder,
-    CompositeEntry, CompositeHostArchiveBuilder, CompositeRotArchiveBuilder,
-    MtimeSource,
+    ArtifactSource, CompositeControlPlaneArchiveBuilder, CompositeEntry,
+    CompositeHostArchiveBuilder, CompositeRotArchiveBuilder, MtimeSource,
+    make_filler_text,
 };
 
 static FAKE_MANIFEST_TOML: &str =
@@ -545,7 +545,7 @@ impl DeserializedControlPlaneZoneSource {
                 (name.to_owned(), data, MtimeSource::Now)
             }
             DeserializedControlPlaneZoneSource::Fake { name, size } => {
-                use flate2::{write::GzEncoder, Compression};
+                use flate2::{Compression, write::GzEncoder};
                 use omicron_brand_metadata::{
                     ArchiveType, LayerInfo, Metadata,
                 };

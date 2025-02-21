@@ -89,14 +89,14 @@ pub use planning_input::SledLookupError;
 pub use planning_input::SledLookupErrorKind;
 pub use planning_input::SledResources;
 pub use planning_input::ZpoolFilter;
-pub use zone_type::blueprint_zone_type;
 pub use zone_type::BlueprintZoneType;
 pub use zone_type::DurableDataset;
+pub use zone_type::blueprint_zone_type;
 
 use blueprint_display::{
-    constants::*, BpDiffState, BpGeneration, BpOmicronZonesTableSchema,
+    BpDiffState, BpGeneration, BpOmicronZonesTableSchema,
     BpPhysicalDisksTableSchema, BpTable, BpTableData, BpTableRow,
-    KvListWithHeading,
+    KvListWithHeading, constants::*,
 };
 use id_map::{IdMap, IdMappable};
 

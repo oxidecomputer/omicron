@@ -11,7 +11,7 @@ use crate::{
     authz,
     context::OpContext,
     db,
-    db::error::{public_error_from_diesel, ErrorHandler},
+    db::error::{ErrorHandler, public_error_from_diesel},
 };
 use async_bb8_diesel::AsyncRunQueryDsl;
 use db_macros::lookup_resource;

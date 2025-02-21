@@ -5,8 +5,8 @@
 //! Background task for propagating VPC routes (system and custom) to sleds.
 
 use crate::app::background::BackgroundTask;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use nexus_db_model::{Sled, SledState, Vni};
 use nexus_db_queries::{context::OpContext, db::DataStore};
 use nexus_networking::sled_client_from_address;

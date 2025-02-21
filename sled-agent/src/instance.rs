@@ -25,6 +25,7 @@ use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::svc::wait_for_service;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zpool::ZpoolOrRamdisk;
+use omicron_common::NoDebug;
 use omicron_common::api::internal::nexus::{SledVmmState, VmmRuntimeState};
 use omicron_common::api::internal::shared::{
     NetworkInterface, ResolvedVpcFirewallRule, SledIdentifiers, SourceNatConfig,
@@ -32,14 +33,13 @@ use omicron_common::api::internal::shared::{
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
 use omicron_common::zpool_name::ZpoolName;
-use omicron_common::NoDebug;
 use omicron_uuid_kinds::{
     GenericUuid, InstanceUuid, OmicronZoneUuid, PropolisUuid,
 };
 use propolis_api_types::ErrorCode as PropolisErrorCode;
 use propolis_client::Client as PropolisClient;
-use rand::prelude::IteratorRandom;
 use rand::SeedableRng;
+use rand::prelude::IteratorRandom;
 use sled_agent_types::instance::*;
 use sled_agent_types::zone_bundle::{ZoneBundleCause, ZoneBundleMetadata};
 use sled_storage::dataset::ZONE_DATASET;
@@ -905,6 +905,7 @@ impl InstanceRunner {
         // platform library in Nexus.
 
         use propolis_client::{
+            PciPath, SpecKey,
             types::{
                 BlobStorageBackend, Board, BootOrderEntry, BootSettings,
                 Chipset, ComponentV0, CrucibleStorageBackend,
@@ -912,7 +913,6 @@ impl InstanceRunner {
                 ReplacementComponent, SerialPort, SerialPortNumber, VirtioDisk,
                 VirtioNetworkBackend, VirtioNic,
             },
-            PciPath, SpecKey,
         };
 
         // Define some local helper structs for unpacking hardware descriptions
@@ -2252,20 +2252,20 @@ mod tests {
     use camino_tempfile::Utf8TempDir;
     use dns_server::TransientServer;
     use dropshot::HttpServer;
-    use illumos_utils::dladm::MockDladm;
     use illumos_utils::dladm::__mock_MockDladm::__create_vnic::Context as MockDladmCreateVnicContext;
     use illumos_utils::dladm::__mock_MockDladm::__delete_vnic::Context as MockDladmDeleteVnicContext;
+    use illumos_utils::dladm::MockDladm;
     use illumos_utils::svc::__wait_for_service::Context as MockWaitForServiceContext;
-    use illumos_utils::zone::MockZones;
     use illumos_utils::zone::__mock_MockZones::__boot::Context as MockZonesBootContext;
     use illumos_utils::zone::__mock_MockZones::__id::Context as MockZonesIdContext;
+    use illumos_utils::zone::MockZones;
     use internal_dns_resolver::Resolver;
+    use omicron_common::FileKv;
     use omicron_common::api::external::{
         ByteCount, Generation, Hostname, InstanceCpuCount,
     };
     use omicron_common::api::internal::nexus::{InstanceProperties, VmmState};
     use omicron_common::api::internal::shared::{DhcpConfig, SledIdentifiers};
-    use omicron_common::FileKv;
     use sled_agent_types::zone_bundle::CleanupContext;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use std::net::Ipv6Addr;
@@ -2349,8 +2349,8 @@ mod tests {
         }
     }
 
-    fn mock_vnic_contexts(
-    ) -> (MockDladmCreateVnicContext, MockDladmDeleteVnicContext) {
+    fn mock_vnic_contexts()
+    -> (MockDladmCreateVnicContext, MockDladmDeleteVnicContext) {
         let create_vnic_ctx = MockDladm::create_vnic_context();
         let delete_vnic_ctx = MockDladm::delete_vnic_context();
         create_vnic_ctx.expect().return_once(
@@ -2369,8 +2369,8 @@ mod tests {
     //    which calls cpapi_instances_put
     //   and calls Instance::setup_propolis_inner,
     //    which creates the zone (which isn't real in these tests, of course)
-    fn mock_zone_contexts(
-    ) -> (MockZonesBootContext, MockWaitForServiceContext, MockZonesIdContext)
+    fn mock_zone_contexts()
+    -> (MockZonesBootContext, MockWaitForServiceContext, MockZonesIdContext)
     {
         let boot_ctx = MockZones::boot_context();
         boot_ctx.expect().return_once(|_| Ok(()));
@@ -2700,7 +2700,9 @@ mod tests {
             ..
         }) = state_rx.borrow().to_owned()
         {
-            panic!("Nexus's InstanceState should never have reached running if zone creation timed out");
+            panic!(
+                "Nexus's InstanceState should never have reached running if zone creation timed out"
+            );
         }
 
         storage_harness.cleanup().await;
@@ -2807,7 +2809,9 @@ mod tests {
             ..
         }) = state_rx.borrow().to_owned()
         {
-            panic!("Nexus's InstanceState should never have reached running if zone creation timed out");
+            panic!(
+                "Nexus's InstanceState should never have reached running if zone creation timed out"
+            );
         }
 
         // Notify the "boot" closure that it can continue, and then wait to

@@ -11,7 +11,7 @@ use nexus_types::deployment::{
     BlueprintZonesConfig, ClickhouseClusterConfig,
 };
 use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
-use slog::{error, Logger};
+use slog::{Logger, error};
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
@@ -620,8 +620,7 @@ pub mod test {
 
     #[test]
     fn expunge_a_different_keeper_while_adding_keeper() {
-        static TEST_NAME: &str =
-            "clickhouse_allocator_expunge_a_different_keeper_while_adding_keeper";
+        static TEST_NAME: &str = "clickhouse_allocator_expunge_a_different_keeper_while_adding_keeper";
         let logctx = test_setup_log(TEST_NAME);
 
         let (n_keeper_zones, n_server_zones, n_keepers, n_servers) =

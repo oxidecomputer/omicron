@@ -10,14 +10,14 @@ use camino::Utf8PathBuf;
 use clickhouse_admin_keeper_client::Client as ClickhouseKeeperClient;
 use clickhouse_admin_server_client::Client as ClickhouseServerClient;
 use clickhouse_admin_single_client::Client as ClickhouseSingleClient;
+use clickhouse_admin_types::CLICKHOUSE_KEEPER_CONFIG_DIR;
+use clickhouse_admin_types::CLICKHOUSE_SERVER_CONFIG_DIR;
 use clickhouse_admin_types::ClickhouseHost;
 use clickhouse_admin_types::KeeperConfigurableSettings;
 use clickhouse_admin_types::KeeperSettings;
 use clickhouse_admin_types::RaftServerSettings;
 use clickhouse_admin_types::ServerConfigurableSettings;
 use clickhouse_admin_types::ServerSettings;
-use clickhouse_admin_types::CLICKHOUSE_KEEPER_CONFIG_DIR;
-use clickhouse_admin_types::CLICKHOUSE_SERVER_CONFIG_DIR;
 use futures::future::Either;
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
@@ -333,18 +333,17 @@ mod test {
     use clickhouse_admin_types::KeeperId;
     use clickhouse_admin_types::ServerId;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-    use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneType;
+    use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::inventory::ZpoolName;
     use omicron_common::api::external::Generation;
     use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::BTreeSet;
 
-    fn test_data(
-    ) -> (BTreeMap<SledUuid, BlueprintZonesConfig>, ClickhouseClusterConfig)
-    {
+    fn test_data()
+    -> (BTreeMap<SledUuid, BlueprintZonesConfig>, ClickhouseClusterConfig) {
         let num_keepers = 3u64;
         let num_servers = 2u64;
 

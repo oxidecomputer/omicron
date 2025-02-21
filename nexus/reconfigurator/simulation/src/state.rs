@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use anyhow::{anyhow, bail, Context};
+use anyhow::{Context, anyhow, bail};
 use nexus_inventory::CollectionBuilder;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_common::api::external::Generation;
@@ -12,10 +12,10 @@ use omicron_uuid_kinds::{CollectionUuid, ReconfiguratorSimUuid};
 use sync_ptr::SyncConstPtr;
 
 use crate::{
-    config::SimConfig, errors::NonEmptySystemError, LoadSerializedConfigResult,
-    LoadSerializedSystemResult, SimConfigBuilder, SimConfigLogEntry, SimRng,
-    SimRngBuilder, SimRngLogEntry, SimSystem, SimSystemBuilder,
-    SimSystemLogEntry, Simulator,
+    LoadSerializedConfigResult, LoadSerializedSystemResult, SimConfigBuilder,
+    SimConfigLogEntry, SimRng, SimRngBuilder, SimRngLogEntry, SimSystem,
+    SimSystemBuilder, SimSystemLogEntry, Simulator, config::SimConfig,
+    errors::NonEmptySystemError,
 };
 
 /// A top-level, versioned snapshot of reconfigurator state.
@@ -149,10 +149,9 @@ impl SimState {
                 .map(|params| (params.generation, params.clone()))
                 .collect(),
             silo_names: self.config.silo_names().cloned().collect(),
-            external_dns_zone_names: vec![self
-                .config
-                .external_dns_zone_name()
-                .to_owned()],
+            external_dns_zone_names: vec![
+                self.config.external_dns_zone_name().to_owned(),
+            ],
         })
     }
 

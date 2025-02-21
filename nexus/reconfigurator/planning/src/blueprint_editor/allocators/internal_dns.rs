@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use nexus_types::deployment::blueprint_zone_type::InternalDns;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::blueprint_zone_type::InternalDns;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::ReservedRackSubnet;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;

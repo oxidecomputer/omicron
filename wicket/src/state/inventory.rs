@@ -4,7 +4,7 @@
 
 //! Information about all top-level Oxide components (sleds, switches, PSCs)
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

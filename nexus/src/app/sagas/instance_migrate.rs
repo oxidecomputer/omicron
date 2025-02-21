@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{NexusActionContext, NexusSaga, ACTION_GENERATE_ID};
+use super::{ACTION_GENERATE_ID, NexusActionContext, NexusSaga};
 use crate::app::instance::{
     InstanceEnsureRegisteredApiResources, InstanceRegisterReason,
     InstanceStateChangeError, InstanceStateChangeRequest,
@@ -188,7 +188,7 @@ async fn sim_reserve_sled_resources(
         osagactx.nexus(),
         InstanceUuid::from_untyped_uuid(params.instance.id()),
         propolis_id,
-        u32::from(params.instance.ncpus.0 .0),
+        u32::from(params.instance.ncpus.0.0),
         params.instance.memory,
         constraints,
     )
@@ -482,11 +482,7 @@ async fn sim_ensure_destination_propolis_undo(
     {
         Ok(_) => Ok(()),
         Err(InstanceStateChangeError::SledAgent(inner)) => {
-            if !inner.vmm_gone() {
-                Ok(())
-            } else {
-                Err(inner.0.into())
-            }
+            if !inner.vmm_gone() { Ok(()) } else { Err(inner.0.into()) }
         }
         Err(e) => Err(e.into()),
     }

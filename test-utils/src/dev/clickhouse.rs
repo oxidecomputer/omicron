@@ -10,19 +10,19 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::{Builder, Utf8TempDir};
-use dropshot::test_util::{log_prefix_for_test, LogContext};
-use futures::stream::FuturesUnordered;
+use dropshot::test_util::{LogContext, log_prefix_for_test};
 use futures::StreamExt as _;
+use futures::stream::FuturesUnordered;
 use omicron_common::address::{CLICKHOUSE_HTTP_PORT, CLICKHOUSE_TCP_PORT};
 use std::net::{Ipv6Addr, SocketAddrV6};
 use thiserror::Error;
 use tokio::{
     fs::File,
     io::{AsyncBufReadExt, BufReader},
-    time::{sleep, Instant},
+    time::{Instant, sleep},
 };
 
 use crate::dev::poll;
@@ -1320,9 +1320,9 @@ async fn clickhouse_ready_from_log(
 #[cfg(test)]
 mod tests {
     use super::{
-        discover_ready, wait_for_ports, ClickHouseDeployment, ClickHouseError,
-        ClickHousePorts, CLICKHOUSE_HTTP_PORT_NEEDLE, CLICKHOUSE_READY,
-        CLICKHOUSE_TCP_PORT_NEEDLE, CLICKHOUSE_TIMEOUT,
+        CLICKHOUSE_HTTP_PORT_NEEDLE, CLICKHOUSE_READY,
+        CLICKHOUSE_TCP_PORT_NEEDLE, CLICKHOUSE_TIMEOUT, ClickHouseDeployment,
+        ClickHouseError, ClickHousePorts, discover_ready, wait_for_ports,
     };
     use crate::dev::test_setup_log;
     use camino_tempfile::NamedUtf8TempFile;

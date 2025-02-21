@@ -14,18 +14,16 @@ use crate::blueprint_editor::ExternalSnatNetworkingChoice;
 use crate::blueprint_editor::InternalDnsError;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
-use crate::planner::rng::PlannerRng;
 use crate::planner::ZoneExpungeReason;
+use crate::planner::rng::PlannerRng;
+use anyhow::Context as _;
 use anyhow::anyhow;
 use anyhow::bail;
-use anyhow::Context as _;
 use clickhouse_admin_types::OXIMETER_CLUSTER;
 use itertools::Either;
 use nexus_inventory::now_db_precision;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::inventory::ZoneKind;
-use nexus_types::deployment::blueprint_zone_type;
-use nexus_types::deployment::id_map::IdMap;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintDatasetFilter;
@@ -48,13 +46,15 @@ use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::ZpoolName;
+use nexus_types::deployment::blueprint_zone_type;
+use nexus_types::deployment::id_map::IdMap;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
-use omicron_common::address::ReservedRackSubnet;
 use omicron_common::address::CLICKHOUSE_HTTP_PORT;
 use omicron_common::address::DNS_HTTP_PORT;
 use omicron_common::address::DNS_PORT;
 use omicron_common::address::NTP_PORT;
+use omicron_common::address::ReservedRackSubnet;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
@@ -65,15 +65,15 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use once_cell::unsync::OnceCell;
+use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::info;
 use slog::o;
-use slog::Logger;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
+use std::collections::btree_map::Entry;
 use std::fmt;
 use std::iter;
 use std::net::IpAddr;
@@ -292,7 +292,10 @@ impl fmt::Display for Operation {
                 write!(f, "sled {sled_id}: added zone: {}", kind.report_str())
             }
             Self::UpdateDisks { sled_id, added, updated, removed } => {
-                write!(f, "sled {sled_id}: added {added} disks, updated {updated}, removed {removed} disks")
+                write!(
+                    f,
+                    "sled {sled_id}: added {added} disks, updated {updated}, removed {removed} disks"
+                )
             }
             Self::UpdateDatasets {
                 sled_id,
@@ -301,7 +304,10 @@ impl fmt::Display for Operation {
                 expunged,
                 removed,
             } => {
-                write!(f, "sled {sled_id}: added {added} datasets, updated: {updated}, expunged {expunged}, removed {removed} datasets")
+                write!(
+                    f,
+                    "sled {sled_id}: added {added} datasets, updated: {updated}, expunged {expunged}, removed {removed} datasets"
+                )
             }
             Self::ZoneExpunged { sled_id, reason, count } => {
                 let reason = match reason {
@@ -2076,9 +2082,9 @@ pub(super) fn ensure_input_networking_records_appear_in_parent_blueprint(
 #[cfg(test)]
 pub mod test {
     use super::*;
-    use crate::example::example;
     use crate::example::ExampleSystemBuilder;
     use crate::example::SimRngState;
+    use crate::example::example;
     use crate::planner::test::assert_planning_makes_no_changes;
     use crate::system::SledBuilder;
     use nexus_reconfigurator_blippy::Blippy;
@@ -2213,10 +2219,9 @@ pub mod test {
                 ..
             } = &z
             {
-                assert!(new_sled_resources
-                    .subnet
-                    .net()
-                    .contains(*address.ip()));
+                assert!(
+                    new_sled_resources.subnet.net().contains(*address.ip())
+                );
                 true
             } else {
                 false

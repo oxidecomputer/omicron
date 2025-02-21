@@ -4,11 +4,11 @@
 
 //! Server API for bootstrap-related functionality.
 
+use super::BootstrapError;
+use super::RssAccessError;
 use super::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use super::http_entrypoints;
 use super::views::SledAgentResponse;
-use super::BootstrapError;
-use super::RssAccessError;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::http_entrypoints::BootstrapServerContext;
 use crate::bootstrap::maghemite;
@@ -33,7 +33,7 @@ use illumos_utils::zfs;
 use illumos_utils::zone;
 use illumos_utils::zone::Zones;
 use internal_dns_resolver::Resolver;
-use omicron_common::address::{Ipv6Subnet, AZ_PREFIX};
+use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
 use omicron_common::ledger;
 use omicron_common::ledger::Ledger;
 use omicron_ddm_admin_client::Client as DdmAdminClient;

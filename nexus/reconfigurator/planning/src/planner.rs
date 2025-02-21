@@ -32,7 +32,7 @@ use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
 use slog::error;
-use slog::{info, warn, Logger};
+use slog::{Logger, info, warn};
 use std::collections::BTreeSet;
 use std::str::FromStr;
 
@@ -827,9 +827,9 @@ pub(crate) enum ZoneExpungeReason {
 pub(crate) mod test {
     use super::*;
     use crate::blueprint_builder::test::verify_blueprint;
-    use crate::example::example;
     use crate::example::ExampleSystemBuilder;
     use crate::example::SimRngState;
+    use crate::example::example;
     use crate::system::SledBuilder;
     use chrono::NaiveDateTime;
     use chrono::TimeZone;
@@ -837,13 +837,13 @@ pub(crate) mod test {
     use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
     use clickhouse_admin_types::KeeperId;
     use expectorate::assert_contents;
-    use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::BlueprintDiffSummary;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::ClickhouseMode;
     use nexus_types::deployment::ClickhousePolicy;
     use nexus_types::deployment::SledDisk;
+    use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
@@ -1237,11 +1237,9 @@ pub(crate) mod test {
         // sleds (two should get 4 and one should get 3).
         let mut total_new_nexus_zones = 0;
         for sled_id in &summary.sleds_modified {
-            assert!(!summary
-                .diff
-                .blueprint_zones
-                .removed
-                .contains_key(sled_id));
+            assert!(
+                !summary.diff.blueprint_zones.removed.contains_key(sled_id)
+            );
             let zones_cfg_diff =
                 summary.zones_on_modified_sled(sled_id).unwrap();
             assert_eq!(zones_cfg_diff.zones.modified().count(), 0);
@@ -2530,8 +2528,10 @@ pub(crate) mod test {
 
         // All the zones of the expunged sled should be expunged, and the sled
         // itself should be decommissioned.
-        assert!(blueprint2.blueprint_zones[&expunged_sled_id]
-            .are_all_zones_expunged());
+        assert!(
+            blueprint2.blueprint_zones[&expunged_sled_id]
+                .are_all_zones_expunged()
+        );
         assert_eq!(
             blueprint2.sled_state[&expunged_sled_id],
             SledState::Decommissioned

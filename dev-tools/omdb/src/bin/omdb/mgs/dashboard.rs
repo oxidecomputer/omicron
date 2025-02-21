@@ -13,12 +13,13 @@ use crossterm::{
     },
     execute,
     terminal::{
-        disable_raw_mode, enable_raw_mode, EnterAlternateScreen,
-        LeaveAlternateScreen,
+        EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+        enable_raw_mode,
     },
 };
 use dyn_clone::DynClone;
 use ratatui::{
+    Frame, Terminal,
     backend::{Backend, CrosstermBackend},
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -28,12 +29,11 @@ use ratatui::{
         Axis, Block, Borders, Chart, Dataset, List, ListItem, ListState,
         Paragraph,
     },
-    Frame, Terminal,
 };
 
 use crate::mgs::sensors::{
-    sensor_data, sensor_metadata, SensorId, SensorInput, SensorMetadata,
-    SensorValues, SensorsArgs,
+    SensorId, SensorInput, SensorMetadata, SensorValues, SensorsArgs,
+    sensor_data, sensor_metadata,
 };
 use crate::mgs::sp_to_string;
 use clap::Args;

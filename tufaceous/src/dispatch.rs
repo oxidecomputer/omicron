@@ -2,14 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use clap::{CommandFactory, Parser};
 use omicron_common::{api::external::SemverVersion, update::ArtifactKind};
 use tufaceous_lib::{
-    assemble::{ArtifactManifest, OmicronRepoAssembler},
     AddArtifact, ArchiveExtractor, Key, OmicronRepo,
+    assemble::{ArtifactManifest, OmicronRepoAssembler},
 };
 
 #[derive(Debug, Parser)]

@@ -10,12 +10,12 @@ use owo_colors::OwoColorize;
 use similar::TextDiff;
 
 use crate::{
-    output::{
-        display_api_spec, display_api_spec_file, display_error,
-        display_summary, headers::*, plural, write_diff, OutputOpts, Styles,
-    },
-    spec::{all_apis, CheckStale, Environment},
     FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
+    output::{
+        OutputOpts, Styles, display_api_spec, display_api_spec_file,
+        display_error, display_summary, headers::*, plural, write_diff,
+    },
+    spec::{CheckStale, Environment, all_apis},
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -109,7 +109,7 @@ pub(crate) fn check_impl(
                         eprintln!(
                             "{:>HEADER_WIDTH$}{count_section_indent}\
                              ({error_count:>total_errors_width$}/{total_errors}) {}",
-                             heading.style(styles.warning_header),
+                            heading.style(styles.warning_header),
                             display_api_spec_file(spec, spec_file, &styles),
                         );
                     };

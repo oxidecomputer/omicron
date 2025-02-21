@@ -12,12 +12,12 @@
 
 use crate::app::background::BackgroundTask;
 use anyhow::Context;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, ZpoolUuid};
@@ -348,7 +348,9 @@ mod tests {
             match (fetched_zpool, fetched_dataset) {
                 (Some(_), Some(_)) => false,
                 (None, None) => true,
-                _ => panic!("If zpool and dataset were cleaned, they should be cleaned together"),
+                _ => panic!(
+                    "If zpool and dataset were cleaned, they should be cleaned together"
+                ),
             }
         }
     }

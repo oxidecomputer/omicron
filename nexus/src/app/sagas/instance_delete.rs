@@ -169,10 +169,10 @@ mod test {
     use nexus_db_queries::{
         authn::saga::Serialized, context::OpContext, db, db::lookup::LookupPath,
     };
+    use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils::resource_helpers::create_default_ip_pool;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
-    use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::identity::Resource;
     use omicron_common::api::external::{

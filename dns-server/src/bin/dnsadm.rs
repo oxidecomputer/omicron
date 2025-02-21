@@ -12,9 +12,9 @@
 //! - All writes involve a read-modify-write with no ability to avoid clobbering
 //!   a concurrent write.
 
-use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
+use anyhow::ensure;
 use clap::{Args, Parser, Subcommand};
 use dns_service_client::Client;
 use internal_dns_types::config::DnsConfig;

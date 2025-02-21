@@ -9,19 +9,19 @@ use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::TransactionError;
 use crate::db::datastore::ValidateTransition;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::model::to_db_sled_policy;
+use crate::db::error::public_error_from_diesel;
 use crate::db::model::Sled;
 use crate::db::model::SledResource;
 use crate::db::model::SledState;
 use crate::db::model::SledUpdate;
-use crate::db::pagination::paginated;
+use crate::db::model::to_db_sled_policy;
 use crate::db::pagination::Paginator;
+use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
-use crate::db::TransactionError;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -845,12 +845,12 @@ pub(in crate::db::datastore) mod test {
         sled_baseboard_for_test, sled_system_hardware_for_test,
     };
     use crate::db::datastore::test_utils::{
-        sled_set_policy, sled_set_state, Expected, IneligibleSleds,
+        Expected, IneligibleSleds, sled_set_policy, sled_set_state,
     };
     use crate::db::lookup::LookupPath;
-    use crate::db::model::to_db_typed_uuid;
     use crate::db::model::ByteCount;
     use crate::db::model::SqlU32;
+    use crate::db::model::to_db_typed_uuid;
     use crate::db::pub_test_utils::TestDatabase;
     use anyhow::{Context, Result};
     use itertools::Itertools;
@@ -865,7 +865,7 @@ pub(in crate::db::datastore) mod test {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
-    use predicates::{prelude::*, BoxPredicate};
+    use predicates::{BoxPredicate, prelude::*};
     use std::net::{Ipv6Addr, SocketAddrV6};
 
     fn rack_id() -> Uuid {

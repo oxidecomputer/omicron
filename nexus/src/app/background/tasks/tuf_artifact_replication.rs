@@ -64,7 +64,7 @@ use futures::future::BoxFuture;
 use futures::{FutureExt, Stream, StreamExt};
 use nexus_auth::context::OpContext;
 use nexus_db_queries::db::{
-    datastore::SQL_BATCH_SIZE, pagination::Paginator, DataStore,
+    DataStore, datastore::SQL_BATCH_SIZE, pagination::Paginator,
 };
 use nexus_networking::sled_client_from_address;
 use nexus_types::deployment::SledFilter;
@@ -78,7 +78,7 @@ use rand::seq::SliceRandom;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
 use tokio::sync::mpsc::error::TryRecvError;
-use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
 use update_common::artifacts::{
     ArtifactsWithPlan, ExtractedArtifactDataHandle,
 };
@@ -218,11 +218,7 @@ impl Inventory {
                     if *count > 0 && *count < EXPECTED_COUNT {
                         let Ok(source_sled) = sleds_present
                             .choose_weighted(rng, |sled| {
-                                if sled.id == target_sled.id {
-                                    0
-                                } else {
-                                    1
-                                }
+                                if sled.id == target_sled.id { 0 } else { 1 }
                             })
                             .copied()
                         else {
@@ -695,7 +691,7 @@ mod tests {
     use std::fmt::Write;
 
     use expectorate::assert_contents;
-    use rand::{rngs::StdRng, Rng, SeedableRng};
+    use rand::{Rng, SeedableRng, rngs::StdRng};
 
     use super::*;
 

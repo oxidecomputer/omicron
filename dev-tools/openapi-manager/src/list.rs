@@ -8,7 +8,7 @@ use indent_write::io::IndentWriter;
 use owo_colors::OwoColorize;
 
 use crate::{
-    output::{display_api_spec, display_error, OutputOpts, Styles},
+    output::{OutputOpts, Styles, display_api_spec, display_error},
     spec::all_apis,
 };
 
