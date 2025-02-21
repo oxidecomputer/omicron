@@ -152,9 +152,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.95"
+version = "1.0.96"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34ac096ce696dc2fcabef30516bb13c0a68a11d30131d3df6f04711467681b04"
+checksum = "6b964d184e89d9b6b67dd2715bc8e74cf3107fb2b529990c90cf517326150bf4"
 dependencies = [
  "backtrace",
 ]
@@ -718,7 +718,7 @@ dependencies = [
  "bitflags 2.6.0",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "log",
@@ -1053,7 +1053,7 @@ checksum = "2d886547e41f740c616ae73108f6eb70afe6d940c7bc697cb30f13daec073037"
 dependencies = [
  "camino",
  "cargo-platform",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -1067,7 +1067,7 @@ checksum = "8769706aad5d996120af43197bf46ef6ad0fda35216b4505f926a365a232d924"
 dependencies = [
  "camino",
  "cargo-platform",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "thiserror 2.0.11",
@@ -1152,9 +1152,9 @@ dependencies = [
 
 [[package]]
 name = "cfg-expr"
-version = "0.17.2"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d4ba6e40bd1184518716a6e1a781bf9160e286d219ccdb8ab2612e74cfe4789"
+checksum = "1a2b34126159980f92da2a08bdec0694fd80fb5eb9e48aff25d20a0d8dfa710d"
 dependencies = [
  "smallvec 1.13.2",
  "target-lexicon",
@@ -1307,9 +1307,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.27"
+version = "4.5.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "769b0145982b4b48713e01ec42d61614425f27b7058bda7180a3a41f30104796"
+checksum = "92b7b18d71fad5313a1e320fa9897994228ce274b60faa4d694fe0ea89cd9e6d"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -1317,9 +1317,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.27"
+version = "4.5.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b26884eb4b57140e4d2d93652abfa49498b938b3c9179f9fc487b0acc3edad7"
+checksum = "a35db2071778a7344791a4fb4f95308b5673d219dee3ae348b86642574ecc90c"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1330,9 +1330,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "4.5.24"
+version = "4.5.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54b755194d6389280185988721fffba69495eed5ee9feeee9a599b53db80318c"
+checksum = "bf4ced95c6f4a675af3da73304b9ac4ed991640c36374e4b46795c49e17cf1ed"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -2324,9 +2324,9 @@ dependencies = [
 
 [[package]]
 name = "derive_more"
-version = "0.99.18"
+version = "0.99.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f33878137e4dafd7fa914ad4e259e18a4e8e532b9617a2d0150262bf53abfce"
+checksum = "3da29a38df43d6f156149c9b43ded5e018ddff2a855cf2cfd62e8cd7d079c69f"
 dependencies = [
  "convert_case",
  "proc-macro2",
@@ -2721,7 +2721,7 @@ dependencies = [
  "rustls-pemfile 2.2.0",
  "schemars",
  "scopeguard",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "serde_path_to_error",
@@ -2765,7 +2765,7 @@ dependencies = [
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_tokenstream",
  "syn 2.0.96",
@@ -2804,9 +2804,9 @@ checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
 name = "dyn-clone"
-version = "1.0.17"
+version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d6ef0072f8a535281e4876be788938b528e9a1d43900b82c2569af7da799125"
+checksum = "feeef44e73baff3a26d371801df019877a9866a8c493d315ab00177843314f35"
 
 [[package]]
 name = "ecdsa"
@@ -3162,6 +3162,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
 
 [[package]]
+name = "fixedbitset"
+version = "0.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
+
+[[package]]
 name = "flagset"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3179,9 +3185,9 @@ dependencies = [
 
 [[package]]
 name = "float-cmp"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98de4bbd547a563b716d8dfa9aad1cb19bfab00f4fa09a6a4ed21dbcf44ce9c4"
+checksum = "b09cf3155332e944990140d967ff5eceb70df778b34f77d8075db46e4704e6d8"
 dependencies = [
  "num-traits",
 ]
@@ -3675,24 +3681,24 @@ dependencies = [
 
 [[package]]
 name = "guppy"
-version = "0.17.12"
+version = "0.17.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a70d0754232d1c2fd4819914085dc06cccbe2f2377905cdd2e668ca77df6e72"
+checksum = "2dadc932032945158611b2b45baae9f6fc0024a6f91dd57f61f5edb4ad507f3b"
 dependencies = [
  "ahash",
  "camino",
  "cargo_metadata 0.19.1",
  "cfg-if",
  "debug-ignore",
- "fixedbitset",
+ "fixedbitset 0.5.7",
  "guppy-workspace-hack",
  "indexmap 2.7.1",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "nested",
  "once_cell",
  "pathdiff",
- "petgraph",
- "semver 1.0.24",
+ "petgraph 0.7.1",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "smallvec 1.13.2",
@@ -4131,9 +4137,9 @@ dependencies = [
 
 [[package]]
 name = "httptest"
-version = "0.16.1"
+version = "0.16.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae0fc8d140f1f0f3e7f821c8eff55cd13966db7a3370b2d9a7b08e9ec8ee8786"
+checksum = "bde82de3ef9bd882493c6a5edbc3363ad928925b30ccecc0f2ddeb42601b3021"
 dependencies = [
  "bstr",
  "bytes",
@@ -4516,6 +4522,7 @@ dependencies = [
  "macaddr",
  "mockall",
  "omicron-common",
+ "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "opte-ioctl",
@@ -4806,7 +4813,7 @@ dependencies = [
  "progenitor 0.9.1",
  "qorb",
  "reqwest",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "sled",
@@ -4939,6 +4946,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5028,7 +5044,7 @@ dependencies = [
  "is-terminal",
  "itertools 0.10.5",
  "lalrpop-util",
- "petgraph",
+ "petgraph 0.6.5",
  "regex",
  "regex-syntax 0.6.29",
  "string_cache",
@@ -5151,7 +5167,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -5720,7 +5736,6 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "once_cell",
  "openssl",
  "oso",
  "pq-sys",
@@ -5787,7 +5802,6 @@ dependencies = [
  "omicron-common",
  "omicron-rpaths",
  "omicron-workspace-hack",
- "once_cell",
  "pq-sys",
  "strum",
  "uuid",
@@ -5820,14 +5834,13 @@ dependencies = [
  "omicron-rpaths",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "once_cell",
  "oxnet",
  "parse-display",
  "pq-sys",
  "rand",
  "ref-cast",
  "schemars",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "sled-agent-client",
@@ -5883,14 +5896,13 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "once_cell",
  "openapiv3",
  "oso",
  "oximeter",
  "oxnet",
  "paste",
  "pem",
- "petgraph",
+ "petgraph 0.6.5",
  "pq-sys",
  "predicates",
  "pretty_assertions",
@@ -5901,7 +5913,7 @@ dependencies = [
  "regex",
  "rustls 0.22.4",
  "schemars",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "serde_with",
@@ -5928,7 +5940,6 @@ dependencies = [
  "ipnetwork",
  "omicron-common",
  "omicron-workspace-hack",
- "once_cell",
  "oxnet",
  "rand",
  "serde_json",
@@ -6232,7 +6243,6 @@ dependencies = [
  "omicron-rpaths",
  "omicron-test-utils",
  "omicron-workspace-hack",
- "once_cell",
  "pq-sys",
  "pretty_assertions",
  "serde",
@@ -6674,7 +6684,7 @@ name = "omicron-brand-metadata"
 version = "0.1.0"
 dependencies = [
  "omicron-workspace-hack",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "tar",
@@ -6757,7 +6767,6 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "once_cell",
  "openapi-lint",
  "openapiv3",
  "pq-sys",
@@ -6801,7 +6810,6 @@ dependencies = [
  "mg-admin-client",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "once_cell",
  "oxnet",
  "parse-display",
  "progenitor-client 0.9.1",
@@ -6810,7 +6818,7 @@ dependencies = [
  "regress 0.9.1",
  "reqwest",
  "schemars",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_human_bytes",
  "serde_json",
@@ -6906,7 +6914,6 @@ dependencies = [
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
- "once_cell",
  "oximeter",
  "oximeter-instruments",
  "oximeter-producer",
@@ -6976,7 +6983,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "parse-display",
- "petgraph",
+ "petgraph 0.6.5",
  "serde",
  "subprocess",
  "toml 0.8.19",
@@ -7065,7 +7072,6 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "once_cell",
  "openapi-lint",
  "openapiv3",
  "openssl",
@@ -7081,7 +7087,7 @@ dependencies = [
  "parse-display",
  "paste",
  "pem",
- "petgraph",
+ "petgraph 0.6.5",
  "pq-sys",
  "pretty_assertions",
  "progenitor-client 0.9.1",
@@ -7098,7 +7104,7 @@ dependencies = [
  "rustls-pemfile 2.2.0",
  "samael",
  "schemars",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -7214,11 +7220,11 @@ dependencies = [
  "indicatif",
  "omicron-workspace-hack",
  "omicron-zone-package",
- "petgraph",
+ "petgraph 0.6.5",
  "rayon",
  "reqwest",
  "ring",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "shell-words",
  "sled-hardware",
@@ -7282,9 +7288,8 @@ dependencies = [
  "omicron-pins",
  "omicron-workspace-hack",
  "omicron-zone-package",
- "once_cell",
  "reqwest",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "sha2",
  "shell-words",
@@ -7365,7 +7370,6 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "once_cell",
  "opte-ioctl",
  "oximeter",
  "oximeter-instruments",
@@ -7382,7 +7386,7 @@ dependencies = [
  "repo-depot-client",
  "reqwest",
  "schemars",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_human_bytes",
  "serde_json",
@@ -7536,7 +7540,6 @@ dependencies = [
  "indicatif",
  "inout",
  "itertools 0.10.5",
- "itertools 0.12.1",
  "lalrpop-util",
  "lazy_static",
  "libc",
@@ -7557,7 +7560,7 @@ dependencies = [
  "peg-runtime",
  "pem-rfc7468",
  "percent-encoding",
- "petgraph",
+ "petgraph 0.6.5",
  "phf",
  "phf_shared 0.11.2",
  "pkcs8",
@@ -7577,7 +7580,7 @@ dependencies = [
  "rustls-webpki 0.102.8",
  "schemars",
  "scopeguard",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "sha1",
@@ -7630,7 +7633,7 @@ dependencies = [
  "futures-util",
  "hex",
  "reqwest",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_derive",
  "serde_json",
@@ -7646,9 +7649,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.20.2"
+version = "1.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1261fe7e33c73b354eab43b1273a57c8f967d0391e80353e51f764ac02cf6775"
+checksum = "945462a4b81e43c4e3ba96bd7b49d834c6f61198356aa858733bc4acf3cbe62e"
 
 [[package]]
 name = "oorandom"
@@ -7700,7 +7703,7 @@ dependencies = [
  "owo-colors",
  "oximeter-api",
  "repo-depot-api",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde_json",
  "similar",
  "sled-agent-api",
@@ -7730,9 +7733,9 @@ dependencies = [
 
 [[package]]
 name = "openssl"
-version = "0.10.70"
+version = "0.10.71"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61cfb4e166a8bb8c9b55c500bc2308550148ece889be90f609377e58140f42c6"
+checksum = "5e14130c6a98cd258fdcb0fb6d744152343ff729cbfcb28c656a9d12b999fbcd"
 dependencies = [
  "bitflags 2.6.0",
  "cfg-if",
@@ -7762,9 +7765,9 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.105"
+version = "0.9.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b22d5b84be05a8d6947c7cb71f7c849aa0f112acd4bf51c2a7c1c988ac0a9dc"
+checksum = "8bb61ea9811cc39e3c2069f40b8b8e2e70d8569b361f879786cc7ed48b777cdd"
 dependencies = [
  "cc",
  "libc",
@@ -7965,7 +7968,7 @@ dependencies = [
  "rand",
  "reqwest",
  "schemars",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "slog",
@@ -8575,10 +8578,20 @@ version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4c5cc86750666a3ed20bdaf5ca2a0344f9c67674cae0515bec2da16fbaa47db"
 dependencies = [
- "fixedbitset",
+ "fixedbitset 0.4.2",
  "indexmap 2.7.1",
  "serde",
  "serde_derive",
+]
+
+[[package]]
+name = "petgraph"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3672b37090dbd86368a4145bc067582552b29c27377cad4e0a306c97f9bd7772"
+dependencies = [
+ "fixedbitset 0.5.7",
+ "indexmap 2.7.1",
 ]
 
 [[package]]
@@ -8903,9 +8916,9 @@ checksum = "925383efa346730478fb4838dbe9137d2a47675ad789c546d150a6e1dd4ab31c"
 
 [[package]]
 name = "predicates"
-version = "3.1.2"
+version = "3.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e9086cc7640c29a356d1a29fd134380bee9d8f79a17410aa76e7ad295f42c97"
+checksum = "a5d19ee57562043d37e82899fade9a22ebab7be9cef5026b07fda9cdd4293573"
 dependencies = [
  "anstyle",
  "difflib",
@@ -8955,9 +8968,9 @@ dependencies = [
 
 [[package]]
 name = "prettyplease"
-version = "0.2.25"
+version = "0.2.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64d1ec885c64d0457d564db4ec299b2dae3f9c02808b8ad9c3a089c591b18033"
+checksum = "6924ced06e1f7dfe3fa48d57b9f74f55d8915f5036121bef647ef4b204895fac"
 dependencies = [
  "proc-macro2",
  "syn 2.0.96",
@@ -9506,23 +9519,23 @@ dependencies = [
 
 [[package]]
 name = "ratatui"
-version = "0.28.1"
+version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdef7f9be5c0122f890d58bdf4d964349ba6a6161f705907526d891efabba57d"
+checksum = "eabd94c2f37801c20583fc49dd5cd6b0ba68c716787c2dd6ed18571e1e63117b"
 dependencies = [
  "bitflags 2.6.0",
  "cassowary",
  "compact_str",
  "crossterm",
+ "indoc 2.0.5",
  "instability",
  "itertools 0.13.0",
  "lru",
  "paste",
  "strum",
- "strum_macros 0.26.4",
  "unicode-segmentation",
  "unicode-truncate",
- "unicode-width 0.1.14",
+ "unicode-width 0.2.0",
 ]
 
 [[package]]
@@ -9759,9 +9772,9 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.12.9"
+version = "0.12.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a77c62af46e79de0a562e1a9849205ffcb7fc1238876e9bd743357570e04046f"
+checksum = "43e734407157c3c2034e0258f5e4473ddb361b1e85f95a66690d67264d7cd1da"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -9800,6 +9813,7 @@ dependencies = [
  "tokio-native-tls",
  "tokio-rustls 0.26.0",
  "tokio-util",
+ "tower",
  "tower-service",
  "url",
  "wasm-bindgen",
@@ -10103,7 +10117,7 @@ version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
 dependencies = [
- "semver 1.0.24",
+ "semver 1.0.25",
 ]
 
 [[package]]
@@ -10498,9 +10512,9 @@ checksum = "d4f410fedcf71af0345d7607d246e7ad15faaadd49d240ee3b24e5dc21a820ac"
 
 [[package]]
 name = "semver"
-version = "1.0.24"
+version = "1.0.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cb6eb87a131f756572d7fb904f6e7b68633f09cca868c5df1c4b8d1a694bbba"
+checksum = "f79dfe2d285b0488816f30e700a7438c5a73d816b5b7d3ac72fbc48b0d185e03"
 dependencies = [
  "serde",
 ]
@@ -10567,9 +10581,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.135"
+version = "1.0.139"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b0d7ba2887406110130a978386c4e1befb98c674b4fba677954e4db976630d9"
+checksum = "44f86c3acccc9c65b153fe1b85a3be07fe5515274ec9f0653b4a0875731c72a6"
 dependencies = [
  "itoa",
  "memchr",
@@ -11412,7 +11426,7 @@ dependencies = [
  "futures",
  "lazy_static",
  "newtype_derive",
- "petgraph",
+ "petgraph 0.6.5",
  "schemars",
  "serde",
  "serde_json",
@@ -11720,20 +11734,19 @@ dependencies = [
 
 [[package]]
 name = "target-lexicon"
-version = "0.12.16"
+version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61c41af27dd6d1e27b1b16b489db798443478cef1f06a660c96db617ba5de3b1"
+checksum = "e502f78cdbb8ba4718f566c418c52bc729126ffd16baee5baa718cf25dd5a69a"
 
 [[package]]
 name = "target-spec"
-version = "3.3.1"
+version = "3.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da00bc76fdc8b7ed7163b7cf728179277b26985c177510b69cc320f30b5a517f"
+checksum = "49424d0fdcba4406e46d1cea3014c4d1987263790b8e5d1be45c4509c9d52553"
 dependencies = [
  "cfg-expr",
  "guppy-workspace-hack",
  "target-lexicon",
- "unicode-ident",
 ]
 
 [[package]]
@@ -12283,7 +12296,7 @@ dependencies = [
  "home",
  "once_cell",
  "regex",
- "semver 1.0.24",
+ "semver 1.0.25",
  "walkdir",
 ]
 
@@ -12327,6 +12340,27 @@ dependencies = [
  "url",
  "walkdir",
 ]
+
+[[package]]
+name = "tower"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d039ad9159c98b70ecfd540b2573b97f7f52c3e8d9f8ad57a24b916a536975f9"
+dependencies = [
+ "futures-core",
+ "futures-util",
+ "pin-project-lite",
+ "sync_wrapper",
+ "tokio",
+ "tower-layer",
+ "tower-service",
+]
+
+[[package]]
+name = "tower-layer"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "121c2a6cda46980bb0fcd1647ffaf6cd3fc79a013de288782836f6df9c48780e"
 
 [[package]]
 name = "tower-service"
@@ -12439,7 +12473,7 @@ dependencies = [
  "omicron-workspace-hack",
  "parse-size",
  "rand",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "serde_path_to_error",
@@ -12455,12 +12489,12 @@ dependencies = [
 
 [[package]]
 name = "tui-tree-widget"
-version = "0.22.0"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df0b54061d997162f225bed5d2147574af0648480214759a000e33f6cea0017a"
+checksum = "fcc95ebc9c578c67223514d0e10a75c3b996d1f22dc93a4792475260f7c3c11e"
 dependencies = [
  "ratatui",
- "unicode-width 0.1.14",
+ "unicode-width 0.2.0",
 ]
 
 [[package]]
@@ -12583,7 +12617,7 @@ dependencies = [
  "quote",
  "regress 0.10.1",
  "schemars",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "syn 2.0.96",
@@ -12603,7 +12637,7 @@ dependencies = [
  "quote",
  "regress 0.10.1",
  "schemars",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "syn 2.0.96",
@@ -12620,7 +12654,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "schemars",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "serde_tokenstream",
@@ -12637,7 +12671,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "schemars",
- "semver 1.0.24",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "serde_tokenstream",
@@ -12827,7 +12861,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "owo-colors",
- "petgraph",
+ "petgraph 0.6.5",
  "schemars",
  "serde",
  "serde_json",
@@ -13235,7 +13269,6 @@ dependencies = [
  "omicron-common",
  "omicron-passwords",
  "omicron-workspace-hack",
- "once_cell",
  "owo-colors",
  "proptest",
  "ratatui",
@@ -13358,7 +13391,6 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "once_cell",
  "openapi-lint",
  "openapiv3",
  "oxnet",
@@ -13459,7 +13491,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

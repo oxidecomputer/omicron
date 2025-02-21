@@ -1629,6 +1629,191 @@ fn after_124_0_0(client: &Client) -> BoxFuture<'_, ()> {
         );
     })
 }
+
+fn before_125_0_0(client: &Client) -> BoxFuture<'_, ()> {
+    Box::pin(async {
+        // Insert a few bp_omicron_zone records and their parent
+        // bp_sled_omicron_zones row (from which we pull its generation)
+        let bp1_id: Uuid =
+            "00000000-0000-0000-0000-000000000001".parse().unwrap();
+        let bp2_id: Uuid =
+            "00000000-0000-0000-0000-000000000002".parse().unwrap();
+
+        let sled_id: Uuid = Uuid::new_v4();
+
+        let bp1_generation: i64 = 3;
+        let bp2_generation: i64 = 4;
+
+        client
+            .batch_execute(&format!(
+                "
+                    INSERT INTO bp_sled_omicron_zones (
+                        blueprint_id, sled_id, generation
+                    ) VALUES (
+                        '{bp1_id}', '{sled_id}', {bp1_generation}
+                    );
+
+                    INSERT INTO bp_sled_omicron_zones (
+                        blueprint_id, sled_id, generation
+                    ) VALUES (
+                        '{bp2_id}', '{sled_id}', {bp2_generation}
+                    );
+                "
+            ))
+            .await
+            .expect("inserted record");
+
+        // Insert an in-service zone and and expunged zone for each blueprint.
+        let in_service_zone_id: Uuid =
+            "00000001-0000-0000-0000-000000000000".parse().unwrap();
+        let expunged_zone_id: Uuid =
+            "00000002-0000-0000-0000-000000000000".parse().unwrap();
+
+        for bp_id in [bp1_id, bp2_id] {
+            for (zone_id, disposition) in [
+                (in_service_zone_id, "in_service"),
+                (expunged_zone_id, "expunged"),
+            ] {
+                client
+                    .batch_execute(&format!(
+                        "
+                        INSERT INTO bp_omicron_zone (
+                            blueprint_id,
+                            sled_id,
+                            id,
+                            zone_type,
+                            primary_service_ip,
+                            primary_service_port,
+                            disposition
+                        ) VALUES (
+                            '{bp_id}',
+                            '{sled_id}',
+                            '{zone_id}',
+                            'oximeter',
+                            '::1',
+                            0,
+                            '{disposition}'
+                        );
+                    "
+                    ))
+                    .await
+                    .expect("inserted record");
+            }
+        }
+    })
+}
+
+fn after_125_0_0(client: &Client) -> BoxFuture<'_, ()> {
+    Box::pin(async {
+        let bp1_id: Uuid =
+            "00000000-0000-0000-0000-000000000001".parse().unwrap();
+        let bp2_id: Uuid =
+            "00000000-0000-0000-0000-000000000002".parse().unwrap();
+        let bp1_generation: i64 = 3;
+        let bp2_generation: i64 = 4;
+        let in_service_zone_id: Uuid =
+            "00000001-0000-0000-0000-000000000000".parse().unwrap();
+        let expunged_zone_id: Uuid =
+            "00000002-0000-0000-0000-000000000000".parse().unwrap();
+
+        let rows = client
+            .query(
+                r#"
+                SELECT
+                    blueprint_id,
+                    id,
+                    disposition,
+                    disposition_expunged_as_of_generation,
+                    disposition_expunged_ready_for_cleanup
+                FROM bp_omicron_zone
+                ORDER BY blueprint_id, id
+                "#,
+                &[],
+            )
+            .await
+            .expect("loaded bp_omicron_zone rows");
+
+        let records = process_rows(&rows);
+
+        assert_eq!(records.len(), 4);
+
+        assert_eq!(
+            records[0].values,
+            vec![
+                ColumnValue::new("blueprint_id", bp1_id),
+                ColumnValue::new("id", in_service_zone_id),
+                ColumnValue::new(
+                    "disposition",
+                    SqlEnum::from(("bp_zone_disposition", "in_service")),
+                ),
+                ColumnValue::null("disposition_expunged_as_of_generation"),
+                ColumnValue::new(
+                    "disposition_expunged_ready_for_cleanup",
+                    false
+                ),
+            ],
+            "in_service zone left in service",
+        );
+        assert_eq!(
+            records[1].values,
+            vec![
+                ColumnValue::new("blueprint_id", bp1_id),
+                ColumnValue::new("id", expunged_zone_id),
+                ColumnValue::new(
+                    "disposition",
+                    SqlEnum::from(("bp_zone_disposition", "expunged")),
+                ),
+                ColumnValue::new(
+                    "disposition_expunged_as_of_generation",
+                    bp1_generation
+                ),
+                ColumnValue::new(
+                    "disposition_expunged_ready_for_cleanup",
+                    false
+                ),
+            ],
+            "expunged zone gets correct disposition and generation",
+        );
+        assert_eq!(
+            records[2].values,
+            vec![
+                ColumnValue::new("blueprint_id", bp2_id),
+                ColumnValue::new("id", in_service_zone_id),
+                ColumnValue::new(
+                    "disposition",
+                    SqlEnum::from(("bp_zone_disposition", "in_service")),
+                ),
+                ColumnValue::null("disposition_expunged_as_of_generation"),
+                ColumnValue::new(
+                    "disposition_expunged_ready_for_cleanup",
+                    false
+                ),
+            ],
+            "in_service zone left in service",
+        );
+        assert_eq!(
+            records[3].values,
+            vec![
+                ColumnValue::new("blueprint_id", bp2_id),
+                ColumnValue::new("id", expunged_zone_id),
+                ColumnValue::new(
+                    "disposition",
+                    SqlEnum::from(("bp_zone_disposition", "expunged")),
+                ),
+                ColumnValue::new(
+                    "disposition_expunged_as_of_generation",
+                    bp2_generation
+                ),
+                ColumnValue::new(
+                    "disposition_expunged_ready_for_cleanup",
+                    false
+                ),
+            ],
+            "expunged zone gets correct disposition and generation",
+        );
+    })
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -1672,6 +1857,11 @@ fn get_migration_checks() -> BTreeMap<SemverVersion, DataMigrationFns> {
     map.insert(
         SemverVersion::new(124, 0, 0),
         DataMigrationFns { before: Some(before_124_0_0), after: after_124_0_0 },
+    );
+
+    map.insert(
+        SemverVersion::new(125, 0, 0),
+        DataMigrationFns { before: Some(before_125_0_0), after: after_125_0_0 },
     );
 
     map
