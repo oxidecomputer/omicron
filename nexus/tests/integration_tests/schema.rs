@@ -16,6 +16,8 @@ use nexus_db_queries::db::DISALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_test_utils::{load_test_config, ControlPlaneTestContextBuilder};
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_test_utils::dev::db::{Client, CockroachInstance};
+use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::SledUuid;
 use pretty_assertions::{assert_eq, assert_ne};
 use semver::Version;
 use similar_asserts;
@@ -987,7 +989,8 @@ async fn dbinit_equals_sum_of_all_up() {
         diesel::insert_into(dsl::sled_resource)
             .values(SledResource {
                 id: Uuid::new_v4(),
-                sled_id: Uuid::new_v4(),
+                instance_id: Some(InstanceUuid::new_v4().into()),
+                sled_id: SledUuid::new_v4().into(),
                 kind: SledResourceKind::Instance,
                 resources: Resources {
                     hardware_threads: 8_u32.into(),

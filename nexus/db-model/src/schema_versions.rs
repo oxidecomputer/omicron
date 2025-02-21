@@ -8,27 +8,27 @@
 
 use anyhow::{bail, ensure, Context};
 use camino::Utf8Path;
-use once_cell::sync::Lazy;
 use semver::Version;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::LazyLock};
 
 /// The version of the database schema this particular version of Nexus was
 /// built against
 ///
 /// This must be updated when you change the database schema.  Refer to
 /// schema/crdb/README.adoc in the root of this repository for details.
-pub const SCHEMA_VERSION: Version = Version::new(125, 0, 0);
+pub const SCHEMA_VERSION: Version = Version::new(126, 0, 0);
 
 /// List of all past database schema versions, in *reverse* order
 ///
 /// If you want to change the Omicron database schema, you must update this.
-static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
+static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
     vec![
         // +- The next version goes here!  Duplicate this line, uncomment
         // |  the *second* copy, then update that copy for your version,
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
+        KnownVersion::new(126, "affinity"),
         KnownVersion::new(125, "blueprint-disposition-expunged-cleanup"),
         KnownVersion::new(124, "support-read-only-region-replacement"),
         KnownVersion::new(123, "vpc-subnet-contention"),

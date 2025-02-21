@@ -493,9 +493,11 @@ mod test {
         self,
         poll::{wait_for_condition, CondCheckError},
     };
-    use once_cell::sync::Lazy;
     use pretty_assertions::assert_eq;
-    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+    use std::sync::{
+        atomic::{AtomicBool, AtomicU32, Ordering},
+        LazyLock,
+    };
     use steno::{
         new_action_noop_undo, Action, ActionContext, ActionError,
         ActionRegistry, DagBuilder, Node, SagaDag, SagaId, SagaName,
@@ -561,10 +563,10 @@ mod test {
         }
     }
 
-    static ACTION_N1: Lazy<Arc<dyn Action<TestOp>>> =
-        Lazy::new(|| new_action_noop_undo("n1_action", node_one));
-    static ACTION_N2: Lazy<Arc<dyn Action<TestOp>>> =
-        Lazy::new(|| new_action_noop_undo("n2_action", node_two));
+    static ACTION_N1: LazyLock<Arc<dyn Action<TestOp>>> =
+        LazyLock::new(|| new_action_noop_undo("n1_action", node_one));
+    static ACTION_N2: LazyLock<Arc<dyn Action<TestOp>>> =
+        LazyLock::new(|| new_action_noop_undo("n2_action", node_two));
 
     fn registry_create() -> Arc<ActionRegistry<TestOp>> {
         let mut registry = ActionRegistry::new();
