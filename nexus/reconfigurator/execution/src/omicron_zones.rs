@@ -32,18 +32,13 @@ use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 
-/// Typestate indicating that the deploy disks step was performed.
-#[derive(Debug)]
-#[must_use = "token indicating completion of deploy_zones"]
-pub(crate) struct DeployZonesDone(());
-
 /// Idempotently ensure that the specified Omicron zones are deployed to the
 /// corresponding sleds
 pub(crate) async fn deploy_zones<'a, I>(
     opctx: &OpContext,
     sleds_by_id: &BTreeMap<SledUuid, Sled>,
     zones: I,
-) -> Result<DeployZonesDone, Vec<anyhow::Error>>
+) -> Result<(), Vec<anyhow::Error>>
 where
     I: Iterator<Item = (SledUuid, &'a BlueprintZonesConfig)>,
 {
@@ -100,7 +95,11 @@ where
         .collect()
         .await;
 
-    if errors.is_empty() { Ok(DeployZonesDone(())) } else { Err(errors) }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
 }
 
 /// Idempontently perform any cleanup actions necessary for expunged zones.
