@@ -14,7 +14,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use sled_hardware::{
     DiskFirmware, Partition, PooledDisk, PooledDiskError, UnparsedDisk,
 };
-use slog::{info, Logger};
+use slog::{Logger, info};
 
 use crate::config::MountConfig;
 use crate::dataset;

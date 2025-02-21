@@ -77,7 +77,7 @@ use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
 };
 use crate::rack_setup::plan::sled::Plan as SledPlan;
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use chrono::Utc;
@@ -85,15 +85,15 @@ use dns_service_client::DnsError;
 use internal_dns_resolver::Resolver as DnsResolver;
 use internal_dns_types::names::ServiceName;
 use nexus_client::{
-    types as NexusTypes, Client as NexusClient, Error as NexusError,
+    Client as NexusClient, Error as NexusError, types as NexusTypes,
 };
 use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
 use nexus_types::deployment::{
-    blueprint_zone_type, id_map::IdMap, Blueprint, BlueprintDatasetConfig,
-    BlueprintDatasetDisposition, BlueprintDatasetsConfig, BlueprintZoneType,
-    BlueprintZonesConfig, CockroachDbPreserveDowngrade,
+    Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
+    BlueprintDatasetsConfig, BlueprintZoneType, BlueprintZonesConfig,
+    CockroachDbPreserveDowngrade, blueprint_zone_type, id_map::IdMap,
 };
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::get_sled_address;
@@ -101,7 +101,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::LldpAdminStatus;
 use omicron_common::backoff::{
-    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
+    BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::{
     DatasetKind, DatasetsConfig, OmicronPhysicalDisksConfig,
@@ -114,7 +114,7 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
-    types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
+    Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
@@ -129,7 +129,7 @@ use sled_hardware_types::underlay::BootstrapInterface;
 use sled_storage::dataset::CONFIG_DATASET;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
-use std::collections::{btree_map, BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, btree_map};
 use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::net::SocketAddrV6;
@@ -1735,7 +1735,7 @@ mod test {
         OmicronZonesConfig, SledRole,
     };
     use omicron_common::{
-        address::{get_sled_address, Ipv6Subnet, SLED_PREFIX},
+        address::{Ipv6Subnet, SLED_PREFIX, get_sled_address},
         api::external::{ByteCount, Generation},
         disk::{DiskIdentity, DiskVariant},
     };

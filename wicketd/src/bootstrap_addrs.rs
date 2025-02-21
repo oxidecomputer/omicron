@@ -4,10 +4,10 @@
 
 use futures::stream::FuturesUnordered;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
-use sled_hardware_types::underlay::BootstrapInterface;
 use sled_hardware_types::Baseboard;
-use slog::warn;
+use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
+use slog::warn;
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
 use std::sync::Arc;

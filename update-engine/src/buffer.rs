@@ -17,12 +17,12 @@ use indexmap::IndexMap;
 use petgraph::{prelude::*, visit::Walker};
 
 use crate::{
+    ExecutionId, NestedSpec, StepSpec,
     display::AbortMessageDisplay,
     events::{
         Event, EventReport, ProgressEvent, ProgressEventKind, StepEvent,
         StepEventKind, StepEventPriority, StepInfo, StepOutcome,
     },
-    ExecutionId, NestedSpec, StepSpec,
 };
 
 /// A receiver for events that provides a pull-based model with periodic
@@ -1750,14 +1750,14 @@ impl fmt::Display for RootEventIndex {
 mod tests {
     use std::collections::HashSet;
 
-    use anyhow::{bail, ensure, Context};
+    use anyhow::{Context, bail, ensure};
     use indexmap::IndexSet;
     use omicron_test_utils::dev::test_setup_log;
-    use serde::{de::IntoDeserializer, Deserialize};
+    use serde::{Deserialize, de::IntoDeserializer};
 
     use crate::{
         events::ProgressCounter,
-        test_utils::{generate_test_events, GenerateTestEventsKind, TestSpec},
+        test_utils::{GenerateTestEventsKind, TestSpec, generate_test_events},
     };
 
     use super::*;
@@ -2027,7 +2027,8 @@ mod tests {
                     data2.sort_key()
                 );
                 ensure!(
-                    data1.parent_key_and_child_index() == data2.parent_key_and_child_index(),
+                    data1.parent_key_and_child_index()
+                        == data2.parent_key_and_child_index(),
                     "buffers have same parent key and child index at index {} ({:?} vs {:?})",
                     ix,
                     data1.parent_key_and_child_index(),

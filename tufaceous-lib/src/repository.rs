@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{key::Key, target::TargetWriter, AddArtifact, ArchiveBuilder};
-use anyhow::{anyhow, bail, Context, Result};
+use crate::{AddArtifact, ArchiveBuilder, key::Key, target::TargetWriter};
+use anyhow::{Context, Result, anyhow, bail};
 use buf_list::BufList;
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
@@ -15,9 +15,9 @@ use omicron_common::{
 };
 use std::{collections::BTreeSet, num::NonZeroU64};
 use tough::{
-    editor::{signed::SignedRole, RepositoryEditor},
-    schema::{Root, Target},
     ExpirationEnforcement, Repository, RepositoryLoader, TargetName,
+    editor::{RepositoryEditor, signed::SignedRole},
+    schema::{Root, Target},
 };
 use url::Url;
 

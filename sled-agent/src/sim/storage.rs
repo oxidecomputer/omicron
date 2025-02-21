@@ -8,12 +8,12 @@
 //! than the representation of "virtual disks" which would be presented
 //! through Nexus' external API.
 
+use crate::sim::SimulatedUpstairs;
 use crate::sim::http_entrypoints_pantry::ExpectedDigest;
 use crate::sim::http_entrypoints_pantry::PantryStatus;
 use crate::sim::http_entrypoints_pantry::VolumeStatus;
-use crate::sim::SimulatedUpstairs;
 use crate::support_bundle::storage::SupportBundleManager;
-use anyhow::{self, bail, Result};
+use anyhow::{self, Result, bail};
 use camino::Utf8Path;
 use camino_tempfile::Utf8TempDir;
 use chrono::prelude::*;
@@ -435,10 +435,9 @@ mod test {
 
         let first_region_port = region.port_number;
 
-        assert!(agent
-            .delete(RegionId(region_id.to_string()))
-            .unwrap()
-            .is_some());
+        assert!(
+            agent.delete(RegionId(region_id.to_string())).unwrap().is_some()
+        );
 
         // Create another region, make sure it gets the same port number, but
         // don't delete it.
@@ -479,10 +478,12 @@ mod test {
 
         let third_region_port = third_region.port_number;
 
-        assert!(agent
-            .delete(RegionId(third_region.id.to_string()))
-            .unwrap()
-            .is_some());
+        assert!(
+            agent
+                .delete(RegionId(third_region.id.to_string()))
+                .unwrap()
+                .is_some()
+        );
 
         // Create a running snapshot, make sure it gets the same port number
         // as the third region did. This ensures that the Crucible agent shares
@@ -1382,7 +1383,7 @@ impl StorageInner {
                     return Err(HttpError::for_not_found(
                         None,
                         "Dataset not found".to_string(),
-                    ))
+                    ));
                 }
             };
         }
@@ -1449,7 +1450,7 @@ impl StorageInner {
                     return Err(HttpError::for_not_found(
                         None,
                         "Dataset not found".to_string(),
-                    ))
+                    ));
                 }
             };
         }
@@ -1493,7 +1494,7 @@ impl StorageInner {
                     return Err(HttpError::for_not_found(
                         None,
                         "Dataset not found".to_string(),
-                    ))
+                    ));
                 }
             };
         }

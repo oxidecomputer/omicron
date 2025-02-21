@@ -580,9 +580,9 @@ impl InstanceManagerRunner {
                         ));
                     } else {
                         info!(
-                        &self.log,
-                        "instance already registered with requested Propolis ID"
-                    );
+                            &self.log,
+                            "instance already registered with requested Propolis ID"
+                        );
                         existing_instance
                     }
                 }

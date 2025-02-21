@@ -6,15 +6,15 @@
 
 //! Tools for collecting and inspecting service bundles for zones.
 
-use anyhow::anyhow;
 use anyhow::Context;
+use anyhow::anyhow;
 use camino::FromPathBufError;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use flate2::bufread::GzDecoder;
-use illumos_utils::running_zone::is_oxide_smf_log_file;
 use illumos_utils::running_zone::RunningZone;
 use illumos_utils::running_zone::ServiceProcess;
+use illumos_utils::running_zone::is_oxide_smf_log_file;
 use illumos_utils::zfs::CreateSnapshotError;
 use illumos_utils::zfs::DestroyDatasetError;
 use illumos_utils::zfs::DestroySnapshotError;
@@ -24,8 +24,8 @@ use illumos_utils::zfs::ListDatasetsError;
 use illumos_utils::zfs::ListSnapshotsError;
 use illumos_utils::zfs::SetValueError;
 use illumos_utils::zfs::Snapshot;
-use illumos_utils::zfs::Zfs;
 use illumos_utils::zfs::ZFS;
+use illumos_utils::zfs::Zfs;
 use illumos_utils::zone::AdmError;
 use sled_agent_types::zone_bundle::*;
 use sled_storage::dataset::U2_DEBUG_DATASET;
@@ -43,8 +43,8 @@ use tar::Header;
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::sync::Notify;
-use tokio::time::sleep;
 use tokio::time::Instant;
+use tokio::time::sleep;
 use uuid::Uuid;
 
 // The name of the snapshot created from the zone root filesystem.
@@ -698,9 +698,11 @@ fn create_zfs_snapshots(
                                 unwind any previously created snapshots";
                                 "error" => ?e,
                             );
-                            assert!(maybe_err
-                                .replace(BundleError::from(e))
-                                .is_none());
+                            assert!(
+                                maybe_err
+                                    .replace(BundleError::from(e))
+                                    .is_none()
+                            );
                             break;
                         }
                     };
@@ -1719,8 +1721,6 @@ mod tests {
 
 #[cfg(all(target_os = "illumos", test))]
 mod illumos_tests {
-    use super::find_archived_log_files;
-    use super::zfs_quota;
     use super::CleanupContext;
     use super::CleanupPeriod;
     use super::PriorityOrder;
@@ -1732,6 +1732,8 @@ mod illumos_tests {
     use super::ZoneBundleInfo;
     use super::ZoneBundleMetadata;
     use super::ZoneBundler;
+    use super::find_archived_log_files;
+    use super::zfs_quota;
     use anyhow::Context;
     use chrono::DateTime;
     use chrono::TimeZone;
@@ -2305,10 +2307,12 @@ mod illumos_tests {
             should_match.sort();
             files.sort();
             assert_eq!(files.len(), should_match.len());
-            assert!(files
-                .iter()
-                .zip(should_match.iter())
-                .all(|(file, name)| { file.file_name().unwrap() == *name }));
+            assert!(
+                files
+                    .iter()
+                    .zip(should_match.iter())
+                    .all(|(file, name)| { file.file_name().unwrap() == *name })
+            );
         }
     }
 

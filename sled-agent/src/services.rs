@@ -25,10 +25,10 @@
 //! - [ServiceManager::activate_switch] exposes an API to specifically enable
 //!   or disable (via [ServiceManager::deactivate_switch]) the switch zone.
 
+use crate::bootstrap::BootstrapNetworking;
 use crate::bootstrap::early_networking::{
     EarlyNetworkSetup, EarlyNetworkSetupError,
 };
-use crate::bootstrap::BootstrapNetworking;
 use crate::config::SidecarRevision;
 use crate::metrics::MetricsRequestQueue;
 use crate::params::{DendriteAsic, OmicronZoneConfigExt, OmicronZoneTypeExt};
@@ -41,7 +41,7 @@ use clickhouse_admin_types::CLICKHOUSE_KEEPER_CONFIG_DIR;
 use clickhouse_admin_types::CLICKHOUSE_KEEPER_CONFIG_FILE;
 use clickhouse_admin_types::CLICKHOUSE_SERVER_CONFIG_DIR;
 use clickhouse_admin_types::CLICKHOUSE_SERVER_CONFIG_FILE;
-use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
+use dpd_client::{Client as DpdClient, Error as DpdError, types as DpdTypes};
 use dropshot::HandlerTaskMode;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::IPV6_LINK_LOCAL_ADDROBJ_NAME;
@@ -60,7 +60,7 @@ use illumos_utils::smf_helper::SmfHelper;
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zpool::{PathInPool, ZpoolName, ZpoolOrRamdisk};
-use illumos_utils::{execute, PFEXEC};
+use illumos_utils::{PFEXEC, execute};
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
 use internal_dns_types::names::DNS_ZONE;
@@ -79,18 +79,18 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::TFPORTD_PORT;
 use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
+use omicron_common::address::{BOOTSTRAP_ARTIFACT_PORT, COCKROACH_ADMIN_PORT};
 use omicron_common::address::{
-    get_internal_dns_server_addresses, CLICKHOUSE_ADMIN_PORT,
-    CLICKHOUSE_TCP_PORT,
+    CLICKHOUSE_ADMIN_PORT, CLICKHOUSE_TCP_PORT,
+    get_internal_dns_server_addresses,
 };
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
-use omicron_common::address::{BOOTSTRAP_ARTIFACT_PORT, COCKROACH_ADMIN_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::{
     HostPortConfig, RackNetworkConfig, SledIdentifiers,
 };
 use omicron_common::backoff::{
-    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
+    BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::{self, Ledger, Ledgerable};
@@ -102,9 +102,9 @@ use sled_agent_types::{
     time_sync::TimeSync,
     zone_bundle::{ZoneBundleCause, ZoneBundleMetadata},
 };
+use sled_hardware::SledMode;
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
-use sled_hardware::SledMode;
 use sled_hardware_types::Baseboard;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::{CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET};
@@ -114,11 +114,11 @@ use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
-use tokio::sync::{oneshot, MutexGuard};
+use tokio::sync::{MutexGuard, oneshot};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
@@ -247,7 +247,9 @@ pub enum Error {
         source: illumos_utils::zfs::GetValueError,
     },
 
-    #[error("Cannot launch {zone} with {dataset} (saw {prop_name} = {prop_value}, expected {prop_value_expected})")]
+    #[error(
+        "Cannot launch {zone} with {dataset} (saw {prop_name} = {prop_value}, expected {prop_value_expected})"
+    )]
     DatasetNotReady {
         zone: String,
         dataset: String,
@@ -2829,12 +2831,14 @@ impl ServiceManager {
                                             ref s,
                                         ) => s,
                                         _ => {
-                                            return Err(Error::SidecarRevision(
-                                                anyhow::anyhow!(
-                                                    "expected soft sidecar \
+                                            return Err(
+                                                Error::SidecarRevision(
+                                                    anyhow::anyhow!(
+                                                        "expected soft sidecar \
                                                     revision"
+                                                    ),
                                                 ),
-                                            ))
+                                            );
                                         }
                                     };
 
@@ -4027,7 +4031,7 @@ impl ServiceManager {
             SledMode::Gimlet => {
                 return Err(Error::SwitchZone(anyhow::anyhow!(
                     "attempted to activate switch zone on non-scrimlet sled"
-                )))
+                )));
             }
 
             // Sled is a scrimlet and the real tofino driver has been loaded.
@@ -4440,9 +4444,9 @@ impl ServiceManager {
                                     error!(
                                         self.inner.log,
                                         concat!(
-                                        "rack_id not present,",
-                                        " even though underlay address exists"
-                                    )
+                                            "rack_id not present,",
+                                            " even though underlay address exists"
+                                        )
                                     );
                                 }
                             }
@@ -4498,7 +4502,10 @@ impl ServiceManager {
                                 }
                             }
                             smfh.refresh()?;
-                            info!(self.inner.log, "refreshed dendrite service with new configuration")
+                            info!(
+                                self.inner.log,
+                                "refreshed dendrite service with new configuration"
+                            )
                         }
                         SwitchService::Wicketd { .. } => {
                             if let Some(&address) = first_address {
@@ -4516,7 +4523,10 @@ impl ServiceManager {
                                 )?;
 
                                 smfh.refresh()?;
-                                info!(self.inner.log, "refreshed wicketd service with new configuration")
+                                info!(
+                                    self.inner.log,
+                                    "refreshed wicketd service with new configuration"
+                                )
                             } else {
                                 error!(
                                     self.inner.log,
@@ -4538,7 +4548,10 @@ impl ServiceManager {
                                 )?;
                             }
                             smfh.refresh()?;
-                            info!(self.inner.log, "refreshed lldpd service with new configuration")
+                            info!(
+                                self.inner.log,
+                                "refreshed lldpd service with new configuration"
+                            )
                         }
                         SwitchService::Tfport { pkt_source, asic } => {
                             info!(self.inner.log, "configuring tfport service");
@@ -4577,7 +4590,10 @@ impl ServiceManager {
                             }
 
                             smfh.refresh()?;
-                            info!(self.inner.log, "refreshed tfport service with new configuration")
+                            info!(
+                                self.inner.log,
+                                "refreshed tfport service with new configuration"
+                            )
                         }
                         SwitchService::Pumpkind { .. } => {
                             // Unless we want to plumb through the "only log
@@ -4671,7 +4687,10 @@ impl ServiceManager {
                                 }
                             }
                             smfh.refresh()?;
-                            info!(self.inner.log, "refreshed mg-ddm service with new configuration")
+                            info!(
+                                self.inner.log,
+                                "refreshed mg-ddm service with new configuration"
+                            )
                         }
                     }
                 }
@@ -4943,7 +4962,7 @@ mod illumos_tests {
     use super::*;
     use illumos_utils::{
         dladm::{
-            Etherstub, MockDladm, BOOTSTRAP_ETHERSTUB_NAME,
+            BOOTSTRAP_ETHERSTUB_NAME, Etherstub, MockDladm,
             UNDERLAY_ETHERSTUB_NAME, UNDERLAY_ETHERSTUB_VNIC_NAME,
         },
         svc,

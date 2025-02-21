@@ -28,12 +28,12 @@ use omicron_common::update::ArtifactHash;
 use omicron_common::update::ArtifactHashId;
 use omicron_common::update::ArtifactId;
 use omicron_common::update::ArtifactKind;
-use slog::info;
 use slog::Logger;
-use std::collections::btree_map;
-use std::collections::hash_map;
+use slog::info;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::btree_map;
+use std::collections::hash_map;
 use std::io;
 use tokio::io::AsyncReadExt;
 use tokio::runtime::Handle;
@@ -1063,7 +1063,7 @@ impl<'a> UpdatePlanBuilder<'a> {
                         kind,
                         v1: version.clone(),
                         v2: v.id.version.clone(),
-                    })
+                    });
                 }
             }
         }
@@ -1277,11 +1277,11 @@ mod tests {
 
     use super::*;
     use bytes::Bytes;
-    use flate2::{write::GzEncoder, Compression};
+    use flate2::{Compression, write::GzEncoder};
     use futures::StreamExt;
     use omicron_brand_metadata::{ArchiveType, LayerInfo, Metadata};
     use omicron_test_utils::dev::test_setup_log;
-    use rand::{distributions::Standard, thread_rng, Rng};
+    use rand::{Rng, distributions::Standard, thread_rng};
     use sha2::{Digest, Sha256};
     use tufaceous_lib::{
         CompositeControlPlaneArchiveBuilder, CompositeEntry, MtimeSource,

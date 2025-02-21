@@ -13,13 +13,13 @@ use anyhow::anyhow;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
-use futures::future::FutureExt;
 use futures::Stream;
 use futures::StreamExt;
+use futures::future::FutureExt;
 use illumos_utils::zfs::{
     DatasetEnsureArgs, DatasetProperties, Mountpoint, WhichDatasets, Zfs,
 };
-use illumos_utils::zpool::{ZpoolName, ZPOOL_MOUNTPOINT_ROOT};
+use illumos_utils::zpool::{ZPOOL_MOUNTPOINT_ROOT, ZpoolName};
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::{
     DatasetConfig, DatasetManagementStatus, DatasetName, DatasetsConfig,
@@ -29,12 +29,12 @@ use omicron_common::disk::{
 use omicron_common::ledger::Ledger;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
-use slog::{error, info, o, warn, Logger};
+use slog::{Logger, error, info, o, warn};
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::future::Future;
 use tokio::sync::{mpsc, oneshot, watch};
-use tokio::time::{interval, Duration, MissedTickBehavior};
+use tokio::time::{Duration, MissedTickBehavior, interval};
 
 // The size of the mpsc bounded channel used to communicate
 // between the `StorageHandle` and `StorageManager`.
@@ -912,7 +912,10 @@ impl StorageManager {
                 ledger
             }
             None => {
-                info!(log, "No previously-stored 'requested datasets', creating new ledger");
+                info!(
+                    log,
+                    "No previously-stored 'requested datasets', creating new ledger"
+                );
                 Ledger::<DatasetsConfig>::new_with(
                     &log,
                     ledger_paths.clone(),
@@ -1301,7 +1304,10 @@ impl StorageManager {
                 ledger
             }
             None => {
-                info!(log, "No previously-stored 'requested disks', creating new ledger");
+                info!(
+                    log,
+                    "No previously-stored 'requested disks', creating new ledger"
+                );
                 Ledger::<OmicronPhysicalDisksConfig>::new_with(
                     &log,
                     ledger_paths.clone(),
@@ -1400,11 +1406,7 @@ impl StorageManager {
             .disks()
             .iter_all()
             .filter_map(|(id, _variant, _slot, _firmware)| {
-                if !all_ids.contains(id) {
-                    Some(id.clone())
-                } else {
-                    None
-                }
+                if !all_ids.contains(id) { Some(id.clone()) } else { None }
             })
             .collect();
 
@@ -1700,11 +1702,7 @@ mod tests {
             let firmware = all_disks_gen2
                 .iter_all()
                 .find_map(|(identity, _, _, fw)| {
-                    if identity == rd.identity() {
-                        Some(fw)
-                    } else {
-                        None
-                    }
+                    if identity == rd.identity() { Some(fw) } else { None }
                 })
                 .expect("disk exists");
             assert_eq!(firmware, rd.firmware(), "didn't see firmware update");
@@ -1728,12 +1726,14 @@ mod tests {
         assert!(all_disks.boot_disk().is_none());
 
         // Waiting for the boot disk should time out.
-        assert!(tokio::time::timeout(
-            tokio::time::Duration::from_millis(10),
-            harness.handle_mut().wait_for_boot_disk(),
-        )
-        .await
-        .is_err());
+        assert!(
+            tokio::time::timeout(
+                tokio::time::Duration::from_millis(10),
+                harness.handle_mut().wait_for_boot_disk(),
+            )
+            .await
+            .is_err()
+        );
 
         // Now we add a boot disk.
         let boot_disk = harness.add_vdevs(&["m2_under_test.vdev"]).await;

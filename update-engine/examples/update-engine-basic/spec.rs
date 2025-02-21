@@ -8,9 +8,9 @@ use std::fmt;
 
 use camino::Utf8PathBuf;
 use schemars::{
+    JsonSchema,
     r#gen::SchemaGenerator,
     schema::{Schema, SchemaObject},
-    JsonSchema,
 };
 use serde::{Deserialize, Serialize};
 use update_engine::StepSpec;

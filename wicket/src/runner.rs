@@ -7,21 +7,21 @@ use crossterm::event::EventStream;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen,
-    LeaveAlternateScreen,
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+    enable_raw_mode,
 };
 use futures::StreamExt;
-use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 use slog::Logger;
 use slog::{debug, error, info};
-use std::io::{stdout, Stdout};
+use std::io::{Stdout, stdout};
 use std::net::SocketAddrV6;
 use std::time::Instant;
 use tokio::sync::mpsc::{
-    unbounded_channel, UnboundedReceiver, UnboundedSender,
+    UnboundedReceiver, UnboundedSender, unbounded_channel,
 };
-use tokio::time::{interval, Duration};
+use tokio::time::{Duration, interval};
 use wicket_common::rack_update::AbortUpdateOptions;
 
 use crate::events::EventReportMap;

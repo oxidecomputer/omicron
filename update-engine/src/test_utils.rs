@@ -11,8 +11,8 @@ use tokio::sync::oneshot;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
-    events::{Event, ProgressUnits, StepProgress},
     EventBuffer, ExecutionId, StepContext, StepSpec, StepSuccess, UpdateEngine,
+    events::{Event, ProgressUnits, StepProgress},
 };
 
 #[derive(JsonSchema)]

@@ -15,8 +15,8 @@ use sled_hardware::HardwareManager;
 use slog::Logger;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc, oneshot, Notify};
-use tokio::time::{interval, Duration, MissedTickBehavior};
+use tokio::sync::{Notify, broadcast, mpsc, oneshot};
+use tokio::time::{Duration, MissedTickBehavior, interval};
 
 // Re-export the nexus_client::Client crate. (Use a type alias to be more
 // rust-analyzer friendly.)
@@ -550,7 +550,7 @@ mod test {
 
     use crate::fakes::nexus::FakeNexusServer;
     use omicron_test_utils::dev::poll::{
-        wait_for_condition as wait_for, CondCheckError,
+        CondCheckError, wait_for_condition as wait_for,
     };
     use omicron_uuid_kinds::GenericUuid;
 

@@ -13,17 +13,17 @@ use nexus_sled_agent_shared::inventory::{
     Inventory, OmicronZoneDataset, SledRole,
 };
 use nexus_types::deployment::{
-    blueprint_zone_type, BlueprintPhysicalDiskConfig,
-    BlueprintPhysicalDiskDisposition, BlueprintPhysicalDisksConfig,
-    BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
+    BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
+    BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
+    BlueprintZoneDisposition, BlueprintZoneType,
     OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
-    OmicronZoneExternalSnatIp,
+    OmicronZoneExternalSnatIp, blueprint_zone_type,
 };
 use omicron_common::address::{
-    get_sled_address, get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet,
-    DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, MGD_PORT, MGS_PORT,
+    DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, Ipv6Subnet, MGD_PORT, MGS_PORT,
     NEXUS_INTERNAL_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS,
-    RSS_RESERVED_ADDRESSES, SLED_PREFIX,
+    RSS_RESERVED_ADDRESSES, ReservedRackSubnet, SLED_PREFIX, get_sled_address,
+    get_switch_zone_address,
 };
 use omicron_common::api::external::{Generation, MacAddr, Vni};
 use omicron_common::api::internal::shared::{
@@ -31,7 +31,7 @@ use omicron_common::api::internal::shared::{
     SourceNatConfigError,
 };
 use omicron_common::backoff::{
-    retry_notify_ext, retry_policy_internal_service_aggressive, BackoffError,
+    BackoffError, retry_notify_ext, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::{
     CompressionAlgorithm, DatasetConfig, DatasetKind, DatasetName,
@@ -51,7 +51,7 @@ use rand::prelude::SliceRandom;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
-    types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
+    Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
 use sled_agent_types::rack_init::RackInitializeRequest as Config;
 use sled_agent_types::sled::StartSledAgentRequest;
@@ -363,7 +363,7 @@ impl Plan {
                         _ => {
                             return Err(PlanError::UnexpectedDataset(
                                 name.to_string(),
-                            ))
+                            ));
                         }
                     };
 

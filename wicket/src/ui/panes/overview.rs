@@ -5,23 +5,23 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use super::help_text;
 use super::ComputedScrollOffset;
 use super::Control;
 use super::PendingScroll;
+use super::help_text;
 use crate::state::Component;
-use crate::state::{ComponentId, ALL_COMPONENT_IDS};
+use crate::state::{ALL_COMPONENT_IDS, ComponentId};
 use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
 use crate::ui::widgets::IgnitionPopup;
 use crate::ui::widgets::{BoxConnector, BoxConnectorKind, Rack};
 use crate::ui::wrap::wrap_text;
 use crate::{Action, Cmd, State};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
-use ratatui::Frame;
 use wicket_common::inventory::RotState;
 use wicket_common::inventory::SpComponentCaboose;
 use wicket_common::inventory::SpComponentInfo;

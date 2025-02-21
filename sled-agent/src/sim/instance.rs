@@ -231,7 +231,7 @@ impl SimInstanceInner {
                             state {:?} (current state: {:?})",
                             self.next_resting_state(),
                             self
-                        )))
+                        )));
                     }
                 }
             }
@@ -253,7 +253,7 @@ impl SimInstanceInner {
                             state {:?} (current state: {:?})",
                             self.next_resting_state(),
                             self
-                        )))
+                        )));
                     }
                 }
             }
@@ -282,7 +282,7 @@ impl SimInstanceInner {
                         (current state: {:?})",
                         self.next_resting_state(),
                         self
-                    )))
+                    )));
                 }
             },
         }
@@ -440,9 +440,11 @@ impl Simulatable for SimInstance {
     type Action = InstanceAction;
 
     fn new(current: SledVmmState) -> Self {
-        assert!(matches!(
-            current.vmm_state.state,
-            VmmState::Starting | VmmState::Migrating),
+        assert!(
+            matches!(
+                current.vmm_state.state,
+                VmmState::Starting | VmmState::Migrating
+            ),
             "new VMMs should always be registered in the Starting or Migrating \
             state (supplied state: {:?})",
             current.vmm_state.state
