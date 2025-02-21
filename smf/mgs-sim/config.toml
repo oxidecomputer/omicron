@@ -9,14 +9,12 @@
 host_phase2_recovery_image_cache_max_images = 1
 
 [dropshot]
-# We want to allow uploads of host phase 2 recovery images, which may be
-# measured in the (small) hundreds of MiB. Set this to 512 MiB.
 default_request_body_max_bytes = 1048576
 
 [switch]
 # Which interface is connected to our local sidecar SP (i.e., the SP that acts
 # as our contact to the ignition controller)?
-local_ignition_controller_interface = "fake-switch1"
+local_ignition_controller_interface = "fake-switch0"
 
 [switch.rpc_retry_config]
 # When sending UDP RPC packets to an SP (other than to reset it), how many total
@@ -47,7 +45,7 @@ names = ["switch0", "switch1"]
 # if there is a miscabling that results in an unsolvable system (e.g.,
 # determination 0 reports "switch0" and determination 1 reports "switch1").
 [[switch.location.determination]]
-interfaces = ["fake-sled0", "fake-sled1", "fake-sled2", "fake-sled3"]
+interfaces = ["fake-sled0", "fake-sled1"]
 sp_port_1 = ["switch0"]
 sp_port_2 = ["switch1"]
 
@@ -57,38 +55,24 @@ sp_port_2 = ["switch1"]
 # entry for each member of `[switch.location]` above.
 [[switch.port]]
 kind = "simulated"
-fake-interface = "fake-switch1"
-addr = "[::1]:33301"
+fake-interface = "fake-switch0"
+addr = "[::1]:33300"
 ignition-target = 1
 location = { switch0 = ["switch", 0], switch1 = ["switch", 1] }
 
 [[switch.port]]
 kind = "simulated"
 fake-interface = "fake-sled0"
-addr = "[::1]:33311"
+addr = "[::1]:33310"
 ignition-target = 2
 location = { switch0 = ["sled", 0], switch1 = ["sled", 0] }
 
 [[switch.port]]
 kind = "simulated"
 fake-interface = "fake-sled1"
-addr = "[::1]:33321"
+addr = "[::1]:33320"
 ignition-target = 3
 location = { switch0 = ["sled", 1], switch1 = ["sled", 1] }
-
-[[switch.port]]
-kind = "simulated"
-fake-interface = "fake-sled2"
-addr = "[::1]:33331"
-ignition-target = 4
-location = { switch0 = ["sled", 2], switch1 = ["sled", 2] }
-
-[[switch.port]]
-kind = "simulated"
-fake-interface = "fake-sled3"
-addr = "[::1]:33341"
-ignition-target = 0
-location = { switch0 = ["sled", 3], switch1 = ["sled", 3] }
 
 [log]
 # Show log messages of this level and more severe

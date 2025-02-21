@@ -12,33 +12,59 @@ sled_mode = "scrimlet"
 # Identifies the revision of the sidecar that is attached, if one is attached.
 # TODO: This field should be removed once Gimlets have the ability to auto-detect
 # this information.
-sidecar_revision.soft_propolis = { front_port_count = 2, rear_port_count = 4 }
+sidecar_revision.soft_zone = { front_port_count = 1, rear_port_count = 1 }
 
 # Setting this to true causes sled-agent to always report that its time is
 # in-sync, rather than querying its NTP zone.
 skip_timesync = false
 
+# For testing purposes, a file-backed virtual disk can be manually created with
+# the following:
+#
+# # truncate -s 10GB <name>.vdev
+#
+# Note that you'll need to create one such file for each disk below.
+# `cargo xtask virtual-hardware create` does this for you.
+#
+# These paths have the prefix of either "u2" or "m2", followed by an underscore,
+# followed by a string that is embedded into their fake serial values.
 vdevs = [
-  "m2_g3_0.vdev",
-  "m2_g3_1.vdev",
+  "m2_0.vdev",
+  "m2_1.vdev",
 
-  "u2_g3_0.vdev",
-  "u2_g3_1.vdev",
-  "u2_g3_2.vdev",
-  "u2_g3_3.vdev",
-  "u2_g3_4.vdev",
+  "u2_0.vdev",
+  "u2_1.vdev",
+  "u2_2.vdev",
+  "u2_3.vdev",
+  "u2_4.vdev",
+  "u2_5.vdev",
+  "u2_6.vdev",
+  "u2_7.vdev",
+  "u2_8.vdev",
 ]
 
 # Percentage of usable physical DRAM to use for the VMM reservoir, which
 # guest memory is pulled from.
-vmm_reservoir_percentage = 0
+vmm_reservoir_percentage = 50
+
+# Optionally you can specify the size of the VMM reservoir in MiB.
+# Note vmm_reservoir_percentage and vmm_reservoir_size_mb cannot be specified
+# at the same time.
+#vmm_reservoir_size_mb = 2048
+
+# Swap device size for the system. The device is a sparsely allocated zvol on
+# the internal zpool of the M.2 that we booted from.
+#
+# If use of the VMM reservoir is configured, it is likely the system will not
+# work without a swap device configured.
+swap_device_size_gb = 64
 
 # An optional data link from which we extract a MAC address.
 # This is used as a unique identifier for the bootstrap address.
 #
 # If empty, this will be equivalent to the first result from:
 # $ dladm show-phys -p -o LINK
-data_link = "vioif1"
+# data_link = "igb0"
 
 # On a multi-sled system, transit-mode Maghemite runs in the `oxz_switch` zone
 # to configure routes between sleds.  This runs over the Sidecar's rear ports
@@ -46,21 +72,13 @@ data_link = "vioif1"
 # tfportd will create the necessary links and Maghemite will be configured to
 # use those.  But on non-Gimlet systems, you need to specify physical links to
 # be passed into the `oxz_switch` zone for this purpose.  You can skip this if
-# you're deploying a single-sled system.
-switch_zone_maghemite_links = [
-    "tfportrear0_0",
-    "tfportrear1_0",
-    "tfportrear2_0",
-    "tfportrear3_0",
-]
+# you're deploying a single-sled system and just leave the single tfportrear
+# as-is.
+switch_zone_maghemite_links = ["tfportrear0_0"]
 
-# The data links that sled-agent will treat as a real gimlet cxgbe0/cxgbe1
-# links.
-data_links = ["vioif1", "vioif2"]
+data_links = ["net0", "net1"]
 
 [dropshot]
-# Host OS images are just over 800 MiB currently; set this to 2 GiB to give some
-# breathing room.
 default_request_body_max_bytes = 1048576
 
 [log]
