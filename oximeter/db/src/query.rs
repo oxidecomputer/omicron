@@ -5,7 +5,7 @@
 //! Functions for querying the timeseries database.
 // Copyright 2024 Oxide Computer Company
 
-use crate::{Error, FieldSchema, FieldSource, TimeseriesSchema, DATABASE_NAME};
+use crate::{DATABASE_NAME, Error, FieldSchema, FieldSource, TimeseriesSchema};
 use chrono::{DateTime, Utc};
 use dropshot::PaginationOrder;
 use oximeter::schema::TimeseriesKey;
@@ -430,23 +430,26 @@ impl FromStr for StringFieldSelector {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let re = Regex::new("\\s*(==|!=|>|>=|<|<=|~=)\\s*").unwrap();
-        if let Some(match_) = re.find(s) {
-            let name = &s[..match_.start()];
-            let op = match_.as_str().parse()?;
-            let value = &s[match_.end()..];
-            if name.is_empty() || value.is_empty() {
-                Err(Error::InvalidFieldSelectorString {
-                    selector: s.to_string(),
-                })
-            } else {
-                Ok(StringFieldSelector {
-                    name: name.to_string(),
-                    op,
-                    value: value.to_string(),
-                })
+        match re.find(s) {
+            Some(match_) => {
+                let name = &s[..match_.start()];
+                let op = match_.as_str().parse()?;
+                let value = &s[match_.end()..];
+                if name.is_empty() || value.is_empty() {
+                    Err(Error::InvalidFieldSelectorString {
+                        selector: s.to_string(),
+                    })
+                } else {
+                    Ok(StringFieldSelector {
+                        name: name.to_string(),
+                        op,
+                        value: value.to_string(),
+                    })
+                }
             }
-        } else {
-            Err(Error::InvalidFieldSelectorString { selector: s.to_string() })
+            _ => Err(Error::InvalidFieldSelectorString {
+                selector: s.to_string(),
+            }),
         }
     }
 }
@@ -732,26 +735,26 @@ impl SelectQuery {
 // Format the value for use in a query to the database, e.g., `... WHERE field_value = {}`.
 fn field_as_db_str(value: &FieldValue) -> String {
     match value {
-        FieldValue::Bool(ref inner) => {
+        FieldValue::Bool(inner) => {
             format!("{}", if *inner { 1 } else { 0 })
         }
-        FieldValue::I8(ref inner) => format!("{}", inner),
-        FieldValue::U8(ref inner) => format!("{}", inner),
-        FieldValue::I16(ref inner) => format!("{}", inner),
-        FieldValue::U16(ref inner) => format!("{}", inner),
-        FieldValue::I32(ref inner) => format!("{}", inner),
-        FieldValue::U32(ref inner) => format!("{}", inner),
-        FieldValue::I64(ref inner) => format!("{}", inner),
-        FieldValue::U64(ref inner) => format!("{}", inner),
-        FieldValue::IpAddr(ref inner) => {
+        FieldValue::I8(inner) => format!("{}", inner),
+        FieldValue::U8(inner) => format!("{}", inner),
+        FieldValue::I16(inner) => format!("{}", inner),
+        FieldValue::U16(inner) => format!("{}", inner),
+        FieldValue::I32(inner) => format!("{}", inner),
+        FieldValue::U32(inner) => format!("{}", inner),
+        FieldValue::I64(inner) => format!("{}", inner),
+        FieldValue::U64(inner) => format!("{}", inner),
+        FieldValue::IpAddr(inner) => {
             let addr = match inner {
-                IpAddr::V4(ref v4) => v4.to_ipv6_mapped(),
-                IpAddr::V6(ref v6) => *v6,
+                IpAddr::V4(v4) => v4.to_ipv6_mapped(),
+                IpAddr::V6(v6) => *v6,
             };
             format!("'{}'", addr)
         }
-        FieldValue::String(ref inner) => format!("'{}'", inner),
-        FieldValue::Uuid(ref inner) => format!("'{}'", inner),
+        FieldValue::String(inner) => format!("'{}'", inner),
+        FieldValue::Uuid(inner) => format!("'{}'", inner),
     }
 }
 
@@ -1230,7 +1233,8 @@ mod tests {
                 "filter0.timeseries_name = filter1.timeseries_name AND ",
                 "filter0.timeseries_key = filter1.timeseries_key) ",
                 "ORDER BY (filter0.timeseries_name, filter0.timeseries_key)",
-            ));
+            )
+        );
         let keys = &[0, 1];
         assert_eq!(
             query.measurement_query(keys).trim(),

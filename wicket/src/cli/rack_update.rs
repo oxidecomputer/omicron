@@ -149,15 +149,20 @@ impl StartRackUpdateArgs {
             }
             Err(error) => {
                 // Error responses can be printed out more clearly.
-                if let wicketd_client::Error::ErrorResponse(rv) = &error {
-                    slog::error!(
-                        log,
-                        "Error response from wicketd: {}",
-                        rv.message
-                    );
-                    bail!("Received error from wicketd while starting update");
-                } else {
-                    bail!(error);
+                match &error {
+                    wicketd_client::Error::ErrorResponse(rv) => {
+                        slog::error!(
+                            log,
+                            "Error response from wicketd: {}",
+                            rv.message
+                        );
+                        bail!(
+                            "Received error from wicketd while starting update"
+                        );
+                    }
+                    _ => {
+                        bail!(error);
+                    }
                 }
             }
         }

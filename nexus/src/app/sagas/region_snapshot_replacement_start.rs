@@ -48,9 +48,10 @@
 //! saga for the next step in the process.
 
 use super::{
-    ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
-    ACTION_GENERATE_ID,
+    ACTION_GENERATE_ID, ActionRegistry, NexusActionContext, NexusSaga,
+    SagaInitError,
 };
+use crate::app::RegionAllocationStrategy;
 use crate::app::db::datastore::ExistingTarget;
 use crate::app::db::datastore::RegionAllocationFor;
 use crate::app::db::datastore::RegionAllocationParameters;
@@ -60,7 +61,6 @@ use crate::app::db::datastore::VolumeToDelete;
 use crate::app::db::datastore::VolumeWithTarget;
 use crate::app::sagas::common_storage::find_only_new_region;
 use crate::app::sagas::declare_saga_actions;
-use crate::app::RegionAllocationStrategy;
 use crate::app::{authn, db};
 use nexus_db_model::ReadOnlyTargetReplacement;
 use nexus_db_queries::db::datastore::NewRegionVolumeId;
@@ -876,7 +876,7 @@ async fn rsrss_new_region_volume_create(
             block_size: 0,
             blocks_per_extent: 0,
             extent_count: 0,
-            gen: 0,
+            r#gen: 0,
             opts: CrucibleOpts {
                 id: new_region_volume_id.into_untyped_uuid(),
                 target: vec![new_region_address],
@@ -967,7 +967,7 @@ async fn rsrss_create_fake_volume(
             block_size: 0,
             blocks_per_extent: 0,
             extent_count: 0,
-            gen: 0,
+            r#gen: 0,
             opts: CrucibleOpts {
                 id: *new_volume_id.as_untyped_uuid(),
                 // Do not put the new region ID here: it will be deleted during
@@ -1218,10 +1218,10 @@ async fn rsrss_update_request_record(
 #[cfg(test)]
 pub(crate) mod test {
     use crate::{
-        app::db::lookup::LookupPath, app::db::DataStore,
-        app::saga::create_saga_dag,
+        app::RegionAllocationStrategy, app::db::DataStore,
+        app::db::lookup::LookupPath, app::saga::create_saga_dag,
         app::sagas::region_snapshot_replacement_start::*,
-        app::sagas::test_helpers::test_opctx, app::RegionAllocationStrategy,
+        app::sagas::test_helpers::test_opctx,
     };
     use nexus_db_model::PhysicalDiskPolicy;
     use nexus_db_model::RegionSnapshotReplacement;
@@ -1229,11 +1229,11 @@ pub(crate) mod test {
     use nexus_db_model::Volume;
     use nexus_db_queries::authn::saga::Serialized;
     use nexus_db_queries::context::OpContext;
+    use nexus_test_utils::resource_helpers::DiskTest;
+    use nexus_test_utils::resource_helpers::DiskTestBuilder;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::create_snapshot;
-    use nexus_test_utils::resource_helpers::DiskTest;
-    use nexus_test_utils::resource_helpers::DiskTestBuilder;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::views;
     use nexus_types::identity::Asset;
@@ -1411,10 +1411,12 @@ pub(crate) mod test {
             .await
             .unwrap();
 
-        assert!(volumes
-            .iter()
-            .map(|v| v.id())
-            .any(|vid| vid == db_snapshot.volume_id()));
+        assert!(
+            volumes
+                .iter()
+                .map(|v| v.id())
+                .any(|vid| vid == db_snapshot.volume_id())
+        );
     }
 
     fn new_test_params(

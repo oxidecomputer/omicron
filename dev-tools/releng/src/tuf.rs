@@ -20,13 +20,13 @@ use sha2::Digest;
 use sha2::Sha256;
 use slog::Logger;
 use tokio::io::AsyncReadExt;
+use tufaceous_lib::Key;
 use tufaceous_lib::assemble::ArtifactManifest;
 use tufaceous_lib::assemble::DeserializedArtifactData;
 use tufaceous_lib::assemble::DeserializedArtifactSource;
 use tufaceous_lib::assemble::DeserializedControlPlaneZoneSource;
 use tufaceous_lib::assemble::DeserializedManifest;
 use tufaceous_lib::assemble::OmicronRepoAssembler;
-use tufaceous_lib::Key;
 
 pub(crate) async fn build_tuf_repo(
     logger: Logger,

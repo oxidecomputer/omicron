@@ -8,7 +8,7 @@ use std::fmt;
 
 use camino::Utf8PathBuf;
 use schemars::{
-    gen::SchemaGenerator,
+    r#gen::SchemaGenerator,
     schema::{Schema, SchemaObject},
     JsonSchema,
 };
@@ -134,14 +134,14 @@ pub(crate) enum ExampleWriteStepId {
     },
 }
 
-fn path_schema(gen: &mut SchemaGenerator) -> Schema {
-    let mut schema: SchemaObject = <String>::json_schema(gen).into();
+fn path_schema(r#gen: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = <String>::json_schema(r#gen).into();
     schema.format = Some("Utf8PathBuf".to_owned());
     schema.into()
 }
 
-fn paths_schema(gen: &mut SchemaGenerator) -> Schema {
-    let mut schema: SchemaObject = <Vec<String>>::json_schema(gen).into();
+fn paths_schema(r#gen: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = <Vec<String>>::json_schema(r#gen).into();
     schema.format = Some("Vec<Utf8PathBuf>".to_owned());
     schema.into()
 }

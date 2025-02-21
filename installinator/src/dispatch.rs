@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use buf_list::{BufList, Cursor};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
@@ -19,7 +19,7 @@ use omicron_common::{
     update::{ArtifactHash, ArtifactHashId, ArtifactKind},
 };
 use sha2::{Digest, Sha256};
-use slog::{error, warn, Drain};
+use slog::{Drain, error, warn};
 use tufaceous_lib::ControlPlaneZoneImages;
 use update_engine::StepResult;
 
@@ -519,7 +519,7 @@ async fn fetch_artifact(
 
 pub(crate) fn stderr_env_drain(
     env_var: &str,
-) -> impl Drain<Ok = (), Err = slog::Never> {
+) -> impl Drain<Ok = (), Err = slog::Never> + use<> {
     let stderr_decorator = slog_term::TermDecorator::new().build();
     let stderr_drain =
         slog_term::FullFormat::new(stderr_decorator).build().fuse();

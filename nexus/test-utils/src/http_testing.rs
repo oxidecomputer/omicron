@@ -4,12 +4,12 @@
 
 //! Facilities for testing HTTP servers
 
+use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::ensure;
-use anyhow::Context;
 use camino::Utf8Path;
-use dropshot::test_util::ClientTestContext;
 use dropshot::ResultsPage;
+use dropshot::test_util::ClientTestContext;
 use futures::TryStreamExt;
 use headers::authorization::Credentials;
 use http_body_util::BodyExt;
@@ -764,10 +764,13 @@ impl<'a> NexusRequest<'a> {
             );
             all_items.extend_from_slice(&page.items);
             npages += 1;
-            if let Some(token) = page.next_page {
-                next_token = Some(token);
-            } else {
-                break;
+            match page.next_page {
+                Some(token) => {
+                    next_token = Some(token);
+                }
+                _ => {
+                    break;
+                }
             }
         }
 
@@ -787,8 +790,8 @@ pub struct Collection<T> {
 /// functions.
 pub mod dropshot_compat {
     use super::NexusRequest;
-    use dropshot::{test_util::ClientTestContext, ResultsPage};
-    use serde::{de::DeserializeOwned, Serialize};
+    use dropshot::{ResultsPage, test_util::ClientTestContext};
+    use serde::{Serialize, de::DeserializeOwned};
 
     /// See [`dropshot::test_util::object_get`].
     pub async fn object_get<T>(

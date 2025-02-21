@@ -565,70 +565,75 @@ impl InstanceManagerRunner {
         );
 
         let instance = {
-            if let Some(existing_instance) = self.jobs.get(&propolis_id) {
-                if instance_id != existing_instance.id() {
-                    info!(&self.log,
+            match self.jobs.get(&propolis_id) {
+                Some(existing_instance) => {
+                    if instance_id != existing_instance.id() {
+                        info!(&self.log,
                           "Propolis ID already used by another instance";
                           "propolis_id" => %propolis_id,
                           "existing_instanceId" => %existing_instance.id());
 
-                    return Err(Error::Instance(
-                        crate::instance::Error::PropolisAlreadyRegistered(
-                            propolis_id,
-                        ),
-                    ));
-                } else {
-                    info!(
+                        return Err(Error::Instance(
+                            crate::instance::Error::PropolisAlreadyRegistered(
+                                propolis_id,
+                            ),
+                        ));
+                    } else {
+                        info!(
                         &self.log,
                         "instance already registered with requested Propolis ID"
                     );
-                    existing_instance
+                        existing_instance
+                    }
                 }
-            } else {
-                info!(&self.log,
+                _ => {
+                    info!(&self.log,
                       "registering new instance";
                       "instance_id" => %instance_id,
                       "propolis_id" => %propolis_id,
                     "migration_id" => ?migration_id);
 
-                let instance_log = self.log.new(o!(
-                    "instance_id" => instance_id.to_string(),
-                    "propolis_id" => propolis_id.to_string(),
-                ));
+                    let instance_log = self.log.new(o!(
+                        "instance_id" => instance_id.to_string(),
+                        "propolis_id" => propolis_id.to_string(),
+                    ));
 
-                let ticket =
-                    InstanceTicket::new(propolis_id, self.terminate_tx.clone());
+                    let ticket = InstanceTicket::new(
+                        propolis_id,
+                        self.terminate_tx.clone(),
+                    );
 
-                let services = InstanceManagerServices {
-                    nexus_client: self.nexus_client.clone(),
-                    vnic_allocator: self.vnic_allocator.clone(),
-                    port_manager: self.port_manager.clone(),
-                    storage: self.storage.clone(),
-                    zone_bundler: self.zone_bundler.clone(),
-                    zone_builder_factory: self.zone_builder_factory.clone(),
-                    metrics_queue: self.metrics_queue.clone(),
-                };
+                    let services = InstanceManagerServices {
+                        nexus_client: self.nexus_client.clone(),
+                        vnic_allocator: self.vnic_allocator.clone(),
+                        port_manager: self.port_manager.clone(),
+                        storage: self.storage.clone(),
+                        zone_bundler: self.zone_bundler.clone(),
+                        zone_builder_factory: self.zone_builder_factory.clone(),
+                        metrics_queue: self.metrics_queue.clone(),
+                    };
 
-                let state = crate::instance::InstanceInitialState {
-                    hardware,
-                    vmm_runtime,
-                    propolis_addr,
-                    migration_id,
-                };
+                    let state = crate::instance::InstanceInitialState {
+                        hardware,
+                        vmm_runtime,
+                        propolis_addr,
+                        migration_id,
+                    };
 
-                let instance = Instance::new(
-                    instance_log,
-                    instance_id,
-                    propolis_id,
-                    ticket,
-                    state,
-                    services,
-                    sled_identifiers,
-                    metadata,
-                )?;
-                let _old = self.jobs.insert(propolis_id, instance);
-                assert!(_old.is_none());
-                &self.jobs.get(&propolis_id).unwrap()
+                    let instance = Instance::new(
+                        instance_log,
+                        instance_id,
+                        propolis_id,
+                        ticket,
+                        state,
+                        services,
+                        sled_identifiers,
+                        metadata,
+                    )?;
+                    let _old = self.jobs.insert(propolis_id, instance);
+                    assert!(_old.is_none());
+                    &self.jobs.get(&propolis_id).unwrap()
+                }
             }
         };
         let (tx, rx) = oneshot::channel();

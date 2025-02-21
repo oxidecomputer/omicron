@@ -313,7 +313,7 @@ impl CockroachStarter {
     }
 
     /// Returns a human-readable summary of the command line to be executed
-    pub fn cmdline(&self) -> impl fmt::Display {
+    pub fn cmdline(&self) -> impl fmt::Display + use<> {
         self.args.join(" ")
     }
 

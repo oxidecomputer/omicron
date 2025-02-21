@@ -252,7 +252,7 @@ impl RackSetupService {
     ) -> Self {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone());
-            if let Err(e) = svc
+            match svc
                 .run(
                     &config,
                     &storage_manager,
@@ -262,10 +262,11 @@ impl RackSetupService {
                 )
                 .await
             {
-                warn!(log, "RSS injection failed: {}", e);
-                Err(e)
-            } else {
-                Ok(())
+                Err(e) => {
+                    warn!(log, "RSS injection failed: {}", e);
+                    Err(e)
+                }
+                _ => Ok(()),
             }
         });
 
@@ -278,11 +279,12 @@ impl RackSetupService {
     ) -> Self {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone());
-            if let Err(e) = svc.reset(local_bootstrap_agent).await {
-                warn!(log, "RSS rack reset failed: {}", e);
-                Err(e)
-            } else {
-                Ok(())
+            match svc.reset(local_bootstrap_agent).await {
+                Err(e) => {
+                    warn!(log, "RSS rack reset failed: {}", e);
+                    Err(e)
+                }
+                _ => Ok(()),
             }
         });
 
@@ -739,15 +741,21 @@ impl ServiceInner {
             let mut sync = true;
 
             for sled_address in sled_addresses {
-                if let Ok(ts) = self.sled_timesync(sled_address).await {
-                    info!(self.log, "Timesync for {} {:?}", sled_address, ts);
-                    if !ts.sync {
-                        sync = false;
-                    } else {
-                        synced_peers += 1;
+                match self.sled_timesync(sled_address).await {
+                    Ok(ts) => {
+                        info!(
+                            self.log,
+                            "Timesync for {} {:?}", sled_address, ts
+                        );
+                        if !ts.sync {
+                            sync = false;
+                        } else {
+                            synced_peers += 1;
+                        }
                     }
-                } else {
-                    sync = false;
+                    _ => {
+                        sync = false;
+                    }
                 }
             }
 

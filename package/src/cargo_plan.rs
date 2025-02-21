@@ -7,23 +7,23 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::io::Write;
 
-use anyhow::bail;
-use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
+use anyhow::bail;
+use anyhow::ensure;
 use cargo_metadata::Metadata;
 use indent_write::io::IndentWriter;
 use omicron_zone_package::config::PackageMap;
 use omicron_zone_package::config::PackageName;
 use omicron_zone_package::package::PackageSource;
-use slog::info;
 use slog::Logger;
+use slog::info;
 use tokio::process::Command;
 
-use crate::config::cargo_features_for_target;
 use crate::config::BaseConfig;
 use crate::config::Config;
 use crate::config::MultiPresetArg;
+use crate::config::cargo_features_for_target;
 
 /// For a configuration, build a plan: the set of packages, binaries, and
 /// features to operate on in release and debug modes.
@@ -242,17 +242,23 @@ pub struct DisplayCargoPlan<'a> {
 impl fmt::Display for DisplayCargoPlan<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "release command: ")?;
-        if let Some(command) = &self.plan.release.build_command(self.command) {
-            writeln!(f, "{}", command_to_string(&command))?;
-        } else {
-            writeln!(f, "(none)")?;
+        match &self.plan.release.build_command(self.command) {
+            Some(command) => {
+                writeln!(f, "{}", command_to_string(&command))?;
+            }
+            _ => {
+                writeln!(f, "(none)")?;
+            }
         }
 
         write!(f, "debug command: ")?;
-        if let Some(command) = &self.plan.debug.build_command(self.command) {
-            writeln!(f, "{}", command_to_string(&command))?;
-        } else {
-            writeln!(f, "(none)")?;
+        match &self.plan.debug.build_command(self.command) {
+            Some(command) => {
+                writeln!(f, "{}", command_to_string(&command))?;
+            }
+            _ => {
+                writeln!(f, "(none)")?;
+            }
         }
 
         Ok(())
@@ -261,11 +267,13 @@ impl fmt::Display for DisplayCargoPlan<'_> {
 
 fn command_to_string(command: &Command) -> String {
     // Use shell-words to join the command and arguments into a single string.
-    let mut v = vec![command
-        .as_std()
-        .get_program()
-        .to_str()
-        .expect("program is valid UTF-8")];
+    let mut v = vec![
+        command
+            .as_std()
+            .get_program()
+            .to_str()
+            .expect("program is valid UTF-8"),
+    ];
     v.extend(
         command
             .as_std()

@@ -3,9 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //! Built-in assignments for built-in users and built-in roles
 
+use super::FLEET_ID;
 use super::role_builtin;
 use super::user_builtin;
-use super::FLEET_ID;
 use nexus_db_model::IdentityType;
 use nexus_db_model::RoleAssignment;
 use once_cell::sync::Lazy;

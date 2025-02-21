@@ -7,25 +7,25 @@
 // Copyright 2024 Oxide Computer Company
 
 use super::query_summary::QuerySummary;
+use crate::Error;
+use crate::Metric;
+use crate::Target;
 use crate::client::Client;
 use crate::model::columns;
 use crate::model::from_block::FromBlock as _;
 use crate::oxql;
+use crate::oxql::Query;
 use crate::oxql::ast::table_ops::filter;
 use crate::oxql::ast::table_ops::filter::Filter;
 use crate::oxql::ast::table_ops::limit::Limit;
 use crate::oxql::ast::table_ops::limit::LimitKind;
-use crate::oxql::Query;
 use crate::query::field_table_name;
-use crate::Error;
-use crate::Metric;
-use crate::Target;
-use oximeter::schema::TimeseriesKey;
 use oximeter::Measurement;
 use oximeter::TimeseriesSchema;
+use oximeter::schema::TimeseriesKey;
+use slog::Logger;
 use slog::debug;
 use slog::trace;
-use slog::Logger;
 use std::collections::BTreeMap;
 use std::time::Duration;
 use std::time::Instant;
@@ -962,7 +962,7 @@ impl Client {
                         db_name = crate::DATABASE_NAME,
                         field_table = field_table_name(field_schema.field_type),
                         timeseries_name = schema.timeseries_name,
-                    )
+                    ),
                 )
             }
             _ => {
@@ -1177,18 +1177,18 @@ mod tests {
     use super::ConsistentKeyGroup;
     use crate::client::oxql::chunk_consistent_key_groups_impl;
     use crate::oxql::ast::grammar::query_parser;
-    use crate::{Client, DbWrite, DATABASE_TIMESTAMP_FORMAT};
+    use crate::{Client, DATABASE_TIMESTAMP_FORMAT, DbWrite};
     use crate::{Metric, Target};
     use chrono::{DateTime, NaiveDate, Utc};
     use dropshot::test_util::LogContext;
     use omicron_test_utils::dev::clickhouse::ClickHouseDeployment;
     use omicron_test_utils::dev::test_setup_log;
-    use oximeter::{types::Cumulative, FieldValue};
     use oximeter::{
         AuthzScope, DatumType, FieldSchema, FieldSource, FieldType, Sample,
         TimeseriesSchema, Units,
     };
-    use oxql_types::{point::Points, Table, Timeseries};
+    use oximeter::{FieldValue, types::Cumulative};
+    use oxql_types::{Table, Timeseries, point::Points};
     use std::collections::{BTreeMap, BTreeSet};
     use std::time::Duration;
 
@@ -1440,17 +1440,14 @@ mod tests {
         let mut it = ctx.test_data.samples_by_timeseries.iter();
         let (entire, only_part) = (it.next().unwrap(), it.next().unwrap());
 
-        let entire_filter = exact_filter_for(&entire.0 .0, entire.0 .1);
-        let only_part_filter =
-            exact_filter_for(&only_part.0 .0, only_part.0 .1);
+        let entire_filter = exact_filter_for(&entire.0.0, entire.0.1);
+        let only_part_filter = exact_filter_for(&only_part.0.0, only_part.0.1);
         let start_timestamp = only_part.1[6].measurement.timestamp();
         let only_part_timestamp_filter = format_timestamp(start_timestamp);
 
         let query = format!(
             "get some_target:some_metric | filter ({}) || (timestamp >= @{} && {})",
-            entire_filter,
-            only_part_timestamp_filter,
-            only_part_filter,
+            entire_filter, only_part_timestamp_filter, only_part_filter,
         );
         let result = ctx
             .client
@@ -1467,7 +1464,7 @@ mod tests {
 
         // Check that we fetched the entire timeseries for the first one.
         let expected_timeseries =
-            find_timeseries_in_table(table, &entire.0 .0, &entire.0 .1)
+            find_timeseries_in_table(table, &entire.0.0, &entire.0.1)
                 .expect("failed to fetch all of the first timeseries");
         let measurements: Vec<_> =
             entire.1.iter().map(|s| s.measurement.clone()).collect();
@@ -1480,7 +1477,7 @@ mod tests {
 
         // And that we only get the last portion of the second timeseries.
         let expected_timeseries =
-            find_timeseries_in_table(table, &only_part.0 .0, &only_part.0 .1)
+            find_timeseries_in_table(table, &only_part.0.0, &only_part.0.1)
                 .expect("failed to fetch part of the second timeseries");
         let measurements: Vec<_> = only_part
             .1

@@ -284,23 +284,22 @@ impl RequestManager {
         from: Baseboard,
         request_id: Uuid,
     ) -> Option<bool> {
-        if let Some(TrackableRequest::InitRack { acks, .. }) =
-            self.requests.get_mut(&request_id)
-        {
-            if !acks.expected.contains(&from) {
-                // We don't want to allow nodes outside of our initial trust
-                // quorum membership to ack.
-                return None;
+        match self.requests.get_mut(&request_id) {
+            Some(TrackableRequest::InitRack { acks, .. }) => {
+                if !acks.expected.contains(&from) {
+                    // We don't want to allow nodes outside of our initial trust
+                    // quorum membership to ack.
+                    return None;
+                }
+                acks.received.insert(from);
+                if acks.received == acks.expected {
+                    let _req = self.remove_request(request_id);
+                    Some(true)
+                } else {
+                    Some(false)
+                }
             }
-            acks.received.insert(from);
-            if acks.received == acks.expected {
-                let _req = self.remove_request(request_id);
-                Some(true)
-            } else {
-                Some(false)
-            }
-        } else {
-            None
+            _ => None,
         }
     }
 
@@ -330,13 +329,12 @@ impl RequestManager {
     /// Return true if there is a `LearnSent` for the given `request_id`, false
     /// otherwise.
     pub fn on_learn_pkg(&mut self, request_id: Uuid) -> bool {
-        if let Some(TrackableRequest::LearnSent { .. }) =
-            self.requests.get_mut(&request_id)
-        {
-            let _req = self.remove_request(request_id);
-            true
-        } else {
-            false
+        match self.requests.get_mut(&request_id) {
+            Some(TrackableRequest::LearnSent { .. }) => {
+                let _req = self.remove_request(request_id);
+                true
+            }
+            _ => false,
         }
     }
 

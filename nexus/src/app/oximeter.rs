@@ -13,8 +13,8 @@ use nexus_db_queries::db::DataStore;
 use omicron_common::api::external::{DataPageParams, Error, ListResultVec};
 use omicron_common::api::internal::nexus::{self, ProducerEndpoint};
 use oximeter_client::Client as OximeterClient;
-use oximeter_db::query::Timestamp;
 use oximeter_db::Measurement;
+use oximeter_db::query::Timestamp;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use std::time::Duration;
@@ -163,12 +163,12 @@ impl super::Nexus {
         }
 
         // If we received no data, exit early.
-        let timeseries =
-            if let Some(timeseries) = timeseries_list.into_iter().next() {
-                timeseries
-            } else {
+        let timeseries = match timeseries_list.into_iter().next() {
+            Some(timeseries) => timeseries,
+            _ => {
                 return Ok(no_results());
-            };
+            }
+        };
 
         Ok(dropshot::ResultsPage::new(
             timeseries.measurements,
@@ -192,50 +192,56 @@ pub(crate) async fn unassign_producer(
     opctx: &OpContext,
     id: &Uuid,
 ) -> Result<(), Error> {
-    if let Some(collector_id) =
-        datastore.producer_endpoint_delete(opctx, id).await?
-    {
-        debug!(
-            log,
-            "deleted metric producer assignment";
-            "producer_id" => %id,
-            "collector_id" => %collector_id,
-        );
-        let oximeter_info =
-            datastore.oximeter_lookup(opctx, &collector_id).await?;
-        let address =
-            SocketAddr::new(oximeter_info.ip.ip(), *oximeter_info.port);
-        let client = build_oximeter_client(&log, &id, address);
-        if let Err(e) = client.producer_delete(&id).await {
-            error!(
-                log,
-                "failed to delete producer from collector";
-                "producer_id" => %id,
-                "collector_id" => %collector_id,
-                "address" => %address,
-                "error" => ?e,
-            );
-            return Err(Error::internal_error(
-                format!("failed to delete producer from collector: {e:?}")
-                    .as_str(),
-            ));
-        } else {
+    match datastore.producer_endpoint_delete(opctx, id).await? {
+        Some(collector_id) => {
             debug!(
                 log,
-                "successfully deleted producer from collector";
+                "deleted metric producer assignment";
                 "producer_id" => %id,
                 "collector_id" => %collector_id,
-                "address" => %address,
+            );
+            let oximeter_info =
+                datastore.oximeter_lookup(opctx, &collector_id).await?;
+            let address =
+                SocketAddr::new(oximeter_info.ip.ip(), *oximeter_info.port);
+            let client = build_oximeter_client(&log, &id, address);
+            match client.producer_delete(&id).await {
+                Err(e) => {
+                    error!(
+                        log,
+                        "failed to delete producer from collector";
+                        "producer_id" => %id,
+                        "collector_id" => %collector_id,
+                        "address" => %address,
+                        "error" => ?e,
+                    );
+                    return Err(Error::internal_error(
+                        format!(
+                            "failed to delete producer from collector: {e:?}"
+                        )
+                        .as_str(),
+                    ));
+                }
+                _ => {
+                    debug!(
+                        log,
+                        "successfully deleted producer from collector";
+                        "producer_id" => %id,
+                        "collector_id" => %collector_id,
+                        "address" => %address,
+                    );
+                    Ok(())
+                }
+            }
+        }
+        _ => {
+            trace!(
+                log,
+                "un-assigned non-existent metric producer";
+                "producer_id" => %id,
             );
             Ok(())
         }
-    } else {
-        trace!(
-            log,
-            "un-assigned non-existent metric producer";
-            "producer_id" => %id,
-        );
-        Ok(())
     }
 }
 

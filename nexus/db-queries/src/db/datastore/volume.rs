@@ -6,14 +6,14 @@
 
 use super::DataStore;
 use crate::db;
+use crate::db::DbConnection;
 use crate::db::datastore::OpContext;
-use crate::db::datastore::RunnableQuery;
 use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
+use crate::db::datastore::RunnableQuery;
 use crate::db::datastore::SQL_BATCH_SIZE;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Asset;
-use crate::db::model::to_db_typed_uuid;
 use crate::db::model::CrucibleDataset;
 use crate::db::model::Disk;
 use crate::db::model::DownstairsClientStopRequestNotification;
@@ -28,16 +28,16 @@ use crate::db::model::Volume;
 use crate::db::model::VolumeResourceUsage;
 use crate::db::model::VolumeResourceUsageRecord;
 use crate::db::model::VolumeResourceUsageType;
-use crate::db::pagination::paginated;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
-use crate::db::DbConnection;
+use crate::db::pagination::paginated;
 use crate::transaction_retry::OptionalError;
 use anyhow::anyhow;
 use anyhow::bail;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
-use diesel::prelude::*;
 use diesel::OptionalExtension;
+use diesel::prelude::*;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -666,12 +666,12 @@ impl DataStore {
                             return Err(
                                 VolumeGetError::CheckoutConditionFailed(
                                     format!(
-                                    "InstanceStart {}: instance {} propolis \
+                                        "InstanceStart {}: instance {} propolis \
                                     id {} mismatch",
-                                    vmm_id,
-                                    instance.id(),
-                                    propolis_id,
-                                ),
+                                        vmm_id,
+                                        instance.id(),
+                                        propolis_id,
+                                    ),
                                 ),
                             );
                         }
@@ -927,7 +927,7 @@ impl DataStore {
                             blocks_per_extent,
                             extent_count,
                             opts,
-                            gen,
+                            r#gen,
                         } => {
                             update_needed = true;
                             new_sv.push(VolumeConstructionRequest::Region {
@@ -935,7 +935,7 @@ impl DataStore {
                                 blocks_per_extent,
                                 extent_count,
                                 opts,
-                                gen: gen + 1,
+                                r#gen: r#gen + 1,
                             });
                         }
                         _ => {
@@ -985,7 +985,7 @@ impl DataStore {
                 blocks_per_extent: _,
                 extent_count: _,
                 opts: _,
-                gen: _,
+                r#gen: _,
             } => {
                 // We don't support a pure Region VCR at the volume level in the
                 // database, so this choice should never be encountered, but I
@@ -1295,12 +1295,13 @@ impl DataStore {
         &self,
         volume_id: VolumeUuid,
     ) -> LookupResult<CrucibleTargets> {
-        let volume = if let Some(volume) = self.volume_get(volume_id).await? {
-            volume
-        } else {
-            // Volume has already been hard deleted (volume_get returns
-            // soft deleted records), return that no cleanup is necessary.
-            return Ok(CrucibleTargets::default());
+        let volume = match self.volume_get(volume_id).await? {
+            Some(volume) => volume,
+            _ => {
+                // Volume has already been hard deleted (volume_get returns
+                // soft deleted records), return that no cleanup is necessary.
+                return Ok(CrucibleTargets::default());
+            }
         };
 
         let vcr: VolumeConstructionRequest =
@@ -3048,22 +3049,19 @@ impl DataStore {
                 }
             })
             .await
-            .map_err(|e| {
-                if let Some(err) = err.take() {
-                    match err {
-                        ReplaceRegionError::Public(e) => e,
+            .map_err(|e| match err.take() {
+                Some(err) => match err {
+                    ReplaceRegionError::Public(e) => e,
 
-                        ReplaceRegionError::SerdeError(_) => {
-                            Error::internal_error(&err.to_string())
-                        }
-
-                        ReplaceRegionError::RegionReplacementError(_) => {
-                            Error::internal_error(&err.to_string())
-                        }
+                    ReplaceRegionError::SerdeError(_) => {
+                        Error::internal_error(&err.to_string())
                     }
-                } else {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                }
+
+                    ReplaceRegionError::RegionReplacementError(_) => {
+                        Error::internal_error(&err.to_string())
+                    }
+                },
+                _ => public_error_from_diesel(e, ErrorHandler::Server),
             })
     }
 
@@ -3204,7 +3202,7 @@ impl DataStore {
                 block_size: 512,
                 blocks_per_extent: 1,
                 extent_count: 1,
-                gen: 1,
+                r#gen: 1,
                 opts: sled_agent_client::CrucibleOpts {
                     id: *volume_to_delete_id.0.as_untyped_uuid(),
                     target: vec![existing.0.into()],
@@ -3409,30 +3407,21 @@ impl DataStore {
                 }
             })
             .await
-            .map_err(|e| {
-                if let Some(err) = err.take() {
-                    match err {
-                        ReplaceSnapshotError::Public(e) => e,
+            .map_err(|e| match err.take() {
+                Some(err) => match err {
+                    ReplaceSnapshotError::Public(e) => e,
 
-                        ReplaceSnapshotError::SerdeError(_)
-                        | ReplaceSnapshotError::SnapshotReplacementError(_)
-                        | ReplaceSnapshotError::UnexpectedReplacedTargets(
-                            _,
-                            _,
-                        )
-                        | ReplaceSnapshotError::UnexpectedDatabaseUpdate(
-                            _,
-                            _,
-                        )
-                        | ReplaceSnapshotError::AddressParseError(_)
-                        | ReplaceSnapshotError::CouldNotFindResource(_)
-                        | ReplaceSnapshotError::MultipleResourceUsageRecords(
-                            _,
-                        ) => Error::internal_error(&err.to_string()),
+                    ReplaceSnapshotError::SerdeError(_)
+                    | ReplaceSnapshotError::SnapshotReplacementError(_)
+                    | ReplaceSnapshotError::UnexpectedReplacedTargets(_, _)
+                    | ReplaceSnapshotError::UnexpectedDatabaseUpdate(_, _)
+                    | ReplaceSnapshotError::AddressParseError(_)
+                    | ReplaceSnapshotError::CouldNotFindResource(_)
+                    | ReplaceSnapshotError::MultipleResourceUsageRecords(_) => {
+                        Error::internal_error(&err.to_string())
                     }
-                } else {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                }
+                },
+                _ => public_error_from_diesel(e, ErrorHandler::Server),
             })
     }
 }
@@ -3625,7 +3614,7 @@ fn replace_region_in_vcr(
                 // nothing required
             }
 
-            VolumeConstructionRequest::Region { opts, gen, .. } => {
+            VolumeConstructionRequest::Region { opts, r#gen, .. } => {
                 for target in &mut opts.target {
                     if let SocketAddr::V6(target) = target {
                         if *target == old_region {
@@ -3636,7 +3625,7 @@ fn replace_region_in_vcr(
                 }
 
                 // Bump generation number, otherwise update will be rejected
-                *gen = *gen + 1;
+                *r#gen = *r#gen + 1;
             }
 
             VolumeConstructionRequest::File { .. } => {
@@ -4067,8 +4056,8 @@ impl DataStore {
 mod tests {
     use super::*;
 
-    use crate::db::datastore::test::TestDatasets;
     use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
+    use crate::db::datastore::test::TestDatasets;
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_config::RegionAllocationStrategy;
     use nexus_db_model::SqlU16;
@@ -4273,7 +4262,7 @@ mod tests {
                         block_size: 512,
                         blocks_per_extent: 10,
                         extent_count: 10,
-                        gen: 1,
+                        r#gen: 1,
                         opts: CrucibleOpts {
                             id: *volume_id.as_untyped_uuid(),
                             target: vec![
@@ -4335,7 +4324,7 @@ mod tests {
                     block_size: 512,
                     blocks_per_extent: 10,
                     extent_count: 10,
-                    gen: 2, // generation number bumped
+                    r#gen: 2, // generation number bumped
                     opts: CrucibleOpts {
                         id: *volume_id.as_untyped_uuid(),
                         target: vec![
@@ -4393,7 +4382,7 @@ mod tests {
                     block_size: 512,
                     blocks_per_extent: 10,
                     extent_count: 10,
-                    gen: 3, // generation number bumped
+                    r#gen: 3, // generation number bumped
                     opts: CrucibleOpts {
                         id: *volume_id.as_untyped_uuid(),
                         target: vec![
@@ -4560,7 +4549,7 @@ mod tests {
                         block_size: 512,
                         blocks_per_extent: 10,
                         extent_count: 10,
-                        gen: 1,
+                        r#gen: 1,
                         opts: CrucibleOpts {
                             id: *volume_id.as_untyped_uuid(),
                             target: vec![
@@ -4583,7 +4572,7 @@ mod tests {
                             block_size: 512,
                             blocks_per_extent: 10,
                             extent_count: 10,
-                            gen: 1,
+                            r#gen: 1,
                             opts: CrucibleOpts {
                                 id: rop_id,
                                 target: vec![
@@ -4681,7 +4670,7 @@ mod tests {
                     block_size: 512,
                     blocks_per_extent: 10,
                     extent_count: 10,
-                    gen: 1,
+                    r#gen: 1,
                     opts: CrucibleOpts {
                         id: *volume_id.as_untyped_uuid(),
                         target: vec![
@@ -4704,7 +4693,7 @@ mod tests {
                         block_size: 512,
                         blocks_per_extent: 10,
                         extent_count: 10,
-                        gen: 1,
+                        r#gen: 1,
                         opts: CrucibleOpts {
                             id: rop_id,
                             target: vec![
@@ -4746,7 +4735,7 @@ mod tests {
                     block_size: 512,
                     blocks_per_extent: 1,
                     extent_count: 1,
-                    gen: 1,
+                    r#gen: 1,
                     opts: CrucibleOpts {
                         id: *volume_to_delete_id.as_untyped_uuid(),
                         target: vec![
@@ -4837,7 +4826,7 @@ mod tests {
                     block_size: 512,
                     blocks_per_extent: 10,
                     extent_count: 10,
-                    gen: 1,
+                    r#gen: 1,
                     opts: CrucibleOpts {
                         id: *volume_id.as_untyped_uuid(),
                         target: vec![
@@ -4860,7 +4849,7 @@ mod tests {
                         block_size: 512,
                         blocks_per_extent: 10,
                         extent_count: 10,
-                        gen: 1,
+                        r#gen: 1,
                         opts: CrucibleOpts {
                             id: *rop_id.as_untyped_uuid(),
                             target: vec![
@@ -4902,7 +4891,7 @@ mod tests {
                     block_size: 512,
                     blocks_per_extent: 1,
                     extent_count: 1,
-                    gen: 1,
+                    r#gen: 1,
                     opts: CrucibleOpts {
                         id: *volume_to_delete_id.as_untyped_uuid(),
                         target: vec![
@@ -5019,7 +5008,7 @@ mod tests {
                             block_size: 512,
                             blocks_per_extent: 10,
                             extent_count: 10,
-                            gen: 1,
+                            r#gen: 1,
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
                                 target: vec![
@@ -5080,7 +5069,7 @@ mod tests {
                     block_size: 512,
                     blocks_per_extent: 10,
                     extent_count: 10,
-                    gen: 1,
+                    r#gen: 1,
                     opts: CrucibleOpts {
                         id: Uuid::new_v4(),
                         target: vec![
@@ -5101,11 +5090,13 @@ mod tests {
             )),
         };
 
-        assert!(read_only_target_in_vcr(
-            &vcr,
-            &"[fd00:1122:3344:104::1]:400".parse().unwrap(),
-        )
-        .unwrap());
+        assert!(
+            read_only_target_in_vcr(
+                &vcr,
+                &"[fd00:1122:3344:104::1]:400".parse().unwrap(),
+            )
+            .unwrap()
+        );
 
         // read_only_target_in_vcr should _not_ find read-write targets
 
@@ -5116,7 +5107,7 @@ mod tests {
                 block_size: 512,
                 blocks_per_extent: 10,
                 extent_count: 10,
-                gen: 1,
+                r#gen: 1,
                 opts: CrucibleOpts {
                     id: Uuid::new_v4(),
                     target: vec![
@@ -5137,11 +5128,13 @@ mod tests {
             read_only_parent: None,
         };
 
-        assert!(!read_only_target_in_vcr(
-            &vcr,
-            &"[fd00:1122:3344:104::1]:400".parse().unwrap(),
-        )
-        .unwrap());
+        assert!(
+            !read_only_target_in_vcr(
+                &vcr,
+                &"[fd00:1122:3344:104::1]:400".parse().unwrap(),
+            )
+            .unwrap()
+        );
 
         // read_only_target_in_vcr should bail on incorrect VCRs (currently it
         // only detects a read/write region under a read-only parent)
@@ -5155,7 +5148,7 @@ mod tests {
                     block_size: 512,
                     blocks_per_extent: 10,
                     extent_count: 10,
-                    gen: 1,
+                    r#gen: 1,
                     opts: CrucibleOpts {
                         id: Uuid::new_v4(),
                         target: vec![
@@ -5199,7 +5192,7 @@ mod tests {
                     block_size: 512,
                     blocks_per_extent: 10,
                     extent_count: 10,
-                    gen: 1,
+                    r#gen: 1,
                     opts: CrucibleOpts {
                         id: volume_id,
                         target: vec![
@@ -5241,7 +5234,7 @@ mod tests {
                         block_size: 512,
                         blocks_per_extent: 10,
                         extent_count: 10,
-                        gen: 1,
+                        r#gen: 1,
                         opts: CrucibleOpts {
                             id: volume_id,
                             target: vec![
@@ -5276,7 +5269,7 @@ mod tests {
                     block_size: 512,
                     blocks_per_extent: 10,
                     extent_count: 10,
-                    gen: 1,
+                    r#gen: 1,
                     opts: CrucibleOpts {
                         id: volume_id,
                         target: vec![
@@ -5299,7 +5292,7 @@ mod tests {
                         block_size: 512,
                         blocks_per_extent: 10,
                         extent_count: 10,
-                        gen: 1,
+                        r#gen: 1,
                         opts: CrucibleOpts {
                             id: volume_id,
                             target: vec![
@@ -5324,7 +5317,7 @@ mod tests {
                     block_size: 512,
                     blocks_per_extent: 10,
                     extent_count: 10,
-                    gen: 1,
+                    r#gen: 1,
                     opts: CrucibleOpts {
                         id: volume_id,
                         target: vec![
@@ -5367,7 +5360,7 @@ mod tests {
                         block_size: 512,
                         blocks_per_extent: 10,
                         extent_count: 10,
-                        gen: 1,
+                        r#gen: 1,
                         opts: CrucibleOpts {
                             id: volume_id,
                             target: vec![
@@ -5390,7 +5383,7 @@ mod tests {
                             block_size: 512,
                             blocks_per_extent: 10,
                             extent_count: 10,
-                            gen: 1,
+                            r#gen: 1,
                             opts: CrucibleOpts {
                                 id: volume_id,
                                 target: vec![
@@ -5419,7 +5412,7 @@ mod tests {
                         block_size: 512,
                         blocks_per_extent: 10,
                         extent_count: 10,
-                        gen: 1,
+                        r#gen: 1,
                         opts: CrucibleOpts {
                             id: volume_id,
                             target: vec![
@@ -5449,7 +5442,7 @@ mod tests {
             block_size: 512,
             blocks_per_extent: 10,
             extent_count: 10,
-            gen: 1,
+            r#gen: 1,
             opts: CrucibleOpts {
                 id: volume_id,
                 target: vec![
@@ -5478,7 +5471,7 @@ mod tests {
                     block_size: 512,
                     blocks_per_extent: 10,
                     extent_count: 10,
-                    gen: 1,
+                    r#gen: 1,
                     opts: CrucibleOpts {
                         id: volume_id,
                         target: vec![
@@ -5516,7 +5509,7 @@ mod tests {
             block_size: 512,
             blocks_per_extent: 10,
             extent_count: 10,
-            gen: 1,
+            r#gen: 1,
             opts: CrucibleOpts {
                 id: volume_id,
                 target: vec![
@@ -5547,7 +5540,7 @@ mod tests {
                         block_size: 512,
                         blocks_per_extent: 10,
                         extent_count: 10,
-                        gen: 1,
+                        r#gen: 1,
                         opts: CrucibleOpts {
                             id: volume_id,
                             target: vec![

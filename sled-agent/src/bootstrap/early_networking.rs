@@ -4,16 +4,17 @@
 
 //! Network setup required to bring up the control plane
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
+use dpd_client::Client as DpdClient;
 use dpd_client::types::{
     LinkCreate, LinkId, LinkSettings, PortId, PortSettings, TxEq,
 };
-use dpd_client::Client as DpdClient;
 use futures::future;
 use gateway_client::Client as MgsClient;
 use http::StatusCode;
 use internal_dns_resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns_types::names::ServiceName;
+use mg_admin_client::Client as MgdClient;
 use mg_admin_client::types::BfdPeerConfig as MgBfdPeerConfig;
 use mg_admin_client::types::BgpPeerConfig as MgBgpPeerConfig;
 use mg_admin_client::types::ImportExportPolicy as MgImportExportPolicy;
@@ -21,7 +22,7 @@ use mg_admin_client::types::{
     AddStaticRoute4Request, ApplyRequest, CheckerSource, Prefix, Prefix4,
     Prefix6, ShaperSource, StaticRoute4, StaticRoute4List,
 };
-use mg_admin_client::Client as MgdClient;
+use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::{MGD_PORT, MGS_PORT};
 use omicron_common::api::external::{BfdMode, ImportExportPolicy};
@@ -30,10 +31,9 @@ use omicron_common::api::internal::shared::{
     SwitchLocation,
 };
 use omicron_common::backoff::{
-    retry_notify, retry_policy_local, BackoffError, ExponentialBackoff,
-    ExponentialBackoffBuilder,
+    BackoffError, ExponentialBackoff, ExponentialBackoffBuilder, retry_notify,
+    retry_policy_local,
 };
-use omicron_common::OMICRON_DPD_TAG;
 use omicron_ddm_admin_client::DdmError;
 use oxnet::IpNet;
 use slog::Logger;
@@ -455,28 +455,31 @@ impl<'a> EarlyNetworkSetup<'a> {
                 )
                 .await
             {
-                if let Some(StatusCode::SERVICE_UNAVAILABLE) = e.status() {
-                    warn!(
-                        self.log,
-                        "dendrite not available, re-attempting port configuration in 5 seconds";
-                        "port_id" => ?port_id,
-                        "configuration" => ?dpd_port_settings,
-                    );
-                    sleep(Duration::from_secs(5)).await;
-                    continue;
-                } else {
-                    // log and move on to the next uplink instead of bailing on the
-                    // entire uplink process
-                    error!(
-                        self.log,
-                        "unable to apply uplink port configuration";
-                        "error" => ?e,
-                        "port_id" => ?port_id,
-                        "configuration" => ?dpd_port_settings
-                    );
-                    uplink_configuration_errors.push(e);
+                match e.status() {
+                    Some(StatusCode::SERVICE_UNAVAILABLE) => {
+                        warn!(
+                            self.log,
+                            "dendrite not available, re-attempting port configuration in 5 seconds";
+                            "port_id" => ?port_id,
+                            "configuration" => ?dpd_port_settings,
+                        );
+                        sleep(Duration::from_secs(5)).await;
+                        continue;
+                    }
+                    _ => {
+                        // log and move on to the next uplink instead of bailing on the
+                        // entire uplink process
+                        error!(
+                            self.log,
+                            "unable to apply uplink port configuration";
+                            "error" => ?e,
+                            "port_id" => ?port_id,
+                            "configuration" => ?dpd_port_settings
+                        );
+                        uplink_configuration_errors.push(e);
 
-                    break;
+                        break;
+                    }
                 }
             }
         }

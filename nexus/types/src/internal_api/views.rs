@@ -318,6 +318,6 @@ pub struct Ipv4NatEntryView {
     pub sled_address: Ipv6Addr,
     pub vni: Vni,
     pub mac: MacAddr,
-    pub gen: i64,
+    pub r#gen: i64,
     pub deleted: bool,
 }

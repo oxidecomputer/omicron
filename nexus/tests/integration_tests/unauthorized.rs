@@ -7,12 +7,12 @@
 
 use super::endpoints::*;
 use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
-use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
+use dropshot::test_util::ClientTestContext;
 use headers::authorization::Credentials;
-use http::method::Method;
 use http::StatusCode;
-use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
+use http::method::Method;
+use httptest::{Expectation, ServerBuilder, matchers::*, responders::*};
 use nexus_db_queries::authn::external::spoof;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -744,27 +744,30 @@ fn record_operation(whichtest: WhichTest<'_>) {
     // the mess of numbers that shows up in the table for the different response
     // codes.
     let t = term::stdout();
-    if let Some(mut term) = t {
-        // We just want to write one green character to stdout.  But we also
-        // want it to be captured by the test runner like people usually expect
-        // when they haven't passed "--nocapture".  The test runner only
-        // captures output from the `print!` family of macros, not all writes to
-        // stdout.  So we write the formatting control character, flush that (to
-        // make sure it gets emitted before our character), use print for our
-        // character, reset the terminal, then flush that.
-        //
-        // Note that this likely still writes the color-changing control
-        // characters to the real stdout, even without "--nocapture".  That
-        // sucks, but at least you don't see them.
-        //
-        // We also don't unwrap() the results of printing control codes
-        // in case the terminal doesn't support them.
-        let _ = term.fg(term::color::GREEN);
-        let _ = term.flush();
-        print!("{}", c);
-        let _ = term.reset();
-        let _ = term.flush();
-    } else {
-        print!("{}", c);
+    match t {
+        Some(mut term) => {
+            // We just want to write one green character to stdout.  But we also
+            // want it to be captured by the test runner like people usually expect
+            // when they haven't passed "--nocapture".  The test runner only
+            // captures output from the `print!` family of macros, not all writes to
+            // stdout.  So we write the formatting control character, flush that (to
+            // make sure it gets emitted before our character), use print for our
+            // character, reset the terminal, then flush that.
+            //
+            // Note that this likely still writes the color-changing control
+            // characters to the real stdout, even without "--nocapture".  That
+            // sucks, but at least you don't see them.
+            //
+            // We also don't unwrap() the results of printing control codes
+            // in case the terminal doesn't support them.
+            let _ = term.fg(term::color::GREEN);
+            let _ = term.flush();
+            print!("{}", c);
+            let _ = term.reset();
+            let _ = term.flush();
+        }
+        _ => {
+            print!("{}", c);
+        }
     }
 }

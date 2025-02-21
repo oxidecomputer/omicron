@@ -10,15 +10,15 @@
 //! for any requests that are in state "Requested". See the documentation there
 //! for more information.
 
+use crate::app::RegionAllocationStrategy;
 use crate::app::authn;
 use crate::app::background::BackgroundTask;
 use crate::app::saga::StartSaga;
 use crate::app::sagas;
-use crate::app::sagas::region_replacement_start::SagaRegionReplacementStart;
 use crate::app::sagas::NexusSaga;
-use crate::app::RegionAllocationStrategy;
-use futures::future::BoxFuture;
+use crate::app::sagas::region_replacement_start::SagaRegionReplacementStart;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use nexus_db_model::RegionReplacement;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -363,7 +363,7 @@ mod test {
                 block_size: 0,
                 blocks_per_extent: 0,
                 extent_count: 0,
-                gen: 0,
+                r#gen: 0,
                 opts: CrucibleOpts {
                     id: Uuid::new_v4(),
                     target: vec![

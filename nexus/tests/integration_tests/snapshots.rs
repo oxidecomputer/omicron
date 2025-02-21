@@ -7,18 +7,19 @@
 use crate::integration_tests::instances::instance_simulate;
 use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
-use http::method::Method;
 use http::StatusCode;
+use http::method::Method;
 use nexus_config::RegionAllocationStrategy;
 use nexus_db_model::to_db_typed_uuid;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use nexus_db_queries::db::datastore::RegionAllocationFor;
 use nexus_db_queries::db::datastore::RegionAllocationParameters;
-use nexus_db_queries::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::LookupPath;
+use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -26,7 +27,6 @@ use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::object_create;
-use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
@@ -578,7 +578,7 @@ async fn test_reject_creating_disk_from_snapshot(
                 volume_id: VolumeUuid::new_v4().into(),
                 destination_volume_id: VolumeUuid::new_v4().into(),
 
-                gen: db::model::Generation::new(),
+                r#gen: db::model::Generation::new(),
                 state: db::model::SnapshotState::Creating,
                 block_size: db::model::BlockSize::AdvancedFormat,
 
@@ -731,7 +731,7 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
                 volume_id: VolumeUuid::new_v4().into(),
                 destination_volume_id: VolumeUuid::new_v4().into(),
 
-                gen: db::model::Generation::new(),
+                r#gen: db::model::Generation::new(),
                 state: db::model::SnapshotState::Creating,
                 block_size: db::model::BlockSize::AdvancedFormat,
 
@@ -827,7 +827,7 @@ async fn test_reject_creating_disk_from_other_project_snapshot(
                 volume_id: VolumeUuid::new_v4().into(),
                 destination_volume_id: VolumeUuid::new_v4().into(),
 
-                gen: db::model::Generation::new(),
+                r#gen: db::model::Generation::new(),
                 state: db::model::SnapshotState::Creating,
                 block_size: db::model::BlockSize::AdvancedFormat,
 
@@ -1045,7 +1045,7 @@ async fn test_create_snapshot_record_idempotent(
         volume_id: VolumeUuid::new_v4().into(),
         destination_volume_id: VolumeUuid::new_v4().into(),
 
-        gen: db::model::Generation::new(),
+        r#gen: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,
         block_size: db::model::BlockSize::Traditional,
         size: external::ByteCount::try_from(1024u32).unwrap().into(),
@@ -1096,7 +1096,7 @@ async fn test_create_snapshot_record_idempotent(
         volume_id: VolumeUuid::new_v4().into(),
         destination_volume_id: VolumeUuid::new_v4().into(),
 
-        gen: db::model::Generation::new(),
+        r#gen: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,
         block_size: db::model::BlockSize::Traditional,
         size: external::ByteCount::try_from(1024u32).unwrap().into(),
@@ -1123,7 +1123,7 @@ async fn test_create_snapshot_record_idempotent(
         .project_snapshot_update_state(
             &opctx,
             &authz_snapshot,
-            db_snapshot.gen,
+            db_snapshot.r#gen,
             db::model::SnapshotState::Ready,
         )
         .await
@@ -1197,7 +1197,7 @@ async fn test_create_snapshot_record_idempotent(
         volume_id: VolumeUuid::new_v4().into(),
         destination_volume_id: VolumeUuid::new_v4().into(),
 
-        gen: db::model::Generation::new(),
+        r#gen: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,
         block_size: db::model::BlockSize::Traditional,
         size: external::ByteCount::try_from(1024u32).unwrap().into(),

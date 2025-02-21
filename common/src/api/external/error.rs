@@ -592,10 +592,10 @@ impl From<serde_json::Error> for Error {
 /// condition is not true.
 #[macro_export]
 macro_rules! bail_unless {
-    ($cond:expr $(,)?) => {
+    ($cond:expr_2021 $(,)?) => {
         bail_unless!($cond, "failed runtime check: {:?}", stringify!($cond))
     };
-    ($cond:expr, $($arg:tt)+) => {
+    ($cond:expr_2021, $($arg:tt)+) => {
         if !$cond {
             Err($crate::api::external::Error::internal_error(&format!(
                 $($arg)*)))?;

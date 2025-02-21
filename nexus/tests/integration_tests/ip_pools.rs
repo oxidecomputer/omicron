@@ -7,11 +7,11 @@
 use std::net::Ipv4Addr;
 
 use crate::integration_tests::instances::instance_wait_for_state;
-use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::ResultsPage;
-use http::method::Method;
+use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
+use http::method::Method;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::SERVICE_IP_POOL_NAME;

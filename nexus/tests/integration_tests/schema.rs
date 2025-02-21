@@ -11,9 +11,9 @@ use nexus_config::SchemaConfig;
 use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
 use nexus_db_model::SCHEMA_VERSION as LATEST_SCHEMA_VERSION;
 use nexus_db_model::{AllSchemaVersions, SchemaVersion};
-use nexus_db_queries::db::pub_test_utils::TestDatabase;
 use nexus_db_queries::db::DISALLOW_FULL_TABLE_SCAN_SQL;
-use nexus_test_utils::{load_test_config, ControlPlaneTestContextBuilder};
+use nexus_db_queries::db::pub_test_utils::TestDatabase;
+use nexus_test_utils::{ControlPlaneTestContextBuilder, load_test_config};
 use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_test_utils::dev::db::{Client, CockroachInstance};
@@ -22,8 +22,8 @@ use similar_asserts;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
-use tokio::time::timeout;
 use tokio::time::Duration;
+use tokio::time::timeout;
 use uuid::Uuid;
 
 const SCHEMA_DIR: &'static str =
@@ -979,10 +979,10 @@ async fn dbinit_equals_sum_of_all_up() {
     // with a `type with ID $NUM does not exist` error.
     {
         use async_bb8_diesel::AsyncRunQueryDsl;
-        use nexus_db_model::schema::sled_resource::dsl;
         use nexus_db_model::Resources;
         use nexus_db_model::SledResource;
         use nexus_db_model::SledResourceKind;
+        use nexus_db_model::schema::sled_resource::dsl;
 
         diesel::insert_into(dsl::sled_resource)
             .values(SledResource {

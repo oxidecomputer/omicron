@@ -399,7 +399,7 @@ table! {
 
         destination_volume_id -> Uuid,
 
-        gen -> Int8,
+        r#gen -> Int8,
         state -> crate::SnapshotStateEnum,
         block_size -> crate::BlockSizeEnum,
         size_bytes -> Int8,

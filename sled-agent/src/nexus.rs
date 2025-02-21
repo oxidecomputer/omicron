@@ -347,15 +347,15 @@ impl NexusNotifierTask {
     ///
     /// This should be spawned into a tokio task
     pub async fn run(mut self) {
-        let (_tx, mut vmm_size_updated) = if let Some(vmm_size_updated) =
-            self.vmm_reservoir_size_updated.take()
-        {
-            (None, vmm_size_updated)
-        } else {
-            // Dummy channel for testing
-            let (tx, rx) = broadcast::channel(1);
-            (Some(tx), rx)
-        };
+        let (_tx, mut vmm_size_updated) =
+            match self.vmm_reservoir_size_updated.take() {
+                Some(vmm_size_updated) => (None, vmm_size_updated),
+                _ => {
+                    // Dummy channel for testing
+                    let (tx, rx) = broadcast::channel(1);
+                    (Some(tx), rx)
+                }
+            };
 
         const RETRY_TIMEOUT: Duration = Duration::from_secs(2);
         let mut interval = interval(RETRY_TIMEOUT);

@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use hkdf::Hkdf;
 use secrecy::{ExposeSecret, Secret};
 use sha3::Sha3_256;
-use slog::{o, warn, Logger};
+use slog::{Logger, o, warn};
 use tokio::sync::{mpsc, oneshot};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -193,28 +193,31 @@ impl<S: SecretRetriever> KeyManager<S> {
     /// This should be spawned into a tokio task
     pub async fn run(&mut self) {
         loop {
-            if let Some(request) = self.storage_rx.recv().await {
-                use StorageKeyRequest::*;
-                match request {
-                    GetKey { epoch, disk_id, responder } => {
-                        let rsp =
-                            self.disk_encryption_key(epoch, &disk_id).await;
-                        let _ = responder.send(rsp);
-                    }
-                    LoadLatestSecret { responder } => {
-                        let rsp = self.load_latest_secret().await;
-                        let _ = responder.send(rsp);
+            match self.storage_rx.recv().await {
+                Some(request) => {
+                    use StorageKeyRequest::*;
+                    match request {
+                        GetKey { epoch, disk_id, responder } => {
+                            let rsp =
+                                self.disk_encryption_key(epoch, &disk_id).await;
+                            let _ = responder.send(rsp);
+                        }
+                        LoadLatestSecret { responder } => {
+                            let rsp = self.load_latest_secret().await;
+                            let _ = responder.send(rsp);
+                        }
                     }
                 }
-            } else {
-                warn!(
-                    self.log,
-                    concat!(
-                        "KeyManager shutting down: ",
-                        "all storage key requesters dropped.",
-                    )
-                );
-                return;
+                _ => {
+                    warn!(
+                        self.log,
+                        concat!(
+                            "KeyManager shutting down: ",
+                            "all storage key requesters dropped.",
+                        )
+                    );
+                    return;
+                }
             }
         }
     }

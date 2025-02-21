@@ -67,9 +67,9 @@ fn assert_valid_uuid(id: &uuid::Uuid) {
 
 #[cfg(test)]
 mod test {
+    use super::FLEET_ID;
     use super::allow_list::USER_FACING_SERVICES_ALLOW_LIST_ID;
     use super::assert_valid_uuid;
-    use super::FLEET_ID;
 
     #[test]
     fn test_builtin_fleet_id_is_valid() {

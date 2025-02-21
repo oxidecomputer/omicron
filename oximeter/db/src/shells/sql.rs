@@ -7,8 +7,8 @@
 // Copyright 2024 Oxide Computer Company
 
 use super::prepare_columns;
-use crate::sql::{function_allow_list, QueryResult, Table};
-use crate::{make_client, Client, QuerySummary};
+use crate::sql::{QueryResult, Table, function_allow_list};
+use crate::{Client, QuerySummary, make_client};
 use clap::Args;
 use dropshot::EmptyScanParams;
 use dropshot::WhichPage;
@@ -202,17 +202,20 @@ async fn describe_virtual_table(
     match table.parse() {
         Err(_) => println!("Invalid timeseries name: {table}"),
         Ok(name) => {
-            if let Some(schema) = client.schema_for_timeseries(&name).await? {
-                let (cols, types) = prepare_columns(&schema);
-                let mut builder = tabled::builder::Builder::default();
-                builder.push_record(cols); // first record is the header
-                builder.push_record(types);
-                println!(
-                    "{}",
-                    builder.build().with(tabled::settings::Style::psql())
-                );
-            } else {
-                println!("No such timeseries: {table}");
+            match client.schema_for_timeseries(&name).await? {
+                Some(schema) => {
+                    let (cols, types) = prepare_columns(&schema);
+                    let mut builder = tabled::builder::Builder::default();
+                    builder.push_record(cols); // first record is the header
+                    builder.push_record(types);
+                    println!(
+                        "{}",
+                        builder.build().with(tabled::settings::Style::psql())
+                    );
+                }
+                _ => {
+                    println!("No such timeseries: {table}");
+                }
             }
         }
     }

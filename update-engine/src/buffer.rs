@@ -285,27 +285,28 @@ impl<S: StepSpec> EventStore<S> {
                 // Do we already know about this execution? If so, grab the parent
                 // key and child index from the first step.
                 let parent_key_and_child_index =
-                    if let Some(data) = self.map.get(first_step_key) {
-                        data.parent_key_and_child_index
-                    } else {
-                        if let Some(parent_key) = new_execution.parent_key {
-                            match self.map.get_mut(&parent_key) {
-                                Some(parent_data) => {
-                                    let child_index =
-                                        parent_data.child_executions_seen;
-                                    parent_data.child_executions_seen += 1;
-                                    Some((parent_key, child_index))
+                    match self.map.get(first_step_key) {
+                        Some(data) => data.parent_key_and_child_index,
+                        _ => {
+                            if let Some(parent_key) = new_execution.parent_key {
+                                match self.map.get_mut(&parent_key) {
+                                    Some(parent_data) => {
+                                        let child_index =
+                                            parent_data.child_executions_seen;
+                                        parent_data.child_executions_seen += 1;
+                                        Some((parent_key, child_index))
+                                    }
+                                    None => {
+                                        // This should never happen -- it indicates that the
+                                        // parent key was unknown. This can happen if we
+                                        // didn't receive an event regarding a parent
+                                        // execution being started.
+                                        None
+                                    }
                                 }
-                                None => {
-                                    // This should never happen -- it indicates that the
-                                    // parent key was unknown. This can happen if we
-                                    // didn't receive an event regarding a parent
-                                    // execution being started.
-                                    None
-                                }
+                            } else {
+                                None
                             }
-                        } else {
-                            None
                         }
                     };
 

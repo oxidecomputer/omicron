@@ -49,15 +49,20 @@ fn target_impl(tokens: TokenStream) -> syn::Result<TokenStream> {
     let item = syn::parse2::<DeriveInput>(tokens)?;
     if let Data::Struct(ref data) = item.data {
         let name = &item.ident;
-        let fields = if let Fields::Named(ref data_fields) = data.fields {
-            extract_struct_fields(&data_fields, None)
-        } else if matches!(data.fields, Fields::Unit) {
-            vec![]
-        } else {
-            return Err(Error::new(
-                    item.span(),
-                    "Can only be derived for structs with named fields or unit structs",
-                ));
+        let fields = match data.fields {
+            Fields::Named(ref data_fields) => {
+                extract_struct_fields(&data_fields, None)
+            }
+            _ => {
+                if matches!(data.fields, Fields::Unit) {
+                    vec![]
+                } else {
+                    return Err(Error::new(
+                        item.span(),
+                        "Can only be derived for structs with named fields or unit structs",
+                    ));
+                }
+            }
         };
         return Ok(build_target_trait_impl(&name, &fields[..]));
     }
@@ -72,19 +77,20 @@ fn metric_impl(item: TokenStream) -> syn::Result<TokenStream> {
     let item = syn::parse2::<ItemStruct>(item)?;
     let datum_field = extract_datum_type(&item)?;
     let name = &item.ident;
-    if let Fields::Named(ref data_fields) = item.fields {
-        let ignore = datum_field.ident.as_ref().unwrap().to_string();
-        let fields = extract_struct_fields(&data_fields, Some(&ignore));
-        let metric_impl =
-            build_metric_trait_impl(name, &fields[..], &datum_field);
-        Ok(quote! {
-            #metric_impl
-        })
-    } else {
-        Err(Error::new(
+    match item.fields {
+        Fields::Named(ref data_fields) => {
+            let ignore = datum_field.ident.as_ref().unwrap().to_string();
+            let fields = extract_struct_fields(&data_fields, Some(&ignore));
+            let metric_impl =
+                build_metric_trait_impl(name, &fields[..], &datum_field);
+            Ok(quote! {
+                #metric_impl
+            })
+        }
+        _ => Err(Error::new(
             item.span(),
             "Attribute may only be applied to structs with named fields",
-        ))
+        )),
     }
 }
 
@@ -92,12 +98,12 @@ fn metric_impl(item: TokenStream) -> syn::Result<TokenStream> {
 // the type of the field, and the tokens representing the `oximeter::DatumType` enum variant
 // corresponding to the field's type.
 fn extract_datum_type(item: &ItemStruct) -> syn::Result<&syn::Field> {
-    if let Fields::Named(ref fields) = item.fields {
+    match item.fields { Fields::Named(ref fields) => {
         find_datum_field(fields)
             .ok_or_else(|| Error::new(item.span(), "Metric structs must have exactly one field named `datum` or a field annotated with the `#[datum]` attribute helper"))
-    } else {
+    } _ => {
         Err(Error::new(item.span(), "Struct must contain named fields"))
-    }
+    }}
 }
 
 fn find_datum_field(fields: &FieldsNamed) -> Option<&syn::Field> {
@@ -394,13 +400,16 @@ mod tests {
         .unwrap();
         let field = extract_datum_type(&item).unwrap();
         assert_eq!(field.ident.as_ref().unwrap(), "datum");
-        if let syn::Type::Path(ref p) = field.ty {
-            assert_eq!(
-                p.path.segments.last().unwrap().ident.to_string(),
-                "i64"
-            );
-        } else {
-            panic!("Expected the extracted datum type");
+        match field.ty {
+            syn::Type::Path(ref p) => {
+                assert_eq!(
+                    p.path.segments.last().unwrap().ident.to_string(),
+                    "i64"
+                );
+            }
+            _ => {
+                panic!("Expected the extracted datum type");
+            }
         }
     }
 
@@ -416,13 +425,16 @@ mod tests {
         .unwrap();
         let field = extract_datum_type(&item).unwrap();
         assert_eq!(field.ident.as_ref().unwrap(), "also_not_datum");
-        if let syn::Type::Path(ref p) = field.ty {
-            assert_eq!(
-                p.path.segments.last().unwrap().ident.to_string(),
-                "i64"
-            );
-        } else {
-            panic!("Expected the extracted datum type");
+        match field.ty {
+            syn::Type::Path(ref p) => {
+                assert_eq!(
+                    p.path.segments.last().unwrap().ident.to_string(),
+                    "i64"
+                );
+            }
+            _ => {
+                panic!("Expected the extracted datum type");
+            }
         }
     }
 
@@ -467,13 +479,16 @@ mod tests {
         .unwrap();
         let field = extract_datum_type(&item).unwrap();
         assert_eq!(field.ident.as_ref().unwrap(), "datum");
-        if let syn::Type::Path(ref p) = field.ty {
-            assert_eq!(
-                p.path.segments.last().unwrap().ident.to_string(),
-                "i64"
-            );
-        } else {
-            panic!("Expected the extracted datum type");
+        match field.ty {
+            syn::Type::Path(ref p) => {
+                assert_eq!(
+                    p.path.segments.last().unwrap().ident.to_string(),
+                    "i64"
+                );
+            }
+            _ => {
+                panic!("Expected the extracted datum type");
+            }
         }
     }
 }

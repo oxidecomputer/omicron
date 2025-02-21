@@ -8,27 +8,26 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::IncompleteOnConflictExt;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::model::to_db_typed_uuid;
+use crate::db::error::public_error_from_diesel;
 use crate::db::model::Generation;
 use crate::db::model::Name;
 use crate::db::model::Project;
 use crate::db::model::Snapshot;
 use crate::db::model::SnapshotState;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
-use crate::db::IncompleteOnConflictExt;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
-use diesel::prelude::*;
 use diesel::OptionalExtension;
+use diesel::prelude::*;
 use nexus_types::identity::Resource;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -36,6 +35,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::VolumeUuid;
 use ref_cast::RefCast;
@@ -48,7 +48,7 @@ impl DataStore {
         authz_project: &authz::Project,
         snapshot: Snapshot,
     ) -> CreateResult<Snapshot> {
-        let gen = snapshot.gen;
+        let r#gen = snapshot.r#gen;
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
         let project_id = snapshot.project_id;
@@ -154,9 +154,9 @@ impl DataStore {
             snapshot.state
         );
         bail_unless!(
-            snapshot.gen == gen,
+            snapshot.r#gen == r#gen,
             "newly-created Snapshot has unexpected generation: {:?}",
-            snapshot.gen
+            snapshot.r#gen
         );
 
         Ok(snapshot)
@@ -178,8 +178,8 @@ impl DataStore {
         diesel::update(dsl::snapshot)
             .filter(dsl::id.eq(authz_snapshot.id()))
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::gen.eq(old_gen))
-            .set((dsl::state.eq(new_state), dsl::gen.eq(next_gen)))
+            .filter(dsl::r#gen.eq(old_gen))
+            .set((dsl::state.eq(new_state), dsl::r#gen.eq(next_gen)))
             .returning(Snapshot::as_returning())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -237,13 +237,13 @@ impl DataStore {
         // then it was already deleted.
 
         let snapshot_id = authz_snapshot.id();
-        let gen = db_snapshot.gen;
+        let r#gen = db_snapshot.r#gen;
 
         use db::schema::snapshot::dsl;
 
         let result = diesel::update(dsl::snapshot)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::gen.eq(gen))
+            .filter(dsl::r#gen.eq(r#gen))
             .filter(dsl::id.eq(snapshot_id))
             .filter(dsl::state.eq_any(ok_to_delete_states.clone()))
             .set((
@@ -285,11 +285,10 @@ impl DataStore {
                             "snapshot cannot be deleted in state {:?}",
                             snapshot.state,
                         )))
-                    } else if snapshot.gen != gen {
+                    } else if snapshot.r#gen != r#gen {
                         Err(Error::invalid_request(&format!(
                             "snapshot cannot be deleted: mismatched generation {:?} != {:?}",
-                            gen,
-                            snapshot.gen,
+                            r#gen, snapshot.r#gen,
                         )))
                     } else {
                         error!(

@@ -6,8 +6,8 @@
 
 use async_trait::async_trait;
 use camino::{Utf8Path, Utf8PathBuf};
-use serde::{de::DeserializeOwned, Serialize};
-use slog::{debug, error, info, warn, Logger};
+use serde::{Serialize, de::DeserializeOwned};
+use slog::{Logger, debug, error, info, warn};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -27,7 +27,9 @@ pub enum Error {
     #[error("Not found in storage")]
     NotFound,
 
-    #[error("Failed to write the ledger to storage (tried to access: {failed_paths:?})")]
+    #[error(
+        "Failed to write the ledger to storage (tried to access: {failed_paths:?})"
+    )]
     FailedToWrite { failed_paths: Vec<(Utf8PathBuf, Error)> },
 }
 
@@ -74,10 +76,9 @@ impl<T: Ledgerable> Ledger<T> {
     /// exists, otherwise returns `None`.
     pub async fn new(log: &Logger, paths: Vec<Utf8PathBuf>) -> Option<Self> {
         // Read the ledgers from storage
-        if let Some(ledger) = Self::read(log, &paths).await {
-            Some(Self { log: log.clone(), ledger, paths })
-        } else {
-            None
+        match Self::read(log, &paths).await {
+            Some(ledger) => Some(Self { log: log.clone(), ledger, paths }),
+            _ => None,
         }
     }
 
@@ -95,11 +96,7 @@ impl<T: Ledgerable> Ledger<T> {
 
         // Return the ledger with the highest generation number.
         let ledger = ledgers.into_iter().reduce(|prior, ledger| {
-            if ledger.is_newer_than(&prior) {
-                ledger
-            } else {
-                prior
-            }
+            if ledger.is_newer_than(&prior) { ledger } else { prior }
         });
         ledger
     }
@@ -126,11 +123,14 @@ impl<T: Ledgerable> Ledger<T> {
         let mut failed_paths = vec![];
         let mut one_successful_write = false;
         for path in self.paths.iter() {
-            if let Err(e) = self.atomic_write(&path).await {
-                warn!(self.log, "Failed to write ledger"; "path" => ?path, "err" => ?e);
-                failed_paths.push((path.to_path_buf(), e));
-            } else {
-                one_successful_write = true;
+            match self.atomic_write(&path).await {
+                Err(e) => {
+                    warn!(self.log, "Failed to write ledger"; "path" => ?path, "err" => ?e);
+                    failed_paths.push((path.to_path_buf(), e));
+                }
+                _ => {
+                    one_successful_write = true;
+                }
             }
         }
 
@@ -215,10 +215,10 @@ pub trait Ledgerable: DeserializeOwned + Serialize + Send + Sync {
 mod test {
     use super::*;
 
-    pub use dropshot::test_util::LogContext;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;
     use dropshot::ConfigLoggingLevel;
+    pub use dropshot::test_util::LogContext;
 
     // Copied from `omicron-test-utils` to avoid a circular dependency where
     // `omicron-common` depends on `omicron-test-utils` which depends on

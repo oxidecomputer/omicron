@@ -7,13 +7,13 @@ use crate::authz;
 use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::datastore::SQL_BATCH_SIZE;
-use crate::db::error::public_error_from_diesel;
-use crate::db::error::ErrorHandler;
-use crate::db::pagination::paginated;
-use crate::db::pagination::Paginator;
 use crate::db::DbConnection;
 use crate::db::TransactionError;
+use crate::db::datastore::SQL_BATCH_SIZE;
+use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
+use crate::db::pagination::Paginator;
+use crate::db::pagination::paginated;
 use crate::transaction_retry::OptionalError;
 use anyhow::Context;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -22,6 +22,13 @@ use chrono::Utc;
 use clickhouse_admin_types::{KeeperId, ServerId};
 use core::future::Future;
 use core::pin::Pin;
+use diesel::Column;
+use diesel::ExpressionMethods;
+use diesel::Insertable;
+use diesel::IntoSql;
+use diesel::OptionalExtension;
+use diesel::QueryDsl;
+use diesel::RunQueryDsl;
 use diesel::expression::SelectableHelper;
 use diesel::pg::Pg;
 use diesel::query_builder::AstPass;
@@ -30,15 +37,7 @@ use diesel::query_builder::QueryId;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use diesel::sql_types;
-use diesel::Column;
-use diesel::ExpressionMethods;
-use diesel::Insertable;
-use diesel::IntoSql;
-use diesel::OptionalExtension;
-use diesel::QueryDsl;
-use diesel::RunQueryDsl;
 use futures::FutureExt;
-use nexus_db_model::to_db_typed_uuid;
 use nexus_db_model::Blueprint as DbBlueprint;
 use nexus_db_model::BpClickhouseClusterConfig;
 use nexus_db_model::BpClickhouseKeeperZoneIdToNodeId;
@@ -52,7 +51,7 @@ use nexus_db_model::BpSledOmicronPhysicalDisks;
 use nexus_db_model::BpSledOmicronZones;
 use nexus_db_model::BpSledState;
 use nexus_db_model::BpTarget;
-use nexus_types::deployment::id_map::IdMap;
+use nexus_db_model::to_db_typed_uuid;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintMetadata;
@@ -61,6 +60,7 @@ use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
+use nexus_types::deployment::id_map::IdMap;
 use nexus_types::external_api::views::SledState;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -1412,12 +1412,9 @@ impl DataStore {
             }
         })
         .await
-        .map_err(|e| {
-            if let Some(err) = err.take() {
-                err.into()
-            } else {
-                public_error_from_diesel(e, ErrorHandler::Server)
-            }
+        .map_err(|e| match err.take() {
+            Some(err) => err.into(),
+            _ => public_error_from_diesel(e, ErrorHandler::Server),
         })
     }
 
@@ -1805,11 +1802,9 @@ const NO_SUCH_BLUEPRINT_SENTINEL: &str = "no-such-blueprint";
 const PARENT_NOT_TARGET_SENTINEL: &str = "parent-not-target";
 
 // Error messages generated from the above sentinel values.
-const NO_SUCH_BLUEPRINT_ERROR_MESSAGE: &str =
-    "could not parse \"no-such-blueprint\" as type uuid: \
+const NO_SUCH_BLUEPRINT_ERROR_MESSAGE: &str = "could not parse \"no-such-blueprint\" as type uuid: \
      uuid: incorrect UUID length: no-such-blueprint";
-const PARENT_NOT_TARGET_ERROR_MESSAGE: &str =
-    "could not parse \"parent-not-target\" as type uuid: \
+const PARENT_NOT_TARGET_ERROR_MESSAGE: &str = "could not parse \"parent-not-target\" as type uuid: \
      uuid: incorrect UUID length: parent-not-target";
 
 impl InsertTargetQuery {
@@ -2000,14 +1995,13 @@ mod tests {
 
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::QueryBuilder;
-    use nexus_inventory::now_db_precision;
     use nexus_inventory::CollectionBuilder;
+    use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::Ensure;
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
-    use nexus_reconfigurator_planning::example::example;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
-    use nexus_types::deployment::blueprint_zone_type;
+    use nexus_reconfigurator_planning::example::example;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneType;
@@ -2019,6 +2013,7 @@ mod tests {
     use nexus_types::deployment::SledDisk;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::SledResources;
+    use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::external_api::views::PhysicalDiskPolicy;
     use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::external_api::views::SledPolicy;
@@ -2032,8 +2027,8 @@ mod tests {
     use omicron_common::api::internal::shared::NetworkInterfaceKind;
     use omicron_common::disk::DiskIdentity;
     use omicron_test_utils::dev;
-    use omicron_test_utils::dev::poll::wait_for_condition;
     use omicron_test_utils::dev::poll::CondCheckError;
+    use omicron_test_utils::dev::poll::wait_for_condition;
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -2042,8 +2037,8 @@ mod tests {
     use once_cell::sync::Lazy;
     use oxnet::IpNet;
     use pretty_assertions::assert_eq;
-    use rand::thread_rng;
     use rand::Rng;
+    use rand::thread_rng;
     use slog::Logger;
     use std::mem;
     use std::net::IpAddr;
@@ -2051,9 +2046,9 @@ mod tests {
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
     use std::str::FromStr;
+    use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
-    use std::sync::Arc;
     use std::time::Duration;
 
     static EMPTY_PLANNING_INPUT: Lazy<PlanningInput> =
@@ -2130,7 +2125,7 @@ mod tests {
                 )
             })
             .collect();
-        let ip = ip.unwrap_or_else(|| thread_rng().gen::<u128>().into());
+        let ip = ip.unwrap_or_else(|| thread_rng().r#gen::<u128>().into());
         let resources = SledResources { zpools, subnet: Ipv6Subnet::new(ip) };
         SledDetails {
             policy: SledPolicy::provisionable(),
@@ -2737,9 +2732,9 @@ mod tests {
             .blueprint_target_set_current_enabled(&opctx, bp2_target)
             .await
             .unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("is not the current target blueprint"));
+        assert!(
+            err.to_string().contains("is not the current target blueprint")
+        );
 
         // ...but we can make it the target via `blueprint_target_set_current`.
         datastore
@@ -2756,9 +2751,9 @@ mod tests {
             .blueprint_target_set_current_enabled(&opctx, bp1_target)
             .await
             .unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("is not the current target blueprint"));
+        assert!(
+            err.to_string().contains("is not the current target blueprint")
+        );
 
         // We can toggle bp2_target.enabled an arbitrary number of times.
         for _ in 0..10 {

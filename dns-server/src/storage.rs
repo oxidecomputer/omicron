@@ -92,7 +92,7 @@
 // backwards-compatible way (but obviously one wouldn't get the scaling benefits
 // while continuing to use the old API).
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use camino::Utf8PathBuf;
 use hickory_proto::rr::LowerName;
 use hickory_resolver::Name;
@@ -104,9 +104,9 @@ use serde::{Deserialize, Serialize};
 use sled::transaction::ConflictableTransactionError;
 use slog::{debug, error, info, o, warn};
 use std::str::FromStr;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex;
 
@@ -516,7 +516,9 @@ impl Store {
         self.prune_trees(trees_to_prune, "too new");
     }
 
-    fn all_name_trees(&self) -> impl Iterator<Item = (Generation, String)> {
+    fn all_name_trees(
+        &self,
+    ) -> impl Iterator<Item = (Generation, String)> + use<> {
         self.db.tree_names().into_iter().filter_map(|tree_name_bytes| {
             let tree_name = std::str::from_utf8(&tree_name_bytes).ok()?;
             let parts = tree_name.splitn(4, '_').collect::<Vec<_>>();
@@ -883,7 +885,7 @@ mod test {
     fn generations_with_trees(store: &Store) -> Vec<Generation> {
         store
             .all_name_trees()
-            .map(|(gen, _)| gen)
+            .map(|(r#gen, _)| r#gen)
             .collect::<BTreeSet<Generation>>()
             .into_iter()
             .collect()

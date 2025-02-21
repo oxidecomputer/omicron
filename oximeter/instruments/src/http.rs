@@ -10,7 +10,7 @@ use dropshot::{HttpError, HttpResponse, RequestContext, ServerContext};
 use futures::Future;
 use http::StatusCode;
 use oximeter::{
-    histogram::Histogram, histogram::Record, MetricsError, Producer, Sample,
+    MetricsError, Producer, Sample, histogram::Histogram, histogram::Record,
 };
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash as _, Hasher};
@@ -171,7 +171,7 @@ impl LatencyTracker {
         let latency = start.elapsed();
         let status_code = match &result {
             Ok(response) => response.status_code(),
-            Err(ref e) => e.status_code.as_status(),
+            Err(e) => e.status_code.as_status(),
         };
         if let Err(e) =
             self.update(&context.endpoint.operation_id, status_code, latency)

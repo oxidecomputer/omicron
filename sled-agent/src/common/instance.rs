@@ -178,7 +178,7 @@ impl InstanceStates {
             migration_id.map(|migration_id| MigrationRuntimeState {
                 migration_id,
                 state: MigrationState::Pending,
-                gen: Generation::new(),
+                r#gen: Generation::new(),
                 time_updated: Utc::now(),
             });
         InstanceStates { vmm, migration_in, migration_out: None }
@@ -218,7 +218,7 @@ impl InstanceStates {
             ObservedMigrationState { id, state }: ObservedMigrationState,
             now: DateTime<Utc>,
         ) {
-            if let Some(ref mut m) = current {
+            if let Some(m) = current {
                 // Don't generate spurious state updates if the migration is already in
                 // the state we're transitioning to.
                 if m.migration_id == id && m.state == state {
@@ -226,10 +226,10 @@ impl InstanceStates {
                 }
                 m.state = state;
                 if m.migration_id == id {
-                    m.gen = m.gen.next();
+                    m.r#gen = m.r#gen.next();
                 } else {
                     m.migration_id = id;
-                    m.gen = Generation::new().next();
+                    m.r#gen = Generation::new().next();
                 }
                 m.time_updated = now;
             } else {
@@ -241,7 +241,7 @@ impl InstanceStates {
                     // to advance the initial generation once to be ahead of
                     // what the generation in the database is when Nexus creates
                     // the initial migration record at generation 1.
-                    gen: Generation::new().next(),
+                    r#gen: Generation::new().next(),
                     state,
                     time_updated: now,
                 });
@@ -253,7 +253,7 @@ impl InstanceStates {
             now: DateTime<Utc>,
         ) {
             if !migration.state.is_terminal() {
-                migration.gen = migration.gen.next();
+                migration.r#gen = migration.r#gen.next();
                 migration.time_updated = now;
                 migration.state = MigrationState::Failed;
             }
@@ -269,7 +269,7 @@ impl InstanceStates {
         // this VMM is active, it will be retired and an appropriate
         // non-Destroyed state applied to the instance itself.
         self.vmm.state = observed.vmm_state.into();
-        self.vmm.gen = self.vmm.gen.next();
+        self.vmm.r#gen = self.vmm.r#gen.next();
         self.vmm.time_updated = observed.time;
 
         // Update the instance record to reflect the result of any completed
@@ -315,7 +315,7 @@ impl InstanceStates {
         now: DateTime<Utc>,
     ) {
         self.vmm.state = next.into();
-        self.vmm.gen = self.vmm.gen.next();
+        self.vmm.r#gen = self.vmm.r#gen.next();
         self.vmm.time_updated = now;
     }
 
@@ -370,7 +370,7 @@ mod test {
 
         let vmm = VmmRuntimeState {
             state: VmmState::Starting,
-            gen: Generation::new(),
+            r#gen: Generation::new(),
             time_updated: now,
         };
 
@@ -386,7 +386,7 @@ mod test {
             state: MigrationState::InProgress,
             // advance the generation once, since we are starting out in the
             // `InProgress` state.
-            gen: Generation::new().next(),
+            r#gen: Generation::new().next(),
             time_updated: Utc::now(),
         });
 
@@ -398,7 +398,7 @@ mod test {
 
         let vmm = VmmRuntimeState {
             state: VmmState::Migrating,
-            gen: Generation::new(),
+            r#gen: Generation::new(),
             time_updated: now,
         };
 
@@ -426,7 +426,7 @@ mod test {
         // Propolis is free to publish no-op VMM state updates (e.g. when an
         // in-progress migration's state changes but the migration is not yet
         // complete), so don't test the converse here.
-        if prev.vmm.gen == next.vmm.gen {
+        if prev.vmm.r#gen == next.vmm.r#gen {
             assert_eq!(prev.vmm.state, next.vmm.state);
         }
     }
@@ -455,7 +455,7 @@ mod test {
                 .migration_out
                 .expect("state must have a migration");
             assert_eq!(migration.state, MigrationState::Failed);
-            assert!(migration.gen > original_migration.gen);
+            assert!(migration.r#gen > original_migration.r#gen);
             assert!(matches!(requested_action, Some(Action::Destroy)));
         }
     }
@@ -473,7 +473,7 @@ mod test {
                 .migration_in
                 .expect("state must have a migration");
             assert_eq!(migration.state, MigrationState::Failed);
-            assert!(migration.gen > original_migration.gen);
+            assert!(migration.r#gen > original_migration.r#gen);
             assert!(matches!(requested_action, Some(Action::Destroy)));
         }
     }
@@ -510,7 +510,7 @@ mod test {
         let prev_migration =
             prev.migration_out.expect("previous state must have a migration");
         assert_eq!(migration.state, MigrationState::Completed);
-        assert!(migration.gen > prev_migration.gen);
+        assert!(migration.r#gen > prev_migration.r#gen);
         let prev_migration = migration;
 
         // Once a successful migration is observed, the VMM's state should
@@ -525,7 +525,7 @@ mod test {
         // external viewers from perceiving that the instance is stopped before
         // the VMM is fully retired.
         assert_eq!(state.vmm.state, VmmState::Stopping);
-        assert!(state.vmm.gen > prev.vmm.gen);
+        assert!(state.vmm.r#gen > prev.vmm.r#gen);
 
         // Now that the migration has completed, it should not transition again.
         let migration = state
@@ -533,7 +533,7 @@ mod test {
             .clone()
             .expect("instance must have a migration state");
         assert_eq!(migration.state, MigrationState::Completed);
-        assert_eq!(migration.gen, prev_migration.gen);
+        assert_eq!(migration.r#gen, prev_migration.r#gen);
         let prev_migration = migration;
 
         let prev = state.clone();
@@ -544,14 +544,14 @@ mod test {
         ));
         assert_state_change_has_gen_change(&prev, &state);
         assert_eq!(state.vmm.state, VmmState::Destroyed);
-        assert!(state.vmm.gen > prev.vmm.gen);
+        assert!(state.vmm.r#gen > prev.vmm.r#gen);
 
         let migration = state
             .migration_out
             .clone()
             .expect("instance must have a migration state");
         assert_eq!(migration.state, MigrationState::Completed);
-        assert_eq!(migration.gen, prev_migration.gen);
+        assert_eq!(migration.r#gen, prev_migration.r#gen);
 
         state.terminate_rudely(false);
         let migration = state
@@ -559,7 +559,7 @@ mod test {
             .clone()
             .expect("instance must have a migration state");
         assert_eq!(migration.state, MigrationState::Completed);
-        assert_eq!(migration.gen, prev_migration.gen);
+        assert_eq!(migration.r#gen, prev_migration.r#gen);
     }
 
     #[test]
@@ -586,7 +586,7 @@ mod test {
         ));
         assert_state_change_has_gen_change(&prev, &state);
         assert_eq!(state.vmm.state, VmmState::Failed);
-        assert!(state.vmm.gen > prev.vmm.gen);
+        assert!(state.vmm.r#gen > prev.vmm.r#gen);
 
         // The migration state should transition.
         let migration =
@@ -594,7 +594,7 @@ mod test {
         let prev_migration =
             prev.migration_in.expect("previous state must have a migration");
         assert_eq!(migration.state, MigrationState::Failed);
-        assert!(migration.gen > prev_migration.gen);
+        assert!(migration.r#gen > prev_migration.r#gen);
     }
 
     // Verifies that the rude-termination state change doesn't update the
@@ -619,6 +619,6 @@ mod test {
         let prev_migration =
             prev.migration_in.expect("previous state must have a migration");
         assert_eq!(migration.state, MigrationState::Failed);
-        assert!(migration.gen > prev_migration.gen);
+        assert!(migration.r#gen > prev_migration.r#gen);
     }
 }

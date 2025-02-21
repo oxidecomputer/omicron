@@ -5,6 +5,11 @@
 //! Query information about the Dropshot/OpenAPI/Progenitor-based APIs within
 //! the Oxide system
 
+use crate::ClientPackageName;
+use crate::DeploymentUnitName;
+use crate::LoadArgs;
+use crate::ServerComponentName;
+use crate::ServerPackageName;
 use crate::api_metadata::AllApiMetadata;
 use crate::api_metadata::ApiMetadata;
 use crate::api_metadata::Evaluation;
@@ -12,13 +17,8 @@ use crate::api_metadata::VersionedHow;
 use crate::cargo::DepPath;
 use crate::parse_toml_file;
 use crate::workspaces::Workspaces;
-use crate::ClientPackageName;
-use crate::DeploymentUnitName;
-use crate::LoadArgs;
-use crate::ServerComponentName;
-use crate::ServerPackageName;
 use anyhow::Result;
-use anyhow::{anyhow, bail, Context};
+use anyhow::{Context, anyhow, bail};
 use camino::Utf8PathBuf;
 use cargo_metadata::Package;
 use parse_display::{Display, FromStr};
@@ -212,7 +212,7 @@ impl SystemApis {
     pub fn deployment_unit_servers(
         &self,
         unit: &DeploymentUnitName,
-    ) -> Result<impl Iterator<Item = &ServerComponentName>> {
+    ) -> Result<impl Iterator<Item = &ServerComponentName> + use<'_>> {
         Ok(self
             .unit_server_components
             .get(unit)
@@ -230,7 +230,9 @@ impl SystemApis {
         &self,
         server_component: &ServerComponentName,
         filter: ApiDependencyFilter,
-    ) -> Result<impl Iterator<Item = (&ClientPackageName, &DepPath)> + '_> {
+    ) -> Result<
+        impl Iterator<Item = (&ClientPackageName, &DepPath)> + '_ + use<'_>,
+    > {
         let mut rv = Vec::new();
         let Some(apis_consumed) = self.apis_consumed.get(server_component)
         else {
@@ -274,8 +276,9 @@ impl SystemApis {
         &self,
         client: &ClientPackageName,
         filter: ApiDependencyFilter,
-    ) -> Result<impl Iterator<Item = (&ServerComponentName, Vec<&DepPath>)> + '_>
-    {
+    ) -> Result<
+        impl Iterator<Item = (&ServerComponentName, Vec<&DepPath>)> + '_ + use<'_>,
+    > {
         let mut rv = Vec::new();
 
         let Some(api_consumers) = self.api_consumers.get(client) else {
@@ -882,11 +885,12 @@ impl<'a> ServerComponentsTracker<'a> {
             );
         }
 
-        assert!(self
-            .unit_server_components
-            .entry(deployment_unit.clone())
-            .or_default()
-            .insert(server_component.clone()));
+        assert!(
+            self.unit_server_components
+                .entry(deployment_unit.clone())
+                .or_default()
+                .insert(server_component.clone())
+        );
         Ok(())
     }
 }

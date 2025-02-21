@@ -6,9 +6,9 @@
 
 //! Perform "bootstrap-agent lite" sled setup.
 
-use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
+use anyhow::ensure;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm;
 use illumos_utils::dladm::Dladm;
@@ -17,8 +17,8 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use sled_hardware::underlay;
 use sled_hardware_types::underlay::BootstrapInterface;
-use slog::info;
 use slog::Logger;
+use slog::info;
 
 const MG_DDM_SERVICE_FMRI: &str = "svc:/oxide/mg-ddm";
 const MG_DDM_MANIFEST_PATH: &str = "/opt/oxide/mg-ddm/pkg/ddm/manifest.xml";

@@ -16,7 +16,7 @@ use camino::Utf8PathBuf;
 use omicron_common::ledger::{Ledger, Ledgerable};
 use serde::{Deserialize, Serialize};
 use sled_hardware_types::Baseboard;
-use slog::{info, Logger};
+use slog::{Logger, info};
 
 /// A persistent version of `Fsm::State`
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,23 +65,27 @@ impl PersistentFsmState {
         node_id: Baseboard,
         config: FsmConfig,
     ) -> (Fsm, u64) {
-        if let Some(ledger) =
-            Ledger::<PersistentFsmState>::new(&log, paths).await
-        {
-            let persistent_state = ledger.into_inner();
-            info!(
-                log,
-                "Loading Fsm::State from ledger in state {} with generation {}",
-                persistent_state.state.name(),
-                persistent_state.generation
-            );
-            (
-                Fsm::new(node_id, config, persistent_state.state),
-                persistent_state.generation,
-            )
-        } else {
-            info!(log, "No ledger found. Loading Fsm::State as Uninitialized");
-            (Fsm::new_uninitialized(node_id, config), 0)
+        match Ledger::<PersistentFsmState>::new(&log, paths).await {
+            Some(ledger) => {
+                let persistent_state = ledger.into_inner();
+                info!(
+                    log,
+                    "Loading Fsm::State from ledger in state {} with generation {}",
+                    persistent_state.state.name(),
+                    persistent_state.generation
+                );
+                (
+                    Fsm::new(node_id, config, persistent_state.state),
+                    persistent_state.generation,
+                )
+            }
+            _ => {
+                info!(
+                    log,
+                    "No ledger found. Loading Fsm::State as Uninitialized"
+                );
+                (Fsm::new_uninitialized(node_id, config), 0)
+            }
         }
     }
 }
@@ -134,17 +138,20 @@ impl NetworkConfig {
         log: &Logger,
         paths: Vec<Utf8PathBuf>,
     ) -> Option<NetworkConfig> {
-        if let Some(ledger) = Ledger::<NetworkConfig>::new(&log, paths).await {
-            let config = ledger.into_inner();
-            info!(
-                log,
-                "Loading network config from ledger with generation {}",
-                config.generation
-            );
-            Some(config)
-        } else {
-            info!(log, "No ledger found for network config");
-            None
+        match Ledger::<NetworkConfig>::new(&log, paths).await {
+            Some(ledger) => {
+                let config = ledger.into_inner();
+                info!(
+                    log,
+                    "Loading network config from ledger with generation {}",
+                    config.generation
+                );
+                Some(config)
+            }
+            _ => {
+                info!(log, "No ledger found for network config");
+                None
+            }
         }
     }
 }

@@ -111,10 +111,9 @@ impl CrucibleDataInner {
     fn create(&mut self, params: CreateRegion) -> Result<Region> {
         let id = Uuid::from_str(&params.id.0).unwrap();
 
-        let state = if let Some(on_create) = &self.on_create {
-            on_create(&params)
-        } else {
-            State::Requested
+        let state = match &self.on_create {
+            Some(on_create) => on_create(&params),
+            _ => State::Requested,
         };
 
         if self.region_creation_error {

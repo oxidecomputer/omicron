@@ -6,11 +6,11 @@
 
 //! Encode / decode a column.
 
+use crate::native::Error;
 use crate::native::block::Column;
 use crate::native::block::DataType;
 use crate::native::block::ValueArray;
 use crate::native::io;
-use crate::native::Error;
 use bytes::Buf as _;
 use bytes::BufMut as _;
 use bytes::BytesMut;
@@ -47,7 +47,7 @@ const MAX_DATETIME64: &str = "2299-12-31 23:59:59.99999999";
 /// Helper macro to quickly and unsafely copy POD data from a message from the
 /// ClickHouse server into our own column data types.
 macro_rules! copyin_pod_values_raw {
-    ($data_type:ty, $src:expr, $n_rows:expr) => {{
+    ($data_type:ty, $src:expr_2021, $n_rows:expr_2021) => {{
         // Compute the number of total bytes, and try to split the source
         // buffer at that value. We fail if we have a short read.
         let n_bytes = $n_rows * core::mem::size_of::<$data_type>();
@@ -105,9 +105,7 @@ macro_rules! copyin_pod_values_raw {
 }
 
 macro_rules! copyin_pod_as_values {
-    ($data_type:ty, $src:expr, $n_rows:expr) => {{
-        ValueArray::from(copyin_pod_values_raw!($data_type, $src, $n_rows))
-    }};
+    ($data_type:ty, $src:expr_2021, $n_rows:expr_2021) => {{ ValueArray::from(copyin_pod_values_raw!($data_type, $src, $n_rows)) }};
 }
 
 /// Decode an array of values in a column.
@@ -333,7 +331,7 @@ pub fn decode(
 /// Helper macro to quickly and unsafely copy out POD data from our column into
 /// a destination buffer meant for the server.
 macro_rules! copyout_pod_values {
-    ($data_type:ty, $values:expr, $dst:expr) => {{
+    ($data_type:ty, $values:expr_2021, $dst:expr_2021) => {{
         let n_bytes = $values.len() * std::mem::size_of::<$data_type>();
         let as_bytes = unsafe {
             std::slice::from_raw_parts($values.as_ptr().cast(), n_bytes)
@@ -756,8 +754,7 @@ mod tests {
                 });
             assert_eq!(name, "foo");
             assert_eq!(
-                col,
-                decoded,
+                col, decoded,
                 "Failed encode/decode round-trip for column with type '{typ:?}'"
             );
         }

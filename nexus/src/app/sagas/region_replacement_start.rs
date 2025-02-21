@@ -46,13 +46,13 @@
 //! steps in the process.
 
 use super::{
-    ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
-    ACTION_GENERATE_ID,
+    ACTION_GENERATE_ID, ActionRegistry, NexusActionContext, NexusSaga,
+    SagaInitError,
 };
+use crate::app::RegionAllocationStrategy;
 use crate::app::db::datastore::VolumeReplaceResult;
 use crate::app::sagas::common_storage::find_only_new_region;
 use crate::app::sagas::declare_saga_actions;
-use crate::app::RegionAllocationStrategy;
 use crate::app::{authn, db};
 use nexus_db_queries::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use omicron_common::api::external::Error;
@@ -683,7 +683,7 @@ async fn srrs_create_fake_volume(
             block_size: 0,
             blocks_per_extent: 0,
             extent_count: 0,
-            gen: 0,
+            r#gen: 0,
             opts: CrucibleOpts {
                 id: *new_volume_id.as_untyped_uuid(),
                 target: vec![old_region_address.into()],
@@ -763,12 +763,12 @@ async fn srrs_update_request_record(
 #[cfg(test)]
 pub(crate) mod test {
     use crate::{
-        app::db::lookup::LookupPath, app::db::DataStore,
-        app::saga::create_saga_dag,
-        app::sagas::region_replacement_start::find_only_new_region,
+        app::RegionAllocationStrategy, app::db::DataStore,
+        app::db::lookup::LookupPath, app::saga::create_saga_dag,
         app::sagas::region_replacement_start::Params,
         app::sagas::region_replacement_start::SagaRegionReplacementStart,
-        app::sagas::test_helpers::test_opctx, app::RegionAllocationStrategy,
+        app::sagas::region_replacement_start::find_only_new_region,
+        app::sagas::test_helpers::test_opctx,
     };
     use chrono::Utc;
     use nexus_db_model::CrucibleDataset;
@@ -878,9 +878,9 @@ pub(crate) mod test {
         // Validate that one of the regions for the disk is the new one
         let new_region =
             datastore.get_region(result.new_region_id.unwrap()).await.unwrap();
-        assert!(allocated_regions
-            .iter()
-            .any(|(_, region)| *region == new_region));
+        assert!(
+            allocated_regions.iter().any(|(_, region)| *region == new_region)
+        );
 
         // Validate the old region has the new volume id
         let old_region =
@@ -1075,8 +1075,8 @@ pub(crate) mod test {
                 }
             }
 
-            VolumeConstructionRequest::Region { gen, .. } => {
-                *gen = 0;
+            VolumeConstructionRequest::Region { r#gen, .. } => {
+                *r#gen = 0;
             }
 
             _ => {}

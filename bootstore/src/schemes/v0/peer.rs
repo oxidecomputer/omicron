@@ -5,9 +5,9 @@
 //! The entrypoint of the v0 scheme for use by bootstrap agent
 
 use super::peer_networking::{
-    spawn_accepted_connection_management_task, spawn_connection_initiator_task,
     AcceptedConnHandle, ConnToMainMsg, ConnToMainMsgInner, MainToConnMsg, Msg,
-    PeerConnHandle,
+    PeerConnHandle, spawn_accepted_connection_management_task,
+    spawn_connection_initiator_task,
 };
 use super::storage::{NetworkConfig, PersistentFsmState};
 use super::{ApiError, ApiOutput, Fsm, FsmConfig, RackUuid};
@@ -15,14 +15,14 @@ use crate::trust_quorum::RackSecret;
 use camino::Utf8PathBuf;
 use derive_more::From;
 use sled_hardware_types::Baseboard;
-use slog::{error, info, o, warn, Logger};
+use slog::{Logger, error, info, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{SocketAddr, SocketAddrV6};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::{interval, Instant, MissedTickBehavior};
+use tokio::time::{Instant, MissedTickBehavior, interval};
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -469,15 +469,18 @@ impl Node {
                         .send(Err(NodeRequestError::RequestAlreadyPending));
                     return;
                 }
-                if let Err(err) = self.fsm.init_rack(
+                match self.fsm.init_rack(
                     Instant::now().into(),
                     rack_uuid,
                     initial_membership,
                 ) {
-                    let _ = responder.send(Err(err.into()));
-                } else {
-                    self.init_responder = Some(responder);
-                    self.deliver_envelopes().await;
+                    Err(err) => {
+                        let _ = responder.send(Err(err.into()));
+                    }
+                    _ => {
+                        self.init_responder = Some(responder);
+                        self.deliver_envelopes().await;
+                    }
                 }
             }
             NodeApiRequest::InitLearner { responder } => {
@@ -487,11 +490,14 @@ impl Node {
                         .send(Err(NodeRequestError::RequestAlreadyPending));
                     return;
                 }
-                if let Err(err) = self.fsm.init_learner(Instant::now().into()) {
-                    let _ = responder.send(Err(err.into()));
-                } else {
-                    self.init_responder = Some(responder);
-                    self.deliver_envelopes().await;
+                match self.fsm.init_learner(Instant::now().into()) {
+                    Err(err) => {
+                        let _ = responder.send(Err(err.into()));
+                    }
+                    _ => {
+                        self.init_responder = Some(responder);
+                        self.deliver_envelopes().await;
+                    }
                 }
             }
             NodeApiRequest::LoadRackSecret { responder } => {
@@ -501,13 +507,14 @@ impl Node {
                         .send(Err(NodeRequestError::RequestAlreadyPending));
                     return;
                 }
-                if let Err(err) =
-                    self.fsm.load_rack_secret(Instant::now().into())
-                {
-                    let _ = responder.send(Err(err.into()));
-                } else {
-                    self.rack_secret_responder = Some(responder);
-                    self.deliver_envelopes().await;
+                match self.fsm.load_rack_secret(Instant::now().into()) {
+                    Err(err) => {
+                        let _ = responder.send(Err(err.into()));
+                    }
+                    _ => {
+                        self.rack_secret_responder = Some(responder);
+                        self.deliver_envelopes().await;
+                    }
                 }
             }
             NodeApiRequest::PeerAddresses(peers) => {
@@ -689,22 +696,23 @@ impl Node {
     // Route messages to their destination connections
     async fn deliver_envelopes(&mut self) {
         for envelope in self.fsm.drain_envelopes() {
-            if let Some(conn_handle) =
-                self.established_connections.get(&envelope.to)
-            {
-                info!(
-                    self.log,
-                    "Sending {:?} to {}", envelope.msg, envelope.to
-                );
-                if let Err(e) = conn_handle
-                    .tx
-                    .send(MainToConnMsg::Msg(Msg::Fsm(envelope.msg)))
-                    .await
-                {
-                    warn!(self.log, "Failed to send {e:?}");
+            match self.established_connections.get(&envelope.to) {
+                Some(conn_handle) => {
+                    info!(
+                        self.log,
+                        "Sending {:?} to {}", envelope.msg, envelope.to
+                    );
+                    if let Err(e) = conn_handle
+                        .tx
+                        .send(MainToConnMsg::Msg(Msg::Fsm(envelope.msg)))
+                        .await
+                    {
+                        warn!(self.log, "Failed to send {e:?}");
+                    }
                 }
-            } else {
-                warn!(self.log, "Missing connection to {}", envelope.to);
+                _ => {
+                    warn!(self.log, "Missing connection to {}", envelope.to);
+                }
             }
         }
     }
@@ -731,13 +739,16 @@ impl Node {
             ApiOutput::RackSecret { secret, .. } => {
                 // We only allow one outstanding request currently, so no
                 // need to get the `request_id` from destructuring above
-                if let Some(responder) = self.rack_secret_responder.take() {
-                    let _ = responder.send(Ok(secret));
-                } else {
-                    warn!(
-                        self.log,
-                        "Rack secret loaded, but no pending responder"
-                    );
+                match self.rack_secret_responder.take() {
+                    Some(responder) => {
+                        let _ = responder.send(Ok(secret));
+                    }
+                    _ => {
+                        warn!(
+                            self.log,
+                            "Rack secret loaded, but no pending responder"
+                        );
+                    }
                 }
             }
             ApiOutput::ShareDistributedToLearner => {
@@ -750,13 +761,16 @@ impl Node {
                 .await;
             }
             ApiOutput::LearningCompleted => {
-                if let Some(responder) = self.init_responder.take() {
-                    let _ = responder.send(Ok(()));
-                } else {
-                    warn!(
-                        self.log,
-                        "Learning completed, but no pending responder"
-                    );
+                match self.init_responder.take() {
+                    Some(responder) => {
+                        let _ = responder.send(Ok(()));
+                    }
+                    _ => {
+                        warn!(
+                            self.log,
+                            "Learning completed, but no pending responder"
+                        );
+                    }
                 }
                 self.fsm_ledger_generation = PersistentFsmState::save(
                     &self.log,
@@ -864,34 +878,38 @@ impl Node {
                 }
             }
             ConnToMainMsgInner::ConnectedInitiator { addr, peer_id } => {
-                if let Some(handle) = self.initiating_connections.remove(&addr)
-                {
-                    // Put back the non-matching connection we removed
-                    // The received message is stale, so we return.
-                    if unique_id != handle.unique_id {
-                        self.initiating_connections.insert(addr, handle);
+                match self.initiating_connections.remove(&addr) {
+                    Some(handle) => {
+                        // Put back the non-matching connection we removed
+                        // The received message is stale, so we return.
+                        if unique_id != handle.unique_id {
+                            self.initiating_connections.insert(addr, handle);
+                            return;
+                        }
+
+                        if let Some(network_config) =
+                            self.network_config.as_ref()
+                        {
+                            self.send_network_config(
+                                network_config.clone(),
+                                &peer_id,
+                                &handle,
+                            )
+                            .await;
+                        }
+
+                        self.established_connections
+                            .insert(peer_id.clone(), handle);
+                    }
+                    _ => {
+                        warn!(
+                            self.log,
+                            "Missing PeerConnHandle; Stale ConnectedInitiator msg";
+                            "addr" => addr.to_string(),
+                            "remote_peer_id" => peer_id.to_string()
+                        );
                         return;
                     }
-
-                    if let Some(network_config) = self.network_config.as_ref() {
-                        self.send_network_config(
-                            network_config.clone(),
-                            &peer_id,
-                            &handle,
-                        )
-                        .await;
-                    }
-
-                    self.established_connections
-                        .insert(peer_id.clone(), handle);
-                } else {
-                    warn!(
-                        self.log,
-                        "Missing PeerConnHandle; Stale ConnectedInitiator msg";
-                        "addr" => addr.to_string(),
-                        "remote_peer_id" => peer_id.to_string()
-                    );
-                    return;
                 }
 
                 if let Err(e) =
@@ -907,18 +925,20 @@ impl Node {
             ConnToMainMsgInner::Disconnected { peer_id } => {
                 // Ignore the stale message if the unique_id doesn't match what
                 // we have stored.
-                if let Some(handle) = self.established_connections.get(&peer_id)
-                {
-                    if unique_id != handle.unique_id {
+                match self.established_connections.get(&peer_id) {
+                    Some(handle) => {
+                        if unique_id != handle.unique_id {
+                            return;
+                        }
+                    }
+                    _ => {
+                        warn!(
+                            self.log,
+                            "Missing PeerConnHandle: Stale Disconnected msg";
+                            "remote_peer_id" => peer_id.to_string()
+                        );
                         return;
                     }
-                } else {
-                    warn!(
-                        self.log,
-                        "Missing PeerConnHandle: Stale Disconnected msg";
-                        "remote_peer_id" => peer_id.to_string()
-                    );
-                    return;
                 }
                 warn!(self.log, "peer disconnected {peer_id}");
                 let handle =
@@ -1014,31 +1034,34 @@ impl Node {
     }
 
     async fn remove_peer(&mut self, addr: SocketAddrV6) {
-        if let Some(handle) = self.initiating_connections.remove(&addr) {
-            // The connection has not yet completed its handshake
-            info!(
-                self.log,
-                "Peer removed: deleting initiating connection";
-                "remote_addr" => addr.to_string()
-            );
-            let _ = handle.tx.send(MainToConnMsg::Close).await;
-        } else {
-            // Do we have an established connection?
-            if let Some((id, handle)) = self
-                .established_connections
-                .iter()
-                .find(|(_, handle)| handle.addr == addr)
-            {
+        match self.initiating_connections.remove(&addr) {
+            Some(handle) => {
+                // The connection has not yet completed its handshake
                 info!(
                     self.log,
-                    "Peer removed: deleting established connection";
-                    "remote_addr" => addr.to_string(),
-                    "remote_peer_id" => id.to_string(),
+                    "Peer removed: deleting initiating connection";
+                    "remote_addr" => addr.to_string()
                 );
                 let _ = handle.tx.send(MainToConnMsg::Close).await;
-                // probably a better way to avoid borrowck issues
-                let id = id.clone();
-                self.established_connections.remove(&id);
+            }
+            _ => {
+                // Do we have an established connection?
+                if let Some((id, handle)) = self
+                    .established_connections
+                    .iter()
+                    .find(|(_, handle)| handle.addr == addr)
+                {
+                    info!(
+                        self.log,
+                        "Peer removed: deleting established connection";
+                        "remote_addr" => addr.to_string(),
+                        "remote_peer_id" => id.to_string(),
+                    );
+                    let _ = handle.tx.send(MainToConnMsg::Close).await;
+                    // probably a better way to avoid borrowck issues
+                    let id = id.clone();
+                    self.established_connections.remove(&id);
+                }
             }
         }
     }
@@ -1172,12 +1195,12 @@ mod tests {
                         learn_timeout: Duration::from_secs(5),
                         rack_init_timeout: Duration::from_secs(10),
                         rack_secret_request_timeout: Duration::from_secs(1),
-                        fsm_state_ledger_paths: vec![tempdir
-                            .path()
-                            .join(&fsm_file)],
-                        network_config_ledger_paths: vec![tempdir
-                            .path()
-                            .join(&network_file)],
+                        fsm_state_ledger_paths: vec![
+                            tempdir.path().join(&fsm_file),
+                        ],
+                        network_config_ledger_paths: vec![
+                            tempdir.path().join(&network_file),
+                        ],
                     };
 
                     TestNode::new(config, log.clone())
@@ -1240,14 +1263,12 @@ mod tests {
                 learn_timeout: Duration::from_secs(5),
                 rack_init_timeout: Duration::from_secs(10),
                 rack_secret_request_timeout: Duration::from_secs(1),
-                fsm_state_ledger_paths: vec![self
-                    .tempdir
-                    .path()
-                    .join(&fsm_file)],
-                network_config_ledger_paths: vec![self
-                    .tempdir
-                    .path()
-                    .join(&network_file)],
+                fsm_state_ledger_paths: vec![
+                    self.tempdir.path().join(&fsm_file),
+                ],
+                network_config_ledger_paths: vec![
+                    self.tempdir.path().join(&network_file),
+                ],
             };
 
             self.learner = Some(TestNode::new(config, self.log.clone()));

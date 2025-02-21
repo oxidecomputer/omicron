@@ -18,7 +18,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use serde_tokenstream::ParseWrapper;
 use syn::spanned::Spanned;
-use syn::{parse_quote, Data, DataStruct, DeriveInput, Error, Fields, Ident};
+use syn::{Data, DataStruct, DeriveInput, Error, Fields, Ident, parse_quote};
 
 mod lookup;
 #[cfg(test)]
@@ -116,16 +116,17 @@ fn get_field_with_name<'a>(
     data: &'a DataStruct,
     name: &str,
 ) -> Option<&'a syn::Field> {
-    if let Fields::Named(ref data_fields) = data.fields {
-        data_fields.named.iter().find(|field| {
-            if let Some(ident) = &field.ident {
-                ident == name
-            } else {
-                false
-            }
-        })
-    } else {
-        None
+    match data.fields {
+        Fields::Named(ref data_fields) => {
+            data_fields.named.iter().find(|field| {
+                if let Some(ident) = &field.ident {
+                    ident == name
+                } else {
+                    false
+                }
+            })
+        }
+        _ => None,
     }
 }
 

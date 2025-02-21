@@ -4,22 +4,22 @@
 
 // Copyright 2022 Oxide Computer Company
 
-use crate::error::SpCommsError;
 use crate::SpIdentifier;
+use crate::error::SpCommsError;
 use dropshot::WebsocketChannelResult;
 use dropshot::WebsocketConnection;
 use dropshot::WebsocketConnectionRaw;
-use futures::stream::SplitSink;
-use futures::stream::SplitStream;
 use futures::SinkExt;
 use futures::StreamExt;
+use futures::stream::SplitSink;
+use futures::stream::SplitStream;
 use gateway_messages::SERIAL_CONSOLE_IDLE_TIMEOUT;
 use gateway_sp_comms::AttachedSerialConsole;
 use gateway_sp_comms::AttachedSerialConsoleSend;
+use slog::Logger;
 use slog::error;
 use slog::info;
 use slog::warn;
-use slog::Logger;
 use slog_error_chain::SlogInlineError;
 use std::borrow::Cow;
 use std::ops::Deref;
@@ -29,12 +29,12 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::time;
 use tokio::time::MissedTickBehavior;
-use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::protocol::Role;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
-use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 
 #[derive(Debug, thiserror::Error, SlogInlineError)]
 enum SerialTaskError {

@@ -35,7 +35,7 @@ use sled_agent_api::ArtifactPutResponse;
 use sled_storage::dataset::M2_ARTIFACT_DATASET;
 use sled_storage::error::Error as StorageError;
 use sled_storage::manager::StorageHandle;
-use slog::{error, info, Logger};
+use slog::{Logger, error, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
@@ -153,7 +153,7 @@ pub enum StartError {
 }
 
 macro_rules! log_and_store {
-    ($last_error:expr, $log:expr, $verb:literal, $path:expr, $err:expr) => {{
+    ($last_error:expr_2021, $log:expr_2021, $verb:literal, $path:expr_2021, $err:expr_2021) => {{
         error!(
             $log,
             concat!("Failed to ", $verb, " path");
@@ -259,11 +259,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
                 }
             }
         }
-        if any_datasets {
-            Ok(map)
-        } else {
-            Err(Error::NoUpdateDataset)
-        }
+        if any_datasets { Ok(map) } else { Err(Error::NoUpdateDataset) }
     }
 
     /// Common implementation for all artifact write operations that creates
@@ -422,14 +418,17 @@ impl<T: DatasetsManager> ArtifactStore<T> {
                 }
             }
         }
-        if let Some(last_error) = last_error {
-            Err(last_error)
-        } else if any_datasets {
-            Ok(())
-        } else {
-            // If we're here because there aren't any update datasets, we should
-            // report Service Unavailable instead of a successful result.
-            Err(Error::NoUpdateDataset)
+        match last_error {
+            Some(last_error) => Err(last_error),
+            _ => {
+                if any_datasets {
+                    Ok(())
+                } else {
+                    // If we're here because there aren't any update datasets, we should
+                    // report Service Unavailable instead of a successful result.
+                    Err(Error::NoUpdateDataset)
+                }
+            }
         }
     }
 }
@@ -803,12 +802,9 @@ mod test {
                 .await
                 .unwrap();
             // list lists the file
-            assert!(store
-                .list()
-                .await
-                .unwrap()
-                .into_iter()
-                .eq([(TEST_HASH, 2)]));
+            assert!(
+                store.list().await.unwrap().into_iter().eq([(TEST_HASH, 2)])
+            );
             // get succeeds, file reads back OK
             let mut file = store.get(TEST_HASH).await.unwrap();
             let mut vec = Vec::new();

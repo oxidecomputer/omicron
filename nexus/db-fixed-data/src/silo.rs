@@ -6,8 +6,8 @@ use nexus_db_model as model;
 use nexus_types::{
     external_api::{params, shared},
     silo::{
-        default_silo_name, internal_silo_name, DEFAULT_SILO_ID,
-        INTERNAL_SILO_ID,
+        DEFAULT_SILO_ID, INTERNAL_SILO_ID, default_silo_name,
+        internal_silo_name,
     },
 };
 use omicron_common::api::external::IdentityMetadataCreateParams;

@@ -13,31 +13,31 @@ use diesel::ExpressionMethods;
 use diesel::QueryDsl;
 use diesel::SelectableHelper;
 use dropshot::test_util::ClientTestContext;
-use http::method::Method;
 use http::StatusCode;
+use http::method::Method;
 use nexus_config::RegionAllocationStrategy;
-use nexus_db_model::to_db_typed_uuid;
 use nexus_db_model::CrucibleDataset;
 use nexus_db_model::RegionSnapshotReplacement;
 use nexus_db_model::RegionSnapshotReplacementState;
 use nexus_db_model::Volume;
 use nexus_db_model::VolumeResourceUsage;
 use nexus_db_model::VolumeResourceUsageRecord;
+use nexus_db_model::to_db_typed_uuid;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::CrucibleResources;
 use nexus_db_queries::db::datastore::ExistingTarget;
 use nexus_db_queries::db::datastore::RegionAllocationFor;
 use nexus_db_queries::db::datastore::RegionAllocationParameters;
 use nexus_db_queries::db::datastore::ReplacementTarget;
+use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::datastore::VolumeReplaceResult;
 use nexus_db_queries::db::datastore::VolumeToDelete;
 use nexus_db_queries::db::datastore::VolumeWithTarget;
-use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::lookup::LookupPath;
-use nexus_db_queries::db::pagination::paginated;
 use nexus_db_queries::db::pagination::Paginator;
-use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::pagination::paginated;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -57,8 +57,8 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
 use omicron_common::api::internal;
-use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::DownstairsRegionUuid;
 use omicron_uuid_kinds::DownstairsUuid;
@@ -69,7 +69,7 @@ use omicron_uuid_kinds::UpstairsUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use rand::prelude::SliceRandom;
-use rand::{rngs::StdRng, SeedableRng};
+use rand::{SeedableRng, rngs::StdRng};
 use sled_agent_client::{CrucibleOpts, VolumeConstructionRequest};
 use std::collections::HashSet;
 use std::net::{SocketAddr, SocketAddrV6};
@@ -2264,7 +2264,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
                         block_size: 512,
                         blocks_per_extent: 1,
                         extent_count: 1,
-                        gen: 1,
+                        r#gen: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![
@@ -2384,7 +2384,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
                         block_size: 512,
                         blocks_per_extent: 1,
                         extent_count: 1,
-                        gen: 1,
+                        r#gen: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![
@@ -2615,14 +2615,14 @@ async fn test_snapshot_create_saga_unwinds_correctly(
 // and UUID you passed in.
 fn create_region(
     block_size: u64,
-    gen: u64,
+    r#gen: u64,
     id: Uuid,
 ) -> VolumeConstructionRequest {
     VolumeConstructionRequest::Region {
         block_size,
         blocks_per_extent: 1,
         extent_count: 1,
-        gen,
+        r#gen,
         opts: CrucibleOpts {
             id,
             target: Vec::new(),
@@ -2665,10 +2665,10 @@ fn volume_match_gen(
                         block_size: _,
                         blocks_per_extent: _,
                         extent_count: _,
-                        gen,
+                        r#gen,
                         opts: _,
                     } => {
-                        assert_eq!(*gen, expected_gen[index].unwrap());
+                        assert_eq!(*r#gen, expected_gen[index].unwrap());
                     }
                     _ => {
                         assert!(expected_gen[index].is_none());
@@ -3632,7 +3632,7 @@ impl TestReadOnlyRegionReferenceUsage {
                         block_size: 512,
                         blocks_per_extent: self.region.blocks_per_extent(),
                         extent_count: self.region.extent_count() as u32,
-                        gen: 1,
+                        r#gen: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![self.region_address.into()],
@@ -3718,23 +3718,30 @@ impl TestReadOnlyRegionReferenceUsage {
     }
 
     pub async fn validate_region_returned_for_cleanup(&self) {
-        assert!(self
-            .datastore
-            .regions_to_delete(&self.last_resources_to_delete.as_ref().unwrap())
-            .await
-            .unwrap()
-            .into_iter()
-            .any(|(_, r)| r.id() == self.region.id()));
+        assert!(
+            self.datastore
+                .regions_to_delete(
+                    &self.last_resources_to_delete.as_ref().unwrap()
+                )
+                .await
+                .unwrap()
+                .into_iter()
+                .any(|(_, r)| r.id() == self.region.id())
+        );
     }
 
     pub async fn validate_region_not_returned_for_cleanup(&self) {
-        assert!(!self
-            .datastore
-            .regions_to_delete(&self.last_resources_to_delete.as_ref().unwrap())
-            .await
-            .unwrap()
-            .into_iter()
-            .any(|(_, r)| r.id() == self.region.id()));
+        assert!(
+            !self
+                .datastore
+                .regions_to_delete(
+                    &self.last_resources_to_delete.as_ref().unwrap()
+                )
+                .await
+                .unwrap()
+                .into_iter()
+                .any(|(_, r)| r.id() == self.region.id())
+        );
     }
 
     // read-only regions should never be returned by find_deleted_volume_regions
@@ -3742,10 +3749,12 @@ impl TestReadOnlyRegionReferenceUsage {
         let freed_crucible_resources =
             self.datastore.find_deleted_volume_regions().await.unwrap();
 
-        assert!(!freed_crucible_resources
-            .datasets_and_regions
-            .into_iter()
-            .any(|(_, r)| r.id() == self.region.id()));
+        assert!(
+            !freed_crucible_resources
+                .datasets_and_regions
+                .into_iter()
+                .any(|(_, r)| r.id() == self.region.id())
+        );
     }
 
     pub async fn create_first_volume_region_in_rop(&self) {
@@ -3761,7 +3770,7 @@ impl TestReadOnlyRegionReferenceUsage {
                             block_size: 512,
                             blocks_per_extent: self.region.blocks_per_extent(),
                             extent_count: self.region.extent_count() as u32,
-                            gen: 1,
+                            r#gen: 1,
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
                                 target: vec![self.region_address.into()],
@@ -3793,7 +3802,7 @@ impl TestReadOnlyRegionReferenceUsage {
                         block_size: 512,
                         blocks_per_extent: self.region.blocks_per_extent(),
                         extent_count: self.region.extent_count() as u32,
-                        gen: 1,
+                        r#gen: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![self.region_address.into()],
@@ -3827,7 +3836,7 @@ impl TestReadOnlyRegionReferenceUsage {
                             block_size: 512,
                             blocks_per_extent: self.region.blocks_per_extent(),
                             extent_count: self.region.extent_count() as u32,
-                            gen: 1,
+                            r#gen: 1,
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
                                 target: vec![self.region_address.into()],
@@ -4148,15 +4157,17 @@ async fn test_read_only_region_reference_counting(
     let read_only_region_address: SocketAddrV6 =
         nexus.region_addr(&opctx.log, read_only_region.id()).await.unwrap();
 
-    assert!(datastore
-        .find_volumes_referencing_socket_addr(
-            &opctx,
-            read_only_region_address.into()
-        )
-        .await
-        .unwrap()
-        .iter()
-        .any(|volume| volume.id() == db_disk_from_snapshot.volume_id()));
+    assert!(
+        datastore
+            .find_volumes_referencing_socket_addr(
+                &opctx,
+                read_only_region_address.into()
+            )
+            .await
+            .unwrap()
+            .iter()
+            .any(|volume| volume.id() == db_disk_from_snapshot.volume_id())
+    );
 
     // Expect that there are two read-only region references now: one in the
     // snapshot volume, and one in the disk-from-snap volume.
@@ -4172,9 +4183,11 @@ async fn test_read_only_region_reference_counting(
 
     assert_eq!(usage.len(), 2);
     assert!(usage.iter().any(|r| r.volume_id() == db_snapshot.volume_id()));
-    assert!(usage
-        .iter()
-        .any(|r| r.volume_id() == db_disk_from_snapshot.volume_id()));
+    assert!(
+        usage
+            .iter()
+            .any(|r| r.volume_id() == db_disk_from_snapshot.volume_id())
+    );
 
     // Deleting the snapshot should _not_ cause the region to get deleted from
     // CRDB
@@ -4409,15 +4422,17 @@ async fn test_read_only_region_reference_counting_layers(
     let read_only_region_address: SocketAddrV6 =
         nexus.region_addr(&opctx.log, read_only_region.id()).await.unwrap();
 
-    assert!(datastore
-        .find_volumes_referencing_socket_addr(
-            &opctx,
-            read_only_region_address.into()
-        )
-        .await
-        .unwrap()
-        .iter()
-        .any(|volume| volume.id() == db_disk_from_snapshot.volume_id()));
+    assert!(
+        datastore
+            .find_volumes_referencing_socket_addr(
+                &opctx,
+                read_only_region_address.into()
+            )
+            .await
+            .unwrap()
+            .iter()
+            .any(|volume| volume.id() == db_disk_from_snapshot.volume_id())
+    );
 
     // Expect that there are two read-only region references now: one in the
     // snapshot volume, and one in the disk-from-snap volume.
@@ -4433,9 +4448,11 @@ async fn test_read_only_region_reference_counting_layers(
 
     assert_eq!(usage.len(), 2);
     assert!(usage.iter().any(|r| r.volume_id() == db_snapshot.volume_id()));
-    assert!(usage
-        .iter()
-        .any(|r| r.volume_id() == db_disk_from_snapshot.volume_id()));
+    assert!(
+        usage
+            .iter()
+            .any(|r| r.volume_id() == db_disk_from_snapshot.volume_id())
+    );
 
     // Take a snapshot of the disk-from-snapshot disk
 
@@ -4471,12 +4488,14 @@ async fn test_read_only_region_reference_counting_layers(
 
     assert_eq!(usage.len(), 3);
     assert!(usage.iter().any(|r| r.volume_id() == db_snapshot.volume_id()));
-    assert!(usage
-        .iter()
-        .any(|r| r.volume_id() == db_disk_from_snapshot.volume_id()));
-    assert!(usage
-        .iter()
-        .any(|r| r.volume_id() == db_double_snapshot.volume_id()));
+    assert!(
+        usage
+            .iter()
+            .any(|r| r.volume_id() == db_disk_from_snapshot.volume_id())
+    );
+    assert!(
+        usage.iter().any(|r| r.volume_id() == db_double_snapshot.volume_id())
+    );
 
     // Delete resources, assert volume resource usage records along the way
 
@@ -4499,9 +4518,9 @@ async fn test_read_only_region_reference_counting_layers(
 
     assert_eq!(usage.len(), 2);
     assert!(usage.iter().any(|r| r.volume_id() == db_snapshot.volume_id()));
-    assert!(usage
-        .iter()
-        .any(|r| r.volume_id() == db_double_snapshot.volume_id()));
+    assert!(
+        usage.iter().any(|r| r.volume_id() == db_double_snapshot.volume_id())
+    );
 
     NexusRequest::object_delete(client, &get_snapshot_url("snapshot"))
         .authn_as(AuthnMode::PrivilegedUser)
@@ -4521,9 +4540,9 @@ async fn test_read_only_region_reference_counting_layers(
         .unwrap();
 
     assert_eq!(usage.len(), 1);
-    assert!(usage
-        .iter()
-        .any(|r| r.volume_id() == db_double_snapshot.volume_id()));
+    assert!(
+        usage.iter().any(|r| r.volume_id() == db_double_snapshot.volume_id())
+    );
 
     NexusRequest::object_delete(client, &get_snapshot_url("double-snapshot"))
         .authn_as(AuthnMode::PrivilegedUser)
@@ -4852,9 +4871,11 @@ async fn test_volume_remove_rop_respects_accounting(
 
         assert_eq!(usage.len(), 2);
         assert!(usage.iter().any(|r| r.volume_id() == db_snapshot.volume_id()));
-        assert!(usage
-            .iter()
-            .any(|r| r.volume_id() == db_disk_from_snapshot.volume_id()));
+        assert!(
+            usage
+                .iter()
+                .any(|r| r.volume_id() == db_disk_from_snapshot.volume_id())
+        );
     }
 
     // Remove the ROP from disk-from-snapshot
@@ -5034,9 +5055,11 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
 
         assert_eq!(usage.len(), 3);
         assert!(usage.iter().any(|r| r.volume_id() == db_snapshot.volume_id()));
-        assert!(usage
-            .iter()
-            .any(|r| r.volume_id() == db_disk_from_snapshot.volume_id()));
+        assert!(
+            usage
+                .iter()
+                .any(|r| r.volume_id() == db_disk_from_snapshot.volume_id())
+        );
         assert!(usage.iter().any(
             |r| r.volume_id() == db_another_disk_from_snapshot.volume_id()
         ));
@@ -5124,8 +5147,10 @@ async fn perform_migration(datastore: &DataStore) {
         "../../../schema/crdb/crucible-ref-count-records/up08.sql"
     );
 
-    assert!(MIGRATION_TO_REF_COUNT_WITH_RECORDS_SQL
-        .contains("INSERT INTO volume_resource_usage"));
+    assert!(
+        MIGRATION_TO_REF_COUNT_WITH_RECORDS_SQL
+            .contains("INSERT INTO volume_resource_usage")
+    );
 
     let conn = datastore.pool_connection_for_tests().await.unwrap();
 
@@ -5344,11 +5369,9 @@ async fn test_migrate_to_ref_count_with_records_soft_delete_volume(
 
     // Assert that the region snapshots did not have deleted set to true
 
-    assert!(datastore
-        .snapshots_to_delete(&resources)
-        .await
-        .unwrap()
-        .is_empty());
+    assert!(
+        datastore.snapshots_to_delete(&resources).await.unwrap().is_empty()
+    );
 
     // This means that the snapshot volume is soft-deleted, make sure the
     // migration does not make usage records for it!
@@ -5444,7 +5467,7 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
                         block_size: 512,
                         blocks_per_extent: 1,
                         extent_count: 1,
-                        gen: 1,
+                        r#gen: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![
@@ -5481,7 +5504,7 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
                         block_size: 512,
                         blocks_per_extent: 1,
                         extent_count: 1,
-                        gen: 1,
+                        r#gen: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![
@@ -6055,7 +6078,7 @@ async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
                     block_size: 512,
                     blocks_per_extent: 1,
                     extent_count: 1,
-                    gen: 1,
+                    r#gen: 1,
                     opts: CrucibleOpts {
                         id: Uuid::new_v4(),
                         target: vec![
@@ -6240,7 +6263,7 @@ async fn test_no_zombie_read_write_regions(
                     block_size: 512,
                     blocks_per_extent: 1,
                     extent_count: 1,
-                    gen: 1,
+                    r#gen: 1,
                     opts: CrucibleOpts {
                         id: Uuid::new_v4(),
                         target: vec![

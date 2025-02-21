@@ -5,7 +5,7 @@
 use super::{Generation, Project};
 use crate::collection::DatastoreCollectionConfig;
 use crate::schema::{image, project, silo};
-use crate::{impl_enum_type, DatabaseString, Image};
+use crate::{DatabaseString, Image, impl_enum_type};
 use db_macros::Resource;
 use nexus_types::external_api::shared::{
     FleetRole, SiloIdentityMode, SiloRole,

@@ -1961,109 +1961,112 @@ impl ComponentUpdateListState {
 
         // Generate the status text (displayed in a single line at the top.)
         let mut status_text = Vec::new();
-        let show_help = if let Some(root_execution_id) =
-            event_buffer.root_execution_id()
-        {
-            let summary = steps.summarize();
-            let summary = summary.get(&root_execution_id).expect(
+        let show_help = match event_buffer.root_execution_id() {
+            Some(root_execution_id) => {
+                let summary = steps.summarize();
+                let summary = summary.get(&root_execution_id).expect(
                 "root execution ID should have a summary associated with it",
             );
 
-            match &summary.execution_status {
-                ExecutionStatus::NotStarted => {
-                    status_text.push(Span::styled(
-                        "Update not started",
-                        style::plain_text(),
-                    ));
-                    None
-                }
-                ExecutionStatus::Running { step_key, .. } => {
-                    status_text
-                        .push(Span::styled("Update ", style::plain_text()));
-                    status_text.push(Span::styled(
-                        "running",
-                        style::successful_update_bold(),
-                    ));
-                    status_text.push(Span::styled(
-                        format!(
-                            " (step {})",
-                            ProgressRatioDisplay::index_and_total(
-                                step_key.index,
-                                summary.total_steps,
-                            )
-                        ),
-                        style::plain_text(),
-                    ));
-                    Some(ComponentUpdateShowHelp::Running)
-                }
-                ExecutionStatus::Terminal(info) => {
-                    match info.kind {
-                        TerminalKind::Completed => {
-                            status_text.push(Span::styled(
-                                "Update ",
-                                style::plain_text(),
-                            ));
-                            status_text.push(Span::styled(
-                                "completed",
-                                style::successful_update_bold(),
-                            ));
-                        }
-                        TerminalKind::Failed => {
-                            status_text.push(Span::styled(
-                                "Update ",
-                                style::plain_text(),
-                            ));
-                            status_text.push(Span::styled(
-                                "failed",
-                                style::failed_update_bold(),
-                            ));
-                            status_text.push(Span::styled(
-                                format!(
-                                    " at step {}",
-                                    ProgressRatioDisplay::index_and_total(
-                                        info.step_key.index,
-                                        summary.total_steps,
-                                    )
-                                ),
-                                style::plain_text(),
-                            ));
-                        }
-                        TerminalKind::Aborted => {
-                            status_text.push(Span::styled(
-                                "Update ",
-                                style::plain_text(),
-                            ));
-                            status_text.push(Span::styled(
-                                "aborted",
-                                style::failed_update_bold(),
-                            ));
-                            status_text.push(Span::styled(
-                                format!(
-                                    " at step {}",
-                                    ProgressRatioDisplay::index_and_total(
-                                        info.step_key.index,
-                                        summary.total_steps,
-                                    )
-                                ),
-                                style::plain_text(),
-                            ));
-                        }
-                    }
-
-                    if let Some(total_elapsed) = info.root_total_elapsed {
+                match &summary.execution_status {
+                    ExecutionStatus::NotStarted => {
                         status_text.push(Span::styled(
-                            format!(" after {:.2?}", total_elapsed),
+                            "Update not started",
                             style::plain_text(),
                         ));
+                        None
                     }
+                    ExecutionStatus::Running { step_key, .. } => {
+                        status_text
+                            .push(Span::styled("Update ", style::plain_text()));
+                        status_text.push(Span::styled(
+                            "running",
+                            style::successful_update_bold(),
+                        ));
+                        status_text.push(Span::styled(
+                            format!(
+                                " (step {})",
+                                ProgressRatioDisplay::index_and_total(
+                                    step_key.index,
+                                    summary.total_steps,
+                                )
+                            ),
+                            style::plain_text(),
+                        ));
+                        Some(ComponentUpdateShowHelp::Running)
+                    }
+                    ExecutionStatus::Terminal(info) => {
+                        match info.kind {
+                            TerminalKind::Completed => {
+                                status_text.push(Span::styled(
+                                    "Update ",
+                                    style::plain_text(),
+                                ));
+                                status_text.push(Span::styled(
+                                    "completed",
+                                    style::successful_update_bold(),
+                                ));
+                            }
+                            TerminalKind::Failed => {
+                                status_text.push(Span::styled(
+                                    "Update ",
+                                    style::plain_text(),
+                                ));
+                                status_text.push(Span::styled(
+                                    "failed",
+                                    style::failed_update_bold(),
+                                ));
+                                status_text.push(Span::styled(
+                                    format!(
+                                        " at step {}",
+                                        ProgressRatioDisplay::index_and_total(
+                                            info.step_key.index,
+                                            summary.total_steps,
+                                        )
+                                    ),
+                                    style::plain_text(),
+                                ));
+                            }
+                            TerminalKind::Aborted => {
+                                status_text.push(Span::styled(
+                                    "Update ",
+                                    style::plain_text(),
+                                ));
+                                status_text.push(Span::styled(
+                                    "aborted",
+                                    style::failed_update_bold(),
+                                ));
+                                status_text.push(Span::styled(
+                                    format!(
+                                        " at step {}",
+                                        ProgressRatioDisplay::index_and_total(
+                                            info.step_key.index,
+                                            summary.total_steps,
+                                        )
+                                    ),
+                                    style::plain_text(),
+                                ));
+                            }
+                        }
 
-                    Some(ComponentUpdateShowHelp::Completed)
+                        if let Some(total_elapsed) = info.root_total_elapsed {
+                            status_text.push(Span::styled(
+                                format!(" after {:.2?}", total_elapsed),
+                                style::plain_text(),
+                            ));
+                        }
+
+                        Some(ComponentUpdateShowHelp::Completed)
+                    }
                 }
             }
-        } else {
-            status_text
-                .push(Span::styled("Update not started", style::plain_text()));
-            None
+            _ => {
+                status_text.push(Span::styled(
+                    "Update not started",
+                    style::plain_text(),
+                ));
+                None
+            }
         };
 
         let mut list_items = IndexMap::new();
@@ -2242,20 +2245,26 @@ impl ComponentUpdateListState {
     }
 
     fn select_first(&mut self) {
-        if let Some((step_key, _)) = self.list_items.first() {
-            self.selected = Some(*step_key);
-            self.tui_list_state.select(Some(0));
-        } else {
-            // The list is empty. Don't need to do anything here.
+        match self.list_items.first() {
+            Some((step_key, _)) => {
+                self.selected = Some(*step_key);
+                self.tui_list_state.select(Some(0));
+            }
+            _ => {
+                // The list is empty. Don't need to do anything here.
+            }
         }
     }
 
     fn select_last(&mut self) {
-        if let Some((step_key, _)) = self.list_items.last() {
-            self.selected = Some(*step_key);
-            self.tui_list_state.select(Some(self.list_items.len() - 1));
-        } else {
-            // The list is empty. Don't need to do anything here.
+        match self.list_items.last() {
+            Some((step_key, _)) => {
+                self.selected = Some(*step_key);
+                self.tui_list_state.select(Some(self.list_items.len() - 1));
+            }
+            _ => {
+                // The list is empty. Don't need to do anything here.
+            }
         }
     }
 }

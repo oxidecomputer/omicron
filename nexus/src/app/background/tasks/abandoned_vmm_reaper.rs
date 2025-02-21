@@ -33,13 +33,13 @@
 
 use crate::app::background::BackgroundTask;
 use anyhow::Context;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use nexus_db_model::Vmm;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
-use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
 use omicron_uuid_kinds::{GenericUuid, PropolisUuid};
 use std::sync::Arc;
@@ -250,7 +250,7 @@ mod tests {
                         runtime: VmmRuntimeState {
                             state: VmmState::Destroyed,
                             time_state_updated: Utc::now(),
-                            gen: Generation::new(),
+                            r#gen: Generation::new(),
                         }
                     }),
                 )
@@ -264,16 +264,18 @@ mod tests {
             );
             let constraints =
                 nexus_db_model::SledReservationConstraints::none();
-            dbg!(datastore
-                .sled_reservation_create(
-                    &opctx,
-                    destroyed_vmm_id.into_untyped_uuid(),
-                    SledResourceKind::Instance,
-                    resources.clone(),
-                    constraints,
-                )
-                .await
-                .expect("sled reservation should be created successfully"));
+            dbg!(
+                datastore
+                    .sled_reservation_create(
+                        &opctx,
+                        destroyed_vmm_id.into_untyped_uuid(),
+                        SledResourceKind::Instance,
+                        resources.clone(),
+                        constraints,
+                    )
+                    .await
+                    .expect("sled reservation should be created successfully")
+            );
             Self { destroyed_vmm_id }
         }
 

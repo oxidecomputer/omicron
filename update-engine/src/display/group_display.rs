@@ -141,42 +141,43 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
         K: Borrow<Q>,
         Q: Ord,
     {
-        if let Some(state) = self.single_states.get_mut(key) {
-            let result = state.add_event_report(event_report);
-            // Set self.start_sw to the max of root_total_elapsed and the current value.
-            if let Some(root_total_elapsed) = result.root_total_elapsed {
-                if self.start_sw.elapsed() < root_total_elapsed {
-                    self.start_sw =
-                        TokioSw::with_elapsed_started(root_total_elapsed);
+        match self.single_states.get_mut(key) {
+            Some(state) => {
+                let result = state.add_event_report(event_report);
+                // Set self.start_sw to the max of root_total_elapsed and the current value.
+                if let Some(root_total_elapsed) = result.root_total_elapsed {
+                    if self.start_sw.elapsed() < root_total_elapsed {
+                        self.start_sw =
+                            TokioSw::with_elapsed_started(root_total_elapsed);
+                    }
                 }
+
+                self.stats.apply_result(result);
+
+                if result.before != result.after {
+                    slog::debug!(
+                        self.log,
+                        "add_event_report caused state transition";
+                        "prefix" => &state.prefix,
+                        "before" => %result.before,
+                        "after" => %result.after,
+                        "current_stats" => ?self.stats,
+                        "root_total_elapsed" => ?result.root_total_elapsed,
+                    );
+                } else {
+                    slog::trace!(
+                        self.log,
+                        "add_event_report called, state did not change";
+                        "prefix" => &state.prefix,
+                        "state" => %result.before,
+                        "current_stats" => ?self.stats,
+                        "root_total_elapsed" => ?result.root_total_elapsed,
+                    );
+                }
+
+                Ok(())
             }
-
-            self.stats.apply_result(result);
-
-            if result.before != result.after {
-                slog::debug!(
-                    self.log,
-                    "add_event_report caused state transition";
-                    "prefix" => &state.prefix,
-                    "before" => %result.before,
-                    "after" => %result.after,
-                    "current_stats" => ?self.stats,
-                    "root_total_elapsed" => ?result.root_total_elapsed,
-                );
-            } else {
-                slog::trace!(
-                    self.log,
-                    "add_event_report called, state did not change";
-                    "prefix" => &state.prefix,
-                    "state" => %result.before,
-                    "current_stats" => ?self.stats,
-                    "root_total_elapsed" => ?result.root_total_elapsed,
-                );
-            }
-
-            Ok(())
-        } else {
-            Err(UnknownReportKey {})
+            _ => Err(UnknownReportKey {}),
         }
     }
 

@@ -283,10 +283,9 @@ impl Inner {
         loop {
             let incr_throttle_count: Pin<
                 Box<dyn Future<Output = Option<usize>> + Send>,
-            > = if let Some(throttler) = throttler.as_mut() {
-                Box::pin(throttler.recv())
-            } else {
-                Box::pin(future::pending())
+            > = match throttler.as_mut() {
+                Some(throttler) => Box::pin(throttler.recv()),
+                _ => Box::pin(future::pending()),
             };
             select! {
                 Some(n) = incr_throttle_count => {

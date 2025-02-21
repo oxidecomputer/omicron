@@ -10,7 +10,7 @@ use crate::collection::DatastoreAttachTargetConfig;
 use crate::schema::{disk, external_ip, instance};
 use chrono::{DateTime, TimeDelta, Utc};
 use db_macros::Resource;
-use diesel::expression::{is_aggregate, ValidGrouping};
+use diesel::expression::{ValidGrouping, is_aggregate};
 use diesel::pg;
 use diesel::prelude::*;
 use diesel::sql_types::{Bool, Nullable};
@@ -188,7 +188,7 @@ pub struct InstanceRuntimeState {
     /// including the fallback state, the instance's active Propolis ID, and its
     /// migration IDs.
     #[diesel(column_name = state_generation)]
-    pub gen: Generation,
+    pub r#gen: Generation,
 
     /// The ID of the Propolis server hosting the current incarnation of this
     /// instance, or None if the instance has no active VMM.
@@ -235,7 +235,7 @@ impl InstanceRuntimeState {
             propolis_id: None,
             dst_propolis_id: None,
             migration_id: None,
-            gen: Generation::new(),
+            r#gen: Generation::new(),
             time_last_auto_restarted: None,
         }
     }
@@ -399,16 +399,16 @@ impl InstanceAutoRestart {
     /// Yes, this should probably be in `nexus-db-queries`, but it seemed nice
     /// for it to be defined on the same struct as the in-memory logic
     /// (`can_reincarnate`).
-    pub fn filter_reincarnatable(
-    ) -> impl diesel::query_builder::QueryFragment<pg::Pg>
-           + diesel::query_builder::QueryId
-           // All elements in this expression appear on the `instance` table, so
-           // it's a valid `filter` for that table, and the expression evaluates
-           // to a bool (or NULL), making it a valid WHERE clause.
-           + AppearsOnTable<instance::table, SqlType = Nullable<Bool>>
-           // I think this trait tells diesel that the query fragment has no
-           // GROUP BY clause, so that it knows it can be used as a WHERE clause
-           + ValidGrouping<(), IsAggregate = is_aggregate::No> {
+    pub fn filter_reincarnatable()
+    -> impl diesel::query_builder::QueryFragment<pg::Pg>
+    + diesel::query_builder::QueryId
+    // All elements in this expression appear on the `instance` table, so
+    // it's a valid `filter` for that table, and the expression evaluates
+    // to a bool (or NULL), making it a valid WHERE clause.
+    + AppearsOnTable<instance::table, SqlType = Nullable<Bool>>
+    // I think this trait tells diesel that the query fragment has no
+    // GROUP BY clause, so that it knows it can be used as a WHERE clause
+    + ValidGrouping<(), IsAggregate = is_aggregate::No> {
         use instance::dsl;
 
         let now = diesel::dsl::now.into_sql::<pg::sql_types::Timestamptz>();

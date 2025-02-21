@@ -47,13 +47,12 @@ impl core::ops::Deref for PortInner {
 impl Drop for PortInner {
     fn drop(&mut self) {
         let err = match Handle::new() {
-            Ok(hdl) => {
-                if let Err(e) = hdl.delete_xde(&self.name) {
-                    e
-                } else {
+            Ok(hdl) => match hdl.delete_xde(&self.name) {
+                Err(e) => e,
+                _ => {
                     return;
                 }
-            }
+            },
             Err(e) => e,
         };
         eprintln!(

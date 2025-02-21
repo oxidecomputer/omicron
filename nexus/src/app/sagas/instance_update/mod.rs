@@ -341,12 +341,12 @@
 //!     tasks, as appropriate.
 
 use super::{
-    ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
-    ACTION_GENERATE_ID,
+    ACTION_GENERATE_ID, ActionRegistry, NexusActionContext, NexusSaga,
+    SagaInitError,
 };
-use crate::app::db::datastore::instance;
 use crate::app::db::datastore::InstanceGestalt;
 use crate::app::db::datastore::VmmStateUpdateResult;
+use crate::app::db::datastore::instance;
 use crate::app::db::lookup::LookupPath;
 use crate::app::db::model::ByteCount;
 use crate::app::db::model::Generation;
@@ -508,7 +508,7 @@ impl UpdatesRequired {
         snapshot: &InstanceGestalt,
     ) -> Option<Self> {
         let mut new_runtime = snapshot.instance.runtime().clone();
-        new_runtime.gen = Generation(new_runtime.gen.next());
+        new_runtime.r#gen = Generation(new_runtime.r#gen.next());
         new_runtime.time_updated = Utc::now();
         let instance_id = snapshot.instance.id();
 
@@ -698,7 +698,7 @@ impl UpdatesRequired {
             // that the instance's oximeter producer should be cleaned up.
             Some(Deprovision {
                 project_id: snapshot.instance.project_id,
-                cpus_diff: i64::from(snapshot.instance.ncpus.0 .0),
+                cpus_diff: i64::from(snapshot.instance.ncpus.0.0),
                 ram_diff: snapshot.instance.memory,
             })
         } else {
@@ -1372,7 +1372,7 @@ async fn unwind_instance_lock(
     // - fails *because the instance doesn't exist*, in which case we can die
     //   happily because it doesn't matter if the instance is actually unlocked.
     use dropshot::HttpError;
-    use futures::{future, TryFutureExt};
+    use futures::{TryFutureExt, future};
     use omicron_common::backoff;
 
     let osagactx = sagactx.user_data();
@@ -1470,11 +1470,11 @@ async fn unwind_instance_lock(
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::app::OpContext;
     use crate::app::db::model::Instance;
     use crate::app::db::model::VmmRuntimeState;
     use crate::app::saga::create_saga_dag;
     use crate::app::sagas::test_helpers;
-    use crate::app::OpContext;
     use crate::external_api::params;
     use chrono::Utc;
     use dropshot::test_util::ClientTestContext;
@@ -1663,7 +1663,7 @@ mod test {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    gen: Generation(instance.runtime().gen.0.next()),
+                    r#gen: Generation(instance.runtime().r#gen.0.next()),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -1890,7 +1890,7 @@ mod test {
                 &vmm_id,
                 &VmmRuntimeState {
                     time_state_updated: Utc::now(),
-                    gen: Generation(vmm.runtime.gen.0.next()),
+                    r#gen: Generation(vmm.runtime.r#gen.0.next()),
                     state: VmmState::Destroyed,
                 },
             )
@@ -2554,7 +2554,7 @@ mod test {
             let vmm_id = PropolisUuid::from_untyped_uuid(src_vmm.id);
             let new_runtime = nexus_db_model::VmmRuntimeState {
                 time_state_updated: Utc::now(),
-                gen: Generation(src_vmm.runtime.gen.0.next()),
+                r#gen: Generation(src_vmm.runtime.r#gen.0.next()),
                 state: vmm_state,
             };
 
@@ -2566,7 +2566,7 @@ mod test {
             let migration_out = MigrationRuntimeState {
                 migration_id: migration.id,
                 state: migration_state,
-                gen: migration.source_gen.0.next(),
+                r#gen: migration.source_gen.0.next(),
                 time_updated: Utc::now(),
             };
             let migrations = Migrations {
@@ -2611,7 +2611,7 @@ mod test {
             let vmm_id = PropolisUuid::from_untyped_uuid(target_vmm.id);
             let new_runtime = nexus_db_model::VmmRuntimeState {
                 time_state_updated: Utc::now(),
-                gen: Generation(target_vmm.runtime.gen.0.next()),
+                r#gen: Generation(target_vmm.runtime.r#gen.0.next()),
                 state: vmm_state,
             };
 
@@ -2623,7 +2623,7 @@ mod test {
             let migration_in = MigrationRuntimeState {
                 migration_id: migration.id,
                 state: migration_state,
-                gen: migration.target_gen.0.next(),
+                r#gen: migration.target_gen.0.next(),
                 time_updated: Utc::now(),
             };
             let migrations = Migrations {

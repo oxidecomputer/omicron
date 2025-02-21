@@ -11,7 +11,7 @@ use nexus_types::deployment::{
     BlueprintZonesConfig, ClickhouseClusterConfig,
 };
 use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
-use slog::{error, Logger};
+use slog::{Logger, error};
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
@@ -228,7 +228,7 @@ impl ClickhouseAllocator {
                 .parent_config
                 .keepers
                 .iter()
-                .find(|(_, &keeper_id)| keeper_id == added_keeper_id)
+                .find(|&(_, &keeper_id)| keeper_id == added_keeper_id)
                 .unwrap();
 
             // Let's ensure that this zone has not been expunged yet. If it has that means
@@ -620,8 +620,7 @@ pub mod test {
 
     #[test]
     fn expunge_a_different_keeper_while_adding_keeper() {
-        static TEST_NAME: &str =
-            "clickhouse_allocator_expunge_a_different_keeper_while_adding_keeper";
+        static TEST_NAME: &str = "clickhouse_allocator_expunge_a_different_keeper_while_adding_keeper";
         let logctx = test_setup_log(TEST_NAME);
 
         let (n_keeper_zones, n_server_zones, n_keepers, n_servers) =
@@ -665,7 +664,7 @@ pub mod test {
             .parent_config
             .keepers
             .iter()
-            .find(|(_, &keeper_id)| keeper_id == keeper_to_expunge)
+            .find(|&(_, &keeper_id)| keeper_id == keeper_to_expunge)
             .map(|(zone_id, _)| *zone_id)
             .unwrap();
         active_clickhouse_zones.keepers.remove(&zone_to_expunge);
@@ -758,7 +757,7 @@ pub mod test {
         let zone_to_expunge = new_config
             .keepers
             .iter()
-            .find(|(_, &keeper_id)| keeper_id == 5.into())
+            .find(|&(_, &keeper_id)| keeper_id == 5.into())
             .map(|(zone_id, _)| *zone_id)
             .unwrap();
         allocator.parent_config = new_config;

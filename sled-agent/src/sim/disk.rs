@@ -236,7 +236,7 @@ impl Simulatable for SimDisk {
     }
 
     fn generation(&self) -> Generation {
-        self.state.current().gen
+        self.state.current().r#gen
     }
 
     fn current(&self) -> Self::CurrentState {

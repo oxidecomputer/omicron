@@ -1420,25 +1420,29 @@ async fn enumerate_zone_bundles(
                 // metadata. So it's plausible that we end up with a lot of
                 // detritus here in that case.
                 let path = Utf8PathBuf::try_from(maybe_bundle.path())?;
-                if let Ok(metadata) =
-                    extract_zone_bundle_metadata(path.clone()).await
-                {
-                    let info = ZoneBundleInfo {
-                        metadata,
-                        path: path.clone(),
-                        bytes: maybe_bundle
-                            .metadata()
-                            .await
-                            .map_err(|err| BundleError::Metadata { path, err })?
-                            .len(),
-                    };
-                    info_by_dir.push(info);
-                } else {
-                    warn!(
-                        log,
-                        "found non-zone-bundle file in zone bundle directory";
-                        "path" => %path,
-                    );
+                match extract_zone_bundle_metadata(path.clone()).await {
+                    Ok(metadata) => {
+                        let info = ZoneBundleInfo {
+                            metadata,
+                            path: path.clone(),
+                            bytes: maybe_bundle
+                                .metadata()
+                                .await
+                                .map_err(|err| BundleError::Metadata {
+                                    path,
+                                    err,
+                                })?
+                                .len(),
+                        };
+                        info_by_dir.push(info);
+                    }
+                    _ => {
+                        warn!(
+                            log,
+                            "found non-zone-bundle file in zone bundle directory";
+                            "path" => %path,
+                        );
+                    }
                 }
             }
         }

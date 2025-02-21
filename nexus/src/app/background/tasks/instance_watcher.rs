@@ -7,14 +7,14 @@
 use crate::app::background::BackgroundTask;
 use crate::app::instance::SledAgentInstanceError;
 use crate::app::saga::StartSaga;
-use futures::{future::BoxFuture, FutureExt};
+use futures::{FutureExt, future::BoxFuture};
 use nexus_db_model::Instance;
 use nexus_db_model::Project;
 use nexus_db_model::Sled;
 use nexus_db_model::Vmm;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::pagination::Paginator;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
@@ -90,7 +90,7 @@ impl InstanceWatcher {
         target: VirtualMachine,
         vmm: Vmm,
         sled: Sled,
-    ) -> impl Future<Output = Check> + Send + 'static {
+    ) -> impl Future<Output = Check> + Send + 'static + use<> {
         let datastore = self.datastore.clone();
         let sagas = self.sagas.clone();
 
@@ -577,9 +577,9 @@ mod metrics {
     use super::virtual_machine::Check;
     use super::virtual_machine::IncompleteCheck;
     use super::{CheckOutcome, Incomplete, VirtualMachine};
-    use oximeter::types::Cumulative;
     use oximeter::MetricsError;
     use oximeter::Sample;
+    use oximeter::types::Cumulative;
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::sync::Mutex;

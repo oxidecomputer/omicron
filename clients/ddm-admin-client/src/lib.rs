@@ -9,21 +9,21 @@
 #![allow(clippy::match_single_binding)]
 #![allow(clippy::clone_on_copy)]
 
-pub use ddm_admin_client::types;
 pub use ddm_admin_client::Error;
+pub use ddm_admin_client::types;
 
-use ddm_admin_client::types::TunnelOrigin;
 use ddm_admin_client::Client as InnerClient;
+use ddm_admin_client::types::TunnelOrigin;
 use either::Either;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::retry_policy_internal_service_aggressive;
-use sled_hardware_types::underlay::BootstrapInterface;
 use sled_hardware_types::underlay::BOOTSTRAP_MASK;
 use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
-use slog::info;
+use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
+use slog::info;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
@@ -125,7 +125,7 @@ impl Client {
     pub async fn derive_bootstrap_addrs_from_prefixes<'a>(
         &self,
         interfaces: &'a [BootstrapInterface],
-    ) -> Result<impl Iterator<Item = Ipv6Addr> + 'a, DdmError> {
+    ) -> Result<impl Iterator<Item = Ipv6Addr> + 'a + use<'a>, DdmError> {
         let prefixes = self.inner.get_prefixes().await?.into_inner();
         Ok(prefixes.into_iter().flat_map(|(_, prefixes)| {
             prefixes.into_iter().flat_map(|prefix| {

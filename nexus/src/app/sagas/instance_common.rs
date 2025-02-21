@@ -288,18 +288,18 @@ pub(super) async fn instance_ip_get_instance_state(
             return Err(ActionError::action_failed(Error::not_found_by_id(
                 omicron_common::api::external::ResourceType::Instance,
                 &authz_instance.id(),
-            )))
+            )));
         }
         (InstanceState::Creating, _) => {
             return Err(ActionError::action_failed(Error::invalid_request(
                 "cannot modify instance IPs, instance is still being created",
-            )))
+            )));
         }
         (InstanceState::Failed, _)
         | (InstanceState::Vmm, Some(VmmState::Failed)) => {
             return Err(ActionError::action_failed(Error::invalid_request(
                 "cannot modify instance IPs, instance is in unhealthy state",
-            )))
+            )));
         }
 
         // This case represents an inconsistency in the database. It should

@@ -4,19 +4,19 @@
 
 //! omdb commands that query oximeter
 
-use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::Omdb;
+use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use anyhow::Context;
 use chrono::SecondsFormat;
 use clap::Args;
 use clap::Subcommand;
 use futures::TryStreamExt;
 use internal_dns_types::names::ServiceName;
+use oximeter_client::Client;
 use oximeter_client::types::FailedCollection;
 use oximeter_client::types::ProducerDetails;
 use oximeter_client::types::ProducerEndpoint;
 use oximeter_client::types::SuccessfulCollection;
-use oximeter_client::Client;
 use slog::Logger;
 use std::net::SocketAddr;
 use std::time::Duration;

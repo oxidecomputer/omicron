@@ -11,9 +11,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
-use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
+use anyhow::bail;
 use camino::Utf8PathBuf;
 use chrono::Utc;
 use clap::Parser;
@@ -22,11 +22,11 @@ use omicron_zone_package::config::Config;
 use omicron_zone_package::config::PackageName;
 use once_cell::sync::Lazy;
 use semver::Version;
+use slog::Drain;
+use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::info;
-use slog::Drain;
-use slog::Logger;
 use slog_term::FullFormat;
 use slog_term::TermDecorator;
 use tokio::sync::Semaphore;
@@ -465,7 +465,7 @@ async fn main() -> Result<()> {
     // (This could be a function but the resulting function would have too many
     // confusable arguments.)
     macro_rules! stamp_packages {
-        ($name:expr, $target:expr, $packages:expr) => {{
+        ($name:expr_2021, $target:expr_2021, $packages:expr_2021) => {{
             let mut stamp_jobs =
                 Jobs::new(&logger, permits.clone(), &args.output_dir);
             for package in $packages {

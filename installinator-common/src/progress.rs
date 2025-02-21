@@ -8,14 +8,14 @@ use camino::Utf8PathBuf;
 use illumos_utils::zpool;
 use omicron_common::disk::M2Slot;
 use schemars::{
-    gen::SchemaGenerator,
-    schema::{Schema, SchemaObject},
     JsonSchema,
+    r#gen::SchemaGenerator,
+    schema::{Schema, SchemaObject},
 };
 use serde::{Deserialize, Serialize};
 use serde_with::rust::deserialize_ignore_any;
 use thiserror::Error;
-use update_engine::{errors::NestedEngineError, AsError, StepSpec};
+use update_engine::{AsError, StepSpec, errors::NestedEngineError};
 
 // ---
 // Type definitions for use by installinator code.
@@ -302,14 +302,14 @@ pub enum ControlPlaneZonesStepId {
     Unknown,
 }
 
-fn path_schema(gen: &mut SchemaGenerator) -> Schema {
-    let mut schema: SchemaObject = <String>::json_schema(gen).into();
+fn path_schema(r#gen: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = <String>::json_schema(r#gen).into();
     schema.format = Some("Utf8PathBuf".to_owned());
     schema.into()
 }
 
-fn path_schema_opt(gen: &mut SchemaGenerator) -> Schema {
-    let mut schema: SchemaObject = <Option<String>>::json_schema(gen).into();
+fn path_schema_opt(r#gen: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = <Option<String>>::json_schema(r#gen).into();
     schema.format = Some("Utf8PathBuf".to_owned());
     schema.into()
 }

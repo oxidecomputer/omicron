@@ -4,7 +4,7 @@
 
 //! Implementation of the "mgs sensors" subcommand
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use clap::Args;
 use gateway_client::types::MeasurementErrorCode;
 use gateway_client::types::MeasurementKind;
@@ -226,7 +226,7 @@ pub(crate) enum DeviceIdentifier {
 impl DeviceIdentifier {
     fn device(&self) -> &String {
         match self {
-            Self::Device(ref device) => device,
+            Self::Device(device) => device,
             _ => panic!(),
         }
     }
@@ -568,7 +568,7 @@ pub(crate) async fn sensor_metadata<R: std::io::Read>(
         .map(|named| named.into_iter().collect::<HashSet<_>>());
 
     let info = match input {
-        SensorInput::MgsClient(ref mgs_client) => {
+        &mut SensorInput::MgsClient(ref mgs_client) => {
             sp_info_mgs(mgs_client, args).await?
         }
         SensorInput::CsvReader(reader, position) => {
@@ -798,7 +798,7 @@ pub(crate) async fn sensor_data<R: std::io::Read + std::io::Seek>(
     metadata: &Arc<SensorMetadata>,
 ) -> Result<SensorValues, anyhow::Error> {
     match input {
-        SensorInput::MgsClient(ref mgs_client) => {
+        &mut SensorInput::MgsClient(ref mgs_client) => {
             sp_data_mgs(mgs_client, metadata).await
         }
         SensorInput::CsvReader(reader, position) => {

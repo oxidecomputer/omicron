@@ -1,8 +1,8 @@
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::model::{Ipv4NatEntry, Ipv4NatValues};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::{DateTime, Utc};
@@ -886,9 +886,11 @@ mod test {
 
         while !changes.is_empty() {
             // check ordering
-            assert!(changes
-                .windows(2)
-                .all(|entries| entries[0].gen < entries[1].gen));
+            assert!(
+                changes
+                    .windows(2)
+                    .all(|entries| entries[0].r#gen < entries[1].r#gen)
+            );
 
             // check deleted status and version numbers
             changes.iter().for_each(|change| match change.deleted {
@@ -896,7 +898,7 @@ mod test {
                     // version should match a deleted entry
                     let deleted_nat = db_records
                         .iter()
-                        .find(|entry| entry.version_removed == Some(change.gen))
+                        .find(|entry| entry.version_removed == Some(change.r#gen))
                         .expect("did not find a deleted nat entry with a matching version number");
 
                     assert_eq!(
@@ -919,7 +921,7 @@ mod test {
                     // version should match an active nat entry
                     let added_nat = db_records
                         .iter()
-                        .find(|entry| entry.version_added == change.gen)
+                        .find(|entry| entry.version_added == change.r#gen)
                         .expect("did not find an active nat entry with a matching version number");
 
                     assert!(added_nat.version_removed.is_none());
@@ -942,7 +944,7 @@ mod test {
             // bump the count of changes seen
             total_changes += changes.len();
 
-            version = changes.last().unwrap().gen;
+            version = changes.last().unwrap().r#gen;
             changes = datastore
                 .ipv4_nat_changeset(&opctx, version, limit)
                 .await

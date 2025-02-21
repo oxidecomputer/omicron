@@ -10,7 +10,7 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::{public_error_from_diesel, ErrorHandler};
+use crate::db::error::{ErrorHandler, public_error_from_diesel};
 use crate::db::model::SemverVersion;
 use crate::db::pagination::paginated;
 use crate::transaction_retry::OptionalError;
@@ -24,7 +24,7 @@ use omicron_common::api::external::{
 };
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
-use swrite::{swrite, SWrite};
+use swrite::{SWrite, swrite};
 use uuid::Uuid;
 
 /// The return value of [`DataStore::update_tuf_repo_insert`].
@@ -101,12 +101,9 @@ impl DataStore {
                 )
             })
             .await
-            .map_err(|e| {
-                if let Some(err) = err.take() {
-                    err.into()
-                } else {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                }
+            .map_err(|e| match err.take() {
+                Some(err) => err.into(),
+                _ => public_error_from_diesel(e, ErrorHandler::Server),
             })
     }
 

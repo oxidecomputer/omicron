@@ -7,9 +7,9 @@ use std::{borrow::Cow, convert::Infallible, fmt, str::FromStr};
 use crate::api::{external::SemverVersion, internal::nexus::KnownArtifactKind};
 use hex::FromHexError;
 use schemars::{
-    gen::SchemaGenerator,
-    schema::{Schema, SchemaObject},
     JsonSchema,
+    r#gen::SchemaGenerator,
+    schema::{Schema, SchemaObject},
 };
 use serde::{Deserialize, Serialize};
 
@@ -322,8 +322,8 @@ impl FromStr for ArtifactHash {
 
 /// Produce an OpenAPI schema describing a hex array of a specific length (e.g.,
 /// a hash digest).
-pub fn hex_schema<const N: usize>(gen: &mut SchemaGenerator) -> Schema {
-    let mut schema: SchemaObject = <String>::json_schema(gen).into();
+pub fn hex_schema<const N: usize>(r#gen: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = <String>::json_schema(r#gen).into();
     schema.format = Some(format!("hex string ({N} bytes)"));
     schema.into()
 }

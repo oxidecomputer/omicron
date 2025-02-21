@@ -273,10 +273,9 @@ impl Runner {
     pub fn restart(&mut self) -> Rpy {
         self.core.screen = Screen::new(&self.core.log);
         self.core.state = State::new();
-        if let Err(e) = self.core.init_screen() {
-            Rpy::Err(format!("Failed to init screen: {e}"))
-        } else {
-            Rpy::Ok
+        match self.core.init_screen() {
+            Err(e) => Rpy::Err(format!("Failed to init screen: {e}")),
+            _ => Rpy::Ok,
         }
     }
 

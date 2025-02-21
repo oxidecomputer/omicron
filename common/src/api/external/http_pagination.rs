@@ -51,9 +51,9 @@ use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::WhichPage;
 use schemars::JsonSchema;
-use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::fmt::Debug;
 use std::num::NonZeroU32;
 use uuid::Uuid;
@@ -284,9 +284,8 @@ fn default_id_sort_mode() -> IdSortMode {
     IdSortMode::IdAscending
 }
 
-impl<
-        T: Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize,
-    > ScanParams for ScanById<T>
+impl<T: Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize>
+    ScanParams for ScanById<T>
 {
     type MarkerValue = Uuid;
     fn direction(&self) -> PaginationOrder {
@@ -368,9 +367,8 @@ pub enum PaginatedBy<'a> {
     Name(DataPageParams<'a, Name>),
 }
 
-impl<
-        T: Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize,
-    > ScanParams for ScanByNameOrId<T>
+impl<T: Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize>
+    ScanParams for ScanByNameOrId<T>
 {
     type MarkerValue = NameOrId;
 
@@ -412,11 +410,6 @@ impl<
 
 #[cfg(test)]
 mod test {
-    use super::data_page_params_with_limit;
-    use super::marker_for_id;
-    use super::marker_for_name;
-    use super::marker_for_name_or_id;
-    use super::page_selector_for;
     use super::IdSortMode;
     use super::Name;
     use super::NameOrId;
@@ -434,9 +427,14 @@ mod test {
     use super::ScanByName;
     use super::ScanByNameOrId;
     use super::ScanParams;
-    use crate::api::external::http_pagination::name_or_id_pagination;
+    use super::data_page_params_with_limit;
+    use super::marker_for_id;
+    use super::marker_for_name;
+    use super::marker_for_name_or_id;
+    use super::page_selector_for;
     use crate::api::external::IdentityMetadata;
     use crate::api::external::ObjectIdentity;
+    use crate::api::external::http_pagination::name_or_id_pagination;
     use chrono::Utc;
     use dropshot::PaginationOrder;
     use dropshot::PaginationParams;
@@ -647,10 +645,13 @@ mod test {
         // marker.  This should match `itemlast_marker`.  That will tell us that
         // the results page was properly generated.
         assert_eq!(S::from_query(&p1).unwrap(), scan);
-        if let WhichPage::Next(PageSelector { ref last_seen, .. }) = p1.page {
-            assert_eq!(last_seen, itemlast_marker);
-        } else {
-            panic!("expected WhichPage::Next");
+        match p1.page {
+            WhichPage::Next(PageSelector { ref last_seen, .. }) => {
+                assert_eq!(last_seen, itemlast_marker);
+            }
+            _ => {
+                panic!("expected WhichPage::Next");
+            }
         }
 
         // Return these two sets of pagination parameters to the caller for more

@@ -13,8 +13,8 @@
 //! sled agent or that sled agent will never update (like the sled ID).
 
 use super::{Generation, VmmState};
-use crate::schema::vmm;
 use crate::SqlU16;
+use crate::schema::vmm;
 use chrono::{DateTime, Utc};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::{Deserialize, Serialize};
@@ -85,7 +85,7 @@ impl Vmm {
             runtime: VmmRuntimeState {
                 state: VmmState::Creating,
                 time_state_updated: now,
-                gen: Generation::new(),
+                r#gen: Generation::new(),
             },
         }
     }
@@ -110,7 +110,7 @@ pub struct VmmRuntimeState {
 
     /// The generation number protecting this VMM's state and update time.
     #[diesel(column_name = state_generation)]
-    pub gen: Generation,
+    pub r#gen: Generation,
 
     /// The state of this VMM. If this VMM is the active VMM for a given
     /// instance, this state is the instance's logical state.
@@ -126,7 +126,7 @@ impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
         Self {
             state: value.state.into(),
             time_state_updated: value.time_updated,
-            gen: value.gen.into(),
+            r#gen: value.r#gen.into(),
         }
     }
 }
@@ -134,7 +134,7 @@ impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
 impl From<Vmm> for sled_agent_client::types::VmmRuntimeState {
     fn from(s: Vmm) -> Self {
         Self {
-            gen: s.runtime.gen.into(),
+            r#gen: s.runtime.r#gen.into(),
             state: s.runtime.state.into(),
             time_updated: s.runtime.time_state_updated,
         }

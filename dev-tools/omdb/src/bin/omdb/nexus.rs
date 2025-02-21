@@ -4,14 +4,14 @@
 
 //! omdb commands that query or update specific Nexus instances
 
+use crate::Omdb;
 use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::db::DbUrlOptions;
+use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::const_max_len;
 use crate::helpers::should_colorize;
-use crate::helpers::CONNECTION_OPTIONS_HEADING;
-use crate::Omdb;
-use anyhow::bail;
 use anyhow::Context;
+use anyhow::bail;
 use camino::Utf8PathBuf;
 use chrono::DateTime;
 use chrono::SecondsFormat;
@@ -20,8 +20,8 @@ use clap::Args;
 use clap::ColorChoice;
 use clap::Subcommand;
 use clap::ValueEnum;
-use futures::future::try_join;
 use futures::TryStreamExt;
+use futures::future::try_join;
 use http::StatusCode;
 use internal_dns_types::names::ServiceName;
 use itertools::Itertools;
@@ -34,8 +34,8 @@ use nexus_client::types::PhysicalDiskPath;
 use nexus_client::types::SagaState;
 use nexus_client::types::SledSelector;
 use nexus_client::types::UninitializedSledId;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::lookup::LookupPath;
 use nexus_inventory::now_db_precision;
 use nexus_saga_recovery::LastPass;
 use nexus_types::deployment::Blueprint;
@@ -75,21 +75,21 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::str::FromStr;
 use std::sync::Arc;
-use tabled::settings::object::Columns;
-use tabled::settings::Padding;
 use tabled::Tabled;
+use tabled::settings::Padding;
+use tabled::settings::object::Columns;
 use tokio::sync::OnceCell;
-use update_engine::display::LineDisplay;
-use update_engine::display::LineDisplayStyles;
-use update_engine::display::ProgressRatioDisplay;
-use update_engine::events::EventReport;
-use update_engine::events::StepOutcome;
 use update_engine::EventBuffer;
 use update_engine::ExecutionStatus;
 use update_engine::ExecutionTerminalInfo;
 use update_engine::NestedError;
 use update_engine::NestedSpec;
 use update_engine::TerminalKind;
+use update_engine::display::LineDisplay;
+use update_engine::display::LineDisplayStyles;
+use update_engine::display::ProgressRatioDisplay;
+use update_engine::events::EventReport;
+use update_engine::events::StepOutcome;
 use uuid::Uuid;
 
 /// Arguments to the "omdb nexus" subcommand
@@ -2153,11 +2153,21 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
             }) = cleanup_report
             {
                 println!("    Support Bundle Cleanup Report:");
-                println!("      Bundles deleted from sleds: {sled_bundles_deleted_ok}");
-                println!("      Bundles not found on sleds: {sled_bundles_deleted_not_found}");
-                println!("      Bundles delete failed on sleds: {sled_bundles_delete_failed}");
-                println!("      Bundles deleted from database: {db_destroying_bundles_removed}");
-                println!("      Bundles marked failed in database: {db_failing_bundles_updated}");
+                println!(
+                    "      Bundles deleted from sleds: {sled_bundles_deleted_ok}"
+                );
+                println!(
+                    "      Bundles not found on sleds: {sled_bundles_deleted_not_found}"
+                );
+                println!(
+                    "      Bundles delete failed on sleds: {sled_bundles_delete_failed}"
+                );
+                println!(
+                    "      Bundles deleted from database: {db_destroying_bundles_removed}"
+                );
+                println!(
+                    "      Bundles marked failed in database: {db_failing_bundles_updated}"
+                );
             }
 
             if let Some(collection_err) = collection_err {
@@ -2172,8 +2182,12 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
             {
                 println!("    Support Bundle Collection Report:");
                 println!("      Bundle ID: {bundle}");
-                println!("      Bundle was able to list in-service sleds: {listed_in_service_sleds}");
-                println!("      Bundle was activated in the database: {activated_in_db_ok}");
+                println!(
+                    "      Bundle was able to list in-service sleds: {listed_in_service_sleds}"
+                );
+                println!(
+                    "      Bundle was activated in the database: {activated_in_db_ok}"
+                );
             }
         }
     }
@@ -2900,22 +2914,23 @@ async fn cmd_nexus_sagas_demo_complete(
     args: &DemoSagaIdArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
-    if let Err(error) = client
+    match client
         .saga_demo_complete(&args.demo_saga_id)
         .await
         .context("completing demo saga")
     {
-        eprintln!("error: {:#}", error);
-        eprintln!(
-            "note: `demo-complete` must be run against the same Nexus \
+        Err(error) => {
+            eprintln!("error: {:#}", error);
+            eprintln!(
+                "note: `demo-complete` must be run against the same Nexus \
             instance that is currently running that saga."
-        );
-        eprintln!(
-            "note: Be sure that you're using the demo_saga_id, not the saga_id."
-        );
-        Err(error)
-    } else {
-        Ok(())
+            );
+            eprintln!(
+                "note: Be sure that you're using the demo_saga_id, not the saga_id."
+            );
+            Err(error)
+        }
+        _ => Ok(()),
     }
 }
 
@@ -2992,11 +3007,11 @@ impl ConfirmationPrompt {
             DefaultPromptSegment::Basic(message.to_string()),
             DefaultPromptSegment::Empty,
         );
-        if let Ok(reedline::Signal::Success(input)) = self.0.read_line(&prompt)
-        {
-            Ok(input)
-        } else {
-            bail!("operation aborted")
+        match self.0.read_line(&prompt) {
+            Ok(reedline::Signal::Success(input)) => Ok(input),
+            _ => {
+                bail!("operation aborted")
+            }
         }
     }
 

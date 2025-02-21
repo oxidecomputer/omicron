@@ -5,16 +5,16 @@
 //! Encapsulates policy, parameters, and low-level implementation of
 //! password-based authentication for the external API
 
-use argon2::password_hash;
 use argon2::Argon2;
 use argon2::PasswordHasher;
 use argon2::PasswordVerifier;
-use password_hash::errors::Error as PasswordHashError;
+use argon2::password_hash;
 pub use password_hash::PasswordHashString;
 use password_hash::SaltString;
-use rand::prelude::ThreadRng;
+use password_hash::errors::Error as PasswordHashError;
 use rand::CryptoRng;
 use rand::RngCore;
+use rand::prelude::ThreadRng;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_with::SerializeDisplay;
@@ -174,7 +174,7 @@ impl JsonSchema for NewPasswordHash {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -310,17 +310,17 @@ fn verify_strength(hash: &PasswordHashString) -> Result<(), String> {
 
 #[cfg(test)]
 mod test {
-    use super::external_password_argon;
-    use super::Hasher;
-    use super::Password;
-    use super::PasswordTooLongError;
     use super::ARGON2_COST_M_KIB;
     use super::ARGON2_COST_P;
     use super::ARGON2_COST_T;
+    use super::Hasher;
     use super::MAX_PASSWORD_LENGTH;
+    use super::Password;
+    use super::PasswordTooLongError;
+    use super::external_password_argon;
+    use crate::MIN_EXPECTED_PASSWORD_VERIFY_TIME;
     use crate::parse_phc_hash;
     use crate::verify_strength;
-    use crate::MIN_EXPECTED_PASSWORD_VERIFY_TIME;
     use argon2::password_hash::PasswordHashString;
     use argon2::password_hash::SaltString;
     use rand::SeedableRng;
@@ -391,18 +391,24 @@ mod test {
         assert!(hasher.verify_password(&password, &hash_str).unwrap());
         assert!(!hasher.verify_password(&bad_password, &hash_str).unwrap());
         let time_elapsed = start.elapsed();
-        assert!(!hasher
-            .verify_password(&Password::new("hunter22").unwrap(), &hash_str)
-            .unwrap());
-        assert!(!hasher
-            .verify_password(&Password::new("").unwrap(), &hash_str)
-            .unwrap());
-        assert!(!hasher
-            .verify_password(
-                &Password::new(&"o".repeat(512)).unwrap(),
-                &hash_str
-            )
-            .unwrap());
+        assert!(
+            !hasher
+                .verify_password(&Password::new("hunter22").unwrap(), &hash_str)
+                .unwrap()
+        );
+        assert!(
+            !hasher
+                .verify_password(&Password::new("").unwrap(), &hash_str)
+                .unwrap()
+        );
+        assert!(
+            !hasher
+                .verify_password(
+                    &Password::new(&"o".repeat(512)).unwrap(),
+                    &hash_str
+                )
+                .unwrap()
+        );
 
         // Verifies that password hash verification takes as long as we think it
         // does.  As of this writing, it's calibrated to take at least one
@@ -527,11 +533,13 @@ mod test {
         let password = Password::new(PASSWORD_STR).unwrap();
         let password_hash_str = hasher.create_password(&password).unwrap();
         verify_strength(&password_hash_str).unwrap();
-        assert!(argon2alt::verify_encoded(
-            password_hash_str.as_ref(),
-            PASSWORD_STR.as_bytes()
-        )
-        .unwrap());
+        assert!(
+            argon2alt::verify_encoded(
+                password_hash_str.as_ref(),
+                PASSWORD_STR.as_bytes()
+            )
+            .unwrap()
+        );
 
         // Now, verify that a password hashed with the alternate implementation
         // can be verified with ours.
@@ -542,12 +550,14 @@ mod test {
             &argon2alt::Config::default(),
         )
         .unwrap();
-        assert!(hasher
-            .verify_password(
-                &Password::new(BAD_PASSWORD_STR).unwrap(),
-                &PasswordHashString::new(&alt_hashed).unwrap()
-            )
-            .unwrap());
+        assert!(
+            hasher
+                .verify_password(
+                    &Password::new(BAD_PASSWORD_STR).unwrap(),
+                    &PasswordHashString::new(&alt_hashed).unwrap()
+                )
+                .unwrap()
+        );
 
         // This isn't really necessary, but again, since this is easy to do:
         // check that the two implementations produce the exact same result

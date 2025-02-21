@@ -18,16 +18,16 @@ use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{
-    AddressLotBlock, BgpConfig, BootstoreConfig, LoopbackAddress,
-    SwitchLinkSpeed, INFRA_LOT, NETWORK_KEY,
+    AddressLotBlock, BgpConfig, BootstoreConfig, INFRA_LOT, LoopbackAddress,
+    NETWORK_KEY, SwitchLinkSpeed,
 };
 use uuid::Uuid;
 
 use crate::app::background::BackgroundTask;
 use display_error_chain::DisplayErrorChain;
 use dpd_client::types::PortId;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use mg_admin_client::types::{
     AddStaticRoute4Request, ApplyRequest, BgpPeerConfig, CheckerSource,
     DeleteStaticRoute4Request, ImportExportPolicy as MgImportExportPolicy,
@@ -36,13 +36,13 @@ use mg_admin_client::types::{
 };
 use nexus_db_queries::{
     context::OpContext,
-    db::{datastore::SwitchPortSettingsCombinedResult, DataStore},
+    db::{DataStore, datastore::SwitchPortSettingsCombinedResult},
 };
 use nexus_types::identity::Asset;
 use nexus_types::{external_api::params, identity::Resource};
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::{
-    address::{get_sled_address, Ipv6Subnet},
+    address::{Ipv6Subnet, get_sled_address},
     api::{
         external::{DataPageParams, ImportExportPolicy, SwitchLocation},
         internal::shared::ParseSwitchLocationError,
@@ -56,7 +56,7 @@ use sled_agent_client::types::{
     RouteConfig as SledRouteConfig, TxEqConfig, UplinkAddressConfig,
 };
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
+    collections::{HashMap, HashSet, hash_map::Entry},
     hash::Hash,
     net::{IpAddr, Ipv4Addr},
     str::FromStr,
@@ -1293,7 +1293,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     // if both scrimlets are down, bootstore updates aren't happening anyway
                     let mut one_succeeded = false;
                     for (location, client) in &sled_agent_clients {
-                        if let Err(e) = client.write_network_bootstore_config(&desired_config).await {
+                        match client.write_network_bootstore_config(&desired_config).await { Err(e) => {
                             error!(
                                 log,
                                 "error updating bootstore";
@@ -1301,9 +1301,9 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 "config" => ?desired_config,
                                 "error" => %e,
                             )
-                        } else {
+                        } _ => {
                             one_succeeded = true;
-                        }
+                        }}
                     }
 
                     // if at least one succeeded, record this update in the db
@@ -1538,45 +1538,51 @@ fn static_routes_to_del(
 
     // find routes to remove
     for (switch_location, routes_on_switch) in &current_static_routes {
-        if let Some(routes_wanted) = desired_static_routes.get(switch_location)
-        {
-            // if it's on the switch but not desired (in our db), it should be removed
-            let stale_routes = routes_on_switch
-                .difference(routes_wanted)
-                .map(|(nexthop, prefix, vlan_id, rib_priority)| StaticRoute4 {
-                    nexthop: *nexthop,
-                    prefix: *prefix,
-                    vlan_id: *vlan_id,
-                    rib_priority: rib_priority
-                        .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
-                })
-                .collect::<Vec<StaticRoute4>>();
+        match desired_static_routes.get(switch_location) {
+            Some(routes_wanted) => {
+                // if it's on the switch but not desired (in our db), it should be removed
+                let stale_routes = routes_on_switch
+                    .difference(routes_wanted)
+                    .map(|(nexthop, prefix, vlan_id, rib_priority)| {
+                        StaticRoute4 {
+                            nexthop: *nexthop,
+                            prefix: *prefix,
+                            vlan_id: *vlan_id,
+                            rib_priority: rib_priority
+                                .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
+                        }
+                    })
+                    .collect::<Vec<StaticRoute4>>();
 
-            routes_to_del.insert(
-                *switch_location,
-                DeleteStaticRoute4Request {
+                routes_to_del.insert(
+                    *switch_location,
+                    DeleteStaticRoute4Request {
+                        routes: StaticRoute4List { list: stale_routes },
+                    },
+                );
+            }
+            _ => {
+                // if no desired routes are present, all routes on this switch should be deleted
+                let stale_routes = routes_on_switch
+                    .iter()
+                    .map(|(nexthop, prefix, vlan_id, rib_priority)| {
+                        StaticRoute4 {
+                            nexthop: *nexthop,
+                            prefix: *prefix,
+                            vlan_id: *vlan_id,
+                            rib_priority: rib_priority
+                                .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
+                        }
+                    })
+                    .collect::<Vec<StaticRoute4>>();
+
+                let req = DeleteStaticRoute4Request {
                     routes: StaticRoute4List { list: stale_routes },
-                },
-            );
-        } else {
-            // if no desired routes are present, all routes on this switch should be deleted
-            let stale_routes = routes_on_switch
-                .iter()
-                .map(|(nexthop, prefix, vlan_id, rib_priority)| StaticRoute4 {
-                    nexthop: *nexthop,
-                    prefix: *prefix,
-                    vlan_id: *vlan_id,
-                    rib_priority: rib_priority
-                        .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
-                })
-                .collect::<Vec<StaticRoute4>>();
+                };
 
-            let req = DeleteStaticRoute4Request {
-                routes: StaticRoute4List { list: stale_routes },
-            };
-
-            routes_to_del.insert(*switch_location, req);
-            continue;
+                routes_to_del.insert(*switch_location, req);
+                continue;
+            }
         };
     }
 

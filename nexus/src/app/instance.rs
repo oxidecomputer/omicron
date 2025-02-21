@@ -29,13 +29,12 @@ use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
-use nexus_db_queries::db::DataStore;
 use nexus_types::external_api::views;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -48,18 +47,19 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
-use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
-use propolis_client::support::tungstenite::protocol::CloseFrame;
-use propolis_client::support::tungstenite::Message as WebSocketMessage;
 use propolis_client::support::InstanceSerialConsoleHelper;
 use propolis_client::support::WSClientOffset;
 use propolis_client::support::WebSocketStream;
+use propolis_client::support::tungstenite::Message as WebSocketMessage;
+use propolis_client::support::tungstenite::protocol::CloseFrame;
+use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use sagas::instance_common::ExternalIpAttach;
 use sagas::instance_start;
 use sagas::instance_update;
@@ -272,7 +272,7 @@ impl super::Nexus {
         match instance_selector {
             params::InstanceSelector {
                 instance: NameOrId::Id(id),
-                project: None
+                project: None,
             } => {
                 let instance =
                     LookupPath::new(opctx, &self.db_datastore).instance_id(id);
@@ -280,26 +280,21 @@ impl super::Nexus {
             }
             params::InstanceSelector {
                 instance: NameOrId::Name(name),
-                project: Some(project)
+                project: Some(project),
             } => {
                 let instance = self
                     .project_lookup(opctx, params::ProjectSelector { project })?
                     .instance_name_owned(name.into());
                 Ok(instance)
             }
-            params::InstanceSelector {
-                instance: NameOrId::Id(_),
-                ..
-            } => {
+            params::InstanceSelector { instance: NameOrId::Id(_), .. } => {
                 Err(Error::invalid_request(
                     "when providing instance as an ID project should not be specified",
                 ))
             }
-            _ => {
-                Err(Error::invalid_request(
-                    "instance should either be UUID or project should be specified",
-                ))
-            }
+            _ => Err(Error::invalid_request(
+                "instance should either be UUID or project should be specified",
+            )),
         }
     }
 
@@ -808,22 +803,24 @@ impl super::Nexus {
                         return Err(Error::invalid_request(&format!(
                             "cannot run an instance in state {} with no VMM",
                             effective_state
-                        )))
+                        )));
                     }
                     InstanceStateChangeRequest::Stop => {
-                        return Ok(InstanceStateChangeRequestAction::AlreadyDone);
+                        return Ok(
+                            InstanceStateChangeRequestAction::AlreadyDone,
+                        );
                     }
                     InstanceStateChangeRequest::Reboot => {
                         return Err(Error::invalid_request(&format!(
                             "cannot reboot an instance in state {} with no VMM",
                             effective_state
-                        )))
+                        )));
                     }
                     InstanceStateChangeRequest::Migrate(_) => {
                         return Err(Error::invalid_request(&format!(
                             "cannot migrate an instance in state {} with no VMM",
                             effective_state
-                        )))
+                        )));
                     }
                 },
 
@@ -832,9 +829,9 @@ impl super::Nexus {
                 // Return a specific error message explaining the problem.
                 InstanceState::Creating => {
                     return Err(Error::invalid_request(
-                                "cannot change instance state while it is \
-                                still being created"
-                                ))
+                        "cannot change instance state while it is \
+                                still being created",
+                    ));
                 }
                 // Failed instances may transition to Stopped by just changing
                 // the Nexus state in the database to NoVmm.
@@ -849,23 +846,32 @@ impl super::Nexus {
                 // that a Failed instance is definitely not incarnated on a
                 // sled, so all we need to do to "stop" it is to update its
                 // state in the database.
-                InstanceState::Failed if matches!(requested, InstanceStateChangeRequest::Stop) => {
+                InstanceState::Failed
+                    if matches!(
+                        requested,
+                        InstanceStateChangeRequest::Stop
+                    ) =>
+                {
                     // As discussed above, this shouldn't happen, so return an
                     // internal error and complain about it in the logs.
                     if vmm_state.is_some() {
                         return Err(Error::internal_error(
                             "an instance should not be in the Failed \
-                             effective state if it has an active VMM"
+                             effective state if it has an active VMM",
                         ));
                     }
 
                     let prev_runtime = instance_state.runtime();
-                    return Ok(InstanceStateChangeRequestAction::UpdateRuntime(db::model::InstanceRuntimeState {
-                        time_updated: chrono::Utc::now(),
-                        r#gen: prev_runtime.r#gen.0.next().into(),
-                        nexus_state: db::model::InstanceState::NoVmm,
-                        ..prev_runtime.clone()
-                    }));
+                    return Ok(
+                        InstanceStateChangeRequestAction::UpdateRuntime(
+                            db::model::InstanceRuntimeState {
+                                time_updated: chrono::Utc::now(),
+                                r#gen: prev_runtime.r#gen.0.next().into(),
+                                nexus_state: db::model::InstanceState::NoVmm,
+                                ..prev_runtime.clone()
+                            },
+                        ),
+                    );
                 }
                 // If the instance has no sled beacuse it's been destroyed or
                 // has fallen over, reject the state change.
@@ -873,7 +879,7 @@ impl super::Nexus {
                     return Err(Error::invalid_request(&format!(
                         "instance state cannot be changed from {}",
                         effective_state
-                    )))
+                    )));
                 }
 
                 // In other states, the instance should have a sled, and an
@@ -884,7 +890,7 @@ impl super::Nexus {
                            "state" => ?effective_state);
 
                     return Err(Error::internal_error(
-                        "instance is active but not resident on a sled"
+                        "instance is active but not resident on a sled",
                     ));
                 }
             }
@@ -1270,7 +1276,7 @@ impl super::Nexus {
         // state.
         let vmm_runtime = sled_agent_client::types::VmmRuntimeState {
             time_updated: chrono::Utc::now(),
-            r#gen: initial_vmm.runtime.gen.next(),
+            r#gen: initial_vmm.runtime.r#gen.next(),
             state: match operation {
                 InstanceRegisterReason::Migrate { .. } => {
                     sled_agent_client::types::VmmState::Migrating
@@ -1676,24 +1682,28 @@ impl super::Nexus {
             match vmm.runtime.state {
                 DbVmmState::Running
                 | DbVmmState::Rebooting
-                | DbVmmState::Migrating => {
-                    Ok((vmm.clone(), SocketAddr::new(vmm.propolis_ip.ip(), vmm.propolis_port.into())))
-                }
+                | DbVmmState::Migrating => Ok((
+                    vmm.clone(),
+                    SocketAddr::new(
+                        vmm.propolis_ip.ip(),
+                        vmm.propolis_port.into(),
+                    ),
+                )),
 
                 DbVmmState::Starting
                 | DbVmmState::Stopping
                 | DbVmmState::Stopped
                 | DbVmmState::Failed
-                | DbVmmState::Creating => {
-                    Err(Error::invalid_request(format!(
-                        "cannot connect to serial console of instance in state \"{}\"",
-                        state.effective_state(),
-                    )))
-                }
+                | DbVmmState::Creating => Err(Error::invalid_request(format!(
+                    "cannot connect to serial console of instance in state \"{}\"",
+                    state.effective_state(),
+                ))),
 
-                DbVmmState::Destroyed | DbVmmState::SagaUnwound => Err(Error::invalid_request(
-                    "cannot connect to serial console of instance in state \"Stopped\"",
-                )),
+                DbVmmState::Destroyed | DbVmmState::SagaUnwound => {
+                    Err(Error::invalid_request(
+                        "cannot connect to serial console of instance in state \"Stopped\"",
+                    ))
+                }
             }
         } else {
             Err(Error::invalid_request(format!(
@@ -1817,7 +1827,7 @@ impl super::Nexus {
                     permit.send(message)?.await?;
                 }
                 msg = propolis_read => {
-                    if let Some(msg) = msg {
+                    match msg { Some(msg) => {
                         let msg = match msg {
                             Ok(msg) => msg.process().await, // msg.process isn't cancel-safe
                             Err(error) => Err(error),
@@ -1852,7 +1862,7 @@ impl super::Nexus {
                             // Frame won't exist at this level, and ping reply is handled by tungstenite
                             Ok(WebSocketMessage::Frame(_) | WebSocketMessage::Ping(_) | WebSocketMessage::Pong(_)) => {}
                         }
-                    } else {
+                    } _ => {
                         nexus_sink.send(WebSocketMessage::Close(Some(CloseFrame {
                             code: CloseCode::Abnormal,
                             reason: std::borrow::Cow::from(
@@ -1860,7 +1870,7 @@ impl super::Nexus {
                             ),
                         }))).await?;
                         break;
-                    }
+                    }}
                 }
                 result = propolis_reserve => {
                     let permit = result?;
@@ -2008,7 +2018,7 @@ impl super::Nexus {
         log: &slog::Logger,
         saga: steno::SagaDag,
         instance_id: InstanceUuid,
-    ) -> impl std::future::Future<Output = ()> + Send {
+    ) -> impl std::future::Future<Output = ()> + Send + use<> {
         let sagas = self.sagas.clone();
         let task_instance_updater =
             self.background_tasks.task_instance_updater.clone();
@@ -2262,7 +2272,7 @@ fn instance_start_allowed(
             return Err(Error::conflict(&format!(
                 "instance is in state {s} but it must be {} to be started",
                 InstanceState::Stopped
-            )))
+            )));
         }
     }
 }
@@ -2426,12 +2436,14 @@ mod tests {
         let (mut instance, _vmm) = make_instance_and_vmm();
         instance.runtime_state.nexus_state = DbInstanceState::NoVmm;
         let state = InstanceAndActiveVmm::from((instance, None));
-        assert!(instance_start_allowed(
-            &logctx.log,
-            &state,
-            instance_start::Reason::User
-        )
-        .is_ok());
+        assert!(
+            instance_start_allowed(
+                &logctx.log,
+                &state,
+                instance_start::Reason::User
+            )
+            .is_ok()
+        );
         logctx.cleanup_successful();
     }
 
@@ -2445,12 +2457,14 @@ mod tests {
         instance.runtime_state.propolis_id = Some(vmm.id);
         vmm.runtime.state = DbVmmState::SagaUnwound;
         let state = InstanceAndActiveVmm::from((instance, Some(vmm)));
-        assert!(instance_start_allowed(
-            &logctx.log,
-            &state,
-            instance_start::Reason::User
-        )
-        .is_ok());
+        assert!(
+            instance_start_allowed(
+                &logctx.log,
+                &state,
+                instance_start::Reason::User
+            )
+            .is_ok()
+        );
         logctx.cleanup_successful();
     }
 
@@ -2461,12 +2475,14 @@ mod tests {
         let (mut instance, _vmm) = make_instance_and_vmm();
         instance.runtime_state.nexus_state = DbInstanceState::Creating;
         let state = InstanceAndActiveVmm::from((instance, None));
-        assert!(instance_start_allowed(
-            &logctx.log,
-            &state,
-            instance_start::Reason::User
-        )
-        .is_err());
+        assert!(
+            instance_start_allowed(
+                &logctx.log,
+                &state,
+                instance_start::Reason::User
+            )
+            .is_err()
+        );
         logctx.cleanup_successful();
     }
 
@@ -2479,41 +2495,49 @@ mod tests {
         vmm.runtime.state = DbVmmState::Starting;
         let state =
             InstanceAndActiveVmm::from((instance.clone(), Some(vmm.clone())));
-        assert!(instance_start_allowed(
-            &logctx.log,
-            &state,
-            instance_start::Reason::User
-        )
-        .is_ok());
+        assert!(
+            instance_start_allowed(
+                &logctx.log,
+                &state,
+                instance_start::Reason::User
+            )
+            .is_ok()
+        );
 
         vmm.runtime.state = DbVmmState::Running;
         let state =
             InstanceAndActiveVmm::from((instance.clone(), Some(vmm.clone())));
-        assert!(instance_start_allowed(
-            &logctx.log,
-            &state,
-            instance_start::Reason::User
-        )
-        .is_ok());
+        assert!(
+            instance_start_allowed(
+                &logctx.log,
+                &state,
+                instance_start::Reason::User
+            )
+            .is_ok()
+        );
 
         vmm.runtime.state = DbVmmState::Rebooting;
         let state =
             InstanceAndActiveVmm::from((instance.clone(), Some(vmm.clone())));
-        assert!(instance_start_allowed(
-            &logctx.log,
-            &state,
-            instance_start::Reason::User
-        )
-        .is_ok());
+        assert!(
+            instance_start_allowed(
+                &logctx.log,
+                &state,
+                instance_start::Reason::User
+            )
+            .is_ok()
+        );
 
         vmm.runtime.state = DbVmmState::Migrating;
         let state = InstanceAndActiveVmm::from((instance, Some(vmm)));
-        assert!(instance_start_allowed(
-            &logctx.log,
-            &state,
-            instance_start::Reason::User
-        )
-        .is_ok());
+        assert!(
+            instance_start_allowed(
+                &logctx.log,
+                &state,
+                instance_start::Reason::User
+            )
+            .is_ok()
+        );
         logctx.cleanup_successful();
     }
 }

@@ -6,12 +6,13 @@
 
 //! Types for working with actual blocks and columns of data.
 
-use super::packets::server::ColumnDescription;
 use super::Error;
+use super::packets::server::ColumnDescription;
 use chrono::DateTime;
 use chrono::NaiveDate;
 use chrono_tz::Tz;
 use indexmap::IndexMap;
+use nom::IResult;
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::bytes::complete::take_while1;
@@ -29,7 +30,6 @@ use nom::sequence::delimited;
 use nom::sequence::preceded;
 use nom::sequence::separated_pair;
 use nom::sequence::tuple;
-use nom::IResult;
 use oximeter::DatumType;
 use std::fmt;
 use std::net::IpAddr;
@@ -712,7 +712,7 @@ impl TryFrom<u8> for Precision {
 /// order to convert it to a number of seconds and nanoseconds. Those are then
 /// used to call `DateTime::from_timestamp()`.
 macro_rules! precision_conversion_func {
-    ($tz:expr, $precision:literal) => {{
+    ($tz:expr_2021, $precision:literal) => {{
         |tz, x| {
             const SCALE: i64 = 10i64.pow($precision);
             const FACTOR: i64 =
@@ -731,11 +731,7 @@ impl Precision {
     pub const MAX: Self = Self(Self::MAX_U8);
 
     pub fn new(precision: u8) -> Option<Self> {
-        if precision <= Self::MAX_U8 {
-            Some(Self(precision))
-        } else {
-            None
-        }
+        if precision <= Self::MAX_U8 { Some(Self(precision)) } else { None }
     }
 
     /// Return a conversion function that takes an i64 count and converts it to
@@ -1167,14 +1163,14 @@ impl std::str::FromStr for DataType {
 
 #[cfg(test)]
 mod tests {
-    use super::enum8;
     use super::Block;
     use super::BlockInfo;
     use super::Column;
+    use super::DEFAULT_TIMEZONE;
     use super::DataType;
     use super::Precision;
     use super::ValueArray;
-    use super::DEFAULT_TIMEZONE;
+    use super::enum8;
     use crate::native::block::datetime;
     use crate::native::block::datetime64;
     use crate::native::block::enum_variant;

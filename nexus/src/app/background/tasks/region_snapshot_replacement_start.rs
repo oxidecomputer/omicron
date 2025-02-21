@@ -10,15 +10,15 @@
 //! replacement start saga for any requests that are in state "Requested". See
 //! the documentation in that saga's docstring for more information.
 
+use crate::app::RegionAllocationStrategy;
 use crate::app::authn;
 use crate::app::background::BackgroundTask;
 use crate::app::saga::StartSaga;
 use crate::app::sagas;
-use crate::app::sagas::region_snapshot_replacement_start::*;
 use crate::app::sagas::NexusSaga;
-use crate::app::RegionAllocationStrategy;
-use futures::future::BoxFuture;
+use crate::app::sagas::region_snapshot_replacement_start::*;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use nexus_db_model::ReadOnlyTargetReplacement;
 use nexus_db_model::RegionSnapshotReplacement;
 use nexus_db_queries::context::OpContext;
@@ -307,8 +307,8 @@ impl BackgroundTask for RegionSnapshotReplacementDetector {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::app::background::init::test::NoopStartSaga;
     use crate::app::MIN_DISK_SIZE_BYTES;
+    use crate::app::background::init::test::NoopStartSaga;
     use chrono::Utc;
     use nexus_db_model::BlockSize;
     use nexus_db_model::Generation;
@@ -526,7 +526,7 @@ mod test {
                     volume_id: volume_id.into(),
                     destination_volume_id: VolumeUuid::new_v4().into(),
 
-                    gen: Generation::new(),
+                    r#gen: Generation::new(),
                     state: SnapshotState::Creating,
                     block_size: BlockSize::AdvancedFormat,
 
@@ -685,7 +685,7 @@ mod test {
                             block_size: 512,
                             blocks_per_extent: 1,
                             extent_count: 1,
-                            gen: 1,
+                            r#gen: 1,
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
                                 target: vec!["[::1]:12345".parse().unwrap()],

@@ -15,11 +15,10 @@ use crate::db::collection_detach::DatastoreDetachTarget;
 use crate::db::collection_detach::DetachError;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
-use crate::db::model::to_db_typed_uuid;
 use crate::db::model::Disk;
 use crate::db::model::DiskRuntimeState;
 use crate::db::model::DiskUpdate;
@@ -28,6 +27,7 @@ use crate::db::model::Name;
 use crate::db::model::Project;
 use crate::db::model::VirtualProvisioningResource;
 use crate::db::model::Volume;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
 use crate::db::queries::disk::DiskSetClauseForAttach;
 use crate::db::update_and_check::UpdateAndCheck;
@@ -37,7 +37,6 @@ use chrono::DateTime;
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -45,6 +44,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::VolumeUuid;
 use ref_cast::RefCast;
@@ -91,7 +91,7 @@ impl DataStore {
 
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
-        let gen = disk.runtime().gen;
+        let r#gen = disk.runtime().r#gen;
         let name = disk.name().clone();
         let project_id = disk.project_id;
 
@@ -122,9 +122,9 @@ impl DataStore {
             runtime.disk_state
         );
         bail_unless!(
-            runtime.gen == gen,
+            runtime.r#gen == r#gen,
             "newly-created Disk has unexpected generation: {:?}",
-            runtime.gen
+            runtime.r#gen
         );
         Ok(disk)
     }
@@ -470,7 +470,7 @@ impl DataStore {
         let updated = diesel::update(dsl::disk)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(disk_id))
-            .filter(dsl::state_generation.lt(new_runtime.gen))
+            .filter(dsl::state_generation.lt(new_runtime.r#gen))
             .set(new_runtime.clone())
             .check_if_exists::<Disk>(disk_id)
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)

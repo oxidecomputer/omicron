@@ -384,18 +384,18 @@ impl JsonSchema for IpRange {
     }
 
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        r#gen: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
                 one_of: Some(vec![
                     external::label_schema(
                         "v4",
-                        gen.subschema_for::<Ipv4Range>(),
+                        r#gen.subschema_for::<Ipv4Range>(),
                     ),
                     external::label_schema(
                         "v6",
-                        gen.subschema_for::<Ipv6Range>(),
+                        r#gen.subschema_for::<Ipv6Range>(),
                     ),
                 ]),
                 ..Default::default()
@@ -839,7 +839,9 @@ mod test {
             "net": "ff12::3456/64"
         });
 
-        assert!(serde_json::from_value::<Ipv6Subnet<64>>(value.clone()).is_ok());
+        assert!(
+            serde_json::from_value::<Ipv6Subnet<64>>(value.clone()).is_ok()
+        );
         assert!(serde_json::from_value::<Ipv6Subnet<56>>(value).is_err());
     }
 }

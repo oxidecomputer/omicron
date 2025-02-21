@@ -13,12 +13,13 @@ use crossterm::{
     },
     execute,
     terminal::{
-        disable_raw_mode, enable_raw_mode, EnterAlternateScreen,
-        LeaveAlternateScreen,
+        EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+        enable_raw_mode,
     },
 };
 use dyn_clone::DynClone;
 use ratatui::{
+    Frame, Terminal,
     backend::{Backend, CrosstermBackend},
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -28,12 +29,11 @@ use ratatui::{
         Axis, Block, Borders, Chart, Dataset, List, ListItem, ListState,
         Paragraph,
     },
-    Frame, Terminal,
 };
 
 use crate::mgs::sensors::{
-    sensor_data, sensor_metadata, SensorId, SensorInput, SensorMetadata,
-    SensorValues, SensorsArgs,
+    SensorId, SensorInput, SensorMetadata, SensorValues, SensorsArgs,
+    sensor_data, sensor_metadata,
 };
 use crate::mgs::sp_to_string;
 use clap::Args;
@@ -1045,15 +1045,18 @@ fn draw_graphs(f: &mut Frame, parent: Rect, dashboard: &mut Dashboard) {
     let sp = dashboard.sps[dashboard.selected_sp];
 
     for (i, k) in dashboard.kinds.iter().enumerate() {
-        if let Some(graph) = dashboard.flipped.get_mut(k) {
-            draw_graph(f, screen[i], graph, dashboard.time);
-        } else {
-            draw_graph(
-                f,
-                screen[i],
-                dashboard.graphs.get_mut(&(sp, *k)).unwrap(),
-                dashboard.time,
-            );
+        match dashboard.flipped.get_mut(k) {
+            Some(graph) => {
+                draw_graph(f, screen[i], graph, dashboard.time);
+            }
+            _ => {
+                draw_graph(
+                    f,
+                    screen[i],
+                    dashboard.graphs.get_mut(&(sp, *k)).unwrap(),
+                    dashboard.time,
+                );
+            }
         }
     }
 }

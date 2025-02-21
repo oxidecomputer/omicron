@@ -492,7 +492,7 @@ mod tests {
         let mut estimator = Quantile::new(0.6).unwrap();
 
         for _ in 0..100 {
-            let x: f64 = rng.gen();
+            let x: f64 = rng.r#gen();
             estimator.append(x).unwrap();
         }
 

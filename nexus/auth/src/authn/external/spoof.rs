@@ -11,11 +11,11 @@ use super::SchemeResult;
 use super::SiloUserSilo;
 use crate::authn;
 use crate::authn::Actor;
-use anyhow::anyhow;
 use anyhow::Context;
+use anyhow::anyhow;
 use async_trait::async_trait;
-use headers::authorization::{Authorization, Bearer};
 use headers::HeaderMapExt;
+use headers::authorization::{Authorization, Bearer};
 use once_cell::sync::Lazy;
 use slog::debug;
 use uuid::Uuid;
@@ -188,10 +188,10 @@ mod test {
     use super::make_header_value;
     use super::make_header_value_raw;
     use super::make_header_value_str;
-    use headers::authorization::Bearer;
-    use headers::authorization::Credentials;
     use headers::Authorization;
     use headers::HeaderMapExt;
+    use headers::authorization::Bearer;
+    use headers::authorization::Credentials;
     use uuid::Uuid;
 
     #[test]
@@ -297,15 +297,18 @@ mod test {
         for input in &bad_inputs {
             let test_header = make_header_value_str(input).unwrap();
             let result = authn_spoof_parse_id(Some(&test_header));
-            if let Err(error) = result {
-                assert!(error.to_string().starts_with(
-                    "bad authentication credentials: parsing header value"
-                ));
-            } else {
-                panic!(
-                    "unexpected result from bad input {:?}: {:?}",
-                    input, result
-                );
+            match result {
+                Err(error) => {
+                    assert!(error.to_string().starts_with(
+                        "bad authentication credentials: parsing header value"
+                    ));
+                }
+                _ => {
+                    panic!(
+                        "unexpected result from bad input {:?}: {:?}",
+                        input, result
+                    );
+                }
             }
         }
 

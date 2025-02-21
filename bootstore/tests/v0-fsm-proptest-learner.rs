@@ -11,9 +11,9 @@ mod common;
 
 use assert_matches::assert_matches;
 use bootstore::schemes::v0::{
-    create_pkgs, ApiError, ApiOutput, Envelope, Fsm, FsmConfig,
-    LearnedSharePkg, Msg, MsgError, RackUuid, Request, RequestType, Response,
-    ResponseType, Share, SharePkg, State,
+    ApiError, ApiOutput, Envelope, Fsm, FsmConfig, LearnedSharePkg, Msg,
+    MsgError, RackUuid, Request, RequestType, Response, ResponseType, Share,
+    SharePkg, State, create_pkgs,
 };
 use bootstore::trust_quorum::RackSecret;
 use common::CommonTestState;
@@ -24,8 +24,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 use common::generators::{
-    arb_action, arb_config, arb_initial_member_ids, arb_learner_id, Action,
-    MAX_ACTIONS, MAX_INITIAL_MEMBERS, MIN_INITIAL_MEMBERS, TICK_TIMEOUT,
+    Action, MAX_ACTIONS, MAX_INITIAL_MEMBERS, MIN_INITIAL_MEMBERS,
+    TICK_TIMEOUT, arb_action, arb_config, arb_initial_member_ids,
+    arb_learner_id,
 };
 
 /// Actions run during the learning phase of the test
@@ -237,11 +238,12 @@ impl TestState {
         peer_id: Baseboard,
     ) -> Uuid {
         self.common.connected_peers.insert(peer_id.clone());
-        assert!(self
-            .common
-            .sut
-            .on_connected(self.common.now, peer_id.clone())
-            .is_ok());
+        assert!(
+            self.common
+                .sut
+                .on_connected(self.common.now, peer_id.clone())
+                .is_ok()
+        );
         let mut iter = self.common.sut.drain_envelopes();
         let envelope = iter.next().unwrap();
         assert_matches!(envelope,
@@ -367,25 +369,30 @@ impl TestState {
             );
 
             // Do we have a `LoadRackSecret` request?
-            if let Some(test_req) =
-                self.common.load_rack_secret_requests.get_mut(&request_id)
-            {
-                test_req.acks.insert(envelope.to);
-                // We don't count the SUT, which has its own share
-                if test_req.acks.len() == self.common.threshold - 1 {
-                    assert_matches!(
-                        output,
-                        Ok(Some(ApiOutput::RackSecret { .. }))
-                    );
-                    self.common.load_rack_secret_requests.remove(&request_id);
-                } else {
+            match self.common.load_rack_secret_requests.get_mut(&request_id) {
+                Some(test_req) => {
+                    test_req.acks.insert(envelope.to);
+                    // We don't count the SUT, which has its own share
+                    if test_req.acks.len() == self.common.threshold - 1 {
+                        assert_matches!(
+                            output,
+                            Ok(Some(ApiOutput::RackSecret { .. }))
+                        );
+                        self.common
+                            .load_rack_secret_requests
+                            .remove(&request_id);
+                    } else {
+                        assert_matches!(output, Ok(None));
+                        assert!(
+                            self.common.sut.drain_envelopes().next().is_none()
+                        );
+                    }
+                }
+                _ => {
+                    // These are extra shares (after the threshold is reached)
                     assert_matches!(output, Ok(None));
                     assert!(self.common.sut.drain_envelopes().next().is_none());
                 }
-            } else {
-                // These are extra shares (after the threshold is reached)
-                assert_matches!(output, Ok(None));
-                assert!(self.common.sut.drain_envelopes().next().is_none());
             }
         }
     }
@@ -406,12 +413,15 @@ impl TestState {
             );
             // An outstanding request must exist and the peer must
             // not have acked for an envelope to be sent.
-            if let Some(test_req) =
-                self.common.load_rack_secret_requests.get(&request_id)
-            {
-                assert!(!test_req.acks.contains(&envelope.to));
-            } else {
-                panic!("Share sent without an outstanding load rack request");
+            match self.common.load_rack_secret_requests.get(&request_id) {
+                Some(test_req) => {
+                    assert!(!test_req.acks.contains(&envelope.to));
+                }
+                _ => {
+                    panic!(
+                        "Share sent without an outstanding load rack request"
+                    );
+                }
             }
         }
     }

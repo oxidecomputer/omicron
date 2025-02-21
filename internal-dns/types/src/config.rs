@@ -60,7 +60,7 @@
 //!
 //! This module provides types used to assemble that configuration.
 
-use crate::names::{ServiceName, BOUNDARY_NTP_DNS_NAME, DNS_ZONE};
+use crate::names::{BOUNDARY_NTP_DNS_NAME, DNS_ZONE, ServiceName};
 use anyhow::{anyhow, ensure};
 use core::fmt;
 use omicron_common::address::{CLICKHOUSE_ADMIN_PORT, CLICKHOUSE_TCP_PORT};

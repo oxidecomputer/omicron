@@ -11,7 +11,7 @@ use crate::{
 use daft::Diffable;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -961,12 +961,12 @@ impl JsonSchema for DatasetKind {
     }
 
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        r#gen: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         // The schema is a bit more complicated than this -- it's either one of
         // the fixed values or a string starting with "zone/" -- but this is
         // good enough for now.
-        let mut schema = <String>::json_schema(gen).into_object();
+        let mut schema = <String>::json_schema(r#gen).into_object();
         schema.metadata().description = Some(
             "The kind of dataset. See the `DatasetKind` enum \
              in omicron-common for possible values."

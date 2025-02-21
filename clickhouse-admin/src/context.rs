@@ -4,13 +4,13 @@
 
 use crate::{ClickhouseCli, Clickward};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use camino::Utf8PathBuf;
 use clickhouse_admin_types::{
+    CLICKHOUSE_KEEPER_CONFIG_DIR, CLICKHOUSE_KEEPER_CONFIG_FILE,
+    CLICKHOUSE_SERVER_CONFIG_DIR, CLICKHOUSE_SERVER_CONFIG_FILE,
     GenerateConfigResult, KeeperConfigurableSettings,
-    ServerConfigurableSettings, CLICKHOUSE_KEEPER_CONFIG_DIR,
-    CLICKHOUSE_KEEPER_CONFIG_FILE, CLICKHOUSE_SERVER_CONFIG_DIR,
-    CLICKHOUSE_SERVER_CONFIG_FILE,
+    ServerConfigurableSettings,
 };
 use dropshot::{ClientErrorStatusCode, HttpError};
 use flume::{Receiver, Sender, TrySendError};
@@ -50,8 +50,8 @@ impl KeeperServerContext {
 
         // If there is already a configuration file with a generation number we'll
         // use that. Otherwise, we set the generation number to None.
-        let gen = read_generation_from_file(config_path)?;
-        let (generation_tx, generation_rx) = watch::channel(gen);
+        let r#gen = read_generation_from_file(config_path)?;
+        let (generation_tx, generation_rx) = watch::channel(r#gen);
 
         // We only want to handle one in flight request at a time. Reconfigurator execution will retry
         // again later anyway. We use flume bounded channels with a size of 0 to act as a rendezvous channel.
@@ -137,8 +137,8 @@ impl ServerContext {
 
         // If there is already a configuration file with a generation number we'll
         // use that. Otherwise, we set the generation number to None.
-        let gen = read_generation_from_file(config_path)?;
-        let (generation_tx, generation_rx) = watch::channel(gen);
+        let r#gen = read_generation_from_file(config_path)?;
+        let (generation_tx, generation_rx) = watch::channel(r#gen);
 
         // We only want to handle one in flight request at a time. Reconfigurator execution will retry
         // again later anyway. We use flume bounded channels with a size of 0 to act as a rendezvous channel.
@@ -342,9 +342,8 @@ fn generate_config_and_enable_svc(
                 ClientErrorStatusCode::CONFLICT,
                 format!(
                     "current generation '{}' is greater than incoming generation '{}'",
-                    current,
-                    incoming_generation,
-                )
+                    current, incoming_generation,
+                ),
             ));
         }
     };
@@ -499,9 +498,9 @@ fn read_generation_from_file(path: Utf8PathBuf) -> Result<Option<Generation>> {
         )
     })?;
 
-    let gen = Generation::try_from(gen_u64)?;
+    let r#gen = Generation::try_from(gen_u64)?;
 
-    Ok(Some(gen))
+    Ok(Some(r#gen))
 }
 
 #[cfg(test)]
@@ -573,7 +572,7 @@ mod tests {
 
         assert_eq!(
             format!("{}", root_cause),
-           "first line of configuration file 'types/testutils/malformed_3.xml' is malformed: <!-- generation:2 --> -->"
+            "first line of configuration file 'types/testutils/malformed_3.xml' is malformed: <!-- generation:2 --> -->"
         );
     }
 }

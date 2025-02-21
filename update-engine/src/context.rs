@@ -78,21 +78,29 @@ impl<S: StepSpec> StepContext<S> {
         let now = Instant::now();
 
         let mut res = Ok(());
-        let delta_report = if let Some(id) = report.root_execution_id {
-            let mut nested_buffers = self.nested_buffers.lock().unwrap();
-            Some(nested_buffers.entry(id).or_default().add_event_report(report))
-        } else {
-            // If there's no root execution ID set, report is expected to be
-            // empty. However, report is untrusted data so we can't assert on
-            // it. Instead, log this.
-            if !report.step_events.is_empty() {
-                slog::warn!(
-                    self.log,
-                    "received non-empty report with empty root execution ID";
-                    "report" => ?report,
-                );
+        let delta_report = match report.root_execution_id {
+            Some(id) => {
+                let mut nested_buffers = self.nested_buffers.lock().unwrap();
+                Some(
+                    nested_buffers
+                        .entry(id)
+                        .or_default()
+                        .add_event_report(report),
+                )
             }
-            None
+            _ => {
+                // If there's no root execution ID set, report is expected to be
+                // empty. However, report is untrusted data so we can't assert on
+                // it. Instead, log this.
+                if !report.step_events.is_empty() {
+                    slog::warn!(
+                        self.log,
+                        "received non-empty report with empty root execution ID";
+                        "report" => ?report,
+                    );
+                }
+                None
+            }
         };
 
         if let Some(delta_report) = delta_report {

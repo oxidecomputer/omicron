@@ -6,14 +6,14 @@
 //!
 //! See `nexus_reconfigurator_planning` crate-level docs for background.
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::execution::*;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::execution::*;
 use nexus_types::external_api::views::SledState;
 use nexus_types::identity::Asset;
 use omicron_physical_disks::DeployDisksDone;
@@ -26,8 +26,8 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use update_engine::merge_anyhow_list;
 use update_engine::StepWarning;
+use update_engine::merge_anyhow_list;
 
 mod clickhouse;
 mod cockroachdb;
@@ -579,15 +579,14 @@ fn register_deploy_clickhouse_single_node_step<'a>(
             ExecutionStepId::Ensure,
             "Deploy single-node clickhouse cluster",
             move |_cx| async move {
-                if let Err(e) = clickhouse::deploy_single_node(
+                match clickhouse::deploy_single_node(
                     &opctx,
                     &blueprint.blueprint_zones,
                 )
                 .await
                 {
-                    StepWarning::new((), e.to_string()).into()
-                } else {
-                    StepSuccess::new(()).into()
+                    Err(e) => StepWarning::new((), e.to_string()).into(),
+                    _ => StepSuccess::new(()).into(),
                 }
             },
         )
@@ -667,18 +666,18 @@ fn register_cockroachdb_settings_step<'a>(
             ExecutionStepId::Ensure,
             "Ensure CockroachDB settings",
             move |_cx| async move {
-                if let Err(error) =
-                    cockroachdb::ensure_settings(&opctx, datastore, blueprint)
-                        .await
+                match cockroachdb::ensure_settings(&opctx, datastore, blueprint)
+                    .await
                 {
-                    // We treat errors as non-fatal here, but we still want to
-                    // log them. It's okay to just log the message here without
-                    // the chain of sources, since we collect the full chain in
-                    // the last step (`register_finalize_step`).
-                    let message = error.to_string();
-                    StepWarning::new(Some(error), message).into()
-                } else {
-                    StepSuccess::new(None).into()
+                    Err(error) => {
+                        // We treat errors as non-fatal here, but we still want to
+                        // log them. It's okay to just log the message here without
+                        // the chain of sources, since we collect the full chain in
+                        // the last step (`register_finalize_step`).
+                        let message = error.to_string();
+                        StepWarning::new(Some(error), message).into()
+                    }
+                    _ => StepSuccess::new(None).into(),
                 }
             },
         )

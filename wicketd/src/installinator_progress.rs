@@ -55,62 +55,66 @@ impl IprArtifactServer {
         report: installinator_common::EventReport,
     ) -> EventReportStatus {
         let mut running_updates = self.running_updates.lock().unwrap();
-        if let Some(update) = running_updates.get_mut(&update_id) {
-            slog::debug!(
-                self.log,
-                "progress report seen ({} step events, {} progress events)",
-                report.step_events.len(),
-                report.progress_events.len();
-                "update_id" => %update_id
-            );
-            // Note that take() leaves update in the Invalid state. Each branch
-            // must restore *update to a valid state.
-            match update.take() {
-                RunningUpdate::Initial(start_sender) => {
-                    slog::debug!(
-                        self.log,
-                        "first report seen for this update ID";
-                        "update_id" => %update_id
-                    );
-                    let is_terminal = RunningUpdate::is_terminal(&report);
+        match running_updates.get_mut(&update_id) {
+            Some(update) => {
+                slog::debug!(
+                    self.log,
+                    "progress report seen ({} step events, {} progress events)",
+                    report.step_events.len(),
+                    report.progress_events.len();
+                    "update_id" => %update_id
+                );
+                // Note that take() leaves update in the Invalid state. Each branch
+                // must restore *update to a valid state.
+                match update.take() {
+                    RunningUpdate::Initial(start_sender) => {
+                        slog::debug!(
+                            self.log,
+                            "first report seen for this update ID";
+                            "update_id" => %update_id
+                        );
+                        let is_terminal = RunningUpdate::is_terminal(&report);
 
-                    let (sender, receiver) = watch::channel(report);
-                    _ = start_sender.send(receiver);
-                    // The first value was already sent above, so no need to
-                    // call RunningUpdate::send_and_next_state. Just check
-                    // is_terminal.
-                    if is_terminal {
-                        *update = RunningUpdate::Closed;
-                    } else {
-                        *update = RunningUpdate::ReportsReceived(sender);
+                        let (sender, receiver) = watch::channel(report);
+                        _ = start_sender.send(receiver);
+                        // The first value was already sent above, so no need to
+                        // call RunningUpdate::send_and_next_state. Just check
+                        // is_terminal.
+                        if is_terminal {
+                            *update = RunningUpdate::Closed;
+                        } else {
+                            *update = RunningUpdate::ReportsReceived(sender);
+                        }
+
+                        EventReportStatus::Processed
                     }
-
-                    EventReportStatus::Processed
-                }
-                RunningUpdate::ReportsReceived(sender) => {
-                    slog::debug!(
-                        self.log,
-                        "further report seen for this update ID";
-                        "update_id" => %update_id
-                    );
-                    let (new_state, ret) = RunningUpdate::send_and_next_state(
-                        &self.log, sender, report,
-                    );
-                    *update = new_state;
-                    ret
-                }
-                RunningUpdate::Closed => {
-                    // The sender has been closed; ignore the report.
-                    *update = RunningUpdate::Closed;
-                    EventReportStatus::Processed
-                }
-                RunningUpdate::Invalid => {
-                    unreachable!("invalid state")
+                    RunningUpdate::ReportsReceived(sender) => {
+                        slog::debug!(
+                            self.log,
+                            "further report seen for this update ID";
+                            "update_id" => %update_id
+                        );
+                        let (new_state, ret) =
+                            RunningUpdate::send_and_next_state(
+                                &self.log, sender, report,
+                            );
+                        *update = new_state;
+                        ret
+                    }
+                    RunningUpdate::Closed => {
+                        // The sender has been closed; ignore the report.
+                        *update = RunningUpdate::Closed;
+                        EventReportStatus::Processed
+                    }
+                    RunningUpdate::Invalid => {
+                        unreachable!("invalid state")
+                    }
                 }
             }
-        } else {
-            slog::debug!(self.log, "update ID unrecognized"; "update_id" => %update_id);
-            EventReportStatus::UnrecognizedUpdateId
+            _ => {
+                slog::debug!(self.log, "update ID unrecognized"; "update_id" => %update_id);
+                EventReportStatus::UnrecognizedUpdateId
+            }
         }
     }
 }

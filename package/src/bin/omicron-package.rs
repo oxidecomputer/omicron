@@ -4,7 +4,7 @@
 
 //! Utility for bundling target binaries as tarfiles.
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Parser, Subcommand};
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -24,9 +24,9 @@ use omicron_zone_package::target::TargetMap;
 use rayon::prelude::*;
 use ring::digest::{Context as DigestContext, Digest, SHA256};
 use sled_hardware::cleanup::cleanup_networking_resources;
-use slog::o;
 use slog::Drain;
 use slog::Logger;
+use slog::o;
 use slog::{info, warn};
 use std::env;
 use std::fs::create_dir_all;
@@ -370,7 +370,9 @@ async fn ensure_package(
                         Ok(()) => break,
                         Err(err) => {
                             attempts_left -= 1;
-                            let msg = format!("Failed to download prebuilt ({attempts_left} attempts remaining)");
+                            let msg = format!(
+                                "Failed to download prebuilt ({attempts_left} attempts remaining)"
+                            );
                             progress.set_error_message(msg.into());
                             if attempts_left == 0 {
                                 return Err(err);

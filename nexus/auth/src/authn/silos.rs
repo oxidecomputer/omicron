@@ -4,14 +4,14 @@
 
 //! Silo related authentication types and functions
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use base64::Engine;
 use dropshot::HttpError;
 use samael::metadata::ContactPerson;
 use samael::metadata::ContactType;
 use samael::metadata::EntityDescriptor;
-use samael::metadata::NameIdFormat;
 use samael::metadata::HTTP_REDIRECT_BINDING;
+use samael::metadata::NameIdFormat;
 use samael::schema::Response as SAMLResponse;
 use samael::service_provider::ServiceProvider;
 use samael::service_provider::ServiceProviderBuilder;
@@ -105,13 +105,14 @@ impl SamlIdentityProvider {
             "".to_string()
         };
 
-        let authn_request_url = if let Some(key) = self.private_key_bytes()? {
-            // sign authn request if keys were supplied
-            let pkey = openssl::pkey::PKey::private_key_from_der(&key)
-                .map_err(|e| anyhow!(e.to_string()))?;
-            authn_request.signed_redirect(&encoded_relay_state, pkey)
-        } else {
-            authn_request.redirect(&encoded_relay_state)
+        let authn_request_url = match self.private_key_bytes()? {
+            Some(key) => {
+                // sign authn request if keys were supplied
+                let pkey = openssl::pkey::PKey::private_key_from_der(&key)
+                    .map_err(|e| anyhow!(e.to_string()))?;
+                authn_request.signed_redirect(&encoded_relay_state, pkey)
+            }
+            _ => authn_request.redirect(&encoded_relay_state),
         }
         .map_err(|e| anyhow!(e.to_string()))?
         .ok_or_else(|| anyhow!("request url was none!".to_string()))?;

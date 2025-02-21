@@ -8,14 +8,14 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::IncompleteOnConflictExt;
 use crate::db::datastore::RunnableQueryNoReturn;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
+use crate::db::error::public_error_from_diesel;
 use crate::db::model::SiloGroup;
 use crate::db::model::SiloGroupMembership;
 use crate::db::pagination::paginated;
-use crate::db::IncompleteOnConflictExt;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -34,7 +34,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_silo: &authz::Silo,
         silo_group: SiloGroup,
-    ) -> Result<impl RunnableQueryNoReturn, Error> {
+    ) -> Result<impl RunnableQueryNoReturn + use<>, Error> {
         opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
 
         use db::schema::silo_group::dsl;

@@ -267,7 +267,7 @@ impl super::Nexus {
                     || existing_disk.model != request.model
                 {
                     return Err(Error::internal_error(
-                        "Invalid Physical Disk update (was: {existing_disk:?}, asking for {request:?})"
+                        "Invalid Physical Disk update (was: {existing_disk:?}, asking for {request:?})",
                     ));
                 }
                 return Ok(());

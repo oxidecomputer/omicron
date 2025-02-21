@@ -5,18 +5,17 @@
 //! Types helpful for diffing blueprints.
 
 use super::blueprint_display::{
-    constants::*, linear_table_modified, linear_table_unchanged,
     BpClickhouseServersTableSchema, BpDatasetsTableSchema, BpDiffState,
     BpGeneration, BpOmicronZonesTableSchema, BpPhysicalDisksTableSchema,
     BpTable, BpTableColumn, BpTableData, BpTableRow, KvListWithHeading, KvPair,
+    constants::*, linear_table_modified, linear_table_unchanged,
 };
 use super::{
-    unwrap_or_none, zone_sort_key, BlueprintDatasetConfigDiff,
-    BlueprintDatasetDisposition, BlueprintDatasetsConfigDiff, BlueprintDiff,
-    BlueprintMetadata, BlueprintPhysicalDiskConfig,
-    BlueprintPhysicalDisksConfigDiff, BlueprintZoneConfigDiff,
-    BlueprintZonesConfigDiff, ClickhouseClusterConfig,
-    CockroachDbPreserveDowngrade,
+    BlueprintDatasetConfigDiff, BlueprintDatasetDisposition,
+    BlueprintDatasetsConfigDiff, BlueprintDiff, BlueprintMetadata,
+    BlueprintPhysicalDiskConfig, BlueprintPhysicalDisksConfigDiff,
+    BlueprintZoneConfigDiff, BlueprintZonesConfigDiff, ClickhouseClusterConfig,
+    CockroachDbPreserveDowngrade, unwrap_or_none, zone_sort_key,
 };
 use daft::Diffable;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -1543,7 +1542,7 @@ impl ClickhouseClusterConfigDiffTables {
         after: &ClickhouseClusterConfig,
     ) -> Self {
         macro_rules! diff_row {
-            ($member:ident, $label:expr) => {
+            ($member:ident, $label:expr_2021) => {
                 if before.$member == after.$member {
                     KvPair::new(
                         BpDiffState::Unchanged,
@@ -1733,13 +1732,13 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
 
     pub fn make_metadata_diff_tables(
         &self,
-    ) -> impl IntoIterator<Item = KvListWithHeading> {
+    ) -> impl IntoIterator<Item = KvListWithHeading> + use<> {
         macro_rules! diff_row {
-            ($member:ident, $label:expr) => {
+            ($member:ident, $label:expr_2021) => {
                 diff_row!($member, $label, std::convert::identity)
             };
 
-            ($member:ident, $label:expr, $display:expr) => {
+            ($member:ident, $label:expr_2021, $display:expr_2021) => {
                 if self.before_meta.$member == self.after_meta.$member {
                     KvPair::new(
                         BpDiffState::Unchanged,
@@ -2025,11 +2024,7 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
 }
 
 fn display_none_if_empty(value: &str) -> &str {
-    if value.is_empty() {
-        NONE_PARENS
-    } else {
-        value
-    }
+    if value.is_empty() { NONE_PARENS } else { value }
 }
 
 fn display_optional_preserve_downgrade(

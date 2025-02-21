@@ -160,7 +160,7 @@ pub(crate) mod test {
                 block_size: 0,
                 blocks_per_extent: 0,
                 extent_count: 0,
-                gen: 0,
+                r#gen: 0,
                 opts: CrucibleOpts {
                     id: *old_snapshot_volume_id.as_untyped_uuid(),
                     target: vec![
@@ -243,10 +243,12 @@ pub(crate) mod test {
         );
 
         // Validate the Volume was deleted
-        assert!(datastore
-            .volume_get(old_snapshot_volume_id)
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            datastore
+                .volume_get(old_snapshot_volume_id)
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 }

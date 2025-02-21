@@ -11,11 +11,11 @@ use http::StatusCode;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::UpdatePrecondition;
 use nexus_db_queries::db::model::{SwitchPort, SwitchPortSettings};
-use nexus_db_queries::db::DataStore;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::SwitchLocation;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, Name, NameOrId, UpdateResult,
@@ -65,7 +65,10 @@ impl super::Nexus {
                     if key.len() > 80 {
                         return Err(Error::invalid_value(
                             "md5_auth_key",
-                            format!("md5 auth key for {} is longer than 80 characters", p.addr)
+                            format!(
+                                "md5 auth key for {} is longer than 80 characters",
+                                p.addr
+                            ),
                         ));
                     }
                     for c in key.chars() {
@@ -344,15 +347,14 @@ impl super::Nexus {
 
         let monitors = match dpd.transceiver_monitors_get(&port_id).await {
             Ok(resp) => Some(resp.into_inner()),
-            Err(e) => {
-                if let Some(StatusCode::NOT_FOUND) = e.status() {
-                    None
-                } else {
+            Err(e) => match e.status() {
+                Some(StatusCode::NOT_FOUND) => None,
+                _ => {
                     return Err(Error::internal_error(&format!(
                         "failed to get txr monitors for {port} {e}"
                     )));
                 }
-            }
+            },
         };
 
         let link_json = serde_json::to_value(status).map_err(|e| {

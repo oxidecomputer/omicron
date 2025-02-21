@@ -1,26 +1,26 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
+use crate::MgsArguments;
+use crate::ServerContext;
 use crate::error::CommunicationError;
 use crate::management_switch::SpIdentifier;
 use crate::management_switch::SpType;
-use crate::MgsArguments;
-use crate::ServerContext;
 use anyhow::Context;
-use gateway_messages::measurement::MeasurementError;
-use gateway_messages::measurement::MeasurementKind;
 use gateway_messages::ComponentDetails;
 use gateway_messages::DeviceCapabilities;
+use gateway_messages::measurement::MeasurementError;
+use gateway_messages::measurement::MeasurementKind;
 use gateway_sp_comms::SingleSp;
 use gateway_sp_comms::SpComponent;
 use gateway_sp_comms::VersionedSpState;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::backoff;
+use oximeter::MetricsError;
 use oximeter::types::Cumulative;
 use oximeter::types::ProducerRegistry;
 use oximeter::types::Sample;
-use oximeter::MetricsError;
 use std::borrow::Cow;
 use std::collections::hash_map;
 use std::collections::hash_map::HashMap;
@@ -467,8 +467,7 @@ impl SpPoller {
             Err(e) => {
                 // This should never happen, but it's not worth taking down the
                 // entire management network over that...
-                const MSG: &'static str =
-                    "the `SpPoller::run` function is only called after \
+                const MSG: &'static str = "the `SpPoller::run` function is only called after \
                      discovery completes successfully, and the `SpIdentifier` \
                      used was returned by the management switch, \
                      so it should be valid.";
@@ -713,7 +712,7 @@ impl SpPoller {
                 const BAD_SAMPLE: &str =
                     "we emitted a bad metrics sample! this should never happen";
                 macro_rules! try_sample {
-                    ($sample:expr) => {
+                    ($sample:expr_2021) => {
                         match $sample {
                             Ok(sample) => samples.push(sample),
 
@@ -733,7 +732,7 @@ impl SpPoller {
                     Ok(deets) => deets,
                     // SP seems gone!
                     Err(CommunicationError::NoSpDiscovered) => {
-                        return Err(CommunicationError::NoSpDiscovered)
+                        return Err(CommunicationError::NoSpDiscovered);
                     }
                     Err(error) => {
                         slog::warn!(
@@ -1126,19 +1125,22 @@ impl ServerManager {
 
                 if let Some(old_server) = current_server.replace(server) {
                     let old_addr = old_server.address();
-                    if let Err(error) = old_server.close().await {
-                        slog::error!(
-                            &self.log,
-                            "failed to close old metrics producer server";
-                            "address" => %old_addr,
-                            "error" => %error,
-                        );
-                    } else {
-                        slog::debug!(
-                            &self.log,
-                            "old metrics producer server shut down";
-                            "address" => %old_addr,
-                        )
+                    match old_server.close().await {
+                        Err(error) => {
+                            slog::error!(
+                                &self.log,
+                                "failed to close old metrics producer server";
+                                "address" => %old_addr,
+                                "error" => %error,
+                            );
+                        }
+                        _ => {
+                            slog::debug!(
+                                &self.log,
+                                "old metrics producer server shut down";
+                                "address" => %old_addr,
+                            )
+                        }
                     }
                 }
             }

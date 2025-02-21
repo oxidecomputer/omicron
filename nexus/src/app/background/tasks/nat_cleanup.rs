@@ -11,8 +11,8 @@ use crate::app::map_switch_zone_addrs;
 use super::networking::build_dpd_clients;
 use crate::app::background::BackgroundTask;
 use chrono::{Duration, Utc};
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
 use nexus_db_queries::context::OpContext;
@@ -47,7 +47,7 @@ impl BackgroundTask for Ipv4NatGarbageCollector {
             let result = self.datastore.ipv4_nat_current_version(opctx).await;
 
             let mut min_gen = match result {
-                Ok(gen) => gen,
+                Ok(r#gen) => r#gen,
                 Err(error) => {
                     warn!(
                         &log,
@@ -91,7 +91,7 @@ impl BackgroundTask for Ipv4NatGarbageCollector {
             for (_location, client) in dpd_clients {
                 let response = client.ipv4_nat_generation().await;
                 match response {
-                    Ok(gen) => min_gen = std::cmp::min(min_gen, *gen),
+                    Ok(r#gen) => min_gen = std::cmp::min(min_gen, *r#gen),
                     Err(error) => {
                         warn!(
                             &log,

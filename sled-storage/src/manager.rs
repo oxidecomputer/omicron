@@ -267,7 +267,7 @@ impl StorageHandle {
     pub async fn detected_raw_disk(
         &self,
         raw_disk: RawDisk,
-    ) -> impl Future<Output = Result<(), Error>> {
+    ) -> impl Future<Output = Result<(), Error>> + use<> {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(StorageRequest::DetectedRawDisk { raw_disk, tx: tx.into() })
@@ -285,7 +285,7 @@ impl StorageHandle {
     pub async fn detected_raw_disk_removal(
         &self,
         raw_disk: RawDisk,
-    ) -> impl Future<Output = Result<(), Error>> {
+    ) -> impl Future<Output = Result<(), Error>> + use<> {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(StorageRequest::DetectedRawDiskRemoval {
@@ -306,7 +306,7 @@ impl StorageHandle {
     pub async fn detected_raw_disk_update(
         &self,
         raw_disk: RawDisk,
-    ) -> impl Future<Output = Result<(), Error>> {
+    ) -> impl Future<Output = Result<(), Error>> + use<> {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(StorageRequest::DetectedRawDiskUpdate {
@@ -332,7 +332,7 @@ impl StorageHandle {
     pub async fn ensure_using_exactly_these_disks<I>(
         &self,
         raw_disks: I,
-    ) -> impl Future<Output = Result<(), Error>>
+    ) -> impl Future<Output = Result<(), Error>> + use<I>
     where
         I: IntoIterator<Item = RawDisk>,
     {
@@ -609,14 +609,14 @@ impl StorageManager {
         match req {
             StorageRequest::DetectedRawDisk { raw_disk, tx } => {
                 let result = self.detected_raw_disk(raw_disk).await;
-                if let Err(ref err) = &result {
+                if let Err(err) = &result {
                     warn!(self.log, "Failed to add raw disk"; "err" => ?err);
                 }
                 let _ = tx.0.send(result);
             }
             StorageRequest::DetectedRawDiskUpdate { raw_disk, tx } => {
                 let result = self.detected_raw_disk_update(raw_disk).await;
-                if let Err(ref err) = &result {
+                if let Err(err) = &result {
                     warn!(self.log, "Failed to apply raw disk update"; "err" => ?err);
                 }
                 let _ = tx.0.send(result);
@@ -657,7 +657,7 @@ impl StorageManager {
             }
             StorageRequest::NewFilesystem(request) => {
                 let result = self.add_dataset(&request).await;
-                if let Err(ref err) = &result {
+                if let Err(err) = &result {
                     warn!(self.log, "Failed to add dataset"; "err" => ?err);
                 }
                 let _ = request.responder.0.send(result);
@@ -819,15 +819,21 @@ impl StorageManager {
         // set of disks which we previously stored in the ledger, if one
         // existed.
         let ledger = self.load_disks_ledger().await;
-        if let Some(ledger) = ledger {
-            info!(self.log, "Setting StorageResources state to match ledger");
+        match ledger {
+            Some(ledger) => {
+                info!(
+                    self.log,
+                    "Setting StorageResources state to match ledger"
+                );
 
-            // Identify which disks should be managed by the control
-            // plane, and adopt all requested disks into the control plane
-            // in a background task (see: [Self::manage_disks]).
-            self.resources.set_config(&ledger.data());
-        } else {
-            info!(self.log, "KeyManager ready, but no ledger detected");
+                // Identify which disks should be managed by the control
+                // plane, and adopt all requested disks into the control plane
+                // in a background task (see: [Self::manage_disks]).
+                self.resources.set_config(&ledger.data());
+            }
+            _ => {
+                info!(self.log, "KeyManager ready, but no ledger detected");
+            }
         }
 
         // We don't load any configuration for datasets, since we aren't

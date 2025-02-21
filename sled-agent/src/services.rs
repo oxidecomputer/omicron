@@ -340,25 +340,26 @@ impl From<Error> for omicron_common::api::external::Error {
                 // https://github.com/oxidecomputer/omicron/issues/4776 ,
                 // and we preserve that behavior here, even though we may
                 // launch many zones at the same time.
-                if let Some(err) = errors.iter().find_map(|(_, err)| {
+                match errors.iter().find_map(|(_, err)| {
                     if matches!(err, Error::TimeNotSynchronized) {
                         Some(err)
                     } else {
                         None
                     }
                 }) {
-                    omicron_common::api::external::Error::unavail(
+                    Some(err) => omicron_common::api::external::Error::unavail(
                         &err.to_string(),
-                    )
-                } else {
-                    let internal_message = errors
-                        .iter()
-                        .map(|(name, err)| {
-                            format!("failed to start {name}: {err:?}")
-                        })
-                        .join("\n");
-                    omicron_common::api::external::Error::InternalError {
-                        internal_message,
+                    ),
+                    _ => {
+                        let internal_message = errors
+                            .iter()
+                            .map(|(name, err)| {
+                                format!("failed to start {name}: {err:?}")
+                            })
+                            .join("\n");
+                        omicron_common::api::external::Error::InternalError {
+                            internal_message,
+                        }
                     }
                 }
             }
@@ -4428,19 +4429,22 @@ impl ServiceManager {
                             // It should be impossible for the `sled_info` not
                             // to be set here, as the underlay is set at the
                             // same time.
-                            if let Some(info) = self.inner.sled_info.get() {
-                                smfh.setprop_default_instance(
-                                    "config/rack_id",
-                                    info.rack_id,
-                                )?;
-                            } else {
-                                error!(
-                                    self.inner.log,
-                                    concat!(
+                            match self.inner.sled_info.get() {
+                                Some(info) => {
+                                    smfh.setprop_default_instance(
+                                        "config/rack_id",
+                                        info.rack_id,
+                                    )?;
+                                }
+                                _ => {
+                                    error!(
+                                        self.inner.log,
+                                        concat!(
                                         "rack_id not present,",
                                         " even though underlay address exists"
                                     )
-                                );
+                                    );
+                                }
                             }
 
                             smfh.refresh()?;
@@ -4454,13 +4458,16 @@ impl ServiceManager {
                                 self.inner.log,
                                 "configuring dendrite service"
                             );
-                            if let Some(info) = self.inner.sled_info.get() {
-                                setprop_sled_ident_properties(&smfh, info)?;
-                            } else {
-                                info!(
-                                    self.inner.log,
-                                    "no sled info available yet"
-                                );
+                            match self.inner.sled_info.get() {
+                                Some(info) => {
+                                    setprop_sled_ident_properties(&smfh, info)?;
+                                }
+                                _ => {
+                                    info!(
+                                        self.inner.log,
+                                        "no sled info available yet"
+                                    );
+                                }
                             }
                             smfh.delpropvalue_default_instance(
                                 "config/address",
@@ -4535,13 +4542,16 @@ impl ServiceManager {
                         }
                         SwitchService::Tfport { pkt_source, asic } => {
                             info!(self.inner.log, "configuring tfport service");
-                            if let Some(info) = self.inner.sled_info.get() {
-                                setprop_sled_ident_properties(&smfh, info)?;
-                            } else {
-                                info!(
-                                    self.inner.log,
-                                    "no sled info available yet"
-                                );
+                            match self.inner.sled_info.get() {
+                                Some(info) => {
+                                    setprop_sled_ident_properties(&smfh, info)?;
+                                }
+                                _ => {
+                                    info!(
+                                        self.inner.log,
+                                        "no sled info available yet"
+                                    );
+                                }
                             }
                             smfh.delpropvalue_default_instance(
                                 "config/listen_address",

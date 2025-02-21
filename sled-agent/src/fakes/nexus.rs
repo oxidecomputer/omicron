@@ -9,8 +9,8 @@
 
 use dropshot::Body;
 use dropshot::{
-    endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseOk,
-    HttpResponseUpdatedNoContent, Path, RequestContext, TypedBody,
+    ApiDescription, FreeformBody, HttpError, HttpResponseOk,
+    HttpResponseUpdatedNoContent, Path, RequestContext, TypedBody, endpoint,
 };
 use internal_dns_types::config::DnsConfigBuilder;
 use internal_dns_types::names::ServiceName;

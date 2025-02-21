@@ -7,8 +7,8 @@
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::model::Vmm;
 use crate::db::model::VmmRuntimeState;
 use crate::db::model::VmmState as DbVmmState;
@@ -166,7 +166,7 @@ impl DataStore {
         diesel::update(dsl::vmm)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
-            .filter(dsl::state_generation.lt(new_runtime.gen))
+            .filter(dsl::state_generation.lt(new_runtime.r#gen))
             .set(new_runtime.clone())
             .check_if_exists::<Vmm>(vmm_id.into_untyped_uuid())
             .execute_and_check(conn)

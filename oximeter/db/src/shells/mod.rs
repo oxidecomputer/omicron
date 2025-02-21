@@ -23,7 +23,7 @@ pub mod special_idents {
     use oximeter::DatumType;
 
     macro_rules! gen_marker {
-        ($p:expr, $field:expr) => {
+        ($p:expr_2021, $field:expr_2021) => {
             concat!("p", $p, "_", $field)
         };
     }
@@ -110,17 +110,20 @@ pub async fn describe_timeseries(
         "
         ),
         Ok(name) => {
-            if let Some(schema) = client.schema_for_timeseries(&name).await? {
-                let (cols, types) = prepare_columns(&schema);
-                let mut builder = tabled::builder::Builder::default();
-                builder.push_record(cols); // first record is the header
-                builder.push_record(types);
-                println!(
-                    "{}",
-                    builder.build().with(tabled::settings::Style::psql())
-                );
-            } else {
-                eprintln!("No such timeseries: {timeseries}");
+            match client.schema_for_timeseries(&name).await? {
+                Some(schema) => {
+                    let (cols, types) = prepare_columns(&schema);
+                    let mut builder = tabled::builder::Builder::default();
+                    builder.push_record(cols); // first record is the header
+                    builder.push_record(types);
+                    println!(
+                        "{}",
+                        builder.build().with(tabled::settings::Style::psql())
+                    );
+                }
+                _ => {
+                    eprintln!("No such timeseries: {timeseries}");
+                }
             }
         }
     }

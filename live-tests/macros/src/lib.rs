@@ -7,7 +7,7 @@
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, ItemFn};
+use syn::{ItemFn, parse_macro_input};
 
 /// Define a test function that uses `LiveTestContext`
 ///
@@ -46,13 +46,10 @@ pub fn live_test(_attrs: TokenStream, input: TokenStream) -> TokenStream {
     // Verify we're returning an empty tuple
     correct_signature &= match input_func.sig.output {
         syn::ReturnType::Default => true,
-        syn::ReturnType::Type(_, ref t) => {
-            if let syn::Type::Tuple(syn::TypeTuple { elems, .. }) = &**t {
-                elems.is_empty()
-            } else {
-                false
-            }
-        }
+        syn::ReturnType::Type(_, ref t) => match &**t {
+            syn::Type::Tuple(syn::TypeTuple { elems, .. }) => elems.is_empty(),
+            _ => false,
+        },
     };
     if !correct_signature {
         panic!("func signature must be async fn(&LiveTestContext)");

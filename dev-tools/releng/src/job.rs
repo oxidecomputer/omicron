@@ -21,9 +21,9 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::anyhow;
 use anyhow::Context;
 use anyhow::Result;
+use anyhow::anyhow;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use fs_err::tokio::File;
@@ -31,16 +31,16 @@ use futures::future::BoxFuture;
 use futures::future::FutureExt;
 use futures::stream::FuturesUnordered;
 use futures::stream::TryStreamExt;
-use slog::info;
 use slog::Logger;
+use slog::info;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
+use tokio::sync::Semaphore;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::error::RecvError;
-use tokio::sync::Semaphore;
 
 use crate::cmd::Command;
 
@@ -185,7 +185,7 @@ impl Selector<'_> {
 }
 
 macro_rules! info_or_error {
-    ($logger:expr, $result:expr, $($tt:tt)*) => {
+    ($logger:expr_2021, $result:expr_2021, $($tt:tt)*) => {
         if $result.is_ok() {
             ::slog::info!($logger, $($tt)*);
         } else {

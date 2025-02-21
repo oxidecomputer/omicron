@@ -28,8 +28,8 @@ use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use parse_display::Display;
 use parse_display::FromStr;
-use rand::thread_rng;
 use rand::Rng;
+use rand::thread_rng;
 use schemars::JsonSchema;
 use semver;
 use serde::Deserialize;
@@ -310,7 +310,7 @@ impl JsonSchema for Name {
         "Name".to_string()
     }
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         name_schema(schemars::schema::Metadata {
             title: Some(
@@ -391,13 +391,13 @@ impl JsonSchema for NameOrId {
     }
 
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        r#gen: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
                 one_of: Some(vec![
-                    label_schema("id", gen.subschema_for::<Uuid>()),
-                    label_schema("name", gen.subschema_for::<Name>()),
+                    label_schema("id", r#gen.subschema_for::<Uuid>()),
+                    label_schema("name", r#gen.subschema_for::<Name>()),
                 ]),
                 ..Default::default()
             })),
@@ -443,7 +443,7 @@ impl JsonSchema for UserId {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         name_schema(schemars::schema::Metadata {
             title: Some("A username for a local-only user".to_string()),
@@ -524,7 +524,7 @@ impl JsonSchema for SemverVersion {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             instance_type: Some(schemars::schema::InstanceType::String.into()),
@@ -579,7 +579,7 @@ impl JsonSchema for RoleName {
         "RoleName".to_string()
     }
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::Schema::Object(schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -949,7 +949,7 @@ impl JsonSchema for Hostname {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::Schema::Object(schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -2007,7 +2007,7 @@ impl JsonSchema for L4PortRange {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -2179,7 +2179,7 @@ impl JsonSchema for MacAddr {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -3058,12 +3058,12 @@ impl BgpMessageHistory {
 
 impl JsonSchema for BgpMessageHistory {
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        r#gen: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         let obj = schemars::schema::Schema::Object(
             schemars::schema::SchemaObject::default(),
         );
-        gen.definitions_mut().insert(Self::schema_name(), obj.clone());
+        r#gen.definitions_mut().insert(Self::schema_name(), obj.clone());
         obj
     }
 
@@ -3787,18 +3787,15 @@ mod test {
         assert!(!"fd00::/40".parse::<Ipv6Net>().unwrap().is_vpc_prefix());
 
         let vpc_prefix = "fd00::/48".parse::<Ipv6Net>().unwrap();
-        assert!("fd00::/64"
-            .parse::<Ipv6Net>()
-            .unwrap()
-            .is_vpc_subnet(&vpc_prefix));
-        assert!(!"fd10::/64"
-            .parse::<Ipv6Net>()
-            .unwrap()
-            .is_vpc_subnet(&vpc_prefix));
-        assert!(!"fd00::/63"
-            .parse::<Ipv6Net>()
-            .unwrap()
-            .is_vpc_subnet(&vpc_prefix));
+        assert!(
+            "fd00::/64".parse::<Ipv6Net>().unwrap().is_vpc_subnet(&vpc_prefix)
+        );
+        assert!(
+            !"fd10::/64".parse::<Ipv6Net>().unwrap().is_vpc_subnet(&vpc_prefix)
+        );
+        assert!(
+            !"fd00::/63".parse::<Ipv6Net>().unwrap().is_vpc_subnet(&vpc_prefix)
+        );
     }
 
     #[test]

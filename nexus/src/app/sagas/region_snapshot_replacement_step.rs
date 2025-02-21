@@ -44,8 +44,8 @@
 //! collect" saga for the next step in the process.
 
 use super::{
-    ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
-    ACTION_GENERATE_ID,
+    ACTION_GENERATE_ID, ActionRegistry, NexusActionContext, NexusSaga,
+    SagaInitError,
 };
 use crate::app::db::datastore::ExistingTarget;
 use crate::app::db::datastore::ReplacementTarget;
@@ -277,7 +277,7 @@ async fn rssrs_create_fake_volume(
             block_size: 0,
             blocks_per_extent: 0,
             extent_count: 0,
-            gen: 0,
+            r#gen: 0,
             opts: CrucibleOpts {
                 id: *new_volume_id.as_untyped_uuid(),
                 target: vec![],

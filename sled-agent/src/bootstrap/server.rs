@@ -4,11 +4,11 @@
 
 //! Server API for bootstrap-related functionality.
 
+use super::BootstrapError;
+use super::RssAccessError;
 use super::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use super::http_entrypoints;
 use super::views::SledAgentResponse;
-use super::BootstrapError;
-use super::RssAccessError;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::http_entrypoints::BootstrapServerContext;
 use crate::bootstrap::maghemite;
@@ -33,7 +33,7 @@ use illumos_utils::zfs;
 use illumos_utils::zone;
 use illumos_utils::zone::Zones;
 use internal_dns_resolver::Resolver;
-use omicron_common::address::{Ipv6Subnet, AZ_PREFIX};
+use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
 use omicron_common::ledger;
 use omicron_common::ledger::Ledger;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
@@ -240,34 +240,35 @@ impl Server {
         let sprockets_server_handle = tokio::spawn(sprockets_server.run());
 
         // Do we have a persistent sled-agent request that we need to restore?
-        let state = if let Some(ledger) = maybe_ledger {
-            let start_sled_agent_request = ledger.into_inner();
-            let sled_agent_server = start_sled_agent(
-                &config,
-                start_sled_agent_request,
-                long_running_task_handles.clone(),
-                service_manager.clone(),
-                &ddm_admin_localhost_client,
-                &base_log,
-                &startup_log,
-            )
-            .await?;
+        let state = match maybe_ledger {
+            Some(ledger) => {
+                let start_sled_agent_request = ledger.into_inner();
+                let sled_agent_server = start_sled_agent(
+                    &config,
+                    start_sled_agent_request,
+                    long_running_task_handles.clone(),
+                    service_manager.clone(),
+                    &ddm_admin_localhost_client,
+                    &base_log,
+                    &startup_log,
+                )
+                .await?;
 
-            // Give the HardwareMonitory access to the `SledAgent`
-            let sled_agent = sled_agent_server.sled_agent();
-            sled_agent_started_tx
-                .send(sled_agent.clone())
-                .map_err(|_| ())
-                .expect("Failed to send to StorageMonitor");
+                // Give the HardwareMonitory access to the `SledAgent`
+                let sled_agent = sled_agent_server.sled_agent();
+                sled_agent_started_tx
+                    .send(sled_agent.clone())
+                    .map_err(|_| ())
+                    .expect("Failed to send to StorageMonitor");
 
-            // For cold boot specifically, we now need to load the services
-            // we're responsible for, while continuing to handle hardware
-            // notifications. This cannot fail: we retry indefinitely until
-            // we're done loading services.
-            sled_agent.load_services().await;
-            SledAgentState::ServerStarted(sled_agent_server)
-        } else {
-            SledAgentState::Bootstrapping(Some(sled_agent_started_tx))
+                // For cold boot specifically, we now need to load the services
+                // we're responsible for, while continuing to handle hardware
+                // notifications. This cannot fail: we retry indefinitely until
+                // we're done loading services.
+                sled_agent.load_services().await;
+                SledAgentState::ServerStarted(sled_agent_server)
+            }
+            _ => SledAgentState::Bootstrapping(Some(sled_agent_started_tx)),
         };
 
         // Spawn our inner task that handles any future hardware updates and any

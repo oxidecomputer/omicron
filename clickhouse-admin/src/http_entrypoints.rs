@@ -54,17 +54,17 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Generation>, HttpError> {
         let ctx = rqctx.context();
-        let gen = match ctx.generation() {
+        let r#gen = match ctx.generation() {
             Some(g) => g,
             None => {
                 return Err(HttpError::for_client_error(
                     Some(String::from("ObjectNotFound")),
                     ClientErrorStatusCode::NOT_FOUND,
                     "no generation number found".to_string(),
-                ))
+                ));
             }
         };
-        Ok(HttpResponseOk(gen))
+        Ok(HttpResponseOk(r#gen))
     }
 
     async fn distributed_ddl_queue(
@@ -120,17 +120,17 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Generation>, HttpError> {
         let ctx = rqctx.context();
-        let gen = match ctx.generation() {
+        let r#gen = match ctx.generation() {
             Some(g) => g,
             None => {
                 return Err(HttpError::for_client_error(
                     Some(String::from("ObjectNotFound")),
                     ClientErrorStatusCode::NOT_FOUND,
                     "no generation number found".to_string(),
-                ))
+                ));
             }
         };
-        Ok(HttpResponseOk(gen))
+        Ok(HttpResponseOk(r#gen))
     }
 
     async fn lgif(

@@ -5,12 +5,12 @@
 //! Model types for external IPs, both for instances and externally-facing
 //! services.
 
-use crate::impl_enum_type;
-use crate::schema::external_ip;
-use crate::schema::floating_ip;
 use crate::Name;
 use crate::ServiceNetworkInterface;
 use crate::SqlU16;
+use crate::impl_enum_type;
+use crate::schema::external_ip;
+use crate::schema::floating_ip;
 use chrono::DateTime;
 use chrono::Utc;
 use db_macros::Resource;

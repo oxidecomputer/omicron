@@ -1271,18 +1271,19 @@ impl InstanceRunner {
         //
         // If there is nothing here, then there is no `RunningZone`, and so
         // there's no zone or resources to clean up at all.
-        let mut running_state = if let Some(state) = self.running_state.take() {
-            state
-        } else {
-            debug!(
-                self.log,
-                "Instance::terminate() called with no running state"
-            );
+        let mut running_state = match self.running_state.take() {
+            Some(state) => state,
+            _ => {
+                debug!(
+                    self.log,
+                    "Instance::terminate() called with no running state"
+                );
 
-            // Ensure the instance is removed from the instance manager's table
-            // so that a new instance can take its place.
-            self.instance_ticket.deregister();
-            return;
+                // Ensure the instance is removed from the instance manager's table
+                // so that a new instance can take its place.
+                self.instance_ticket.deregister();
+                return;
+            }
         };
 
         // Ask the sled-agent's metrics task to stop tracking statistics for our
@@ -1458,7 +1459,7 @@ fn propolis_error_code(
     error: &PropolisClientError,
 ) -> Option<PropolisErrorCode> {
     // Is this a structured error response from the Propolis server?
-    let propolis_client::Error::ErrorResponse(ref rv) = &error else {
+    let propolis_client::Error::ErrorResponse(rv) = &error else {
         return None;
     };
 
@@ -1826,7 +1827,7 @@ impl InstanceRunner {
         let name = propolis_zone_name(&self.propolis_id);
         match &self.running_state {
             None => Err(BundleError::Unavailable { name }),
-            Some(RunningState { ref running_zone, .. }) => {
+            Some(RunningState { running_zone, .. }) => {
                 self.zone_bundler
                     .create(running_zone, ZoneBundleCause::ExplicitRequest)
                     .await
@@ -1854,48 +1855,52 @@ impl InstanceRunner {
         &mut self,
         migration_params: Option<InstanceMigrationTargetParams>,
     ) -> Result<(), Error> {
-        if let Some(running_state) = self.running_state.as_ref() {
-            info!(
-                &self.log,
-                "Ensuring instance which already has a running state"
-            );
-            self.propolis_ensure_inner(
-                &running_state.client,
-                &running_state.running_zone,
-                migration_params,
-            )
-            .await?;
-        } else {
-            let setup_result: Result<(), Error> = 'setup: {
-                // Set up the Propolis zone and the objects associated with it.
-                let setup = match self.setup_propolis_inner().await {
-                    Ok(setup) => setup,
-                    Err(e) => break 'setup Err(e),
+        match self.running_state.as_ref() {
+            Some(running_state) => {
+                info!(
+                    &self.log,
+                    "Ensuring instance which already has a running state"
+                );
+                self.propolis_ensure_inner(
+                    &running_state.client,
+                    &running_state.running_zone,
+                    migration_params,
+                )
+                .await?;
+            }
+            _ => {
+                let setup_result: Result<(), Error> = 'setup: {
+                    // Set up the Propolis zone and the objects associated with it.
+                    let setup = match self.setup_propolis_inner().await {
+                        Ok(setup) => setup,
+                        Err(e) => break 'setup Err(e),
+                    };
+
+                    // Direct the Propolis server to create its VM and the tasks
+                    // associated with it. On success, the zone handle moves into
+                    // this instance, preserving the zone.
+                    self.ensure_propolis_and_tasks(setup, migration_params)
+                        .await
                 };
 
-                // Direct the Propolis server to create its VM and the tasks
-                // associated with it. On success, the zone handle moves into
-                // this instance, preserving the zone.
-                self.ensure_propolis_and_tasks(setup, migration_params).await
-            };
+                // If this instance started from scratch, and startup failed, move
+                // the instance to the Failed state instead of leaking the Starting
+                // state.
+                //
+                // Once again, migration targets don't do this, because a failure to
+                // start a migration target simply leaves the VM running untouched
+                // on the source.
+                if migration_params.is_none() && setup_result.is_err() {
+                    error!(&self.log, "vmm setup failed: {:?}", setup_result);
 
-            // If this instance started from scratch, and startup failed, move
-            // the instance to the Failed state instead of leaking the Starting
-            // state.
-            //
-            // Once again, migration targets don't do this, because a failure to
-            // start a migration target simply leaves the VM running untouched
-            // on the source.
-            if migration_params.is_none() && setup_result.is_err() {
-                error!(&self.log, "vmm setup failed: {:?}", setup_result);
-
-                // This case is morally equivalent to starting Propolis and then
-                // rudely terminating it before asking it to do anything. Update
-                // the VMM and instance states accordingly.
-                let mark_failed = false;
-                self.state.terminate_rudely(mark_failed);
+                    // This case is morally equivalent to starting Propolis and then
+                    // rudely terminating it before asking it to do anything. Update
+                    // the VMM and instance states accordingly.
+                    let mark_failed = false;
+                    self.state.terminate_rudely(mark_failed);
+                }
+                setup_result?;
             }
-            setup_result?;
         }
         Ok(())
     }
@@ -2180,18 +2185,19 @@ impl InstanceRunner {
         disk_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
-        if let Some(running_state) = &self.running_state {
-            running_state
-                .client
-                .instance_issue_crucible_snapshot_request()
-                .id(disk_id)
-                .snapshot_id(snapshot_id)
-                .send()
-                .await?;
+        match &self.running_state {
+            Some(running_state) => {
+                running_state
+                    .client
+                    .instance_issue_crucible_snapshot_request()
+                    .id(disk_id)
+                    .snapshot_id(snapshot_id)
+                    .send()
+                    .await?;
 
-            Ok(())
-        } else {
-            Err(Error::VmNotRunning(self.propolis_id))
+                Ok(())
+            }
+            _ => Err(Error::VmNotRunning(self.propolis_id)),
         }
     }
 
@@ -2501,7 +2507,7 @@ mod tests {
             hardware,
             vmm_runtime: VmmRuntimeState {
                 state: VmmState::Starting,
-                gen: Generation::new(),
+                r#gen: Generation::new(),
                 time_updated: Default::default(),
             },
             propolis_addr,

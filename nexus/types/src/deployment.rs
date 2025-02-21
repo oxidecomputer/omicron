@@ -89,14 +89,14 @@ pub use planning_input::SledLookupError;
 pub use planning_input::SledLookupErrorKind;
 pub use planning_input::SledResources;
 pub use planning_input::ZpoolFilter;
-pub use zone_type::blueprint_zone_type;
 pub use zone_type::BlueprintZoneType;
 pub use zone_type::DurableDataset;
+pub use zone_type::blueprint_zone_type;
 
 use blueprint_display::{
-    constants::*, BpDiffState, BpGeneration, BpOmicronZonesTableSchema,
+    BpDiffState, BpGeneration, BpOmicronZonesTableSchema,
     BpPhysicalDisksTableSchema, BpTable, BpTableData, BpTableRow,
-    KvListWithHeading,
+    KvListWithHeading, constants::*,
 };
 use id_map::{IdMap, IdMappable};
 
@@ -673,7 +673,7 @@ impl ZoneSortKey for OmicronZoneConfig {
     }
 }
 
-fn zone_sort_key<T: ZoneSortKey>(z: &T) -> impl Ord {
+fn zone_sort_key<T: ZoneSortKey>(z: &T) -> impl Ord + use<T> {
     // First sort by kind, then by ID. This makes it so that zones of the same
     // kind (e.g. Crucible zones) are grouped together.
     (z.kind(), z.id())

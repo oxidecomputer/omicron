@@ -261,11 +261,12 @@ impl HardwareMonitor {
     // We use this when we're monitoring hardware for the first
     // time, and if we miss notifications.
     async fn check_latest_hardware_snapshot(&mut self) {
-        let underlay_network = if let Some(sled_agent) = &self.sled_agent {
-            sled_agent.notify_nexus_about_self(&self.log).await;
-            Some(sled_agent.switch_zone_underlay_info())
-        } else {
-            None
+        let underlay_network = match &self.sled_agent {
+            Some(sled_agent) => {
+                sled_agent.notify_nexus_about_self(&self.log).await;
+                Some(sled_agent.switch_zone_underlay_info())
+            }
+            _ => None,
         };
 
         info!(

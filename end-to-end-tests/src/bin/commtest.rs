@@ -1,16 +1,16 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
 use end_to_end_tests::helpers::cli::oxide_cli_style;
 use end_to_end_tests::helpers::icmp::ping4_test_run;
 use oxide_client::{
+    ClientHiddenExt, ClientLoginExt, ClientProjectsExt,
+    ClientSystemHardwareExt, ClientSystemIpPoolsExt, ClientSystemStatusExt,
+    ClientVpcsExt,
     types::{
         IpPoolCreate, IpPoolLinkSilo, IpRange, Ipv4Range, Name, NameOrId,
         PingStatus, ProbeCreate, ProbeInfo, ProjectCreate,
         UsernamePasswordCredentials,
     },
-    ClientHiddenExt, ClientLoginExt, ClientProjectsExt,
-    ClientSystemHardwareExt, ClientSystemIpPoolsExt, ClientSystemStatusExt,
-    ClientVpcsExt,
 };
 use std::{
     net::{IpAddr, Ipv4Addr},
@@ -113,7 +113,7 @@ async fn wait_until_oxide_api_is_available(cli: &Cli) -> Result<()> {
 }
 
 macro_rules! api_retry {
-    ($call:expr) => {{
+    ($call:expr_2021) => {{
         let mut limit = API_RETRY_ATTEMPTS;
         loop {
             match $call {
@@ -182,50 +182,54 @@ async fn cleanup_probes(cli: &Cli) -> Result<oxide_client::Client> {
 }
 
 async fn rack_cleanup(oxide: &oxide_client::Client) -> Result<()> {
-    if let Err(e) = oxide
+    match oxide
         .project_view()
         .project(Name::try_from("classone").unwrap())
         .send()
         .await
     {
-        if let Some(reqwest::StatusCode::NOT_FOUND) = e.status() {
-            print!("project does not exist");
-        } else {
-            Err(e)?;
+        Err(e) => match e.status() {
+            Some(reqwest::StatusCode::NOT_FOUND) => {
+                print!("project does not exist");
+            }
+            _ => {
+                Err(e)?;
+            }
+        },
+        _ => {
+            print!("deleting classone subnet ... ");
+            api_retry!(
+                oxide
+                    .vpc_subnet_delete()
+                    .project(Name::try_from("classone").unwrap())
+                    .vpc(Name::try_from("default").unwrap())
+                    .subnet(Name::try_from("default").unwrap())
+                    .send()
+                    .await
+            )?;
+            println!("done");
+
+            print!("deleting classone vpc ... ");
+            api_retry!(
+                oxide
+                    .vpc_delete()
+                    .project(Name::try_from("classone").unwrap())
+                    .vpc(Name::try_from("default").unwrap())
+                    .send()
+                    .await
+            )?;
+            println!("done");
+
+            print!("deleting classone project ... ");
+            api_retry!(
+                oxide
+                    .project_delete()
+                    .project(Name::try_from("classone").unwrap())
+                    .send()
+                    .await
+            )?;
+            println!("done");
         }
-    } else {
-        print!("deleting classone subnet ... ");
-        api_retry!(
-            oxide
-                .vpc_subnet_delete()
-                .project(Name::try_from("classone").unwrap())
-                .vpc(Name::try_from("default").unwrap())
-                .subnet(Name::try_from("default").unwrap())
-                .send()
-                .await
-        )?;
-        println!("done");
-
-        print!("deleting classone vpc ... ");
-        api_retry!(
-            oxide
-                .vpc_delete()
-                .project(Name::try_from("classone").unwrap())
-                .vpc(Name::try_from("default").unwrap())
-                .send()
-                .await
-        )?;
-        println!("done");
-
-        print!("deleting classone project ... ");
-        api_retry!(
-            oxide
-                .project_delete()
-                .project(Name::try_from("classone").unwrap())
-                .send()
-                .await
-        )?;
-        println!("done");
     }
     Ok(())
 }
@@ -252,64 +256,70 @@ async fn rack_prepare(
     )?;
     println!("done");
 
-    api_retry!(if let Err(e) = oxide
+    api_retry!(match oxide
         .project_view()
         .project(Name::try_from("classone").unwrap())
         .send()
         .await
     {
-        if let Some(reqwest::StatusCode::NOT_FOUND) = e.status() {
-            print!("project does not exist, creating ... ");
-            oxide
-                .project_create()
-                .body(ProjectCreate {
-                    description: "A project for probes".into(),
-                    name: "classone".parse().unwrap(),
-                })
-                .send()
-                .await?;
-            println!("done");
-            Ok(())
-        } else {
-            Err(e)
+        Err(e) => {
+            match e.status() {
+                Some(reqwest::StatusCode::NOT_FOUND) => {
+                    print!("project does not exist, creating ... ");
+                    oxide
+                        .project_create()
+                        .body(ProjectCreate {
+                            description: "A project for probes".into(),
+                            name: "classone".parse().unwrap(),
+                        })
+                        .send()
+                        .await?;
+                    println!("done");
+                    Ok(())
+                }
+                _ => Err(e),
+            }
         }
-    } else {
-        println!("classone project already exists");
-        Ok(())
+        _ => {
+            println!("classone project already exists");
+            Ok(())
+        }
     })?;
 
     let pool_name = "default";
-    api_retry!(
-        if let Err(e) = oxide.ip_pool_view().pool("default").send().await {
-            if let Some(reqwest::StatusCode::NOT_FOUND) = e.status() {
-                print!("default ip pool does not exist, creating ...");
-                oxide
-                    .ip_pool_create()
-                    .body(IpPoolCreate {
-                        name: pool_name.parse().unwrap(),
-                        description: "Default IP pool".to_string(),
-                    })
-                    .send()
-                    .await?;
-                oxide
-                    .ip_pool_silo_link()
-                    .pool(pool_name)
-                    .body(IpPoolLinkSilo {
-                        silo: NameOrId::Name("recovery".parse().unwrap()),
-                        is_default: true,
-                    })
-                    .send()
-                    .await?;
-                println!("done");
-                Ok(())
-            } else {
-                Err(e)
+    api_retry!(match oxide.ip_pool_view().pool("default").send().await {
+        Err(e) => {
+            match e.status() {
+                Some(reqwest::StatusCode::NOT_FOUND) => {
+                    print!("default ip pool does not exist, creating ...");
+                    oxide
+                        .ip_pool_create()
+                        .body(IpPoolCreate {
+                            name: pool_name.parse().unwrap(),
+                            description: "Default IP pool".to_string(),
+                        })
+                        .send()
+                        .await?;
+                    oxide
+                        .ip_pool_silo_link()
+                        .pool(pool_name)
+                        .body(IpPoolLinkSilo {
+                            silo: NameOrId::Name("recovery".parse().unwrap()),
+                            is_default: true,
+                        })
+                        .send()
+                        .await?;
+                    println!("done");
+                    Ok(())
+                }
+                _ => Err(e),
             }
-        } else {
+        }
+        _ => {
             println!("default ip pool already exists");
             Ok(())
         }
-    )?;
+    })?;
 
     let pool = api_retry!(
         oxide
@@ -365,34 +375,38 @@ async fn launch_probes(
 ) -> Result<Vec<Ipv4Addr>> {
     for (i, sled) in sleds.into_iter().enumerate() {
         println!("checking if probe{i} exists");
-        api_retry!(if let Err(e) = oxide
+        api_retry!(match oxide
             .probe_view()
             .project(Name::try_from("classone").unwrap())
             .probe(Name::try_from(format!("probe{i}")).unwrap())
             .send()
             .await
         {
-            if let Some(reqwest::StatusCode::NOT_FOUND) = e.status() {
-                print!("probe{i} does not exist, creating ... ");
-                oxide
-                    .probe_create()
-                    .project(Name::try_from("classone").unwrap())
-                    .body(ProbeCreate {
-                        description: format!("probe {i}"),
-                        ip_pool: Some("default".parse().unwrap()),
-                        name: format!("probe{i}").parse().unwrap(),
-                        sled,
-                    })
-                    .send()
-                    .await?;
-                println!("done");
-                Ok(())
-            } else {
-                Err(e)
+            Err(e) => {
+                match e.status() {
+                    Some(reqwest::StatusCode::NOT_FOUND) => {
+                        print!("probe{i} does not exist, creating ... ");
+                        oxide
+                            .probe_create()
+                            .project(Name::try_from("classone").unwrap())
+                            .body(ProbeCreate {
+                                description: format!("probe {i}"),
+                                ip_pool: Some("default".parse().unwrap()),
+                                name: format!("probe{i}").parse().unwrap(),
+                                sled,
+                            })
+                            .send()
+                            .await?;
+                        println!("done");
+                        Ok(())
+                    }
+                    _ => Err(e),
+                }
             }
-        } else {
-            println!("probe{i} already exists");
-            Ok(())
+            _ => {
+                println!("probe{i} already exists");
+                Ok(())
+            }
         })?;
     }
 

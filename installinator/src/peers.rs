@@ -10,7 +10,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use async_trait::async_trait;
 use buf_list::BufList;
 use bytes::Bytes;
@@ -110,7 +110,10 @@ impl FromStr for DiscoveryMechanism {
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(Self::List(peers))
         } else {
-            bail!("invalid discovery mechanism (expected \"bootstrap\" or \"list:[::1]:8000\"): {}", s);
+            bail!(
+                "invalid discovery mechanism (expected \"bootstrap\" or \"list:[::1]:8000\"): {}",
+                s
+            );
         }
     }
 }
@@ -150,7 +153,9 @@ impl FetchedArtifact {
                     slog::warn!(
                         log,
                         "(attempt {attempt}) failed to discover peers, retrying: {}",
-                        DisplayErrorChain::new(AsRef::<dyn std::error::Error>::as_ref(&error)),
+                        DisplayErrorChain::new(
+                            AsRef::<dyn std::error::Error>::as_ref(&error)
+                        ),
                     );
                     cx.send_progress(StepProgress::retry(format!(
                         "failed to discover peers: {error}"
@@ -172,7 +177,7 @@ impl FetchedArtifact {
             );
             match peers.fetch_artifact(&cx, artifact_hash_id).await {
                 Some((addr, artifact)) => {
-                    return Ok(Self { attempt, addr, artifact })
+                    return Ok(Self { attempt, addr, artifact });
                 }
                 None => {
                     slog::warn!(
@@ -282,7 +287,7 @@ impl Peers {
         self.imp.peer_count()
     }
 
-    pub(crate) fn display(&self) -> impl fmt::Display {
+    pub(crate) fn display(&self) -> impl fmt::Display + use<> {
         self.peers().join(", ")
     }
 

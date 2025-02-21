@@ -11,8 +11,8 @@
 //! start' background task.
 
 use crate::app::background::BackgroundTask;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::ReadOnlyRegionReplacementStartStatus;
@@ -161,8 +161,8 @@ impl BackgroundTask for ReadOnlyRegionReplacementDetector {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::app::RegionAllocationStrategy;
     use crate::app::MIN_DISK_SIZE_BYTES;
+    use crate::app::RegionAllocationStrategy;
     use crate::external_api::params;
     use chrono::Utc;
     use nexus_db_model::BlockSize;
@@ -299,7 +299,7 @@ mod test {
                     volume_id: volume_id.into(),
                     destination_volume_id: VolumeUuid::new_v4().into(),
 
-                    gen: Generation::new(),
+                    r#gen: Generation::new(),
                     state: SnapshotState::Creating,
                     block_size: BlockSize::Traditional,
 

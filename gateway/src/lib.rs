@@ -16,8 +16,8 @@ pub use context::ServerContext;
 pub use error::*;
 
 use dropshot::ShutdownWaitFuture;
-use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use gateway_sp_comms::InMemoryHostPhase2Provider;
 pub use management_switch::LocationConfig;
 pub use management_switch::LocationDeterminationConfig;
@@ -32,15 +32,15 @@ use omicron_common::FileKv;
 
 use dropshot::ConfigDropshot;
 use dropshot::HandlerTaskMode;
+use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::info;
 use slog::o;
 use slog::warn;
-use slog::Logger;
 use slog_error_chain::InlineErrorChain;
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::mem;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -253,27 +253,30 @@ impl Server {
         // For each address in `addresses`, either start a new server or move
         // the existing one from `self.http_servers` into `http_servers`.
         for &addr in addresses {
-            if let Some(existing) = self.http_servers.remove(&addr) {
-                info!(
-                    self.apictx.log,
-                    "adjusting dropshot addresses; keeping existing addr";
-                    "addr" => %addr,
-                );
-                http_servers.insert(addr, existing);
-            } else {
-                info!(
-                    self.apictx.log,
-                    "adjusting dropshot addresses; starting new server";
-                    "addr" => %addr,
-                );
-                start_dropshot_server(
-                    &self.apictx,
-                    addr,
-                    self.default_request_body_max_bytes,
-                    &mut http_servers,
-                    &self.all_servers_shutdown,
-                    &self.log,
-                )?;
+            match self.http_servers.remove(&addr) {
+                Some(existing) => {
+                    info!(
+                        self.apictx.log,
+                        "adjusting dropshot addresses; keeping existing addr";
+                        "addr" => %addr,
+                    );
+                    http_servers.insert(addr, existing);
+                }
+                _ => {
+                    info!(
+                        self.apictx.log,
+                        "adjusting dropshot addresses; starting new server";
+                        "addr" => %addr,
+                    );
+                    start_dropshot_server(
+                        &self.apictx,
+                        addr,
+                        self.default_request_body_max_bytes,
+                        &mut http_servers,
+                        &self.all_servers_shutdown,
+                        &self.log,
+                    )?;
+                }
             }
         }
 

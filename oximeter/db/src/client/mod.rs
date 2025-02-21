@@ -15,15 +15,6 @@ mod sql;
 
 pub use self::dbwrite::DbWrite;
 pub use self::dbwrite::TestDbWrite;
-use crate::client::query_summary::QuerySummary;
-use crate::model::columns;
-use crate::model::fields::FieldSelectRow;
-use crate::model::from_block::FromBlock;
-use crate::native;
-use crate::native::block::Block;
-use crate::native::block::ValueArray;
-use crate::native::QueryResult;
-use crate::query;
 use crate::Error;
 use crate::Metric;
 use crate::Target;
@@ -31,30 +22,39 @@ use crate::Timeseries;
 use crate::TimeseriesPageSelector;
 use crate::TimeseriesScanParams;
 use crate::TimeseriesSchema;
+use crate::client::query_summary::QuerySummary;
+use crate::model::columns;
+use crate::model::fields::FieldSelectRow;
+use crate::model::from_block::FromBlock;
+use crate::native;
+use crate::native::QueryResult;
+use crate::native::block::Block;
+use crate::native::block::ValueArray;
+use crate::query;
 use debug_ignore::DebugIgnore;
 use dropshot::EmptyScanParams;
 use dropshot::PaginationOrder;
 use dropshot::ResultsPage;
 use dropshot::WhichPage;
 use omicron_common::backoff;
-use oximeter::schema::TimeseriesKey;
-use oximeter::types::Sample;
 use oximeter::Measurement;
 use oximeter::TimeseriesName;
+use oximeter::schema::TimeseriesKey;
+use oximeter::types::Sample;
 use qorb::pool::Pool;
 use qorb::resolver::BoxedResolver;
 use qorb::resolvers::single_host::SingleHostResolver;
 use regex::Regex;
 use regex::RegexBuilder;
+use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::info;
 use slog::trace;
 use slog::warn;
-use slog::Logger;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::btree_map::Entry;
 use std::convert::TryFrom;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
@@ -264,8 +264,8 @@ impl Client {
         limit: NonZeroU32,
     ) -> Result<ResultsPage<Timeseries>, Error> {
         let (params, offset) = match page {
-            WhichPage::First(ref params) => (params, 0),
-            WhichPage::Next(ref sel) => (&sel.params, sel.offset.get()),
+            WhichPage::First(params) => (params, 0),
+            WhichPage::Next(sel) => (&sel.params, sel.offset.get()),
         };
         let schema = self
             .schema_for_timeseries(&params.timeseries_name)
@@ -345,7 +345,7 @@ impl Client {
                     limit.get(),
                 )
             }
-            WhichPage::Next(ref last_timeseries) => {
+            WhichPage::Next(last_timeseries) => {
                 format!(
                     concat!(
                         "SELECT * FROM {}.timeseries_schema ",
@@ -1375,13 +1375,13 @@ mod tests {
     use native::block::Column;
     use omicron_test_utils::dev::clickhouse::ClickHouseDeployment;
     use omicron_test_utils::dev::test_setup_log;
-    use oximeter::histogram::Histogram;
-    use oximeter::types::MissingDatum;
     use oximeter::Datum;
     use oximeter::FieldValue;
     use oximeter::Measurement;
     use oximeter::Metric;
     use oximeter::Target;
+    use oximeter::histogram::Histogram;
+    use oximeter::types::MissingDatum;
     use std::net::Ipv6Addr;
     use std::path::PathBuf;
     use std::pin::Pin;
@@ -1542,20 +1542,24 @@ mod tests {
             ),
             (
                 "test_field_record_count_replicated",
-                Box::new(move |db, client|{
+                Box::new(move |db, client| {
                     Box::pin(test_field_record_count_impl(db, client))
                 }),
             ),
             (
                 "test_differentiate_by_timeseries_name_replicated",
                 Box::new(move |db, client| {
-                    Box::pin(test_differentiate_by_timeseries_name_impl(db, client))
+                    Box::pin(test_differentiate_by_timeseries_name_impl(
+                        db, client,
+                    ))
                 }),
             ),
             (
                 "test_select_timeseries_with_select_one_replicated",
-                Box::new(move |db, client|{
-                    Box::pin(test_select_timeseries_with_select_one_impl(db, client))
+                Box::new(move |db, client| {
+                    Box::pin(test_select_timeseries_with_select_one_impl(
+                        db, client,
+                    ))
                 }),
             ),
             (
@@ -1572,43 +1576,45 @@ mod tests {
             ),
             (
                 "test_select_timeseries_with_all_replicated",
-                Box::new(move |db, client|{
+                Box::new(move |db, client| {
                     Box::pin(test_select_timeseries_with_all_impl(db, client))
                 }),
             ),
             (
                 "test_select_timeseries_with_start_time_replicated",
-                Box::new(move |db, client|{
-                    Box::pin(test_select_timeseries_with_start_time_impl(db, client))
+                Box::new(move |db, client| {
+                    Box::pin(test_select_timeseries_with_start_time_impl(
+                        db, client,
+                    ))
                 }),
             ),
             (
                 "test_select_timeseries_with_limit_replicated",
-                Box::new(move |db, client|{
+                Box::new(move |db, client| {
                     Box::pin(test_select_timeseries_with_limit_impl(db, client))
                 }),
             ),
             (
                 "test_select_timeseries_with_order_replicated",
-                Box::new(move |db, client|{
+                Box::new(move |db, client| {
                     Box::pin(test_select_timeseries_with_order_impl(db, client))
                 }),
             ),
             (
                 "test_get_schema_no_new_values_replicated",
-                Box::new(move |db, client|{
+                Box::new(move |db, client| {
                     Box::pin(test_get_schema_no_new_values_impl(db, client))
                 }),
             ),
             (
                 "test_timeseries_schema_list_replicated",
-                Box::new(move |db, client|{
+                Box::new(move |db, client| {
                     Box::pin(test_timeseries_schema_list_impl(db, client))
                 }),
             ),
             (
                 "test_list_timeseries_replicated",
-                Box::new(move |db, client|{
+                Box::new(move |db, client| {
                     Box::pin(test_list_timeseries_impl(db, client))
                 }),
             ),
@@ -1621,25 +1627,33 @@ mod tests {
             (
                 "test_database_version_update_idempotent_replicated",
                 Box::new(move |db, client| {
-                    Box::pin(test_database_version_update_is_idempotent_impl(db, client))
+                    Box::pin(test_database_version_update_is_idempotent_impl(
+                        db, client,
+                    ))
                 }),
             ),
             (
                 "test_database_version_will_not_downgrade_replicated",
                 Box::new(move |db, client| {
-                    Box::pin(test_database_version_will_not_downgrade_impl(db, client))
+                    Box::pin(test_database_version_will_not_downgrade_impl(
+                        db, client,
+                    ))
                 }),
             ),
             (
                 "test_database_version_will_not_upgrade_replicated",
                 Box::new(move |db, client| {
-                    Box::pin(test_database_version_will_not_upgrade_impl(db, client))
+                    Box::pin(test_database_version_will_not_upgrade_impl(
+                        db, client,
+                    ))
                 }),
             ),
             (
                 "test_update_schema_cache_on_new_sample_replicated",
                 Box::new(move |db, client| {
-                    Box::pin(test_update_schema_cache_on_new_sample_impl(db, client))
+                    Box::pin(test_update_schema_cache_on_new_sample_impl(
+                        db, client,
+                    ))
                 }),
             ),
             (
@@ -1651,7 +1665,9 @@ mod tests {
             (
                 "test_new_schema_removed_when_not_inserted_replicated",
                 Box::new(move |db, client| {
-                    Box::pin(test_new_schema_removed_when_not_inserted_impl(db, client))
+                    Box::pin(test_new_schema_removed_when_not_inserted_impl(
+                        db, client,
+                    ))
                 }),
             ),
             (
@@ -1827,9 +1843,9 @@ mod tests {
         let result =
             client.verify_or_cache_sample_schema(&sample).await.unwrap();
         assert!(
-                matches!(result, Some(_)),
-                "When verifying a new sample, the rows to be inserted should be returned"
-            );
+            matches!(result, Some(_)),
+            "When verifying a new sample, the rows to be inserted should be returned"
+        );
 
         // Clear the internal caches of seen schema
         client.schema.lock().await.clear();
@@ -1851,10 +1867,9 @@ mod tests {
             )
             .clone();
         assert_eq!(
-                actual_schema,
-                expected_schema,
-                "The timeseries schema for a new sample was not correctly inserted into internal cache",
-            );
+            actual_schema, expected_schema,
+            "The timeseries schema for a new sample was not correctly inserted into internal cache",
+        );
 
         // This should no longer return a new row to be inserted for the schema of this sample, as
         // any schema have been included above.
@@ -1947,9 +1962,11 @@ mod tests {
         let expected_measurements =
             samples.iter().map(|sample| &sample.measurement);
         let actual_measurements = timeseries.measurements.iter();
-        assert!(actual_measurements
-            .zip(expected_measurements)
-            .all(|(first, second)| first == second));
+        assert!(
+            actual_measurements
+                .zip(expected_measurements)
+                .all(|(first, second)| first == second)
+        );
         assert_eq!(timeseries.target.name, "virtual_machine");
         // Compare fields, but order might be different.
         fn field_cmp<'a>(
@@ -2243,10 +2260,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_select_timeseries_with_select_multiple_fields_with_multiple_values(
-    ) {
-        let logctx =
-            test_setup_log("test_select_timeseries_with_select_multiple_fields_with_multiple_values");
+    async fn test_select_timeseries_with_select_multiple_fields_with_multiple_values()
+     {
+        let logctx = test_setup_log(
+            "test_select_timeseries_with_select_multiple_fields_with_multiple_values",
+        );
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
         let client = Client::new(db.native_address().into(), &logctx.log);
@@ -2889,7 +2907,7 @@ mod tests {
                 (
                     "timeseries_name".to_string(),
                     Column::from(ValueArray::String(vec![
-                        TIMESERIES_NAME.to_string()
+                        TIMESERIES_NAME.to_string(),
                     ])),
                 ),
                 (
@@ -2899,7 +2917,7 @@ mod tests {
                 (
                     "field_name".to_string(),
                     Column::from(ValueArray::String(vec![
-                        FIELD_NAME.to_string()
+                        FIELD_NAME.to_string(),
                     ])),
                 ),
                 ("field_value".to_string(), Column::from(values)),

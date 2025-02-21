@@ -14,8 +14,8 @@ use crate::db::collection_detach_many::DetachManyError;
 use crate::db::collection_detach_many::DetachManyFromCollectionStatement;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
 use crate::db::model::ByteCount;
@@ -48,7 +48,6 @@ use nexus_db_model::Disk;
 use nexus_types::internal_api::background::ReincarnationReason;
 use omicron_common::api;
 use omicron_common::api::external;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -59,6 +58,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::MessagePair;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -346,7 +346,7 @@ impl DataStore {
 
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
-        let gen = instance.runtime().gen;
+        let r#gen = instance.runtime().r#gen;
         let name = instance.name().clone();
         let project_id = instance.project_id;
 
@@ -377,9 +377,9 @@ impl DataStore {
             instance.runtime().nexus_state
         );
         bail_unless!(
-            instance.runtime().gen == gen,
+            instance.runtime().r#gen == r#gen,
             "newly-created Instance has unexpected generation: {:?}",
-            instance.runtime().gen
+            instance.runtime().r#gen
         );
         Ok(instance)
     }
@@ -747,7 +747,7 @@ impl DataStore {
             // - the active Propolis ID will not change, the state generation
             //   increased, and the Propolis generation will not change, or
             // - the Propolis generation increased.
-            .filter(dsl::state_generation.lt(new_runtime.gen))
+            .filter(dsl::state_generation.lt(new_runtime.r#gen))
             .set(new_runtime.clone())
             .check_if_exists::<Instance>(instance_id.into_untyped_uuid())
             .execute_and_check(&*self.pool_connection_unauthorized().await?)
@@ -2020,8 +2020,7 @@ impl DataStore {
             // did not match.
             UpdateAndQueryResult { ref found, .. } => match found.updater_id {
                 Some(actual_id) => {
-                    const MSG: &'static str =
-                        "cannot commit instance updates: the instance is \
+                    const MSG: &'static str = "cannot commit instance updates: the instance is \
                          locked by another saga!";
                     error!(
                         &opctx.log,
@@ -2035,8 +2034,7 @@ impl DataStore {
                     Err(Error::internal_error(MSG))
                 }
                 None => {
-                    const MSG: &'static str =
-                        "cannot commit instance updates: the instance is \
+                    const MSG: &'static str = "cannot commit instance updates: the instance is \
                          not locked";
                     error!(
                         &opctx.log,
@@ -2205,7 +2203,7 @@ mod tests {
         .await;
 
         macro_rules! assert_locked {
-            ($id:expr) => {{
+            ($id:expr_2021) => {{
                 let lock = dbg!(
                     datastore
                         .instance_updater_lock(&opctx, &authz_instance, $id)
@@ -2226,7 +2224,7 @@ mod tests {
         }
 
         macro_rules! assert_not_locked {
-            ($id:expr) => {
+            ($id:expr_2021) => {
                 let err = dbg!(datastore
                     .instance_updater_lock(&opctx, &authz_instance, $id)
                     .await)
@@ -2779,7 +2777,7 @@ mod tests {
                     propolis_port: 420.into(),
                     runtime: VmmRuntimeState {
                         time_state_updated: Utc::now(),
-                        gen: Generation::new(),
+                        r#gen: Generation::new(),
                         state: VmmState::Running,
                     },
                 },
@@ -2793,8 +2791,8 @@ mod tests {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    gen: Generation(
-                        snapshot.instance.runtime_state.gen.0.next(),
+                    r#gen: Generation(
+                        snapshot.instance.runtime_state.r#gen.0.next(),
                     ),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(active_vmm.id),
@@ -2841,7 +2839,7 @@ mod tests {
                     propolis_port: 666.into(),
                     runtime: VmmRuntimeState {
                         time_state_updated: Utc::now(),
-                        gen: Generation::new(),
+                        r#gen: Generation::new(),
                         state: VmmState::Running,
                     },
                 },
@@ -2865,8 +2863,8 @@ mod tests {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    gen: Generation(
-                        snapshot.instance.runtime_state.gen.0.next(),
+                    r#gen: Generation(
+                        snapshot.instance.runtime_state.r#gen.0.next(),
                     ),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(active_vmm.id),
@@ -2956,7 +2954,7 @@ mod tests {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    r#gen: Generation(instance.runtime_state.gen.0.next()),
+                    r#gen: Generation(instance.runtime_state.r#gen.0.next()),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(vmm1.id),
                     ..instance.runtime_state.clone()
@@ -3144,7 +3142,8 @@ mod tests {
         );
 
         // Now, mark the previous migration as Failed.
-        let updated = dbg!(datastore
+        let updated =
+            dbg!(datastore
             .migration_mark_failed(&opctx, migration.id)
             .await
             .expect(
@@ -3238,7 +3237,7 @@ mod tests {
                         &InstanceUuid::from_untyped_uuid(instance_id),
                         &InstanceRuntimeState {
                             time_updated: Utc::now(),
-                            gen: Generation(Generation::new().next()),
+                            r#gen: Generation(Generation::new().next()),
                             nexus_state: InstanceState::Vmm,
                             propolis_id: Some(vmm_id),
                             dst_propolis_id: None,

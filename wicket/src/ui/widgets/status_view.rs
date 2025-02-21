@@ -63,20 +63,23 @@ impl<'a, W: Widget + HasBlock<'a>> StatusView<'a, W> {
         );
 
         // If there's help text at the bottom, render it.
-        if let Some(help_text) = self.help_text {
-            frame.render_widget(
-                help_text.block(self.block.clone()),
-                self.help_rect,
-            );
-            frame.render_widget(
-                BoxConnector::new(BoxConnectorKind::Both),
-                widget_rect,
-            );
-        } else {
-            frame.render_widget(
-                BoxConnector::new(BoxConnectorKind::Top),
-                widget_rect,
-            );
+        match self.help_text {
+            Some(help_text) => {
+                frame.render_widget(
+                    help_text.block(self.block.clone()),
+                    self.help_rect,
+                );
+                frame.render_widget(
+                    BoxConnector::new(BoxConnectorKind::Both),
+                    widget_rect,
+                );
+            }
+            _ => {
+                frame.render_widget(
+                    BoxConnector::new(BoxConnectorKind::Top),
+                    widget_rect,
+                );
+            }
         }
     }
 
@@ -102,20 +105,23 @@ impl<'a, W: Widget + HasBlock<'a>> StatusView<'a, W> {
         );
 
         // If there's help text at the bottom, render it.
-        if let Some(help_text) = self.help_text {
-            frame.render_widget(
-                help_text.block(self.block.clone()),
-                self.help_rect,
-            );
-            frame.render_widget(
-                BoxConnector::new(BoxConnectorKind::Both),
-                widget_rect,
-            );
-        } else {
-            frame.render_widget(
-                BoxConnector::new(BoxConnectorKind::Top),
-                widget_rect,
-            );
+        match self.help_text {
+            Some(help_text) => {
+                frame.render_widget(
+                    help_text.block(self.block.clone()),
+                    self.help_rect,
+                );
+                frame.render_widget(
+                    BoxConnector::new(BoxConnectorKind::Both),
+                    widget_rect,
+                );
+            }
+            _ => {
+                frame.render_widget(
+                    BoxConnector::new(BoxConnectorKind::Top),
+                    widget_rect,
+                );
+            }
         }
     }
 

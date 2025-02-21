@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use crate::integration_tests::instances::{
-    create_project_and_pool, instance_post, instance_simulate, InstanceOp,
+    InstanceOp, create_project_and_pool, instance_post, instance_simulate,
 };
 use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
@@ -13,24 +13,24 @@ use dropshot::{HttpErrorResponseBody, ResultsPage};
 use http::{Method, StatusCode};
 use nexus_auth::authn::USER_TEST_UNPRIVILEGED;
 use nexus_db_queries::db::identity::Asset;
+use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_disk, create_instance, create_project,
-    grant_iam, object_create_error, objects_list_page_authz, DiskTest,
+    DiskTest, create_default_ip_pool, create_disk, create_instance,
+    create_project, grant_iam, object_create_error, objects_list_page_authz,
 };
 use nexus_test_utils::wait_for_producer;
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::shared::ProjectRole;
 use nexus_types::external_api::views::OxqlQueryResult;
 use nexus_types::silo::DEFAULT_SILO_ID;
-use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
+use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
+use oximeter::TimeseriesSchema;
 use oximeter::types::Datum;
 use oximeter::types::FieldValue;
 use oximeter::types::Measurement;
-use oximeter::TimeseriesSchema;
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -423,7 +423,7 @@ async fn test_instance_watcher_metrics(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
 ) {
     macro_rules! assert_gte {
-        ($a:expr, $b:expr) => {{
+        ($a:expr_2021, $b:expr_2021) => {{
             let a = $a;
             let b = $b;
             assert!(
@@ -498,7 +498,7 @@ async fn test_instance_watcher_metrics(
             )
         }
         match timeseries.points.values(0) {
-            Some(ValueArray::Integer(ref vals)) => {
+            Some(ValueArray::Integer(vals)) => {
                 vals.iter().filter_map(|&v| v).sum()
             }
             x => panic!(
@@ -950,16 +950,20 @@ async fn test_mgs_metrics(
                     n_points > 0,
                     "{name} timeseries {fields:?} should have points"
                 );
-                let serial_str: &str = match timeseries.fields.get("chassis_serial")
-            {
-                Some(FieldValue::String(s)) => s.borrow(),
-                Some(x) => panic!(
-                    "{name} `chassis_serial` field should be a string, but got: {x:?}"
-                ),
-                None => {
-                    panic!("{name} timeseries should have a `chassis_serial` field")
-                }
-            };
+                let serial_str: &str = match timeseries
+                    .fields
+                    .get("chassis_serial")
+                {
+                    Some(FieldValue::String(s)) => s.borrow(),
+                    Some(x) => panic!(
+                        "{name} `chassis_serial` field should be a string, but got: {x:?}"
+                    ),
+                    None => {
+                        panic!(
+                            "{name} timeseries should have a `chassis_serial` field"
+                        )
+                    }
+                };
                 if let Some(count) = found.get_mut(serial_str) {
                     *count += 1;
                 } else {

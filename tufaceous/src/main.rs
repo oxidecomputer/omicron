@@ -20,7 +20,9 @@ fn setup_log() -> slog::Logger {
     slog::Logger::root(drain, slog::o!())
 }
 
-fn stderr_env_drain(env_var: &str) -> impl Drain<Ok = (), Err = slog::Never> {
+fn stderr_env_drain(
+    env_var: &str,
+) -> impl Drain<Ok = (), Err = slog::Never> + use<> {
     let stderr_decorator = slog_term::TermDecorator::new().build();
     let stderr_drain =
         slog_term::FullFormat::new(stderr_decorator).build().fuse();

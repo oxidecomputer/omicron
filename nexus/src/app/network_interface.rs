@@ -9,8 +9,8 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use uuid::Uuid;
@@ -29,7 +29,7 @@ impl super::Nexus {
             params::InstanceNetworkInterfaceSelector {
                 network_interface: NameOrId::Id(id),
                 instance: None,
-                project: None
+                project: None,
             } => {
                 let network_interface =
                     LookupPath::new(opctx, &self.db_datastore)
@@ -39,26 +39,25 @@ impl super::Nexus {
             params::InstanceNetworkInterfaceSelector {
                 network_interface: NameOrId::Name(name),
                 instance: Some(instance),
-                project
+                project,
             } => {
                 let network_interface = self
-                    .instance_lookup(opctx, params::InstanceSelector { project, instance })?
+                    .instance_lookup(
+                        opctx,
+                        params::InstanceSelector { project, instance },
+                    )?
                     .instance_network_interface_name_owned(name.into());
                 Ok(network_interface)
             }
             params::InstanceNetworkInterfaceSelector {
-              network_interface: NameOrId::Id(_),
-              ..
-            } => {
-              Err(Error::invalid_request(
-                "when providing network_interface as an id instance and project should not be specified"
-              ))
-            }
-            _ => {
-              Err(Error::invalid_request(
-                "network_interface should either be a UUID or instance should be specified"
-              ))
-            }
+                network_interface: NameOrId::Id(_),
+                ..
+            } => Err(Error::invalid_request(
+                "when providing network_interface as an id instance and project should not be specified",
+            )),
+            _ => Err(Error::invalid_request(
+                "network_interface should either be a UUID or instance should be specified",
+            )),
         }
     }
 
