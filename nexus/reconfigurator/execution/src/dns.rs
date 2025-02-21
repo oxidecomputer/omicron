@@ -329,7 +329,6 @@ mod test {
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
-    use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::CockroachDbClusterVersion;
@@ -681,7 +680,10 @@ mod test {
         let out_of_service_addr = Ipv6Addr::LOCALHOST;
         blueprint.blueprint_zones.values_mut().next().unwrap().zones.insert(
             BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::Quiesced,
+                disposition: BlueprintZoneDisposition::Expunged {
+                    as_of_generation: Generation::new(),
+                    ready_for_cleanup: false,
+                },
                 id: out_of_service_id,
                 filesystem_pool: Some(ZpoolName::new_external(
                     ZpoolUuid::new_v4(),
@@ -755,12 +757,12 @@ mod test {
         // To start, we need a mapping from underlay IP to the corresponding
         // Omicron zone.
         let mut omicron_zones_by_ip: BTreeMap<_, _> = blueprint
-            .all_omicron_zones(BlueprintZoneFilter::ShouldBeInInternalDns)
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
             .map(|(_, zone)| (zone.underlay_ip(), zone.id))
             .collect();
         println!("omicron zones by IP: {:#?}", omicron_zones_by_ip);
 
-        // Check to see that the quiesced zone was actually excluded
+        // Check to see that the out-of-service zone was actually excluded
         assert!(omicron_zones_by_ip
             .values()
             .all(|id| *id != out_of_service_id));
@@ -1025,7 +1027,7 @@ mod test {
             ]
         );
 
-        // Change the zone disposition to quiesced for the nexus zone on the
+        // Change the zone disposition to expunged for the nexus zone on the
         // first sled. This should ensure we don't get an external DNS record
         // back for that sled.
         let (_, bp_zones_config) =
@@ -1035,7 +1037,10 @@ mod test {
             .iter_mut()
             .find(|z| z.zone_type.is_nexus())
             .unwrap();
-        nexus_zone.disposition = BlueprintZoneDisposition::Quiesced;
+        nexus_zone.disposition = BlueprintZoneDisposition::Expunged {
+            as_of_generation: Generation::new(),
+            ready_for_cleanup: false,
+        };
         mem::drop(nexus_zone);
 
         // Retrieve the DNS config based on the modified blueprint
@@ -1387,11 +1392,11 @@ mod test {
         eprintln!("blueprint2: {}", blueprint2.display());
         // Figure out the id of the new zone.
         let zones_before = blueprint
-            .all_omicron_zones(BlueprintZoneFilter::All)
+            .all_omicron_zones(BlueprintZoneDisposition::any)
             .filter_map(|(_, z)| z.zone_type.is_nexus().then_some(z.id))
             .collect::<BTreeSet<_>>();
         let zones_after = blueprint2
-            .all_omicron_zones(BlueprintZoneFilter::All)
+            .all_omicron_zones(BlueprintZoneDisposition::any)
             .filter_map(|(_, z)| z.zone_type.is_nexus().then_some(z.id))
             .collect::<BTreeSet<_>>();
         let new_zones: Vec<_> = zones_after.difference(&zones_before).collect();

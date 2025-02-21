@@ -13,7 +13,8 @@ use omicron_uuid_kinds::SledUuid;
 
 use crate::{
     deployment::{
-        blueprint_zone_type, Blueprint, BlueprintZoneFilter, BlueprintZoneType,
+        blueprint_zone_type, Blueprint, BlueprintZoneDisposition,
+        BlueprintZoneType,
     },
     internal_api::params::{DnsConfigZone, DnsRecord},
     silo::{default_silo_name, silo_dns_name},
@@ -36,7 +37,7 @@ pub fn blueprint_internal_dns_config(
     let mut dns_builder = DnsConfigBuilder::new();
 
     'all_zones: for (_, zone) in
-        blueprint.all_omicron_zones(BlueprintZoneFilter::ShouldBeInInternalDns)
+        blueprint.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
     {
         let (service_name, &address) = match &zone.zone_type {
             BlueprintZoneType::BoundaryNtp(

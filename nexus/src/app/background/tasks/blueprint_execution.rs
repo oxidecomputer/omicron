@@ -180,7 +180,6 @@ mod test {
         EventBuffer, EventReport, ExecutionComponent, ExecutionStepId,
         ReconfiguratorExecutionSpec, StepInfo,
     };
-    use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::{
         blueprint_zone_type, Blueprint, BlueprintDatasetsConfig,
         BlueprintPhysicalDisksConfig, BlueprintTarget, BlueprintZoneConfig,
@@ -430,7 +429,7 @@ mod test {
 
         let generation = generation.next();
 
-        // Both in-service and quiesced zones should be deployed.
+        // In-service zones should be deployed.
         //
         // TODO: add expunged zones to the test (should not be deployed).
         let mut blueprint = create_blueprint(
@@ -438,7 +437,7 @@ mod test {
             &opctx,
             BTreeMap::from([
                 (sled_id1, make_zones(BlueprintZoneDisposition::InService)),
-                (sled_id2, make_zones(BlueprintZoneDisposition::Quiesced)),
+                (sled_id2, make_zones(BlueprintZoneDisposition::InService)),
             ]),
             BTreeMap::new(),
             BTreeMap::new(),
@@ -448,7 +447,7 @@ mod test {
 
         // Insert records for the zpools backing the datasets in these zones.
         for (sled_id, config) in
-            blueprint.1.all_omicron_zones(BlueprintZoneFilter::All)
+            blueprint.1.all_omicron_zones(BlueprintZoneDisposition::any)
         {
             let Some(dataset) = config.zone_type.durable_dataset() else {
                 continue;
