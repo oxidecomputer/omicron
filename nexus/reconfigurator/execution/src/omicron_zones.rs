@@ -18,7 +18,6 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::CollectorReassignment;
 use nexus_types::deployment::BlueprintZoneConfig;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_common::address::COCKROACH_ADMIN_PORT;
@@ -110,20 +109,12 @@ pub(crate) async fn clean_up_expunged_zones<R: CleanupResolver>(
     datastore: &DataStore,
     resolver: &R,
     expunged_zones: impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)>,
-    _deploy_zones_done: &DeployZonesDone,
 ) -> Result<(), Vec<anyhow::Error>> {
     let errors: Vec<anyhow::Error> = stream::iter(expunged_zones)
         .filter_map(|(sled_id, config)| async move {
-            // We expect to only be called with expunged zones; skip any with a
-            // different disposition.
-            //
-            // TODO We should be looking at `ready_for_cleanup` here! But
-            // currently the planner never sets it to true, so we're dependent
-            // on `DeployZonesDone` instead.
-            if !matches!(
-                config.disposition,
-                BlueprintZoneDisposition::Expunged { .. }
-            ) {
+            // We expect to only be called with expunged zones that are ready
+            // for cleanup; skip any with a different disposition.
+            if !config.disposition.is_ready_for_cleanup() {
                 return None;
             }
 
@@ -360,6 +351,7 @@ mod test {
         OmicronZoneDataset, OmicronZonesConfig, SledRole,
     };
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::{
         Blueprint, BlueprintDatasetsConfig, BlueprintPhysicalDisksConfig,
         BlueprintSledConfig, BlueprintTarget, BlueprintZoneImageSource,
@@ -687,7 +679,7 @@ mod test {
         let crdb_zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::Expunged {
                 as_of_generation: Generation::new(),
-                ready_for_cleanup: false,
+                ready_for_cleanup: true,
             },
             id: OmicronZoneUuid::new_v4(),
             filesystem_pool: Some(ZpoolName::new_external(ZpoolUuid::new_v4())),
@@ -718,10 +710,6 @@ mod test {
         }
         let fake_resolver = FixedResolver(vec![mock_admin.addr()]);
 
-        // This is a unit test, so pretend we already successfully called
-        // deploy_zones.
-        let deploy_zones_done = DeployZonesDone(());
-
         // We haven't yet inserted a mapping from zone ID to cockroach node ID
         // in the db, so trying to clean up the zone should log a warning but
         // otherwise succeed, without attempting to contact our mock admin
@@ -732,7 +720,6 @@ mod test {
             datastore,
             &fake_resolver,
             iter::once((any_sled_id, &crdb_zone)),
-            &deploy_zones_done,
         )
         .await
         .expect("unknown node ID: no cleanup");
@@ -779,7 +766,6 @@ mod test {
             datastore,
             &fake_resolver,
             iter::once((any_sled_id, &crdb_zone)),
-            &deploy_zones_done,
         )
         .await
         .expect("decommissioned test node");
@@ -811,7 +797,6 @@ mod test {
             datastore,
             &fake_resolver,
             iter::once((any_sled_id, &crdb_zone)),
-            &deploy_zones_done,
         )
         .await
         .expect_err("no successful response should result in failure");
@@ -840,7 +825,6 @@ mod test {
             datastore,
             &fake_resolver,
             iter::once((any_sled_id, &crdb_zone)),
-            &deploy_zones_done,
         )
         .await
         .expect("decommissioned test node");

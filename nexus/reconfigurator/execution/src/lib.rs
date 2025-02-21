@@ -148,13 +148,12 @@ pub async fn realize_blueprint_with_overrides(
         sled_list.clone(),
     );
 
-    let deploy_zones_done = register_cleanup_expunged_zones_step(
+    register_cleanup_expunged_zones_step(
         &engine.for_component(ExecutionComponent::OmicronZones),
         &opctx,
         datastore,
         resolver,
         blueprint,
-        deploy_zones_done,
     );
 
     register_decommission_sleds_step(
@@ -475,34 +474,27 @@ fn register_cleanup_expunged_zones_step<'a>(
     datastore: &'a DataStore,
     resolver: &'a Resolver,
     blueprint: &'a Blueprint,
-    deploy_zones_done: StepHandle<DeployZonesDone>,
-) -> StepHandle<DeployZonesDone> {
+) {
     registrar
         .new_step(
             ExecutionStepId::Remove,
             "Cleanup expunged zones",
-            move |cx| async move {
-                let done = deploy_zones_done.into_value(cx.token()).await;
+            move |_cx| async move {
                 omicron_zones::clean_up_expunged_zones(
                     &opctx,
                     datastore,
                     resolver,
-                    // TODO-correctness Once the planner fills in
-                    // `ready_for_cleanup`, we should filter on that here and
-                    // stop requiring `deploy_zones_done`. This is necessary to
-                    // fix omicron#6999.
                     blueprint.all_omicron_zones(
-                        BlueprintZoneDisposition::is_expunged,
+                        BlueprintZoneDisposition::is_ready_for_cleanup,
                     ),
-                    &done,
                 )
                 .await
                 .map_err(merge_anyhow_list)?;
 
-                StepSuccess::new(done).into()
+                StepSuccess::new(()).into()
             },
         )
-        .register()
+        .register();
 }
 
 fn register_decommission_sleds_step<'a>(

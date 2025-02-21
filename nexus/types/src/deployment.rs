@@ -812,6 +812,12 @@ impl BlueprintZoneDisposition {
             } => !ready_for_cleanup,
         }
     }
+
+    /// Returns true if `self` indicates the zone is expunged and ready for
+    /// cleanup.
+    pub fn is_ready_for_cleanup(self) -> bool {
+        matches!(self, Self::Expunged { ready_for_cleanup: true, .. })
+    }
 }
 
 impl fmt::Display for BlueprintZoneDisposition {
