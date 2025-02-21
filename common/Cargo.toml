@@ -49,7 +49,6 @@ uuid.workspace = true
 parse-display.workspace = true
 progenitor-client.workspace = true
 omicron-workspace-hack.workspace = true
-once_cell.workspace = true
 regress.workspace = true
 
 [dev-dependencies]

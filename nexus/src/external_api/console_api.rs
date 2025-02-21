@@ -19,10 +19,10 @@ use nexus_types::external_api::params::{self, RelativeUri};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{DataPageParams, Error, NameOrId};
-use once_cell::sync::Lazy;
 use serde_urlencoded;
 use std::collections::HashMap;
 use std::num::NonZeroU32;
+use std::sync::LazyLock;
 use tokio::fs::File;
 use tokio_util::codec::{BytesCodec, FramedRead};
 
@@ -296,7 +296,7 @@ fn with_gz_ext(path: &Utf8Path) -> Utf8PathBuf {
 
 // Define header values as const so that `HeaderValue::from_static` is given the
 // opportunity to panic at compile time
-static ALLOWED_EXTENSIONS: Lazy<HashMap<&str, HeaderValue>> = {
+static ALLOWED_EXTENSIONS: LazyLock<HashMap<&str, HeaderValue>> = {
     const CONTENT_TYPES: [(&str, HeaderValue); 10] = [
         ("css", HeaderValue::from_static("text/css")),
         ("html", HeaderValue::from_static("text/html; charset=utf-8")),
@@ -310,7 +310,7 @@ static ALLOWED_EXTENSIONS: Lazy<HashMap<&str, HeaderValue>> = {
         ("woff2", HeaderValue::from_static("font/woff2")),
     ];
 
-    Lazy::new(|| HashMap::from(CONTENT_TYPES))
+    LazyLock::new(|| HashMap::from(CONTENT_TYPES))
 };
 const CONTENT_ENCODING_GZIP: HeaderValue = HeaderValue::from_static("gzip");
 // Web application security headers; these should stay in sync with the headers

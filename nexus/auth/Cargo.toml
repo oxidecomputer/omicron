@@ -24,7 +24,6 @@ hyper.workspace = true
 newtype_derive.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
-once_cell.workspace = true
 openssl.workspace = true
 oso.workspace = true
 samael.workspace = true
