@@ -12,8 +12,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::execution::*;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintDatasetFilter;
-use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::SledState;
 use nexus_types::identity::Asset;
@@ -21,6 +20,7 @@ use omicron_physical_disks::DeployDisksDone;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_zones::DeployZonesDone;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -103,14 +103,6 @@ pub async fn realize_blueprint_with_overrides(
         blueprint,
     );
 
-    register_support_bundle_failure_step(
-        &engine.for_component(ExecutionComponent::SupportBundles),
-        &opctx,
-        datastore,
-        blueprint,
-        nexus_id,
-    );
-
     let sled_list = register_sled_list_step(
         &engine.for_component(ExecutionComponent::SledList),
         &opctx,
@@ -132,7 +124,7 @@ pub async fn realize_blueprint_with_overrides(
         sled_list.clone(),
     );
 
-    register_deploy_zones_step(
+    let deploy_zones_done = register_deploy_zones_step(
         &engine.for_component(ExecutionComponent::OmicronZones),
         &opctx,
         blueprint,
@@ -145,13 +137,6 @@ pub async fn realize_blueprint_with_overrides(
         datastore,
     );
 
-    register_dataset_records_step(
-        &engine.for_component(ExecutionComponent::DatasetRecords),
-        &opctx,
-        datastore,
-        blueprint,
-    );
-
     register_dns_records_step(
         &engine.for_component(ExecutionComponent::Dns),
         &opctx,
@@ -162,12 +147,13 @@ pub async fn realize_blueprint_with_overrides(
         sled_list.clone(),
     );
 
-    register_cleanup_expunged_zones_step(
+    let deploy_zones_done = register_cleanup_expunged_zones_step(
         &engine.for_component(ExecutionComponent::OmicronZones),
         &opctx,
         datastore,
         resolver,
         blueprint,
+        deploy_zones_done,
     );
 
     register_decommission_sleds_step(
@@ -196,12 +182,22 @@ pub async fn realize_blueprint_with_overrides(
         blueprint,
     );
 
+    let deploy_zones_done = register_support_bundle_failure_step(
+        &engine.for_component(ExecutionComponent::SupportBundles),
+        &opctx,
+        datastore,
+        blueprint,
+        nexus_id,
+        deploy_zones_done,
+    );
+
     let reassign_saga_output = register_reassign_sagas_step(
         &engine.for_component(ExecutionComponent::OmicronZones),
         &opctx,
         datastore,
         blueprint,
         nexus_id,
+        deploy_zones_done,
     );
 
     let register_cockroach_output = register_cockroachdb_settings_step(
@@ -257,12 +253,14 @@ fn register_support_bundle_failure_step<'a>(
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
     nexus_id: OmicronZoneUuid,
-) {
+    deploy_zones_done: StepHandle<DeployZonesDone>,
+) -> StepHandle<DeployZonesDone> {
     registrar
         .new_step(
             ExecutionStepId::Ensure,
             "Mark support bundles as failed if they rely on an expunged disk or sled",
-            move |_cx| async move {
+            move |cx| async move {
+                let done = deploy_zones_done.into_value(cx.token()).await;
                 datastore
                     .support_bundle_fail_expunged(
                         &opctx, blueprint, nexus_id
@@ -270,10 +268,10 @@ fn register_support_bundle_failure_step<'a>(
                     .await
                     .map_err(|err| anyhow!(err))?;
 
-                StepSuccess::new(()).into()
+                StepSuccess::new(done).into()
             },
         )
-        .register();
+        .register()
 }
 
 fn register_sled_list_step<'a>(
@@ -362,14 +360,14 @@ fn register_deploy_zones_step<'a>(
     opctx: &'a OpContext,
     blueprint: &'a Blueprint,
     sleds: SharedStepHandle<Arc<BTreeMap<SledUuid, Sled>>>,
-) {
+) -> StepHandle<DeployZonesDone> {
     registrar
         .new_step(
             ExecutionStepId::Ensure,
             "Deploy Omicron zones",
             move |cx| async move {
                 let sleds_by_id = sleds.into_value(cx.token()).await;
-                omicron_zones::deploy_zones(
+                let done = omicron_zones::deploy_zones(
                     &opctx,
                     &sleds_by_id,
                     &blueprint.blueprint_zones,
@@ -377,10 +375,10 @@ fn register_deploy_zones_step<'a>(
                 .await
                 .map_err(merge_anyhow_list)?;
 
-                StepSuccess::new(()).into()
+                StepSuccess::new(done).into()
             },
         )
-        .register();
+        .register()
 }
 
 fn register_plumb_firewall_rules_step<'a>(
@@ -409,33 +407,6 @@ fn register_plumb_firewall_rules_step<'a>(
                 )
                 .await
                 .context("failed to plumb service firewall rules to sleds")?;
-
-                StepSuccess::new(()).into()
-            },
-        )
-        .register();
-}
-
-fn register_dataset_records_step<'a>(
-    registrar: &ComponentRegistrar<'_, 'a>,
-    opctx: &'a OpContext,
-    datastore: &'a DataStore,
-    blueprint: &'a Blueprint,
-) {
-    registrar
-        .new_step(
-            ExecutionStepId::Ensure,
-            "Ensure dataset records",
-            move |_cx| async move {
-                datasets::ensure_crucible_dataset_records_exist(
-                    &opctx,
-                    datastore,
-                    blueprint.id,
-                    blueprint
-                        .all_omicron_datasets(BlueprintDatasetFilter::All)
-                        .map(|(_sled_id, dataset)| dataset),
-                )
-                .await?;
 
                 StepSuccess::new(()).into()
             },
@@ -482,25 +453,34 @@ fn register_cleanup_expunged_zones_step<'a>(
     datastore: &'a DataStore,
     resolver: &'a Resolver,
     blueprint: &'a Blueprint,
-) {
+    deploy_zones_done: StepHandle<DeployZonesDone>,
+) -> StepHandle<DeployZonesDone> {
     registrar
         .new_step(
             ExecutionStepId::Remove,
             "Cleanup expunged zones",
-            move |_cx| async move {
+            move |cx| async move {
+                let done = deploy_zones_done.into_value(cx.token()).await;
                 omicron_zones::clean_up_expunged_zones(
                     &opctx,
                     datastore,
                     resolver,
-                    blueprint.all_omicron_zones(BlueprintZoneFilter::Expunged),
+                    // TODO-correctness Once the planner fills in
+                    // `ready_for_cleanup`, we should filter on that here and
+                    // stop requiring `deploy_zones_done`. This is necessary to
+                    // fix omicron#6999.
+                    blueprint.all_omicron_zones(
+                        BlueprintZoneDisposition::is_expunged,
+                    ),
+                    &done,
                 )
                 .await
                 .map_err(merge_anyhow_list)?;
 
-                StepSuccess::new(()).into()
+                StepSuccess::new(done).into()
             },
         )
-        .register();
+        .register()
 }
 
 fn register_decommission_sleds_step<'a>(
@@ -626,6 +606,7 @@ fn register_reassign_sagas_step<'a>(
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
     nexus_id: OmicronZoneUuid,
+    deploy_zones_done: StepHandle<DeployZonesDone>,
 ) -> StepHandle<ReassignSagaOutput> {
     // For this and subsequent steps, we'll assume that any errors that we
     // encounter do *not* require stopping execution.  We'll just accumulate
@@ -636,13 +617,15 @@ fn register_reassign_sagas_step<'a>(
         .new_step(
             ExecutionStepId::Ensure,
             "Reassign sagas",
-            move |_cx| async move {
+            move |cx| async move {
+                let done = deploy_zones_done.into_value(cx.token()).await;
+
                 // For any expunged Nexus zones, re-assign in-progress sagas to
                 // some other Nexus.  If this fails for some reason, it doesn't
                 // affect anything else.
                 let sec_id = nexus_db_model::SecId::from(nexus_id);
                 let reassigned = sagas::reassign_sagas_from_expunged(
-                    &opctx, datastore, blueprint, sec_id,
+                    &opctx, datastore, blueprint, sec_id, &done,
                 )
                 .await
                 .context("failed to re-assign sagas");
@@ -737,106 +720,4 @@ fn register_finalize_step(
             },
         )
         .register()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use nexus_db_model::Generation;
-    use nexus_db_model::PhysicalDisk;
-    use nexus_db_model::PhysicalDiskKind;
-    use nexus_db_model::SledBaseboard;
-    use nexus_db_model::SledSystemHardware;
-    use nexus_db_model::SledUpdate;
-    use nexus_db_model::Zpool;
-    use omicron_common::api::external::Error;
-    use omicron_uuid_kinds::PhysicalDiskUuid;
-    use std::collections::BTreeSet;
-    use uuid::Uuid;
-
-    // Helper function to insert sled records from an initial blueprint. Some
-    // tests expect to be able to realize the the blueprint created from an
-    // initial collection, and ensuring the zones' datasets exist requires first
-    // inserting the sled and zpool records.
-    pub(crate) async fn insert_sled_records(
-        datastore: &DataStore,
-        blueprint: &Blueprint,
-    ) {
-        let rack_id = Uuid::new_v4();
-        let mut sleds_inserted = BTreeSet::new();
-
-        for sled_id in blueprint.blueprint_zones.keys().copied() {
-            if sleds_inserted.insert(sled_id) {
-                let sled = SledUpdate::new(
-                    sled_id.into_untyped_uuid(),
-                    "[::1]:0".parse().unwrap(),
-                    SledBaseboard {
-                        serial_number: format!("test-{sled_id}"),
-                        part_number: "test-sled".to_string(),
-                        revision: 0,
-                    },
-                    SledSystemHardware {
-                        is_scrimlet: false,
-                        usable_hardware_threads: 128,
-                        usable_physical_ram: (64 << 30).try_into().unwrap(),
-                        reservoir_size: (16 << 30).try_into().unwrap(),
-                    },
-                    rack_id,
-                    Generation::new(),
-                );
-                datastore
-                    .sled_upsert(sled)
-                    .await
-                    .expect("failed to upsert sled");
-            }
-        }
-    }
-
-    // Helper function to insert zpool records from an initial blueprint. Some
-    // tests expect to be able to realize the the blueprint created from an
-    // initial collection, and ensuring the zones' datasets exist requires first
-    // inserting the sled and zpool records.
-    pub(crate) async fn create_disks_for_zones_using_datasets(
-        datastore: &DataStore,
-        opctx: &OpContext,
-        blueprint: &Blueprint,
-    ) {
-        let mut pool_inserted = BTreeSet::new();
-
-        for (sled_id, config) in
-            blueprint.all_omicron_zones(BlueprintZoneFilter::All)
-        {
-            let Some(dataset) = config.zone_type.durable_dataset() else {
-                continue;
-            };
-
-            let physical_disk_id = PhysicalDiskUuid::new_v4();
-            let pool_id = dataset.dataset.pool_name.id();
-
-            let disk = PhysicalDisk::new(
-                physical_disk_id,
-                String::from("Oxide"),
-                format!("PhysDisk of {}", pool_id),
-                String::from("FakeDisk"),
-                PhysicalDiskKind::U2,
-                sled_id.into_untyped_uuid(),
-            );
-            match datastore.physical_disk_insert(&opctx, disk.clone()).await {
-                Ok(_) | Err(Error::ObjectAlreadyExists { .. }) => (),
-                Err(e) => panic!("failed to upsert physical disk: {e}"),
-            }
-
-            if pool_inserted.insert(pool_id) {
-                let zpool = Zpool::new(
-                    pool_id.into_untyped_uuid(),
-                    sled_id.into_untyped_uuid(),
-                    physical_disk_id,
-                );
-                datastore
-                    .zpool_insert(opctx, zpool)
-                    .await
-                    .expect("failed to upsert zpool");
-            }
-        }
-    }
 }

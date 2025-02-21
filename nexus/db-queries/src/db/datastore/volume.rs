@@ -202,13 +202,14 @@ impl DataStore {
     async fn volume_create_in_txn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         err: OptionalError<VolumeCreationError>,
-        volume: Volume,
+        volume_id: VolumeUuid,
+        vcr: VolumeConstructionRequest,
         crucible_targets: CrucibleTargets,
     ) -> Result<Volume, diesel::result::Error> {
         use db::schema::volume::dsl;
 
         let maybe_volume: Option<Volume> = dsl::volume
-            .filter(dsl::id.eq(to_db_typed_uuid(volume.id())))
+            .filter(dsl::id.eq(to_db_typed_uuid(volume_id)))
             .select(Volume::as_select())
             .first_async(conn)
             .await
@@ -219,6 +220,11 @@ impl DataStore {
         if let Some(volume) = maybe_volume {
             return Ok(volume);
         }
+
+        let vcr_string = serde_json::to_string(&vcr)
+            .map_err(|e| err.bail(VolumeCreationError::SerdeError(e)))?;
+
+        let volume = Volume::new(volume_id, vcr_string);
 
         let volume: Volume = diesel::insert_into(dsl::volume)
             .values(volume.clone())
@@ -363,19 +369,15 @@ impl DataStore {
         Ok(None)
     }
 
-    pub async fn volume_create(&self, volume: Volume) -> CreateResult<Volume> {
+    pub async fn volume_create(
+        &self,
+        volume_id: VolumeUuid,
+        vcr: VolumeConstructionRequest,
+    ) -> CreateResult<Volume> {
         // Grab all the targets that the volume construction request references.
         // Do this outside the transaction, as the data inside volume doesn't
         // change and this would simply add to the transaction time.
         let crucible_targets = {
-            let vcr: VolumeConstructionRequest =
-                serde_json::from_str(&volume.data()).map_err(|e| {
-                    Error::internal_error(&format!(
-                        "serde_json::from_str error in volume_create: {}",
-                        e
-                    ))
-                })?;
-
             let mut crucible_targets = CrucibleTargets::default();
             read_only_resources_associated_with_volume(
                 &vcr,
@@ -390,12 +392,14 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 let crucible_targets = crucible_targets.clone();
-                let volume = volume.clone();
+                let vcr = vcr.clone();
+
                 async move {
                     Self::volume_create_in_txn(
                         &conn,
                         err,
-                        volume,
+                        volume_id,
+                        vcr,
                         crucible_targets,
                     )
                     .await
@@ -1125,16 +1129,10 @@ impl DataStore {
         let vcr: sled_agent_client::VolumeConstructionRequest =
             serde_json::from_str(volume.data())?;
 
-        let randomized_vcr = serde_json::to_string(
-            &Self::randomize_ids(&vcr)
-                .map_err(|e| Error::internal_error(&e.to_string()))?,
-        )?;
+        let randomized_vcr = Self::randomize_ids(&vcr)
+            .map_err(|e| Error::internal_error(&e.to_string()))?;
 
-        self.volume_create(db::model::Volume::new(
-            VolumeUuid::new_v4(),
-            randomized_vcr,
-        ))
-        .await
+        self.volume_create(VolumeUuid::new_v4(), randomized_vcr).await
     }
 
     /// Find read/write regions for deleted volumes that do not have associated
@@ -3841,6 +3839,40 @@ impl DataStore {
 
         Ok(volumes)
     }
+
+    /// Returns Some(bool) depending on if a read-only target exists in a
+    /// volume, None if the volume was deleted, or an error otherwise.
+    pub async fn volume_references_read_only_target(
+        &self,
+        volume_id: VolumeUuid,
+        address: SocketAddrV6,
+    ) -> LookupResult<Option<bool>> {
+        let Some(volume) = self.volume_get(volume_id).await? else {
+            return Ok(None);
+        };
+
+        let vcr: VolumeConstructionRequest =
+            match serde_json::from_str(&volume.data()) {
+                Ok(vcr) => vcr,
+
+                Err(e) => {
+                    return Err(Error::internal_error(&format!(
+                        "cannot deserialize volume data for {}: {e}",
+                        volume.id(),
+                    )));
+                }
+            };
+
+        let reference =
+            read_only_target_in_vcr(&vcr, &address).map_err(|e| {
+                Error::internal_error(&format!(
+                    "cannot deserialize volume data for {}: {e}",
+                    volume.id(),
+                ))
+            })?;
+
+        Ok(Some(reference))
+    }
 }
 
 // Add some validation that runs only for tests
@@ -4060,16 +4092,15 @@ mod tests {
 
         let volume_id = VolumeUuid::new_v4();
         let _volume = datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: *volume_id.as_untyped_uuid(),
                     block_size: 512,
                     sub_volumes: vec![],
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -4233,9 +4264,9 @@ mod tests {
             .unwrap();
 
         let _volume = datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: *volume_id.as_untyped_uuid(),
                     block_size: 512,
                     sub_volumes: vec![VolumeConstructionRequest::Region {
@@ -4262,9 +4293,8 @@ mod tests {
                         },
                     }],
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -4521,9 +4551,9 @@ mod tests {
         let rop_id = Uuid::new_v4();
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: *volume_id.as_untyped_uuid(),
                     block_size: 512,
                     sub_volumes: vec![VolumeConstructionRequest::Region {
@@ -4573,9 +4603,8 @@ mod tests {
                             },
                         },
                     )),
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -4596,16 +4625,15 @@ mod tests {
         }
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_to_delete_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: *volume_to_delete_id.as_untyped_uuid(),
                     block_size: 512,
                     sub_volumes: vec![],
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -4980,9 +5008,9 @@ mod tests {
         // case where the needle is found
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: *volume_id.as_untyped_uuid(),
                     block_size: 512,
                     sub_volumes: vec![],
@@ -5010,9 +5038,8 @@ mod tests {
                             },
                         },
                     )),
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 

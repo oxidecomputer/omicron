@@ -58,17 +58,6 @@ stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
 =============================================
-EXECUTING COMMAND: omdb ["db", "reconfigurator-save", "<TMP_PATH_REDACTED>"]
-termination: Exited(0)
----------------------------------------------
-stdout:
----------------------------------------------
-stderr:
-note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
-note: database schema version matches expected (<redacted database version>)
-assembling reconfigurator state ... done
-wrote <TMP_PATH_REDACTED>
-=============================================
 EXECUTING COMMAND: omdb ["db", "sleds"]
 termination: Exited(0)
 ---------------------------------------------
@@ -348,6 +337,10 @@ task: "physical_disk_adoption"
     ensure new physical disks are automatically marked in-service
 
 
+task: "read_only_region_replacement_start"
+    detect if read-only regions need replacement and begin the process
+
+
 task: "region_replacement"
     detects if a region requires replacing and begins the process
 
@@ -392,6 +385,10 @@ task: "support_bundle_collector"
 
 task: "switch_port_config_manager"
     manages switch port settings for rack switches
+
+
+task: "tuf_artifact_replication"
+    replicate update repo artifacts across sleds
 
 
 task: "v2p_manager"
@@ -620,6 +617,14 @@ task: "physical_disk_adoption"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: task disabled
 
+task: "read_only_region_replacement_start"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total requests created ok: 0
+    errors: 0
+
 task: "region_replacement"
   configured period: every <REDACTED_DURATION>m
   currently executing: no
@@ -728,6 +733,33 @@ task: "switch_port_config_manager"
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
+
+task: "tuf_artifact_replication"
+  configured period: every <REDACTED_DURATION>h
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    request ringbuf:
+      <REDACTED_SECTION>
+    last run:
+      list ok:      <LIST_OK_REDACTED>
+      list err:     0
+      put ok:       0
+      put err:      0
+      copy ok:      0
+      copy err:     0
+      delete ok:    0
+      delete err:   0
+    lifetime:
+      list ok:      <LIST_OK_REDACTED>
+      list err:     0
+      put ok:       0
+      put err:      0
+      copy ok:      0
+      copy err:     0
+      delete ok:    0
+      delete err:   0
+    local repos: 0
 
 task: "v2p_manager"
   configured period: every <REDACTED_DURATION>s
@@ -1084,6 +1116,14 @@ task: "physical_disk_adoption"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: task disabled
 
+task: "read_only_region_replacement_start"
+  configured period: every <REDACTED_DURATION>m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total requests created ok: 0
+    errors: 0
+
 task: "region_replacement"
   configured period: every <REDACTED_DURATION>m
   currently executing: no
@@ -1193,6 +1233,33 @@ task: "switch_port_config_manager"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
 
+task: "tuf_artifact_replication"
+  configured period: every <REDACTED_DURATION>h
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    request ringbuf:
+      <REDACTED_SECTION>
+    last run:
+      list ok:      <LIST_OK_REDACTED>
+      list err:     0
+      put ok:       0
+      put err:      0
+      copy ok:      0
+      copy err:     0
+      delete ok:    0
+      delete err:   0
+    lifetime:
+      list ok:      <LIST_OK_REDACTED>
+      list err:     0
+      put ok:       0
+      put err:      0
+      copy ok:      0
+      copy err:     0
+      delete ok:    0
+      delete err:   0
+    local repos: 0
+
 task: "v2p_manager"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
@@ -1290,6 +1357,12 @@ parent:    <none>
     nexus-tests   nexus-test-model   nexus-test-disk-19
 
 
+    datasets at generation 2:
+    ---------------------------------------------------------------------------
+    dataset name   dataset id   disposition   quota   reservation   compression
+    ---------------------------------------------------------------------------
+
+
     omicron zones at generation 2:
     -----------------------------------------------
     zone type   zone id   disposition   underlay IP
@@ -1313,6 +1386,18 @@ parent:    <none>
     nexus-tests   nexus-test-model   nexus-test-disk-7
     nexus-tests   nexus-test-model   nexus-test-disk-8
     nexus-tests   nexus-test-model   nexus-test-disk-9
+
+
+    datasets at generation 2:
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    dataset name                                                                                                   dataset id                             disposition   quota   reservation   compression
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_clickhouse_..........<REDACTED_UUID>...........        ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_cockroachdb_..........<REDACTED_UUID>...........       ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_crucible_pantry_..........<REDACTED_UUID>...........   ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
 
 
     omicron zones at generation 2:
@@ -1368,6 +1453,12 @@ parent:    <none>
     nexus-tests   nexus-test-model   nexus-test-disk-19
 
 
+    datasets at generation 2:
+    ---------------------------------------------------------------------------
+    dataset name   dataset id   disposition   quota   reservation   compression
+    ---------------------------------------------------------------------------
+
+
     omicron zones at generation 2:
     -----------------------------------------------
     zone type   zone id   disposition   underlay IP
@@ -1391,6 +1482,18 @@ parent:    <none>
     nexus-tests   nexus-test-model   nexus-test-disk-7
     nexus-tests   nexus-test-model   nexus-test-disk-8
     nexus-tests   nexus-test-model   nexus-test-disk-9
+
+
+    datasets at generation 2:
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    dataset name                                                                                                   dataset id                             disposition   quota   reservation   compression
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_clickhouse_..........<REDACTED_UUID>...........        ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_cockroachdb_..........<REDACTED_UUID>...........       ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_crucible_pantry_..........<REDACTED_UUID>...........   ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
 
 
     omicron zones at generation 2:
@@ -1467,15 +1570,15 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
 
 
     datasets at generation 2:
-    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    dataset name                                                                                                   dataset uuid                           quota   reservation   compression
-    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_clickhouse_..........<REDACTED_UUID>...........        ..........<REDACTED_UUID>...........   none    none          off        
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_cockroachdb_..........<REDACTED_UUID>...........       ..........<REDACTED_UUID>...........   none    none          off        
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_crucible_pantry_..........<REDACTED_UUID>...........   ..........<REDACTED_UUID>...........   none    none          off        
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   none    none          off        
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   none    none          off        
-    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   none    none          off        
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    dataset name                                                                                                   dataset id                             disposition   quota   reservation   compression
+    -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_clickhouse_..........<REDACTED_UUID>...........        ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_cockroachdb_..........<REDACTED_UUID>...........       ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_crucible_pantry_..........<REDACTED_UUID>...........   ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_external_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_internal_dns_..........<REDACTED_UUID>...........      ..........<REDACTED_UUID>...........   in service    none    none          off        
+    oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
 
 
     omicron zones at generation 2:
@@ -1502,4 +1605,15 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["reconfigurator", "export", "<TMP_PATH_REDACTED>"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+assembling reconfigurator state ... done
+wrote <TMP_PATH_REDACTED>
 =============================================

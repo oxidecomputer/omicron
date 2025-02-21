@@ -96,13 +96,12 @@ fn main() -> Result<(), anyhow::Error> {
             };
 
             let logs = zones.zone_logs(&zone, filter);
-            for (svc_name, mut svc_logs) in logs {
+            for (svc_name, svc_logs) in logs {
                 if let Some(service) = &service {
                     if svc_name != service.as_str() {
                         continue;
                     }
                 }
-                svc_logs.archived.sort();
                 if filter.current {
                     if let Some(current) = &svc_logs.current {
                         if metadata {

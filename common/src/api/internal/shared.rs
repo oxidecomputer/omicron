@@ -8,7 +8,7 @@ use crate::{
     address::NUM_SOURCE_NAT_PORTS,
     api::external::{self, BfdMode, ImportExportPolicy, Name, Vni},
 };
-use diffus::Diffus;
+use daft::Diffable;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
@@ -36,7 +36,7 @@ use super::nexus::HostIdentifier;
     Serialize,
     JsonSchema,
     Hash,
-    Diffus,
+    Diffable,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NetworkInterfaceKind {
@@ -60,7 +60,7 @@ pub enum NetworkInterfaceKind {
     PartialOrd,
     Ord,
     Hash,
-    Diffus,
+    Diffable,
 )]
 pub struct NetworkInterface {
     pub id: Uuid,
@@ -91,7 +91,7 @@ pub struct NetworkInterface {
     PartialOrd,
     Ord,
     Hash,
-    Diffus,
+    Diffable,
 )]
 pub struct SourceNatConfig {
     /// The external address provided to the instance or service.
@@ -822,14 +822,26 @@ pub struct DhcpConfig {
 
 /// The target for a given router entry.
 #[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
 #[serde(tag = "type", rename_all = "snake_case", content = "value")]
 pub enum RouterTarget {
     Drop,
-    InternetGateway(Option<Uuid>),
+    InternetGateway(InternetGatewayRouterTarget),
     Ip(IpAddr),
     VpcSubnet(IpNet),
+}
+
+/// An Internet Gateway router target.
+#[derive(
+    Copy, Clone, Debug, Deserialize, Eq, Hash, JsonSchema, PartialEq, Serialize,
+)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum InternetGatewayRouterTarget {
+    /// Targets the gateway for the system-internal services VPC.
+    System,
+    /// Targets a gateway for an instance's VPC.
+    Instance(Uuid),
 }
 
 /// Information on the current parent router (and version) of a route set
@@ -896,7 +908,7 @@ pub struct ExternalIpGatewayMap {
 
 /// Describes the purpose of the dataset.
 #[derive(
-    Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, EnumCount, Diffus,
+    Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, EnumCount, Diffable,
 )]
 #[cfg_attr(feature = "testing", derive(test_strategy::Arbitrary))]
 pub enum DatasetKind {

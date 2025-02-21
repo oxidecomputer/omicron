@@ -345,7 +345,7 @@ async fn sdc_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
 /// Call out to Crucible agent and perform region creation.
 async fn sdc_regions_ensure(
     sagactx: NexusActionContext,
-) -> Result<String, ActionError> {
+) -> Result<VolumeConstructionRequest, ActionError> {
     let osagactx = sagactx.user_data();
     let log = osagactx.log();
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
@@ -534,12 +534,7 @@ async fn sdc_regions_ensure(
         read_only_parent,
     };
 
-    let volume_data = serde_json::to_string(&volume_construction_request)
-        .map_err(|e| {
-            ActionError::action_failed(Error::internal_error(&e.to_string()))
-        })?;
-
-    Ok(volume_data)
+    Ok(volume_construction_request)
 }
 
 async fn sdc_regions_ensure_undo(
@@ -608,13 +603,12 @@ async fn sdc_create_volume_record(
     let osagactx = sagactx.user_data();
 
     let volume_id = sagactx.lookup::<VolumeUuid>("volume_id")?;
-    let volume_data = sagactx.lookup::<String>("regions_ensure")?;
-
-    let volume = db::model::Volume::new(volume_id, volume_data);
+    let volume_data =
+        sagactx.lookup::<VolumeConstructionRequest>("regions_ensure")?;
 
     osagactx
         .datastore()
-        .volume_create(volume)
+        .volume_create(volume_id, volume_data)
         .await
         .map_err(ActionError::action_failed)?;
 

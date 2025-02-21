@@ -219,7 +219,7 @@ impl DataStore {
         // For this blueprint: The set of all expunged Nexus zones
         let invalid_nexus_zones = blueprint
             .all_omicron_zones(
-                nexus_types::deployment::BlueprintZoneFilter::Expunged,
+                nexus_types::deployment::BlueprintZoneDisposition::is_expunged,
             )
             .filter_map(|(_sled, zone)| {
                 if matches!(
@@ -486,7 +486,6 @@ mod test {
     use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::BlueprintDatasetFilter;
     use nexus_types::deployment::BlueprintZoneDisposition;
-    use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::BlueprintZoneType;
     use omicron_common::api::external::LookupType;
     use omicron_common::api::internal::shared::DatasetKind::Debug as DebugDatasetKind;
@@ -570,6 +569,7 @@ mod test {
             let sled = SledUpdate::new(
                 *self.sled.as_untyped_uuid(),
                 "[::1]:0".parse().unwrap(),
+                0,
                 SledBaseboard {
                     serial_number: format!(
                         "test-{}",
@@ -928,9 +928,8 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    fn get_nexuses_from_blueprint(
+    fn get_in_service_nexuses_from_blueprint(
         bp: &Blueprint,
-        filter: BlueprintZoneFilter,
     ) -> Vec<OmicronZoneUuid> {
         bp.blueprint_zones
             .values()
@@ -938,7 +937,7 @@ mod test {
                 let mut nexus_zones = vec![];
                 for zone in &zones_config.zones {
                     if matches!(zone.zone_type, BlueprintZoneType::Nexus(_))
-                        && zone.disposition.matches(filter)
+                        && zone.disposition.is_in_service()
                     {
                         nexus_zones.push(zone.id);
                     }
@@ -982,7 +981,10 @@ mod test {
         for zones in bp.blueprint_zones.values_mut() {
             for mut zone in &mut zones.zones {
                 if zone.id == bundle.assigned_nexus.unwrap().into() {
-                    zone.disposition = BlueprintZoneDisposition::Expunged;
+                    zone.disposition = BlueprintZoneDisposition::Expunged {
+                        as_of_generation: *Generation::new(),
+                        ready_for_cleanup: false,
+                    };
                 }
             }
         }
@@ -1022,13 +1024,10 @@ mod test {
         }
 
         // Extract Nexus and Dataset information from the generated blueprint.
-        let this_nexus_id = get_nexuses_from_blueprint(
-            &bp1,
-            BlueprintZoneFilter::ShouldBeRunning,
-        )
-        .get(0)
-        .map(|id| *id)
-        .expect("There should be a Nexus in the example blueprint");
+        let this_nexus_id = get_in_service_nexuses_from_blueprint(&bp1)
+            .get(0)
+            .map(|id| *id)
+            .expect("There should be a Nexus in the example blueprint");
         let debug_datasets = get_debug_datasets_from_blueprint(
             &bp1,
             BlueprintDatasetFilter::InService,
@@ -1131,13 +1130,10 @@ mod test {
         }
 
         // Extract Nexus and Dataset information from the generated blueprint.
-        let this_nexus_id = get_nexuses_from_blueprint(
-            &bp1,
-            BlueprintZoneFilter::ShouldBeRunning,
-        )
-        .get(0)
-        .map(|id| *id)
-        .expect("There should be a Nexus in the example blueprint");
+        let this_nexus_id = get_in_service_nexuses_from_blueprint(&bp1)
+            .get(0)
+            .map(|id| *id)
+            .expect("There should be a Nexus in the example blueprint");
         let debug_datasets = get_debug_datasets_from_blueprint(
             &bp1,
             BlueprintDatasetFilter::InService,
@@ -1241,10 +1237,7 @@ mod test {
         }
 
         // Extract Nexus and Dataset information from the generated blueprint.
-        let nexus_ids = get_nexuses_from_blueprint(
-            &bp1,
-            BlueprintZoneFilter::ShouldBeRunning,
-        );
+        let nexus_ids = get_in_service_nexuses_from_blueprint(&bp1);
         let debug_datasets = get_debug_datasets_from_blueprint(
             &bp1,
             BlueprintDatasetFilter::InService,
@@ -1364,10 +1357,7 @@ mod test {
         }
 
         // Extract Nexus and Dataset information from the generated blueprint.
-        let nexus_ids = get_nexuses_from_blueprint(
-            &bp1,
-            BlueprintZoneFilter::ShouldBeRunning,
-        );
+        let nexus_ids = get_in_service_nexuses_from_blueprint(&bp1);
         let debug_datasets = get_debug_datasets_from_blueprint(
             &bp1,
             BlueprintDatasetFilter::InService,

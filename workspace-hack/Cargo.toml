@@ -36,7 +36,7 @@ chrono = { version = "0.4.39", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
 clap = { version = "4.5.27", features = ["cargo", "derive", "env", "wrap_help"] }
 clap_builder = { version = "4.5.27", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
-console = { version = "0.15.8" }
+console = { version = "0.15.10" }
 crossbeam-epoch = { version = "0.9.18" }
 crossbeam-utils = { version = "0.8.20" }
 crossterm = { version = "0.28.1", features = ["event-stream", "serde"] }
@@ -64,11 +64,11 @@ getrandom = { version = "0.2.15", default-features = false, features = ["js", "r
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.15.1" }
 hex = { version = "0.4.3", features = ["serde"] }
-hickory-proto = { version = "0.24.2", features = ["text-parsing"] }
+hickory-proto = { version = "0.24.3", features = ["text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "1.5.2", features = ["full"] }
 idna = { version = "1.0.3" }
-indexmap = { version = "2.7.0", features = ["serde"] }
+indexmap = { version = "2.7.1", features = ["serde"] }
 inout = { version = "0.1.3", default-features = false, features = ["std"] }
 itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
@@ -79,6 +79,7 @@ log = { version = "0.4.22", default-features = false, features = ["kv_unstable",
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.7.4" }
 newtype-uuid = { version = "1.2.1" }
+nix = { version = "0.29.0", features = ["feature", "net", "uio"] }
 nom = { version = "7.1.3" }
 num-bigint-dig = { version = "0.8.4", default-features = false, features = ["i128", "prime", "serde", "u64_digit", "zeroize"] }
 num-integer = { version = "0.1.46", features = ["i128"] }
@@ -93,7 +94,7 @@ phf = { version = "0.11.2" }
 phf_shared = { version = "0.11.2" }
 pkcs8 = { version = "0.10.2", default-features = false, features = ["encryption", "pem", "std"] }
 postgres-types = { version = "0.2.8", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
-predicates = { version = "3.1.2" }
+predicates = { version = "3.1.3" }
 proc-macro2 = { version = "1.0.92" }
 qorb = { version = "0.2.1", features = ["qtop"] }
 quote = { version = "1.0.38" }
@@ -156,7 +157,7 @@ chrono = { version = "0.4.39", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
 clap = { version = "4.5.27", features = ["cargo", "derive", "env", "wrap_help"] }
 clap_builder = { version = "4.5.27", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
-console = { version = "0.15.8" }
+console = { version = "0.15.10" }
 crossbeam-epoch = { version = "0.9.18" }
 crossbeam-utils = { version = "0.8.20" }
 crossterm = { version = "0.28.1", features = ["event-stream", "serde"] }
@@ -184,11 +185,11 @@ getrandom = { version = "0.2.15", default-features = false, features = ["js", "r
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.15.1" }
 hex = { version = "0.4.3", features = ["serde"] }
-hickory-proto = { version = "0.24.2", features = ["text-parsing"] }
+hickory-proto = { version = "0.24.3", features = ["text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "1.5.2", features = ["full"] }
 idna = { version = "1.0.3" }
-indexmap = { version = "2.7.0", features = ["serde"] }
+indexmap = { version = "2.7.1", features = ["serde"] }
 inout = { version = "0.1.3", default-features = false, features = ["std"] }
 itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
@@ -199,6 +200,7 @@ log = { version = "0.4.22", default-features = false, features = ["kv_unstable",
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.7.4" }
 newtype-uuid = { version = "1.2.1" }
+nix = { version = "0.29.0", features = ["feature", "net", "uio"] }
 nom = { version = "7.1.3" }
 num-bigint-dig = { version = "0.8.4", default-features = false, features = ["i128", "prime", "serde", "u64_digit", "zeroize"] }
 num-integer = { version = "0.1.46", features = ["i128"] }
@@ -213,7 +215,7 @@ phf = { version = "0.11.2" }
 phf_shared = { version = "0.11.2" }
 pkcs8 = { version = "0.10.2", default-features = false, features = ["encryption", "pem", "std"] }
 postgres-types = { version = "0.2.8", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
-predicates = { version = "3.1.2" }
+predicates = { version = "3.1.3" }
 proc-macro2 = { version = "1.0.92" }
 qorb = { version = "0.2.1", features = ["qtop"] }
 quote = { version = "1.0.38" }
@@ -322,7 +324,7 @@ cookie = { version = "0.18.1", default-features = false, features = ["percent-en
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
 hyper-rustls = { version = "0.27.3", default-features = false, features = ["http1", "http2", "ring", "tls12", "webpki-tokio"] }
 hyper-util = { version = "0.1.10", features = ["full"] }
-indicatif = { version = "0.17.9", features = ["rayon"] }
+indicatif = { version = "0.17.11", features = ["rayon"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.20.2" }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
@@ -334,7 +336,7 @@ cookie = { version = "0.18.1", default-features = false, features = ["percent-en
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
 hyper-rustls = { version = "0.27.3", default-features = false, features = ["http1", "http2", "ring", "tls12", "webpki-tokio"] }
 hyper-util = { version = "0.1.10", features = ["full"] }
-indicatif = { version = "0.17.9", features = ["rayon"] }
+indicatif = { version = "0.17.11", features = ["rayon"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.20.2" }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }

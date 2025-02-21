@@ -16,12 +16,14 @@ use clickhouse_admin_types::KeeperSettings;
 use clickhouse_admin_types::RaftServerSettings;
 use clickhouse_admin_types::ServerConfigurableSettings;
 use clickhouse_admin_types::ServerSettings;
+use clickhouse_admin_types::CLICKHOUSE_KEEPER_CONFIG_DIR;
+use clickhouse_admin_types::CLICKHOUSE_SERVER_CONFIG_DIR;
 use futures::future::Either;
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use nexus_db_queries::context::OpContext;
-use nexus_sled_agent_shared::inventory::OmicronZoneType;
-use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use omicron_common::address::CLICKHOUSE_ADMIN_PORT;
@@ -36,9 +38,6 @@ use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::str::FromStr;
 
-const CLICKHOUSE_SERVER_CONFIG_DIR: &str =
-    "/opt/oxide/clickhouse_server/config.d";
-const CLICKHOUSE_KEEPER_CONFIG_DIR: &str = "/opt/oxide/clickhouse_keeper";
 const CLICKHOUSE_DATA_DIR: &str = "/data";
 
 pub(crate) async fn deploy_nodes(
@@ -183,18 +182,11 @@ pub(crate) async fn deploy_single_node(
     opctx: &OpContext,
     zones: &BTreeMap<SledUuid, BlueprintZonesConfig>,
 ) -> Result<(), anyhow::Error> {
-    if let Some(zone) = zones
-        .values()
-        .flat_map(|zones| {
-            zones
-                .to_omicron_zones_config(BlueprintZoneFilter::ShouldBeRunning)
-                .zones
-                .into_iter()
-                .find(|zone| {
-                    matches!(zone.zone_type, OmicronZoneType::Clickhouse { .. })
-                })
-        })
-        .next()
+    if let Some((_, zone)) = Blueprint::filtered_zones(
+        zones,
+        BlueprintZoneDisposition::is_in_service,
+    )
+    .find(|(_, zone)| zone.zone_type.is_clickhouse())
     {
         let admin_addr = SocketAddr::V6(SocketAddrV6::new(
             zone.underlay_ip(),

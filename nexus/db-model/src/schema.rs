@@ -907,6 +907,7 @@ table! {
         sled_policy -> crate::sled_policy::SledPolicyEnum,
         sled_state -> crate::SledStateEnum,
         sled_agent_gen -> Int8,
+        repo_depot_port -> Int4,
     }
 }
 
@@ -1177,6 +1178,7 @@ table! {
         vpc_router_id -> Uuid,
         target -> Text,
         destination -> Text,
+        vpc_subnet_id -> Nullable<Uuid>,
     }
 }
 
@@ -1751,6 +1753,8 @@ table! {
         snat_first_port -> Nullable<Int4>,
         snat_last_port -> Nullable<Int4>,
         disposition -> crate::DbBpZoneDispositionEnum,
+        disposition_expunged_as_of_generation -> Nullable<Int8>,
+        disposition_expunged_ready_for_cleanup -> Bool,
         external_ip_id -> Nullable<Uuid>,
         filesystem_pool -> Nullable<Uuid>,
     }
@@ -1942,14 +1946,15 @@ table! {
     region_snapshot_replacement (id) {
         id -> Uuid,
         request_time -> Timestamptz,
-        old_dataset_id -> Uuid,
+        old_dataset_id -> Nullable<Uuid>,
         old_region_id -> Uuid,
-        old_snapshot_id -> Uuid,
+        old_snapshot_id -> Nullable<Uuid>,
         old_snapshot_volume_id -> Nullable<Uuid>,
         new_region_id -> Nullable<Uuid>,
         replacement_state -> crate::RegionSnapshotReplacementStateEnum,
         operating_saga_id -> Nullable<Uuid>,
         new_region_volume_id -> Nullable<Uuid>,
+        replacement_type -> crate::ReadOnlyTargetReplacementTypeEnum,
     }
 }
 

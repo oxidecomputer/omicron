@@ -32,6 +32,44 @@ fn most_recent_activate_time(
     }
 }
 
+/// Given the name of a background task, wait for it to complete if it's
+/// running, then return the last polled `BackgroundTask` object. Panics if the
+/// task has never been activated.
+pub async fn wait_background_task(
+    internal_client: &ClientTestContext,
+    task_name: &str,
+) -> BackgroundTask {
+    // Wait for the task to finish
+    let last_task_poll = wait_for_condition(
+        || async {
+            let task = NexusRequest::object_get(
+                internal_client,
+                &format!("/bgtasks/view/{task_name}"),
+            )
+            .execute_and_parse_unwrap::<BackgroundTask>()
+            .await;
+
+            // Wait until the task has actually run and then is idle
+            if matches!(&task.current, CurrentStatus::Idle) {
+                match &task.last {
+                    LastResult::Completed(_) => Ok(task),
+                    LastResult::NeverCompleted => {
+                        panic!("task never activated")
+                    }
+                }
+            } else {
+                Err(CondCheckError::<()>::NotYet)
+            }
+        },
+        &Duration::from_millis(50),
+        &Duration::from_secs(60),
+    )
+    .await
+    .unwrap();
+
+    last_task_poll
+}
+
 /// Given the name of a background task, activate it, then wait for it to
 /// complete. Return the last polled `BackgroundTask` object.
 pub async fn activate_background_task(
@@ -112,7 +150,7 @@ pub async fn activate_background_task(
                 Err(CondCheckError::<()>::NotYet)
             }
         },
-        &Duration::from_millis(500),
+        &Duration::from_millis(50),
         &Duration::from_secs(60),
     )
     .await
@@ -267,8 +305,6 @@ pub async fn run_region_snapshot_replacement_step(
     )
     .unwrap();
 
-    eprintln!("{:?}", &status.errors);
-
     assert!(status.errors.is_empty());
 
     status.step_records_created_ok.len()
@@ -308,32 +344,98 @@ pub async fn run_region_snapshot_replacement_finish(
     status.finish_invoked_ok.len()
 }
 
-/// Run all replacement related background tasks until they aren't doing
-/// anything anymore.
-pub async fn run_replacement_tasks_to_completion(
+/// Run the read_only_region_replacement_start background task, returning how
+/// many actions were taken
+pub async fn run_read_only_region_replacement_start(
     internal_client: &ClientTestContext,
-) {
-    wait_for_condition(
-        || async {
-            let actions_taken =
-                // region replacement related
-                run_region_replacement(internal_client).await +
-                run_region_replacement_driver(internal_client).await +
-                // region snapshot replacement related
-                run_region_snapshot_replacement_start(internal_client).await +
-                run_region_snapshot_replacement_garbage_collection(internal_client).await +
-                run_region_snapshot_replacement_step(internal_client).await +
-                run_region_snapshot_replacement_finish(internal_client).await;
-
-            if actions_taken > 0 {
-                Err(CondCheckError::<()>::NotYet)
-            } else {
-                Ok(())
-            }
-        },
-        &Duration::from_secs(1),
-        &Duration::from_secs(60),
+) -> usize {
+    let last_background_task = activate_background_task(
+        &internal_client,
+        "read_only_region_replacement_start",
     )
-    .await
+    .await;
+
+    let LastResult::Completed(last_result_completed) =
+        last_background_task.last
+    else {
+        panic!(
+            "unexpected {:?} returned from read_only_region_replacement_start \
+            task",
+            last_background_task.last,
+        );
+    };
+
+    let status =
+        serde_json::from_value::<ReadOnlyRegionReplacementStartStatus>(
+            last_result_completed.details,
+        )
+        .unwrap();
+
+    assert!(status.errors.is_empty());
+
+    status.requests_created_ok.len()
+}
+
+/// Run all replacement related background tasks and return how many actions
+/// were taken.
+pub async fn run_all_crucible_replacement_tasks(
+    internal_client: &ClientTestContext,
+) -> usize {
+    // region replacement related
+    run_region_replacement(internal_client).await +
+    run_region_replacement_driver(internal_client).await +
+    // region snapshot replacement related
+    run_region_snapshot_replacement_start(internal_client).await +
+    run_region_snapshot_replacement_garbage_collection(internal_client).await +
+    run_region_snapshot_replacement_step(internal_client).await +
+    run_region_snapshot_replacement_finish(internal_client).await +
+    run_read_only_region_replacement_start(internal_client).await
+}
+
+pub async fn wait_tuf_artifact_replication_step(
+    internal_client: &ClientTestContext,
+) -> TufArtifactReplicationStatus {
+    let last_background_task =
+        wait_background_task(&internal_client, "tuf_artifact_replication")
+            .await;
+
+    let LastResult::Completed(last_result_completed) =
+        last_background_task.last
+    else {
+        panic!(
+            "unexpected {:?} returned from tuf_artifact_replication task",
+            last_background_task.last,
+        );
+    };
+
+    let status = serde_json::from_value::<TufArtifactReplicationStatus>(
+        last_result_completed.details,
+    )
     .unwrap();
+    assert_eq!(status.last_run_counters.err(), 0);
+    status
+}
+
+pub async fn run_tuf_artifact_replication_step(
+    internal_client: &ClientTestContext,
+) -> TufArtifactReplicationStatus {
+    let last_background_task =
+        activate_background_task(&internal_client, "tuf_artifact_replication")
+            .await;
+
+    let LastResult::Completed(last_result_completed) =
+        last_background_task.last
+    else {
+        panic!(
+            "unexpected {:?} returned from tuf_artifact_replication task",
+            last_background_task.last,
+        );
+    };
+
+    let status = serde_json::from_value::<TufArtifactReplicationStatus>(
+        last_result_completed.details,
+    )
+    .unwrap();
+    assert_eq!(status.last_run_counters.err(), 0);
+    status
 }

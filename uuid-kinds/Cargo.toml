@@ -12,7 +12,7 @@ workspace = true
 # within omicron.
 
 [dependencies]
-diffus.workspace = true
+daft.workspace = true
 newtype-uuid.workspace = true
 paste.workspace = true
 proptest = { workspace = true, optional = true }

@@ -32,14 +32,15 @@ use omicron_uuid_kinds::VolumeUuid;
 use uuid::Uuid;
 
 impl DataStore {
-    /// Create and insert a region replacement request for a Region, returning the ID of the
-    /// request.
+    /// Create and insert a region replacement request for a Region, returning
+    /// the ID of the request.
     pub async fn create_region_replacement_request_for_region(
         &self,
         opctx: &OpContext,
         region: &Region,
     ) -> Result<Uuid, Error> {
         if region.read_only() {
+            // You want `create_read_only_region_replacement_request`! :)
             return Err(Error::invalid_request(format!(
                 "region {} is read-only",
                 region.id(),
@@ -943,16 +944,15 @@ mod test {
         let volume_id = VolumeUuid::new_v4();
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: Uuid::new_v4(),
                     block_size: 512,
                     sub_volumes: vec![],
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -988,16 +988,15 @@ mod test {
         let volume_id = VolumeUuid::new_v4();
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: Uuid::new_v4(),
                     block_size: 512,
                     sub_volumes: vec![],
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 
@@ -1094,16 +1093,15 @@ mod test {
         let volume_id = VolumeUuid::new_v4();
 
         datastore
-            .volume_create(nexus_db_model::Volume::new(
+            .volume_create(
                 volume_id,
-                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                VolumeConstructionRequest::Volume {
                     id: Uuid::new_v4(),
                     block_size: 512,
                     sub_volumes: vec![],
                     read_only_parent: None,
-                })
-                .unwrap(),
-            ))
+                },
+            )
             .await
             .unwrap();
 

@@ -42,9 +42,11 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::ClickhouseMode;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
+use nexus_types::internal_api::background::BlueprintRendezvousStatus;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
+use nexus_types::internal_api::background::ReadOnlyRegionReplacementStartStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
 use nexus_types::internal_api::background::RegionReplacementStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus;
@@ -53,6 +55,9 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
+use nexus_types::internal_api::background::TufArtifactReplicationCounters;
+use nexus_types::internal_api::background::TufArtifactReplicationRequest;
+use nexus_types::internal_api::background::TufArtifactReplicationStatus;
 use nexus_types::inventory::BaseboardId;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
@@ -891,6 +896,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "blueprint_loader" => {
             print_task_blueprint_loader(details);
         }
+        "blueprint_rendezvous" => {
+            print_task_blueprint_rendezvous(details);
+        }
         "dns_config_external" | "dns_config_internal" => {
             print_task_dns_config(details);
         }
@@ -921,6 +929,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "phantom_disks" => {
             print_task_phantom_disks(details);
         }
+        "read_only_region_replacement_start" => {
+            print_task_read_only_region_replacement_start(details);
+        }
         "region_replacement" => {
             print_task_region_replacement(details);
         }
@@ -947,6 +958,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "support_bundle_collector" => {
             print_task_support_bundle_collector(details);
+        }
+        "tuf_artifact_replication" => {
+            print_task_tuf_artifact_replication(details);
         }
         _ => {
             println!(
@@ -1108,6 +1122,56 @@ fn print_task_blueprint_loader(details: &serde_json::Value) {
                 humantime::format_rfc3339_millis(status.time_created.into())
             );
             println!("    status:           {}", status.status);
+        }
+    }
+}
+
+fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
+    match serde_json::from_value::<BlueprintRendezvousStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            println!("    target blueprint:     {}", status.blueprint_id);
+            println!(
+                "    inventory collection: {}",
+                status.inventory_collection_id
+            );
+            println!("    debug_dataset rendezvous counts:");
+            println!(
+                "        num_inserted:           {}",
+                status.stats.debug_dataset.num_inserted
+            );
+            println!(
+                "        num_already_exist:      {}",
+                status.stats.debug_dataset.num_already_exist
+            );
+            println!(
+                "        num_not_in_inventory:   {}",
+                status.stats.debug_dataset.num_not_in_inventory
+            );
+            println!(
+                "        num_tombstoned:         {}",
+                status.stats.debug_dataset.num_tombstoned
+            );
+            println!(
+                "        num_already_tombstoned: {}",
+                status.stats.debug_dataset.num_already_tombstoned
+            );
+            println!("    crucible_dataset rendezvous counts:");
+            println!(
+                "        num_inserted:         {}",
+                status.stats.crucible_dataset.num_inserted
+            );
+            println!(
+                "        num_already_exist:    {}",
+                status.stats.crucible_dataset.num_already_exist
+            );
+            println!(
+                "        num_not_in_inventory: {}",
+                status.stats.crucible_dataset.num_not_in_inventory
+            );
         }
     }
 }
@@ -1664,6 +1728,32 @@ fn print_task_phantom_disks(details: &serde_json::Value) {
     };
 }
 
+fn print_task_read_only_region_replacement_start(details: &serde_json::Value) {
+    match serde_json::from_value::<ReadOnlyRegionReplacementStartStatus>(
+        details.clone(),
+    ) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+
+        Ok(status) => {
+            println!(
+                "    total requests created ok: {}",
+                status.requests_created_ok.len(),
+            );
+            for line in &status.requests_created_ok {
+                println!("    > {line}");
+            }
+
+            println!("    errors: {}", status.errors.len());
+            for line in &status.errors {
+                println!("    > {line}");
+            }
+        }
+    }
+}
+
 fn print_task_region_replacement(details: &serde_json::Value) {
     match serde_json::from_value::<RegionReplacementStatus>(details.clone()) {
         Err(error) => eprintln!(
@@ -2085,6 +2175,72 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 println!("      Bundle was able to list in-service sleds: {listed_in_service_sleds}");
                 println!("      Bundle was activated in the database: {activated_in_db_ok}");
             }
+        }
+    }
+}
+
+fn print_task_tuf_artifact_replication(details: &serde_json::Value) {
+    fn print_counters(counters: TufArtifactReplicationCounters) {
+        const ROWS: &[&str] = &[
+            "list ok:",
+            "list err:",
+            "put ok:",
+            "put err:",
+            "copy ok:",
+            "copy err:",
+            "delete ok:",
+            "delete err:",
+        ];
+        const WIDTH: usize = const_max_len(ROWS);
+
+        for (label, value) in ROWS.iter().zip([
+            counters.list_ok,
+            counters.list_err,
+            counters.put_ok,
+            counters.put_err,
+            counters.copy_ok,
+            counters.copy_err,
+            counters.delete_ok,
+            counters.delete_err,
+        ]) {
+            println!("      {label:<WIDTH$} {value:>3}");
+        }
+    }
+
+    match serde_json::from_value::<TufArtifactReplicationStatus>(
+        details.clone(),
+    ) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            println!("    request ringbuf:");
+            if status.request_debug_ringbuf.is_empty() {
+                println!("      [no entries]");
+            }
+            for TufArtifactReplicationRequest {
+                time,
+                target_sled,
+                operation,
+                error,
+            } in status.request_debug_ringbuf.iter()
+            {
+                println!("      - target sled: {target_sled}");
+                println!("        operation: {operation:?}");
+                println!(
+                    "        at: {}",
+                    time.to_rfc3339_opts(SecondsFormat::Secs, true)
+                );
+                if let Some(error) = error {
+                    println!("        error: {error}")
+                }
+            }
+            println!("    last run:");
+            print_counters(status.last_run_counters);
+            println!("    lifetime:");
+            print_counters(status.lifetime_counters);
+            println!("    local repos: {}", status.local_repos);
         }
     }
 }

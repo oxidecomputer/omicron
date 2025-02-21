@@ -1327,32 +1327,6 @@
         }
       }
     },
-    "/update": {
-      "post": {
-        "operationId": "update_artifact",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateArtifactId"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/v2p": {
       "get": {
         "summary": "List v2p mappings present on sled",
@@ -4130,6 +4104,46 @@
           "ncpus"
         ]
       },
+      "InternetGatewayRouterTarget": {
+        "description": "An Internet Gateway router target.",
+        "oneOf": [
+          {
+            "description": "Targets the gateway for the system-internal services VPC.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "system"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Targets a gateway for an instance's VPC.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
       "Inventory": {
         "description": "Identity and basic status information about this sled agent",
         "type": "object",
@@ -4386,24 +4400,6 @@
         },
         "required": [
           "net"
-        ]
-      },
-      "KnownArtifactKind": {
-        "description": "Kinds of update artifacts, as used by Nexus to determine what updates are available and by sled-agent to determine how to apply an update when asked.",
-        "type": "string",
-        "enum": [
-          "gimlet_sp",
-          "gimlet_rot",
-          "gimlet_rot_bootloader",
-          "host",
-          "trampoline",
-          "control_plane",
-          "psc_sp",
-          "psc_rot",
-          "psc_rot_bootloader",
-          "switch_sp",
-          "switch_rot",
-          "switch_rot_bootloader"
         ]
       },
       "L4PortRange": {
@@ -4731,6 +4727,16 @@
           "id": {
             "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
           },
+          "image_source": {
+            "default": {
+              "type": "install_dataset"
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OmicronZoneImageSource"
+              }
+            ]
+          },
           "zone_type": {
             "$ref": "#/components/schemas/OmicronZoneType"
           }
@@ -4750,6 +4756,46 @@
         },
         "required": [
           "pool_name"
+        ]
+      },
+      "OmicronZoneImageSource": {
+        "description": "Where Sled Agent should get the image for a zone.",
+        "oneOf": [
+          {
+            "description": "This zone's image source is whatever happens to be on the sled's \"install\" dataset.\n\nThis is whatever was put in place at the factory or by the latest MUPdate. The image used here can vary by sled and even over time (if the sled gets MUPdated again).\n\nHistorically, this was the only source for zone images. In an system with automated control-plane-driven update we expect to only use this variant in emergencies where the system had to be recovered via MUPdate.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "install_dataset"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "This zone's image source is the artifact matching this hash from the TUF artifact store (aka \"TUF repo depot\").\n\nThis originates from TUF repos uploaded to Nexus which are then replicated out to all sleds.",
+            "type": "object",
+            "properties": {
+              "hash": {
+                "type": "string",
+                "format": "hex string (32 bytes)"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "artifact"
+                ]
+              }
+            },
+            "required": [
+              "hash",
+              "type"
+            ]
+          }
         ]
       },
       "OmicronZoneType": {
@@ -5550,9 +5596,7 @@
                 ]
               },
               "value": {
-                "nullable": true,
-                "type": "string",
-                "format": "uuid"
+                "$ref": "#/components/schemas/InternetGatewayRouterTarget"
               }
             },
             "required": [
@@ -5617,10 +5661,6 @@
           "router_id",
           "version"
         ]
-      },
-      "SemverVersion": {
-        "type": "string",
-        "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
       },
       "SledDiagnosticsQueryOutput": {
         "oneOf": [
@@ -6040,37 +6080,6 @@
       "TypedUuidForZpoolKind": {
         "type": "string",
         "format": "uuid"
-      },
-      "UpdateArtifactId": {
-        "description": "An identifier for a single update artifact.",
-        "type": "object",
-        "properties": {
-          "kind": {
-            "description": "The kind of update artifact this is.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/KnownArtifactKind"
-              }
-            ]
-          },
-          "name": {
-            "description": "The artifact's name.",
-            "type": "string"
-          },
-          "version": {
-            "description": "The artifact's version.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SemverVersion"
-              }
-            ]
-          }
-        },
-        "required": [
-          "kind",
-          "name",
-          "version"
-        ]
       },
       "UplinkAddressConfig": {
         "type": "object",

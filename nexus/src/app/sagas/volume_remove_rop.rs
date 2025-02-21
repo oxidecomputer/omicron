@@ -6,8 +6,6 @@ use super::{ActionRegistry, NexusActionContext, NexusSaga, SagaInitError};
 use crate::app::sagas;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::authn;
-use nexus_db_queries::db;
-use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::Deserialize;
@@ -140,18 +138,10 @@ async fn svr_create_temp_volume(
         sub_volumes: vec![],
         read_only_parent: None,
     };
-    let temp_volume_data = serde_json::to_string(&volume_construction_request)
-        .map_err(|e| {
-            ActionError::action_failed(Error::internal_error(&format!(
-                "failed to deserialize volume data: {}",
-                e,
-            )))
-        })?;
 
-    let volume = db::model::Volume::new(temp_volume_id, temp_volume_data);
     osagactx
         .datastore()
-        .volume_create(volume)
+        .volume_create(temp_volume_id, volume_construction_request)
         .await
         .map_err(ActionError::action_failed)?;
 

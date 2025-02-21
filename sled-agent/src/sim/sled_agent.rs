@@ -104,7 +104,8 @@ pub struct SledAgent {
     fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
     pub bootstore_network_config: Mutex<EarlyNetworkConfig>,
-    artifacts: ArtifactStore<SimArtifactStorage>,
+    pub(super) repo_depot:
+        dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
     pub log: Logger,
 }
 
@@ -154,8 +155,8 @@ impl SledAgent {
 
         simulated_upstairs.register_storage(id, &storage);
 
-        let artifacts =
-            ArtifactStore::new(&log, SimArtifactStorage::new(storage.clone()));
+        let repo_depot = ArtifactStore::new(&log, SimArtifactStorage::new())
+            .start(&log, &config.dropshot);
 
         Arc::new(SledAgent {
             id,
@@ -185,7 +186,7 @@ impl SledAgent {
                 zones: vec![],
             }),
             instance_ensure_state_error: Mutex::new(None),
-            artifacts,
+            repo_depot,
             log,
             bootstore_network_config,
         })
@@ -289,6 +290,7 @@ impl SledAgent {
                                     .memory
                                     .to_whole_mebibytes(),
                                 cpuid: None,
+                                guest_hv_interface: None,
                             },
                             components: [(
                                 "com1".to_string(),
@@ -511,7 +513,7 @@ impl SledAgent {
     }
 
     pub(super) fn artifact_store(&self) -> &ArtifactStore<SimArtifactStorage> {
-        &self.artifacts
+        self.repo_depot.app_private()
     }
 
     pub async fn vmm_count(&self) -> usize {

@@ -58,7 +58,6 @@ use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintTarget;
-use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
@@ -1390,9 +1389,9 @@ impl DataStore {
                     &conn,
                     &opctx.log,
                     blueprint
-                        .all_omicron_zones_not_in(
-                            BlueprintZoneFilter::ShouldBeExternallyReachable,
-                        )
+                        .all_omicron_zones(|disposition| {
+                            !disposition.is_in_service()
+                        })
                         .map(|(_sled_id, zone)| zone),
                 )
                 .await
@@ -1401,9 +1400,9 @@ impl DataStore {
                     &conn,
                     opctx,
                     blueprint
-                        .all_omicron_zones(
-                            BlueprintZoneFilter::ShouldBeExternallyReachable,
-                        )
+                        .all_omicron_zones(|disposition| {
+                            disposition.is_in_service()
+                        })
                         .map(|(_sled_id, zone)| zone),
                 )
                 .await
@@ -2007,10 +2006,10 @@ mod tests {
     use nexus_reconfigurator_planning::blueprint_builder::Ensure;
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
-    use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
@@ -2275,7 +2274,7 @@ mod tests {
             collection.sled_agents.len()
         );
         assert_eq!(
-            blueprint1.all_omicron_zones(BlueprintZoneFilter::All).count(),
+            blueprint1.all_omicron_zones(BlueprintZoneDisposition::any).count(),
             collection.all_omicron_zones().count()
         );
         // All zones should be in service.
@@ -2407,9 +2406,9 @@ mod tests {
             blueprint2.blueprint_zones.len()
         );
         assert_eq!(
-            blueprint1.all_omicron_zones(BlueprintZoneFilter::All).count()
+            blueprint1.all_omicron_zones(BlueprintZoneDisposition::any).count()
                 + num_new_sled_zones,
-            blueprint2.all_omicron_zones(BlueprintZoneFilter::All).count()
+            blueprint2.all_omicron_zones(BlueprintZoneDisposition::any).count()
         );
 
         // All zones should be in service.
@@ -2899,32 +2898,71 @@ mod tests {
 
     #[tokio::test]
     async fn test_ensure_external_networking_bails_on_bad_target() {
+        let test_name = "test_ensure_external_networking_bails_on_bad_target";
+
         // Setup
-        let logctx = dev::test_setup_log(
-            "test_ensure_external_networking_bails_on_bad_target",
-        );
+        let logctx = dev::test_setup_log(test_name);
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // Create an initial empty collection
-        let collection = CollectionBuilder::new("test").build();
-
-        let blueprint1 =
-            create_blueprint_with_external_ip(&datastore, &opctx).await;
+        // Create two blueprints, both of which have external networking (via 1
+        // Nexus zone).
+        let (example_system, blueprint1) =
+            ExampleSystemBuilder::new(&opctx.log, test_name)
+                .nsleds(1)
+                .nexus_count(1)
+                .internal_dns_count(0)
+                .expect("internal DNS count can be 0")
+                .external_dns_count(0)
+                .expect("external DNS count can be 0")
+                .crucible_pantry_count(0)
+                .build();
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &EMPTY_PLANNING_INPUT,
-            &collection,
-            "test2",
+            &example_system.input,
+            &example_system.collection,
+            &format!("{test_name}-2"),
         )
         .expect("failed to create builder")
         .build();
 
-        // Insert both into the blueprint table.
+        // Insert an IP pool range covering the one Nexus IP.
+        let nexus_ip = blueprint1
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .find_map(|(_, zone_config)| {
+                zone_config
+                    .zone_type
+                    .external_networking()
+                    .map(|(ip, _nic)| ip.ip())
+            })
+            .expect("found external IP");
+        let (service_ip_pool, _) = datastore
+            .ip_pools_service_lookup(&opctx)
+            .await
+            .expect("lookup service ip pool");
+        datastore
+            .ip_pool_add_range(
+                &opctx,
+                &service_ip_pool,
+                &IpRange::try_from((nexus_ip, nexus_ip))
+                    .expect("valid IP range"),
+            )
+            .await
+            .expect("add range to service IP pool");
+
+        // Insert both (plus the original parent of blueprint1, internal to
+        // `ExampleSystemBuilder`) into the blueprint table.
+        let blueprint0 = example_system.initial_blueprint;
+        datastore.blueprint_insert(&opctx, &blueprint0).await.unwrap();
         datastore.blueprint_insert(&opctx, &blueprint1).await.unwrap();
         datastore.blueprint_insert(&opctx, &blueprint2).await.unwrap();
 
+        let bp0_target = BlueprintTarget {
+            target_id: blueprint0.id,
+            enabled: true,
+            time_made_target: now_db_precision(),
+        };
         let bp1_target = BlueprintTarget {
             target_id: blueprint1.id,
             enabled: true,
@@ -2936,7 +2974,12 @@ mod tests {
             time_made_target: now_db_precision(),
         };
 
-        // Set bp1_target as the current target.
+        // Set bp1_target as the current target (which requires making bp0 the
+        // target first).
+        datastore
+            .blueprint_target_set_current(&opctx, bp0_target)
+            .await
+            .unwrap();
         datastore
             .blueprint_target_set_current(&opctx, bp1_target)
             .await
@@ -3104,10 +3147,7 @@ mod tests {
 
     fn assert_all_zones_in_service(blueprint: &Blueprint) {
         let not_in_service = blueprint
-            .all_omicron_zones(BlueprintZoneFilter::All)
-            .filter(|(_, z)| {
-                z.disposition != BlueprintZoneDisposition::InService
-            })
+            .all_omicron_zones(|disposition| !disposition.is_in_service())
             .collect::<Vec<_>>();
         assert!(
             not_in_service.is_empty(),

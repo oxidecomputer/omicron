@@ -108,6 +108,7 @@ use super::tasks::metrics_producer_gc;
 use super::tasks::nat_cleanup;
 use super::tasks::phantom_disks;
 use super::tasks::physical_disk_adoption;
+use super::tasks::read_only_region_replacement_start::*;
 use super::tasks::region_replacement;
 use super::tasks::region_replacement_driver;
 use super::tasks::region_snapshot_replacement_finish::*;
@@ -119,6 +120,7 @@ use super::tasks::service_firewall_rules;
 use super::tasks::support_bundle_collector;
 use super::tasks::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
+use super::tasks::tuf_artifact_replication;
 use super::tasks::v2p_mappings::V2PManager;
 use super::tasks::vpc_routes;
 use super::Activator;
@@ -135,7 +137,9 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use tokio::sync::watch;
+use update_common::artifacts::ArtifactsWithPlan;
 use uuid::Uuid;
 
 /// Interface for activating various background tasks and read data that they
@@ -176,6 +180,8 @@ pub struct BackgroundTasks {
     pub task_region_snapshot_replacement_garbage_collection: Activator,
     pub task_region_snapshot_replacement_step: Activator,
     pub task_region_snapshot_replacement_finish: Activator,
+    pub task_tuf_artifact_replication: Activator,
+    pub task_read_only_region_replacement_start: Activator,
 
     // Handles to activate background tasks that do not get used by Nexus
     // at-large.  These background tasks are implementation details as far as
@@ -265,6 +271,8 @@ impl BackgroundTasksInitializer {
             ),
             task_region_snapshot_replacement_step: Activator::new(),
             task_region_snapshot_replacement_finish: Activator::new(),
+            task_tuf_artifact_replication: Activator::new(),
+            task_read_only_region_replacement_start: Activator::new(),
 
             task_internal_dns_propagation: Activator::new(),
             task_external_dns_propagation: Activator::new(),
@@ -333,6 +341,8 @@ impl BackgroundTasksInitializer {
             task_region_snapshot_replacement_garbage_collection,
             task_region_snapshot_replacement_step,
             task_region_snapshot_replacement_finish,
+            task_tuf_artifact_replication,
+            task_read_only_region_replacement_start,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -868,11 +878,42 @@ impl BackgroundTasksInitializer {
                 done",
             period: config.region_snapshot_replacement_finish.period_secs,
             task_impl: Box::new(RegionSnapshotReplacementFinishDetector::new(
-                datastore, sagas,
+                datastore.clone(),
+                sagas,
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_region_snapshot_replacement_finish,
+        });
+
+        driver.register(TaskDefinition {
+            name: "tuf_artifact_replication",
+            description: "replicate update repo artifacts across sleds",
+            period: config.tuf_artifact_replication.period_secs,
+            task_impl: Box::new(
+                tuf_artifact_replication::ArtifactReplication::new(
+                    datastore.clone(),
+                    args.tuf_artifact_replication_rx,
+                    config.tuf_artifact_replication.min_sled_replication,
+                ),
+            ),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_tuf_artifact_replication,
+        });
+
+        driver.register(TaskDefinition {
+            name: "read_only_region_replacement_start",
+            description:
+                "detect if read-only regions need replacement and begin the \
+                process",
+            period: config.read_only_region_replacement_start.period_secs,
+            task_impl: Box::new(ReadOnlyRegionReplacementDetector::new(
+                datastore,
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_read_only_region_replacement_start,
         });
 
         driver
@@ -899,6 +940,8 @@ pub struct BackgroundTasksData {
     pub producer_registry: ProducerRegistry,
     /// Helpers for saga recovery
     pub saga_recovery: saga_recovery::SagaRecoveryHelpers<Arc<Nexus>>,
+    /// Channel for TUF repository artifacts to be replicated out to sleds
+    pub tuf_artifact_replication_rx: mpsc::Receiver<ArtifactsWithPlan>,
 }
 
 /// Starts the three DNS-propagation-related background tasks for either

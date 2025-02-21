@@ -24,6 +24,7 @@ use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::svc::wait_for_service;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
+use illumos_utils::zpool::ZpoolOrRamdisk;
 use omicron_common::api::internal::nexus::{SledVmmState, VmmRuntimeState};
 use omicron_common::api::internal::shared::{
     NetworkInterface, ResolvedVpcFirewallRule, SledIdentifiers, SourceNatConfig,
@@ -1114,6 +1115,7 @@ impl InstanceRunner {
                     cpus: self.vcpus,
                     memory_mb: self.memory_mib,
                     cpuid: None,
+                    guest_hv_interface: None,
                 },
                 components: Default::default(),
             };
@@ -1836,7 +1838,10 @@ impl InstanceRunner {
         let Some(run_state) = &self.running_state else {
             return None;
         };
-        run_state.running_zone.root_zpool().map(|p| p.clone())
+        match run_state.running_zone.root_zpool() {
+            ZpoolOrRamdisk::Zpool(zpool_name) => Some(zpool_name.clone()),
+            ZpoolOrRamdisk::Ramdisk => None,
+        }
     }
 
     fn current_state(&self) -> SledVmmState {

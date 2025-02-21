@@ -17,7 +17,7 @@ use nexus_sled_agent_shared::inventory::{
 };
 use omicron_common::{
     api::internal::{
-        nexus::{DiskRuntimeState, SledVmmState, UpdateArtifactId},
+        nexus::{DiskRuntimeState, SledVmmState},
         shared::{
             ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
             SledIdentifiers, SwitchPorts, VirtualNetworkInterfaceHost,
@@ -401,15 +401,6 @@ pub trait SledAgentApi {
         path_params: Path<DiskPathParam>,
         body: TypedBody<DiskEnsureBody>,
     ) -> Result<HttpResponseOk<DiskRuntimeState>, HttpError>;
-
-    #[endpoint {
-        method = POST,
-        path = "/update"
-    }]
-    async fn update_artifact(
-        rqctx: RequestContext<Self::Context>,
-        artifact: TypedBody<UpdateArtifactId>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
         method = GET,

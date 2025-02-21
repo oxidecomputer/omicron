@@ -25,8 +25,8 @@ use tokio_util::io::ReaderStream;
 
 /// Handle to the data of an extracted artifact.
 ///
-/// This does not contain the actual data; use `reader_stream()` to get a new
-/// handle to the underlying file to read it on demand.
+/// This does not contain the actual data; use `file()` or `reader_stream()` to
+/// get a new handle to the underlying file to read it on demand.
 ///
 /// Note that although this type implements `Clone` and that cloning is
 /// relatively cheap, it has additional implications on filesystem cleanup.
@@ -69,6 +69,15 @@ impl ExtractedArtifactDataHandle {
         self.hash_id.hash
     }
 
+    /// Opens the file for this artifact.
+    ///
+    /// This can fail due to I/O errors outside our control (e.g., something
+    /// removed the contents of our temporary directory).
+    pub async fn file(&self) -> std::io::Result<tokio::fs::File> {
+        let path = path_for_artifact(&self.tempdir, &self.hash_id);
+        fs_err::tokio::File::open(&path).await.map(|file| file.into_parts().0)
+    }
+
     /// Async stream to read the contents of this artifact on demand.
     ///
     /// This can fail due to I/O errors outside our control (e.g., something
@@ -76,13 +85,7 @@ impl ExtractedArtifactDataHandle {
     pub async fn reader_stream(
         &self,
     ) -> anyhow::Result<ReaderStream<impl AsyncRead>> {
-        let path = path_for_artifact(&self.tempdir, &self.hash_id);
-
-        let file = tokio::fs::File::open(&path)
-            .await
-            .with_context(|| format!("failed to open {path}"))?;
-
-        Ok(ReaderStream::new(file))
+        Ok(ReaderStream::new(self.file().await?))
     }
 }
 

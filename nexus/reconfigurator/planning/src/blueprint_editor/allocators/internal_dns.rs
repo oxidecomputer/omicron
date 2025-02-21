@@ -2,15 +2,25 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::Error;
 use nexus_types::deployment::blueprint_zone_type::InternalDns;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneType;
-use nexus_types::deployment::PlanningInput;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::ReservedRackSubnet;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use std::collections::BTreeSet;
+
+#[derive(Debug, thiserror::Error)]
+pub enum InternalDnsInputError {
+    #[error("can only have {INTERNAL_DNS_REDUNDANCY} internal DNS servers")]
+    TooManyDnsServers,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum InternalDnsError {
+    #[error("no reserved subnets available for internal DNS")]
+    NoAvailableDnsSubnets,
+}
 
 /// Internal DNS zones are not allocated an address in the sled's subnet.
 /// Instead, they get a /64 subnet of the "reserved" rack subnet (so that
@@ -18,15 +28,15 @@ use std::collections::BTreeSet;
 /// be at most `INTERNAL_DNS_REDUNDANCY` subnets (and so servers)
 /// allocated. This structure tracks which subnets are currently allocated.
 #[derive(Debug)]
-pub struct DnsSubnetAllocator {
+pub struct InternalDnsSubnetAllocator {
     in_use: BTreeSet<DnsSubnet>,
 }
 
-impl DnsSubnetAllocator {
+impl InternalDnsSubnetAllocator {
     pub fn new<'a>(
         running_omicron_zones: impl Iterator<Item = &'a BlueprintZoneConfig>,
-        input: &'a PlanningInput,
-    ) -> Result<Self, Error> {
+        target_redundancy: usize,
+    ) -> Result<Self, InternalDnsInputError> {
         let in_use = running_omicron_zones
             .filter_map(|zone_config| match zone_config.zone_type {
                 BlueprintZoneType::InternalDns(InternalDns {
@@ -37,9 +47,11 @@ impl DnsSubnetAllocator {
             })
             .collect::<BTreeSet<DnsSubnet>>();
 
-        let redundancy = input.target_internal_dns_zone_count();
-        if redundancy > INTERNAL_DNS_REDUNDANCY {
-            return Err(Error::TooManyDnsServers);
+        // TODO-cleanup This is the only reason we take `target_redundancy`; do
+        // we have another use for it in the future, or should someone else do
+        // this check?
+        if target_redundancy > INTERNAL_DNS_REDUNDANCY {
+            return Err(InternalDnsInputError::TooManyDnsServers);
         }
 
         Ok(Self { in_use })
@@ -53,7 +65,7 @@ impl DnsSubnetAllocator {
     pub fn alloc(
         &mut self,
         rack_subnet: ReservedRackSubnet,
-    ) -> Result<DnsSubnet, Error> {
+    ) -> Result<DnsSubnet, InternalDnsError> {
         let new = if let Some(first) = self.in_use.first() {
             // Take the first available DNS subnet. We currently generate
             // all `INTERNAL_DNS_REDUNDANCY` subnets and subtract any
@@ -66,7 +78,7 @@ impl DnsSubnetAllocator {
             if let Some(first) = avail.next() {
                 *first
             } else {
-                return Err(Error::NoAvailableDnsSubnets);
+                return Err(InternalDnsError::NoAvailableDnsSubnets);
             }
         } else {
             rack_subnet.get_dns_subnet(1)
@@ -101,7 +113,7 @@ pub mod test {
     use super::*;
     use crate::blueprint_builder::test::verify_blueprint;
     use crate::example::ExampleSystemBuilder;
-    use nexus_types::deployment::BlueprintZoneFilter;
+    use nexus_types::deployment::BlueprintZoneDisposition;
     use omicron_common::disk::DatasetKind;
     use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
     use omicron_test_utils::dev::test_setup_log;
@@ -150,11 +162,11 @@ pub mod test {
         verify_blueprint(&blueprint1);
 
         // Create an allocator.
-        let mut allocator = DnsSubnetAllocator::new(
+        let mut allocator = InternalDnsSubnetAllocator::new(
             blueprint1
-                .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .map(|(_sled_id, zone_config)| zone_config),
-            &example.input,
+            example.input.target_internal_dns_zone_count(),
         )
         .expect("can't create allocator");
 

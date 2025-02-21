@@ -126,6 +126,7 @@ impl Server {
         // TODO-robustness if this returns a 400 error, we probably want to
         // return a permanent error from the `notify_nexus` closure.
         let sa_address = http_server.local_addr();
+        let repo_depot_port = sled_agent.repo_depot.local_addr().port();
         let config_clone = config.clone();
         let log_clone = log.clone();
         let task = tokio::spawn(async move {
@@ -139,6 +140,7 @@ impl Server {
                         &config.id,
                         &NexusTypes::SledAgentInfo {
                             sa_address: sa_address.to_string(),
+                            repo_depot_port,
                             role: NexusTypes::SledRole::Scrimlet,
                             baseboard: NexusTypes::Baseboard {
                                 serial: format!(
