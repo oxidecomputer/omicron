@@ -40,6 +40,8 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::fmt;
 use strum::IntoEnumIterator;
@@ -185,8 +187,8 @@ impl DataStore {
     pub async fn sled_reservation_create(
         &self,
         opctx: &OpContext,
-        resource_id: Uuid,
-        resource_kind: db::model::SledResourceKind,
+        instance_id: InstanceUuid,
+        propolis_id: PropolisUuid,
         resources: db::model::Resources,
         constraints: db::model::SledReservationConstraints,
     ) -> CreateResult<db::model::SledResource> {
@@ -210,7 +212,7 @@ impl DataStore {
                     use db::schema::sled_resource::dsl as resource_dsl;
                     // Check if resource ID already exists - if so, return it.
                     let old_resource = resource_dsl::sled_resource
-                        .filter(resource_dsl::id.eq(resource_id))
+                        .filter(resource_dsl::id.eq(*propolis_id.as_untyped_uuid()))
                         .select(SledResource::as_select())
                         .limit(1)
                         .load_async(&conn)
@@ -309,10 +311,10 @@ impl DataStore {
 
                     // Create a SledResource record, associate it with the target
                     // sled.
-                    let resource = SledResource::new(
-                        resource_id,
-                        sled_targets[0],
-                        resource_kind,
+                    let resource = SledResource::new_for_vmm(
+                        propolis_id,
+                        instance_id,
+                        SledUuid::from_untyped_uuid(sled_targets[0]),
                         resources,
                     );
 
@@ -1113,8 +1115,8 @@ pub(in crate::db::datastore) mod test {
         let error = datastore
             .sled_reservation_create(
                 &opctx,
-                Uuid::new_v4(),
-                db::model::SledResourceKind::Instance,
+                InstanceUuid::new_v4(),
+                PropolisUuid::new_v4(),
                 resources.clone(),
                 constraints,
             )
@@ -1134,15 +1136,15 @@ pub(in crate::db::datastore) mod test {
             let resource = datastore
                 .sled_reservation_create(
                     &opctx,
-                    Uuid::new_v4(),
-                    db::model::SledResourceKind::Instance,
+                    InstanceUuid::new_v4(),
+                    PropolisUuid::new_v4(),
                     resources.clone(),
                     constraints,
                 )
                 .await
                 .unwrap();
             assert_eq!(
-                resource.sled_id,
+                resource.sled_id.into_untyped_uuid(),
                 provisionable_sled.id(),
                 "resource is always allocated to the provisionable sled"
             );
