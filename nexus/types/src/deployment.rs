@@ -702,6 +702,7 @@ pub struct BlueprintZoneConfig {
     /// zpool used for the zone's (transient) root filesystem
     pub filesystem_pool: Option<ZpoolName>,
     pub zone_type: BlueprintZoneType,
+    pub image_source: OmicronZoneImageSource,
 }
 
 impl IdMappable for BlueprintZoneConfig {
@@ -744,13 +745,9 @@ impl From<BlueprintZoneConfig> for OmicronZoneConfig {
             filesystem_pool,
             zone_type,
             disposition: _disposition,
+            image_source,
         } = z;
-        Self {
-            id,
-            filesystem_pool,
-            zone_type: zone_type.into(),
-            image_source: OmicronZoneImageSource::InstallDataset,
-        }
+        Self { id, filesystem_pool, zone_type: zone_type.into(), image_source }
     }
 }
 

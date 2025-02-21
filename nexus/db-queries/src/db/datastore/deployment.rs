@@ -2007,6 +2007,7 @@ mod tests {
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::example;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
+    use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
@@ -2850,6 +2851,7 @@ mod tests {
                             external_dns_servers: vec![],
                         },
                     ),
+                    image_source: OmicronZoneImageSource::InstallDataset,
                 }]
                 .into_iter()
                 .collect(),

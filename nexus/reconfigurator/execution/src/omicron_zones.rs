@@ -362,7 +362,8 @@ mod test {
     use httptest::responders::{json_encoded, status_code};
     use httptest::Expectation;
     use nexus_sled_agent_shared::inventory::{
-        OmicronZoneDataset, OmicronZonesConfig, SledRole,
+        OmicronZoneDataset, OmicronZoneImageSource, OmicronZonesConfig,
+        SledRole,
     };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
@@ -467,6 +468,7 @@ mod test {
                             http_address: "[::1]:0".parse().unwrap(),
                         },
                     ),
+                    image_source: OmicronZoneImageSource::InstallDataset,
                 }]
                 .into_iter()
                 .collect(),
@@ -569,6 +571,7 @@ mod test {
                         address: "[::1]:0".parse().unwrap(),
                     },
                 ),
+                image_source: OmicronZoneImageSource::InstallDataset,
             });
         }
 
@@ -654,6 +657,7 @@ mod test {
                     },
                 },
             ),
+            image_source: OmicronZoneImageSource::InstallDataset,
         };
 
         // Start a mock cockroach-admin server.

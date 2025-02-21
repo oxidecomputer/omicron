@@ -598,7 +598,17 @@ impl ZoneKind {
 
 /// Where Sled Agent should get the image for a zone.
 #[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Diffable,
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OmicronZoneImageSource {

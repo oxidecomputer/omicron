@@ -23,6 +23,7 @@ use clickhouse_admin_types::OXIMETER_CLUSTER;
 use itertools::Either;
 use nexus_inventory::now_db_precision;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::id_map::IdMap;
@@ -1208,6 +1209,8 @@ impl<'a> BlueprintBuilder<'a> {
             id: self.rng.sled_rng(sled_id).next_zone(),
             filesystem_pool: Some(zpool),
             zone_type,
+            // XXX: Is InstallDataset correct here and elsewhere?
+            image_source: OmicronZoneImageSource::InstallDataset,
         };
 
         self.sled_add_zone(sled_id, zone)
@@ -1259,6 +1262,7 @@ impl<'a> BlueprintBuilder<'a> {
             id,
             filesystem_pool: Some(pool_name),
             zone_type,
+            image_source: OmicronZoneImageSource::InstallDataset,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1297,6 +1301,7 @@ impl<'a> BlueprintBuilder<'a> {
             id: self.rng.sled_rng(sled_id).next_zone(),
             filesystem_pool: Some(filesystem_pool),
             zone_type,
+            image_source: OmicronZoneImageSource::InstallDataset,
         };
 
         self.sled_add_zone(sled_id, zone)?;
@@ -1357,6 +1362,7 @@ impl<'a> BlueprintBuilder<'a> {
             id: self.rng.sled_rng(sled_id).next_zone(),
             filesystem_pool: Some(filesystem_pool),
             zone_type,
+            image_source: OmicronZoneImageSource::InstallDataset,
         };
 
         self.sled_add_zone(sled_id, zone)?;
@@ -1466,6 +1472,7 @@ impl<'a> BlueprintBuilder<'a> {
             id: nexus_id,
             filesystem_pool: Some(filesystem_pool),
             zone_type,
+            image_source: OmicronZoneImageSource::InstallDataset,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1490,6 +1497,7 @@ impl<'a> BlueprintBuilder<'a> {
             id: oximeter_id,
             filesystem_pool: Some(filesystem_pool),
             zone_type,
+            image_source: OmicronZoneImageSource::InstallDataset,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1513,6 +1521,7 @@ impl<'a> BlueprintBuilder<'a> {
             id: pantry_id,
             filesystem_pool: Some(filesystem_pool),
             zone_type,
+            image_source: OmicronZoneImageSource::InstallDataset,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1546,6 +1555,7 @@ impl<'a> BlueprintBuilder<'a> {
             id: zone_id,
             filesystem_pool: Some(filesystem_pool),
             zone_type,
+            image_source: OmicronZoneImageSource::InstallDataset,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1571,6 +1581,7 @@ impl<'a> BlueprintBuilder<'a> {
             id,
             filesystem_pool: Some(pool_name),
             zone_type,
+            image_source: OmicronZoneImageSource::InstallDataset,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1598,6 +1609,7 @@ impl<'a> BlueprintBuilder<'a> {
             id: zone_id,
             filesystem_pool: Some(filesystem_pool),
             zone_type,
+            image_source: OmicronZoneImageSource::InstallDataset,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1625,6 +1637,7 @@ impl<'a> BlueprintBuilder<'a> {
             id: zone_id,
             filesystem_pool: Some(filesystem_pool),
             zone_type,
+            image_source: OmicronZoneImageSource::InstallDataset,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1752,6 +1765,7 @@ impl<'a> BlueprintBuilder<'a> {
                 id: new_zone_id,
                 filesystem_pool: Some(filesystem_pool),
                 zone_type,
+                image_source: OmicronZoneImageSource::InstallDataset,
             },
         )
     }

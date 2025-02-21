@@ -736,6 +736,8 @@ impl ModifiedZone {
                     id: *diff.id.after,
                     filesystem_pool: diff.filesystem_pool.after.cloned(),
                     zone_type: diff.zone_type.after.clone(),
+                    // XXX: Is it an error if the image source is modified?
+                    image_source: diff.image_source.after.clone(),
                 },
             })
         } else {

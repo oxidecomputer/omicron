@@ -676,6 +676,7 @@ pub mod test {
     use super::*;
     use illumos_utils::zpool::ZpoolName;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+    use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
@@ -917,6 +918,7 @@ pub mod test {
                         },
                     },
                 ),
+                image_source: OmicronZoneImageSource::InstallDataset,
             }
         };
 

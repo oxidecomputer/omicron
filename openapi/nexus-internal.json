@@ -2271,6 +2271,9 @@
           "id": {
             "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
           },
+          "image_source": {
+            "$ref": "#/components/schemas/OmicronZoneImageSource"
+          },
           "zone_type": {
             "$ref": "#/components/schemas/BlueprintZoneType"
           }
@@ -2278,6 +2281,7 @@
         "required": [
           "disposition",
           "id",
+          "image_source",
           "zone_type"
         ]
       },
@@ -4545,6 +4549,46 @@
         "required": [
           "id",
           "snat_cfg"
+        ]
+      },
+      "OmicronZoneImageSource": {
+        "description": "Where Sled Agent should get the image for a zone.",
+        "oneOf": [
+          {
+            "description": "This zone's image source is whatever happens to be on the sled's \"install\" dataset.\n\nThis is whatever was put in place at the factory or by the latest MUPdate. The image used here can vary by sled and even over time (if the sled gets MUPdated again).\n\nHistorically, this was the only source for zone images. In an system with automated control-plane-driven update we expect to only use this variant in emergencies where the system had to be recovered via MUPdate.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "install_dataset"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "This zone's image source is the artifact matching this hash from the TUF artifact store (aka \"TUF repo depot\").\n\nThis originates from TUF repos uploaded to Nexus which are then replicated out to all sleds.",
+            "type": "object",
+            "properties": {
+              "hash": {
+                "type": "string",
+                "format": "hex string (32 bytes)"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "artifact"
+                ]
+              }
+            },
+            "required": [
+              "hash",
+              "type"
+            ]
+          }
         ]
       },
       "OximeterInfo": {

@@ -318,6 +318,7 @@ mod test {
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_preparation::PlanningInputFromDb;
     use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
+    use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use nexus_sled_agent_shared::inventory::OmicronZoneType;
     use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -585,6 +586,7 @@ mod test {
             id: config.id,
             filesystem_pool: config.filesystem_pool,
             zone_type,
+            image_source: config.image_source,
         })
     }
 
@@ -698,6 +700,7 @@ mod test {
                         ),
                     },
                 ),
+                image_source: OmicronZoneImageSource::InstallDataset,
             },
         );
 

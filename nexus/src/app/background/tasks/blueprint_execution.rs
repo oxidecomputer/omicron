@@ -174,7 +174,9 @@ mod test {
     use nexus_db_queries::authn;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
-    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+    use nexus_sled_agent_shared::inventory::{
+        OmicronZoneDataset, OmicronZoneImageSource,
+    };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::execution::{
         EventBuffer, EventReport, ExecutionComponent, ExecutionStepId,
@@ -421,6 +423,7 @@ mod test {
                             http_address: "[::1]:12345".parse().unwrap(),
                         },
                     ),
+                    image_source: OmicronZoneImageSource::InstallDataset,
                 }]
                 .into_iter()
                 .collect(),

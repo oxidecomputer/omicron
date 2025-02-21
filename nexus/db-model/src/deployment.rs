@@ -24,7 +24,9 @@ use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Utc};
 use clickhouse_admin_types::{KeeperId, ServerId};
 use ipnetwork::IpNetwork;
-use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+use nexus_sled_agent_shared::inventory::{
+    OmicronZoneDataset, OmicronZoneImageSource,
+};
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
@@ -904,6 +906,7 @@ impl BpOmicronZone {
                 .filesystem_pool
                 .map(|id| ZpoolName::new_external(id.into())),
             zone_type,
+            image_source: OmicronZoneImageSource::InstallDataset,
         })
     }
 }
