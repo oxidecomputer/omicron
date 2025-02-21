@@ -821,7 +821,7 @@ impl Points {
                     let mut new = Vec::with_capacity(doubles.len());
                     for maybe_double in doubles.iter().copied() {
                         match maybe_double {
-                            Some(d) if d == 0.0 => new.push(Some(false)),
+                            Some(0.0) => new.push(Some(false)),
                             Some(_) => new.push(Some(true)),
                             None => new.push(None),
                         }

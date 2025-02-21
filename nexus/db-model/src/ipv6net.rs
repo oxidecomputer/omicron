@@ -61,7 +61,7 @@ impl Ipv6Net {
             StdRng::from_entropy()
         };
         let random =
-            u128::from(rng.next_u64()) << 64 | u128::from(rng.next_u64());
+            (u128::from(rng.next_u64()) << 64) | u128::from(rng.next_u64());
 
         // Generate a mask for the new address.
         //
