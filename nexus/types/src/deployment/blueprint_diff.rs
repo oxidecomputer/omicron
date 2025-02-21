@@ -1078,7 +1078,7 @@ impl<'a> BpDiffPhysicalDisksModified<'a> {
     }
 }
 
-impl<'a> BpTableData for BpDiffPhysicalDisksModified<'a> {
+impl BpTableData for BpDiffPhysicalDisksModified<'_> {
     fn bp_generation(&self) -> BpGeneration {
         BpGeneration::Diff {
             before: Some(self.generation_before),
