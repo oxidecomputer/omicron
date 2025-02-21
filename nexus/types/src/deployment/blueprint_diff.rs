@@ -516,13 +516,13 @@ impl<'a> BlueprintDiffSummary<'a> {
         ))
     }
 
-    /// Iterate over all modified diskss on a sled
+    /// Iterate over all modified disks on a sled
     pub fn modified_disks(
         &'a self,
         sled_id: &SledUuid,
     ) -> Option<(BpDiffPhysicalDisksModified<'a>, BpDiffPhysicalDiskErrors)>
     {
-        // Check if the sled is modified and there are any modified diskss
+        // Check if the sled is modified and there are any modified disks
         let disks_cfg_diff = self.modified_disks_diff.get(sled_id)?;
         let mut modified_disks =
             disks_cfg_diff.disks.modified_values_diff().peekable();
