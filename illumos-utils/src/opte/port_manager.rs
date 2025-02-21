@@ -9,11 +9,14 @@ use crate::opte::opte_firewall_rules;
 use crate::opte::port::PortData;
 use crate::opte::Error;
 use crate::opte::Gateway;
+use crate::opte::Handle;
 use crate::opte::Port;
 use crate::opte::Vni;
 use ipnetwork::IpNetwork;
+use macaddr::MacAddr6;
 use omicron_common::api::external;
 use omicron_common::api::internal::shared::ExternalIpGatewayMap;
+use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
@@ -28,6 +31,7 @@ use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use oxide_vpc::api::AddRouterEntryReq;
 use oxide_vpc::api::DelRouterEntryReq;
 use oxide_vpc::api::DhcpCfg;
+use oxide_vpc::api::Direction;
 use oxide_vpc::api::ExternalIpCfg;
 use oxide_vpc::api::IpCfg;
 use oxide_vpc::api::IpCidr;
@@ -39,6 +43,9 @@ use oxide_vpc::api::SNat4Cfg;
 use oxide_vpc::api::SNat6Cfg;
 use oxide_vpc::api::SetExternalIpsReq;
 use oxide_vpc::api::VpcCfg;
+use oxnet::IpNet;
+use oxnet::Ipv4Net;
+use oxnet::Ipv6Net;
 use slog::debug;
 use slog::error;
 use slog::info;
@@ -47,6 +54,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -55,7 +63,7 @@ use std::sync::Mutex;
 use uuid::Uuid;
 
 /// Stored routes (and usage count) for a given VPC/subnet.
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 struct RouteSet {
     version: Option<RouterVersion>,
     routes: HashSet<ResolvedVpcRoute>,
@@ -133,7 +141,6 @@ impl PortManager {
     }
 
     /// Create an OPTE port
-    #[cfg_attr(not(target_os = "illumos"), allow(unused_variables))]
     pub fn create_port(
         &self,
         params: PortCreateParams,
@@ -288,9 +295,8 @@ impl PortManager {
             "vpc_cfg" => ?&vpc_cfg,
             "dhcp_config" => ?&dhcp_config,
         );
-        #[cfg(target_os = "illumos")]
         let hdl = {
-            let hdl = opte_ioctl::OpteHdl::open(opte_ioctl::OpteHdl::XDE_CTL)?;
+            let hdl = Handle::new()?;
             hdl.create_xde(
                 &port_name,
                 vpc_cfg,
@@ -349,7 +355,6 @@ impl PortManager {
             "port_name" => &port_name,
             "rules" => ?&rules,
         );
-        #[cfg(target_os = "illumos")]
         hdl.set_fw_rules(&oxide_vpc::api::SetFwRulesReq {
             port_name: port_name.clone(),
             rules,
@@ -359,21 +364,39 @@ impl PortManager {
         // control plane for this port already installed. If not,
         // create a record to show that we're interested in receiving
         // those routes.
-        let mut routes = self.inner.routes.lock().unwrap();
-        let system_routes = match &ip_cfg {
-            IpCfg::Ipv4(_) => system_routes_v4(is_service, &mut routes, &port),
-            IpCfg::Ipv6(_) => system_routes_v6(is_service, &mut routes, &port),
-            IpCfg::DualStack { .. } => {
-                system_routes_v4(is_service, &mut routes, &port);
-                system_routes_v6(is_service, &mut routes, &port)
-            }
-        };
-
+        let mut route_map = self.inner.routes.lock().unwrap();
+        let system_routes =
+            route_map.entry(port.system_router_key()).or_insert_with(|| {
+                let mut routes = HashSet::new();
+                if is_service {
+                    // Always insert a rule targeting the _system VPC Internet Gateway_.
+                    // This may be sent later from Nexus, but we need it during
+                    // bootstrapping NTP or other very early services, before the
+                    // control plane database has been started.
+                    let target = ApiRouterTarget::InternetGateway(
+                        InternetGatewayRouterTarget::System,
+                    );
+                    routes.insert(ResolvedVpcRoute {
+                        dest: IpNet::V4(
+                            Ipv4Net::new(Ipv4Addr::UNSPECIFIED, 0).unwrap(),
+                        ),
+                        target,
+                    });
+                    routes.insert(ResolvedVpcRoute {
+                        dest: IpNet::V6(
+                            Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 0).unwrap(),
+                        ),
+                        target,
+                    });
+                }
+                RouteSet { version: None, routes, active_ports: 0 }
+            });
         system_routes.active_ports += 1;
+
         // Clone is needed to get borrowck on our side, sadly.
         let system_routes = system_routes.clone();
 
-        let custom_routes = routes
+        let custom_routes = route_map
             .entry(port.custom_router_key())
             .or_insert_with(|| RouteSet {
                 version: None,
@@ -391,13 +414,9 @@ impl PortManager {
                     class,
                     port_name: port_name.clone(),
                     dest: super::net_to_cidr(route.dest),
-                    target: super::router_target_opte(
-                        &route.target,
-                        is_instance,
-                    ),
+                    target: super::router_target_opte(&route.target),
                 };
 
-                #[cfg(target_os = "illumos")]
                 hdl.add_router_entry(&route)?;
 
                 debug!(
@@ -414,27 +433,22 @@ impl PortManager {
         //       This, external IPs, and cfg'able state
         //       (DHCP?) are probably worth being managed by an RPW.
         for block in &nic.transit_ips {
-            #[cfg(target_os = "illumos")]
-            {
-                use oxide_vpc::api::Direction;
-
-                // In principle if this were an operation on an existing
-                // port, we would explicitly undo the In addition if the
-                // Out addition fails.
-                // However, failure here will just destroy the port
-                // outright -- this should only happen if an excessive
-                // number of rules are specified.
-                hdl.allow_cidr(
-                    &port_name,
-                    super::net_to_cidr(*block),
-                    Direction::In,
-                )?;
-                hdl.allow_cidr(
-                    &port_name,
-                    super::net_to_cidr(*block),
-                    Direction::Out,
-                )?;
-            }
+            // In principle if this were an operation on an existing
+            // port, we would explicitly undo the In addition if the
+            // Out addition fails.
+            // However, failure here will just destroy the port
+            // outright -- this should only happen if an excessive
+            // number of rules are specified.
+            hdl.allow_cidr(
+                &port_name,
+                super::net_to_cidr(*block),
+                Direction::In,
+            )?;
+            hdl.allow_cidr(
+                &port_name,
+                super::net_to_cidr(*block),
+                Direction::Out,
+            )?;
 
             debug!(
                 self.inner.log,
@@ -514,21 +528,16 @@ impl PortManager {
         // to prevent several nexuses computng and applying deltas
         // out of order.
         let ports = self.inner.ports.lock().unwrap();
-        #[cfg(target_os = "illumos")]
-        let hdl = opte_ioctl::OpteHdl::open(opte_ioctl::OpteHdl::XDE_CTL)?;
+        let hdl = Handle::new()?;
 
         // Propagate deltas out to all ports.
-        for (interface_id, port) in ports.iter() {
+        for port in ports.values() {
             let system_id = port.system_router_key();
             let system_delta = deltas.get(&system_id);
 
             let custom_id = port.custom_router_key();
             let custom_delta = deltas.get(&custom_id);
 
-            let is_instance =
-                matches!(interface_id.1, NetworkInterfaceKind::Instance { .. });
-
-            #[cfg_attr(not(target_os = "illumos"), allow(unused_variables))]
             for (class, delta) in [
                 (RouterClass::System, system_delta),
                 (RouterClass::Custom, custom_delta),
@@ -549,13 +558,9 @@ impl PortManager {
                         class,
                         port_name: port.name().into(),
                         dest: super::net_to_cidr(route.dest),
-                        target: super::router_target_opte(
-                            &route.target,
-                            is_instance,
-                        ),
+                        target: super::router_target_opte(&route.target),
                     };
 
-                    #[cfg(target_os = "illumos")]
                     hdl.del_router_entry(&route)?;
 
                     debug!(
@@ -571,13 +576,9 @@ impl PortManager {
                         class,
                         port_name: port.name().into(),
                         dest: super::net_to_cidr(route.dest),
-                        target: super::router_target_opte(
-                            &route.target,
-                            is_instance,
-                        ),
+                        target: super::router_target_opte(&route.target),
                     };
 
-                    #[cfg(target_os = "illumos")]
                     hdl.add_router_entry(&route)?;
 
                     debug!(
@@ -608,7 +609,6 @@ impl PortManager {
     }
 
     /// Lookup an OPTE port, and ensure its external IP config is up to date.
-    #[cfg_attr(not(target_os = "illumos"), allow(unused_variables))]
     pub fn external_ips_ensure(
         &self,
         nic_id: Uuid,
@@ -632,7 +632,6 @@ impl PortManager {
     }
 
     /// Ensure external IPs for an OPTE port are up to date.
-    #[cfg_attr(not(target_os = "illumos"), allow(unused_variables))]
     pub fn external_ips_ensure_port(
         &self,
         port: &Port,
@@ -746,24 +745,17 @@ impl PortManager {
             external_ips_v6: v6_cfg,
             inet_gw_map,
         };
-
-        #[cfg(target_os = "illumos")]
-        let hdl = opte_ioctl::OpteHdl::open(opte_ioctl::OpteHdl::XDE_CTL)?;
-
-        #[cfg(target_os = "illumos")]
+        let hdl = Handle::new()?;
         hdl.set_external_ips(&req)?;
 
         Ok(())
     }
 
-    #[cfg(target_os = "illumos")]
     pub fn firewall_rules_ensure(
         &self,
         vni: external::Vni,
         rules: &[ResolvedVpcFirewallRule],
     ) -> Result<(), Error> {
-        use opte_ioctl::OpteHdl;
-
         info!(
             self.inner.log,
             "Ensuring VPC firewall rules";
@@ -771,8 +763,7 @@ impl PortManager {
             "rules" => ?&rules,
         );
 
-        let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
-
+        let hdl = Handle::new()?;
         let ports = self.inner.ports.lock().unwrap();
 
         // We update VPC rules as a set so grab only
@@ -797,29 +788,10 @@ impl PortManager {
         Ok(())
     }
 
-    #[cfg(not(target_os = "illumos"))]
-    pub fn firewall_rules_ensure(
-        &self,
-        vni: external::Vni,
-        rules: &[ResolvedVpcFirewallRule],
-    ) -> Result<(), Error> {
-        info!(
-            self.inner.log,
-            "Ensuring VPC firewall rules (ignored)";
-            "vni" => ?vni,
-            "rules" => ?&rules,
-        );
-        Ok(())
-    }
-
-    #[cfg(target_os = "illumos")]
     pub fn list_virtual_nics(
         &self,
     ) -> Result<Vec<VirtualNetworkInterfaceHost>, Error> {
-        use macaddr::MacAddr6;
-        use opte_ioctl::OpteHdl;
-
-        let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
+        let hdl = Handle::new()?;
         let v2p =
             hdl.dump_v2p(&oxide_vpc::api::DumpVirt2PhysReq { unused: 99 })?;
         let mut mappings: Vec<_> = vec![];
@@ -853,30 +825,16 @@ impl PortManager {
         Ok(mappings)
     }
 
-    #[cfg(not(target_os = "illumos"))]
-    pub fn list_virtual_nics(
-        &self,
-    ) -> Result<Vec<VirtualNetworkInterfaceHost>, Error> {
-        info!(
-            self.inner.log,
-            "Listing virtual nics (ignored)";
-        );
-        Ok(vec![])
-    }
-
-    #[cfg(target_os = "illumos")]
     pub fn set_virtual_nic_host(
         &self,
         mapping: &VirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
-        use opte_ioctl::OpteHdl;
-
         info!(
             self.inner.log,
             "Mapping virtual NIC to physical host";
             "mapping" => ?&mapping,
         );
-        let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
+        let hdl = Handle::new()?;
         hdl.set_v2p(&oxide_vpc::api::SetVirt2PhysReq {
             vip: mapping.virtual_ip.into(),
             phys: oxide_vpc::api::PhysNet {
@@ -891,33 +849,17 @@ impl PortManager {
         Ok(())
     }
 
-    #[cfg(not(target_os = "illumos"))]
-    pub fn set_virtual_nic_host(
-        &self,
-        mapping: &VirtualNetworkInterfaceHost,
-    ) -> Result<(), Error> {
-        info!(
-            self.inner.log,
-            "Mapping virtual NIC to physical host (ignored)";
-            "mapping" => ?&mapping,
-        );
-        Ok(())
-    }
-
-    #[cfg(target_os = "illumos")]
     pub fn unset_virtual_nic_host(
         &self,
         mapping: &VirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
-        use opte_ioctl::OpteHdl;
-
         info!(
             self.inner.log,
             "Clearing mapping of virtual NIC to physical host";
             "mapping" => ?&mapping,
         );
 
-        let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
+        let hdl = Handle::new()?;
         hdl.clear_v2p(&oxide_vpc::api::ClearVirt2PhysReq {
             vip: mapping.virtual_ip.into(),
             phys: oxide_vpc::api::PhysNet {
@@ -929,19 +871,6 @@ impl PortManager {
             },
         })?;
 
-        Ok(())
-    }
-
-    #[cfg(not(target_os = "illumos"))]
-    pub fn unset_virtual_nic_host(
-        &self,
-        mapping: &VirtualNetworkInterfaceHost,
-    ) -> Result<(), Error> {
-        info!(
-            self.inner.log,
-            "Ignoring unset of virtual NIC mapping";
-            "mapping" => ?&mapping,
-        );
         Ok(())
     }
 }
@@ -1036,42 +965,398 @@ impl Drop for PortTicket {
     }
 }
 
-fn system_routes_v4<'a>(
-    is_service: bool,
-    routes: &'a mut HashMap<RouterId, RouteSet>,
-    port: &Port,
-) -> &'a mut RouteSet {
-    let routes = routes.entry(port.system_router_key()).or_insert_with(|| {
-        let routes = HashSet::new();
-        RouteSet { version: None, routes, active_ports: 0 }
-    });
+#[cfg(test)]
+mod tests {
+    use crate::opte::Handle;
 
-    if is_service {
-        routes.routes.insert(ResolvedVpcRoute {
-            dest: "0.0.0.0/0".parse().unwrap(),
-            target: ApiRouterTarget::InternetGateway(None),
-        });
+    use super::{PortCreateParams, PortManager};
+    use macaddr::MacAddr6;
+    use omicron_common::api::{
+        external::{MacAddr, Vni},
+        internal::shared::{
+            InternetGatewayRouterTarget, NetworkInterface,
+            NetworkInterfaceKind, ResolvedVpcRoute, ResolvedVpcRouteSet,
+            RouterTarget, RouterVersion, SourceNatConfig,
+        },
+    };
+    use omicron_test_utils::dev::test_setup_log;
+    use oxide_vpc::api::DhcpCfg;
+    use oxnet::{IpNet, Ipv4Net, Ipv6Net};
+    use std::{
+        collections::HashSet,
+        net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    };
+    use uuid::Uuid;
+
+    // Regression for https://github.com/oxidecomputer/omicron/issues/7541.
+    #[test]
+    fn multiple_ports_does_not_destroy_default_route() {
+        let logctx =
+            test_setup_log("multiple_ports_does_not_destroy_default_route");
+        let manager = PortManager::new(logctx.log.clone(), Ipv6Addr::LOCALHOST);
+        let default_ipv4_route =
+            IpNet::V4(Ipv4Net::new(Ipv4Addr::UNSPECIFIED, 0).unwrap());
+        let default_ipv6_route =
+            IpNet::V6(Ipv6Net::new(Ipv6Addr::UNSPECIFIED, 0).unwrap());
+
+        // Information about our builtin services VPC System Router.
+        //
+        // This comes from nexus/db-fixed-data/src/vpc.rs. It _should_ stay in
+        // sync with that for clarity, but the correctness of this test does not
+        // rely on it.
+        const SERVICES_INTERNET_GATEWAY_ID: Uuid =
+            uuid::uuid!("001de000-074c-4000-8000-000000000002");
+        const SERVICES_VPC_VNI: Vni = Vni::SERVICES_VNI;
+
+        let handle = Handle::new().unwrap();
+        handle.set_xde_underlay("foo0", "foo1").unwrap();
+
+        // First, create a port for a service.
+        //
+        // At this point, we'll insert a single default route, because this is a
+        // service point, from `0.0.0.0/0 -> InternetGateway(None)`, and then
+        // add this route to OPTE.
+        let private_ipv4_addr0 = IpAddr::V4(Ipv4Addr::new(172, 20, 0, 4));
+        let private_ipv4_addr1 = IpAddr::V4(Ipv4Addr::new(172, 20, 0, 5));
+        let public_ipv4_addr0 = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 4));
+        let public_ipv4_addr1 = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5));
+        let private_subnet =
+            IpNet::V4(Ipv4Net::new(Ipv4Addr::new(172, 20, 0, 0), 24).unwrap());
+        const MAX_PORT: u16 = (1 << 14) - 1;
+        let (port0, _ticket0) = manager
+            .create_port(PortCreateParams {
+                nic: &NetworkInterface {
+                    id: Uuid::new_v4(),
+                    kind: NetworkInterfaceKind::Service { id: Uuid::new_v4() },
+                    name: "opte0".parse().unwrap(),
+                    ip: private_ipv4_addr0,
+                    mac: MacAddr(MacAddr6::new(
+                        0xa8, 0x40, 0x25, 0x00, 0x00, 0x01,
+                    )),
+                    subnet: private_subnet,
+                    vni: SERVICES_VPC_VNI,
+                    primary: true,
+                    slot: 0,
+                    transit_ips: Vec::new(),
+                },
+                source_nat: Some(
+                    SourceNatConfig::new(public_ipv4_addr0, 0, MAX_PORT)
+                        .unwrap(),
+                ),
+                ephemeral_ip: None,
+                floating_ips: &[],
+                firewall_rules: &[],
+                dhcp_config: DhcpCfg {
+                    hostname: None,
+                    host_domain: None,
+                    domain_search_list: Vec::new(),
+                    dns4_servers: Vec::new(),
+                    dns6_servers: Vec::new(),
+                },
+            })
+            .unwrap();
+
+        // At this point, we should have inserted a single default route. That
+        // is because the port is for an Oxide service, and so we automatically
+        // add a default route to the IGW. This doesn't have an ID for the IGW,
+        // since we haven't launched Nexus or the database -- until that time,
+        // we don't know that IGW's ID.
+        let system_routes = manager
+            .inner
+            .routes
+            .lock()
+            .unwrap()
+            .get(&port0.system_router_key())
+            .unwrap()
+            .clone();
+
+        // We actually have two route-sets, one for the system and one for the
+        // custom router. We're only interested in the former though.
+        assert_eq!(
+            system_routes.routes.len(),
+            2,
+            "We should have two default routes in the VPC's System Router"
+        );
+        for route in system_routes.routes.iter() {
+            assert!(
+                route.dest == default_ipv4_route
+                    || route.dest == default_ipv6_route,
+                "VPC System Router should have a default route"
+            );
+            assert_eq!(
+                route.target,
+                RouterTarget::InternetGateway(
+                    InternetGatewayRouterTarget::System
+                ),
+                "VPC System Router default route should target the \
+                System Internet Gateway"
+            );
+        }
+
+        // In OPTE, we should have one route, also squished down to this
+        // default route.
+        //
+        // NOTE: When we're doing these assertions, we hold a lock on the OPTE
+        // port state, so we need to do it in a scope before we do other
+        // operations.
+        {
+            let state = handle.state().lock().unwrap();
+            assert_eq!(state.ports.len(), 1);
+            let rt = state
+                .ports
+                .get("opte0")
+                .unwrap()
+                .routes
+                .iter()
+                .filter(|rt| rt.is_system_default_ipv4_route())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                rt.len(),
+                1,
+                "OPTE should have exactly one default system route for \
+                the first port on creation"
+            );
+        }
+
+        // PUT some routes.
+        //
+        // Simulate a PUT /vpc-routes from Nexus. Now that Nexus has launched
+        // and loaded builtin data to the database, it knows the ID of our the
+        // IGW of the System Router in the builtin services VPC. This ID is
+        // included in the list of routes. Because that set does _not_ contain
+        // the implicit route added above, that one is _removed_ from the one
+        // existing port. An equivalent one is added though, since the IGW is
+        // ignored at this point when setting the route in OPTE.
+        let mut new_routes = vec![ResolvedVpcRouteSet {
+            id: port0.system_router_key(),
+            version: Some(RouterVersion {
+                router_id: SERVICES_INTERNET_GATEWAY_ID,
+                version: 1,
+            }),
+            routes: HashSet::from([ResolvedVpcRoute {
+                dest: default_ipv4_route,
+                target: RouterTarget::InternetGateway(
+                    InternetGatewayRouterTarget::System,
+                ),
+            }]),
+        }];
+        manager.vpc_routes_ensure(new_routes.clone()).unwrap();
+
+        // At this point, the in-memory state of the manager should have one
+        // route, for the _explicit_ IGW of the services VPC; and our OPTE state
+        // should have just one for the IGW with _no_ ID, because we always
+        // throw away the UUID when we apply the rule there.
+        let system_routes = manager
+            .inner
+            .routes
+            .lock()
+            .unwrap()
+            .get(&port0.system_router_key())
+            .unwrap()
+            .clone();
+        assert_eq!(
+            system_routes.routes.len(),
+            1,
+            "We should have only a single route in the VPC's System Router"
+        );
+        let route = system_routes.routes.iter().next().unwrap();
+        assert_eq!(
+            route.dest, default_ipv4_route,
+            "VPC System Router should have a default route"
+        );
+        assert_eq!(
+            route.target,
+            RouterTarget::InternetGateway(InternetGatewayRouterTarget::System),
+            "VPC System Router default route should target the explicit \
+            services Internet Gateway after vpc_routes_ensure"
+        );
+
+        {
+            let state = handle.state().lock().unwrap();
+            assert_eq!(state.ports.len(), 1);
+            let rt = state
+                .ports
+                .get("opte0")
+                .unwrap()
+                .routes
+                .iter()
+                .filter(|rt| rt.is_system_default_ipv4_route())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                rt.len(),
+                1,
+                "OPTE should have exactly one default system route for \
+                the first port on creation"
+            );
+        }
+
+        // Create a new port.
+        //
+        // Now, when we create this new port, we'll again implicitly create that
+        // default route. Since we _also_ have the route in the previous step
+        // pointing to an explicit IGW, we'll call add_router_entry twice for
+        // this point on creation, but not the other port since we don't modify
+        // it when we create this second port. That happens when we call
+        // `vpc_routes_ensure` below.
+        let (port1, _ticket1) = manager
+            .create_port(PortCreateParams {
+                nic: &NetworkInterface {
+                    id: Uuid::new_v4(),
+                    kind: NetworkInterfaceKind::Service { id: Uuid::new_v4() },
+                    name: "opte1".parse().unwrap(),
+                    ip: private_ipv4_addr1,
+                    mac: MacAddr(MacAddr6::new(
+                        0xa8, 0x40, 0x25, 0x00, 0x00, 0x02,
+                    )),
+                    subnet: private_subnet,
+                    vni: SERVICES_VPC_VNI,
+                    primary: true,
+                    slot: 0,
+                    transit_ips: Vec::new(),
+                },
+                source_nat: Some(
+                    SourceNatConfig::new(public_ipv4_addr1, 0, MAX_PORT)
+                        .unwrap(),
+                ),
+                ephemeral_ip: None,
+                floating_ips: &[],
+                firewall_rules: &[],
+                dhcp_config: DhcpCfg {
+                    hostname: None,
+                    host_domain: None,
+                    domain_search_list: Vec::new(),
+                    dns4_servers: Vec::new(),
+                    dns6_servers: Vec::new(),
+                },
+            })
+            .unwrap();
+
+        // When creating the system port, we automatically added a default route
+        // pointing to IGW(None). In the previous behavior, this was considered
+        // different from IGW(ID) -- that's incorrect, because we throw away the
+        // ID when we set route in OPTE itself.
+        //
+        // We should have exactly one default route here and at OPTE, pointing
+        // to the services VPC System Router's IGW, without an explicit ID.
+        let system_routes = manager
+            .inner
+            .routes
+            .lock()
+            .unwrap()
+            .get(&port1.system_router_key())
+            .unwrap()
+            .clone();
+        assert_eq!(
+            system_routes.routes.len(),
+            1,
+            "We should always have 1 default route, pointing to the services \
+            VPC System Router's IGW, even after adding a new port",
+        );
+        let _ = system_routes
+            .routes
+            .iter()
+            .find(|rt| {
+                rt.dest == default_ipv4_route
+                    && rt.target
+                        == RouterTarget::InternetGateway(
+                            InternetGatewayRouterTarget::System,
+                        )
+            })
+            .expect(
+                "Should have default route targeting the explicit services IGW",
+            );
+
+        {
+            let state = handle.state().lock().unwrap();
+            assert_eq!(state.ports.len(), 2);
+            for p in 0..2 {
+                let port_name = format!("opte{p}");
+                let rt = state
+                    .ports
+                    .get(&port_name)
+                    .unwrap()
+                    .routes
+                    .iter()
+                    .filter(|rt| rt.is_system_default_ipv4_route())
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    rt.len(),
+                    1,
+                    "{port_name} should have exactly one default system route \
+                    pointing to the IGW(None), after creating the second port",
+                );
+            }
+        }
+
+        // Now, PUT /vpc-routes again, but with a higher version so that things
+        // are replaced internally.
+        new_routes[0].version.as_mut().expect("Set above").version = 2;
+        manager.vpc_routes_ensure(new_routes).unwrap();
+
+        // Previously, this is where things blew up. Nexus told us to add a new
+        // route to the explicit IGW, which we already have. That means our set
+        // of routes to add is empty. But our set of routes to delete still has
+        // the _implicit_ route we added when we created the second port, the
+        // one pointing to IGW(None).
+        //
+        // Since Nexus's request didn't include that, we deleted it from both
+        // ports, which destroyed the (only) default route on the first port.
+        // The second port still had a route because we made a distinction
+        // between the implicit and explicit routes.
+        let system_routes = manager
+            .inner
+            .routes
+            .lock()
+            .unwrap()
+            .get(&port0.system_router_key())
+            .unwrap()
+            .clone();
+        assert_eq!(
+            system_routes.routes.len(),
+            1,
+            "We should now have only 1 default route, since Nexus sent \
+            us a request with an explicit IGW. We should have deleted \
+            the one pointing to IGW(None)."
+        );
+        let _ = system_routes
+            .routes
+            .iter()
+            .find(|rt| {
+                rt.dest == default_ipv4_route
+                    && rt.target
+                        == RouterTarget::InternetGateway(
+                            InternetGatewayRouterTarget::System,
+                        )
+            })
+            .expect(
+                "Should have default route targeting the explicit services IGW",
+            );
+
+        // As before, we should still have a default route pointing to IGW(None)
+        // for both OPTE ports. We shouldn't delete the default route on the
+        // first.
+        {
+            let state = handle.state().lock().unwrap();
+            assert_eq!(state.ports.len(), 2);
+            for p in 0..2 {
+                let port_name = format!("opte{p}");
+                let rt = state
+                    .ports
+                    .get(&port_name)
+                    .unwrap()
+                    .routes
+                    .iter()
+                    .filter(|rt| rt.is_system_default_ipv4_route())
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    rt.len(),
+                    1,
+                    "{port_name} should have exactly one default system route \
+                    target the services IGW, after creating the second port",
+                );
+            }
+        }
+
+        logctx.cleanup_successful();
     }
-
-    routes
-}
-
-fn system_routes_v6<'a>(
-    is_service: bool,
-    routes: &'a mut HashMap<RouterId, RouteSet>,
-    port: &Port,
-) -> &'a mut RouteSet {
-    let routes = routes.entry(port.system_router_key()).or_insert_with(|| {
-        let routes = HashSet::new();
-        RouteSet { version: None, routes, active_ports: 0 }
-    });
-
-    if is_service {
-        routes.routes.insert(ResolvedVpcRoute {
-            dest: "::/0".parse().unwrap(),
-            target: ApiRouterTarget::InternetGateway(None),
-        });
-    }
-
-    routes
 }
