@@ -511,6 +511,13 @@ table! {
 }
 
 table! {
+    anti_affinity_group_affinity_membership (anti_affinity_group_id, affinity_group_id) {
+        anti_affinity_group_id -> Uuid,
+        affinity_group_id -> Uuid,
+    }
+}
+
+table! {
     metric_producer (id) {
         id -> Uuid,
         time_created -> Timestamptz,

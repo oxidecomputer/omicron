@@ -1479,6 +1479,31 @@ pub(in crate::db::datastore) mod test {
         .unwrap();
     }
 
+    async fn add_affinity_group_to_anti_affinity_group(
+        datastore: &DataStore,
+        aa_group_id: AntiAffinityGroupUuid,
+        a_group_id: AffinityGroupUuid,
+    ) {
+        use db::model::AntiAffinityGroupAffinityMembership;
+        use db::schema::anti_affinity_group_affinity_membership::dsl as membership_dsl;
+
+        diesel::insert_into(
+            membership_dsl::anti_affinity_group_affinity_membership,
+        )
+        .values(AntiAffinityGroupAffinityMembership::new(
+            aa_group_id,
+            a_group_id,
+        ))
+        .on_conflict((
+            membership_dsl::anti_affinity_group_id,
+            membership_dsl::affinity_group_id,
+        ))
+        .do_nothing()
+        .execute_async(&*datastore.pool_connection_for_tests().await.unwrap())
+        .await
+        .unwrap();
+    }
+
     async fn create_affinity_group(
         opctx: &OpContext,
         datastore: &DataStore,
@@ -1608,6 +1633,42 @@ pub(in crate::db::datastore) mod test {
             }
 
             Self { id_by_name }
+        }
+
+        async fn add_affinity_groups_to_anti_affinity_group(
+            &self,
+            datastore: &DataStore,
+            aa_group: &'static str,
+            a_groups: &[&'static str],
+        ) {
+            let (affinity, aa_group_id) =
+                self.id_by_name.get(aa_group).unwrap_or_else(|| {
+                    panic!(
+                        "Anti-affinity group {aa_group} not part of AllGroups"
+                    )
+                });
+            assert!(
+                matches!(affinity, Affinity::Negative),
+                "{aa_group} should be an anti-affinity group, but is not"
+            );
+
+            for a_group in a_groups {
+                let (affinity, a_group_id) =
+                    self.id_by_name.get(a_group).unwrap_or_else(|| {
+                        panic!("Affinity group {a_group} not part of AllGroups")
+                    });
+                assert!(
+                    matches!(affinity, Affinity::Positive),
+                    "{a_group} should be an affinity group, but is not"
+                );
+
+                add_affinity_group_to_anti_affinity_group(
+                    datastore,
+                    AntiAffinityGroupUuid::from_untyped_uuid(*aa_group_id),
+                    AffinityGroupUuid::from_untyped_uuid(*a_group_id),
+                )
+                .await;
+            }
         }
     }
 
@@ -2318,6 +2379,331 @@ pub(in crate::db::datastore) mod test {
             .expect("Should have succeeded allocation");
 
         assert_eq!(resource.sled_id.into_untyped_uuid(), sleds[2].id());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn anti_affinity_group_containing_affinity_groups() {
+        let logctx = dev::test_setup_log(
+            "anti_affinity_group_containing_affinity_groups",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _project) =
+            create_project(&opctx, &datastore).await;
+
+        const SLED_COUNT: usize = 4;
+        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+
+        let groups = [
+            Group {
+                affinity: Affinity::Negative,
+                name: "anti-affinity",
+                policy: external::AffinityPolicy::Fail,
+            },
+            Group {
+                affinity: Affinity::Positive,
+                name: "affinity1",
+                policy: external::AffinityPolicy::Allow,
+            },
+            Group {
+                affinity: Affinity::Positive,
+                name: "affinity2",
+                policy: external::AffinityPolicy::Allow,
+            },
+        ];
+        let all_groups =
+            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
+                .await;
+        all_groups
+            .add_affinity_groups_to_anti_affinity_group(
+                &datastore,
+                "anti-affinity",
+                &["affinity1", "affinity2"],
+            )
+            .await;
+
+        // The instances on sled 0 and 1 belong to "affinity1"
+        // The instances on sled 2 and 3 belong to "affinity2"
+        //
+        // A new instance in "affinity2" can only be placed on sled 2.
+        let instances = [
+            Instance::new().group("affinity1").sled(sleds[0].id()),
+            Instance::new().group("affinity1").sled(sleds[1].id()),
+            Instance::new().group("affinity2").sled(sleds[2].id()),
+            Instance::new()
+                .group("affinity2")
+                .sled(sleds[3].id())
+                .use_many_resources(),
+        ];
+        for instance in instances {
+            instance
+                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .await
+                .expect("Failed to set up instances");
+        }
+
+        let test_instance = Instance::new().group("affinity2");
+        let resource = test_instance
+            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .await
+            .expect("Should have succeeded allocation");
+
+        assert_eq!(
+            resource.sled_id.into_untyped_uuid(),
+            sleds[2].id(),
+            "All sleds: {sled_ids:#?}",
+            sled_ids = sleds.iter().map(|s| s.identity.id).collect::<Vec<_>>(),
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn anti_affinity_group_containing_affinity_groups_force_away_from_affine(
+    ) {
+        let logctx = dev::test_setup_log("anti_affinity_group_containing_affinity_groups_force_away_from_affine");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _project) =
+            create_project(&opctx, &datastore).await;
+
+        const SLED_COUNT: usize = 5;
+        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+
+        let groups = [
+            Group {
+                affinity: Affinity::Negative,
+                name: "anti-affinity",
+                policy: external::AffinityPolicy::Fail,
+            },
+            Group {
+                affinity: Affinity::Positive,
+                name: "affinity1",
+                policy: external::AffinityPolicy::Allow,
+            },
+            Group {
+                affinity: Affinity::Positive,
+                name: "affinity2",
+                policy: external::AffinityPolicy::Allow,
+            },
+        ];
+        let all_groups =
+            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
+                .await;
+        all_groups
+            .add_affinity_groups_to_anti_affinity_group(
+                &datastore,
+                "anti-affinity",
+                &["affinity1", "affinity2"],
+            )
+            .await;
+
+        // The instances on sled 0 and 1 belong to "affinity1"
+        // The instance on sled 2 belongs to "affinity2"
+        // The instance on sled 3 directly belongs to "anti-affinity"
+        //
+        // Even though the instance belongs to the affinity groups - and
+        // would "prefer" to be co-located with them - it's forced to be placed
+        // on sleds[4], since that's the only sled which doesn't violate
+        // the hard "anti-affinity" requirement.
+        let instances = [
+            Instance::new().group("affinity1").sled(sleds[0].id()),
+            Instance::new().group("affinity1").sled(sleds[1].id()),
+            Instance::new().group("affinity2").sled(sleds[2].id()),
+            Instance::new().group("anti-affinity").sled(sleds[3].id()),
+        ];
+        for instance in instances {
+            instance
+                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .await
+                .expect("Failed to set up instances");
+        }
+
+        // This instance is not part of "anti-affinity" directly. However, it
+        // is indirectly part of the anti-affinity group, because of its
+        // affinity group memberships.
+        let test_instance =
+            Instance::new().group("affinity1").group("affinity2");
+        let resource = test_instance
+            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .await
+            .expect("Should have succeeded allocation");
+
+        assert_eq!(
+            resource.sled_id.into_untyped_uuid(),
+            sleds[4].id(),
+            "All sleds: {sled_ids:#?}",
+            sled_ids = sleds.iter().map(|s| s.identity.id).collect::<Vec<_>>(),
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn anti_affinity_group_containing_affinity_groups_multigroup() {
+        let logctx = dev::test_setup_log(
+            "anti_affinity_group_containing_affinity_groups_multigroup",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _project) =
+            create_project(&opctx, &datastore).await;
+
+        const SLED_COUNT: usize = 3;
+        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+
+        let groups = [
+            Group {
+                affinity: Affinity::Negative,
+                name: "wolf-eat-goat",
+                policy: external::AffinityPolicy::Fail,
+            },
+            Group {
+                affinity: Affinity::Negative,
+                name: "goat-eat-cabbage",
+                policy: external::AffinityPolicy::Fail,
+            },
+            Group {
+                affinity: Affinity::Positive,
+                name: "wolf",
+                policy: external::AffinityPolicy::Allow,
+            },
+            Group {
+                affinity: Affinity::Positive,
+                name: "goat",
+                policy: external::AffinityPolicy::Allow,
+            },
+            Group {
+                affinity: Affinity::Positive,
+                name: "cabbage",
+                policy: external::AffinityPolicy::Allow,
+            },
+        ];
+        let all_groups =
+            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
+                .await;
+        all_groups
+            .add_affinity_groups_to_anti_affinity_group(
+                &datastore,
+                "wolf-eat-goat",
+                &["wolf", "goat"],
+            )
+            .await;
+        all_groups
+            .add_affinity_groups_to_anti_affinity_group(
+                &datastore,
+                "goat-eat-cabbage",
+                &["goat", "cabbage"],
+            )
+            .await;
+
+        let instances = [
+            Instance::new().group("wolf").sled(sleds[0].id()),
+            Instance::new().group("cabbage").sled(sleds[1].id()),
+            Instance::new().group("goat").sled(sleds[2].id()),
+        ];
+        for instance in instances {
+            instance
+                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .await
+                .expect("Failed to set up instances");
+        }
+
+        let test_instance = Instance::new().group("wolf").group("cabbage");
+        let resource = test_instance
+            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .await
+            .expect("Should have succeeded allocation");
+
+        // This instance can go on either sled[0] or sled[1], but not sled[2]
+        assert_ne!(
+            resource.sled_id.into_untyped_uuid(),
+            sleds[2].id(),
+            "All sleds: {sled_ids:#?}",
+            sled_ids = sleds.iter().map(|s| s.identity.id).collect::<Vec<_>>(),
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn anti_affinity_group_containing_overlapping_affinity_groups() {
+        let logctx = dev::test_setup_log(
+            "anti_affinity_group_containing_overlapping_affinity_groups",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let (authz_project, _project) =
+            create_project(&opctx, &datastore).await;
+
+        const SLED_COUNT: usize = 4;
+        let sleds = create_sleds(&datastore, SLED_COUNT).await;
+
+        let groups = [
+            Group {
+                affinity: Affinity::Negative,
+                name: "anti-affinity",
+                policy: external::AffinityPolicy::Fail,
+            },
+            Group {
+                affinity: Affinity::Positive,
+                name: "affinity1",
+                policy: external::AffinityPolicy::Allow,
+            },
+            Group {
+                affinity: Affinity::Positive,
+                name: "affinity2",
+                policy: external::AffinityPolicy::Allow,
+            },
+        ];
+        let all_groups =
+            AllGroups::create(&opctx, &datastore, &authz_project, &groups)
+                .await;
+        all_groups
+            .add_affinity_groups_to_anti_affinity_group(
+                &datastore,
+                "anti-affinity",
+                &["affinity1", "affinity2"],
+            )
+            .await;
+
+        // The instances on sled 0 and 1 belong to "affinity1"
+        // The instances on sled 2 and 3 belong to "affinity2"
+        //
+        // If a new instance belongs to both affinity groups, it cannot satisfy
+        // the anti-affinity requirements.
+        let instances = [
+            Instance::new().group("affinity1").sled(sleds[0].id()),
+            Instance::new().group("affinity1").sled(sleds[1].id()),
+            Instance::new().group("affinity2").sled(sleds[2].id()),
+            Instance::new().group("affinity2").sled(sleds[3].id()),
+        ];
+        for instance in instances {
+            instance
+                .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+                .await
+                .expect("Failed to set up instances");
+        }
+
+        let test_instance =
+            Instance::new().group("affinity1").group("affinity2");
+        let err = test_instance
+            .add_to_groups_and_reserve(&opctx, &datastore, &all_groups)
+            .await
+            .expect_err("Should have failed to place instance");
+
+        let SledReservationTransactionError::Reservation(
+            SledReservationError::NotFound,
+        ) = err
+        else {
+            panic!("Unexpected error: {err:?}");
+        };
 
         db.terminate().await;
         logctx.cleanup_successful();

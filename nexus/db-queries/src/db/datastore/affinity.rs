@@ -18,6 +18,7 @@ use crate::db::model::AffinityGroup;
 use crate::db::model::AffinityGroupInstanceMembership;
 use crate::db::model::AffinityGroupUpdate;
 use crate::db::model::AntiAffinityGroup;
+use crate::db::model::AntiAffinityGroupAffinityMembership;
 use crate::db::model::AntiAffinityGroupInstanceMembership;
 use crate::db::model::AntiAffinityGroupUpdate;
 use crate::db::model::Name;
@@ -433,27 +434,60 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, authz_anti_affinity_group).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let instance_id = match member {
-            external::AntiAffinityGroupMember::Instance(id) => id,
-        };
-
-        use db::schema::anti_affinity_group_instance_membership::dsl;
-        dsl::anti_affinity_group_instance_membership
-            .filter(dsl::group_id.eq(authz_anti_affinity_group.id()))
-            .filter(dsl::instance_id.eq(instance_id.into_untyped_uuid()))
-            .select(AntiAffinityGroupInstanceMembership::as_select())
-            .get_result_async(&*conn)
-            .await
-            .map(|m| m.into())
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::AntiAffinityGroupMember,
-                        LookupType::by_id(instance_id.into_untyped_uuid()),
-                    ),
-                )
-            })
+        match member {
+            external::AntiAffinityGroupMember::Instance(instance_id) => {
+                use db::schema::anti_affinity_group_instance_membership::dsl;
+                dsl::anti_affinity_group_instance_membership
+                    .filter(dsl::group_id.eq(authz_anti_affinity_group.id()))
+                    .filter(
+                        dsl::instance_id.eq(instance_id.into_untyped_uuid()),
+                    )
+                    .select(AntiAffinityGroupInstanceMembership::as_select())
+                    .get_result_async(&*conn)
+                    .await
+                    .map(|m| m.into())
+                    .map_err(|e| {
+                        public_error_from_diesel(
+                            e,
+                            ErrorHandler::NotFoundByLookup(
+                                ResourceType::AntiAffinityGroupMember,
+                                LookupType::by_id(
+                                    instance_id.into_untyped_uuid(),
+                                ),
+                            ),
+                        )
+                    })
+            }
+            external::AntiAffinityGroupMember::AffinityGroup(
+                affinity_group_id,
+            ) => {
+                use db::schema::anti_affinity_group_affinity_membership::dsl;
+                dsl::anti_affinity_group_affinity_membership
+                    .filter(
+                        dsl::anti_affinity_group_id
+                            .eq(authz_anti_affinity_group.id()),
+                    )
+                    .filter(
+                        dsl::affinity_group_id
+                            .eq(affinity_group_id.into_untyped_uuid()),
+                    )
+                    .select(AntiAffinityGroupAffinityMembership::as_select())
+                    .get_result_async(&*conn)
+                    .await
+                    .map(|m| m.into())
+                    .map_err(|e| {
+                        public_error_from_diesel(
+                            e,
+                            ErrorHandler::NotFoundByLookup(
+                                ResourceType::AntiAffinityGroupMember,
+                                LookupType::by_id(
+                                    affinity_group_id.into_untyped_uuid(),
+                                ),
+                            ),
+                        )
+                    })
+            }
+        }
     }
 
     pub async fn affinity_group_member_add(
@@ -593,13 +627,35 @@ impl DataStore {
             .authorize(authz::Action::Modify, authz_anti_affinity_group)
             .await?;
 
-        let instance_id = match member {
-            external::AntiAffinityGroupMember::Instance(id) => id,
-        };
+        match member {
+            external::AntiAffinityGroupMember::Instance(id) => {
+                self.anti_affinity_group_member_add_instance(
+                    opctx,
+                    authz_anti_affinity_group,
+                    id,
+                )
+                .await
+            }
+            external::AntiAffinityGroupMember::AffinityGroup(id) => {
+                self.anti_affinity_group_member_add_group(
+                    opctx,
+                    authz_anti_affinity_group,
+                    id,
+                )
+                .await
+            }
+        }
+    }
 
+    async fn anti_affinity_group_member_add_instance(
+        &self,
+        opctx: &OpContext,
+        authz_anti_affinity_group: &authz::AntiAffinityGroup,
+        instance_id: InstanceUuid,
+    ) -> Result<(), Error> {
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.transaction_retry_wrapper("anti_affinity_group_member_add")
+        self.transaction_retry_wrapper("anti_affinity_group_member_add_instance")
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 use db::schema::anti_affinity_group::dsl as group_dsl;
@@ -686,6 +742,95 @@ impl DataStore {
                                     ErrorHandler::Conflict(
                                         ResourceType::AntiAffinityGroupMember,
                                         &instance_id.to_string(),
+                                    ),
+                                )
+                            })
+                        })?;
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    return err;
+                }
+                public_error_from_diesel(e, ErrorHandler::Server)
+            })?;
+        Ok(())
+    }
+
+    async fn anti_affinity_group_member_add_group(
+        &self,
+        opctx: &OpContext,
+        authz_anti_affinity_group: &authz::AntiAffinityGroup,
+        affinity_group_id: AffinityGroupUuid,
+    ) -> Result<(), Error> {
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.transaction_retry_wrapper("anti_affinity_group_member_add_group")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                use db::schema::anti_affinity_group::dsl as anti_affinity_group_dsl;
+                use db::schema::affinity_group::dsl as affinity_group_dsl;
+                use db::schema::anti_affinity_group_affinity_membership::dsl as membership_dsl;
+
+                async move {
+                    // Check that the anti-affinity group exists
+                    anti_affinity_group_dsl::anti_affinity_group
+                        .filter(anti_affinity_group_dsl::time_deleted.is_null())
+                        .filter(anti_affinity_group_dsl::id.eq(authz_anti_affinity_group.id()))
+                        .select(anti_affinity_group_dsl::id)
+                        .first_async::<uuid::Uuid>(&conn)
+                        .await
+                        .map_err(|e| {
+                            err.bail_retryable_or_else(e, |e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::NotFoundByResource(
+                                        authz_anti_affinity_group,
+                                    ),
+                                )
+                            })
+                        })?;
+
+                    // Check that the affinity group exists
+                    affinity_group_dsl::affinity_group
+                        .filter(affinity_group_dsl::time_deleted.is_null())
+                        .filter(affinity_group_dsl::id.eq(affinity_group_id.into_untyped_uuid()))
+                        .select(affinity_group_dsl::id)
+                        .first_async::<uuid::Uuid>(&conn)
+                        .await
+                        .map_err(|e| {
+                            err.bail_retryable_or_else(e, |e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::NotFoundByLookup(
+                                        ResourceType::AffinityGroup,
+                                        LookupType::ById(affinity_group_id.into_untyped_uuid())
+                                    ),
+                                )
+                            })
+                        })?;
+
+                    // TODO: It's possible that the affinity group has members
+                    // which are already running. We should probably check this,
+                    // and prevent it, otherwise we could circumvent "policy =
+                    // fail" stances.
+
+                    diesel::insert_into(membership_dsl::anti_affinity_group_affinity_membership)
+                        .values(AntiAffinityGroupAffinityMembership::new(
+                            AntiAffinityGroupUuid::from_untyped_uuid(authz_anti_affinity_group.id()),
+                            affinity_group_id,
+                        ))
+                        .execute_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            err.bail_retryable_or_else(e, |e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Conflict(
+                                        ResourceType::AntiAffinityGroupMember,
+                                        &affinity_group_id.to_string(),
                                     ),
                                 )
                             })
@@ -810,13 +955,38 @@ impl DataStore {
             .authorize(authz::Action::Modify, authz_anti_affinity_group)
             .await?;
 
-        let instance_id = match member {
-            external::AntiAffinityGroupMember::Instance(id) => id,
-        };
+        match member {
+            external::AntiAffinityGroupMember::Instance(id) => {
+                self.anti_affinity_group_instance_member_delete(
+                    opctx,
+                    authz_anti_affinity_group,
+                    id,
+                )
+                .await
+            }
+            external::AntiAffinityGroupMember::AffinityGroup(id) => {
+                self.anti_affinity_group_affinity_member_delete(
+                    opctx,
+                    authz_anti_affinity_group,
+                    id,
+                )
+                .await
+            }
+        }
+    }
 
+    // Deletes an anti-affinity member, when that member is an instance
+    //
+    // See: [`Self::anti_affinity_group_member_delete`]
+    async fn anti_affinity_group_instance_member_delete(
+        &self,
+        opctx: &OpContext,
+        authz_anti_affinity_group: &authz::AntiAffinityGroup,
+        instance_id: InstanceUuid,
+    ) -> Result<(), Error> {
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.transaction_retry_wrapper("anti_affinity_group_member_delete")
+        self.transaction_retry_wrapper("anti_affinity_group_instance_member_delete")
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 use db::schema::anti_affinity_group::dsl as group_dsl;
@@ -853,6 +1023,70 @@ impl DataStore {
                         })?;
                     if rows == 0 {
                         return Err(err.bail(LookupType::ById(instance_id.into_untyped_uuid()).into_not_found(
+                            ResourceType::AntiAffinityGroupMember,
+                        )));
+                    }
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    return err;
+                }
+                public_error_from_diesel(e, ErrorHandler::Server)
+            })?;
+        Ok(())
+    }
+
+    // Deletes an anti-affinity member, when that member is an affinity group
+    //
+    // See: [`Self::anti_affinity_group_member_delete`]
+    async fn anti_affinity_group_affinity_member_delete(
+        &self,
+        opctx: &OpContext,
+        authz_anti_affinity_group: &authz::AntiAffinityGroup,
+        affinity_group_id: AffinityGroupUuid,
+    ) -> Result<(), Error> {
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.transaction_retry_wrapper("anti_affinity_group_affinity_member_delete")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                use db::schema::anti_affinity_group::dsl as group_dsl;
+                use db::schema::anti_affinity_group_affinity_membership::dsl as membership_dsl;
+
+                async move {
+                    // Check that the anti-affinity group exists
+                    group_dsl::anti_affinity_group
+                        .filter(group_dsl::time_deleted.is_null())
+                        .filter(group_dsl::id.eq(authz_anti_affinity_group.id()))
+                        .select(group_dsl::id)
+                        .first_async::<uuid::Uuid>(&conn)
+                        .await
+                        .map_err(|e| {
+                            err.bail_retryable_or_else(e, |e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::NotFoundByResource(
+                                        authz_anti_affinity_group,
+                                    ),
+                                )
+                            })
+                        })?;
+
+                    let rows = diesel::delete(membership_dsl::anti_affinity_group_affinity_membership)
+                        .filter(membership_dsl::anti_affinity_group_id.eq(authz_anti_affinity_group.id()))
+                        .filter(membership_dsl::affinity_group_id.eq(affinity_group_id.into_untyped_uuid()))
+                        .execute_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            err.bail_retryable_or_else(e, |e| {
+                                public_error_from_diesel(e, ErrorHandler::Server)
+                            })
+                        })?;
+                    if rows == 0 {
+                        return Err(err.bail(LookupType::ById(affinity_group_id.into_untyped_uuid()).into_not_found(
                             ResourceType::AntiAffinityGroupMember,
                         )));
                     }

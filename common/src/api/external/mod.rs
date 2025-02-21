@@ -22,6 +22,7 @@ use dropshot::HttpError;
 pub use dropshot::PaginationOrder;
 pub use error::*;
 use futures::stream::BoxStream;
+use omicron_uuid_kinds::AffinityGroupUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use oxnet::IpNet;
@@ -1391,12 +1392,16 @@ impl SimpleIdentity for AffinityGroupMember {
 pub enum AntiAffinityGroupMember {
     /// An instance belonging to this group, identified by UUID.
     Instance(InstanceUuid),
+
+    /// An affinity group belonging to this group, identified by UUID.
+    AffinityGroup(AffinityGroupUuid),
 }
 
 impl SimpleIdentity for AntiAffinityGroupMember {
     fn id(&self) -> Uuid {
         match self {
             AntiAffinityGroupMember::Instance(id) => *id.as_untyped_uuid(),
+            AntiAffinityGroupMember::AffinityGroup(id) => *id.as_untyped_uuid(),
         }
     }
 }
