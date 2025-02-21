@@ -182,13 +182,12 @@ pub async fn realize_blueprint_with_overrides(
         blueprint,
     );
 
-    let deploy_zones_done = register_support_bundle_failure_step(
+    register_support_bundle_failure_step(
         &engine.for_component(ExecutionComponent::SupportBundles),
         &opctx,
         datastore,
         blueprint,
         nexus_id,
-        deploy_zones_done,
     );
 
     let reassign_saga_output = register_reassign_sagas_step(
@@ -270,14 +269,12 @@ fn register_support_bundle_failure_step<'a>(
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
     nexus_id: OmicronZoneUuid,
-    deploy_zones_done: StepHandle<DeployZonesDone>,
-) -> StepHandle<DeployZonesDone> {
+) {
     registrar
         .new_step(
             ExecutionStepId::Ensure,
             "Mark support bundles as failed if they rely on an expunged disk or sled",
-            move |cx| async move {
-                let done = deploy_zones_done.into_value(cx.token()).await;
+            move |_cx| async move {
                 datastore
                     .support_bundle_fail_expunged(
                         &opctx, blueprint, nexus_id
@@ -285,10 +282,10 @@ fn register_support_bundle_failure_step<'a>(
                     .await
                     .map_err(|err| anyhow!(err))?;
 
-                StepSuccess::new(done).into()
+                StepSuccess::new(()).into()
             },
         )
-        .register()
+        .register();
 }
 
 fn register_sled_list_step<'a>(
