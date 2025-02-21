@@ -820,6 +820,18 @@ impl<'a> BlueprintBuilder<'a> {
         }
     }
 
+    pub fn current_sled_state(
+        &self,
+        sled_id: SledUuid,
+    ) -> Result<SledState, Error> {
+        let editor = self.sled_editors.get(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to get sled state for unknown sled {sled_id}"
+            ))
+        })?;
+        Ok(editor.state())
+    }
+
     /// Set the desired state of the given sled.
     pub fn set_sled_decommissioned(
         &mut self,
@@ -926,17 +938,12 @@ impl<'a> BlueprintBuilder<'a> {
         let mut zones_ready_for_cleanup = Vec::new();
         for zone in editor.zones(BlueprintZoneDisposition::any) {
             match zone.disposition {
-                BlueprintZoneDisposition::Expunged {
-                    ready_for_cleanup,
-                    ..
-                } => {
+                BlueprintZoneDisposition::Expunged { .. } => {
                     // Since this is a full sled expungement, we'll never see an
                     // inventory collection indicating the zones are shut down,
-                    // nor do we need to: go ahead any expunged zones as ready
-                    // for cleanup, skipping those that are already marked.
-                    if !ready_for_cleanup {
-                        zones_ready_for_cleanup.push(zone.id);
-                    }
+                    // nor do we need to: go ahead and mark any expunged zones
+                    // as ready for cleanup.
+                    zones_ready_for_cleanup.push(zone.id);
                 }
                 BlueprintZoneDisposition::InService => {
                     return Err(Error::Planner(anyhow!(

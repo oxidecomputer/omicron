@@ -301,7 +301,14 @@ impl<'a> Planner<'a> {
             // Has the sled been expunged? If so, expunge everything on this
             // sled from the blueprint.
             SledPolicy::Expunged => {
-                self.blueprint.expunge_sled(sled_id)?;
+                match self.blueprint.current_sled_state(sled_id)? {
+                    SledState::Active => {
+                        self.blueprint.expunge_sled(sled_id)?;
+                    }
+                    // If the sled is decommissioned, we've already expunged it
+                    // in a prior planning run.
+                    SledState::Decommissioned => (),
+                }
             }
         }
 

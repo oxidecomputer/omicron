@@ -180,6 +180,13 @@ impl SledEditor {
         }
     }
 
+    pub fn state(&self) -> SledState {
+        match &self.0 {
+            InnerSledEditor::Active(_) => SledState::Active,
+            InnerSledEditor::Decommissioned(edited_sled) => edited_sled.state,
+        }
+    }
+
     pub fn edit_counts(&self) -> SledEditCounts {
         match &self.0 {
             InnerSledEditor::Active(editor) => editor.edit_counts(),
