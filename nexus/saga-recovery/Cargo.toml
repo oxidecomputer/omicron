@@ -34,7 +34,6 @@ nexus-test-utils-macros.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-test-utils.workspace = true
-once_cell.workspace = true
 pretty_assertions.workspace = true
 steno.workspace = true
 tokio.workspace = true
