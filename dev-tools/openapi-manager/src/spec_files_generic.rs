@@ -743,3 +743,110 @@ fn hash_contents(contents: &[u8]) -> String {
     let computed_hash = hasher.finalize();
     hex::encode(&computed_hash.as_slice()[0..3])
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use assert_matches::assert_matches;
+
+    #[test]
+    fn test_parse_name_lockstep() {
+        let apis = ManagedApis::all().unwrap();
+        let name = ApiSpecFileName::parse_lockstep(&apis, "wicketd.json");
+        assert_matches!(name, Ok(ApiSpecFileName {
+            ident,
+            kind: ApiSpecFileNameKind::Lockstep,
+        }) if *ident == "wicketd");
+    }
+
+    #[test]
+    fn test_parse_name_versioned() {
+        let apis = ManagedApis::all().unwrap();
+        let name = ApiSpecFileName::parse_versioned(
+            &apis,
+            "dns-server",
+            "dns-server-1.2.3-feedface.json",
+        );
+        assert_matches!(name, Ok(ApiSpecFileName {
+            ident,
+            kind: ApiSpecFileNameKind::Versioned { version, hash },
+        }) if *ident == "dns-server"
+            && version.to_string() == "1.2.3"
+            && hash == "feedface"
+        );
+    }
+
+    #[test]
+    fn test_parse_name_lockstep_fail() {
+        let apis = ManagedApis::all().unwrap();
+        let error =
+            ApiSpecFileName::parse_lockstep(&apis, "wicketd").unwrap_err();
+        assert_matches!(error, BadLockstepFileName::MissingJsonSuffix);
+        let error = ApiSpecFileName::parse_lockstep(&apis, "bart-simpson.json")
+            .unwrap_err();
+        assert_matches!(error, BadLockstepFileName::NoSuchApi);
+        let error = ApiSpecFileName::parse_lockstep(&apis, "dns-server.json")
+            .unwrap_err();
+        assert_matches!(error, BadLockstepFileName::NotLockstep);
+    }
+
+    #[test]
+    fn test_parse_name_versioned_fail() {
+        let apis = ManagedApis::all().unwrap();
+        let error = ApiSpecFileName::parse_versioned(
+            &apis,
+            "bart-simpson",
+            "bart-simpson-1.2.3-hash.json",
+        )
+        .unwrap_err();
+        assert_matches!(error, BadVersionedFileName::NoSuchApi);
+
+        let error = ApiSpecFileName::parse_versioned(
+            &apis,
+            "wicketd",
+            "wicketd-1.2.3-hash.json",
+        )
+        .unwrap_err();
+        assert_matches!(error, BadVersionedFileName::NotVersioned);
+
+        let error = ApiSpecFileName::parse_versioned(
+            &apis,
+            "dns-server",
+            "1.2.3-hash.json",
+        )
+        .unwrap_err();
+        assert_matches!(error, BadVersionedFileName::UnexpectedName { .. });
+
+        let error = ApiSpecFileName::parse_versioned(
+            &apis,
+            "dns-server",
+            "dns-server-1.2.3.json",
+        )
+        .unwrap_err();
+        assert_matches!(error, BadVersionedFileName::UnexpectedName { .. });
+
+        let error = ApiSpecFileName::parse_versioned(
+            &apis,
+            "dns-server",
+            "dns-server-hash.json",
+        )
+        .unwrap_err();
+        assert_matches!(error, BadVersionedFileName::UnexpectedName { .. });
+
+        let error = ApiSpecFileName::parse_versioned(
+            &apis,
+            "dns-server",
+            "dns-server-1.2.3-hash",
+        )
+        .unwrap_err();
+        assert_matches!(error, BadVersionedFileName::UnexpectedName { .. });
+
+        let error = ApiSpecFileName::parse_versioned(
+            &apis,
+            "dns-server",
+            "dns-server-bogus-hash",
+        )
+        .unwrap_err();
+        assert_matches!(error, BadVersionedFileName::UnexpectedName { .. });
+    }
+}
