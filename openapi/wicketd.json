@@ -6796,31 +6796,57 @@
         "type": "object",
         "properties": {
           "datapath": {
-            "$ref": "#/components/schemas/Datapath"
+            "nullable": true,
+            "description": "Status of the transceiver's machinery for carrying data, the \"datapath\".",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Datapath"
+              }
+            ]
           },
           "monitors": {
-            "$ref": "#/components/schemas/Monitors"
+            "nullable": true,
+            "description": "Environmental monitoring data, such as temperature or optical power.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Monitors"
+              }
+            ]
           },
           "port": {
+            "description": "The port in which the transceiver sits.",
             "type": "string"
           },
           "power": {
-            "$ref": "#/components/schemas/PowerMode"
+            "nullable": true,
+            "description": "Information about the power state of the transceiver.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PowerMode"
+              }
+            ]
           },
           "status": {
-            "$ref": "#/components/schemas/ExtendedStatus"
+            "nullable": true,
+            "description": "The general status of the transceiver, such as presence and faults.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ExtendedStatus"
+              }
+            ]
           },
           "vendor": {
-            "$ref": "#/components/schemas/VendorInfo"
+            "nullable": true,
+            "description": "Details about the vendor, part number, and serial number.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VendorInfo"
+              }
+            ]
           }
         },
         "required": [
-          "datapath",
-          "monitors",
-          "port",
-          "power",
-          "status",
-          "vendor"
+          "port"
         ]
       },
       "TransceiverInventorySnapshot": {

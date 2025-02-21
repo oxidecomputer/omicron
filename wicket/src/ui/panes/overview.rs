@@ -1196,7 +1196,11 @@ fn inventory_description(component: &Component) -> Text {
                 );
 
                 let (temp_style, temp) = format_transceiver_temperature(
-                    transceiver.monitors.as_ref().map(|m| m.temperature),
+                    transceiver
+                        .monitors
+                        .as_ref()
+                        .map(|m| m.temperature)
+                        .ok_or(FailedToRead),
                 );
                 spans.push(
                     vec![
@@ -1208,7 +1212,11 @@ fn inventory_description(component: &Component) -> Text {
                 );
 
                 let (voltage_style, voltage) = format_transceiver_voltage(
-                    transceiver.monitors.as_ref().map(|m| m.supply_voltage),
+                    transceiver
+                        .monitors
+                        .as_ref()
+                        .map(|m| m.supply_voltage)
+                        .ok_or(FailedToRead),
                 );
                 spans.push(
                     vec![
@@ -1226,7 +1234,8 @@ fn inventory_description(component: &Component) -> Text {
                     transceiver
                         .monitors
                         .as_ref()
-                        .map(|m| m.receiver_power.as_deref()),
+                        .map(|m| m.receiver_power.as_deref())
+                        .ok_or(FailedToRead),
                 ));
                 spans.push(line.into());
 
@@ -1236,7 +1245,8 @@ fn inventory_description(component: &Component) -> Text {
                     transceiver
                         .monitors
                         .as_ref()
-                        .map(|m| m.transmitter_power.as_deref()),
+                        .map(|m| m.transmitter_power.as_deref())
+                        .ok_or(FailedToRead),
                 ));
                 spans.push(line.into());
             }
@@ -1351,6 +1361,19 @@ fn append_caboose(
     version_spans.push(Span::styled(version, ok_style));
 }
 
+/// Helper to indicate when we've failed to read data from a transceiver module.
+struct FailedToRead;
+
+impl FailedToRead {
+    fn to_ui_elements(self) -> (Style, String) {
+        (style::text_warning(), String::from("Failed to read!"))
+    }
+}
+
+fn unsupported_ui_elements() -> (Style, String) {
+    (style::text_dim(), String::from("Unsupported"))
+}
+
 // Print relevant transceiver status bits.
 //
 // We know the transceiver is present by construction, so print the power state
@@ -1358,9 +1381,7 @@ fn append_caboose(
 fn format_transceiver_status(
     status: Option<&ExtendedStatus>,
 ) -> (Style, String) {
-    let Some(status) = status else {
-        return (style::text_warning(), String::from("Failed to read!"));
-    };
+    let Some(status) = status else { return FailedToRead.to_ui_elements() };
     if status.contains(ExtendedStatus::ENABLED) {
         if status.contains(ExtendedStatus::POWER_GOOD) {
             return (style::text_success(), String::from("Enabled"));
@@ -1383,9 +1404,7 @@ fn format_transceiver_status(
 fn format_transceiver_power_state(
     power: Option<&PowerMode>,
 ) -> (Style, String) {
-    let Some(power) = power else {
-        return (style::text_warning(), String::from("Failed to read!"));
-    };
+    let Some(power) = power else { return FailedToRead.to_ui_elements() };
     let style = match power.state {
         PowerState::Off => style::text_warning(),
         PowerState::Low => style::text_warning(),
@@ -1409,162 +1428,155 @@ fn format_transceiver_power_state(
 }
 
 /// Format the transceiver temperature.
-///
-/// The outer option indicates whether we were able to read the module
-/// successfully at all. The inner indicates whether the module reported a value
-/// (they're not required to do so).
 fn format_transceiver_temperature(
-    maybe_temp: Option<Option<f32>>,
+    maybe_temp: Result<Option<f32>, FailedToRead>,
 ) -> (Style, String) {
-    let Some(maybe_temp) = maybe_temp else {
-        return (style::text_warning(), String::from("Failed to read!"));
+    let t = match maybe_temp {
+        Ok(Some(t)) => t,
+        Ok(None) => return unsupported_ui_elements(),
+        Err(e) => return e.to_ui_elements(),
     };
     const MIN_WARNING_TEMP: f32 = 15.0;
     const MAX_WARNING_TEMP: f32 = 50.0;
-    match maybe_temp {
-        Some(t) => {
-            let temp = format!("{t:0.2} °C");
-            let style = if t < MIN_WARNING_TEMP || t > MAX_WARNING_TEMP {
-                style::text_warning()
-            } else {
-                style::text_success()
-            };
-            (style, temp)
-        }
-        None => (style::text_dim(), String::from("Unsupported")),
-    }
+    let temp = format!("{t:0.2} °C");
+    let style = if t < MIN_WARNING_TEMP || t > MAX_WARNING_TEMP {
+        style::text_warning()
+    } else {
+        style::text_success()
+    };
+    (style, temp)
 }
 
 /// Format the transceiver voltage.
-///
-/// The outer option indicates whether we were able to read the module
-/// successfully at all. The inner indicates whether the module reported a value
-/// (they're not required to do so).
 fn format_transceiver_voltage(
-    maybe_voltage: Option<Option<f32>>,
+    maybe_voltage: Result<Option<f32>, FailedToRead>,
 ) -> (Style, String) {
-    let Some(maybe_voltage) = maybe_voltage else {
-        return (style::text_warning(), String::from("Failed to read!"));
+    let v = match maybe_voltage {
+        Ok(Some(v)) => v,
+        Ok(None) => return unsupported_ui_elements(),
+        Err(e) => return e.to_ui_elements(),
     };
     const MIN_WARNING_VOLTAGE: f32 = 3.0;
     const MAX_WARNING_VOLTAGE: f32 = 3.7;
-    match maybe_voltage {
-        Some(v) => {
-            let voltage = format!("{v:0.2} V");
-            let style = if v < MIN_WARNING_VOLTAGE || v > MAX_WARNING_VOLTAGE {
-                style::text_warning()
-            } else {
-                style::text_success()
-            };
-            (style, voltage)
-        }
-        None => (style::text_dim(), String::from("Unsupported")),
-    }
+    let voltage = format!("{v:0.2} V");
+    let style = if v < MIN_WARNING_VOLTAGE || v > MAX_WARNING_VOLTAGE {
+        style::text_warning()
+    } else {
+        style::text_success()
+    };
+    (style, voltage)
 }
 
 /// Format the transceiver received optical power.
-///
-/// The outer option indicates whether we were able to read the module
-/// successfully at all. The inner indicates whether the module reported a value
-/// (they're not required to do so).
 fn format_transceiver_receive_power(
     n_lanes: Option<usize>,
-    receiver_power: Option<Option<&[ReceiverPower]>>,
+    receiver_power: Result<Option<&[ReceiverPower]>, FailedToRead>,
 ) -> Vec<Span> {
-    let Some(receiver_power) = receiver_power else {
-        return vec![
-            Span::styled("Rx power: ", style::text_label()),
-            Span::styled("Failed to read!", style::text_warning()),
-        ];
+    let pow = match receiver_power {
+        Ok(Some(p)) if !p.is_empty() => p,
+        // Either not supported at all, or list of power is empty.
+        Ok(None) | Ok(Some(_)) => {
+            let elems = unsupported_ui_elements();
+            return vec![
+                Span::styled("Rx power: ", style::text_label()),
+                Span::styled(elems.1, elems.0),
+            ];
+        }
+        // Failed to read entirely
+        Err(e) => {
+            let elems = e.to_ui_elements();
+            return vec![
+                Span::styled("Rx power: ", style::text_label()),
+                Span::styled(elems.1, elems.0),
+            ];
+        }
     };
+
     const MIN_WARNING_POWER: f32 = 0.5;
     const MAX_WARNING_POWER: f32 = 2.5;
-    let mut out = Vec::new();
-    if let Some(pow) = receiver_power {
-        if !pow.is_empty() {
-            // Push the label itself.
-            let kind = if matches!(&pow[0], ReceiverPower::Average(_)) {
-                "Avg"
-            } else {
-                "Peak-to-peak"
-            };
-            let label = format!("Rx power (mW, {}): [", kind);
-            out.push(Span::styled(label, style::text_label()));
+    assert!(!pow.is_empty());
+    let mut out = Vec::with_capacity(pow.len() + 2);
 
-            // Push each Rx power measurement, styling it if it's above the
-            // limit.
-            let n_lanes = n_lanes.unwrap_or(pow.len());
-            for (lane, meas) in pow[..n_lanes].iter().enumerate() {
-                let style = if meas.value() < MIN_WARNING_POWER
-                    || meas.value() > MAX_WARNING_POWER
-                {
-                    style::text_warning()
-                } else {
-                    style::text_success()
-                };
-                let measurement = format!("{:0.3}", meas.value());
-                out.push(Span::styled(measurement, style));
-                if lane < n_lanes - 1 {
-                    out.push(Span::styled(", ", style::text_label()));
-                }
-            }
-            out.push(Span::styled("]", style::text_label()));
-            return out;
+    // Push the label itself.
+    let kind = if matches!(&pow[0], ReceiverPower::Average(_)) {
+        "Avg"
+    } else {
+        "Peak-to-peak"
+    };
+    let label = format!("Rx power (mW, {}): [", kind);
+    out.push(Span::styled(label, style::text_label()));
+
+    // Push each Rx power measurement, styling it if it's above the
+    // limit.
+    let n_lanes = n_lanes.unwrap_or(pow.len());
+    for (lane, meas) in pow[..n_lanes].iter().enumerate() {
+        let style = if meas.value() < MIN_WARNING_POWER
+            || meas.value() > MAX_WARNING_POWER
+        {
+            style::text_warning()
+        } else {
+            style::text_success()
+        };
+        let measurement = format!("{:0.3}", meas.value());
+        out.push(Span::styled(measurement, style));
+        if lane < n_lanes - 1 {
+            out.push(Span::styled(", ", style::text_label()));
         }
     }
-    out.push(Span::styled("Rx power: ", style::text_label()));
-    out.push(Span::styled("Unsupported", style::text_dim()));
+    out.push(Span::styled("]", style::text_label()));
     out
 }
 
 /// Format the transceiver transmitted optical power.
-///
-/// The outer option indicates whether we were able to read the module
-/// successfully at all. The inner indicates whether the module reported a value
-/// (they're not required to do so).
 fn format_transceiver_transmit_power(
     n_lanes: Option<usize>,
-    transmitter_power: Option<Option<&[f32]>>,
+    transmitter_power: Result<Option<&[f32]>, FailedToRead>,
 ) -> Vec<Span> {
-    let Some(transmitter_power) = transmitter_power else {
-        return vec![
-            Span::styled("Tx power: ", style::text_label()),
-            Span::styled("Failed to read!", style::text_warning()),
-        ];
+    let pow = match transmitter_power {
+        Ok(Some(p)) if !p.is_empty() => p,
+        // Either not supported at all, or list of power is empty.
+        Ok(None) | Ok(Some(_)) => {
+            let elems = unsupported_ui_elements();
+            return vec![
+                Span::styled("Tx power: ", style::text_label()),
+                Span::styled(elems.1, elems.0),
+            ];
+        }
+        // Failed to read entirely
+        Err(e) => {
+            let elems = e.to_ui_elements();
+            return vec![
+                Span::styled("Tx power: ", style::text_label()),
+                Span::styled(elems.1, elems.0),
+            ];
+        }
     };
+
     const MIN_WARNING_POWER: f32 = 0.5;
     const MAX_WARNING_POWER: f32 = 2.5;
-    if let Some(pow) = transmitter_power {
-        if !pow.is_empty() {
-            let mut out =
-                vec![Span::styled("Tx power (mW): [", style::text_label())];
-            let n_lanes = n_lanes.unwrap_or(pow.len());
-            for (lane, meas) in pow[..n_lanes].iter().enumerate() {
-                let style =
-                    if *meas < MIN_WARNING_POWER || *meas > MAX_WARNING_POWER {
-                        style::text_warning()
-                    } else {
-                        style::text_success()
-                    };
-                let measurement = format!("{:0.3}", meas);
-                out.push(Span::styled(measurement, style));
-                if lane < n_lanes - 1 {
-                    out.push(Span::styled(", ", style::text_label()));
-                }
-            }
-            out.push(Span::styled("]", style::text_label()));
-            return out;
+    assert!(!pow.is_empty());
+    let mut out = Vec::with_capacity(pow.len() + 2);
+    out.push(Span::styled("Tx power (mW): [", style::text_label()));
+    let n_lanes = n_lanes.unwrap_or(pow.len());
+    for (lane, meas) in pow[..n_lanes].iter().enumerate() {
+        let style = if *meas < MIN_WARNING_POWER || *meas > MAX_WARNING_POWER {
+            style::text_warning()
+        } else {
+            style::text_success()
+        };
+        let measurement = format!("{:0.3}", meas);
+        out.push(Span::styled(measurement, style));
+        if lane < n_lanes - 1 {
+            out.push(Span::styled(", ", style::text_label()));
         }
     }
-    vec![
-        Span::styled("Tx power (mW): ", style::text_label()),
-        Span::styled("Unavailable", style::text_dim()),
-    ]
+    out.push(Span::styled("]", style::text_label()));
+    out
 }
 
 fn extract_media_type(datapath: Option<&Datapath>) -> (Style, String) {
     let Some(datapath) = datapath else {
-        return (style::text_warning(), String::from("Failed to read!"));
+        return FailedToRead.to_ui_elements();
     };
     match datapath {
         Datapath::Cmis { datapaths, .. } => {
