@@ -44,3 +44,6 @@ textwrap.workspace = true
 thiserror.workspace = true
 supports-color.workspace = true
 wicketd-api.workspace = true
+
+[dev-dependencies]
+assert_matches.workspace = true

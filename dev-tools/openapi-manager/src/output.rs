@@ -351,7 +351,7 @@ pub fn display_resolution(
     // Print a summary line.
     let status_header = if num_failed > 0 {
         FAILURE.style(styles.failure_header)
-    } else if num_stale > 0 {
+    } else if num_stale > 0 || num_general_problems > 0 {
         STALE.style(styles.warning_header)
     } else {
         SUCCESS.style(styles.success_header)
@@ -377,7 +377,7 @@ pub fn display_resolution(
             "cargo xtask openapi generate".style(styles.bold)
         );
         Ok(CheckResult::Failures)
-    } else if num_stale > 0 {
+    } else if num_stale > 0 || num_general_problems > 0 {
         eprintln!(
             "{:>HEADER_WIDTH$} (run {} to update)",
             "",

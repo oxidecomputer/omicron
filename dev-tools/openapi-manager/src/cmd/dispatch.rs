@@ -66,7 +66,7 @@ pub enum Command {
 }
 
 #[derive(Debug, Args)]
-struct BlessedSourceArgs {
+pub struct BlessedSourceArgs {
     /// Loads blessed OpenAPI documents from path PATH in the given Git
     /// REVISION.
     ///
@@ -83,7 +83,7 @@ struct BlessedSourceArgs {
         env("OPENAPI_MGR_BLESSED_FROM_GIT"),
         value_name("REVISION:PATH")
     )]
-    blessed_from_git: Option<String>,
+    pub blessed_from_git: Option<String>,
 
     /// Loads blessed OpenAPI documents from a local directory (instead of the
     /// default, from Git).
@@ -95,7 +95,7 @@ struct BlessedSourceArgs {
         env("OPENAPI_MGR_BLESSED_FROM_DIR"),
         value_name("DIRECTORY")
     )]
-    blessed_from_dir: Option<Utf8PathBuf>,
+    pub blessed_from_dir: Option<Utf8PathBuf>,
 }
 
 impl TryFrom<BlessedSourceArgs> for BlessedSource {
@@ -128,7 +128,7 @@ pub struct GeneratedSourceArgs {
     ///
     ///
     #[clap(long, value_name("DIRECTORY"))]
-    generated_from_dir: Option<Utf8PathBuf>,
+    pub generated_from_dir: Option<Utf8PathBuf>,
 }
 
 impl From<GeneratedSourceArgs> for GeneratedSource {
@@ -228,3 +228,200 @@ pub(crate) const NEEDS_UPDATE_EXIT_CODE: u8 = 2;
 
 // This code indicates failures during generation, e.g. validation errors.
 pub(crate) const FAILURE_EXIT_CODE: u8 = 100;
+
+#[cfg(test)]
+mod test {
+    use super::{
+        App, BlessedSourceArgs, CheckArgs, Command, GeneratedSourceArgs,
+        LocalSourceArgs,
+    };
+    use crate::environment::{BlessedSource, Environment, GeneratedSource};
+    use assert_matches::assert_matches;
+    use camino::Utf8PathBuf;
+    use clap::Parser;
+
+    #[test]
+    fn test_arg_parsing() {
+        // Default case
+        let app = App::parse_from(&["dummy", "check"]);
+        assert_matches!(
+            app.command,
+            Command::Check(CheckArgs {
+                local: LocalSourceArgs { dir: None },
+                blessed: BlessedSourceArgs {
+                    blessed_from_git: None,
+                    blessed_from_dir: None
+                },
+                generated: GeneratedSourceArgs { generated_from_dir: None },
+            })
+        );
+
+        // Override local dir
+        let app = App::parse_from(&["dummy", "check", "--dir", "foo"]);
+        assert_matches!(app.command, Command::Check(CheckArgs {
+            local: LocalSourceArgs { dir: Some(local_dir) },
+            blessed:
+                BlessedSourceArgs { blessed_from_git: None, blessed_from_dir: None },
+            generated: GeneratedSourceArgs { generated_from_dir: None },
+        }) if local_dir == Utf8PathBuf::from("foo"));
+
+        // Override generated dir differently
+        let app = App::parse_from(&[
+            "dummy",
+            "check",
+            "--dir",
+            "foo",
+            "--generated-from-dir",
+            "bar",
+        ]);
+        assert_matches!(app.command, Command::Check(CheckArgs {
+            local: LocalSourceArgs { dir: Some(local_dir) },
+            blessed:
+                BlessedSourceArgs { blessed_from_git: None, blessed_from_dir: None },
+            generated: GeneratedSourceArgs { generated_from_dir: Some(generated_dir) },
+        }) if local_dir == Utf8PathBuf::from("foo") && generated_dir == Utf8PathBuf::from("bar"));
+
+        // Override blessed with a local directory.
+        let app = App::parse_from(&[
+            "dummy",
+            "check",
+            "--dir",
+            "foo",
+            "--generated-from-dir",
+            "bar",
+            "--blessed-from-dir",
+            "baz",
+        ]);
+        assert_matches!(app.command, Command::Check(CheckArgs {
+            local: LocalSourceArgs { dir: Some(local_dir) },
+            blessed:
+                BlessedSourceArgs { blessed_from_git: None, blessed_from_dir: Some(blessed_dir) },
+            generated: GeneratedSourceArgs { generated_from_dir: Some(generated_dir) },
+        }) if local_dir == Utf8PathBuf::from("foo") && generated_dir == Utf8PathBuf::from("bar") && blessed_dir == Utf8PathBuf::from("baz"));
+
+        // Override blessed from Git.
+        let app = App::parse_from(&[
+            "dummy",
+            "check",
+            "--blessed-from-git",
+            "some/other/upstream",
+        ]);
+        assert_matches!(app.command, Command::Check(CheckArgs {
+            local: LocalSourceArgs { dir: None },
+            blessed:
+                BlessedSourceArgs { blessed_from_git: Some(git), blessed_from_dir: None },
+            generated: GeneratedSourceArgs { generated_from_dir: None },
+        }) if git == "some/other/upstream");
+
+        // Error case: specifying both --blessed-from-git and --blessed-from-dir
+        let error = App::try_parse_from(&[
+            "dummy",
+            "check",
+            "--blessed-from-git",
+            "git_revision",
+            "--blessed-from-dir",
+            "dir",
+        ])
+        .unwrap_err();
+        assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
+        assert!(error.to_string().contains(
+            "error: the argument '--blessed-from-git <REVISION:PATH>' cannot \
+             be used with '--blessed-from-dir <DIRECTORY>"
+        ));
+    }
+
+    // Test how we turn `LocalSourceArgs` into `Environment`.
+    #[test]
+    fn test_local_args() {
+        let env = Environment::new(None).expect("loading environment");
+        assert_eq!(
+            env.openapi_dir().canonicalize_utf8().unwrap(),
+            [env!("CARGO_MANIFEST_DIR"), "..", "..", "openapi"]
+                .iter()
+                .collect::<Utf8PathBuf>()
+                .canonicalize_utf8()
+                .unwrap(),
+        );
+
+        let env = Environment::new(Some(Utf8PathBuf::from("/tmp")))
+            .expect("loading environment");
+        assert_eq!(
+            env.openapi_dir().canonicalize_utf8().unwrap(),
+            Utf8PathBuf::from("/tmp").canonicalize_utf8().unwrap(),
+        );
+    }
+
+    // Test how we convert `GeneratedSourceArgs` into `GeneratedSource`.
+    #[test]
+    fn test_generated_args() {
+        let source = GeneratedSource::try_from(GeneratedSourceArgs {
+            generated_from_dir: None,
+        })
+        .unwrap();
+        assert_matches!(source, GeneratedSource::Generated);
+
+        let source = GeneratedSource::try_from(GeneratedSourceArgs {
+            generated_from_dir: Some(Utf8PathBuf::from("/tmp")),
+        })
+        .unwrap();
+        assert_matches!(
+            source,
+            GeneratedSource::Directory { local_directory }
+                if local_directory == "/tmp"
+        );
+    }
+
+    // Test how we convert `BlessedSourceArgs` into `BlessedSource`.
+    #[test]
+    fn test_blessed_args() {
+        let source = BlessedSource::try_from(BlessedSourceArgs {
+            blessed_from_git: None,
+            blessed_from_dir: None,
+        })
+        .unwrap();
+        assert_matches!(
+            source,
+            BlessedSource::GitRevisionMergeBase { revision, directory}
+                if *revision == "main" && directory == "openapi"
+        );
+
+        // Override branch only
+        let source = BlessedSource::try_from(BlessedSourceArgs {
+            blessed_from_git: Some(String::from("my/other/main")),
+            blessed_from_dir: None,
+        })
+        .unwrap();
+        assert_matches!(
+            source,
+            BlessedSource::GitRevisionMergeBase { revision, directory}
+                if *revision == "my/other/main" && directory == "openapi"
+        );
+
+        // Override branch and directory
+        let source = BlessedSource::try_from(BlessedSourceArgs {
+            blessed_from_git: Some(String::from(
+                "my/other/main:other_openapi/bar",
+            )),
+            blessed_from_dir: None,
+        })
+        .unwrap();
+        assert_matches!(
+            source,
+            BlessedSource::GitRevisionMergeBase { revision, directory}
+                if *revision == "my/other/main" &&
+                     directory == "other_openapi/bar"
+        );
+
+        // Override with a local directory
+        let source = BlessedSource::try_from(BlessedSourceArgs {
+            blessed_from_git: None,
+            blessed_from_dir: Some(Utf8PathBuf::from("/tmp")),
+        })
+        .unwrap();
+        assert_matches!(
+            source,
+            BlessedSource::Directory { local_directory }
+                if local_directory == "/tmp"
+        );
+    }
+}

@@ -53,3 +53,29 @@ pub(crate) fn check_impl(
     eprintln!("{:>HEADER_WIDTH$}", SEPARATOR);
     display_resolution(env, &apis, &resolved, &styles)
 }
+
+#[cfg(test)]
+mod test {
+    use crate::cmd::check::*;
+    use crate::cmd::dispatch::*;
+    use crate::environment::Environment;
+    use std::process::ExitCode;
+
+    #[test]
+    fn check_apis_up_to_date() -> Result<ExitCode, anyhow::Error> {
+        let env = Environment::new(None)?;
+        let blessed_source = BlessedSource::try_from(BlessedSourceArgs {
+            blessed_from_git: None,
+            blessed_from_dir: None,
+        })?;
+        let generated_source =
+            GeneratedSource::try_from(GeneratedSourceArgs {
+                generated_from_dir: None,
+            })?;
+        let output = OutputOpts { color: clap::ColorChoice::Auto };
+
+        let result =
+            check_impl(&env, &blessed_source, &generated_source, &output)?;
+        Ok(result.to_exit_code())
+    }
+}

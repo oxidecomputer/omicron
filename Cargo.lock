@@ -7710,6 +7710,7 @@ name = "openapi-manager"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "atomicwrites",
  "bootstrap-agent-api",
  "camino",

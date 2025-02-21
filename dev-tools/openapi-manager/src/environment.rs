@@ -58,6 +58,7 @@ impl Environment {
 
 /// Specifies where to find blessed OpenAPI documents (the ones that are
 /// considered immutable because they've been committed-to upstream)
+#[derive(Debug)]
 pub enum BlessedSource {
     /// Blessed OpenAPI documents come from the Git merge base between `HEAD`
     /// and the specified revision (default "main"), in the specified directory.
@@ -111,6 +112,7 @@ impl BlessedSource {
 }
 
 /// Specifies how to find generated OpenAPI documents
+#[derive(Debug)]
 pub enum GeneratedSource {
     /// Generate OpenAPI documents from the API implementation (default)
     Generated,
