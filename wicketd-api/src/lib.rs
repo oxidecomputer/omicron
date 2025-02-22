@@ -23,7 +23,6 @@ use sled_hardware_types::Baseboard;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::Ipv6Addr;
-use std::time::Duration;
 use wicket_common::inventory::RackV1Inventory;
 use wicket_common::inventory::SpIdentifier;
 use wicket_common::inventory::SpType;
@@ -456,7 +455,7 @@ pub struct GetInventoryParams {
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case", tag = "type", content = "data")]
 pub enum GetInventoryResponse {
-    Response { inventory: RackV1Inventory, mgs_last_seen: Duration },
+    Response { inventory: RackV1Inventory },
     Unavailable,
 }
 
