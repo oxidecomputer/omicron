@@ -11,19 +11,18 @@ use dropshot::RequestContext;
 use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use gateway_client::types::IgnitionCommand;
-use omicron_common::api::external::SemverVersion;
 use omicron_common::update::ArtifactHashId;
 use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
 use schemars::JsonSchema;
+use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_hardware_types::Baseboard;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::Ipv6Addr;
-use std::time::Duration;
 use wicket_common::inventory::RackV1Inventory;
 use wicket_common::inventory::SpIdentifier;
 use wicket_common::inventory::SpType;
@@ -456,7 +455,7 @@ pub struct GetInventoryParams {
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case", tag = "type", content = "data")]
 pub enum GetInventoryResponse {
-    Response { inventory: RackV1Inventory, mgs_last_seen: Duration },
+    Response { inventory: RackV1Inventory },
     Unavailable,
 }
 
@@ -473,7 +472,7 @@ pub struct InstallableArtifacts {
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct GetArtifactsAndEventReportsResponse {
-    pub system_version: Option<SemverVersion>,
+    pub system_version: Option<Version>,
 
     /// Map of artifacts we ingested from the most-recently-uploaded TUF
     /// repository to a list of artifacts we're serving over the bootstrap
