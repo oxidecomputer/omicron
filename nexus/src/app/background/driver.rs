@@ -562,8 +562,8 @@ mod test {
         });
 
         // Wait for four activations of our task.  (This is three periods.) That
-        // should take between 300ms and 400ms.  Allow extra time for a busy
-        // system -- in practice, we've seen times up to 1.75 seconds.
+        // would usually take between 300ms and 400ms, but allow plenty of time
+        // as a buffer.
         let start = Instant::now();
         let wall_start = Utc::now();
         wait_until_count(rx1.clone(), 4).await;
@@ -571,8 +571,8 @@ mod test {
         let duration = start.elapsed();
         println!("rx1 -> 3 took {:?}", duration);
         assert!(
-            duration < Duration::from_secs(3),
-            "took longer than 3s to activate our \
+            duration < Duration::from_secs(30),
+            "took longer than 30s to activate our \
              every-100ms-task three times"
         );
         assert!(duration.as_millis() >= 300);

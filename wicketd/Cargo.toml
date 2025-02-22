@@ -48,6 +48,7 @@ tokio-stream.workspace = true
 tokio-util.workspace = true
 toml.workspace = true
 tough.workspace = true
+transceiver-controller.workspace = true
 uuid.workspace = true
 
 bootstrap-agent-client.workspace = true
