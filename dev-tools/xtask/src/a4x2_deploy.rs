@@ -52,6 +52,10 @@ pub enum DeployCommand {
 
     /// Start a4x2, run tests, and then stop a4x2 unless you request otherwise.
     RunTests(RunTestsArgs),
+
+    /// Query the current state of a4x2, including node access information and
+    /// whether the control plane is accessible.
+    Status,
 }
 
 #[derive(Args, Clone)]
@@ -106,11 +110,11 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
         let in_ci = env::var("CI").is_ok();
 
         let a4x2_package_tar = match &args.command {
-            // Unused by stop command, so harmless to fill in with a default
-            DeployCommand::Stop => Utf8PathBuf::from(DEFAULT_A4X2_PKG_PATH),
-
             DeployCommand::Start(args) => args.package.clone(),
             DeployCommand::RunTests(args) => args.package.clone(),
+
+            // Unused by other commands, so harmless to fill in with a default
+            _ => Utf8PathBuf::from(DEFAULT_A4X2_PKG_PATH),
         };
         let a4x2_package_tar = a4x2_package_tar.canonicalize_utf8()?;
 
@@ -132,6 +136,10 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
 
     match args.command {
         DeployCommand::Stop => teardown_a4x2(&sh, &env)?,
+        DeployCommand::Status => {
+            // TODO: expand?
+            print_a4x2_access_info(&sh, &env);
+        },
         DeployCommand::Start(_) | DeployCommand::RunTests(_) => {
             if !env.in_ci {
                 // Teardown previous deploy if it exists, before wiping the data
