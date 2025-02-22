@@ -3234,7 +3234,7 @@ mod tests {
             .expect("created blueprint builder");
             for &sled_id in &sled_ids {
                 builder
-                    .sled_ensure_disks(
+                    .sled_add_disks(
                         sled_id,
                         &planning_input
                             .sled_lookup(SledFilter::InService, sled_id)
