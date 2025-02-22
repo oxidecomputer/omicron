@@ -34,7 +34,6 @@ illumos-utils.workspace = true
 internal-dns-resolver.workspace = true
 internal-dns-types.workspace = true
 itertools.workspace = true
-once_cell.workspace = true
 oxnet.workspace = true
 reqwest.workspace = true
 schemars.workspace = true
@@ -69,6 +68,7 @@ wicket-common.workspace = true
 wicketd-api.workspace = true
 wicketd-client.workspace = true
 omicron-workspace-hack.workspace = true
+semver.workspace = true
 
 [[bin]]
 name = "wicketd"

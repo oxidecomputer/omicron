@@ -26,7 +26,6 @@ internal-dns-resolver.workspace = true
 internal-dns-types.workspace = true
 ipnetwork.workspace = true
 macaddr.workspace = true
-once_cell.workspace = true
 oxnet.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.

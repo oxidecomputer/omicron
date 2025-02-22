@@ -36,9 +36,9 @@ use hubtools::RawHubrisArchive;
 use installinator_common::InstallinatorCompletionMetadata;
 use installinator_common::InstallinatorSpec;
 use installinator_common::WriteOutput;
-use omicron_common::api::external::SemverVersion;
 use omicron_common::disk::M2Slot;
 use omicron_common::update::ArtifactHash;
+use semver::Version;
 use slog::error;
 use slog::info;
 use slog::o;
@@ -961,7 +961,7 @@ impl UpdateDriver {
                         "SP board {}, version {} (git commit {})",
                         caboose.board, caboose.version, caboose.git_commit
                     );
-                    match caboose.version.parse::<SemverVersion>() {
+                    match caboose.version.parse::<Version>() {
                         Ok(version) => {
                             StepSuccess::new((sp_artifact, Some(version)))
                                 .with_message(message)
@@ -1683,7 +1683,7 @@ struct RotInterrogation {
     sp: SpIdentifier,
     // Version reported by the target RoT.
     artifact_to_apply: ArtifactIdData,
-    active_version: Option<SemverVersion>,
+    active_version: Option<Version>,
 }
 
 impl RotInterrogation {
@@ -1705,15 +1705,15 @@ impl RotInterrogation {
         // Older versions of the SP have a bug that prevents setting
         // the active slot for the RoT bootloader. Check for these
         // and skip the update until the SP gets updated
-        const MIN_GIMLET_VERSION: SemverVersion = SemverVersion::new(1, 0, 21);
-        const MIN_SWITCH_VERSION: SemverVersion = SemverVersion::new(1, 0, 21);
-        const MIN_PSC_VERSION: SemverVersion = SemverVersion::new(1, 0, 20);
+        const MIN_GIMLET_VERSION: Version = Version::new(1, 0, 21);
+        const MIN_SWITCH_VERSION: Version = Version::new(1, 0, 21);
+        const MIN_PSC_VERSION: Version = Version::new(1, 0, 20);
 
         match sp_caboose {
             // If we can't get the SP caboose for whatever reason don't risk
             // trying an update
             None => false,
-            Some(caboose) => match caboose.version.parse::<SemverVersion>() {
+            Some(caboose) => match caboose.version.parse::<Version>() {
                 Ok(vers) => match self.sp.type_ {
                     SpType::Sled => vers >= MIN_GIMLET_VERSION,
                     SpType::Switch => vers >= MIN_SWITCH_VERSION,
@@ -1918,7 +1918,7 @@ impl UpdateContext {
                     c.version, c.git_commit
                 );
 
-                match c.version.parse::<SemverVersion>() {
+                match c.version.parse::<Version>() {
                     Ok(version) => StepSuccess::new(make_result(Some(version)))
                         .with_message(message)
                         .into(),
@@ -2012,7 +2012,7 @@ impl UpdateContext {
             active_version,
         };
 
-        match caboose.version.parse::<SemverVersion>() {
+        match caboose.version.parse::<Version>() {
             Ok(version) => StepSuccess::new(make_result(Some(version)))
                 .with_message(message)
                 .into(),

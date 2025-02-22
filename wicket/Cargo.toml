@@ -23,7 +23,6 @@ indexmap.workspace = true
 indicatif.workspace = true
 itertools.workspace = true
 omicron-common.workspace = true
-once_cell.workspace = true
 owo-colors.workspace = true
 ratatui.workspace = true
 reqwest.workspace = true
@@ -52,6 +51,7 @@ update-engine.workspace = true
 wicket-common.workspace = true
 wicketd-client.workspace = true
 omicron-workspace-hack.workspace = true
+semver.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true
