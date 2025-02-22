@@ -337,11 +337,22 @@ impl BpTableData for BlueprintZonesConfig {
                 vec![
                     zone.kind().report_str().to_string(),
                     ZoneSortKey::id(&zone).to_string(),
+                    format_image_source(&zone.image_source),
                     zone.disposition.to_string(),
                     zone.underlay_ip().to_string(),
                 ],
             )
         })
+    }
+}
+
+// XXX: consider making this the Display impl for `OmicronZoneImageSource`
+fn format_image_source(image_source: &OmicronZoneImageSource) -> String {
+    match image_source {
+        OmicronZoneImageSource::InstallDataset => "install dataset".to_string(),
+        OmicronZoneImageSource::Artifact { hash } => {
+            format!("artifact: {}", hash)
+        }
     }
 }
 

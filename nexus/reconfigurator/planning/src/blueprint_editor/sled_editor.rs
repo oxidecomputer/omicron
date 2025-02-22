@@ -8,6 +8,7 @@ use crate::blueprint_builder::SledEditCounts;
 use crate::planner::SledPlannerRng;
 use illumos_utils::zpool::ZpoolName;
 use itertools::Either;
+use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintDatasetConfig;
@@ -326,6 +327,18 @@ impl SledEditor {
         self.as_active_mut()?.expunge_zone(zone_id)
     }
 
+    /// Sets the image source for a zone.
+    ///
+    /// Currently only used by test code.
+    #[cfg_attr(not(test), expect(dead_code))]
+    pub fn set_zone_image_source(
+        &mut self,
+        zone_id: &OmicronZoneUuid,
+        image_source: OmicronZoneImageSource,
+    ) -> Result<OmicronZoneImageSource, SledEditError> {
+        self.as_active_mut()?.set_zone_image_source(zone_id, image_source)
+    }
+
     /// Backwards compatibility / test helper: If we're given a blueprint that
     /// has zones but wasn't created via `SledEditor`, it might not have
     /// datasets for all its zones. This method backfills them.
@@ -575,6 +588,15 @@ impl ActiveSledEditor {
         }
 
         Ok(did_expunge)
+    }
+
+    /// Set the image source for a zone, returning the old image source.
+    pub fn set_zone_image_source(
+        &mut self,
+        zone_id: &OmicronZoneUuid,
+        image_source: OmicronZoneImageSource,
+    ) -> Result<OmicronZoneImageSource, SledEditError> {
+        Ok(self.zones.set_zone_image_source(zone_id, image_source)?)
     }
 
     /// Backwards compatibility / test helper: If we're given a blueprint that

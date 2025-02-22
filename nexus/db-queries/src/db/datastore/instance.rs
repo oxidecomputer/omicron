@@ -1365,6 +1365,13 @@ impl DataStore {
         // Note that due to idempotency of this function, it's possible that
         // "authz_instance.id()" has already been deleted.
         let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
+        self.instance_affinity_group_memberships_delete(opctx, instance_id)
+            .await?;
+        self.instance_anti_affinity_group_memberships_delete(
+            opctx,
+            instance_id,
+        )
+        .await?;
         self.instance_ssh_keys_delete(opctx, instance_id).await?;
         self.instance_mark_migrations_deleted(opctx, instance_id).await?;
 

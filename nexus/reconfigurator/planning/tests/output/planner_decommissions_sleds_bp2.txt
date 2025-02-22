@@ -73,25 +73,25 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
 
 
     omicron zones at generation 3:
-    ---------------------------------------------------------------------------------------------
-    zone type         zone id                                disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------
-    crucible          052553cb-8a1a-42a4-a6cb-97a913e78877   in service    fd00:1122:3344:101::2d
-    crucible          1bd2301a-acd3-4a9c-82d7-b0c19a3c5597   in service    fd00:1122:3344:101::27
-    crucible          7975aa01-6fa9-4622-a8ba-8bfcf000f8eb   in service    fd00:1122:3344:101::2b
-    crucible          85286e23-2498-4034-9999-c5263fc0295f   in service    fd00:1122:3344:101::28
-    crucible          a320b746-b5f6-4027-9c3c-d41e099f2def   in service    fd00:1122:3344:101::2c
-    crucible          dcd393d4-d16c-41a8-8c16-48e0ab80d2e2   in service    fd00:1122:3344:101::25
-    crucible          de34e868-675e-4291-a2f7-c0b24e2e18a1   in service    fd00:1122:3344:101::26
-    crucible          e11dd8a6-951a-4019-8775-bed3a2092aaa   in service    fd00:1122:3344:101::24
-    crucible          f8cdd98e-4ab4-46bb-b621-7590808582cc   in service    fd00:1122:3344:101::2a
-    crucible          fcccf363-d190-441c-ba40-58e24f8a9cb3   in service    fd00:1122:3344:101::29
-    crucible_pantry   6b6843d6-062c-4400-8fd9-d11b5d138fe6   in service    fd00:1122:3344:101::2e
-    crucible_pantry   a22472df-5df2-4c1f-ad1f-439a4164984f   in service    fd00:1122:3344:101::23
-    internal_dns      936b1cbb-84e5-48ab-bc59-3bbd7830a421   in service    fd00:1122:3344:2::1   
-    internal_ntp      52031fcc-eb18-45f5-ae6c-65c7858b5e93   in service    fd00:1122:3344:101::21
-    nexus             33ef9872-ee9a-4478-89b9-b22b78e00d3a   in service    fd00:1122:3344:101::22
-    nexus             75fb916b-4793-4cd0-873b-573768b1efe5   in service    fd00:1122:3344:101::2f
+    ---------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition   underlay IP           
+    ---------------------------------------------------------------------------------------------------------------
+    crucible          052553cb-8a1a-42a4-a6cb-97a913e78877   install dataset   in service    fd00:1122:3344:101::2d
+    crucible          1bd2301a-acd3-4a9c-82d7-b0c19a3c5597   install dataset   in service    fd00:1122:3344:101::27
+    crucible          7975aa01-6fa9-4622-a8ba-8bfcf000f8eb   install dataset   in service    fd00:1122:3344:101::2b
+    crucible          85286e23-2498-4034-9999-c5263fc0295f   install dataset   in service    fd00:1122:3344:101::28
+    crucible          a320b746-b5f6-4027-9c3c-d41e099f2def   install dataset   in service    fd00:1122:3344:101::2c
+    crucible          dcd393d4-d16c-41a8-8c16-48e0ab80d2e2   install dataset   in service    fd00:1122:3344:101::25
+    crucible          de34e868-675e-4291-a2f7-c0b24e2e18a1   install dataset   in service    fd00:1122:3344:101::26
+    crucible          e11dd8a6-951a-4019-8775-bed3a2092aaa   install dataset   in service    fd00:1122:3344:101::24
+    crucible          f8cdd98e-4ab4-46bb-b621-7590808582cc   install dataset   in service    fd00:1122:3344:101::2a
+    crucible          fcccf363-d190-441c-ba40-58e24f8a9cb3   install dataset   in service    fd00:1122:3344:101::29
+    crucible_pantry   6b6843d6-062c-4400-8fd9-d11b5d138fe6   install dataset   in service    fd00:1122:3344:101::2e
+    crucible_pantry   a22472df-5df2-4c1f-ad1f-439a4164984f   install dataset   in service    fd00:1122:3344:101::23
+    internal_dns      936b1cbb-84e5-48ab-bc59-3bbd7830a421   install dataset   in service    fd00:1122:3344:2::1   
+    internal_ntp      52031fcc-eb18-45f5-ae6c-65c7858b5e93   install dataset   in service    fd00:1122:3344:101::21
+    nexus             33ef9872-ee9a-4478-89b9-b22b78e00d3a   install dataset   in service    fd00:1122:3344:101::22
+    nexus             75fb916b-4793-4cd0-873b-573768b1efe5   install dataset   in service    fd00:1122:3344:101::2f
 
 
 
@@ -169,48 +169,48 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
 
 
     omicron zones at generation 3:
-    ---------------------------------------------------------------------------------------------
-    zone type         zone id                                disposition   underlay IP           
-    ---------------------------------------------------------------------------------------------
-    clickhouse        a5813480-2b89-4e18-a09b-c9e5b6b317cc   in service    fd00:1122:3344:102::2e
-    crucible          40f9f06b-eed5-47b9-9925-8afd5540d9f5   in service    fd00:1122:3344:102::24
-    crucible          4561a213-e297-41d2-b40d-995b35715ede   in service    fd00:1122:3344:102::27
-    crucible          5e41815b-3aa2-4507-b3ea-3694c0e05b34   in service    fd00:1122:3344:102::2d
-    crucible          619451af-30b4-4252-9688-379be6555534   in service    fd00:1122:3344:102::2a
-    crucible          64f9bfcb-c1d5-4f15-a877-778ba83c4ada   in service    fd00:1122:3344:102::26
-    crucible          a6ac7172-669b-4ac1-9532-2848bcb80545   in service    fd00:1122:3344:102::2c
-    crucible          e65276c2-baeb-4ab1-9a37-e48786f14dad   in service    fd00:1122:3344:102::29
-    crucible          e6788bd0-ac6e-4125-93d0-aacbc6380f04   in service    fd00:1122:3344:102::28
-    crucible          ea37e4ab-65c6-463a-a2d4-9cf8f0ccbd00   in service    fd00:1122:3344:102::25
-    crucible          f52b4e76-5989-42cf-9208-60548c34b487   in service    fd00:1122:3344:102::2b
-    crucible_pantry   4c1e95a8-7fae-4a3a-8651-9272ef7c9a88   in service    fd00:1122:3344:102::23
-    internal_dns      7b2bb1aa-639b-4aaa-bd80-9c680e4be5fc   in service    fd00:1122:3344:3::1   
-    internal_dns      d74f14f1-0a19-4d92-b76f-1b3a6e630b2c   in service    fd00:1122:3344:1::1   
-    internal_ntp      064ec0c2-a320-4efb-b006-9e0e1d942d8e   in service    fd00:1122:3344:102::21
-    nexus             294379f6-502c-465b-b32d-771c415a38af   in service    fd00:1122:3344:102::22
+    ---------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition   underlay IP           
+    ---------------------------------------------------------------------------------------------------------------
+    clickhouse        a5813480-2b89-4e18-a09b-c9e5b6b317cc   install dataset   in service    fd00:1122:3344:102::2e
+    crucible          40f9f06b-eed5-47b9-9925-8afd5540d9f5   install dataset   in service    fd00:1122:3344:102::24
+    crucible          4561a213-e297-41d2-b40d-995b35715ede   install dataset   in service    fd00:1122:3344:102::27
+    crucible          5e41815b-3aa2-4507-b3ea-3694c0e05b34   install dataset   in service    fd00:1122:3344:102::2d
+    crucible          619451af-30b4-4252-9688-379be6555534   install dataset   in service    fd00:1122:3344:102::2a
+    crucible          64f9bfcb-c1d5-4f15-a877-778ba83c4ada   install dataset   in service    fd00:1122:3344:102::26
+    crucible          a6ac7172-669b-4ac1-9532-2848bcb80545   install dataset   in service    fd00:1122:3344:102::2c
+    crucible          e65276c2-baeb-4ab1-9a37-e48786f14dad   install dataset   in service    fd00:1122:3344:102::29
+    crucible          e6788bd0-ac6e-4125-93d0-aacbc6380f04   install dataset   in service    fd00:1122:3344:102::28
+    crucible          ea37e4ab-65c6-463a-a2d4-9cf8f0ccbd00   install dataset   in service    fd00:1122:3344:102::25
+    crucible          f52b4e76-5989-42cf-9208-60548c34b487   install dataset   in service    fd00:1122:3344:102::2b
+    crucible_pantry   4c1e95a8-7fae-4a3a-8651-9272ef7c9a88   install dataset   in service    fd00:1122:3344:102::23
+    internal_dns      7b2bb1aa-639b-4aaa-bd80-9c680e4be5fc   install dataset   in service    fd00:1122:3344:3::1   
+    internal_dns      d74f14f1-0a19-4d92-b76f-1b3a6e630b2c   install dataset   in service    fd00:1122:3344:1::1   
+    internal_ntp      064ec0c2-a320-4efb-b006-9e0e1d942d8e   install dataset   in service    fd00:1122:3344:102::21
+    nexus             294379f6-502c-465b-b32d-771c415a38af   install dataset   in service    fd00:1122:3344:102::22
 
 
 !a1b477db-b629-48eb-911d-1ccdafca75b9
 WARNING: Zones exist without physical disks!
     omicron zones at generation 3:
-    ----------------------------------------------------------------------------------------------
-    zone type         zone id                                disposition    underlay IP           
-    ----------------------------------------------------------------------------------------------
-    clickhouse        3fd081ea-93f1-417e-bcb1-405854435f28   expunged ⏳     fd00:1122:3344:103::23
-    crucible          290e7e97-c4b3-47da-9f40-8d909397fbae   expunged ⏳     fd00:1122:3344:103::2e
-    crucible          29bbe4ad-e6e8-4e05-b188-a811a793ccbb   expunged ⏳     fd00:1122:3344:103::2a
-    crucible          8500a060-a426-4324-ba40-a66dd4b89bc6   expunged ⏳     fd00:1122:3344:103::29
-    crucible          92b7abd8-3e34-49dd-9c56-19a314e97d49   expunged ⏳     fd00:1122:3344:103::25
-    crucible          b320954e-6c66-4540-9bf4-3d976f21ee1b   expunged ⏳     fd00:1122:3344:103::26
-    crucible          bc3e4495-7e51-46b6-9f55-026ea1da39dd   expunged ⏳     fd00:1122:3344:103::27
-    crucible          cfb7595b-280c-40f5-b1aa-6e154adf280b   expunged ⏳     fd00:1122:3344:103::28
-    crucible          d6b6ea5a-3f29-4815-aa42-b1afeb11dfc5   expunged ⏳     fd00:1122:3344:103::2c
-    crucible          d6b77c1f-8c9e-406d-944e-c97a57b3984d   expunged ⏳     fd00:1122:3344:103::2b
-    crucible          ecc03801-b315-4495-9b2c-49e0eead1283   expunged ⏳     fd00:1122:3344:103::2d
-    crucible_pantry   ecebab45-11e7-47ab-8bc2-ab9114c6e2bc   expunged ⏳     fd00:1122:3344:103::24
-    internal_dns      96b7a45b-be74-44e8-b68a-e530cfa81830   expunged ⏳     fd00:1122:3344:1::1   
-    internal_ntp      b3dbc671-0e4d-49ff-9f4f-71b249d21f57   expunged ⏳     fd00:1122:3344:103::21
-    nexus             bc0f4342-f88d-49cc-bb44-b555d9b8ca12   expunged ⏳     fd00:1122:3344:103::22
+    ----------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition    underlay IP           
+    ----------------------------------------------------------------------------------------------------------------
+    clickhouse        3fd081ea-93f1-417e-bcb1-405854435f28   install dataset   expunged ⏳     fd00:1122:3344:103::23
+    crucible          290e7e97-c4b3-47da-9f40-8d909397fbae   install dataset   expunged ⏳     fd00:1122:3344:103::2e
+    crucible          29bbe4ad-e6e8-4e05-b188-a811a793ccbb   install dataset   expunged ⏳     fd00:1122:3344:103::2a
+    crucible          8500a060-a426-4324-ba40-a66dd4b89bc6   install dataset   expunged ⏳     fd00:1122:3344:103::29
+    crucible          92b7abd8-3e34-49dd-9c56-19a314e97d49   install dataset   expunged ⏳     fd00:1122:3344:103::25
+    crucible          b320954e-6c66-4540-9bf4-3d976f21ee1b   install dataset   expunged ⏳     fd00:1122:3344:103::26
+    crucible          bc3e4495-7e51-46b6-9f55-026ea1da39dd   install dataset   expunged ⏳     fd00:1122:3344:103::27
+    crucible          cfb7595b-280c-40f5-b1aa-6e154adf280b   install dataset   expunged ⏳     fd00:1122:3344:103::28
+    crucible          d6b6ea5a-3f29-4815-aa42-b1afeb11dfc5   install dataset   expunged ⏳     fd00:1122:3344:103::2c
+    crucible          d6b77c1f-8c9e-406d-944e-c97a57b3984d   install dataset   expunged ⏳     fd00:1122:3344:103::2b
+    crucible          ecc03801-b315-4495-9b2c-49e0eead1283   install dataset   expunged ⏳     fd00:1122:3344:103::2d
+    crucible_pantry   ecebab45-11e7-47ab-8bc2-ab9114c6e2bc   install dataset   expunged ⏳     fd00:1122:3344:103::24
+    internal_dns      96b7a45b-be74-44e8-b68a-e530cfa81830   install dataset   expunged ⏳     fd00:1122:3344:1::1   
+    internal_ntp      b3dbc671-0e4d-49ff-9f4f-71b249d21f57   install dataset   expunged ⏳     fd00:1122:3344:103::21
+    nexus             bc0f4342-f88d-49cc-bb44-b555d9b8ca12   install dataset   expunged ⏳     fd00:1122:3344:103::22
 
 
 

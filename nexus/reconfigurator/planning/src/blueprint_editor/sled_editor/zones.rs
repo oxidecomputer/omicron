@@ -4,6 +4,7 @@
 
 use crate::blueprint_builder::EditCounts;
 use illumos_utils::zpool::ZpoolName;
+use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::id_map::Entry;
 use nexus_types::deployment::id_map::IdMap;
@@ -22,6 +23,13 @@ pub enum ZonesEditError {
     AddDuplicateZoneId { id: OmicronZoneUuid, kind1: ZoneKind, kind2: ZoneKind },
     #[error("tried to expunge nonexistent zone {id}")]
     ExpungeNonexistentZone { id: OmicronZoneUuid },
+    #[error(
+        "tried to set image source for nonexistent zone {id} to {image_source:?}"
+    )]
+    SetImageSourceForNonexistentZone {
+        id: OmicronZoneUuid,
+        image_source: OmicronZoneImageSource,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -136,6 +144,28 @@ impl ZonesEditor {
             Self::expunge_impl(&mut config, &mut self.counts, self.generation);
 
         Ok((did_expunge, config.into_ref()))
+    }
+
+    /// Set the image source for a zone, returning the old image source.
+    pub fn set_zone_image_source(
+        &mut self,
+        zone_id: &OmicronZoneUuid,
+        image_source: OmicronZoneImageSource,
+    ) -> Result<OmicronZoneImageSource, ZonesEditError> {
+        let mut config = self.zones.get_mut(zone_id).ok_or_else(|| {
+            ZonesEditError::SetImageSourceForNonexistentZone {
+                id: *zone_id,
+                image_source: image_source.clone(),
+            }
+        })?;
+
+        let old_image_source = config.image_source.clone();
+        if old_image_source != image_source {
+            self.counts.updated += 1;
+        }
+        config.image_source = image_source;
+
+        Ok(old_image_source)
     }
 
     fn expunge_impl(
