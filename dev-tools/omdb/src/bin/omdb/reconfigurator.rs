@@ -8,17 +8,27 @@ use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::db::DbUrlOptions;
 use crate::Omdb;
 use anyhow::Context as _;
+use async_bb8_diesel::AsyncRunQueryDsl;
 use camino::Utf8PathBuf;
 use clap::Args;
 use clap::Subcommand;
+use diesel::ExpressionMethods;
+use diesel::QueryDsl;
+use diesel::SelectableHelper;
+use nexus_db_model::BpTarget;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
+use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
+use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use slog::Logger;
+use std::collections::BTreeMap;
 
 /// Arguments to the "omdb reconfigurator" subcommand
 #[derive(Debug, Args)]
@@ -40,6 +50,8 @@ enum ReconfiguratorCommands {
     /// Save the current Reconfigurator state to a file and remove historical
     /// artifacts from the live system (e.g., non-target blueprints)
     Archive(ExportArgs),
+    /// Show recent history of blueprints
+    History,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -76,6 +88,9 @@ impl ReconfiguratorArgs {
                             token,
                         )
                         .await
+                    }
+                    ReconfiguratorCommands::History => {
+                        cmd_reconfigurator_history(&opctx, &datastore).await
                     }
                 }
             })
@@ -188,6 +203,92 @@ async fn cmd_reconfigurator_archive(
     } else {
         let plural = if ndeleted == 1 { "" } else { "s" };
         eprintln!("done ({ndeleted} blueprint{plural} deleted)",);
+    }
+
+    Ok(())
+}
+
+/// Show recent history of blueprints
+async fn cmd_reconfigurator_history(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    // XXX-dap accept limit option?  paginate?
+) -> anyhow::Result<()> {
+    const LIMIT: i64 = 128;
+
+    // Select recent targets.
+    let mut targets: Vec<_> = {
+        use nexus_db_queries::db::schema::bp_target::dsl;
+        let conn = datastore
+            .pool_connection_for_tests()
+            .await
+            .context("obtaining connection")?;
+        dsl::bp_target
+            .select(BpTarget::as_select())
+            .order_by(dsl::version.desc())
+            .limit(LIMIT)
+            .get_results_async(&*conn)
+            .await
+            .context("listing targets")?
+    };
+
+    // Select everything from the blueprint table.
+    // This shouldn't be very large.
+    let mut all_blueprints: BTreeMap<BlueprintUuid, BlueprintMetadata> =
+        BTreeMap::new();
+    let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+    while let Some(p) = paginator.next() {
+        let records_batch = datastore
+            .blueprints_list(opctx, &p.current_pagparams())
+            .await
+            .context("batch of blueprints")?;
+        paginator = p.found_batch(&records_batch, &|b| *b.id.as_untyped_uuid());
+        all_blueprints.extend(
+            records_batch
+                .into_iter()
+                .map(|b| (b.id, BlueprintMetadata::from(b))),
+        );
+    }
+
+    // Sort the target list in increasing order.
+    // (This should be the same as reversing it.)
+    targets.sort_by_key(|b| b.version);
+
+    // Now, print the history.
+    if targets.len() == usize::try_from(LIMIT).unwrap() {
+        println!("... (earlier history omitted)");
+    }
+
+    println!("{:>5} {:24} {:36}", "VERSN", "TIME", "BLUEPRINT");
+    let mut prev: Option<BlueprintUuid> = None;
+    for t in targets {
+        let target_id = BlueprintUuid::from(t.blueprint_id);
+
+        print!(
+            "{:>5} {} {} {:>8}",
+            t.version,
+            humantime::format_rfc3339_millis(t.time_made_target.into()),
+            target_id,
+            if t.enabled { "enabled" } else { "disabled" },
+        );
+
+        let same_blueprint = matches!(prev,
+            Some(prev_id) if prev_id == target_id
+        );
+        if same_blueprint {
+            // The only change here could be to the enable/disable bit.
+            // There's nothing else to say.
+            println!();
+        } else {
+            // The blueprint id changed.
+            let comment = match all_blueprints.get(&target_id) {
+                Some(b) => &b.comment,
+                None => "blueprint details no longer available",
+            };
+            println!(": {}", comment);
+        }
+
+        prev = Some(target_id);
     }
 
     Ok(())
