@@ -469,6 +469,48 @@ table! {
 }
 
 table! {
+    affinity_group (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        project_id -> Uuid,
+        policy -> crate::AffinityPolicyEnum,
+        failure_domain -> crate::FailureDomainEnum,
+    }
+}
+
+table! {
+    anti_affinity_group (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        project_id -> Uuid,
+        policy -> crate::AffinityPolicyEnum,
+        failure_domain -> crate::FailureDomainEnum,
+    }
+}
+
+table! {
+    affinity_group_instance_membership (group_id, instance_id) {
+        group_id -> Uuid,
+        instance_id -> Uuid,
+    }
+}
+
+table! {
+    anti_affinity_group_instance_membership (group_id, instance_id) {
+        group_id -> Uuid,
+        instance_id -> Uuid,
+    }
+}
+
+table! {
     metric_producer (id) {
         id -> Uuid,
         time_created -> Timestamptz,
@@ -915,10 +957,11 @@ table! {
     sled_resource (id) {
         id -> Uuid,
         sled_id -> Uuid,
-        kind -> crate::SledResourceKindEnum,
         hardware_threads -> Int8,
         rss_ram -> Int8,
         reservoir_ram -> Int8,
+        kind -> crate::SledResourceKindEnum,
+        instance_id -> Nullable<Uuid>,
     }
 }
 
@@ -2029,6 +2072,10 @@ allow_tables_to_appear_in_same_query!(
 allow_tables_to_appear_in_same_query!(hw_baseboard_id, inv_sled_agent,);
 
 allow_tables_to_appear_in_same_query!(
+    anti_affinity_group,
+    anti_affinity_group_instance_membership,
+    affinity_group,
+    affinity_group_instance_membership,
     bp_omicron_zone,
     bp_target,
     rendezvous_debug_dataset,

@@ -2039,7 +2039,6 @@ mod tests {
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use once_cell::sync::Lazy;
     use oxnet::IpNet;
     use pretty_assertions::assert_eq;
     use rand::thread_rng;
@@ -2054,10 +2053,11 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
+    use std::sync::LazyLock;
     use std::time::Duration;
 
-    static EMPTY_PLANNING_INPUT: Lazy<PlanningInput> =
-        Lazy::new(|| PlanningInputBuilder::empty_input());
+    static EMPTY_PLANNING_INPUT: LazyLock<PlanningInput> =
+        LazyLock::new(|| PlanningInputBuilder::empty_input());
 
     #[derive(Default)]
     pub struct NetworkResourceControlFlow {
