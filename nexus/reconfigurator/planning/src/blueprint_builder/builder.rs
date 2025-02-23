@@ -20,6 +20,7 @@ use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context as _;
 use clickhouse_admin_types::OXIMETER_CLUSTER;
+use itertools::Either;
 use nexus_inventory::now_db_precision;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -34,7 +35,6 @@ use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
-use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::ClickhouseClusterConfig;
@@ -144,7 +144,8 @@ pub enum EnsureMultiple {
         expunged: usize,
         /// An item was removed from the blueprint.
         ///
-        /// This usually happens after the work of expungment has completed.
+        /// This happens after expungement or decommissioning has completed
+        /// depending upon the resource type.
         removed: usize,
     },
 
@@ -174,7 +175,8 @@ pub struct EditCounts {
     pub expunged: usize,
     /// An item was removed from the blueprint.
     ///
-    /// This usually happens after the work of expungment has completed.
+    /// This happens after expungement or decommissioning has completed
+    /// depending upon the resource type.
     pub removed: usize,
 }
 
@@ -380,6 +382,9 @@ pub struct BlueprintBuilder<'a> {
     // adding zones, so this delay allows us to reuse resources that just came
     // free. (This is implicit and awkward; as we rework the builder we should
     // rework this to make it more explicit.)
+    //
+    // Note: this is currently still a `once_cell` `OnceCell` rather than a std
+    // `OnceCell`, because `get_or_try_init` isn't stable yet.
     resource_allocator: OnceCell<BlueprintResourceAllocator>,
 
     // These fields will become part of the final blueprint.  See the
@@ -632,6 +637,10 @@ impl<'a> BlueprintBuilder<'a> {
         })
     }
 
+    pub fn parent_blueprint(&self) -> &Blueprint {
+        &self.parent_blueprint
+    }
+
     fn resource_allocator(
         &mut self,
     ) -> Result<&mut BlueprintResourceAllocator, Error> {
@@ -668,16 +677,32 @@ impl<'a> BlueprintBuilder<'a> {
         self.sled_editors.keys().copied()
     }
 
-    pub fn current_sled_zones(
+    pub fn current_sled_zones<F>(
         &self,
         sled_id: SledUuid,
-        filter: BlueprintZoneFilter,
-    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
+        filter: F,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig>
+    where
+        F: FnMut(BlueprintZoneDisposition) -> bool,
+    {
         let Some(editor) = self.sled_editors.get(&sled_id) else {
-            return Box::new(iter::empty())
-                as Box<dyn Iterator<Item = &BlueprintZoneConfig>>;
+            return Either::Left(iter::empty());
         };
-        Box::new(editor.zones(filter))
+        Either::Right(editor.zones(filter))
+    }
+
+    pub fn current_sled_disks<F>(
+        &self,
+        sled_id: SledUuid,
+        filter: F,
+    ) -> impl Iterator<Item = &BlueprintPhysicalDiskConfig>
+    where
+        F: FnMut(BlueprintPhysicalDiskDisposition) -> bool,
+    {
+        let Some(editor) = self.sled_editors.get(&sled_id) else {
+            return Either::Left(iter::empty());
+        };
+        Either::Right(editor.disks(filter))
     }
 
     /// Assemble a final [`Blueprint`] based on the contents of the builder
@@ -714,27 +739,12 @@ impl<'a> BlueprintBuilder<'a> {
                 );
             }
         }
-        // Preserving backwards compatibility, for now: disks should only
-        // have entries for in-service sleds, and expunged disks should be
-        // removed entirely.
+        // Preserving backwards compatibility, for now: datasets should only
+        // have entries for in-service sleds.
         let in_service_sled_ids = self
             .input
             .all_sled_ids(SledFilter::InService)
             .collect::<BTreeSet<_>>();
-        blueprint_disks.retain(|sled_id, disks_config| {
-            if !in_service_sled_ids.contains(sled_id) {
-                return false;
-            }
-
-            disks_config.disks.retain(|config| match config.disposition {
-                BlueprintPhysicalDiskDisposition::InService => true,
-                BlueprintPhysicalDiskDisposition::Expunged => false,
-            });
-
-            true
-        });
-        // Preserving backwards compatibility, for now: datasets should only
-        // have entries for in-service sleds.
         blueprint_datasets
             .retain(|sled_id, _| in_service_sled_ids.contains(sled_id));
 
@@ -899,13 +909,10 @@ impl<'a> BlueprintBuilder<'a> {
         let mut num_zones_expunged = 0;
 
         let mut disks_to_expunge = Vec::new();
-        for disk in editor.disks(DiskFilter::All) {
-            match disk.disposition {
-                BlueprintPhysicalDiskDisposition::InService => {
-                    disks_to_expunge.push(disk.id);
-                }
-                BlueprintPhysicalDiskDisposition::Expunged => (),
-            }
+        for disk in
+            editor.disks(BlueprintPhysicalDiskDisposition::is_in_service)
+        {
+            disks_to_expunge.push(disk.id);
         }
         for disk_id in disks_to_expunge {
             let details = editor
@@ -916,16 +923,22 @@ impl<'a> BlueprintBuilder<'a> {
             }
             num_datasets_expunged += details.num_datasets_expunged;
             num_zones_expunged += details.num_zones_expunged;
+
+            // When we expunge a disk on an expunged sled, we can decommission
+            // it immediately because the sled is already gone. There is no sled
+            // agent to notify about the  disk expungement.
+            editor
+                .decommission_disk(&disk_id)
+                .map_err(|err| Error::SledEditError { sled_id, err })?;
         }
 
         // Expunging a disk expunges any datasets and zones that depend on it,
         // so expunging all in-service disks should have also expunged all
         // datasets and zones. Double-check that that's true.
-        for zone in editor.zones(BlueprintZoneFilter::All) {
+        for zone in editor.zones(BlueprintZoneDisposition::any) {
             match zone.disposition {
-                BlueprintZoneDisposition::Expunged => (),
-                BlueprintZoneDisposition::InService
-                | BlueprintZoneDisposition::Quiesced => {
+                BlueprintZoneDisposition::Expunged { .. } => (),
+                BlueprintZoneDisposition::InService => {
                     return Err(Error::Planner(anyhow!(
                         "expunged all disks but a zone \
                          is still in service: {zone:?}"
@@ -976,7 +989,7 @@ impl<'a> BlueprintBuilder<'a> {
 
         let mut zones_to_expunge = Vec::new();
 
-        for zone in editor.zones(BlueprintZoneFilter::ShouldBeRunning) {
+        for zone in editor.zones(BlueprintZoneDisposition::is_in_service) {
             if zone.zone_type.is_clickhouse_keeper()
                 || zone.zone_type.is_clickhouse_server()
             {
@@ -1019,7 +1032,7 @@ impl<'a> BlueprintBuilder<'a> {
 
         let mut zones_to_expunge = Vec::new();
 
-        for zone in editor.zones(BlueprintZoneFilter::ShouldBeRunning) {
+        for zone in editor.zones(BlueprintZoneDisposition::is_in_service) {
             if zone.zone_type.is_clickhouse() {
                 zones_to_expunge.push(zone.id);
             }
@@ -1046,35 +1059,23 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(())
     }
 
-    /// Ensures that the blueprint contains disks for a sled which already
-    /// exists in the database.
-    ///
-    /// This operation must perform the following:
-    /// - Ensure that any disks / zpools that exist in the database
-    ///   are propagated into the blueprint.
-    /// - Ensure that any disks that are expunged from the database are
-    ///   removed from the blueprint.
-    pub fn sled_ensure_disks(
+    /// Add any disks to the blueprint
+    /// Called by the planner in the `do_plan_add()` stage of planning
+    pub fn sled_add_disks(
         &mut self,
         sled_id: SledUuid,
-        resources: &SledResources,
+        sled_resources: &SledResources,
     ) -> Result<SledEditCounts, Error> {
-        // These are the disks known to our (last?) blueprint
         let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
-                "tried to ensure disks for unknown sled {sled_id}"
+                "tried to add disks for unknown sled {sled_id}"
             ))
         })?;
         let initial_counts = editor.edit_counts();
 
-        let blueprint_disk_ids = editor
-            .disks(DiskFilter::InService)
-            .map(|config| config.id)
-            .collect::<Vec<_>>();
-
         // These are the in-service disks as we observed them in the database,
         // during the planning phase
-        let database_disks = resources
+        let database_disks = sled_resources
             .all_disks(DiskFilter::InService)
             .map(|(zpool, disk)| (disk.disk_id, (zpool, disk)));
         let mut database_disk_ids = BTreeSet::new();
@@ -1097,17 +1098,36 @@ impl<'a> BlueprintBuilder<'a> {
                 .map_err(|err| Error::SledEditError { sled_id, err })?;
         }
 
-        // Remove any disks that appear in the blueprint, but not the database
-        for disk_id in blueprint_disk_ids {
-            if !database_disk_ids.contains(&disk_id) {
-                editor
-                    .expunge_disk(&disk_id)
-                    .map_err(|err| Error::SledEditError { sled_id, err })?;
-            }
-        }
         let final_counts = editor.edit_counts();
-
         Ok(final_counts.difference_since(initial_counts))
+    }
+
+    /// Decommission any expunged disks.
+    ///
+    /// Note: This method is called by the planner only for `InService` sleds.
+    /// `Self::expunge_sled` expunges and decommissions disks immediately since
+    /// the sled is already gone by that point.
+    ///
+    /// Called by the planner in
+    /// `do_plan_decommission_expunged_disks_for_in_service_sled()`.
+    pub fn sled_decommission_disks(
+        &mut self,
+        sled_id: SledUuid,
+        disk_ids: Vec<PhysicalDiskUuid>,
+    ) -> Result<(), Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to decommission disks for unknown sled {sled_id}"
+            ))
+        })?;
+
+        for disk_id in disk_ids {
+            editor
+                .decommission_disk(&disk_id)
+                .map_err(|err| Error::SledEditError { sled_id, err })?;
+        }
+
+        Ok(())
     }
 
     /// Ensure that a sled in the blueprint has all the datasets it needs for
@@ -1157,7 +1177,10 @@ impl<'a> BlueprintBuilder<'a> {
 
     fn next_internal_dns_gz_address_index(&self, sled_id: SledUuid) -> u32 {
         let used_internal_dns_gz_address_indices = self
-            .current_sled_zones(sled_id, BlueprintZoneFilter::ShouldBeRunning)
+            .current_sled_zones(
+                sled_id,
+                BlueprintZoneDisposition::is_in_service,
+            )
             .filter_map(|z| match z.zone_type {
                 BlueprintZoneType::InternalDns(
                     blueprint_zone_type::InternalDns {
@@ -1271,7 +1294,7 @@ impl<'a> BlueprintBuilder<'a> {
                 ))
             })?;
             editor
-                .zones(BlueprintZoneFilter::ShouldBeRunning)
+                .zones(BlueprintZoneDisposition::is_in_service)
                 .any(|z| z.zone_type.is_ntp())
         };
         if has_ntp {
@@ -1313,7 +1336,7 @@ impl<'a> BlueprintBuilder<'a> {
                     "tried to ensure crucible zone for unknown sled {sled_id}"
                 ))
             })?;
-            editor.zones(BlueprintZoneFilter::ShouldBeRunning).any(|z| {
+            editor.zones(BlueprintZoneDisposition::is_in_service).any(|z| {
                 matches!(
                     &z.zone_type,
                     BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
@@ -1373,7 +1396,7 @@ impl<'a> BlueprintBuilder<'a> {
             return 0;
         };
         editor
-            .zones(BlueprintZoneFilter::ShouldBeRunning)
+            .zones(BlueprintZoneDisposition::is_in_service)
             .filter(|z| z.zone_type.kind() == kind)
             .count()
     }
@@ -1395,7 +1418,7 @@ impl<'a> BlueprintBuilder<'a> {
         // settings should be part of `Policy` instead?
         let (external_tls, external_dns_servers) = self
             .parent_blueprint
-            .all_omicron_zones(BlueprintZoneFilter::All)
+            .all_omicron_zones(BlueprintZoneDisposition::any)
             .find_map(|(_, z)| match &z.zone_type {
                 BlueprintZoneType::Nexus(nexus) => Some((
                     nexus.external_tls,
@@ -1635,7 +1658,7 @@ impl<'a> BlueprintBuilder<'a> {
         // from an existing one.
         let (ntp_servers, dns_servers, domain) = self
             .parent_blueprint
-            .all_omicron_zones(BlueprintZoneFilter::All)
+            .all_omicron_zones(BlueprintZoneDisposition::any)
             .find_map(|(_, z)| match &z.zone_type {
                 BlueprintZoneType::BoundaryNtp(zone_config) => Some((
                     zone_config.ntp_servers.clone(),
@@ -1669,7 +1692,7 @@ impl<'a> BlueprintBuilder<'a> {
 
         // Find the internal NTP zone and expunge it.
         let mut internal_ntp_zone_id_iter = editor
-            .zones(BlueprintZoneFilter::ShouldBeRunning)
+            .zones(BlueprintZoneDisposition::is_in_service)
             .filter_map(|zone| {
                 if matches!(zone.zone_type, BlueprintZoneType::InternalNtp(_)) {
                     Some(zone.id)
@@ -1821,7 +1844,7 @@ impl<'a> BlueprintBuilder<'a> {
         // blueprint and the list of all in-service zpools on this sled per our
         // planning input, and only pick zpools that are available in both.
         let current_sled_disks = editor
-            .disks(DiskFilter::InService)
+            .disks(BlueprintPhysicalDiskDisposition::is_in_service)
             .map(|disk_config| disk_config.pool_id)
             .collect::<BTreeSet<_>>();
 
@@ -1833,7 +1856,10 @@ impl<'a> BlueprintBuilder<'a> {
         // up a set of invalid zpools for this sled/kind pair.
         let mut skip_zpools = BTreeSet::new();
         for zone_config in self
-            .current_sled_zones(sled_id, BlueprintZoneFilter::ShouldBeRunning)
+            .current_sled_zones(
+                sled_id,
+                BlueprintZoneDisposition::is_in_service,
+            )
             .filter(|z| z.zone_type.kind() == zone_kind)
         {
             if let Some(zpool) = zone_config.zone_type.durable_zpool() {
@@ -1877,7 +1903,7 @@ impl<'a> BlueprintBuilder<'a> {
     /// TODO-cleanup: Remove when external DNS addresses are in the policy.
     pub fn count_parent_external_dns_zones(&self) -> usize {
         self.parent_blueprint
-            .all_omicron_zones(BlueprintZoneFilter::All)
+            .all_omicron_zones(BlueprintZoneDisposition::any)
             .filter_map(|(_id, zone)| match &zone.zone_type {
                 BlueprintZoneType::ExternalDns(dns) => {
                     Some(dns.dns_address.addr.ip())
@@ -1957,7 +1983,9 @@ pub(super) fn ensure_input_networking_records_appear_in_parent_blueprint(
     // constructed above in `BuilderExternalNetworking::new()`, we do not
     // check for duplicates here: we could very well see reuse of IPs
     // between expunged zones or between expunged -> running zones.
-    for (_, z) in parent_blueprint.all_omicron_zones(BlueprintZoneFilter::All) {
+    for (_, z) in
+        parent_blueprint.all_omicron_zones(BlueprintZoneDisposition::any)
+    {
         let zone_type = &z.zone_type;
         match zone_type {
             BlueprintZoneType::BoundaryNtp(ntp) => {
@@ -2072,7 +2100,6 @@ pub mod test {
     use nexus_reconfigurator_blippy::Blippy;
     use nexus_reconfigurator_blippy::BlippyReportSortKey;
     use nexus_types::deployment::BlueprintDatasetDisposition;
-    use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::OmicronZoneNetworkResources;
     use nexus_types::external_api::views::SledPolicy;
     use omicron_common::address::IpRange;
@@ -2125,7 +2152,7 @@ pub mod test {
         for (sled_id, sled_resources) in
             example.input.all_sled_resources(SledFilter::Commissioned)
         {
-            builder.sled_ensure_disks(sled_id, sled_resources).unwrap();
+            builder.sled_add_disks(sled_id, sled_resources).unwrap();
             builder.sled_ensure_zone_ntp(sled_id).unwrap();
             for pool_id in sled_resources.zpools.keys() {
                 builder.sled_ensure_zone_crucible(sled_id, *pool_id).unwrap();
@@ -2162,7 +2189,7 @@ pub mod test {
             .sled_lookup(SledFilter::Commissioned, new_sled_id)
             .unwrap()
             .resources;
-        builder.sled_ensure_disks(new_sled_id, new_sled_resources).unwrap();
+        builder.sled_add_disks(new_sled_id, &new_sled_resources).unwrap();
         builder.sled_ensure_zone_ntp(new_sled_id).unwrap();
         for pool_id in new_sled_resources.zpools.keys() {
             builder.sled_ensure_zone_crucible(new_sled_id, *pool_id).unwrap();
@@ -2283,7 +2310,10 @@ pub mod test {
             .expect("has zones")
             .zones
         {
-            zone.disposition = BlueprintZoneDisposition::Expunged;
+            zone.disposition = BlueprintZoneDisposition::Expunged {
+                as_of_generation: Generation::new(),
+                ready_for_cleanup: false,
+            };
         }
         blueprint1.blueprint_datasets.remove(&decommision_sled_id);
         blueprint1.blueprint_disks.remove(&decommision_sled_id);
@@ -2330,7 +2360,10 @@ pub mod test {
             .unwrap()
             .zones
         {
-            z.disposition = BlueprintZoneDisposition::Expunged;
+            z.disposition = BlueprintZoneDisposition::Expunged {
+                as_of_generation: Generation::new(),
+                ready_for_cleanup: false,
+            };
         }
 
         // Generate a new blueprint. This desired sled state should still be
@@ -2380,7 +2413,7 @@ pub mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Start with an empty system (sleds with no zones). However, we leave
-        // the disks around so that `sled_ensure_disks` can add them.
+        // the disks around so that `sled_add_disks` can add them.
         let (example, parent) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
                 .create_zones(false)
@@ -2407,7 +2440,7 @@ pub mod test {
                     .sled_editors
                     .get(&sled_id)
                     .unwrap()
-                    .disks(DiskFilter::All)
+                    .disks(BlueprintPhysicalDiskDisposition::any)
                     .collect::<Vec<_>>();
                 assert!(
                     disks.is_empty(),
@@ -2418,9 +2451,8 @@ pub mod test {
             for (sled_id, sled_resources) in
                 input.all_sled_resources(SledFilter::InService)
             {
-                let edits = builder
-                    .sled_ensure_disks(sled_id, &sled_resources)
-                    .unwrap();
+                let edits =
+                    builder.sled_add_disks(sled_id, &sled_resources).unwrap();
                 assert_eq!(
                     edits.disks,
                     EditCounts {
@@ -2524,7 +2556,7 @@ pub mod test {
         let editor =
             builder.sled_editors.get_mut(&sled_id).expect("found sled");
         let crucible_zone_id = editor
-            .zones(BlueprintZoneFilter::ShouldBeRunning)
+            .zones(BlueprintZoneDisposition::is_in_service)
             .find_map(|zone_config| {
                 if zone_config.zone_type.is_crucible() {
                     return Some(zone_config.id);
@@ -2764,7 +2796,9 @@ pub mod test {
             // that are already in use by existing zones. Attempting to add a
             // Nexus with no remaining external IPs should fail.
             let mut used_ip_ranges = Vec::new();
-            for (_, z) in parent.all_omicron_zones(BlueprintZoneFilter::All) {
+            for (_, z) in
+                parent.all_omicron_zones(BlueprintZoneDisposition::any)
+            {
                 if let Some((external_ip, _)) =
                     z.zone_type.external_networking()
                 {
@@ -2825,7 +2859,7 @@ pub mod test {
         // provisions CRDB; this check makes sure we update our use of it if
         // that changes).
         for (_, z) in
-            parent.all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            parent.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         {
             assert!(
                 !z.zone_type.is_cockroach(),
@@ -2867,7 +2901,7 @@ pub mod test {
         verify_blueprint(&blueprint);
         assert_eq!(
             blueprint
-                .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .filter(|(sled_id, z)| {
                     *sled_id == target_sled_id
                         && z.zone_type.kind() == ZoneKind::CockroachDb

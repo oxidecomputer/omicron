@@ -38,6 +38,7 @@ pub(super) struct VmmAndSledIds {
 /// `propolis_id`.
 pub async fn reserve_vmm_resources(
     nexus: &Nexus,
+    instance_id: InstanceUuid,
     propolis_id: PropolisUuid,
     ncpus: u32,
     guest_memory: ByteCount,
@@ -50,8 +51,8 @@ pub async fn reserve_vmm_resources(
     // See https://rfd.shared.oxide.computer/rfd/0205 for a more complete
     // discussion.
     //
-    // Right now, allocate an instance to any random sled agent. This has a few
-    // problems:
+    // Right now, allocate an instance to any random sled agent, as long as
+    // "constraints" and affinity rules are respected. This has a few problems:
     //
     // - There's no consideration for "health of the sled" here, other than
     //   "time_deleted = Null". If the sled is rebooting, in a known unhealthy
@@ -61,10 +62,6 @@ pub async fn reserve_vmm_resources(
     // - This is selecting a random sled from all sleds in the cluster. For
     //   multi-rack, this is going to fling the sled to an arbitrary system.
     //   Maybe that's okay, but worth knowing about explicitly.
-    //
-    // - This doesn't take into account anti-affinity - users will want to
-    //   schedule instances that belong to a cluster on different failure
-    //   domains. See https://github.com/oxidecomputer/omicron/issues/1705.
     let resources = db::model::Resources::new(
         ncpus,
         ByteCount::try_from(0i64).unwrap(),
@@ -73,8 +70,8 @@ pub async fn reserve_vmm_resources(
 
     let resource = nexus
         .reserve_on_random_sled(
-            propolis_id.into_untyped_uuid(),
-            nexus_db_model::SledResourceKind::Instance,
+            instance_id,
+            propolis_id,
             resources,
             constraints,
         )
