@@ -134,7 +134,8 @@ usdt = { version = "0.5.0" }
 usdt-impl = { version = "0.5.0", default-features = false, features = ["asm", "des"] }
 uuid = { version = "1.12.0", features = ["serde", "v4"] }
 x509-cert = { version = "0.2.5" }
-zerocopy = { version = "0.7.35", features = ["derive", "simd"] }
+zerocopy-c38e5c1d305a1b54 = { package = "zerocopy", version = "0.8.10", default-features = false, features = ["derive", "simd"] }
+zerocopy-ca01ad9e24f5d932 = { package = "zerocopy", version = "0.7.35", features = ["derive", "simd"] }
 zeroize = { version = "1.8.1", features = ["std", "zeroize_derive"] }
 zip = { version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
 
@@ -259,7 +260,8 @@ usdt = { version = "0.5.0" }
 usdt-impl = { version = "0.5.0", default-features = false, features = ["asm", "des"] }
 uuid = { version = "1.12.0", features = ["serde", "v4"] }
 x509-cert = { version = "0.2.5" }
-zerocopy = { version = "0.7.35", features = ["derive", "simd"] }
+zerocopy-c38e5c1d305a1b54 = { package = "zerocopy", version = "0.8.10", default-features = false, features = ["derive", "simd"] }
+zerocopy-ca01ad9e24f5d932 = { package = "zerocopy", version = "0.7.35", features = ["derive", "simd"] }
 zeroize = { version = "1.8.1", features = ["std", "zeroize_derive"] }
 zip = { version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
 
