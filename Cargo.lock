@@ -1158,7 +1158,7 @@ version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a2b34126159980f92da2a08bdec0694fd80fb5eb9e48aff25d20a0d8dfa710d"
 dependencies = [
- "smallvec 1.13.2",
+ "smallvec 1.14.0",
  "target-lexicon",
 ]
 
@@ -3683,9 +3683,9 @@ dependencies = [
 
 [[package]]
 name = "guppy"
-version = "0.17.16"
+version = "0.17.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2dadc932032945158611b2b45baae9f6fc0024a6f91dd57f61f5edb4ad507f3b"
+checksum = "452b22f04f2a5cdae96b3a636a7c311da0cba665ca90f5033e042b8b590b6d7c"
 dependencies = [
  "ahash",
  "camino",
@@ -3703,7 +3703,7 @@ dependencies = [
  "semver 1.0.25",
  "serde",
  "serde_json",
- "smallvec 1.13.2",
+ "smallvec 1.14.0",
  "static_assertions",
  "target-spec",
 ]
@@ -3968,7 +3968,7 @@ dependencies = [
  "parking_lot 0.12.3",
  "rand",
  "resolv-conf",
- "smallvec 1.13.2",
+ "smallvec 1.14.0",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
@@ -4224,7 +4224,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "smallvec 1.13.2",
+ "smallvec 1.14.0",
  "tokio",
  "want",
 ]
@@ -4399,7 +4399,7 @@ dependencies = [
  "icu_normalizer_data",
  "icu_properties",
  "icu_provider",
- "smallvec 1.13.2",
+ "smallvec 1.14.0",
  "utf16_iter",
  "utf8_iter",
  "write16",
@@ -4474,7 +4474,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "686f825264d630750a544639377bae737628043f20d38bbc029e8f29ea968a7e"
 dependencies = [
  "idna_adapter",
- "smallvec 1.13.2",
+ "smallvec 1.14.0",
  "utf8_iter",
 ]
 
@@ -6405,7 +6405,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77a5d83df9f36fe23f0c3648c6bbb8b0298bb5f1939c8f2704431371f4b84d43"
 dependencies = [
- "smallvec 1.13.2",
+ "smallvec 1.14.0",
 ]
 
 [[package]]
@@ -6514,7 +6514,7 @@ dependencies = [
  "num-traits",
  "rand",
  "serde",
- "smallvec 1.13.2",
+ "smallvec 1.14.0",
  "zeroize",
 ]
 
@@ -7592,7 +7592,7 @@ dependencies = [
  "sha2",
  "similar",
  "slog",
- "smallvec 1.13.2",
+ "smallvec 1.14.0",
  "spin",
  "string_cache",
  "subtle",
@@ -8348,7 +8348,7 @@ dependencies = [
  "instant",
  "libc",
  "redox_syscall 0.2.16",
- "smallvec 1.13.2",
+ "smallvec 1.14.0",
  "winapi",
 ]
 
@@ -8361,7 +8361,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "redox_syscall 0.5.7",
- "smallvec 1.13.2",
+ "smallvec 1.14.0",
  "windows-targets 0.52.6",
 ]
 
@@ -8457,7 +8457,7 @@ version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c7fabb0b56aba5d2eb3fa9b1547c187f21f8c051295a7b97a50be6a9332f4cb"
 dependencies = [
- "smallvec 1.13.2",
+ "smallvec 1.14.0",
 ]
 
 [[package]]
@@ -10003,7 +10003,7 @@ dependencies = [
  "fallible-streaming-iterator",
  "hashlink",
  "libsqlite3-sys",
- "smallvec 1.13.2",
+ "smallvec 1.14.0",
 ]
 
 [[package]]
@@ -10559,9 +10559,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.217"
+version = "1.0.218"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02fc4265df13d6fa1d00ecff087228cc0a2b5f3c0e87e258d8b94a156e984c70"
+checksum = "e8dfc9d19bdbf6d17e22319da49161d5d0108e4188e8b680aef6299eed22df60"
 dependencies = [
  "serde_derive",
 ]
@@ -10588,9 +10588,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.217"
+version = "1.0.218"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a9bf7cf98d04a2b28aead066b7496853d4779c9cc183c440dbac457641e19a0"
+checksum = "f09503e191f4e797cb8aac08e9a4a4695c5edf6a2e70e376d961ddd5c969f82b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -11207,9 +11207,9 @@ dependencies = [
 
 [[package]]
 name = "smallvec"
-version = "1.13.2"
+version = "1.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
+checksum = "7fcf8323ef1faaee30a44a340193b1ac6814fd9b7b4e88e9d4519a3e4abe1cfd"
 
 [[package]]
 name = "smawk"
