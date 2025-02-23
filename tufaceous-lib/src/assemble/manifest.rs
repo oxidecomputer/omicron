@@ -6,10 +6,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{bail, ensure, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
-use omicron_common::api::{
-    external::SemverVersion, internal::nexus::KnownArtifactKind,
-};
+use omicron_common::api::internal::nexus::KnownArtifactKind;
 use parse_size::parse_size;
+use semver::Version;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -24,7 +23,7 @@ static FAKE_MANIFEST_TOML: &str =
 /// A list of components in a TUF repo representing a single update.
 #[derive(Clone, Debug)]
 pub struct ArtifactManifest {
-    pub system_version: SemverVersion,
+    pub system_version: Version,
     pub artifacts: BTreeMap<KnownArtifactKind, Vec<ArtifactData>>,
 }
 
@@ -245,11 +244,11 @@ impl ArtifactManifest {
 #[derive(Debug)]
 struct FakeDataAttributes<'a> {
     kind: KnownArtifactKind,
-    version: &'a SemverVersion,
+    version: &'a Version,
 }
 
 impl<'a> FakeDataAttributes<'a> {
-    fn new(kind: KnownArtifactKind, version: &'a SemverVersion) -> Self {
+    fn new(kind: KnownArtifactKind, version: &'a Version) -> Self {
         Self { kind, version }
     }
 
@@ -298,7 +297,7 @@ impl<'a> FakeDataAttributes<'a> {
 #[derive(Clone, Debug)]
 pub struct ArtifactData {
     pub name: String,
-    pub version: SemverVersion,
+    pub version: Version,
     pub source: ArtifactSource,
 }
 
@@ -311,7 +310,7 @@ pub struct ArtifactData {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct DeserializedManifest {
-    pub system_version: SemverVersion,
+    pub system_version: Version,
     #[serde(rename = "artifact")]
     pub artifacts: BTreeMap<KnownArtifactKind, Vec<DeserializedArtifactData>>,
 }
@@ -396,7 +395,7 @@ impl DeserializedManifest {
 #[serde(rename_all = "snake_case")]
 pub struct DeserializedArtifactData {
     pub name: String,
-    pub version: SemverVersion,
+    pub version: Version,
     pub source: DeserializedArtifactSource,
 }
 
@@ -594,10 +593,10 @@ impl DeserializedControlPlaneZoneSource {
 #[derive(Clone, Debug)]
 pub enum ManifestTweak {
     /// Update the system version.
-    SystemVersion(SemverVersion),
+    SystemVersion(Version),
 
     /// Update the versions for this artifact.
-    ArtifactVersion { kind: KnownArtifactKind, version: SemverVersion },
+    ArtifactVersion { kind: KnownArtifactKind, version: Version },
 
     /// Update the contents of this artifact (only support changing the size).
     ArtifactContents { kind: KnownArtifactKind, size_delta: i64 },

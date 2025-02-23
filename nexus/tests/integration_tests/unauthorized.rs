@@ -23,7 +23,7 @@ use nexus_test_utils_macros::nexus_test;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -183,8 +183,8 @@ enum SetupReq {
     },
 }
 
-pub static HTTP_SERVER: Lazy<httptest::Server> =
-    Lazy::new(|| {
+pub static HTTP_SERVER: LazyLock<httptest::Server> =
+    LazyLock::new(|| {
         // Run a httptest server
         let server = ServerBuilder::new().run().unwrap();
 
@@ -208,7 +208,7 @@ pub static HTTP_SERVER: Lazy<httptest::Server> =
     });
 
 /// List of requests to execute at setup time
-static SETUP_REQUESTS: Lazy<Vec<SetupReq>> = Lazy::new(|| {
+static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
     vec![
         // Create a separate Silo
         SetupReq::Post {

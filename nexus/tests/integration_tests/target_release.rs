@@ -15,8 +15,9 @@ use nexus_test_utils::load_test_config;
 use nexus_test_utils::test_setup_with_config;
 use nexus_types::external_api::params::SetTargetReleaseParams;
 use nexus_types::external_api::shared::{TargetRelease, TargetReleaseSource};
-use omicron_common::api::external::{SemverVersion, TufRepoInsertResponse};
+use omicron_common::api::external::TufRepoInsertResponse;
 use omicron_sled_agent::sim;
+use semver::Version;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_set_target_release() -> anyhow::Result<()> {
@@ -90,7 +91,7 @@ async fn get_set_target_release() -> anyhow::Result<()> {
     );
 
     // Attempting to set an invalid system version should fail.
-    let version = SemverVersion::new(0, 0, 0);
+    let version = Version::new(0, 0, 0);
     NexusRequest::objects_post(
         client,
         "/v1/system/update/target-release",
@@ -105,7 +106,7 @@ async fn get_set_target_release() -> anyhow::Result<()> {
 
     // Finally, adding a fake (tufaceous) repo and then setting it as the
     // target release should succeed.
-    let version = SemverVersion::new(1, 0, 0);
+    let version = Version::new(1, 0, 0);
     let logctx = LogContext::new("get_set_target_release", &config.pkg.log);
     let temp = Utf8TempDir::new().unwrap();
     let path = temp.path().join("repo.zip");

@@ -8,11 +8,11 @@ use omicron_common::api::external::{
     VpcFirewallRuleFilter, VpcFirewallRulePriority, VpcFirewallRuleProtocol,
     VpcFirewallRuleStatus, VpcFirewallRuleTarget, VpcFirewallRuleUpdate,
 };
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 /// Built-in VPC firewall rule for External DNS.
-pub static DNS_VPC_FW_RULE: Lazy<VpcFirewallRuleUpdate> =
-    Lazy::new(|| VpcFirewallRuleUpdate {
+pub static DNS_VPC_FW_RULE: LazyLock<VpcFirewallRuleUpdate> =
+    LazyLock::new(|| VpcFirewallRuleUpdate {
         name: "external-dns-inbound".parse().unwrap(),
         description: "allow inbound connections for DNS from anywhere"
             .to_string(),
@@ -41,8 +41,8 @@ pub const NEXUS_VPC_FW_RULE_NAME: &str = "nexus-inbound";
 /// Note that we currently rely on this being exactly one rule to implement the
 /// Nexus allowlist. See `nexus/networking/src/firewall_rules.rs` for more
 /// details.
-pub static NEXUS_VPC_FW_RULE: Lazy<VpcFirewallRuleUpdate> =
-    Lazy::new(|| VpcFirewallRuleUpdate {
+pub static NEXUS_VPC_FW_RULE: LazyLock<VpcFirewallRuleUpdate> =
+    LazyLock::new(|| VpcFirewallRuleUpdate {
         name: NEXUS_VPC_FW_RULE_NAME.parse().unwrap(),
         description:
             "allow inbound connections for console & api from anywhere"

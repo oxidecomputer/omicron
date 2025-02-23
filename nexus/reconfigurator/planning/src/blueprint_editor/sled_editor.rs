@@ -14,13 +14,12 @@ use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetFilter;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
+use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
-use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
-use nexus_types::deployment::DiskFilter;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Dataset;
 use nexus_types::inventory::Zpool;
@@ -228,10 +227,13 @@ impl SledEditor {
             .ok_or(SledEditError::OutOfUnderlayIps)
     }
 
-    pub fn disks(
+    pub fn disks<F>(
         &self,
-        filter: DiskFilter,
-    ) -> impl Iterator<Item = &BlueprintPhysicalDiskConfig> {
+        mut filter: F,
+    ) -> impl Iterator<Item = &BlueprintPhysicalDiskConfig>
+    where
+        F: FnMut(BlueprintPhysicalDiskDisposition) -> bool,
+    {
         match &self.0 {
             InnerSledEditor::Active(editor) => {
                 Either::Left(editor.disks(filter))
@@ -241,7 +243,7 @@ impl SledEditor {
                     .disks
                     .disks
                     .iter()
-                    .filter(move |disk| disk.disposition.matches(filter)),
+                    .filter(move |disk| filter(disk.disposition)),
             ),
         }
     }
@@ -264,10 +266,13 @@ impl SledEditor {
         }
     }
 
-    pub fn zones(
+    pub fn zones<F>(
         &self,
-        filter: BlueprintZoneFilter,
-    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
+        mut filter: F,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig>
+    where
+        F: FnMut(BlueprintZoneDisposition) -> bool,
+    {
         match &self.0 {
             InnerSledEditor::Active(editor) => {
                 Either::Left(editor.zones(filter))
@@ -277,7 +282,7 @@ impl SledEditor {
                     .zones
                     .zones
                     .iter()
-                    .filter(move |zone| zone.disposition.matches(filter)),
+                    .filter(move |zone| filter(zone.disposition)),
             ),
         }
     }
@@ -298,8 +303,7 @@ impl SledEditor {
         disk: BlueprintPhysicalDiskConfig,
         rng: &mut SledPlannerRng,
     ) -> Result<(), SledEditError> {
-        self.as_active_mut()?.ensure_disk(disk, rng);
-        Ok(())
+        self.as_active_mut()?.ensure_disk(disk, rng)
     }
 
     pub fn expunge_disk(
@@ -307,6 +311,14 @@ impl SledEditor {
         disk_id: &PhysicalDiskUuid,
     ) -> Result<DiskExpungeDetails, SledEditError> {
         self.as_active_mut()?.expunge_disk(disk_id)
+    }
+
+    pub fn decommission_disk(
+        &mut self,
+        disk_id: &PhysicalDiskUuid,
+    ) -> Result<(), SledEditError> {
+        self.as_active_mut()?.decommission_disk(disk_id)?;
+        Ok(())
     }
 
     pub fn add_zone(
@@ -383,7 +395,7 @@ impl ActiveSledEditor {
         // some time after expungement, we may reuse its IP; reconfigurator must
         // know that's safe prior to pruning the expunged zone.
         let zone_ips =
-            zones.zones(BlueprintZoneFilter::All).map(|z| z.underlay_ip());
+            zones.zones(BlueprintZoneDisposition::any).map(|z| z.underlay_ip());
 
         Ok(Self {
             underlay_ip_allocator: SledUnderlayIpAllocator::new(
@@ -429,14 +441,11 @@ impl ActiveSledEditor {
     }
 
     fn validate_decommisionable(&self) -> Result<(), SledEditError> {
-        // ... and all zones are expunged.
-        if let Some(zone) = self.zones(BlueprintZoneFilter::All).find(|zone| {
-            match zone.disposition {
-                BlueprintZoneDisposition::InService
-                | BlueprintZoneDisposition::Quiesced => true,
-                BlueprintZoneDisposition::Expunged => false,
-            }
-        }) {
+        // A sled is only decommissionable if all its zones have been expunged
+        // (i.e., there are no zones left with an in-service disposition).
+        if let Some(zone) =
+            self.zones(BlueprintZoneDisposition::is_in_service).next()
+        {
             return Err(SledEditError::NonDecommissionableZoneNotExpunged {
                 zone_id: zone.id,
                 kind: zone.zone_type.kind(),
@@ -458,10 +467,13 @@ impl ActiveSledEditor {
         self.underlay_ip_allocator.alloc()
     }
 
-    pub fn disks(
+    pub fn disks<F>(
         &self,
-        filter: DiskFilter,
-    ) -> impl Iterator<Item = &BlueprintPhysicalDiskConfig> {
+        filter: F,
+    ) -> impl Iterator<Item = &BlueprintPhysicalDiskConfig>
+    where
+        F: FnMut(BlueprintPhysicalDiskDisposition) -> bool,
+    {
         self.disks.disks(filter)
     }
 
@@ -472,10 +484,13 @@ impl ActiveSledEditor {
         self.datasets.datasets(filter)
     }
 
-    pub fn zones(
+    pub fn zones<F>(
         &self,
-        filter: BlueprintZoneFilter,
-    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
+        filter: F,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig>
+    where
+        F: FnMut(BlueprintZoneDisposition) -> bool,
+    {
         self.zones.zones(filter)
     }
 
@@ -483,10 +498,10 @@ impl ActiveSledEditor {
         &mut self,
         disk: BlueprintPhysicalDiskConfig,
         rng: &mut SledPlannerRng,
-    ) {
+    ) -> Result<(), SledEditError> {
         let zpool = ZpoolName::new_external(disk.pool_id);
 
-        self.disks.ensure(disk);
+        self.disks.ensure(disk)?;
 
         // Every disk also gets a Debug and Transient Zone Root dataset; ensure
         // both of those exist as well.
@@ -495,6 +510,8 @@ impl ActiveSledEditor {
 
         self.datasets.ensure_in_service(debug, rng);
         self.datasets.ensure_in_service(zone_root, rng);
+
+        Ok(())
     }
 
     pub fn expunge_disk(
@@ -522,6 +539,15 @@ impl ActiveSledEditor {
             num_datasets_expunged,
             num_zones_expunged,
         })
+    }
+
+    pub fn decommission_disk(
+        &mut self,
+        disk_id: &PhysicalDiskUuid,
+    ) -> Result<(), SledEditError> {
+        // TODO: report decommissioning
+        let _ = self.disks.decommission(disk_id)?;
+        Ok(())
     }
 
     pub fn add_zone(
@@ -582,7 +608,7 @@ impl ActiveSledEditor {
         &mut self,
         rng: &mut SledPlannerRng,
     ) -> Result<(), SledEditError> {
-        for zone in self.zones.zones(BlueprintZoneFilter::ShouldBeRunning) {
+        for zone in self.zones.zones(BlueprintZoneDisposition::is_in_service) {
             ZoneDatasetConfigs::new(&self.disks, zone)?
                 .ensure_in_service(&mut self.datasets, rng);
         }
@@ -598,7 +624,7 @@ impl ActiveSledEditor {
         let mut zones_to_edit: BTreeMap<OmicronZoneUuid, ZpoolName> =
             BTreeMap::new();
 
-        for zone in self.zones.zones(BlueprintZoneFilter::ShouldBeRunning) {
+        for zone in self.zones.zones(BlueprintZoneDisposition::is_in_service) {
             let expected_filesystem_pool = if let Some(pool) =
                 zone.zone_type.durable_zpool()
             {

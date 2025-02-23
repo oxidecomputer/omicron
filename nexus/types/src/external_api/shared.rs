@@ -11,11 +11,11 @@ use anyhow::Context;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_uuid_kinds::SupportBundleUuid;
 use parse_display::FromStr;
 use schemars::JsonSchema;
+use semver::Version;
 use serde::de::Error as _;
 use serde::Deserialize;
 use serde::Deserializer;
@@ -520,7 +520,7 @@ pub enum TargetReleaseSource {
     InstallDataset,
 
     /// Use the specified release of the rack's system software.
-    SystemVersion(SemverVersion),
+    SystemVersion(Version),
 }
 
 /// View of a system software target release

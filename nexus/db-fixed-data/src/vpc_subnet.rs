@@ -8,52 +8,55 @@ use omicron_common::address::{
     NEXUS_OPTE_IPV6_SUBNET, NTP_OPTE_IPV4_SUBNET, NTP_OPTE_IPV6_SUBNET,
 };
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 /// UUID of built-in VPC Subnet for External DNS.
-pub static DNS_VPC_SUBNET_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
+pub static DNS_VPC_SUBNET_ID: LazyLock<uuid::Uuid> = LazyLock::new(|| {
     "001de000-c470-4000-8000-000000000001"
         .parse()
         .expect("invalid uuid for builtin external dns vpc subnet id")
 });
 
 /// UUID of built-in VPC Subnet for Nexus.
-pub static NEXUS_VPC_SUBNET_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
+pub static NEXUS_VPC_SUBNET_ID: LazyLock<uuid::Uuid> = LazyLock::new(|| {
     "001de000-c470-4000-8000-000000000002"
         .parse()
         .expect("invalid uuid for builtin nexus vpc subnet id")
 });
 
 /// UUID of built-in VPC Subnet for Boundary NTP.
-pub static NTP_VPC_SUBNET_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
+pub static NTP_VPC_SUBNET_ID: LazyLock<uuid::Uuid> = LazyLock::new(|| {
     "001de000-c470-4000-8000-000000000003"
         .parse()
         .expect("invalid uuid for builtin boundary ntp vpc subnet id")
 });
 
 /// UUID of built-in subnet route VPC Subnet route for External DNS.
-pub static DNS_VPC_SUBNET_ROUTE_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
-    "001de000-c470-4000-8000-000000000004"
-        .parse()
-        .expect("invalid uuid for builtin services vpc default route id")
-});
+pub static DNS_VPC_SUBNET_ROUTE_ID: LazyLock<uuid::Uuid> =
+    LazyLock::new(|| {
+        "001de000-c470-4000-8000-000000000004"
+            .parse()
+            .expect("invalid uuid for builtin services vpc default route id")
+    });
 
 /// UUID of built-in subnet route VPC Subnet route for Nexus.
-pub static NEXUS_VPC_SUBNET_ROUTE_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
-    "001de000-c470-4000-8000-000000000005"
-        .parse()
-        .expect("invalid uuid for builtin services vpc default route id")
-});
+pub static NEXUS_VPC_SUBNET_ROUTE_ID: LazyLock<uuid::Uuid> =
+    LazyLock::new(|| {
+        "001de000-c470-4000-8000-000000000005"
+            .parse()
+            .expect("invalid uuid for builtin services vpc default route id")
+    });
 
 /// UUID of built-in subnet route VPC Subnet route for Boundary NTP.
-pub static NTP_VPC_SUBNET_ROUTE_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
-    "001de000-c470-4000-8000-000000000006"
-        .parse()
-        .expect("invalid uuid for builtin services vpc default route id")
-});
+pub static NTP_VPC_SUBNET_ROUTE_ID: LazyLock<uuid::Uuid> =
+    LazyLock::new(|| {
+        "001de000-c470-4000-8000-000000000006"
+            .parse()
+            .expect("invalid uuid for builtin services vpc default route id")
+    });
 
 /// Built-in VPC Subnet for External DNS.
-pub static DNS_VPC_SUBNET: Lazy<VpcSubnet> = Lazy::new(|| {
+pub static DNS_VPC_SUBNET: LazyLock<VpcSubnet> = LazyLock::new(|| {
     VpcSubnet::new(
         *DNS_VPC_SUBNET_ID,
         *super::vpc::SERVICES_VPC_ID,
@@ -68,7 +71,7 @@ pub static DNS_VPC_SUBNET: Lazy<VpcSubnet> = Lazy::new(|| {
 });
 
 /// Built-in VPC Subnet for Nexus.
-pub static NEXUS_VPC_SUBNET: Lazy<VpcSubnet> = Lazy::new(|| {
+pub static NEXUS_VPC_SUBNET: LazyLock<VpcSubnet> = LazyLock::new(|| {
     VpcSubnet::new(
         *NEXUS_VPC_SUBNET_ID,
         *super::vpc::SERVICES_VPC_ID,
@@ -83,7 +86,7 @@ pub static NEXUS_VPC_SUBNET: Lazy<VpcSubnet> = Lazy::new(|| {
 });
 
 /// Built-in VPC Subnet for Boundary NTP.
-pub static NTP_VPC_SUBNET: Lazy<VpcSubnet> = Lazy::new(|| {
+pub static NTP_VPC_SUBNET: LazyLock<VpcSubnet> = LazyLock::new(|| {
     VpcSubnet::new(
         *NTP_VPC_SUBNET_ID,
         *super::vpc::SERVICES_VPC_ID,
