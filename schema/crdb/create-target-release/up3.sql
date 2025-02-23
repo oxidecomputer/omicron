@@ -3,10 +3,10 @@ INSERT INTO omicron.public.target_release (
     generation,
     time_requested,
     release_source,
-    system_version
+    tuf_repo_id
 ) VALUES (
-    0,
+    1,
     NOW(),
-    'install_dataset',
+    'unspecified',
     NULL
 ) ON CONFLICT DO NOTHING;

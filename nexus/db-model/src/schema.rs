@@ -1417,7 +1417,7 @@ table! {
         generation -> Int8,
         time_requested -> Timestamptz,
         release_source -> crate::TargetReleaseSourceEnum,
-        system_version -> Nullable<Text>,
+        tuf_repo_id -> Nullable<Uuid>,
     }
 }
 

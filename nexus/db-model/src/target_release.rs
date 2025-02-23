@@ -4,9 +4,9 @@
 
 use super::{impl_enum_type, Generation};
 use crate::schema::target_release;
-use crate::SemverVersion;
+use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
-use nexus_types::external_api::shared;
+use omicron_uuid_kinds::TufRepoKind;
 
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
@@ -18,7 +18,7 @@ impl_enum_type!(
     #[diesel(sql_type = TargetReleaseSourceEnum)]
     pub enum TargetReleaseSource;
 
-    InstallDataset => b"install_dataset"
+    Unspecified => b"unspecified"
     SystemVersion => b"system_version"
 );
 
@@ -37,52 +37,33 @@ pub struct TargetRelease {
     /// The source of the target release.
     pub release_source: TargetReleaseSource,
 
-    /// The semantic version of the target release.
-    pub system_version: Option<SemverVersion>,
+    /// The TUF repo containing the target release.
+    pub tuf_repo_id: Option<DbTypedUuid<TufRepoKind>>,
 }
 
 impl TargetRelease {
     pub fn new(
         generation: Generation,
         release_source: TargetReleaseSource,
-        system_version: Option<SemverVersion>,
+        tuf_repo_id: Option<DbTypedUuid<TufRepoKind>>,
     ) -> Self {
         Self {
             generation,
             time_requested: Utc::now(),
             release_source,
-            system_version,
+            tuf_repo_id,
         }
     }
 
     pub fn new_from_prev(
         prev: TargetRelease,
         release_source: TargetReleaseSource,
-        system_version: Option<SemverVersion>,
+        tuf_repo_id: Option<DbTypedUuid<TufRepoKind>>,
     ) -> Self {
         Self::new(
             Generation(prev.generation.next()),
             release_source,
-            system_version,
+            tuf_repo_id,
         )
-    }
-
-    pub fn into_external(self) -> shared::TargetRelease {
-        shared::TargetRelease {
-            generation: (&self.generation.0).into(),
-            time_requested: self.time_requested,
-            release_source: match self.release_source {
-                TargetReleaseSource::InstallDataset => {
-                    shared::TargetReleaseSource::InstallDataset
-                }
-                TargetReleaseSource::SystemVersion => {
-                    shared::TargetReleaseSource::SystemVersion(
-                        self.system_version
-                            .expect("CONSTRAINT system_version_for_release")
-                            .into(),
-                    )
-                }
-            },
-        }
     }
 }

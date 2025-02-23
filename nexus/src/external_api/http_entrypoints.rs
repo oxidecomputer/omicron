@@ -6095,12 +6095,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
+            let target_release =
+                nexus.datastore().get_target_release(&opctx).await?;
             Ok(HttpResponseOk(
                 nexus
                     .datastore()
-                    .get_target_release(&opctx)
-                    .await?
-                    .into_external(),
+                    .export_target_release(&opctx, &target_release)
+                    .await?,
             ))
         };
         apictx
@@ -6121,13 +6122,25 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let params = body.into_inner();
             let (release_source, version) = match params.release_source {
-                shared::TargetReleaseSource::InstallDataset => {
-                    (nexus_db_model::TargetReleaseSource::InstallDataset, None)
+                shared::TargetReleaseSource::Unspecified => {
+                    (nexus_db_model::TargetReleaseSource::Unspecified, None)
                 }
                 shared::TargetReleaseSource::SystemVersion(version) => (
                     nexus_db_model::TargetReleaseSource::SystemVersion,
                     Some(version),
                 ),
+            };
+            let tuf_repo_id = if let Some(version) = version {
+                Some(
+                    nexus
+                        .datastore()
+                        .update_tuf_repo_get(&opctx, version.into())
+                        .await?
+                        .repo
+                        .id,
+                )
+            } else {
+                None
             };
             let current_target_release =
                 nexus.datastore().get_target_release(&opctx).await?;
@@ -6135,14 +6148,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 nexus_db_model::TargetRelease::new_from_prev(
                     current_target_release,
                     release_source,
-                    version.map(nexus_db_model::SemverVersion),
+                    tuf_repo_id,
                 );
+            let target_release = nexus
+                .datastore()
+                .set_target_release(&opctx, next_target_release)
+                .await?;
             Ok(HttpResponseCreated(
                 nexus
                     .datastore()
-                    .set_target_release(&opctx, next_target_release)
-                    .await?
-                    .into_external(),
+                    .export_target_release(&opctx, &target_release)
+                    .await?,
             ))
         };
         apictx

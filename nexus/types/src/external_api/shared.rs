@@ -516,17 +516,19 @@ impl RelayState {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TargetReleaseSource {
-    /// Obtain the release artifact from the `install` dataset.
-    InstallDataset,
+    /// Unspecified or unknown source (probably MUPdate).
+    Unspecified,
 
     /// Use the specified release of the rack's system software.
+    /// A TUF repo containing that release must be available via
+    /// the repo depot.
     SystemVersion(Version),
 }
 
 /// View of a system software target release
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct TargetRelease {
-    /// The target-release generation.
+    /// The target-release generation number.
     pub generation: i64,
 
     /// The time it was or is to be set as the target release.

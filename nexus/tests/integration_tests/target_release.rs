@@ -5,7 +5,7 @@
 //! Get/set the target release via the external API.
 
 use camino_tempfile::Utf8TempDir;
-use chrono::{TimeDelta, Utc};
+use chrono::Utc;
 use clap::Parser as _;
 use dropshot::test_util::LogContext;
 use nexus_config::UpdatesConfig;
@@ -46,49 +46,9 @@ async fn get_set_target_release() -> anyhow::Result<()> {
             .unwrap()
             .parsed_body()
             .unwrap();
-    assert_eq!(target_release.generation, 0);
-    assert!(target_release.time_requested < Utc::now());
-    assert_eq!(
-        target_release.release_source,
-        TargetReleaseSource::InstallDataset
-    );
-
-    // We should be able to set a new generation of target release
-    // still set to whatever is on the `install` dataset.
-    let target_release: TargetRelease = NexusRequest::objects_post(
-        client,
-        "/v1/system/update/target-release",
-        &SetTargetReleaseParams {
-            release_source: TargetReleaseSource::InstallDataset,
-        },
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
     assert_eq!(target_release.generation, 1);
-    assert!(
-        (target_release.time_requested - Utc::now()).abs()
-            < TimeDelta::new(1, 0).expect("1 sec")
-    );
-    assert_eq!(
-        target_release.release_source,
-        TargetReleaseSource::InstallDataset,
-    );
-
-    // Fetching the current target release should now return the same.
-    assert_eq!(
-        NexusRequest::object_get(client, "/v1/system/update/target-release")
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .unwrap()
-            .parsed_body::<TargetRelease>()
-            .unwrap(),
-        target_release,
-    );
+    assert!(target_release.time_requested < Utc::now());
+    assert_eq!(target_release.release_source, TargetReleaseSource::Unspecified);
 
     // Attempting to set an invalid system version should fail.
     let version = Version::new(0, 0, 0);
@@ -104,8 +64,9 @@ async fn get_set_target_release() -> anyhow::Result<()> {
     .await
     .expect_err("invalid TUF repo");
 
-    // Finally, adding a fake (tufaceous) repo and then setting it as the
+    // Adding a fake (tufaceous) repo and then setting it as the
     // target release should succeed.
+    let before = Utc::now();
     let version = Version::new(1, 0, 0);
     let logctx = LogContext::new("get_set_target_release", &config.pkg.log);
     let temp = Utf8TempDir::new().unwrap();
@@ -156,11 +117,10 @@ async fn get_set_target_release() -> anyhow::Result<()> {
     .unwrap()
     .parsed_body()
     .unwrap();
+    let after = Utc::now();
     assert_eq!(target_release.generation, 2);
-    assert!(
-        (target_release.time_requested - Utc::now()).abs()
-            < TimeDelta::new(1, 0).expect("1 sec")
-    );
+    assert!(target_release.time_requested >= before);
+    assert!(target_release.time_requested <= after);
     assert_eq!(
         target_release.release_source,
         TargetReleaseSource::SystemVersion(version),

@@ -8,12 +8,12 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::error::{public_error_from_diesel, ErrorHandler};
-use crate::db::model::{TargetRelease, TargetReleaseSource};
+use crate::db::model::{SemverVersion, TargetRelease, TargetReleaseSource};
 use crate::db::schema::target_release::dsl;
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl as _;
 use diesel::insert_into;
 use diesel::prelude::*;
+use nexus_types::external_api::shared;
 use omicron_common::api::external::{CreateResult, LookupResult};
 
 impl DataStore {
@@ -29,12 +29,12 @@ impl DataStore {
         // Fetch the row in the `target_release` table with the largest
         // generation number. The subquery accesses the same table, so we
         // have to make an alias to not confuse diesel.
-        let target_release2 = diesel::alias!(
+        let target_release_2 = diesel::alias!(
             crate::db::schema::target_release as target_release_2
         );
         dsl::target_release
-            .filter(dsl::generation.nullable().eq_any(target_release2.select(
-                diesel::dsl::max(target_release2.field(dsl::generation)),
+            .filter(dsl::generation.nullable().eq_any(target_release_2.select(
+                diesel::dsl::max(target_release_2.field(dsl::generation)),
             )))
             .select(TargetRelease::as_select())
             .first_async(&*conn)
@@ -52,32 +52,10 @@ impl DataStore {
     ) -> CreateResult<TargetRelease> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        let err = OptionalError::new();
         self.transaction_retry_wrapper("set_target_release")
             .transaction(&conn, |conn| {
                 let target_release = target_release.clone();
-                let err = err.clone();
                 async move {
-                    // Ensure that we have a TUF repo representing a system version.
-                    if let TargetReleaseSource::SystemVersion =
-                        target_release.release_source
-                    {
-                        if let Some(system_version) =
-                            target_release.system_version.clone()
-                        {
-                            assert_eq!(
-                                system_version.clone(),
-                                self.update_tuf_repo_get(opctx, system_version)
-                                    .await
-                                    .map_err(|e| err.bail(e))?
-                                    .repo
-                                    .system_version,
-                                "inconsistent system version"
-                            );
-                        }
-                    }
-
-                    // Insert the target_release row.
                     insert_into(dsl::target_release)
                         .values(target_release)
                         .returning(TargetRelease::as_returning())
@@ -86,13 +64,49 @@ impl DataStore {
                 }
             })
             .await
-            .map_err(|e| {
-                if let Some(err) = err.take() {
-                    err
-                } else {
-                    public_error_from_diesel(e, ErrorHandler::Server)
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Convert a model-level target release to an external view.
+    /// This method lives here because we have to look up the version
+    /// corresponding to the TUF repo.
+    pub async fn export_target_release(
+        &self,
+        opctx: &OpContext,
+        target_release: &TargetRelease,
+    ) -> LookupResult<shared::TargetRelease> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        Ok(shared::TargetRelease {
+            generation: (&target_release.generation.0).into(),
+            time_requested: target_release.time_requested,
+            release_source: match target_release.release_source {
+                TargetReleaseSource::Unspecified => {
+                    shared::TargetReleaseSource::Unspecified
                 }
-            })
+                TargetReleaseSource::SystemVersion => {
+                    use crate::db::schema::tuf_repo;
+                    shared::TargetReleaseSource::SystemVersion(
+                        tuf_repo::table
+                            .select(tuf_repo::system_version)
+                            .filter(tuf_repo::id.eq(
+                                target_release.tuf_repo_id.expect(
+                                    "CONSTRAINT tuf_repo_for_system_version",
+                                ),
+                            ))
+                            .first_async::<SemverVersion>(&*conn)
+                            .await
+                            .map_err(|e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Server,
+                                )
+                            })?
+                            .into(),
+                    )
+                }
+            },
+        })
     }
 }
 
@@ -120,20 +134,20 @@ mod test {
             .get_target_release(opctx)
             .await
             .expect("should be a target release");
-        assert_eq!(target_release.generation, Generation(0.into()));
+        assert_eq!(target_release.generation, Generation(1.into()));
         assert!(target_release.time_requested < Utc::now());
         assert_eq!(
             target_release.release_source,
-            TargetReleaseSource::InstallDataset
+            TargetReleaseSource::Unspecified
         );
-        assert!(target_release.system_version.is_none());
+        assert!(target_release.tuf_repo_id.is_none());
 
         // We should be able to set a new generation just like the first,
         // with some (very small) fuzz allowed in the timestamp reported
         // by the database.
         let initial_target_release = TargetRelease::new_from_prev(
             target_release,
-            TargetReleaseSource::InstallDataset,
+            TargetReleaseSource::Unspecified,
             None,
         );
         let target_release = datastore
@@ -150,7 +164,7 @@ mod test {
                 .abs()
                 < TimeDelta::new(0, 1_000).expect("1 μsec")
         );
-        assert!(target_release.system_version.is_none());
+        assert!(target_release.tuf_repo_id.is_none());
 
         // Trying to reuse a generation should fail.
         assert!(datastore
@@ -158,7 +172,7 @@ mod test {
                 opctx,
                 TargetRelease::new(
                     target_release.generation,
-                    TargetReleaseSource::InstallDataset,
+                    TargetReleaseSource::Unspecified,
                     None,
                 )
             )
@@ -171,36 +185,21 @@ mod test {
                 opctx,
                 TargetRelease::new_from_prev(
                     target_release,
-                    TargetReleaseSource::InstallDataset,
+                    TargetReleaseSource::Unspecified,
                     None,
                 ),
             )
             .await
             .unwrap();
 
-        // If we specify a system version, it had better exist!
-        let _ = datastore
-            .set_target_release(
-                opctx,
-                TargetRelease::new_from_prev(
-                    target_release.clone(),
-                    TargetReleaseSource::SystemVersion,
-                    Some(SemverVersion::new(0, 0, 0)),
-                ),
-            )
-            .await
-            .expect_err("unknown system version");
-
-        // Finally, use a new generation number and a valid system version.
-        // We assume the queries above will have taken some non-trivial
-        // amount of time.
+        // Finally, use a new generation number and a TUF repo source.
         let version = SemverVersion::new(0, 0, 1);
         let hash = ArtifactHash(
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
                 .parse()
                 .expect("SHA256('')"),
         );
-        let system_version = datastore
+        let repo = datastore
             .update_tuf_repo_insert(
                 opctx,
                 TufRepoDescription {
@@ -225,31 +224,31 @@ mod test {
             .await
             .unwrap()
             .recorded
-            .repo
-            .system_version;
-        assert_eq!(version, system_version);
+            .repo;
+        assert_eq!(repo.system_version, version);
+        let tuf_repo_id = repo.id;
+
+        let before = Utc::now();
         let target_release = datastore
             .set_target_release(
                 opctx,
                 TargetRelease::new_from_prev(
                     target_release,
                     TargetReleaseSource::SystemVersion,
-                    Some(version.clone()),
+                    Some(tuf_repo_id),
                 ),
             )
             .await
             .unwrap();
-        assert_eq!(target_release.generation, Generation(3.into()));
-        assert!(
-            (target_release.time_requested
-                - initial_target_release.time_requested)
-                > TimeDelta::new(0, 1_000_000).expect("1 msec")
-        );
+        let after = Utc::now();
+        assert_eq!(target_release.generation, Generation(4.into()));
+        assert!(target_release.time_requested >= before);
+        assert!(target_release.time_requested <= after);
         assert_eq!(
             target_release.release_source,
             TargetReleaseSource::SystemVersion
         );
-        assert_eq!(target_release.system_version, Some(version));
+        assert_eq!(target_release.tuf_repo_id, Some(tuf_repo_id));
 
         // Clean up.
         db.terminate().await;
