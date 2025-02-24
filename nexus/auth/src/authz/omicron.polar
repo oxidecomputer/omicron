@@ -383,6 +383,20 @@ resource BlueprintConfig {
 has_relation(fleet: Fleet, "parent_fleet", list: BlueprintConfig)
 	if list.fleet = fleet;
 
+# Describes the policy for accessing blueprints
+resource TargetReleaseConfig {
+	permissions = [
+	    "read",          # read the current target release
+	    "modify",        # change the current target release
+	];
+
+	relations = { parent_fleet: Fleet };
+	"read" if "viewer" on "parent_fleet";
+	"modify" if "admin" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", resource: TargetReleaseConfig)
+	if resource.fleet = fleet;
+
 # Describes the policy for reading and modifying low-level inventory
 resource Inventory {
 	permissions = [ "read", "modify" ];

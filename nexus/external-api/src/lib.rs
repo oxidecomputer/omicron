@@ -2889,7 +2889,7 @@ pub trait NexusExternalApi {
 
     /// Get the current target release of the rack's system software
     ///
-    /// This may not correpond to the actual software running on the rack
+    /// This may not correspond to the actual software running on the rack
     /// at the time of request; it is instead the release that the rack
     /// reconfigurator should be moving towards as a goal state. After some
     /// number of planning and execution phases, the software running on the
@@ -2900,7 +2900,7 @@ pub trait NexusExternalApi {
         tags = ["system/update"],
         unpublished = true,
     }]
-    async fn system_update_get_target_release(
+    async fn target_release_get(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<views::TargetRelease>, HttpError>;
 
@@ -2915,7 +2915,7 @@ pub trait NexusExternalApi {
         tags = ["system/update"],
         unpublished = true,
     }]
-    async fn system_update_set_target_release(
+    async fn target_release_set(
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<params::SetTargetReleaseParams>,
     ) -> Result<HttpResponseCreated<views::TargetRelease>, HttpError>;

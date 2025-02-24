@@ -9,6 +9,7 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::error::{public_error_from_diesel, ErrorHandler};
 use crate::db::model::{SemverVersion, TargetRelease, TargetReleaseSource};
+use crate::db::schema::target_release;
 use crate::db::schema::target_release::dsl;
 use async_bb8_diesel::AsyncRunQueryDsl as _;
 use diesel::insert_into;
@@ -19,19 +20,20 @@ use omicron_common::api::external::{CreateResult, LookupResult};
 impl DataStore {
     /// Fetch the current target release, i.e., the row with the largest
     /// generation number.
-    pub async fn get_target_release(
+    pub async fn target_release_get_current(
         &self,
         opctx: &OpContext,
     ) -> LookupResult<TargetRelease> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        opctx
+            .authorize(authz::Action::Read, &authz::TARGET_RELEASE_CONFIG)
+            .await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
         // Fetch the row in the `target_release` table with the largest
         // generation number. The subquery accesses the same table, so we
         // have to make an alias to not confuse diesel.
-        let target_release_2 = diesel::alias!(
-            crate::db::schema::target_release as target_release_2
-        );
+        let target_release_2 =
+            diesel::alias!(target_release as target_release_2);
         dsl::target_release
             .filter(dsl::generation.nullable().eq_any(target_release_2.select(
                 diesel::dsl::max(target_release_2.field(dsl::generation)),
@@ -45,12 +47,14 @@ impl DataStore {
     /// Insert a new target release row and return it. It will only become
     /// the current target release if its generation is larger than any
     /// existing row.
-    pub async fn set_target_release(
+    pub async fn target_release_insert(
         &self,
         opctx: &OpContext,
         target_release: TargetRelease,
     ) -> CreateResult<TargetRelease> {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        opctx
+            .authorize(authz::Action::Modify, &authz::TARGET_RELEASE_CONFIG)
+            .await?;
         let conn = self.pool_connection_authorized(opctx).await?;
         self.transaction_retry_wrapper("set_target_release")
             .transaction(&conn, |conn| {
@@ -75,7 +79,9 @@ impl DataStore {
         opctx: &OpContext,
         target_release: &TargetRelease,
     ) -> LookupResult<views::TargetRelease> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        opctx
+            .authorize(authz::Action::Read, &authz::TARGET_RELEASE_CONFIG)
+            .await?;
         let conn = self.pool_connection_authorized(opctx).await?;
         Ok(views::TargetRelease {
             generation: (&target_release.generation.0).into(),
@@ -131,7 +137,7 @@ mod test {
         // There should always be a target release.
         // This is ensured by the schema migration.
         let target_release = datastore
-            .get_target_release(opctx)
+            .target_release_get_current(opctx)
             .await
             .expect("should be a target release");
         assert_eq!(target_release.generation, Generation(1.into()));
@@ -151,7 +157,7 @@ mod test {
             None,
         );
         let target_release = datastore
-            .set_target_release(opctx, initial_target_release.clone())
+            .target_release_insert(opctx, initial_target_release.clone())
             .await
             .unwrap();
         assert_eq!(
@@ -168,7 +174,7 @@ mod test {
 
         // Trying to reuse a generation should fail.
         assert!(datastore
-            .set_target_release(
+            .target_release_insert(
                 opctx,
                 TargetRelease::new(
                     target_release.generation,
@@ -181,7 +187,7 @@ mod test {
 
         // But the next generation should be fine, even with the same source.
         let target_release = datastore
-            .set_target_release(
+            .target_release_insert(
                 opctx,
                 TargetRelease::new_from_prev(
                     target_release,
@@ -230,7 +236,7 @@ mod test {
 
         let before = Utc::now();
         let target_release = datastore
-            .set_target_release(
+            .target_release_insert(
                 opctx,
                 TargetRelease::new_from_prev(
                     target_release,

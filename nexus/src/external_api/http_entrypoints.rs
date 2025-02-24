@@ -6087,16 +6087,16 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn system_update_get_target_release(
+    async fn target_release_get(
         rqctx: RequestContext<ApiContext>,
     ) -> Result<HttpResponseOk<views::TargetRelease>, HttpError> {
         let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
         let handler = async {
+            let nexus = &apictx.context.nexus;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let target_release =
-                nexus.datastore().get_target_release(&opctx).await?;
+                nexus.datastore().target_release_get_current(&opctx).await?;
             Ok(HttpResponseOk(
                 nexus
                     .datastore()
@@ -6111,13 +6111,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn system_update_set_target_release(
+    async fn target_release_set(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<params::SetTargetReleaseParams>,
     ) -> Result<HttpResponseCreated<views::TargetRelease>, HttpError> {
         let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
         let handler = async {
+            let nexus = &apictx.context.nexus;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let params = body.into_inner();
@@ -6129,7 +6129,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .repo
                 .id;
             let current_target_release =
-                nexus.datastore().get_target_release(&opctx).await?;
+                nexus.datastore().target_release_get_current(&opctx).await?;
             let next_target_release =
                 nexus_db_model::TargetRelease::new_from_prev(
                     current_target_release,
@@ -6138,7 +6138,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 );
             let target_release = nexus
                 .datastore()
-                .set_target_release(&opctx, next_target_release)
+                .target_release_insert(&opctx, next_target_release)
                 .await?;
             Ok(HttpResponseCreated(
                 nexus
