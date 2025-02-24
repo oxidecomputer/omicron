@@ -554,6 +554,30 @@ impl<'a> LookupPath<'a> {
     {
         WebhookReceiver::PrimaryKey(Root { lookup_root: self }, id)
     }
+
+    /// Select a resource of type [`WebhookReceiver`], identified by its name
+    pub fn webhook_receiver_name<'b, 'c>(
+        self,
+        name: &'b Name,
+    ) -> WebhookReceiver<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        WebhookReceiver::Name(Root { lookup_root: self }, name)
+    }
+
+    /// Select a resource of type [`WebhookReceiver`], identified by its owned name
+    pub fn webhook_receiver_name_owned<'b, 'c>(
+        self,
+        name: Name,
+    ) -> WebhookReceiver<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        WebhookReceiver::OwnedName(Root { lookup_root: self }, name)
+    }
 }
 
 /// Represents the head of the selection path for a resource
@@ -921,7 +945,7 @@ lookup_resource! {
 lookup_resource! {
     name = "WebhookReceiver",
     ancestors = [],
-    lookup_by_name = false,
+    lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [
         { column_name = "id", uuid_kind = WebhookReceiverKind }

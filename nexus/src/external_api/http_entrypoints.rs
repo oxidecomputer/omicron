@@ -7332,7 +7332,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn webhook_view(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookPath>,
+        path_params: Path<params::WebhookSelector>,
     ) -> Result<HttpResponseOk<views::Webhook>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -7377,7 +7377,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn webhook_update(
         rqctx: RequestContext<Self::Context>,
-        _path_params: Path<params::WebhookPath>,
+        _path_params: Path<params::WebhookSelector>,
         _params: TypedBody<params::WebhookUpdate>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
@@ -7401,7 +7401,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn webhook_delete(
         rqctx: RequestContext<Self::Context>,
-        _path_params: Path<params::WebhookPath>,
+        _path_params: Path<params::WebhookSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -7424,7 +7424,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn webhook_secrets_list(
         rqctx: RequestContext<Self::Context>,
-        _path_params: Path<params::WebhookPath>,
+        _path_params: Path<params::WebhookSelector>,
     ) -> Result<HttpResponseOk<views::WebhookSecrets>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -7448,7 +7448,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     /// Add a secret to a webhook.
     async fn webhook_secrets_add(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookPath>,
+        path_params: Path<params::WebhookSelector>,
         params: TypedBody<params::WebhookSecretCreate>,
     ) -> Result<HttpResponseCreated<views::WebhookSecretId>, HttpError> {
         let apictx = rqctx.context();
@@ -7496,7 +7496,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn webhook_delivery_list(
         rqctx: RequestContext<Self::Context>,
-        _path_params: Path<params::WebhookPath>,
+        _path_params: Path<params::WebhookSelector>,
         _query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<views::WebhookDelivery>>, HttpError>
     {

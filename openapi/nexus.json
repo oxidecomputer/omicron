@@ -760,7 +760,7 @@
         }
       }
     },
-    "/experimental/v1/webhooks/{webhook_id}": {
+    "/experimental/v1/webhooks/{webhook}": {
       "get": {
         "tags": [
           "system/webhooks"
@@ -770,12 +770,11 @@
         "parameters": [
           {
             "in": "path",
-            "name": "webhook_id",
-            "description": "ID of the webhook",
+            "name": "webhook",
+            "description": "The name or ID of the webhook receiver.",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/NameOrId"
             }
           }
         ],
@@ -807,12 +806,11 @@
         "parameters": [
           {
             "in": "path",
-            "name": "webhook_id",
-            "description": "ID of the webhook",
+            "name": "webhook",
+            "description": "The name or ID of the webhook receiver.",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/NameOrId"
             }
           }
         ],
@@ -847,12 +845,11 @@
         "parameters": [
           {
             "in": "path",
-            "name": "webhook_id",
-            "description": "ID of the webhook",
+            "name": "webhook",
+            "description": "The name or ID of the webhook receiver.",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/NameOrId"
             }
           }
         ],
@@ -869,7 +866,7 @@
         }
       }
     },
-    "/experimental/v1/webhooks/{webhook_id}/deliveries": {
+    "/experimental/v1/webhooks/{webhook}/deliveries": {
       "get": {
         "tags": [
           "system/webhooks"
@@ -879,12 +876,11 @@
         "parameters": [
           {
             "in": "path",
-            "name": "webhook_id",
-            "description": "ID of the webhook",
+            "name": "webhook",
+            "description": "The name or ID of the webhook receiver.",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/NameOrId"
             }
           },
           {
@@ -938,7 +934,7 @@
         }
       }
     },
-    "/experimental/v1/webhooks/{webhook_id}/deliveries/{event_id}/resend": {
+    "/experimental/v1/webhooks/{webhook}/deliveries/{event_id}/resend": {
       "post": {
         "tags": [
           "system/webhooks"
@@ -957,11 +953,11 @@
           },
           {
             "in": "path",
-            "name": "webhook_id",
+            "name": "webhook",
+            "description": "The name or ID of the webhook receiver.",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/NameOrId"
             }
           }
         ],
@@ -985,7 +981,7 @@
         }
       }
     },
-    "/experimental/v1/webhooks/{webhook_id}/secrets": {
+    "/experimental/v1/webhooks/{webhook}/secrets": {
       "get": {
         "tags": [
           "system/webhooks"
@@ -995,12 +991,11 @@
         "parameters": [
           {
             "in": "path",
-            "name": "webhook_id",
-            "description": "ID of the webhook",
+            "name": "webhook",
+            "description": "The name or ID of the webhook receiver.",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/NameOrId"
             }
           }
         ],
@@ -1032,12 +1027,11 @@
         "parameters": [
           {
             "in": "path",
-            "name": "webhook_id",
-            "description": "ID of the webhook",
+            "name": "webhook",
+            "description": "The name or ID of the webhook receiver.",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/NameOrId"
             }
           }
         ],
@@ -1071,7 +1065,7 @@
         }
       }
     },
-    "/experimental/v1/webhooks/{webhook_id}/secrets/{secret_id}": {
+    "/experimental/v1/webhooks/{webhook}/secrets/{secret_id}": {
       "delete": {
         "tags": [
           "system/webhooks"
@@ -1091,12 +1085,11 @@
           },
           {
             "in": "path",
-            "name": "webhook_id",
-            "description": "ID of the webhook receiver.",
+            "name": "webhook",
+            "description": "The name or ID of the webhook receiver.",
             "required": true,
             "schema": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/NameOrId"
             }
           }
         ],

@@ -267,16 +267,16 @@ ping                                     GET      /v1/ping
 API operations found with tag "system/webhooks"
 OPERATION ID                             METHOD   URL PATH
 webhook_create                           POST     /experimental/v1/webhooks
-webhook_delete                           DELETE   /experimental/v1/webhooks/{webhook_id}
-webhook_delivery_list                    GET      /experimental/v1/webhooks/{webhook_id}/deliveries
-webhook_delivery_resend                  POST     /experimental/v1/webhooks/{webhook_id}/deliveries/{event_id}/resend
+webhook_delete                           DELETE   /experimental/v1/webhooks/{webhook}
+webhook_delivery_list                    GET      /experimental/v1/webhooks/{webhook}/deliveries
+webhook_delivery_resend                  POST     /experimental/v1/webhooks/{webhook}/deliveries/{event_id}/resend
 webhook_event_class_list                 GET      /experimental/v1/webhook-events/classes
 webhook_event_class_view                 GET      /experimental/v1/webhook-events/classes/{name}
-webhook_secrets_add                      POST     /experimental/v1/webhooks/{webhook_id}/secrets
-webhook_secrets_delete                   DELETE   /experimental/v1/webhooks/{webhook_id}/secrets/{secret_id}
-webhook_secrets_list                     GET      /experimental/v1/webhooks/{webhook_id}/secrets
-webhook_update                           PUT      /experimental/v1/webhooks/{webhook_id}
-webhook_view                             GET      /experimental/v1/webhooks/{webhook_id}
+webhook_secrets_add                      POST     /experimental/v1/webhooks/{webhook}/secrets
+webhook_secrets_delete                   DELETE   /experimental/v1/webhooks/{webhook}/secrets/{secret_id}
+webhook_secrets_list                     GET      /experimental/v1/webhooks/{webhook}/secrets
+webhook_update                           PUT      /experimental/v1/webhooks/{webhook}
+webhook_view                             GET      /experimental/v1/webhooks/{webhook}
 
 API operations found with tag "vpcs"
 OPERATION ID                             METHOD   URL PATH

@@ -17,6 +17,7 @@ use nexus_types::external_api::views;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::NameOrId;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::WebhookEventUuid;
 use omicron_uuid_kinds::WebhookReceiverUuid;
@@ -25,11 +26,22 @@ impl super::Nexus {
     pub fn webhook_receiver_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        webhook_selector: params::WebhookPath,
+        webhook_selector: params::WebhookSelector,
     ) -> LookupResult<lookup::WebhookReceiver<'a>> {
-        Ok(LookupPath::new(opctx, self.datastore()).webhook_receiver_id(
-            WebhookReceiverUuid::from_untyped_uuid(webhook_selector.webhook_id),
-        ))
+        match webhook_selector.webhook {
+            NameOrId::Id(id) => {
+                let webhook = LookupPath::new(opctx, &self.db_datastore)
+                    .webhook_receiver_id(
+                        WebhookReceiverUuid::from_untyped_uuid(id),
+                    );
+                Ok(webhook)
+            }
+            NameOrId::Name(name) => {
+                let webhook = LookupPath::new(opctx, &self.db_datastore)
+                    .webhook_receiver_name_owned(name.into());
+                Ok(webhook)
+            }
+        }
     }
 
     pub async fn webhook_receiver_config_fetch(

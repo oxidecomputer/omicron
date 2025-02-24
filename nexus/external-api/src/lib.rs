@@ -3503,12 +3503,12 @@ pub trait NexusExternalApi {
     /// Get the configuration for a webhook receiver.
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/webhooks/{webhook_id}",
+        path = "/experimental/v1/webhooks/{webhook}",
         tags = ["system/webhooks"],
     }]
     async fn webhook_view(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookPath>,
+        path_params: Path<params::WebhookSelector>,
     ) -> Result<HttpResponseOk<views::Webhook>, HttpError>;
 
     /// Create a new webhook receiver.
@@ -3525,53 +3525,53 @@ pub trait NexusExternalApi {
     /// Update the configuration of an existing webhook receiver.
     #[endpoint {
         method = PUT,
-        path = "/experimental/v1/webhooks/{webhook_id}",
+        path = "/experimental/v1/webhooks/{webhook}",
         tags = ["system/webhooks"],
     }]
     async fn webhook_update(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookPath>,
+        path_params: Path<params::WebhookSelector>,
         params: TypedBody<params::WebhookUpdate>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Delete a webhook receiver.
     #[endpoint {
         method = DELETE,
-        path = "/experimental/v1/webhooks/{webhook_id}",
+        path = "/experimental/v1/webhooks/{webhook}",
         tags = ["system/webhooks"],
     }]
     async fn webhook_delete(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookPath>,
+        path_params: Path<params::WebhookSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
     /// List the IDs of secrets for a webhook receiver.
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/webhooks/{webhook_id}/secrets",
+        path = "/experimental/v1/webhooks/{webhook}/secrets",
         tags = ["system/webhooks"],
     }]
     async fn webhook_secrets_list(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookPath>,
+        path_params: Path<params::WebhookSelector>,
     ) -> Result<HttpResponseOk<views::WebhookSecrets>, HttpError>;
 
     /// Add a secret to a webhook receiver.
     #[endpoint {
         method = POST,
-        path = "/experimental/v1/webhooks/{webhook_id}/secrets",
+        path = "/experimental/v1/webhooks/{webhook}/secrets",
         tags = ["system/webhooks"],
     }]
     async fn webhook_secrets_add(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookPath>,
+        path_params: Path<params::WebhookSelector>,
         params: TypedBody<params::WebhookSecretCreate>,
     ) -> Result<HttpResponseCreated<views::WebhookSecretId>, HttpError>;
 
     /// Delete a secret associated with a webhook receiver by ID.
     #[endpoint {
         method = DELETE,
-        path = "/experimental/v1/webhooks/{webhook_id}/secrets/{secret_id}",
+        path = "/experimental/v1/webhooks/{webhook}/secrets/{secret_id}",
         tags = ["system/webhooks"],
     }]
     async fn webhook_secrets_delete(
@@ -3582,19 +3582,19 @@ pub trait NexusExternalApi {
     /// List delivery attempts to a webhook receiver.
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/webhooks/{webhook_id}/deliveries",
+        path = "/experimental/v1/webhooks/{webhook}/deliveries",
         tags = ["system/webhooks"],
     }]
     async fn webhook_delivery_list(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookPath>,
+        path_params: Path<params::WebhookSelector>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<views::WebhookDelivery>>, HttpError>;
 
     /// Request re-delivery of a webhook event.
     #[endpoint {
         method = POST,
-        path = "/experimental/v1/webhooks/{webhook_id}/deliveries/{event_id}/resend",
+        path = "/experimental/v1/webhooks/{webhook}/deliveries/{event_id}/resend",
         tags = ["system/webhooks"],
     }]
     async fn webhook_delivery_resend(

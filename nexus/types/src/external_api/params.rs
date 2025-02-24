@@ -95,7 +95,6 @@ path_param!(CertificatePath, certificate, "certificate");
 
 id_path_param!(SupportBundlePath, support_bundle, "support bundle");
 id_path_param!(GroupPath, group_id, "group");
-id_path_param!(WebhookPath, webhook_id, "webhook");
 
 // TODO: The hardware resources should be represented by its UUID or a hardware
 // ID that can be used to deterministically generate the UUID.
@@ -2391,6 +2390,12 @@ pub struct EventClassSelector {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookSelector {
+    /// The name or ID of the webhook receiver.
+    pub webhook: NameOrId,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
@@ -2438,14 +2443,16 @@ pub struct WebhookSecretCreate {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookSecretSelector {
-    /// ID of the webhook receiver.
-    pub webhook_id: Uuid,
+    /// Selects the webhook receiver
+    #[serde(flatten)]
+    pub webhook: WebhookSelector,
     /// ID of the secret.
     pub secret_id: Uuid,
-
 }
 #[derive(Deserialize, JsonSchema)]
 pub struct WebhookDeliveryPath {
-    pub webhook_id: Uuid,
+    /// Selects the webhook receiver
+    #[serde(flatten)]
+    pub webhook: WebhookSelector,
     pub event_id: Uuid,
 }
