@@ -14,12 +14,13 @@ use omicron_common::api::external::{
     ByteCount, FailureDomain, Hostname, IdentityMetadataCreateParams,
     IdentityMetadataUpdateParams, InstanceAutoRestartPolicy, InstanceCpuCount,
     LinkFec, LinkSpeed, Name, NameOrId, PaginationOrder, RouteDestination,
-    RouteTarget, SemverVersion, TxEqConfig, UserId,
+    RouteTarget, TxEqConfig, UserId,
 };
 use omicron_common::disk::DiskVariant;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use parse_display::Display;
 use schemars::JsonSchema;
+use semver::Version;
 use serde::{
     de::{self, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
@@ -2241,7 +2242,7 @@ pub struct UpdatesPutRepositoryParams {
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 pub struct UpdatesGetRepositoryParams {
     /// The version to get.
-    pub system_version: SemverVersion,
+    pub system_version: Version,
 }
 
 // Probes

@@ -5,8 +5,7 @@
 //! APIs exposed by Nexus.
 
 use crate::api::external::{
-    ByteCount, DiskState, Generation, Hostname, InstanceCpuCount,
-    SemverVersion, Vni,
+    ByteCount, DiskState, Generation, Hostname, InstanceCpuCount, Vni,
 };
 use chrono::{DateTime, Utc};
 use omicron_uuid_kinds::DownstairsRegionKind;
@@ -15,6 +14,7 @@ use omicron_uuid_kinds::UpstairsRepairKind;
 use omicron_uuid_kinds::UpstairsSessionKind;
 use parse_display::{Display, FromStr};
 use schemars::JsonSchema;
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::net::SocketAddr;
@@ -259,7 +259,7 @@ pub struct UpdateArtifactId {
     pub name: String,
 
     /// The artifact's version.
-    pub version: SemverVersion,
+    pub version: Version,
 
     /// The kind of update artifact this is.
     pub kind: KnownArtifactKind,
