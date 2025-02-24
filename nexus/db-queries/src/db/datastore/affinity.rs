@@ -365,13 +365,20 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    pub async fn anti_affinity_group_member_list(
+    pub async fn anti_affinity_group_member_instance_list(
         &self,
         opctx: &OpContext,
         authz_anti_affinity_group: &authz::AntiAffinityGroup,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<AntiAffinityGroupInstanceMembership> {
         opctx.authorize(authz::Action::Read, authz_anti_affinity_group).await?;
+
+        // TODO: Need to also look up "group_membership" here
+        // TODO: definitely test listing both?
+        // TODO: atlernately - make this API "instance member" specific, make a
+        // different one for "affinity group members", and paginate over both.
+        //
+        // That might be preferable.
 
         use db::schema::anti_affinity_group_instance_membership::dsl;
         match pagparams {
@@ -1804,7 +1811,11 @@ mod tests {
         };
         let pagbyid = PaginatedBy::Id(pagparams_id);
         let members = datastore
-            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .anti_affinity_group_member_instance_list(
+                &opctx,
+                &authz_group,
+                &pagbyid,
+            )
             .await
             .unwrap();
         assert!(members.is_empty());
@@ -1832,7 +1843,11 @@ mod tests {
 
         // We should now be able to list the new member
         let members = datastore
-            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .anti_affinity_group_member_instance_list(
+                &opctx,
+                &authz_group,
+                &pagbyid,
+            )
             .await
             .unwrap();
         assert_eq!(members.len(), 1);
@@ -1855,7 +1870,11 @@ mod tests {
             .await
             .unwrap();
         let members = datastore
-            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .anti_affinity_group_member_instance_list(
+                &opctx,
+                &authz_group,
+                &pagbyid,
+            )
             .await
             .unwrap();
         assert!(members.is_empty());
@@ -2036,7 +2055,11 @@ mod tests {
         };
         let pagbyid = PaginatedBy::Id(pagparams_id);
         let members = datastore
-            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .anti_affinity_group_member_instance_list(
+                &opctx,
+                &authz_group,
+                &pagbyid,
+            )
             .await
             .unwrap();
         assert!(members.is_empty());
@@ -2100,7 +2123,11 @@ mod tests {
 
         // We should now be able to list the new member
         let members = datastore
-            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .anti_affinity_group_member_instance_list(
+                &opctx,
+                &authz_group,
+                &pagbyid,
+            )
             .await
             .unwrap();
         assert_eq!(members.len(), 1);
@@ -2124,7 +2151,11 @@ mod tests {
             .await
             .unwrap();
         let members = datastore
-            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .anti_affinity_group_member_instance_list(
+                &opctx,
+                &authz_group,
+                &pagbyid,
+            )
             .await
             .unwrap();
         assert!(members.is_empty());
@@ -2242,7 +2273,11 @@ mod tests {
         };
         let pagbyid = PaginatedBy::Id(pagparams_id);
         let members = datastore
-            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .anti_affinity_group_member_instance_list(
+                &opctx,
+                &authz_group,
+                &pagbyid,
+            )
             .await
             .unwrap();
         assert!(members.is_empty());
@@ -2274,7 +2309,11 @@ mod tests {
 
         // Confirm that no instance members exist
         let members = datastore
-            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .anti_affinity_group_member_instance_list(
+                &opctx,
+                &authz_group,
+                &pagbyid,
+            )
             .await
             .unwrap();
         assert!(members.is_empty());
@@ -2401,7 +2440,11 @@ mod tests {
         };
         let pagbyid = PaginatedBy::Id(pagparams_id);
         let members = datastore
-            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .anti_affinity_group_member_instance_list(
+                &opctx,
+                &authz_group,
+                &pagbyid,
+            )
             .await
             .unwrap();
         assert!(members.is_empty());
@@ -2438,7 +2481,11 @@ mod tests {
 
         // Confirm that no instance members exist
         let members = datastore
-            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .anti_affinity_group_member_instance_list(
+                &opctx,
+                &authz_group,
+                &pagbyid,
+            )
             .await
             .unwrap();
         assert!(members.is_empty());
@@ -2974,7 +3021,11 @@ mod tests {
         };
         let pagbyid = PaginatedBy::Id(pagparams_id);
         let members = datastore
-            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .anti_affinity_group_member_instance_list(
+                &opctx,
+                &authz_group,
+                &pagbyid,
+            )
             .await
             .unwrap();
         assert_eq!(members.len(), 1);
@@ -3012,7 +3063,11 @@ mod tests {
         );
 
         let members = datastore
-            .anti_affinity_group_member_list(&opctx, &authz_group, &pagbyid)
+            .anti_affinity_group_member_instance_list(
+                &opctx,
+                &authz_group,
+                &pagbyid,
+            )
             .await
             .unwrap();
         assert!(members.is_empty());

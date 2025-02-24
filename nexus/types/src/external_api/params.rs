@@ -839,6 +839,12 @@ pub struct AntiAffinityInstanceGroupMemberPath {
     pub instance: NameOrId,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct AntiAffinityAffinityGroupMemberPath {
+    pub anti_affinity_group: NameOrId,
+    pub affinity_group: NameOrId,
+}
+
 /// Create-time parameters for an `AntiAffinityGroup`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AntiAffinityGroupCreate {

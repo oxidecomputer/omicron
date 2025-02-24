@@ -2983,7 +2983,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 nexus.instance_lookup(&opctx, instance_selector)?;
 
             let group = nexus
-                .anti_affinity_group_member_view(
+                .anti_affinity_group_member_instance_view(
                     &opctx,
                     &group_lookup,
                     &instance_lookup,
@@ -3029,7 +3029,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 nexus.instance_lookup(&opctx, instance_selector)?;
 
             let member = nexus
-                .anti_affinity_group_member_add(
+                .anti_affinity_group_member_instance_add(
                     &opctx,
                     &group_lookup,
                     &instance_lookup,
@@ -3074,10 +3074,146 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 nexus.instance_lookup(&opctx, instance_selector)?;
 
             nexus
-                .anti_affinity_group_member_delete(
+                .anti_affinity_group_member_instance_delete(
                     &opctx,
                     &group_lookup,
                     &instance_lookup,
+                )
+                .await?;
+            Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn anti_affinity_group_member_affinity_group_view(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AntiAffinityAffinityGroupMemberPath>,
+    ) -> Result<HttpResponseOk<AntiAffinityGroupMember>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let query = query_params.into_inner();
+
+            // Select anti-affinity group
+            let group_selector = params::AntiAffinityGroupSelector {
+                anti_affinity_group: path.anti_affinity_group,
+                project: query.project.clone(),
+            };
+            let group_lookup =
+                nexus.anti_affinity_group_lookup(&opctx, group_selector)?;
+
+            // Select affinity group
+            let affinity_group_selector = params::AffinityGroupSelector {
+                project: query.project,
+                affinity_group: path.affinity_group,
+            };
+            let affinity_group_lookup =
+                nexus.affinity_group_lookup(&opctx, affinity_group_selector)?;
+
+            let group = nexus
+                .anti_affinity_group_member_affinity_group_view(
+                    &opctx,
+                    &group_lookup,
+                    &affinity_group_lookup,
+                )
+                .await?;
+
+            Ok(HttpResponseOk(group))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn anti_affinity_group_member_affinity_group_add(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AntiAffinityAffinityGroupMemberPath>,
+    ) -> Result<HttpResponseCreated<AntiAffinityGroupMember>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+
+            // Select anti-affinity group
+            let group_selector = params::AntiAffinityGroupSelector {
+                anti_affinity_group: path.anti_affinity_group,
+                project: query.project.clone(),
+            };
+            let group_lookup =
+                nexus.anti_affinity_group_lookup(&opctx, group_selector)?;
+
+            // Select affinity group
+            let affinity_group_selector = params::AffinityGroupSelector {
+                project: query.project,
+                affinity_group: path.affinity_group,
+            };
+            let affinity_group_lookup =
+                nexus.affinity_group_lookup(&opctx, affinity_group_selector)?;
+
+            let member = nexus
+                .anti_affinity_group_member_affinity_group_add(
+                    &opctx,
+                    &group_lookup,
+                    &affinity_group_lookup,
+                )
+                .await?;
+            Ok(HttpResponseCreated(member))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn anti_affinity_group_member_affinity_group_delete(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AntiAffinityAffinityGroupMemberPath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+
+            // Select anti-affinity group
+            let group_selector = params::AntiAffinityGroupSelector {
+                anti_affinity_group: path.anti_affinity_group,
+                project: query.project.clone(),
+            };
+            let group_lookup =
+                nexus.anti_affinity_group_lookup(&opctx, group_selector)?;
+
+            // Select affinity group
+            let affinity_group_selector = params::AffinityGroupSelector {
+                project: query.project,
+                affinity_group: path.affinity_group,
+            };
+            let affinity_group_lookup =
+                nexus.affinity_group_lookup(&opctx, affinity_group_selector)?;
+
+            nexus
+                .anti_affinity_group_member_affinity_group_delete(
+                    &opctx,
+                    &group_lookup,
+                    &affinity_group_lookup,
                 )
                 .await?;
             Ok(HttpResponseDeleted())
