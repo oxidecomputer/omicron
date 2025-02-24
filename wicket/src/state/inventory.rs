@@ -4,25 +4,28 @@
 
 //! Information about all top-level Oxide components (sleds, switches, PSCs)
 
-use anyhow::{bail, Result};
-use omicron_common::api::internal::nexus::KnownArtifactKind;
-use once_cell::sync::Lazy;
+use anyhow::{bail, Context as _, Result};
+use omicron_common::api::{
+    external::SwitchLocation, internal::nexus::KnownArtifactKind,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::iter::Iterator;
+use std::sync::LazyLock;
 use wicket_common::inventory::{
     RackV1Inventory, RotInventory, RotSlot, SpComponentCaboose,
-    SpComponentInfo, SpIgnition, SpState, SpType,
+    SpComponentInfo, SpIgnition, SpState, SpType, Transceiver,
 };
 
-pub static ALL_COMPONENT_IDS: Lazy<Vec<ComponentId>> = Lazy::new(|| {
-    (0..=31u8)
-        .map(ComponentId::Sled)
-        .chain((0..=1u8).map(ComponentId::Switch))
-        .chain((0..=1u8).map(ComponentId::Psc))
-        .collect()
-});
+pub static ALL_COMPONENT_IDS: LazyLock<Vec<ComponentId>> =
+    LazyLock::new(|| {
+        (0..=31u8)
+            .map(ComponentId::Sled)
+            .chain((0..=1u8).map(ComponentId::Switch))
+            .chain((0..=1u8).map(ComponentId::Psc))
+            .collect()
+    });
 
 /// Inventory is the most recent information about rack composition as
 /// received from MGS.
@@ -49,9 +52,15 @@ impl Inventory {
         &mut self,
         inventory: RackV1Inventory,
     ) -> anyhow::Result<()> {
+        let mgs_inventory = inventory
+            .mgs
+            .map(|mgs| mgs.inventory)
+            .context("Cannot update inventory without any details from MGS")?;
+        let mut transceiver_inventory =
+            inventory.transceivers.map(|tr| tr.inventory).unwrap_or_default();
         let mut new_inventory = Inventory::default();
 
-        for sp in inventory.sps {
+        for sp in mgs_inventory.sps {
             let i = sp.id.slot;
             let type_ = sp.id.type_;
             let sp = Sp {
@@ -67,7 +76,18 @@ impl Inventory {
             let id = ComponentId::from_sp_type_and_slot(type_, i)?;
             let component = match type_ {
                 SpType::Sled => Component::Sled(sp),
-                SpType::Switch => Component::Switch(sp),
+                SpType::Switch => {
+                    // Insert the switch's transceivers.
+                    let switch_id = match i {
+                        0 => SwitchLocation::Switch0,
+                        1 => SwitchLocation::Switch1,
+                        _ => unreachable!(),
+                    };
+                    let transceivers = transceiver_inventory
+                        .remove(&switch_id)
+                        .unwrap_or_default();
+                    Component::Switch { sp, transceivers }
+                }
                 SpType::Power => Component::Psc(sp),
             };
 
@@ -129,7 +149,7 @@ impl Sp {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Component {
     Sled(Sp),
-    Switch(Sp),
+    Switch { sp: Sp, transceivers: Vec<Transceiver> },
     Psc(Sp),
 }
 
@@ -145,7 +165,7 @@ impl Component {
     pub fn sp(&self) -> &Sp {
         match self {
             Component::Sled(sp) => sp,
-            Component::Switch(sp) => sp,
+            Component::Switch { sp, .. } => sp,
             Component::Psc(sp) => sp,
         }
     }

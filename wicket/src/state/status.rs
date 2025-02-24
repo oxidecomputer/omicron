@@ -21,6 +21,7 @@ const LIVENESS_THRESHOLD: Duration = Duration::from_secs(30);
 pub struct ServiceStatus {
     wicketd_last_seen: Option<Duration>,
     mgs_last_seen: Option<Duration>,
+    transceivers_last_seen: Option<Duration>,
 }
 
 impl ServiceStatus {
@@ -44,6 +45,11 @@ impl ServiceStatus {
             *d += time;
             redraw |= d.as_secs() > prev;
         }
+        if let Some(d) = self.transceivers_last_seen.as_mut() {
+            let prev = d.as_secs();
+            *d += time;
+            redraw |= d.as_secs() > prev;
+        }
 
         redraw
     }
@@ -56,12 +62,20 @@ impl ServiceStatus {
         self.mgs_last_seen = Some(elapsed);
     }
 
+    pub fn reset_transceivers(&mut self, elapsed: Duration) {
+        self.transceivers_last_seen = Some(elapsed);
+    }
+
     pub fn mgs_liveness(&self) -> Liveness {
         Self::liveness(self.mgs_last_seen)
     }
 
     pub fn wicketd_liveness(&self) -> Liveness {
         Self::liveness(self.wicketd_last_seen)
+    }
+
+    pub fn transceiver_liveness(&self) -> Liveness {
+        Self::liveness(self.transceivers_last_seen)
     }
 
     fn liveness(elapsed: Option<Duration>) -> Liveness {

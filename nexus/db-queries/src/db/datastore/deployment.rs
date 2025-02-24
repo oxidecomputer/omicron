@@ -838,7 +838,13 @@ impl DataStore {
                                 d.id, d.sled_id
                             ))
                         })?;
-                    sled_disks.disks.insert(d.into());
+                    let disk_id = d.id;
+                    sled_disks.disks.insert(d.try_into().map_err(|e| {
+                        Error::internal_error(&format!(
+                            "Cannot convert BpOmicronPhysicalDisk {}: {e}",
+                            disk_id
+                        ))
+                    })?);
                 }
             }
         }
@@ -2039,7 +2045,6 @@ mod tests {
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use once_cell::sync::Lazy;
     use oxnet::IpNet;
     use pretty_assertions::assert_eq;
     use rand::thread_rng;
@@ -2054,10 +2059,11 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
+    use std::sync::LazyLock;
     use std::time::Duration;
 
-    static EMPTY_PLANNING_INPUT: Lazy<PlanningInput> =
-        Lazy::new(|| PlanningInputBuilder::empty_input());
+    static EMPTY_PLANNING_INPUT: LazyLock<PlanningInput> =
+        LazyLock::new(|| PlanningInputBuilder::empty_input());
 
     #[derive(Default)]
     pub struct NetworkResourceControlFlow {
@@ -2344,12 +2350,12 @@ mod tests {
         assert_eq!(
             EnsureMultiple::from(
                 builder
-                    .sled_ensure_disks(
+                    .sled_add_disks(
                         new_sled_id,
                         &planning_input
                             .sled_lookup(SledFilter::Commissioned, new_sled_id)
                             .unwrap()
-                            .resources,
+                            .resources
                     )
                     .unwrap()
                     .disks
