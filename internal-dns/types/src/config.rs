@@ -451,7 +451,7 @@ impl DnsConfigBuilder {
     /// a simple HTTP interface as well as a lower-level protocol over TCP,
     /// called the "Native protocol". This method inserts a zone and the related
     /// records for both of these services.
-    /// (TODO-https://github.com/oxidecomputer/omicron/issues/7419: Add Native protocol
+    /// (TODO-<https://github.com/oxidecomputer/omicron/issues/7419:> Add Native protocol
     /// interface)
     ///
     /// `http_service` is the `ServiceName` for the HTTP service that belongs in
