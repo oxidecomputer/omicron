@@ -579,6 +579,15 @@ pub struct BlueprintZonesConfig {
     pub zones: IdMap<BlueprintZoneConfig>,
 }
 
+impl Default for BlueprintZonesConfig {
+    fn default() -> Self {
+        Self {
+            generation: Generation::new(),
+            zones: IdMap::new(),
+        }
+    }
+}
+
 impl BlueprintZonesConfig {
     /// Converts self into [`OmicronZonesConfig`].
     ///
@@ -1025,6 +1034,15 @@ impl From<BlueprintPhysicalDiskConfig> for OmicronPhysicalDiskConfig {
 pub struct BlueprintDatasetsConfig {
     pub generation: Generation,
     pub datasets: IdMap<BlueprintDatasetConfig>,
+}
+
+impl Default for BlueprintDatasetsConfig {
+    fn default() -> Self {
+        Self {
+            generation: Generation::new(),
+            datasets: IdMap::new(),
+        }
+    }
 }
 
 impl BlueprintDatasetsConfig {

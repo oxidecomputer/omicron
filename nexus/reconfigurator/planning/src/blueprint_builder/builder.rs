@@ -25,7 +25,6 @@ use nexus_inventory::now_db_precision;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::blueprint_zone_type;
-use nexus_types::deployment::id_map::IdMap;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintDatasetFilter;
@@ -33,6 +32,7 @@ use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
+use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
@@ -84,6 +84,7 @@ use std::net::SocketAddrV6;
 use thiserror::Error;
 
 use super::clickhouse::ClickhouseAllocator;
+use super::ClickhouseZonesThatShouldBeRunning;
 
 /// Errors encountered while assembling blueprints
 #[derive(Debug, Error)]
@@ -432,47 +433,22 @@ impl<'a> BlueprintBuilder<'a> {
         creator: &str,
         mut rng: PlannerRng,
     ) -> Blueprint {
-        let blueprint_zones = sled_ids
+        let sleds = sled_ids
             .map(|sled_id| {
-                let config = BlueprintZonesConfig {
-                    generation: Generation::new(),
-                    zones: IdMap::new(),
+                let config = BlueprintSledConfig {
+                    state: SledState::Active,
+                    disks_config: BlueprintPhysicalDisksConfig::default(),
+                    datasets_config: BlueprintDatasetsConfig::default(),
+                    zones_config: BlueprintZonesConfig::default(),
                 };
                 (sled_id, config)
             })
             .collect::<BTreeMap<_, _>>();
-        let blueprint_disks = blueprint_zones
-            .keys()
-            .copied()
-            .map(|sled_id| {
-                let config = BlueprintPhysicalDisksConfig::default();
-                (sled_id, config)
-            })
-            .collect();
-        let blueprint_datasets = blueprint_zones
-            .keys()
-            .copied()
-            .map(|sled_id| {
-                let config = BlueprintDatasetsConfig {
-                    generation: Generation::new(),
-                    datasets: IdMap::new(),
-                };
-                (sled_id, config)
-            })
-            .collect();
-        let num_sleds = blueprint_zones.len();
-        let sled_state = blueprint_zones
-            .keys()
-            .copied()
-            .map(|sled_id| (sled_id, SledState::Active))
-            .collect();
+        let num_sleds = sleds.len();
 
         Blueprint {
             id: rng.next_blueprint(),
-            blueprint_zones,
-            blueprint_disks,
-            blueprint_datasets,
-            sled_state,
+            sleds,
             parent_blueprint_id: None,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
@@ -500,63 +476,10 @@ impl<'a> BlueprintBuilder<'a> {
             "parent_id" => parent_blueprint.id.to_string(),
         ));
 
-        // Squish the disparate maps in our parent blueprint into one map of
-        // `SledEditor`s.
+        // Convert our parent blueprint's sled configs into `SledEditor`s.
         let mut sled_editors = BTreeMap::new();
-        for (sled_id, zones) in &parent_blueprint.blueprint_zones {
-            // Prefer the sled state from our parent blueprint for sleds
-            // that were in it.
-            let state = match parent_blueprint.sled_state.get(sled_id).copied()
-            {
-                Some(state) => state,
-                // If we have zones but no state for a sled, we assume
-                // it was removed by an earlier version of the planner
-                // (which pruned decommissioned sleds from
-                // `sled_state`). Check that the sled is decommissioned in
-                // the planning input, which is a prerequisite for
-                // decommissioning. If it isn't, then we don't know what to
-                // do: the state is missing but we can't assume
-                // "decommissioned", so fail.
-                None => match input
-                    .sled_lookup(SledFilter::All, *sled_id)
-                    .map(|sled| sled.state)
-                {
-                    Ok(SledState::Decommissioned) => SledState::Decommissioned,
-                    Ok(SledState::Active) => {
-                        bail!(
-                            "sled {sled_id} is present in parent_blueprint \
-                             zones map, but still active in planning input"
-                        );
-                    }
-                    Err(err) => {
-                        bail!(
-                            "sled {sled_id} is present in parent_blueprint \
-                             zones map, but lookup from planning input failed: \
-                             {err}"
-                        );
-                    }
-                },
-            };
-
-            // If we don't have disks/datasets entries, we'll start with an
-            // empty config and rely on `sled_ensure_{disks,datasets}` calls to
-            // populate it. It's also possible our parent blueprint removed
-            // entries because our sled has been expunged, in which case we
-            // won't do any further editing and what we fill in here is
-            // irrelevant.
-            let disks = parent_blueprint
-                .blueprint_disks
-                .get(sled_id)
-                .cloned()
-                .unwrap_or_else(|| BlueprintPhysicalDisksConfig::default());
-            let datasets = parent_blueprint
-                .blueprint_datasets
-                .get(sled_id)
-                .cloned()
-                .unwrap_or_else(|| BlueprintDatasetsConfig {
-                    generation: Generation::new(),
-                    datasets: IdMap::new(),
-                });
+        for (sled_id, sled_cfg) in &parent_blueprint.sleds {
+            let state = sled_cfg.state;
 
             let mut editor = match state {
                 SledState::Active => {
@@ -572,16 +495,16 @@ impl<'a> BlueprintBuilder<'a> {
                         .subnet;
                     SledEditor::for_existing_active(
                         subnet,
-                        zones.clone(),
-                        disks,
-                        datasets.clone(),
+                        sled_cfg.zones_config.clone(),
+                        sled_cfg.disks_config.clone(),
+                        sled_cfg.datasets_config.clone(),
                     )
                 }
                 SledState::Decommissioned => {
                     SledEditor::for_existing_decommissioned(
-                        zones.clone(),
-                        disks,
-                        datasets.clone(),
+                        sled_cfg.zones_config.clone(),
+                        sled_cfg.disks_config.clone(),
+                        sled_cfg.datasets_config.clone(),
                     )
                 }
             }
@@ -711,17 +634,19 @@ impl<'a> BlueprintBuilder<'a> {
 
         // Collect the Omicron zones config for all sleds, including sleds that
         // are no longer in service and need expungement work.
-        let mut sled_state = BTreeMap::new();
-        let mut blueprint_zones = BTreeMap::new();
-        let mut blueprint_disks = BTreeMap::new();
-        let mut blueprint_datasets = BTreeMap::new();
+        let mut sleds = BTreeMap::new();
         for (sled_id, editor) in self.sled_editors {
             let EditedSled { zones, disks, datasets, state, edit_counts } =
                 editor.finalize();
-            sled_state.insert(sled_id, state);
-            blueprint_disks.insert(sled_id, disks);
-            blueprint_datasets.insert(sled_id, datasets);
-            blueprint_zones.insert(sled_id, zones);
+            sleds.insert(
+                sled_id,
+                BlueprintSledConfig {
+                    state,
+                    disks_config: disks,
+                    datasets_config: datasets,
+                    zones_config: zones,
+                },
+            );
             if edit_counts.has_nonzero_counts() {
                 debug!(
                     self.log, "sled modified in new blueprint";
@@ -784,7 +709,10 @@ impl<'a> BlueprintBuilder<'a> {
         // If we have an allocator, use it to generate a new config. If an error
         // is returned then log it and carry over the parent_config.
         let clickhouse_cluster_config = clickhouse_allocator.map(|a| {
-            match a.plan(&(&blueprint_zones).into()) {
+            let should_be_running = ClickhouseZonesThatShouldBeRunning::new(
+                sleds.iter().map(|(id, c)| (*id, &c.zones_config)),
+            );
+            match a.plan(&should_be_running) {
                 Ok(config) => config,
                 Err(e) => {
                     error!(self.log, "clickhouse allocator error: {e}");
@@ -794,10 +722,7 @@ impl<'a> BlueprintBuilder<'a> {
         });
         Blueprint {
             id: blueprint_id,
-            blueprint_zones,
-            blueprint_disks,
-            blueprint_datasets,
-            sled_state,
+            sleds,
             parent_blueprint_id: Some(self.parent_blueprint.id),
             internal_dns_version: self.input.internal_dns_version(),
             external_dns_version: self.input.external_dns_version(),

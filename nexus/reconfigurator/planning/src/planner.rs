@@ -172,11 +172,12 @@ impl<'a> Planner<'a> {
                 (SledPolicy::Expunged, SledState::Active) => (),
             }
 
-            // Check that the sled isn't already decommissioned in the parent blueprint, if it exists.
-            if let Some(sled_state) =
-                self.blueprint.parent_blueprint().sled_state.get(&sled_id)
+            // Check that the sled isn't already decommissioned in the parent
+            // blueprint, if it exists.
+            if let Some(parent_sled_cfg) =
+                self.blueprint.parent_blueprint().sleds.get(&sled_id)
             {
-                if *sled_state == SledState::Decommissioned {
+                if parent_sled_cfg.state == SledState::Decommissioned {
                     continue;
                 }
             }

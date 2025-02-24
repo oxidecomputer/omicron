@@ -12,7 +12,7 @@ use nexus_types::deployment::{
 };
 use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
 use slog::{error, Logger};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use thiserror::Error;
 
 // The set of clickhouse server and keeper zones that should be running as
@@ -26,12 +26,11 @@ pub struct ClickhouseZonesThatShouldBeRunning {
     pub servers: BTreeSet<OmicronZoneUuid>,
 }
 
-impl From<&BTreeMap<SledUuid, BlueprintZonesConfig>>
-    for ClickhouseZonesThatShouldBeRunning
-{
-    fn from(
-        zones_by_sled_id: &BTreeMap<SledUuid, BlueprintZonesConfig>,
-    ) -> Self {
+impl ClickhouseZonesThatShouldBeRunning {
+    pub fn new<'a, I>(zones_by_sled_id: I) -> Self
+    where
+        I: Iterator<Item = (SledUuid, &'a BlueprintZonesConfig)>,
+    {
         let mut keepers = BTreeSet::new();
         let mut servers = BTreeSet::new();
         for (_, bp_zone_config) in Blueprint::filtered_zones(
