@@ -23,6 +23,7 @@ slog-term.workspace = true
 tokio.workspace = true
 tufaceous-lib.workspace = true
 omicron-workspace-hack.workspace = true
+semver.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true

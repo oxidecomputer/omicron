@@ -48,6 +48,7 @@ tokio-stream.workspace = true
 tokio-util.workspace = true
 toml.workspace = true
 tough.workspace = true
+transceiver-controller.workspace = true
 uuid.workspace = true
 
 bootstrap-agent-client.workspace = true
@@ -67,6 +68,7 @@ wicket-common.workspace = true
 wicketd-api.workspace = true
 wicketd-client.workspace = true
 omicron-workspace-hack.workspace = true
+semver.workspace = true
 
 [[bin]]
 name = "wicketd"
