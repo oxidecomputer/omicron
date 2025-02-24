@@ -26,6 +26,12 @@ progenitor::generate_api!(
         ImportExportPolicy = omicron_common::api::external::ImportExportPolicy,
         TypedUuidForRackInitKind = omicron_uuid_kinds::RackInitUuid,
         TypedUuidForRackResetKind = omicron_uuid_kinds::RackResetUuid,
+    },
+    convert = {
+        {
+            type = "string",
+            pattern = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$",
+        } = semver::Version,
     }
 );
 
