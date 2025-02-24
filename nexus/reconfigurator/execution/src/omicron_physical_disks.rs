@@ -13,6 +13,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::info;
 use slog::o;
@@ -25,7 +26,7 @@ pub(crate) async fn deploy_disks(
     opctx: &OpContext,
     sleds_by_id: &BTreeMap<SledUuid, Sled>,
     sled_configs: &BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
-) -> Result<DeployDisksDone, Vec<anyhow::Error>> {
+) -> Result<(), Vec<anyhow::Error>> {
     let errors: Vec<_> = stream::iter(sled_configs)
         .filter_map(|(sled_id, config)| async move {
             let log = opctx.log.new(o!(
@@ -96,38 +97,55 @@ pub(crate) async fn deploy_disks(
         .await;
 
     if errors.is_empty() {
-        Ok(DeployDisksDone {})
+        Ok(())
     } else {
         Err(errors)
     }
 }
 
-/// Typestate indicating that the deploy disks step was performed.
-#[derive(Debug)]
-#[must_use = "this should be passed into decommission_expunged_disks"]
-pub(crate) struct DeployDisksDone {}
-
 /// Decommissions all disks which are currently expunged.
 pub(crate) async fn decommission_expunged_disks(
     opctx: &OpContext,
     datastore: &DataStore,
-    // This is taken as a parameter to ensure that this depends on a
-    // "deploy_disks" call made earlier. Disk expungement is a statement of
-    // policy, but we need to be assured that the Sled Agent has stopped using
-    // that disk before we can mark its state as decommissioned.
-    _deploy_disks_done: DeployDisksDone,
+    expunged_disks: impl Iterator<Item = (SledUuid, PhysicalDiskUuid)>,
 ) -> Result<(), Vec<anyhow::Error>> {
-    datastore
-        .physical_disk_decommission_all_expunged(&opctx)
-        .await
-        .map_err(|e| vec![anyhow!(e)])?;
-    Ok(())
+    let errors: Vec<anyhow::Error> = stream::iter(expunged_disks)
+        .filter_map(|(sled_id, disk_id)| async move {
+            let log = opctx.log.new(slog::o!(
+                "sled_id" => sled_id.to_string(),
+                "disk_id" => disk_id.to_string(),
+            ));
+
+            match datastore.physical_disk_decommission(&opctx, disk_id).await {
+                Err(error) => {
+                    warn!(
+                        log,
+                        "failed to decommission expunged disk";
+                        "error" => #%error
+                    );
+                    Some(anyhow!(error).context(format!(
+                        "failed to decommission: disk_id = {disk_id}",
+                    )))
+                }
+                Ok(()) => {
+                    info!(log, "successfully decommissioned expunged disk");
+                    None
+                }
+            }
+        })
+        .collect()
+        .await;
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::deploy_disks;
-    use super::DeployDisksDone;
 
     use crate::DataStore;
     use crate::Sled;
@@ -238,13 +256,9 @@ mod test {
         // Get a success result back when the blueprint has an empty set of
         // disks.
         let (_, blueprint) = create_blueprint(BTreeMap::new());
-        // Use an explicit type here because not doing so can cause errors to
-        // be ignored (this behavior is genuinely terrible). Instead, ensure
-        // that the type has the right result.
-        let _: DeployDisksDone =
-            deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
-                .await
-                .expect("failed to deploy no disks");
+        deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
+            .await
+            .expect("failed to deploy no disks");
 
         // Disks are updated in a particular order, but each request contains
         // the full set of disks that must be running.
@@ -298,10 +312,9 @@ mod test {
         }
 
         // Execute it.
-        let _: DeployDisksDone =
-            deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
-                .await
-                .expect("failed to deploy initial disks");
+        deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
+            .await
+            .expect("failed to deploy initial disks");
 
         s1.verify_and_clear();
         s2.verify_and_clear();
@@ -318,10 +331,9 @@ mod test {
                 )),
             );
         }
-        let _: DeployDisksDone =
-            deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
-                .await
-                .expect("failed to deploy same disks");
+        deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
+            .await
+            .expect("failed to deploy same disks");
         s1.verify_and_clear();
         s2.verify_and_clear();
 
@@ -588,9 +600,7 @@ mod test {
         super::decommission_expunged_disks(
             &opctx,
             &datastore,
-            // This is an internal test, and we're testing decommissioning in
-            // isolation, so it's okay to create the typestate here.
-            DeployDisksDone {},
+            [(sled_id, disk_to_decommission)].into_iter(),
         )
         .await
         .unwrap();
