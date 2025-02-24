@@ -22,6 +22,8 @@ use dropshot::HttpError;
 pub use dropshot::PaginationOrder;
 pub use error::*;
 use futures::stream::BoxStream;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use parse_display::Display;
@@ -994,6 +996,10 @@ impl JsonSchema for Hostname {
 pub enum ResourceType {
     AddressLot,
     AddressLotBlock,
+    AffinityGroup,
+    AffinityGroupMember,
+    AntiAffinityGroup,
+    AntiAffinityGroupMember,
     AllowList,
     BackgroundTask,
     BgpConfig,
@@ -1324,6 +1330,69 @@ pub enum InstanceAutoRestartPolicy {
     /// best-effort attempt to restart it. The control plane may choose not to
     /// restart the instance to preserve the overall availability of the system.
     BestEffort,
+}
+
+// AFFINITY GROUPS
+
+/// Affinity policy used to describe "what to do when a request cannot be satisfied"
+///
+/// Used for both Affinity and Anti-Affinity Groups
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AffinityPolicy {
+    /// If the affinity request cannot be satisfied, allow it anyway.
+    ///
+    /// This enables a "best-effort" attempt to satisfy the affinity policy.
+    Allow,
+
+    /// If the affinity request cannot be satisfied, fail explicitly.
+    Fail,
+}
+
+/// Describes the scope of affinity for the purposes of co-location.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureDomain {
+    /// Instances are considered co-located if they are on the same sled
+    Sled,
+}
+
+/// A member of an Affinity Group
+///
+/// Membership in a group is not exclusive - members may belong to multiple
+/// affinity / anti-affinity groups.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum AffinityGroupMember {
+    /// An instance belonging to this group, identified by UUID.
+    Instance(InstanceUuid),
+}
+
+impl SimpleIdentity for AffinityGroupMember {
+    fn id(&self) -> Uuid {
+        match self {
+            AffinityGroupMember::Instance(id) => *id.as_untyped_uuid(),
+        }
+    }
+}
+
+/// A member of an Anti-Affinity Group
+///
+/// Membership in a group is not exclusive - members may belong to multiple
+/// affinity / anti-affinity groups.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum AntiAffinityGroupMember {
+    /// An instance belonging to this group, identified by UUID.
+    Instance(InstanceUuid),
+}
+
+impl SimpleIdentity for AntiAffinityGroupMember {
+    fn id(&self) -> Uuid {
+        match self {
+            AntiAffinityGroupMember::Instance(id) => *id.as_untyped_uuid(),
+        }
+    }
 }
 
 // DISKS

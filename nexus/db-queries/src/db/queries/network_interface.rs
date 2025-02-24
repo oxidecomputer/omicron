@@ -31,9 +31,9 @@ use nexus_db_model::{NetworkInterfaceKind, MAX_NICS_PER_INSTANCE};
 use nexus_db_model::{NetworkInterfaceKindEnum, SqlU8};
 use omicron_common::api::external;
 use omicron_common::api::external::MacAddr;
-use once_cell::sync::Lazy;
 use slog_error_chain::SlogInlineError;
 use std::net::{IpAddr, Ipv6Addr};
+use std::sync::LazyLock;
 use uuid::Uuid;
 
 // These are sentinel values and other constants used to verify the state of the
@@ -62,11 +62,11 @@ const INSTANCE_DESTROYED: db::model::InstanceState =
 const INSTANCE_RUNNING: db::model::InstanceState =
     db::model::InstanceState::Vmm;
 
-static NO_INSTANCE_SENTINEL_STRING: Lazy<String> =
-    Lazy::new(|| String::from(NO_INSTANCE_SENTINEL));
+static NO_INSTANCE_SENTINEL_STRING: LazyLock<String> =
+    LazyLock::new(|| String::from(NO_INSTANCE_SENTINEL));
 
-static INSTANCE_BAD_STATE_SENTINEL_STRING: Lazy<String> =
-    Lazy::new(|| String::from(INSTANCE_BAD_STATE_SENTINEL));
+static INSTANCE_BAD_STATE_SENTINEL_STRING: LazyLock<String> =
+    LazyLock::new(|| String::from(INSTANCE_BAD_STATE_SENTINEL));
 
 // Uncastable sentinel used to detect when an instance exists, but is not
 // in the right state to have its network interfaces altered

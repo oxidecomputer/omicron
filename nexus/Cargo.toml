@@ -61,7 +61,6 @@ nexus-networking.workspace = true
 nexus-saga-recovery.workspace = true
 nexus-test-interface.workspace = true
 num-integer.workspace = true
-once_cell.workspace = true
 openssl.workspace = true
 oximeter-client.workspace = true
 oximeter-db = { workspace = true, default-features = false, features = [ "oxql" ] }

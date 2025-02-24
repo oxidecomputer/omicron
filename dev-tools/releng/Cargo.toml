@@ -18,7 +18,6 @@ omicron-common.workspace = true
 omicron-pins.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-zone-package.workspace = true
-once_cell.workspace = true
 reqwest.workspace = true
 semver.workspace = true
 serde.workspace = true

@@ -10,11 +10,11 @@ use base64::Engine;
 use chrono::{DateTime, Utc};
 use http::Uri;
 use omicron_common::api::external::{
-    AddressLotKind, AllowedSourceIps, BfdMode, BgpPeer, ByteCount, Hostname,
-    IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    InstanceAutoRestartPolicy, InstanceCpuCount, LinkFec, LinkSpeed, Name,
-    NameOrId, PaginationOrder, RouteDestination, RouteTarget, SemverVersion,
-    TxEqConfig, UserId,
+    AddressLotKind, AffinityPolicy, AllowedSourceIps, BfdMode, BgpPeer,
+    ByteCount, FailureDomain, Hostname, IdentityMetadataCreateParams,
+    IdentityMetadataUpdateParams, InstanceAutoRestartPolicy, InstanceCpuCount,
+    LinkFec, LinkSpeed, Name, NameOrId, PaginationOrder, RouteDestination,
+    RouteTarget, SemverVersion, TxEqConfig, UserId,
 };
 use omicron_common::disk::DiskVariant;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
@@ -70,6 +70,8 @@ pub struct UninitializedSledId {
     pub part: String,
 }
 
+path_param!(AffinityGroupPath, affinity_group, "affinity group");
+path_param!(AntiAffinityGroupPath, anti_affinity_group, "anti affinity group");
 path_param!(ProjectPath, project, "project");
 path_param!(InstancePath, instance, "instance");
 path_param!(NetworkInterfacePath, interface, "network interface");
@@ -806,6 +808,70 @@ where
     }
 
     Ok(v)
+}
+
+// AFFINITY GROUPS
+
+/// Create-time parameters for an `AffinityGroup`
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AffinityGroupCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    pub policy: AffinityPolicy,
+    pub failure_domain: FailureDomain,
+}
+
+/// Updateable properties of an `AffinityGroup`
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AffinityGroupUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct AffinityInstanceGroupMemberPath {
+    pub affinity_group: NameOrId,
+    pub instance: NameOrId,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct AntiAffinityInstanceGroupMemberPath {
+    pub anti_affinity_group: NameOrId,
+    pub instance: NameOrId,
+}
+
+/// Create-time parameters for an `AntiAffinityGroup`
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AntiAffinityGroupCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    pub policy: AffinityPolicy,
+    pub failure_domain: FailureDomain,
+}
+
+/// Updateable properties of an `AntiAffinityGroup`
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AntiAffinityGroupUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+}
+
+#[derive(Deserialize, JsonSchema, Clone)]
+pub struct AffinityGroupSelector {
+    /// Name or ID of the project, only required if `affinity_group` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the Affinity Group
+    pub affinity_group: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema, Clone)]
+pub struct AntiAffinityGroupSelector {
+    /// Name or ID of the project, only required if `anti_affinity_group` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the Anti Affinity Group
+    pub anti_affinity_group: NameOrId,
 }
 
 // PROJECTS

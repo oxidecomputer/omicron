@@ -58,7 +58,6 @@ use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintTarget;
-use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
@@ -1390,9 +1389,9 @@ impl DataStore {
                     &conn,
                     &opctx.log,
                     blueprint
-                        .all_omicron_zones_not_in(
-                            BlueprintZoneFilter::ShouldBeExternallyReachable,
-                        )
+                        .all_omicron_zones(|disposition| {
+                            !disposition.is_in_service()
+                        })
                         .map(|(_sled_id, zone)| zone),
                 )
                 .await
@@ -1401,9 +1400,9 @@ impl DataStore {
                     &conn,
                     opctx,
                     blueprint
-                        .all_omicron_zones(
-                            BlueprintZoneFilter::ShouldBeExternallyReachable,
-                        )
+                        .all_omicron_zones(|disposition| {
+                            disposition.is_in_service()
+                        })
                         .map(|(_sled_id, zone)| zone),
                 )
                 .await
@@ -2011,7 +2010,6 @@ mod tests {
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
-    use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
@@ -2041,7 +2039,6 @@ mod tests {
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use once_cell::sync::Lazy;
     use oxnet::IpNet;
     use pretty_assertions::assert_eq;
     use rand::thread_rng;
@@ -2056,10 +2053,11 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
+    use std::sync::LazyLock;
     use std::time::Duration;
 
-    static EMPTY_PLANNING_INPUT: Lazy<PlanningInput> =
-        Lazy::new(|| PlanningInputBuilder::empty_input());
+    static EMPTY_PLANNING_INPUT: LazyLock<PlanningInput> =
+        LazyLock::new(|| PlanningInputBuilder::empty_input());
 
     #[derive(Default)]
     pub struct NetworkResourceControlFlow {
@@ -2276,7 +2274,7 @@ mod tests {
             collection.sled_agents.len()
         );
         assert_eq!(
-            blueprint1.all_omicron_zones(BlueprintZoneFilter::All).count(),
+            blueprint1.all_omicron_zones(BlueprintZoneDisposition::any).count(),
             collection.all_omicron_zones().count()
         );
         // All zones should be in service.
@@ -2408,9 +2406,9 @@ mod tests {
             blueprint2.blueprint_zones.len()
         );
         assert_eq!(
-            blueprint1.all_omicron_zones(BlueprintZoneFilter::All).count()
+            blueprint1.all_omicron_zones(BlueprintZoneDisposition::any).count()
                 + num_new_sled_zones,
-            blueprint2.all_omicron_zones(BlueprintZoneFilter::All).count()
+            blueprint2.all_omicron_zones(BlueprintZoneDisposition::any).count()
         );
 
         // All zones should be in service.
@@ -2931,7 +2929,7 @@ mod tests {
 
         // Insert an IP pool range covering the one Nexus IP.
         let nexus_ip = blueprint1
-            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
             .find_map(|(_, zone_config)| {
                 zone_config
                     .zone_type
@@ -3149,10 +3147,7 @@ mod tests {
 
     fn assert_all_zones_in_service(blueprint: &Blueprint) {
         let not_in_service = blueprint
-            .all_omicron_zones(BlueprintZoneFilter::All)
-            .filter(|(_, z)| {
-                z.disposition != BlueprintZoneDisposition::InService
-            })
+            .all_omicron_zones(|disposition| !disposition.is_in_service())
             .collect::<Vec<_>>();
         assert!(
             not_in_service.is_empty(),
