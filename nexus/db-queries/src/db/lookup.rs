@@ -921,7 +921,6 @@ lookup_resource! {
 lookup_resource! {
     name = "WebhookReceiver",
     ancestors = [],
-    children = ["WebhookSecret"],
     lookup_by_name = false,
     soft_deletes = true,
     primary_key_columns = [
@@ -932,7 +931,6 @@ lookup_resource! {
 lookup_resource! {
     name = "WebhookSecret",
     ancestors = ["WebhookReceiver"],
-    children = [],
     lookup_by_name = false,
     soft_deletes = true,
     primary_key_columns = [

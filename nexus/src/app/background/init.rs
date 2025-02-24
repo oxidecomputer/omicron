@@ -917,7 +917,7 @@ impl BackgroundTasksInitializer {
                 process",
             period: config.read_only_region_replacement_start.period_secs,
             task_impl: Box::new(ReadOnlyRegionReplacementDetector::new(
-                datastore,
+                datastore.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
