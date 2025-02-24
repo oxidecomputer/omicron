@@ -10,6 +10,7 @@ use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetFilter;
+use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
@@ -461,11 +462,13 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
     let mut expected_datasets = BTreeSet::new();
 
     // All disks should have debug and zone root datasets.
-    //
-    // TODO-correctness We currently only include in-service disks in the
-    // blueprint; once we include expunged or decommissioned disks too, we
-    // should filter here to only in-service.
-    for (&sled_id, disk_config) in &blippy.blueprint().blueprint_disks {
+    for (sled_id, disk) in blippy
+        .blueprint()
+        .all_omicron_disks(BlueprintPhysicalDiskDisposition::is_in_service)
+    {
+        // Note: This may be called multiple times per `sled_id`,
+        // which is somewhat inefficient. However it will still only report
+        // one error note per `sled_id`.
         let Some(sled_datasets) = datasets.get_sled_or_note_missing(
             blippy,
             sled_id,
@@ -474,41 +477,37 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
             continue;
         };
 
-        for disk in &disk_config.disks {
-            let sled_datasets = sled_datasets.get(&disk.pool_id);
+        let sled_datasets = sled_datasets.get(&disk.pool_id);
 
-            match sled_datasets
-                .and_then(|by_zpool| by_zpool.get(&DatasetKind::Debug))
-            {
-                Some(dataset) => {
-                    expected_datasets.insert(dataset.id);
-                }
-                None => {
-                    blippy.push_sled_note(
-                        sled_id,
-                        Severity::Fatal,
-                        SledKind::ZpoolMissingDebugDataset {
-                            zpool: disk.pool_id,
-                        },
-                    );
-                }
+        match sled_datasets
+            .and_then(|by_zpool| by_zpool.get(&DatasetKind::Debug))
+        {
+            Some(dataset) => {
+                expected_datasets.insert(dataset.id);
             }
+            None => {
+                blippy.push_sled_note(
+                    sled_id,
+                    Severity::Fatal,
+                    SledKind::ZpoolMissingDebugDataset { zpool: disk.pool_id },
+                );
+            }
+        }
 
-            match sled_datasets.and_then(|by_zpool| {
-                by_zpool.get(&DatasetKind::TransientZoneRoot)
-            }) {
-                Some(dataset) => {
-                    expected_datasets.insert(dataset.id);
-                }
-                None => {
-                    blippy.push_sled_note(
-                        sled_id,
-                        Severity::Fatal,
-                        SledKind::ZpoolMissingZoneRootDataset {
-                            zpool: disk.pool_id,
-                        },
-                    );
-                }
+        match sled_datasets
+            .and_then(|by_zpool| by_zpool.get(&DatasetKind::TransientZoneRoot))
+        {
+            Some(dataset) => {
+                expected_datasets.insert(dataset.id);
+            }
+            None => {
+                blippy.push_sled_note(
+                    sled_id,
+                    Severity::Fatal,
+                    SledKind::ZpoolMissingZoneRootDataset {
+                        zpool: disk.pool_id,
+                    },
+                );
             }
         }
     }

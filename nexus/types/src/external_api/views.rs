@@ -868,6 +868,7 @@ impl fmt::Display for PhysicalDiskPolicy {
     PartialEq,
     Eq,
     EnumIter,
+    Diffable,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum PhysicalDiskState {

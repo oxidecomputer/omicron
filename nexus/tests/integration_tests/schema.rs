@@ -14,10 +14,10 @@ use nexus_db_model::{AllSchemaVersions, SchemaVersion};
 use nexus_db_queries::db::pub_test_utils::TestDatabase;
 use nexus_db_queries::db::DISALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_test_utils::{load_test_config, ControlPlaneTestContextBuilder};
-use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_test_utils::dev::db::{Client, CockroachInstance};
 use pretty_assertions::{assert_eq, assert_ne};
+use semver::Version;
 use similar_asserts;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -149,7 +149,7 @@ async fn apply_update(
                 semver::Version::new(10, 0, 0),
             ];
 
-            if NOT_IDEMPOTENT_VERSIONS.contains(&version.semver().0) {
+            if NOT_IDEMPOTENT_VERSIONS.contains(&version.semver()) {
                 break;
             }
         }
@@ -1007,7 +1007,7 @@ struct MigrationContext<'a> {
     //
     // This can be used to validate properties of a database pool
     // before and after a particular schema migration.
-    pool_and_conn: Mutex<BTreeMap<SemverVersion, PoolAndConnection>>,
+    pool_and_conn: Mutex<BTreeMap<Version, PoolAndConnection>>,
 }
 
 impl MigrationContext<'_> {
@@ -1015,7 +1015,7 @@ impl MigrationContext<'_> {
     //
     // Typically called as a part of a "before" function, to set up a connection
     // before a schema migration.
-    async fn populate_pool_and_connection(&self, version: SemverVersion) {
+    async fn populate_pool_and_connection(&self, version: Version) {
         let pool = nexus_db_queries::db::Pool::new_single_host(
             self.log,
             &nexus_db_queries::db::Config {
@@ -1029,10 +1029,7 @@ impl MigrationContext<'_> {
     }
 
     // Takes a pool and connection if they've been populated.
-    fn take_pool_and_connection(
-        &self,
-        version: &SemverVersion,
-    ) -> PoolAndConnection {
+    fn take_pool_and_connection(&self, version: &Version) -> PoolAndConnection {
         let mut map = self.pool_and_conn.lock().unwrap();
         map.remove(version).unwrap()
     }
@@ -1468,7 +1465,7 @@ fn before_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         // See 'at_current_101_0_0' - we create a connection here, because connections
         // may be populating an OID cache. We use the connection after the
         // schema migration to access the "instance_auto_restart" type.
-        let semver = SemverVersion(semver::Version::parse("101.0.0").unwrap());
+        let semver = Version::new(101, 0, 0);
         ctx.populate_pool_and_connection(semver).await;
     })
 }
@@ -1549,7 +1546,7 @@ fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         //
         // This finds all user-defined types which have dropped at some point,
         // but which still appear in the latest schema.
-        let semver = SemverVersion(semver::Version::parse("101.0.0").unwrap());
+        let semver = Version::new(101, 0, 0);
         let pool_and_conn = ctx.take_pool_and_connection(&semver);
 
         {
@@ -1949,48 +1946,46 @@ fn after_125_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
 //
 // Each "check" is implemented as a pair of {before, after} migration function
 // pointers, called precisely around the migration under test.
-fn get_migration_checks() -> BTreeMap<SemverVersion, DataMigrationFns> {
+fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     let mut map = BTreeMap::new();
 
     map.insert(
-        SemverVersion(semver::Version::parse("23.0.0").unwrap()),
+        Version::new(23, 0, 0),
         DataMigrationFns::new().before(before_23_0_0).after(after_23_0_0),
     );
     map.insert(
-        SemverVersion(semver::Version::parse("24.0.0").unwrap()),
+        Version::new(24, 0, 0),
         DataMigrationFns::new().before(before_24_0_0).after(after_24_0_0),
     );
     map.insert(
-        SemverVersion(semver::Version::parse("37.0.1").unwrap()),
+        Version::new(37, 0, 1),
         DataMigrationFns::new().after(after_37_0_1),
     );
     map.insert(
-        SemverVersion(semver::Version::parse("70.0.0").unwrap()),
+        Version::new(70, 0, 0),
         DataMigrationFns::new().before(before_70_0_0).after(after_70_0_0),
     );
     map.insert(
-        SemverVersion(semver::Version::parse("95.0.0").unwrap()),
+        Version::new(95, 0, 0),
         DataMigrationFns::new().before(before_95_0_0).after(after_95_0_0),
     );
     map.insert(
-        SemverVersion(semver::Version::parse("101.0.0").unwrap()),
+        Version::new(101, 0, 0),
         DataMigrationFns::new()
             .before(before_101_0_0)
             .after(after_101_0_0)
             .at_current(at_current_101_0_0),
     );
     map.insert(
-        SemverVersion(semver::Version::parse("107.0.0").unwrap()),
+        Version::new(107, 0, 0),
         DataMigrationFns::new().before(before_107_0_0).after(after_107_0_0),
     );
-
     map.insert(
-        SemverVersion::new(124, 0, 0),
+        Version::new(124, 0, 0),
         DataMigrationFns::new().before(before_124_0_0).after(after_124_0_0),
     );
-
     map.insert(
-        SemverVersion::new(125, 0, 0),
+        Version::new(125, 0, 0),
         DataMigrationFns::new().before(before_125_0_0).after(after_125_0_0),
     );
 
