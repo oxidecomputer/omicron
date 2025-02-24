@@ -828,6 +828,18 @@ impl<'a> BlueprintBuilder<'a> {
         }
     }
 
+    pub fn current_sled_state(
+        &self,
+        sled_id: SledUuid,
+    ) -> Result<SledState, Error> {
+        let editor = self.sled_editors.get(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to get sled state for unknown sled {sled_id}"
+            ))
+        })?;
+        Ok(editor.state())
+    }
+
     /// Set the desired state of the given sled.
     pub fn set_sled_decommissioned(
         &mut self,
@@ -935,9 +947,16 @@ impl<'a> BlueprintBuilder<'a> {
         // Expunging a disk expunges any datasets and zones that depend on it,
         // so expunging all in-service disks should have also expunged all
         // datasets and zones. Double-check that that's true.
+        let mut zones_ready_for_cleanup = Vec::new();
         for zone in editor.zones(BlueprintZoneDisposition::any) {
             match zone.disposition {
-                BlueprintZoneDisposition::Expunged { .. } => (),
+                BlueprintZoneDisposition::Expunged { .. } => {
+                    // Since this is a full sled expungement, we'll never see an
+                    // inventory collection indicating the zones are shut down,
+                    // nor do we need to: go ahead and mark any expunged zones
+                    // as ready for cleanup.
+                    zones_ready_for_cleanup.push(zone.id);
+                }
                 BlueprintZoneDisposition::InService => {
                     return Err(Error::Planner(anyhow!(
                         "expunged all disks but a zone \
@@ -957,6 +976,11 @@ impl<'a> BlueprintBuilder<'a> {
                 }
             }
         }
+        for zone_id in zones_ready_for_cleanup {
+            editor
+                .mark_expunged_zone_ready_for_cleanup(&zone_id)
+                .map_err(|err| Error::SledEditError { sled_id, err })?;
+        }
 
         // If we didn't expunge anything, this sled was presumably expunged in a
         // prior planning run. Only note the operation if we did anything.
@@ -972,6 +996,23 @@ impl<'a> BlueprintBuilder<'a> {
             });
         }
 
+        Ok(())
+    }
+
+    /// Mark expunged zones as ready for cleanup.
+    pub(crate) fn mark_expunged_zones_ready_for_cleanup(
+        &mut self,
+        sled_id: SledUuid,
+        zone_ids: &[OmicronZoneUuid],
+    ) -> Result<(), Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!("tried to expunge unknown sled {sled_id}"))
+        })?;
+        for zone_id in zone_ids {
+            editor
+                .mark_expunged_zone_ready_for_cleanup(zone_id)
+                .map_err(|err| Error::SledEditError { sled_id, err })?;
+        }
         Ok(())
     }
 
