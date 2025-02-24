@@ -273,6 +273,7 @@ webhook_delivery_resend                  POST     /experimental/v1/webhooks/{web
 webhook_event_class_list                 GET      /experimental/v1/webhook-events/classes
 webhook_event_class_view                 GET      /experimental/v1/webhook-events/classes/{name}
 webhook_secrets_add                      POST     /experimental/v1/webhooks/{webhook_id}/secrets
+webhook_secrets_delete                   DELETE   /experimental/v1/webhooks/{webhook_id}/secrets/{secret_id}
 webhook_secrets_list                     GET      /experimental/v1/webhooks/{webhook_id}/secrets
 webhook_update                           PUT      /experimental/v1/webhooks/{webhook_id}
 webhook_view                             GET      /experimental/v1/webhooks/{webhook_id}
