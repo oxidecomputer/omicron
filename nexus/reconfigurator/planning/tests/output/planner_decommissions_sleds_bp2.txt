@@ -1,22 +1,62 @@
 blueprint  1ac2d88f-27dd-4506-8585-6b2be832528e
 parent:    516e80a3-b362-4fac-bd3c-4559717120dd
 
+  sled: a1b477db-b629-48eb-911d-1ccdafca75b9 (decommissioned)
+
+    physical disks at generation 3:
+    -------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition 
+    -------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-069446b4-7881-49dc-838a-63a782d4896d   expunged ✓  
+    fake-vendor   fake-model   serial-20eba316-dffe-4516-9703-af561da19b0b   expunged ✓  
+    fake-vendor   fake-model   serial-426f4b6d-4a82-4106-bf4b-64ee86a2a5a4   expunged ✓  
+    fake-vendor   fake-model   serial-82daeef2-8641-4bf5-ac66-f7b5f62c48b6   expunged ✓  
+    fake-vendor   fake-model   serial-8e5feeb2-14f1-440f-a909-3c34aa8e129b   expunged ✓  
+    fake-vendor   fake-model   serial-942e2123-7c4e-4f6b-9317-1341fe212647   expunged ✓  
+    fake-vendor   fake-model   serial-97a5ce17-df5b-47e7-baf8-80ae710ce18e   expunged ✓  
+    fake-vendor   fake-model   serial-debc9fb6-bd58-4e4f-b8b8-6a9a07fcf25d   expunged ✓  
+    fake-vendor   fake-model   serial-f63a32a9-0659-43cf-8efc-8f34e7af9d45   expunged ✓  
+    fake-vendor   fake-model   serial-ffea118f-7715-4e21-8fc5-bb23cd0f59e8   expunged ✓  
+
+
+    omicron zones at generation 3:
+    ----------------------------------------------------------------------------------------------
+    zone type         zone id                                disposition    underlay IP           
+    ----------------------------------------------------------------------------------------------
+    clickhouse        3fd081ea-93f1-417e-bcb1-405854435f28   expunged ✓     fd00:1122:3344:103::23
+    crucible          290e7e97-c4b3-47da-9f40-8d909397fbae   expunged ✓     fd00:1122:3344:103::2e
+    crucible          29bbe4ad-e6e8-4e05-b188-a811a793ccbb   expunged ✓     fd00:1122:3344:103::2a
+    crucible          8500a060-a426-4324-ba40-a66dd4b89bc6   expunged ✓     fd00:1122:3344:103::29
+    crucible          92b7abd8-3e34-49dd-9c56-19a314e97d49   expunged ✓     fd00:1122:3344:103::25
+    crucible          b320954e-6c66-4540-9bf4-3d976f21ee1b   expunged ✓     fd00:1122:3344:103::26
+    crucible          bc3e4495-7e51-46b6-9f55-026ea1da39dd   expunged ✓     fd00:1122:3344:103::27
+    crucible          cfb7595b-280c-40f5-b1aa-6e154adf280b   expunged ✓     fd00:1122:3344:103::28
+    crucible          d6b6ea5a-3f29-4815-aa42-b1afeb11dfc5   expunged ✓     fd00:1122:3344:103::2c
+    crucible          d6b77c1f-8c9e-406d-944e-c97a57b3984d   expunged ✓     fd00:1122:3344:103::2b
+    crucible          ecc03801-b315-4495-9b2c-49e0eead1283   expunged ✓     fd00:1122:3344:103::2d
+    crucible_pantry   ecebab45-11e7-47ab-8bc2-ab9114c6e2bc   expunged ✓     fd00:1122:3344:103::24
+    internal_dns      96b7a45b-be74-44e8-b68a-e530cfa81830   expunged ✓     fd00:1122:3344:1::1   
+    internal_ntp      b3dbc671-0e4d-49ff-9f4f-71b249d21f57   expunged ✓     fd00:1122:3344:103::21
+    nexus             bc0f4342-f88d-49cc-bb44-b555d9b8ca12   expunged ✓     fd00:1122:3344:103::22
+
+
+
   sled: d67ce8f0-a691-4010-b414-420d82e80527 (active)
 
     physical disks at generation 2:
-    ----------------------------------------------------------------------
-    vendor        model        serial                                     
-    ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-1e2ec79e-9c11-4133-ac77-e0b994a507d5
-    fake-vendor   fake-model   serial-440ae69d-5e2e-4539-91d0-e2930bdd7203
-    fake-vendor   fake-model   serial-4e91d4a3-bb6c-44bb-bd4e-bf8913c1ba2b
-    fake-vendor   fake-model   serial-67de3a80-29cb-4066-b743-e285a2ca1f4e
-    fake-vendor   fake-model   serial-9139b70f-c1d3-475d-8f02-7c9acba52b2b
-    fake-vendor   fake-model   serial-95fbb110-5272-4646-ab50-21b31b7cde23
-    fake-vendor   fake-model   serial-9bf35cd7-4938-4c34-8189-288b3195cb64
-    fake-vendor   fake-model   serial-9d833141-18a1-4f24-8a34-6076c026aa87
-    fake-vendor   fake-model   serial-a279461f-a7b9-413f-a79f-cb4dab4c3fce
-    fake-vendor   fake-model   serial-ff7e002b-3ad8-4d45-b03a-c46ef0ac8e59
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-1e2ec79e-9c11-4133-ac77-e0b994a507d5   in service 
+    fake-vendor   fake-model   serial-440ae69d-5e2e-4539-91d0-e2930bdd7203   in service 
+    fake-vendor   fake-model   serial-4e91d4a3-bb6c-44bb-bd4e-bf8913c1ba2b   in service 
+    fake-vendor   fake-model   serial-67de3a80-29cb-4066-b743-e285a2ca1f4e   in service 
+    fake-vendor   fake-model   serial-9139b70f-c1d3-475d-8f02-7c9acba52b2b   in service 
+    fake-vendor   fake-model   serial-95fbb110-5272-4646-ab50-21b31b7cde23   in service 
+    fake-vendor   fake-model   serial-9bf35cd7-4938-4c34-8189-288b3195cb64   in service 
+    fake-vendor   fake-model   serial-9d833141-18a1-4f24-8a34-6076c026aa87   in service 
+    fake-vendor   fake-model   serial-a279461f-a7b9-413f-a79f-cb4dab4c3fce   in service 
+    fake-vendor   fake-model   serial-ff7e002b-3ad8-4d45-b03a-c46ef0ac8e59   in service 
 
 
     datasets at generation 3:
@@ -98,19 +138,19 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
   sled: fefcf4cf-f7e7-46b3-b629-058526ce440e (active)
 
     physical disks at generation 2:
-    ----------------------------------------------------------------------
-    vendor        model        serial                                     
-    ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-07068f19-1ff2-48da-8e72-874780df2339
-    fake-vendor   fake-model   serial-0f12e6ee-41d2-4eb0-813f-ba5240900ded
-    fake-vendor   fake-model   serial-0fdb4a39-3cd5-47a0-9064-e7f3c285af61
-    fake-vendor   fake-model   serial-13572832-83ad-40d6-896a-751f7e53f4f6
-    fake-vendor   fake-model   serial-3602bdd9-f7bb-4490-87a6-8f061f7712f5
-    fake-vendor   fake-model   serial-65707837-95a4-45d7-84e6-8b9a4da215f1
-    fake-vendor   fake-model   serial-7a43b2b0-3846-401c-8317-d555715a00f7
-    fake-vendor   fake-model   serial-855e3ef1-6929-4e21-8451-0e62bd93c7c9
-    fake-vendor   fake-model   serial-8adcf329-4cee-4075-b798-28b5add1edf5
-    fake-vendor   fake-model   serial-99e926d6-bd42-4cde-9f63-5ecc7ea14322
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-07068f19-1ff2-48da-8e72-874780df2339   in service 
+    fake-vendor   fake-model   serial-0f12e6ee-41d2-4eb0-813f-ba5240900ded   in service 
+    fake-vendor   fake-model   serial-0fdb4a39-3cd5-47a0-9064-e7f3c285af61   in service 
+    fake-vendor   fake-model   serial-13572832-83ad-40d6-896a-751f7e53f4f6   in service 
+    fake-vendor   fake-model   serial-3602bdd9-f7bb-4490-87a6-8f061f7712f5   in service 
+    fake-vendor   fake-model   serial-65707837-95a4-45d7-84e6-8b9a4da215f1   in service 
+    fake-vendor   fake-model   serial-7a43b2b0-3846-401c-8317-d555715a00f7   in service 
+    fake-vendor   fake-model   serial-855e3ef1-6929-4e21-8451-0e62bd93c7c9   in service 
+    fake-vendor   fake-model   serial-8adcf329-4cee-4075-b798-28b5add1edf5   in service 
+    fake-vendor   fake-model   serial-99e926d6-bd42-4cde-9f63-5ecc7ea14322   in service 
 
 
     datasets at generation 3:
@@ -188,30 +228,6 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
     internal_dns      d74f14f1-0a19-4d92-b76f-1b3a6e630b2c   in service    fd00:1122:3344:1::1   
     internal_ntp      064ec0c2-a320-4efb-b006-9e0e1d942d8e   in service    fd00:1122:3344:102::21
     nexus             294379f6-502c-465b-b32d-771c415a38af   in service    fd00:1122:3344:102::22
-
-
-!a1b477db-b629-48eb-911d-1ccdafca75b9
-WARNING: Zones exist without physical disks!
-    omicron zones at generation 3:
-    ----------------------------------------------------------------------------------------------
-    zone type         zone id                                disposition    underlay IP           
-    ----------------------------------------------------------------------------------------------
-    clickhouse        3fd081ea-93f1-417e-bcb1-405854435f28   expunged ✓     fd00:1122:3344:103::23
-    crucible          290e7e97-c4b3-47da-9f40-8d909397fbae   expunged ✓     fd00:1122:3344:103::2e
-    crucible          29bbe4ad-e6e8-4e05-b188-a811a793ccbb   expunged ✓     fd00:1122:3344:103::2a
-    crucible          8500a060-a426-4324-ba40-a66dd4b89bc6   expunged ✓     fd00:1122:3344:103::29
-    crucible          92b7abd8-3e34-49dd-9c56-19a314e97d49   expunged ✓     fd00:1122:3344:103::25
-    crucible          b320954e-6c66-4540-9bf4-3d976f21ee1b   expunged ✓     fd00:1122:3344:103::26
-    crucible          bc3e4495-7e51-46b6-9f55-026ea1da39dd   expunged ✓     fd00:1122:3344:103::27
-    crucible          cfb7595b-280c-40f5-b1aa-6e154adf280b   expunged ✓     fd00:1122:3344:103::28
-    crucible          d6b6ea5a-3f29-4815-aa42-b1afeb11dfc5   expunged ✓     fd00:1122:3344:103::2c
-    crucible          d6b77c1f-8c9e-406d-944e-c97a57b3984d   expunged ✓     fd00:1122:3344:103::2b
-    crucible          ecc03801-b315-4495-9b2c-49e0eead1283   expunged ✓     fd00:1122:3344:103::2d
-    crucible_pantry   ecebab45-11e7-47ab-8bc2-ab9114c6e2bc   expunged ✓     fd00:1122:3344:103::24
-    internal_dns      96b7a45b-be74-44e8-b68a-e530cfa81830   expunged ✓     fd00:1122:3344:1::1   
-    internal_ntp      b3dbc671-0e4d-49ff-9f4f-71b249d21f57   expunged ✓     fd00:1122:3344:103::21
-    nexus             bc0f4342-f88d-49cc-bb44-b555d9b8ca12   expunged ✓     fd00:1122:3344:103::22
-
 
 
  COCKROACHDB SETTINGS:
