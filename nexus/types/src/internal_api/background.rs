@@ -450,3 +450,11 @@ impl slog::KV for DebugDatasetsRendezvousStats {
         Ok(())
     }
 }
+
+/// The status of a `read_only_region_replacement_start` background task
+/// activation
+#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
+pub struct ReadOnlyRegionReplacementStartStatus {
+    pub requests_created_ok: Vec<String>,
+    pub errors: Vec<String>,
+}

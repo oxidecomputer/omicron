@@ -20,31 +20,9 @@ use quote::quote;
 use std::env;
 use std::fs;
 use std::path::Path;
-use typify::TypeSpaceImpl;
 
 const DENDRITE_ASIC_PACKAGE: PackageName =
     PackageName::new_const("dendrite-asic");
-
-// List of types we replace with the existing type of the same name from the
-// `transceiver_decode` crate.
-const REPLACEMENTS: &[&'static str] = &[
-    "ActiveCableMediaInterfaceId",
-    "ApplicationDescriptor",
-    "BaseTMediaInterfaceId",
-    "CmisDatapath",
-    "CmisDatapathState",
-    "CmisLaneStatus",
-    "ConnectorType",
-    "ExtendedSpecificationComplianceCode",
-    "HostElectricalInterfaceId",
-    "Identifier",
-    "MediaType",
-    "MmfMediaInterfaceId",
-    "PassiveCopperMediaInterfaceId",
-    "Sff8636Datapath",
-    "SffComplianceCode",
-    "SmfMediaInterfaceId",
-];
 
 fn main() -> Result<()> {
     // Find the current dendrite repo commit from our package manifest.
@@ -115,13 +93,6 @@ fn main() -> Result<()> {
             }
         })
         .with_derive("PartialEq");
-    for repl in REPLACEMENTS {
-        settings.with_replacement(
-            repl,
-            format!("::transceiver_decode::{repl}"),
-            std::iter::once(TypeSpaceImpl::Display),
-        );
-    }
 
     let code = progenitor::Generator::new(&settings)
         .generate_tokens(&spec)

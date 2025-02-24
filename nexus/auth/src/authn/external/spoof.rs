@@ -4,6 +4,8 @@
 
 //! Custom, test-only authn scheme that trusts whatever the client says
 
+use std::sync::LazyLock;
+
 use super::super::Details;
 use super::HttpAuthnScheme;
 use super::Reason;
@@ -16,7 +18,6 @@ use anyhow::Context;
 use async_trait::async_trait;
 use headers::authorization::{Authorization, Bearer};
 use headers::HeaderMapExt;
-use once_cell::sync::Lazy;
 use slog::debug;
 use uuid::Uuid;
 
@@ -56,20 +57,20 @@ const SPOOF_RESERVED_BAD_CREDS: &str = "this-fake-ID-it-is-truly-excellent";
 const SPOOF_PREFIX: &str = "oxide-spoof-";
 
 /// Actor (id) used for the special "bad credentials" error
-static SPOOF_RESERVED_BAD_CREDS_ACTOR: Lazy<Actor> =
-    Lazy::new(|| Actor::UserBuiltin {
+static SPOOF_RESERVED_BAD_CREDS_ACTOR: LazyLock<Actor> =
+    LazyLock::new(|| Actor::UserBuiltin {
         user_builtin_id: "22222222-2222-2222-2222-222222222222"
             .parse()
             .unwrap(),
     });
 
 /// Complete HTTP header value to trigger the "bad actor" error
-pub static SPOOF_HEADER_BAD_ACTOR: Lazy<Authorization<Bearer>> =
-    Lazy::new(|| make_header_value_str(SPOOF_RESERVED_BAD_ACTOR).unwrap());
+pub static SPOOF_HEADER_BAD_ACTOR: LazyLock<Authorization<Bearer>> =
+    LazyLock::new(|| make_header_value_str(SPOOF_RESERVED_BAD_ACTOR).unwrap());
 
 /// Complete HTTP header value to trigger the "bad creds" error
-pub static SPOOF_HEADER_BAD_CREDS: Lazy<Authorization<Bearer>> =
-    Lazy::new(|| make_header_value_str(SPOOF_RESERVED_BAD_CREDS).unwrap());
+pub static SPOOF_HEADER_BAD_CREDS: LazyLock<Authorization<Bearer>> =
+    LazyLock::new(|| make_header_value_str(SPOOF_RESERVED_BAD_CREDS).unwrap());
 
 /// Implements a (test-only) authentication scheme where the client simply
 /// provides the actor information in a custom bearer token and we always trust

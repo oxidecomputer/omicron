@@ -8,6 +8,7 @@ mod job;
 mod tuf;
 
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -20,7 +21,6 @@ use clap::Parser;
 use fs_err::tokio as fs;
 use omicron_zone_package::config::Config;
 use omicron_zone_package::config::PackageName;
-use once_cell::sync::Lazy;
 use semver::Version;
 use slog::debug;
 use slog::error;
@@ -88,7 +88,7 @@ const TUF_PACKAGES: [&PackageName; 11] = [
 
 const HELIOS_REPO: &str = "https://pkg.oxide.computer/helios/2/dev/";
 
-static WORKSPACE_DIR: Lazy<Utf8PathBuf> = Lazy::new(|| {
+static WORKSPACE_DIR: LazyLock<Utf8PathBuf> = LazyLock::new(|| {
     // $CARGO_MANIFEST_DIR is at `.../omicron/dev-tools/releng`
     let mut dir =
         Utf8PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect(
