@@ -15,6 +15,7 @@ use nexus_types::external_api::views;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -254,22 +255,18 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         anti_affinity_group_lookup: &lookup::AntiAffinityGroup<'_>,
-        pagparams: &PaginatedBy<'_>,
+        pagparams: &DataPageParams<'_, uuid::Uuid>,
     ) -> ListResultVec<external::AntiAffinityGroupMember> {
         let (.., authz_anti_affinity_group) = anti_affinity_group_lookup
             .lookup_for(authz::Action::ListChildren)
             .await?;
-        Ok(self
-            .db_datastore
-            .anti_affinity_group_member_instance_list(
+        self.db_datastore
+            .anti_affinity_group_member_list(
                 opctx,
                 &authz_anti_affinity_group,
                 pagparams,
             )
-            .await?
-            .into_iter()
-            .map(Into::into)
-            .collect())
+            .await
     }
 
     pub(crate) async fn affinity_group_member_view(

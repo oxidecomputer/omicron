@@ -2925,7 +2925,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let query = query_params.into_inner();
             let pag_params = data_page_params_for(&rqctx, &query)?;
             let scan_params = ScanById::from_query(&query)?;
-            let paginated_by = id_pagination(&pag_params, scan_params)?;
 
             let group_selector = params::AntiAffinityGroupSelector {
                 project: scan_params.selector.project.clone(),
@@ -2937,7 +2936,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .anti_affinity_group_member_list(
                     &opctx,
                     &group_lookup,
-                    &paginated_by,
+                    &pag_params,
                 )
                 .await?;
             Ok(HttpResponseOk(ScanById::results_page(

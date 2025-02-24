@@ -1390,18 +1390,18 @@ impl SimpleIdentity for AffinityGroupMember {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum AntiAffinityGroupMember {
-    /// An instance belonging to this group, identified by UUID.
-    Instance(InstanceUuid),
-
     /// An affinity group belonging to this group, identified by UUID.
     AffinityGroup(AffinityGroupUuid),
+
+    /// An instance belonging to this group, identified by UUID.
+    Instance(InstanceUuid),
 }
 
 impl SimpleIdentity for AntiAffinityGroupMember {
     fn id(&self) -> Uuid {
         match self {
-            AntiAffinityGroupMember::Instance(id) => *id.as_untyped_uuid(),
             AntiAffinityGroupMember::AffinityGroup(id) => *id.as_untyped_uuid(),
+            AntiAffinityGroupMember::Instance(id) => *id.as_untyped_uuid(),
         }
     }
 }
