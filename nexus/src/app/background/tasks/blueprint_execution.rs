@@ -174,9 +174,7 @@ mod test {
     use nexus_db_queries::authn;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
-    use nexus_sled_agent_shared::inventory::{
-        OmicronZoneDataset, OmicronZoneImageSource,
-    };
+    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::execution::{
         EventBuffer, EventReport, ExecutionComponent, ExecutionStepId,
@@ -185,8 +183,8 @@ mod test {
     use nexus_types::deployment::{
         blueprint_zone_type, Blueprint, BlueprintDatasetsConfig,
         BlueprintPhysicalDisksConfig, BlueprintTarget, BlueprintZoneConfig,
-        BlueprintZoneDisposition, BlueprintZoneType, BlueprintZonesConfig,
-        CockroachDbPreserveDowngrade,
+        BlueprintZoneDisposition, BlueprintZoneImageSource, BlueprintZoneType,
+        BlueprintZonesConfig, CockroachDbPreserveDowngrade,
     };
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external::Generation;
@@ -423,7 +421,7 @@ mod test {
                             http_address: "[::1]:12345".parse().unwrap(),
                         },
                     ),
-                    image_source: OmicronZoneImageSource::InstallDataset,
+                    image_source: BlueprintZoneImageSource::InstallDataset,
                 }]
                 .into_iter()
                 .collect(),

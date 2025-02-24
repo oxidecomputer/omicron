@@ -333,10 +333,10 @@ mod test {
     use clickhouse_admin_types::KeeperId;
     use clickhouse_admin_types::ServerId;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-    use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::inventory::ZpoolName;
     use omicron_common::api::external::Generation;
@@ -388,7 +388,7 @@ mod test {
                             },
                         },
                     ),
-                    image_source: OmicronZoneImageSource::InstallDataset,
+                    image_source: BlueprintZoneImageSource::InstallDataset,
                 }]
                 .into_iter()
                 .collect(),
@@ -430,7 +430,7 @@ mod test {
                             },
                         },
                     ),
-                    image_source: OmicronZoneImageSource::InstallDataset,
+                    image_source: BlueprintZoneImageSource::InstallDataset,
                 }]
                 .into_iter()
                 .collect(),

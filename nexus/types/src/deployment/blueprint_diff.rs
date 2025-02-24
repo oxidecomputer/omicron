@@ -11,19 +11,20 @@ use super::blueprint_display::{
     BpTable, BpTableColumn, BpTableData, BpTableRow, KvListWithHeading, KvPair,
 };
 use super::{
-    format_image_source, unwrap_or_none, zone_sort_key,
-    BlueprintDatasetConfigDiff, BlueprintDatasetDisposition,
-    BlueprintDatasetsConfigDiff, BlueprintDiff, BlueprintMetadata,
-    BlueprintPhysicalDiskConfig, BlueprintPhysicalDisksConfigDiff,
-    BlueprintZoneConfigDiff, BlueprintZonesConfigDiff, ClickhouseClusterConfig,
+    unwrap_or_none, zone_sort_key, BlueprintDatasetConfigDiff,
+    BlueprintDatasetDisposition, BlueprintDatasetsConfigDiff, BlueprintDiff,
+    BlueprintMetadata, BlueprintPhysicalDiskConfig,
+    BlueprintPhysicalDiskConfigDiff, BlueprintPhysicalDisksConfigDiff,
+    BlueprintZoneConfigDiff, BlueprintZoneImageSource,
+    BlueprintZonesConfigDiff, ClickhouseClusterConfig,
     CockroachDbPreserveDowngrade,
 };
 use daft::Diffable;
-use nexus_sled_agent_shared::inventory::{OmicronZoneImageSource, ZoneKind};
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::{ByteCount, Generation};
-use omicron_common::disk::{CompressionAlgorithm, DatasetName, DiskIdentity};
+use omicron_common::disk::{CompressionAlgorithm, DatasetName};
 use omicron_uuid_kinds::SledUuid;
-use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
+use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write as _};
 
@@ -516,6 +517,26 @@ impl<'a> BlueprintDiffSummary<'a> {
         ))
     }
 
+    /// Iterate over all modified disks on a sled
+    pub fn modified_disks(
+        &'a self,
+        sled_id: &SledUuid,
+    ) -> Option<(BpDiffPhysicalDisksModified<'a>, BpDiffPhysicalDiskErrors)>
+    {
+        // Check if the sled is modified and there are any modified disks
+        let disks_cfg_diff = self.modified_disks_diff.get(sled_id)?;
+        let mut modified_disks =
+            disks_cfg_diff.disks.modified_values_diff().peekable();
+        if modified_disks.peek().is_none() {
+            return None;
+        }
+        Some(BpDiffPhysicalDisksModified::new(
+            *disks_cfg_diff.generation.before,
+            *disks_cfg_diff.generation.after,
+            modified_disks,
+        ))
+    }
+
     /// Iterate over all added datasets on a sled
     pub fn added_datasets(
         &self,
@@ -666,7 +687,7 @@ impl BpTableData for BpDiffZoneDetails {
                 vec![
                     zone.kind().report_str().to_string(),
                     zone.id().to_string(),
-                    format_image_source(&zone.image_source),
+                    zone.image_source.to_string(),
                     zone.disposition.to_string(),
                     zone.underlay_ip().to_string(),
                 ],
@@ -683,7 +704,7 @@ impl BpTableData for BpDiffZoneDetails {
 #[derive(Debug)]
 pub struct ModifiedZone {
     pub prior_disposition: BlueprintZoneDisposition,
-    pub prior_image_source: OmicronZoneImageSource,
+    pub prior_image_source: BlueprintZoneImageSource,
     pub zone: BlueprintZoneConfig,
 }
 
@@ -739,7 +760,6 @@ impl ModifiedZone {
                     id: *diff.id.after,
                     filesystem_pool: diff.filesystem_pool.after.cloned(),
                     zone_type: diff.zone_type.after.clone(),
-                    // XXX: Is it an error if the image source is modified?
                     image_source: diff.image_source.after.clone(),
                 },
             })
@@ -795,13 +815,11 @@ impl BpTableData for BpDiffZonesModified {
         self.zones.iter().map(move |zone| {
             let image_source_column =
                 if zone.prior_image_source == zone.zone.image_source {
-                    BpTableColumn::value(format_image_source(
-                        &zone.zone.image_source,
-                    ))
+                    BpTableColumn::value(zone.zone.image_source.to_string())
                 } else {
                     BpTableColumn::diff(
-                        format_image_source(&zone.prior_image_source),
-                        format_image_source(&zone.zone.image_source),
+                        zone.prior_image_source.to_string(),
+                        zone.zone.image_source.to_string(),
                     )
                 };
             let disposition_column =
@@ -939,7 +957,7 @@ pub struct DiffPhysicalDisksDetails {
     pub after_generation: Option<Generation>,
 
     // Disks added, removed, or unmodified
-    pub disks: Vec<DiskIdentity>,
+    pub disks: Vec<BlueprintPhysicalDiskConfig>,
 }
 
 impl DiffPhysicalDisksDetails {
@@ -948,11 +966,8 @@ impl DiffPhysicalDisksDetails {
         after_generation: Option<Generation>,
         disks_iter: impl Iterator<Item = &'a BlueprintPhysicalDiskConfig>,
     ) -> Self {
-        let mut disks: Vec<_> = disks_iter
-            .map(|disk_config| &disk_config.identity)
-            .cloned()
-            .collect();
-        disks.sort_unstable();
+        let mut disks: Vec<_> = disks_iter.cloned().collect();
+        disks.sort_unstable_by_key(|d| d.identity.clone());
         DiffPhysicalDisksDetails { before_generation, after_generation, disks }
     }
 }
@@ -969,21 +984,160 @@ impl BpTableData for DiffPhysicalDisksDetails {
         self.disks.iter().map(move |d| {
             BpTableRow::from_strings(
                 state,
-                vec![d.vendor.clone(), d.model.clone(), d.serial.clone()],
+                vec![
+                    d.identity.vendor.clone(),
+                    d.identity.model.clone(),
+                    d.identity.serial.clone(),
+                    d.disposition.to_string(),
+                ],
+            )
+        })
+    }
+}
+
+/// Errors arising from illegally modified physical disk fields
+#[derive(Debug)]
+pub struct BpDiffPhysicalDiskErrors {
+    pub generation_before: Generation,
+    pub generation_after: Generation,
+    pub errors: Vec<BpDiffPhysicalDiskError>,
+}
+
+#[derive(Debug)]
+pub struct BpDiffPhysicalDiskError {
+    pub disk_id: PhysicalDiskUuid,
+    pub reason: String,
+}
+
+/// This is just an error parsed diff (Parse don't validate)
+///
+/// We still just want the underlying diff representation for printing
+#[derive(Debug)]
+pub struct ModifiedPhysicalDisk<'a> {
+    pub diff: BlueprintPhysicalDiskConfigDiff<'a>,
+}
+
+impl<'a> ModifiedPhysicalDisk<'a> {
+    pub fn from_diff(
+        diff: BlueprintPhysicalDiskConfigDiff<'a>,
+    ) -> Result<Self, BpDiffPhysicalDiskError> {
+        // Do we have any errors? If so, create a "reason" string.
+        let mut reason = String::new();
+
+        let BlueprintPhysicalDiskConfigDiff {
+            disposition: _,
+            identity,
+            id,
+            pool_id,
+        } = diff;
+
+        // If we're a "modified" disk, we must have the same ID before and
+        // after. (Otherwise our "before" or "after" should've been recorded as
+        // removed/added.)
+        debug_assert_eq!(id.before, id.after);
+
+        if identity.is_modified() {
+            writeln!(
+                &mut reason,
+                "mismatched identity: before: {:?}, after: {:?}",
+                identity.before, identity.after
+            )
+            .expect("write to String is infallible");
+        }
+
+        if pool_id.is_modified() {
+            writeln!(
+                &mut reason,
+                "mismatched zpool: before: {}, after: {}",
+                pool_id.before, pool_id.after
+            )
+            .expect("write to String is infallible");
+        }
+
+        if reason.is_empty() {
+            Ok(ModifiedPhysicalDisk { diff })
+        } else {
+            Err(BpDiffPhysicalDiskError { disk_id: *id.before, reason })
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct BpDiffPhysicalDisksModified<'a> {
+    pub generation_before: Generation,
+    pub generation_after: Generation,
+    pub disks: Vec<ModifiedPhysicalDisk<'a>>,
+}
+
+impl<'a> BpDiffPhysicalDisksModified<'a> {
+    pub fn new(
+        generation_before: Generation,
+        generation_after: Generation,
+        disk_diffs: impl Iterator<Item = BlueprintPhysicalDiskConfigDiff<'a>>,
+    ) -> (BpDiffPhysicalDisksModified<'a>, BpDiffPhysicalDiskErrors) {
+        let mut disks = vec![];
+        let mut errors = vec![];
+        for diff in disk_diffs {
+            match ModifiedPhysicalDisk::from_diff(diff) {
+                Ok(modified_disk) => disks.push(modified_disk),
+                Err(error) => errors.push(error),
+            }
+        }
+        disks.sort_unstable_by_key(|d| d.diff.identity.before.clone());
+        (
+            BpDiffPhysicalDisksModified {
+                generation_before,
+                generation_after,
+                disks,
+            },
+            BpDiffPhysicalDiskErrors {
+                generation_before,
+                generation_after,
+                errors,
+            },
+        )
+    }
+}
+
+impl BpTableData for BpDiffPhysicalDisksModified<'_> {
+    fn bp_generation(&self) -> BpGeneration {
+        BpGeneration::Diff {
+            before: Some(self.generation_before),
+            after: Some(self.generation_after),
+        }
+    }
+
+    fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
+        self.disks.iter().map(move |disk| {
+            let identity = disk.diff.identity.before;
+            let disposition = disk.diff.disposition;
+            BpTableRow::new(
+                state,
+                vec![
+                    BpTableColumn::value(identity.vendor.clone()),
+                    BpTableColumn::value(identity.model.clone()),
+                    BpTableColumn::value(identity.serial.clone()),
+                    BpTableColumn::new(
+                        disposition.before.to_string(),
+                        disposition.after.to_string(),
+                    ),
+                ],
             )
         })
     }
 }
 
 #[derive(Debug, Default)]
-pub struct BpDiffPhysicalDisks {
+pub struct BpDiffPhysicalDisks<'a> {
     pub added: BTreeMap<SledUuid, DiffPhysicalDisksDetails>,
     pub removed: BTreeMap<SledUuid, DiffPhysicalDisksDetails>,
     pub unchanged: BTreeMap<SledUuid, DiffPhysicalDisksDetails>,
+    pub modified: BTreeMap<SledUuid, BpDiffPhysicalDisksModified<'a>>,
+    pub errors: BTreeMap<SledUuid, BpDiffPhysicalDiskErrors>,
 }
 
-impl BpDiffPhysicalDisks {
-    pub fn from_diff_summary(summary: &BlueprintDiffSummary<'_>) -> Self {
+impl<'a> BpDiffPhysicalDisks<'a> {
+    pub fn from_diff_summary(summary: &'a BlueprintDiffSummary<'a>) -> Self {
         let mut diffs = BpDiffPhysicalDisks::default();
         for sled_id in &summary.all_sleds {
             if let Some(added) = summary.added_disks(sled_id) {
@@ -994,6 +1148,12 @@ impl BpDiffPhysicalDisks {
             }
             if let Some(unchanged) = summary.unchanged_disks(sled_id) {
                 diffs.unchanged.insert(*sled_id, unchanged);
+            }
+            if let Some((modified, errors)) = summary.modified_disks(sled_id) {
+                diffs.modified.insert(*sled_id, modified);
+                if !errors.errors.is_empty() {
+                    diffs.errors.insert(*sled_id, errors);
+                }
             }
         }
         diffs
@@ -1011,6 +1171,11 @@ impl BpDiffPhysicalDisks {
             // Generations never vary for the same sled, so this is harmless
             generation = diff.bp_generation();
             rows.extend(diff.rows(BpDiffState::Removed));
+        }
+
+        if let Some(diff) = self.modified.get(sled_id) {
+            generation = diff.bp_generation();
+            rows.extend(diff.rows(BpDiffState::Modified));
         }
 
         if let Some(diff) = self.added.get(sled_id) {
@@ -1739,7 +1904,7 @@ pub struct BlueprintDiffDisplay<'diff> {
     before_meta: BlueprintMetadata,
     after_meta: BlueprintMetadata,
     zones: BpDiffZones,
-    disks: BpDiffPhysicalDisks,
+    disks: BpDiffPhysicalDisks<'diff>,
     datasets: BpDiffDatasets,
 }
 
@@ -2005,6 +2170,24 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
 
                 for err in &errors.errors {
                     writeln!(f, "      zone id: {}", err.zone_before_id)?;
+                    writeln!(f, "      reason: {}", err.reason)?;
+                }
+            }
+        }
+
+        // Write out disk errors.
+        if !self.disks.errors.is_empty() {
+            writeln!(f, "DISK ERRORS:")?;
+            for (sled_id, errors) in &self.disks.errors {
+                writeln!(f, "\n  sled {sled_id}\n")?;
+                writeln!(
+                    f,
+                    "    disk diff errors: before gen {}, after gen {}\n",
+                    errors.generation_before, errors.generation_after
+                )?;
+
+                for err in &errors.errors {
+                    writeln!(f, "      disk id: {}", err.disk_id)?;
                     writeln!(f, "      reason: {}", err.reason)?;
                 }
             }

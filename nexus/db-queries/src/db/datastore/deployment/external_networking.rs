@@ -417,10 +417,10 @@ mod tests {
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_model::SqlU16;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-    use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
@@ -619,7 +619,7 @@ mod tests {
                             external_dns_servers: Vec::new(),
                         },
                     ),
-                    image_source: OmicronZoneImageSource::InstallDataset,
+                    image_source: BlueprintZoneImageSource::InstallDataset,
                 },
                 BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
@@ -639,7 +639,7 @@ mod tests {
                             nic: self.dns_nic.clone(),
                         },
                     ),
-                    image_source: OmicronZoneImageSource::InstallDataset,
+                    image_source: BlueprintZoneImageSource::InstallDataset,
                 },
                 BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
@@ -657,7 +657,7 @@ mod tests {
                             external_ip: self.ntp_external_ip,
                         },
                     ),
-                    image_source: OmicronZoneImageSource::InstallDataset,
+                    image_source: BlueprintZoneImageSource::InstallDataset,
                 },
             ]
         }

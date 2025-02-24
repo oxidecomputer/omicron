@@ -13,19 +13,19 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
   sled: 711ac7f8-d19e-4572-bdb9-e9b50f6e362a (active)
 
     physical disks at generation 2:
-    ----------------------------------------------------------------------
-    vendor        model        serial                                     
-    ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-3b46c403-ad14-435c-a1a8-e8f940bf814f
-    fake-vendor   fake-model   serial-3f8c9484-06e8-4662-9a90-aa7e92c43405
-    fake-vendor   fake-model   serial-4a62a827-4bf3-45d5-a7f5-d080f25c61ef
-    fake-vendor   fake-model   serial-5f774f00-52b7-41b5-a57f-6f38037196f5
-    fake-vendor   fake-model   serial-68ae41d4-99ed-4612-99e1-fecf795ca694
-    fake-vendor   fake-model   serial-6a66241b-b595-423d-84ef-a81b5d8430e8
-    fake-vendor   fake-model   serial-7c45c3f6-6369-40d9-a73f-2f7ed0afe96b
-    fake-vendor   fake-model   serial-a216d334-4a9a-49dd-8b13-20548839306c
-    fake-vendor   fake-model   serial-c9ff8eb0-807c-40ad-a5c4-0d534947c9ad
-    fake-vendor   fake-model   serial-fb29d469-7d3f-47b9-944c-ce817fc70370
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-3b46c403-ad14-435c-a1a8-e8f940bf814f   in service 
+    fake-vendor   fake-model   serial-3f8c9484-06e8-4662-9a90-aa7e92c43405   in service 
+    fake-vendor   fake-model   serial-4a62a827-4bf3-45d5-a7f5-d080f25c61ef   in service 
+    fake-vendor   fake-model   serial-5f774f00-52b7-41b5-a57f-6f38037196f5   in service 
+    fake-vendor   fake-model   serial-68ae41d4-99ed-4612-99e1-fecf795ca694   in service 
+    fake-vendor   fake-model   serial-6a66241b-b595-423d-84ef-a81b5d8430e8   in service 
+    fake-vendor   fake-model   serial-7c45c3f6-6369-40d9-a73f-2f7ed0afe96b   in service 
+    fake-vendor   fake-model   serial-a216d334-4a9a-49dd-8b13-20548839306c   in service 
+    fake-vendor   fake-model   serial-c9ff8eb0-807c-40ad-a5c4-0d534947c9ad   in service 
+    fake-vendor   fake-model   serial-fb29d469-7d3f-47b9-944c-ce817fc70370   in service 
 
 
     datasets at generation 2:
@@ -109,19 +109,19 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
   sled: 9dc50690-f9bf-4520-bf80-051d0f465c2c (active)
 
     physical disks at generation 2:
-    ----------------------------------------------------------------------
-    vendor        model        serial                                     
-    ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-1f9589d8-0a68-47e8-b977-d0fb17bd3fdb
-    fake-vendor   fake-model   serial-44882b6c-5e19-418b-b6c3-065f2af5a557
-    fake-vendor   fake-model   serial-6de47efc-8a6d-4108-bf82-0146eab3be06
-    fake-vendor   fake-model   serial-80e2c62f-052c-4580-8252-7af238fbbe9c
-    fake-vendor   fake-model   serial-81d326ae-5f8a-4ffd-9d5e-a9e8246ac014
-    fake-vendor   fake-model   serial-878af5a0-7810-43e5-bdd5-a3215242459a
-    fake-vendor   fake-model   serial-af59fef5-8258-4852-be1d-ce55ae7dc822
-    fake-vendor   fake-model   serial-b16aa11f-6e49-44c1-abcb-2e7584bffa12
-    fake-vendor   fake-model   serial-f173c79b-a3b4-4f4a-a983-bc94b6b1a616
-    fake-vendor   fake-model   serial-f1a041cc-85c7-4d14-8fc0-8d0e417f7e24
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-1f9589d8-0a68-47e8-b977-d0fb17bd3fdb   in service 
+    fake-vendor   fake-model   serial-44882b6c-5e19-418b-b6c3-065f2af5a557   in service 
+    fake-vendor   fake-model   serial-6de47efc-8a6d-4108-bf82-0146eab3be06   in service 
+    fake-vendor   fake-model   serial-80e2c62f-052c-4580-8252-7af238fbbe9c   in service 
+    fake-vendor   fake-model   serial-81d326ae-5f8a-4ffd-9d5e-a9e8246ac014   in service 
+    fake-vendor   fake-model   serial-878af5a0-7810-43e5-bdd5-a3215242459a   in service 
+    fake-vendor   fake-model   serial-af59fef5-8258-4852-be1d-ce55ae7dc822   in service 
+    fake-vendor   fake-model   serial-b16aa11f-6e49-44c1-abcb-2e7584bffa12   in service 
+    fake-vendor   fake-model   serial-f173c79b-a3b4-4f4a-a983-bc94b6b1a616   in service 
+    fake-vendor   fake-model   serial-f1a041cc-85c7-4d14-8fc0-8d0e417f7e24   in service 
 
 
     datasets at generation 2:
@@ -202,19 +202,19 @@ parent:    06c88262-f435-410e-ba98-101bed41ec27
   sled: a88790de-5962-4871-8686-61c1fd5b7094 (active)
 
     physical disks at generation 2:
-    ----------------------------------------------------------------------
-    vendor        model        serial                                     
-    ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-2f26e76b-6c91-4ee9-87b3-f424b942091b
-    fake-vendor   fake-model   serial-6f8fa855-4f34-42db-a6e4-9d0090d6c828
-    fake-vendor   fake-model   serial-71450d62-791e-4068-9882-8a206a465fd9
-    fake-vendor   fake-model   serial-7b4ad242-8330-4c08-9588-c66782742678
-    fake-vendor   fake-model   serial-9bf23b52-565e-4439-9728-edb603fa6c4e
-    fake-vendor   fake-model   serial-c9476e3d-7745-4fa9-b336-b54ac5b08f56
-    fake-vendor   fake-model   serial-d2cd1e65-b63d-4748-895f-aafecc81e440
-    fake-vendor   fake-model   serial-d4ad3cc1-956a-4444-81a6-da6a025f6df2
-    fake-vendor   fake-model   serial-e1298a43-fa1a-4e6f-bcfa-b26996f69c50
-    fake-vendor   fake-model   serial-fa9ce87c-fa7c-4854-95bd-69b8f01c46f9
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-2f26e76b-6c91-4ee9-87b3-f424b942091b   in service 
+    fake-vendor   fake-model   serial-6f8fa855-4f34-42db-a6e4-9d0090d6c828   in service 
+    fake-vendor   fake-model   serial-71450d62-791e-4068-9882-8a206a465fd9   in service 
+    fake-vendor   fake-model   serial-7b4ad242-8330-4c08-9588-c66782742678   in service 
+    fake-vendor   fake-model   serial-9bf23b52-565e-4439-9728-edb603fa6c4e   in service 
+    fake-vendor   fake-model   serial-c9476e3d-7745-4fa9-b336-b54ac5b08f56   in service 
+    fake-vendor   fake-model   serial-d2cd1e65-b63d-4748-895f-aafecc81e440   in service 
+    fake-vendor   fake-model   serial-d4ad3cc1-956a-4444-81a6-da6a025f6df2   in service 
+    fake-vendor   fake-model   serial-e1298a43-fa1a-4e6f-bcfa-b26996f69c50   in service 
+    fake-vendor   fake-model   serial-fa9ce87c-fa7c-4854-95bd-69b8f01c46f9   in service 
 
 
     datasets at generation 2:
@@ -316,19 +316,19 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
   sled: 711ac7f8-d19e-4572-bdb9-e9b50f6e362a (active)
 
     physical disks at generation 2:
-    ----------------------------------------------------------------------
-    vendor        model        serial                                     
-    ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-3b46c403-ad14-435c-a1a8-e8f940bf814f
-    fake-vendor   fake-model   serial-3f8c9484-06e8-4662-9a90-aa7e92c43405
-    fake-vendor   fake-model   serial-4a62a827-4bf3-45d5-a7f5-d080f25c61ef
-    fake-vendor   fake-model   serial-5f774f00-52b7-41b5-a57f-6f38037196f5
-    fake-vendor   fake-model   serial-68ae41d4-99ed-4612-99e1-fecf795ca694
-    fake-vendor   fake-model   serial-6a66241b-b595-423d-84ef-a81b5d8430e8
-    fake-vendor   fake-model   serial-7c45c3f6-6369-40d9-a73f-2f7ed0afe96b
-    fake-vendor   fake-model   serial-a216d334-4a9a-49dd-8b13-20548839306c
-    fake-vendor   fake-model   serial-c9ff8eb0-807c-40ad-a5c4-0d534947c9ad
-    fake-vendor   fake-model   serial-fb29d469-7d3f-47b9-944c-ce817fc70370
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-3b46c403-ad14-435c-a1a8-e8f940bf814f   in service 
+    fake-vendor   fake-model   serial-3f8c9484-06e8-4662-9a90-aa7e92c43405   in service 
+    fake-vendor   fake-model   serial-4a62a827-4bf3-45d5-a7f5-d080f25c61ef   in service 
+    fake-vendor   fake-model   serial-5f774f00-52b7-41b5-a57f-6f38037196f5   in service 
+    fake-vendor   fake-model   serial-68ae41d4-99ed-4612-99e1-fecf795ca694   in service 
+    fake-vendor   fake-model   serial-6a66241b-b595-423d-84ef-a81b5d8430e8   in service 
+    fake-vendor   fake-model   serial-7c45c3f6-6369-40d9-a73f-2f7ed0afe96b   in service 
+    fake-vendor   fake-model   serial-a216d334-4a9a-49dd-8b13-20548839306c   in service 
+    fake-vendor   fake-model   serial-c9ff8eb0-807c-40ad-a5c4-0d534947c9ad   in service 
+    fake-vendor   fake-model   serial-fb29d469-7d3f-47b9-944c-ce817fc70370   in service 
 
 
     datasets at generation 2:
@@ -412,19 +412,19 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
   sled: 9dc50690-f9bf-4520-bf80-051d0f465c2c (active)
 
     physical disks at generation 2:
-    ----------------------------------------------------------------------
-    vendor        model        serial                                     
-    ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-1f9589d8-0a68-47e8-b977-d0fb17bd3fdb
-    fake-vendor   fake-model   serial-44882b6c-5e19-418b-b6c3-065f2af5a557
-    fake-vendor   fake-model   serial-6de47efc-8a6d-4108-bf82-0146eab3be06
-    fake-vendor   fake-model   serial-80e2c62f-052c-4580-8252-7af238fbbe9c
-    fake-vendor   fake-model   serial-81d326ae-5f8a-4ffd-9d5e-a9e8246ac014
-    fake-vendor   fake-model   serial-878af5a0-7810-43e5-bdd5-a3215242459a
-    fake-vendor   fake-model   serial-af59fef5-8258-4852-be1d-ce55ae7dc822
-    fake-vendor   fake-model   serial-b16aa11f-6e49-44c1-abcb-2e7584bffa12
-    fake-vendor   fake-model   serial-f173c79b-a3b4-4f4a-a983-bc94b6b1a616
-    fake-vendor   fake-model   serial-f1a041cc-85c7-4d14-8fc0-8d0e417f7e24
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-1f9589d8-0a68-47e8-b977-d0fb17bd3fdb   in service 
+    fake-vendor   fake-model   serial-44882b6c-5e19-418b-b6c3-065f2af5a557   in service 
+    fake-vendor   fake-model   serial-6de47efc-8a6d-4108-bf82-0146eab3be06   in service 
+    fake-vendor   fake-model   serial-80e2c62f-052c-4580-8252-7af238fbbe9c   in service 
+    fake-vendor   fake-model   serial-81d326ae-5f8a-4ffd-9d5e-a9e8246ac014   in service 
+    fake-vendor   fake-model   serial-878af5a0-7810-43e5-bdd5-a3215242459a   in service 
+    fake-vendor   fake-model   serial-af59fef5-8258-4852-be1d-ce55ae7dc822   in service 
+    fake-vendor   fake-model   serial-b16aa11f-6e49-44c1-abcb-2e7584bffa12   in service 
+    fake-vendor   fake-model   serial-f173c79b-a3b4-4f4a-a983-bc94b6b1a616   in service 
+    fake-vendor   fake-model   serial-f1a041cc-85c7-4d14-8fc0-8d0e417f7e24   in service 
 
 
     datasets at generation 2:
@@ -505,19 +505,19 @@ parent:    3f00b694-1b16-4aaa-8f78-e6b3a527b434
   sled: a88790de-5962-4871-8686-61c1fd5b7094 (active)
 
     physical disks at generation 2:
-    ----------------------------------------------------------------------
-    vendor        model        serial                                     
-    ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-2f26e76b-6c91-4ee9-87b3-f424b942091b
-    fake-vendor   fake-model   serial-6f8fa855-4f34-42db-a6e4-9d0090d6c828
-    fake-vendor   fake-model   serial-71450d62-791e-4068-9882-8a206a465fd9
-    fake-vendor   fake-model   serial-7b4ad242-8330-4c08-9588-c66782742678
-    fake-vendor   fake-model   serial-9bf23b52-565e-4439-9728-edb603fa6c4e
-    fake-vendor   fake-model   serial-c9476e3d-7745-4fa9-b336-b54ac5b08f56
-    fake-vendor   fake-model   serial-d2cd1e65-b63d-4748-895f-aafecc81e440
-    fake-vendor   fake-model   serial-d4ad3cc1-956a-4444-81a6-da6a025f6df2
-    fake-vendor   fake-model   serial-e1298a43-fa1a-4e6f-bcfa-b26996f69c50
-    fake-vendor   fake-model   serial-fa9ce87c-fa7c-4854-95bd-69b8f01c46f9
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-2f26e76b-6c91-4ee9-87b3-f424b942091b   in service 
+    fake-vendor   fake-model   serial-6f8fa855-4f34-42db-a6e4-9d0090d6c828   in service 
+    fake-vendor   fake-model   serial-71450d62-791e-4068-9882-8a206a465fd9   in service 
+    fake-vendor   fake-model   serial-7b4ad242-8330-4c08-9588-c66782742678   in service 
+    fake-vendor   fake-model   serial-9bf23b52-565e-4439-9728-edb603fa6c4e   in service 
+    fake-vendor   fake-model   serial-c9476e3d-7745-4fa9-b336-b54ac5b08f56   in service 
+    fake-vendor   fake-model   serial-d2cd1e65-b63d-4748-895f-aafecc81e440   in service 
+    fake-vendor   fake-model   serial-d4ad3cc1-956a-4444-81a6-da6a025f6df2   in service 
+    fake-vendor   fake-model   serial-e1298a43-fa1a-4e6f-bcfa-b26996f69c50   in service 
+    fake-vendor   fake-model   serial-fa9ce87c-fa7c-4854-95bd-69b8f01c46f9   in service 
 
 
     datasets at generation 3:
@@ -630,19 +630,19 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
   sled: 711ac7f8-d19e-4572-bdb9-e9b50f6e362a (active)
 
     physical disks at generation 2:
-    ----------------------------------------------------------------------
-    vendor        model        serial                                     
-    ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-3b46c403-ad14-435c-a1a8-e8f940bf814f
-    fake-vendor   fake-model   serial-3f8c9484-06e8-4662-9a90-aa7e92c43405
-    fake-vendor   fake-model   serial-4a62a827-4bf3-45d5-a7f5-d080f25c61ef
-    fake-vendor   fake-model   serial-5f774f00-52b7-41b5-a57f-6f38037196f5
-    fake-vendor   fake-model   serial-68ae41d4-99ed-4612-99e1-fecf795ca694
-    fake-vendor   fake-model   serial-6a66241b-b595-423d-84ef-a81b5d8430e8
-    fake-vendor   fake-model   serial-7c45c3f6-6369-40d9-a73f-2f7ed0afe96b
-    fake-vendor   fake-model   serial-a216d334-4a9a-49dd-8b13-20548839306c
-    fake-vendor   fake-model   serial-c9ff8eb0-807c-40ad-a5c4-0d534947c9ad
-    fake-vendor   fake-model   serial-fb29d469-7d3f-47b9-944c-ce817fc70370
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-3b46c403-ad14-435c-a1a8-e8f940bf814f   in service 
+    fake-vendor   fake-model   serial-3f8c9484-06e8-4662-9a90-aa7e92c43405   in service 
+    fake-vendor   fake-model   serial-4a62a827-4bf3-45d5-a7f5-d080f25c61ef   in service 
+    fake-vendor   fake-model   serial-5f774f00-52b7-41b5-a57f-6f38037196f5   in service 
+    fake-vendor   fake-model   serial-68ae41d4-99ed-4612-99e1-fecf795ca694   in service 
+    fake-vendor   fake-model   serial-6a66241b-b595-423d-84ef-a81b5d8430e8   in service 
+    fake-vendor   fake-model   serial-7c45c3f6-6369-40d9-a73f-2f7ed0afe96b   in service 
+    fake-vendor   fake-model   serial-a216d334-4a9a-49dd-8b13-20548839306c   in service 
+    fake-vendor   fake-model   serial-c9ff8eb0-807c-40ad-a5c4-0d534947c9ad   in service 
+    fake-vendor   fake-model   serial-fb29d469-7d3f-47b9-944c-ce817fc70370   in service 
 
 
     datasets at generation 2:
@@ -726,19 +726,19 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
   sled: 9dc50690-f9bf-4520-bf80-051d0f465c2c (active)
 
     physical disks at generation 2:
-    ----------------------------------------------------------------------
-    vendor        model        serial                                     
-    ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-1f9589d8-0a68-47e8-b977-d0fb17bd3fdb
-    fake-vendor   fake-model   serial-44882b6c-5e19-418b-b6c3-065f2af5a557
-    fake-vendor   fake-model   serial-6de47efc-8a6d-4108-bf82-0146eab3be06
-    fake-vendor   fake-model   serial-80e2c62f-052c-4580-8252-7af238fbbe9c
-    fake-vendor   fake-model   serial-81d326ae-5f8a-4ffd-9d5e-a9e8246ac014
-    fake-vendor   fake-model   serial-878af5a0-7810-43e5-bdd5-a3215242459a
-    fake-vendor   fake-model   serial-af59fef5-8258-4852-be1d-ce55ae7dc822
-    fake-vendor   fake-model   serial-b16aa11f-6e49-44c1-abcb-2e7584bffa12
-    fake-vendor   fake-model   serial-f173c79b-a3b4-4f4a-a983-bc94b6b1a616
-    fake-vendor   fake-model   serial-f1a041cc-85c7-4d14-8fc0-8d0e417f7e24
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-1f9589d8-0a68-47e8-b977-d0fb17bd3fdb   in service 
+    fake-vendor   fake-model   serial-44882b6c-5e19-418b-b6c3-065f2af5a557   in service 
+    fake-vendor   fake-model   serial-6de47efc-8a6d-4108-bf82-0146eab3be06   in service 
+    fake-vendor   fake-model   serial-80e2c62f-052c-4580-8252-7af238fbbe9c   in service 
+    fake-vendor   fake-model   serial-81d326ae-5f8a-4ffd-9d5e-a9e8246ac014   in service 
+    fake-vendor   fake-model   serial-878af5a0-7810-43e5-bdd5-a3215242459a   in service 
+    fake-vendor   fake-model   serial-af59fef5-8258-4852-be1d-ce55ae7dc822   in service 
+    fake-vendor   fake-model   serial-b16aa11f-6e49-44c1-abcb-2e7584bffa12   in service 
+    fake-vendor   fake-model   serial-f173c79b-a3b4-4f4a-a983-bc94b6b1a616   in service 
+    fake-vendor   fake-model   serial-f1a041cc-85c7-4d14-8fc0-8d0e417f7e24   in service 
 
 
     datasets at generation 2:
@@ -819,19 +819,19 @@ parent:    366b0b68-d80e-4bc1-abd3-dc69837847e0
   sled: a88790de-5962-4871-8686-61c1fd5b7094 (active)
 
     physical disks at generation 2:
-    ----------------------------------------------------------------------
-    vendor        model        serial                                     
-    ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-2f26e76b-6c91-4ee9-87b3-f424b942091b
-    fake-vendor   fake-model   serial-6f8fa855-4f34-42db-a6e4-9d0090d6c828
-    fake-vendor   fake-model   serial-71450d62-791e-4068-9882-8a206a465fd9
-    fake-vendor   fake-model   serial-7b4ad242-8330-4c08-9588-c66782742678
-    fake-vendor   fake-model   serial-9bf23b52-565e-4439-9728-edb603fa6c4e
-    fake-vendor   fake-model   serial-c9476e3d-7745-4fa9-b336-b54ac5b08f56
-    fake-vendor   fake-model   serial-d2cd1e65-b63d-4748-895f-aafecc81e440
-    fake-vendor   fake-model   serial-d4ad3cc1-956a-4444-81a6-da6a025f6df2
-    fake-vendor   fake-model   serial-e1298a43-fa1a-4e6f-bcfa-b26996f69c50
-    fake-vendor   fake-model   serial-fa9ce87c-fa7c-4854-95bd-69b8f01c46f9
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-2f26e76b-6c91-4ee9-87b3-f424b942091b   in service 
+    fake-vendor   fake-model   serial-6f8fa855-4f34-42db-a6e4-9d0090d6c828   in service 
+    fake-vendor   fake-model   serial-71450d62-791e-4068-9882-8a206a465fd9   in service 
+    fake-vendor   fake-model   serial-7b4ad242-8330-4c08-9588-c66782742678   in service 
+    fake-vendor   fake-model   serial-9bf23b52-565e-4439-9728-edb603fa6c4e   in service 
+    fake-vendor   fake-model   serial-c9476e3d-7745-4fa9-b336-b54ac5b08f56   in service 
+    fake-vendor   fake-model   serial-d2cd1e65-b63d-4748-895f-aafecc81e440   in service 
+    fake-vendor   fake-model   serial-d4ad3cc1-956a-4444-81a6-da6a025f6df2   in service 
+    fake-vendor   fake-model   serial-e1298a43-fa1a-4e6f-bcfa-b26996f69c50   in service 
+    fake-vendor   fake-model   serial-fa9ce87c-fa7c-4854-95bd-69b8f01c46f9   in service 
 
 
     datasets at generation 4:

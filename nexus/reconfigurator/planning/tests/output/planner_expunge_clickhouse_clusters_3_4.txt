@@ -5,20 +5,30 @@ to:   blueprint 74f2e7fd-687e-4c9e-b5d8-e474a5bb8e7c
 
   sled b340c044-bd87-4a3b-aee3-e6ccd9d3ff02 (active -> decommissioned):
 
-    physical disks from generation 2:
-    ----------------------------------------------------------------------
-    vendor        model        serial                                     
-    ----------------------------------------------------------------------
--   fake-vendor   fake-model   serial-03a84dd2-e0a4-435d-96de-67bfe2674f4e
--   fake-vendor   fake-model   serial-188c3b95-16fa-45ea-b9f7-e987560b4d62
--   fake-vendor   fake-model   serial-1f3bbc7c-888f-40fa-b705-fab3f148b147
--   fake-vendor   fake-model   serial-45a81e70-03bb-4c53-bf49-d598c9fb8d34
--   fake-vendor   fake-model   serial-56c3f0ef-fac1-473d-9317-0e3668aa7e88
--   fake-vendor   fake-model   serial-96f1615c-3dda-427f-8132-408b2fad24e0
--   fake-vendor   fake-model   serial-a9ef71b2-ec22-421c-adc9-bddc4c0641c4
--   fake-vendor   fake-model   serial-b9f9c626-3293-48eb-a475-1debaaccdf6c
--   fake-vendor   fake-model   serial-d563fd5f-9306-49b4-8511-78a2f64733ce
--   fake-vendor   fake-model   serial-fcca32b6-9629-468f-a282-63d7da992447
+    physical disks generation 2 -> 3:
+    ---------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition   
+    ---------------------------------------------------------------------------------------
+*   fake-vendor   fake-model   serial-03a84dd2-e0a4-435d-96de-67bfe2674f4e   - in service  
+     └─                                                                      + expunged ✓  
+*   fake-vendor   fake-model   serial-188c3b95-16fa-45ea-b9f7-e987560b4d62   - in service  
+     └─                                                                      + expunged ✓  
+*   fake-vendor   fake-model   serial-1f3bbc7c-888f-40fa-b705-fab3f148b147   - in service  
+     └─                                                                      + expunged ✓  
+*   fake-vendor   fake-model   serial-45a81e70-03bb-4c53-bf49-d598c9fb8d34   - in service  
+     └─                                                                      + expunged ✓  
+*   fake-vendor   fake-model   serial-56c3f0ef-fac1-473d-9317-0e3668aa7e88   - in service  
+     └─                                                                      + expunged ✓  
+*   fake-vendor   fake-model   serial-96f1615c-3dda-427f-8132-408b2fad24e0   - in service  
+     └─                                                                      + expunged ✓  
+*   fake-vendor   fake-model   serial-a9ef71b2-ec22-421c-adc9-bddc4c0641c4   - in service  
+     └─                                                                      + expunged ✓  
+*   fake-vendor   fake-model   serial-b9f9c626-3293-48eb-a475-1debaaccdf6c   - in service  
+     └─                                                                      + expunged ✓  
+*   fake-vendor   fake-model   serial-d563fd5f-9306-49b4-8511-78a2f64733ce   - in service  
+     └─                                                                      + expunged ✓  
+*   fake-vendor   fake-model   serial-fcca32b6-9629-468f-a282-63d7da992447   - in service  
+     └─                                                                      + expunged ✓  
 
 
     datasets from generation 3:
@@ -81,55 +91,55 @@ to:   blueprint 74f2e7fd-687e-4c9e-b5d8-e474a5bb8e7c
     zone type           zone id                                image source      disposition      underlay IP           
     --------------------------------------------------------------------------------------------------------------------
 *   clickhouse          96dcbb7a-0140-4590-801c-406866500995   install dataset   - in service     fd00:1122:3344:101::23
-     └─                                                                          + expunged ⏳                           
+     └─                                                                          + expunged ✓                           
 *   clickhouse_keeper   1998de68-a305-44f7-8ebc-cc5613c9e6fb   install dataset   - in service     fd00:1122:3344:101::2f
-     └─                                                                          + expunged ⏳                           
+     └─                                                                          + expunged ✓                           
 *   crucible            5366862d-0c9e-4c21-bd16-5599298e75bc   install dataset   - in service     fd00:1122:3344:101::2b
-     └─                                                                          + expunged ⏳                           
+     └─                                                                          + expunged ✓                           
 *   crucible            63dcf460-2794-434c-b0e7-4e09ba0f3a3c   install dataset   - in service     fd00:1122:3344:101::28
-     └─                                                                          + expunged ⏳                           
+     └─                                                                          + expunged ✓                           
 *   crucible            71f24994-337b-4c5f-9826-75f885a669e7   install dataset   - in service     fd00:1122:3344:101::2e
-     └─                                                                          + expunged ⏳                           
+     └─                                                                          + expunged ✓                           
 *   crucible            726f6522-a359-4e6e-abe9-0de41979de91   install dataset   - in service     fd00:1122:3344:101::26
-     └─                                                                          + expunged ⏳                           
+     └─                                                                          + expunged ✓                           
 *   crucible            a794a5cd-ec63-4fe4-a813-720d79dcd2ca   install dataset   - in service     fd00:1122:3344:101::2d
-     └─                                                                          + expunged ⏳                           
+     └─                                                                          + expunged ✓                           
 *   crucible            ab480489-af1c-4446-8e95-da4a7e58df59   install dataset   - in service     fd00:1122:3344:101::25
-     └─                                                                          + expunged ⏳                           
+     └─                                                                          + expunged ✓                           
 *   crucible            cc6e2a17-ba9b-4332-b869-e0ce204915cf   install dataset   - in service     fd00:1122:3344:101::2c
-     └─                                                                          + expunged ⏳                           
+     └─                                                                          + expunged ✓                           
 *   crucible            e5cd215f-19c6-43ca-b31a-039319dd5dcf   install dataset   - in service     fd00:1122:3344:101::29
-     └─                                                                          + expunged ⏳                           
+     └─                                                                          + expunged ✓                           
 *   crucible            e7bc709c-4ef2-4f1f-be78-494f53169554   install dataset   - in service     fd00:1122:3344:101::2a
-     └─                                                                          + expunged ⏳                           
+     └─                                                                          + expunged ✓                           
 *   crucible            fbaea242-74a6-490f-9bc0-0710a40768f4   install dataset   - in service     fd00:1122:3344:101::27
-     └─                                                                          + expunged ⏳                           
+     └─                                                                          + expunged ✓                           
 *   crucible_pantry     ed79fef8-6124-4ecc-aaa4-51cf9fcf58db   install dataset   - in service     fd00:1122:3344:101::24
-     └─                                                                          + expunged ⏳                           
+     └─                                                                          + expunged ✓                           
 *   internal_dns        4d152a2b-089e-4fe2-89fa-76b53fa58773   install dataset   - in service     fd00:1122:3344:1::1   
-     └─                                                                          + expunged ⏳                           
+     └─                                                                          + expunged ✓                           
 *   internal_ntp        89d38277-9743-491b-af94-714776657ce2   install dataset   - in service     fd00:1122:3344:101::21
-     └─                                                                          + expunged ⏳                           
+     └─                                                                          + expunged ✓                           
 *   nexus               4cb9b6d5-fd52-4cfb-b630-59f80bd26615   install dataset   - in service     fd00:1122:3344:101::22
-     └─                                                                          + expunged ⏳                           
+     └─                                                                          + expunged ✓                           
 
 
   sled cdba3bea-3407-4b6e-a029-19bf4a02fca7 (active):
 
     physical disks at generation 2:
-    ----------------------------------------------------------------------
-    vendor        model        serial                                     
-    ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-08616473-ded4-4785-9b53-b6ccc1efb67a
-    fake-vendor   fake-model   serial-2d44b756-94df-45ec-a644-50021248682d
-    fake-vendor   fake-model   serial-2dce7cf0-3097-485d-aaf6-9fc51f99eae5
-    fake-vendor   fake-model   serial-3b9d69e5-aa80-4fc8-9d2e-a2a24bd0f1d7
-    fake-vendor   fake-model   serial-44342c41-75a7-4708-8004-eb2ca5c5a3c2
-    fake-vendor   fake-model   serial-650b4eff-80a2-430a-97c8-f837248480a1
-    fake-vendor   fake-model   serial-6e418b8c-cadd-4fb8-8370-f351a07e1eed
-    fake-vendor   fake-model   serial-6e5772a5-8234-46d1-ba5a-503a83d9d2fb
-    fake-vendor   fake-model   serial-c1da692e-7713-43a0-b6bb-5c182084c09d
-    fake-vendor   fake-model   serial-e35766ef-789a-4b2f-9a6c-e6626d5ab195
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-08616473-ded4-4785-9b53-b6ccc1efb67a   in service 
+    fake-vendor   fake-model   serial-2d44b756-94df-45ec-a644-50021248682d   in service 
+    fake-vendor   fake-model   serial-2dce7cf0-3097-485d-aaf6-9fc51f99eae5   in service 
+    fake-vendor   fake-model   serial-3b9d69e5-aa80-4fc8-9d2e-a2a24bd0f1d7   in service 
+    fake-vendor   fake-model   serial-44342c41-75a7-4708-8004-eb2ca5c5a3c2   in service 
+    fake-vendor   fake-model   serial-650b4eff-80a2-430a-97c8-f837248480a1   in service 
+    fake-vendor   fake-model   serial-6e418b8c-cadd-4fb8-8370-f351a07e1eed   in service 
+    fake-vendor   fake-model   serial-6e5772a5-8234-46d1-ba5a-503a83d9d2fb   in service 
+    fake-vendor   fake-model   serial-c1da692e-7713-43a0-b6bb-5c182084c09d   in service 
+    fake-vendor   fake-model   serial-e35766ef-789a-4b2f-9a6c-e6626d5ab195   in service 
 
 
     datasets generation 3 -> 4:
@@ -218,19 +228,19 @@ to:   blueprint 74f2e7fd-687e-4c9e-b5d8-e474a5bb8e7c
   sled fe7b9b01-e803-41ea-9e39-db240dcd9029 (active):
 
     physical disks at generation 2:
-    ----------------------------------------------------------------------
-    vendor        model        serial                                     
-    ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-21d60319-5fe1-4a3b-a4c0-6aa7465e7bde
-    fake-vendor   fake-model   serial-2acfbb84-5ce0-424e-8d73-44c5071d4430
-    fake-vendor   fake-model   serial-2db7f3b4-ed19-4229-b42c-44f49eeb8a91
-    fake-vendor   fake-model   serial-2fa34d8e-13d9-42d3-b8ba-ca9d74ac496a
-    fake-vendor   fake-model   serial-355e268c-c932-4f32-841c-f3ec88fe0495
-    fake-vendor   fake-model   serial-427b2ccd-998f-4085-af21-e600604cf21e
-    fake-vendor   fake-model   serial-588058f2-f51b-4800-a211-1c5dbb32296b
-    fake-vendor   fake-model   serial-736f6f07-2aa2-4658-8b5c-3bf409ea747a
-    fake-vendor   fake-model   serial-bcfcdede-7084-4a31-97a8-ac4299c268f9
-    fake-vendor   fake-model   serial-fe379ac6-1938-4cc2-93a9-43b1447229ae
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-21d60319-5fe1-4a3b-a4c0-6aa7465e7bde   in service 
+    fake-vendor   fake-model   serial-2acfbb84-5ce0-424e-8d73-44c5071d4430   in service 
+    fake-vendor   fake-model   serial-2db7f3b4-ed19-4229-b42c-44f49eeb8a91   in service 
+    fake-vendor   fake-model   serial-2fa34d8e-13d9-42d3-b8ba-ca9d74ac496a   in service 
+    fake-vendor   fake-model   serial-355e268c-c932-4f32-841c-f3ec88fe0495   in service 
+    fake-vendor   fake-model   serial-427b2ccd-998f-4085-af21-e600604cf21e   in service 
+    fake-vendor   fake-model   serial-588058f2-f51b-4800-a211-1c5dbb32296b   in service 
+    fake-vendor   fake-model   serial-736f6f07-2aa2-4658-8b5c-3bf409ea747a   in service 
+    fake-vendor   fake-model   serial-bcfcdede-7084-4a31-97a8-ac4299c268f9   in service 
+    fake-vendor   fake-model   serial-fe379ac6-1938-4cc2-93a9-43b1447229ae   in service 
 
 
     datasets generation 3 -> 4:

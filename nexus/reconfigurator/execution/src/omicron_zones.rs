@@ -362,13 +362,12 @@ mod test {
     use httptest::responders::{json_encoded, status_code};
     use httptest::Expectation;
     use nexus_sled_agent_shared::inventory::{
-        OmicronZoneDataset, OmicronZoneImageSource, OmicronZonesConfig,
-        SledRole,
+        OmicronZoneDataset, OmicronZonesConfig, SledRole,
     };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
         blueprint_zone_type, Blueprint, BlueprintTarget,
-        CockroachDbPreserveDowngrade,
+        BlueprintZoneImageSource, CockroachDbPreserveDowngrade,
     };
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
@@ -468,7 +467,7 @@ mod test {
                             http_address: "[::1]:0".parse().unwrap(),
                         },
                     ),
-                    image_source: OmicronZoneImageSource::InstallDataset,
+                    image_source: BlueprintZoneImageSource::InstallDataset,
                 }]
                 .into_iter()
                 .collect(),
@@ -571,7 +570,7 @@ mod test {
                         address: "[::1]:0".parse().unwrap(),
                     },
                 ),
-                image_source: OmicronZoneImageSource::InstallDataset,
+                image_source: BlueprintZoneImageSource::InstallDataset,
             });
         }
 
@@ -657,7 +656,7 @@ mod test {
                     },
                 },
             ),
-            image_source: OmicronZoneImageSource::InstallDataset,
+            image_source: BlueprintZoneImageSource::InstallDataset,
         };
 
         // Start a mock cockroach-admin server.

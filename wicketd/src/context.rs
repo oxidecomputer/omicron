@@ -7,6 +7,7 @@
 use crate::bootstrap_addrs::BootstrapPeers;
 use crate::preflight_check::PreflightCheckerHandler;
 use crate::rss_config::CurrentRssConfig;
+use crate::transceivers::Handle as TransceiverHandle;
 use crate::update_tracker::UpdateTracker;
 use crate::MgsHandle;
 use anyhow::anyhow;
@@ -27,6 +28,7 @@ pub struct ServerContext {
     pub(crate) bind_address: SocketAddrV6,
     pub mgs_handle: MgsHandle,
     pub mgs_client: gateway_client::Client,
+    pub transceiver_handle: TransceiverHandle,
     pub(crate) log: slog::Logger,
     /// Our cached copy of what MGS's `/local/switch-id` endpoint returns; it
     /// identifies whether we're connected to switch 0 or 1 and cannot change
@@ -95,7 +97,12 @@ impl ServerContext {
 
                 // Ignore failures on set - that just means we lost the race and
                 // another concurrent call to us already set it.
-                _ = self.local_switch_id.set(switch_id);
+                //
+                // However, we do need to notify the transceiver-fetching task
+                // that we've learned our ID.
+                if self.local_switch_id.set(switch_id).is_ok() {
+                    self.transceiver_handle.set_local_switch_id(switch_id);
+                }
 
                 Some(switch_id)
             }

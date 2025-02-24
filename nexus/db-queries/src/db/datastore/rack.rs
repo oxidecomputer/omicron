@@ -1011,9 +1011,7 @@ mod test {
     use nexus_reconfigurator_planning::system::{
         SledBuilder, SystemDescription,
     };
-    use nexus_sled_agent_shared::inventory::{
-        OmicronZoneDataset, OmicronZoneImageSource,
-    };
+    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::{
@@ -1021,7 +1019,8 @@ mod test {
         OmicronZoneExternalFloatingIp,
     };
     use nexus_types::deployment::{
-        BlueprintZoneDisposition, OmicronZoneExternalSnatIp,
+        BlueprintZoneDisposition, BlueprintZoneImageSource,
+        OmicronZoneExternalSnatIp,
     };
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::external_api::views::SledState;
@@ -1405,7 +1404,7 @@ mod test {
                                 },
                             },
                         ),
-                        image_source: OmicronZoneImageSource::InstallDataset,
+                        image_source: BlueprintZoneImageSource::InstallDataset,
                     },
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
@@ -1440,7 +1439,7 @@ mod test {
                                 },
                             },
                         ),
-                        image_source: OmicronZoneImageSource::InstallDataset,
+                        image_source: BlueprintZoneImageSource::InstallDataset,
                     },
                 ]
                 .into_iter()
@@ -1483,7 +1482,7 @@ mod test {
                                 },
                             },
                         ),
-                        image_source: OmicronZoneImageSource::InstallDataset,
+                        image_source: BlueprintZoneImageSource::InstallDataset,
                     },
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
@@ -1518,7 +1517,7 @@ mod test {
                                 },
                             },
                         ),
-                        image_source: OmicronZoneImageSource::InstallDataset,
+                        image_source: BlueprintZoneImageSource::InstallDataset,
                     },
                 ]
                 .into_iter()
@@ -1538,7 +1537,7 @@ mod test {
                             address: "[::1]:80".parse().unwrap(),
                         },
                     ),
-                    image_source: OmicronZoneImageSource::InstallDataset,
+                    image_source: BlueprintZoneImageSource::InstallDataset,
                 }]
                 .into_iter()
                 .collect(),
@@ -1741,7 +1740,7 @@ mod test {
                                 },
                             },
                         ),
-                        image_source: OmicronZoneImageSource::InstallDataset,
+                        image_source: BlueprintZoneImageSource::InstallDataset,
                     },
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
@@ -1774,7 +1773,7 @@ mod test {
                                 },
                             },
                         ),
-                        image_source: OmicronZoneImageSource::InstallDataset,
+                        image_source: BlueprintZoneImageSource::InstallDataset,
                     },
                 ]
                 .into_iter()
@@ -2012,7 +2011,7 @@ mod test {
                             },
                         },
                     ),
-                    image_source: OmicronZoneImageSource::InstallDataset,
+                    image_source: BlueprintZoneImageSource::InstallDataset,
                 }]
                 .into_iter()
                 .collect(),
@@ -2121,7 +2120,7 @@ mod test {
                                 },
                             },
                         ),
-                        image_source: OmicronZoneImageSource::InstallDataset,
+                        image_source: BlueprintZoneImageSource::InstallDataset,
                     },
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
@@ -2154,7 +2153,7 @@ mod test {
                                 },
                             },
                         ),
-                        image_source: OmicronZoneImageSource::InstallDataset,
+                        image_source: BlueprintZoneImageSource::InstallDataset,
                     },
                 ]
                 .into_iter()

@@ -33,7 +33,6 @@ use nexus_config::NexusConfig;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_db_queries::db::pub_test_utils::crdb;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
 use nexus_test_interface::NexusServer;
@@ -48,6 +47,7 @@ use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
@@ -495,7 +495,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     dataset: OmicronZoneDataset { pool_name },
                 },
             ),
-            image_source: OmicronZoneImageSource::InstallDataset,
+            image_source: BlueprintZoneImageSource::InstallDataset,
         });
         self.database = Some(database);
     }
@@ -546,7 +546,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     dataset: OmicronZoneDataset { pool_name },
                 },
             ),
-            image_source: OmicronZoneImageSource::InstallDataset,
+            image_source: BlueprintZoneImageSource::InstallDataset,
         });
     }
 
@@ -762,7 +762,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     transit_ips: vec![],
                 },
             }),
-            image_source: OmicronZoneImageSource::InstallDataset,
+            image_source: BlueprintZoneImageSource::InstallDataset,
         });
 
         self.nexus_internal = Some(nexus_internal);
@@ -1188,7 +1188,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             zone_type: BlueprintZoneType::CruciblePantry(
                 blueprint_zone_type::CruciblePantry { address },
             ),
-            image_source: OmicronZoneImageSource::InstallDataset,
+            image_source: BlueprintZoneImageSource::InstallDataset,
         });
     }
 
@@ -1256,7 +1256,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     },
                 },
             ),
-            image_source: OmicronZoneImageSource::InstallDataset,
+            image_source: BlueprintZoneImageSource::InstallDataset,
         });
 
         self.external_dns = Some(dns);
@@ -1299,7 +1299,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     gz_address_index: 0,
                 },
             ),
-            image_source: OmicronZoneImageSource::InstallDataset,
+            image_source: BlueprintZoneImageSource::InstallDataset,
         });
 
         self.internal_dns = Some(dns);

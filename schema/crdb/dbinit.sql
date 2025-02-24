@@ -3823,7 +3823,20 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_physical_disk  (
 
     disposition omicron.public.bp_physical_disk_disposition NOT NULL,
 
-    PRIMARY KEY (blueprint_id, id)
+     -- Specific properties of the `expunged` disposition
+    disposition_expunged_as_of_generation INT,
+    disposition_expunged_ready_for_cleanup BOOL NOT NULL,
+
+    PRIMARY KEY (blueprint_id, id),
+
+    CONSTRAINT expunged_disposition_properties CHECK (
+      (disposition != 'expunged'
+          AND disposition_expunged_as_of_generation IS NULL
+          AND NOT disposition_expunged_ready_for_cleanup)
+      OR
+      (disposition = 'expunged'
+          AND disposition_expunged_as_of_generation IS NOT NULL)
+    )
 );
 
 -- description of a collection of omicron datasets stored in a blueprint
@@ -4969,7 +4982,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '126.0.0', NULL)
+    (TRUE, NOW(), NOW(), '127.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

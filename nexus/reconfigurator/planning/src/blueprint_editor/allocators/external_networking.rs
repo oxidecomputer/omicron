@@ -676,9 +676,9 @@ pub mod test {
     use super::*;
     use illumos_utils::zpool::ZpoolName;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-    use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
@@ -918,7 +918,7 @@ pub mod test {
                         },
                     },
                 ),
-                image_source: OmicronZoneImageSource::InstallDataset,
+                image_source: BlueprintZoneImageSource::InstallDataset,
             }
         };
 

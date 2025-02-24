@@ -239,9 +239,9 @@ mod tests {
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-    use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneImageSource;
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
@@ -284,7 +284,7 @@ mod tests {
                         },
                     },
                 ),
-                image_source: OmicronZoneImageSource::InstallDataset,
+                image_source: BlueprintZoneImageSource::InstallDataset,
             };
 
         // Add three CRDB zones with known addresses; the first and third are
@@ -325,7 +325,7 @@ mod tests {
                     address: "[::1]:0".parse().unwrap(),
                 },
             ),
-            image_source: OmicronZoneImageSource::InstallDataset,
+            image_source: BlueprintZoneImageSource::InstallDataset,
         });
 
         // We expect to see CRDB zones 1 and 3 with their IPs but the ports
