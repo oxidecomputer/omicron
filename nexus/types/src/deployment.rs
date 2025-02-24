@@ -256,6 +256,24 @@ impl Blueprint {
             .filter(move |(_, z)| filter(z.disposition))
     }
 
+    /// Iterate over the [`BlueprintPhysicalDiskConfig`] instances in the
+    /// blueprint that match the provided filter, along with the associated
+    /// sled id.
+    pub fn all_omicron_disks<F>(
+        &self,
+        mut filter: F,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintPhysicalDiskConfig)>
+    where
+        F: FnMut(BlueprintPhysicalDiskDisposition) -> bool,
+    {
+        self.blueprint_disks
+            .iter()
+            .flat_map(move |(sled_id, disks)| {
+                disks.disks.iter().map(|disk| (*sled_id, disk))
+            })
+            .filter(move |(_, d)| filter(d.disposition))
+    }
+
     /// Iterate over the [`BlueprintDatasetsConfig`] instances in the blueprint.
     pub fn all_omicron_datasets(
         &self,
@@ -298,11 +316,19 @@ impl BpTableData for &BlueprintPhysicalDisksConfig {
     }
 
     fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
-        let sorted_disk_ids: BTreeSet<DiskIdentity> =
-            self.disks.iter().map(|d| d.identity.clone()).collect();
+        let mut disks: Vec<_> = self.disks.iter().cloned().collect();
+        disks.sort_unstable_by_key(|d| d.identity.clone());
 
-        sorted_disk_ids.into_iter().map(move |d| {
-            BpTableRow::from_strings(state, vec![d.vendor, d.model, d.serial])
+        disks.into_iter().map(move |d| {
+            BpTableRow::from_strings(
+                state,
+                vec![
+                    d.identity.vendor,
+                    d.identity.model,
+                    d.identity.serial,
+                    d.disposition.to_string(),
+                ],
+            )
         })
     }
 }
@@ -869,34 +895,91 @@ pub enum BlueprintDatasetFilter {
     JsonSchema,
     Deserialize,
     Serialize,
-    EnumIter,
     Diffable,
 )]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BlueprintPhysicalDiskDisposition {
     /// The physical disk is in-service.
     InService,
 
     /// The physical disk is permanently gone.
-    Expunged,
+    Expunged {
+        /// Generation of the parent config in which this disk became expunged.
+        as_of_generation: Generation,
+
+        /// True if Reconfiguration knows that this disk has been expunged.
+        ///
+        /// In the current implementation, this means either:
+        ///
+        /// a) the sled where the disk was residing has been expunged.
+        ///
+        /// b) the planner has observed an inventory collection where the
+        /// disk expungement was seen by the sled agent on the sled where the
+        /// disk was previously in service. This is indicated by the inventory
+        /// reporting a disk generation at least as high as `as_of_generation`.
+        ready_for_cleanup: bool,
+    },
 }
 
 impl BlueprintPhysicalDiskDisposition {
-    /// Returns true if the disk disposition matches this filter.
-    pub fn matches(self, filter: DiskFilter) -> bool {
+    /// Always returns true.
+    ///
+    /// This is intended for use with methods that take a filtering
+    /// closure operating on a `BlueprintPhysicalDiskDisposition` (e.g.,
+    /// `Blueprint::all_omicron_disks()`), allowing callers to make it clear
+    /// they accept any disposition via
+    ///
+    /// ```rust,ignore
+    /// blueprint.all_omicron_disks(BlueprintPhysicalDiskDisposition::any)
+    /// ```
+    pub fn any(self) -> bool {
+        true
+    }
+
+    /// Returns true if `self` is `BlueprintZoneDisposition::InService`
+    pub fn is_in_service(self) -> bool {
+        matches!(self, Self::InService)
+    }
+
+    /// Returns true if `self` is `BlueprintPhysicalDiskDisposition::Expunged
+    /// { .. }`, regardless of the details contained within that variant.
+    pub fn is_expunged(self) -> bool {
+        matches!(self, Self::Expunged { .. })
+    }
+
+    /// Returns true if `self` is `BlueprintPhysicalDiskDisposition::Expunged
+    /// {ready_for_cleanup: true, ..}`
+    pub fn is_ready_for_cleanup(self) -> bool {
+        matches!(self, Self::Expunged { ready_for_cleanup: true, .. })
+    }
+
+    /// Return the generation when a disk was expunged or `None` if the disk
+    /// was not expunged.
+    pub fn expunged_as_of_generation(&self) -> Option<Generation> {
         match self {
-            Self::InService => match filter {
-                DiskFilter::All => true,
-                DiskFilter::InService => true,
-                // TODO remove this variant?
-                DiskFilter::ExpungedButActive => false,
-            },
-            Self::Expunged => match filter {
-                DiskFilter::All => true,
-                DiskFilter::InService => false,
-                // TODO remove this variant?
-                DiskFilter::ExpungedButActive => true,
-            },
+            BlueprintPhysicalDiskDisposition::Expunged {
+                as_of_generation,
+                ..
+            } => Some(*as_of_generation),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for BlueprintPhysicalDiskDisposition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            // Neither `write!(f, "...")` nor `f.write_str("...")` obey fill
+            // and alignment (used above), but this does.
+            BlueprintPhysicalDiskDisposition::InService => "in service".fmt(f),
+            BlueprintPhysicalDiskDisposition::Expunged {
+                ready_for_cleanup: true,
+                ..
+            } => "expunged ✓".fmt(f),
+            BlueprintPhysicalDiskDisposition::Expunged {
+                ready_for_cleanup: false,
+                ..
+            } => "expunged ⏳".fmt(f),
         }
     }
 }
@@ -907,6 +990,7 @@ impl BlueprintPhysicalDiskDisposition {
 )]
 pub struct BlueprintPhysicalDiskConfig {
     pub disposition: BlueprintPhysicalDiskDisposition,
+    #[daft(leaf)]
     pub identity: DiskIdentity,
     pub id: PhysicalDiskUuid,
     pub pool_id: ZpoolUuid,
@@ -939,7 +1023,7 @@ impl BlueprintPhysicalDisksConfig {
                 .disks
                 .into_iter()
                 .filter_map(|d| {
-                    if d.disposition.matches(DiskFilter::InService) {
+                    if d.disposition.is_in_service() {
                         Some(d.into())
                     } else {
                         None

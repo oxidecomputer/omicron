@@ -9,12 +9,14 @@ use std::time::Duration;
 use super::setup::WicketdTestContext;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
+use http::StatusCode;
 use sled_hardware_types::Baseboard;
 use slog::{info, warn};
 use wicket::OutputKind;
 use wicket_common::inventory::{SpIdentifier, SpType};
 use wicket_common::rack_setup::BootstrapSledDescription;
 use wicketd_client::types::{GetInventoryParams, GetInventoryResponse};
+use wicketd_client::Error;
 
 #[tokio::test]
 async fn test_inventory() {
@@ -29,29 +31,45 @@ async fn test_inventory() {
                 .wicketd_client
                 .get_inventory(&params)
                 .await
-                .expect("get_inventory succeeded")
-                .into_inner();
+                .map(|r| r.into_inner());
             match response {
-                GetInventoryResponse::Response { inventory, .. } => {
+                Ok(GetInventoryResponse::Response { inventory, .. }) => {
                     // Ensure that the SP state is populated -- if it's not,
                     // then the `configured-bootstrap-sleds` command below
                     // might return an empty list.
-                    let sp_state_none: Vec<_> = inventory
-                        .sps
-                        .iter()
-                        .filter(|sp| sp.state.is_none())
-                        .collect();
-                    if sp_state_none.is_empty() {
-                        break inventory;
+                    if let Some(mgs) = inventory.mgs {
+                        let sp_state_none: Vec<_> = mgs
+                            .inventory
+                            .sps
+                            .iter()
+                            .filter(|sp| sp.state.is_none())
+                            .collect();
+                        if sp_state_none.is_empty() {
+                            break mgs.inventory;
+                        }
+                        warn!(
+                            wicketd_testctx.log(),
+                            "SP state not yet populated for some SPs, retrying";
+                            "sps" => ?sp_state_none
+                        )
+                    } else {
+                        warn!(
+                            wicketd_testctx.log(),
+                            "MGS-derived inventory not yet populated, retrying"
+                        );
                     }
-
-                    warn!(
-                        wicketd_testctx.log(),
-                        "SP state not yet populated for some SPs, retrying";
-                        "sps" => ?sp_state_none
-                    )
                 }
-                GetInventoryResponse::Unavailable => {}
+                // Successful response, but the MGS inventory isn't available.
+                Ok(GetInventoryResponse::Unavailable) => {}
+
+                // 503 means neither MGS nor transceiver inventory is available.
+                Err(Error::ErrorResponse(rv))
+                    if rv.status() == StatusCode::SERVICE_UNAVAILABLE => {}
+
+                // Anything else is unexpected.
+                Err(e) => panic!(
+                    "get_inventory failed with unexpected response: {e:?}"
+                ),
             }
 
             // Keep polling wicketd until it receives its first results from MGS.
