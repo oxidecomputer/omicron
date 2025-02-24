@@ -6089,7 +6089,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn system_update_get_target_release(
         rqctx: RequestContext<ApiContext>,
-    ) -> Result<HttpResponseOk<shared::TargetRelease>, HttpError> {
+    ) -> Result<HttpResponseOk<views::TargetRelease>, HttpError> {
         let apictx = rqctx.context();
         let nexus = &apictx.context.nexus;
         let handler = async {
@@ -6100,7 +6100,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(
                 nexus
                     .datastore()
-                    .export_target_release(&opctx, &target_release)
+                    .target_release_view(&opctx, &target_release)
                     .await?,
             ))
         };
@@ -6114,41 +6114,27 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn system_update_set_target_release(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<params::SetTargetReleaseParams>,
-    ) -> Result<HttpResponseCreated<shared::TargetRelease>, HttpError> {
+    ) -> Result<HttpResponseCreated<views::TargetRelease>, HttpError> {
         let apictx = rqctx.context();
         let nexus = &apictx.context.nexus;
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let params = body.into_inner();
-            let (release_source, version) = match params.release_source {
-                shared::TargetReleaseSource::Unspecified => {
-                    (nexus_db_model::TargetReleaseSource::Unspecified, None)
-                }
-                shared::TargetReleaseSource::SystemVersion(version) => (
-                    nexus_db_model::TargetReleaseSource::SystemVersion,
-                    Some(version),
-                ),
-            };
-            let tuf_repo_id = if let Some(version) = version {
-                Some(
-                    nexus
-                        .datastore()
-                        .update_tuf_repo_get(&opctx, version.into())
-                        .await?
-                        .repo
-                        .id,
-                )
-            } else {
-                None
-            };
+            let system_version = params.system_version;
+            let tuf_repo_id = nexus
+                .datastore()
+                .update_tuf_repo_get(&opctx, system_version.into())
+                .await?
+                .repo
+                .id;
             let current_target_release =
                 nexus.datastore().get_target_release(&opctx).await?;
             let next_target_release =
                 nexus_db_model::TargetRelease::new_from_prev(
                     current_target_release,
-                    release_source,
-                    tuf_repo_id,
+                    nexus_db_model::TargetReleaseSource::SystemVersion,
+                    Some(tuf_repo_id),
                 );
             let target_release = nexus
                 .datastore()
@@ -6157,7 +6143,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseCreated(
                 nexus
                     .datastore()
-                    .export_target_release(&opctx, &target_release)
+                    .target_release_view(&opctx, &target_release)
                     .await?,
             ))
         };

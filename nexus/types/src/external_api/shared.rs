@@ -15,7 +15,6 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_uuid_kinds::SupportBundleUuid;
 use parse_display::FromStr;
 use schemars::JsonSchema;
-use semver::Version;
 use serde::de::Error as _;
 use serde::Deserialize;
 use serde::Deserializer;
@@ -510,30 +509,4 @@ impl RelayState {
         )
         .context("json from relay state string")
     }
-}
-
-/// The source of the target release.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, JsonSchema, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TargetReleaseSource {
-    /// Unspecified or unknown source (probably MUPdate).
-    Unspecified,
-
-    /// Use the specified release of the rack's system software.
-    /// A TUF repo containing that release must be available via
-    /// the repo depot.
-    SystemVersion(Version),
-}
-
-/// View of a system software target release
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-pub struct TargetRelease {
-    /// The target-release generation number.
-    pub generation: i64,
-
-    /// The time it was or is to be set as the target release.
-    pub time_requested: DateTime<Utc>,
-
-    /// The source of the target release.
-    pub release_source: TargetReleaseSource,
 }

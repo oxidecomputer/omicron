@@ -14,7 +14,7 @@ use nexus_test_utils::http_testing::{NexusRequest, RequestBuilder};
 use nexus_test_utils::load_test_config;
 use nexus_test_utils::test_setup_with_config;
 use nexus_types::external_api::params::SetTargetReleaseParams;
-use nexus_types::external_api::shared::{TargetRelease, TargetReleaseSource};
+use nexus_types::external_api::views::{TargetRelease, TargetReleaseSource};
 use omicron_common::api::external::TufRepoInsertResponse;
 use omicron_sled_agent::sim;
 use semver::Version;
@@ -51,13 +51,11 @@ async fn get_set_target_release() -> anyhow::Result<()> {
     assert_eq!(target_release.release_source, TargetReleaseSource::Unspecified);
 
     // Attempting to set an invalid system version should fail.
-    let version = Version::new(0, 0, 0);
+    let system_version = Version::new(0, 0, 0);
     NexusRequest::objects_post(
         client,
         "/v1/system/update/target-release",
-        &SetTargetReleaseParams {
-            release_source: TargetReleaseSource::SystemVersion(version),
-        },
+        &SetTargetReleaseParams { system_version },
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -67,7 +65,7 @@ async fn get_set_target_release() -> anyhow::Result<()> {
     // Adding a fake (tufaceous) repo and then setting it as the
     // target release should succeed.
     let before = Utc::now();
-    let version = Version::new(1, 0, 0);
+    let system_version = Version::new(1, 0, 0);
     let logctx = LogContext::new("get_set_target_release", &config.pkg.log);
     let temp = Utf8TempDir::new().unwrap();
     let path = temp.path().join("repo.zip");
@@ -83,7 +81,7 @@ async fn get_set_target_release() -> anyhow::Result<()> {
     .expect("can't assemble TUF repo");
 
     assert_eq!(
-        version,
+        system_version,
         NexusRequest::new(
             RequestBuilder::new(
                 client,
@@ -107,9 +105,7 @@ async fn get_set_target_release() -> anyhow::Result<()> {
     let target_release: TargetRelease = NexusRequest::objects_post(
         client,
         "/v1/system/update/target-release",
-        &SetTargetReleaseParams {
-            release_source: TargetReleaseSource::SystemVersion(version.clone()),
-        },
+        &SetTargetReleaseParams { system_version: system_version.clone() },
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -123,7 +119,7 @@ async fn get_set_target_release() -> anyhow::Result<()> {
     assert!(target_release.time_requested <= after);
     assert_eq!(
         target_release.release_source,
-        TargetReleaseSource::SystemVersion(version),
+        TargetReleaseSource::SystemVersion(system_version),
     );
 
     ctx.teardown().await;

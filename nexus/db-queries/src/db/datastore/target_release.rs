@@ -13,7 +13,7 @@ use crate::db::schema::target_release::dsl;
 use async_bb8_diesel::AsyncRunQueryDsl as _;
 use diesel::insert_into;
 use diesel::prelude::*;
-use nexus_types::external_api::shared;
+use nexus_types::external_api::views;
 use omicron_common::api::external::{CreateResult, LookupResult};
 
 impl DataStore {
@@ -70,23 +70,23 @@ impl DataStore {
     /// Convert a model-level target release to an external view.
     /// This method lives here because we have to look up the version
     /// corresponding to the TUF repo.
-    pub async fn export_target_release(
+    pub async fn target_release_view(
         &self,
         opctx: &OpContext,
         target_release: &TargetRelease,
-    ) -> LookupResult<shared::TargetRelease> {
+    ) -> LookupResult<views::TargetRelease> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        Ok(shared::TargetRelease {
+        Ok(views::TargetRelease {
             generation: (&target_release.generation.0).into(),
             time_requested: target_release.time_requested,
             release_source: match target_release.release_source {
                 TargetReleaseSource::Unspecified => {
-                    shared::TargetReleaseSource::Unspecified
+                    views::TargetReleaseSource::Unspecified
                 }
                 TargetReleaseSource::SystemVersion => {
                     use crate::db::schema::tuf_repo;
-                    shared::TargetReleaseSource::SystemVersion(
+                    views::TargetReleaseSource::SystemVersion(
                         tuf_repo::table
                             .select(tuf_repo::system_version)
                             .filter(tuf_repo::id.eq(
