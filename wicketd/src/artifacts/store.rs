@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use omicron_common::api::external::SemverVersion;
 use omicron_common::update::ArtifactHashId;
+use semver::Version;
 use slog::Logger;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -40,7 +40,7 @@ impl WicketdArtifactStore {
 
     pub(crate) fn system_version_and_artifact_ids(
         &self,
-    ) -> Option<(SemverVersion, Vec<InstallableArtifacts>)> {
+    ) -> Option<(Version, Vec<InstallableArtifacts>)> {
         let artifacts = self.artifacts_with_plan.lock().unwrap();
         let artifacts = artifacts.as_ref()?;
         let system_version = artifacts.plan().system_version.clone();

@@ -13,7 +13,8 @@ use bytes::Bytes;
 use camino::Utf8PathBuf;
 use fs_err::File;
 use omicron_brand_metadata::Metadata;
-use omicron_common::{api::external::SemverVersion, update::ArtifactKind};
+use omicron_common::update::ArtifactKind;
+use semver::Version;
 
 mod composite;
 
@@ -35,7 +36,7 @@ pub enum ArtifactSource {
 pub struct AddArtifact {
     kind: ArtifactKind,
     name: String,
-    version: SemverVersion,
+    version: Version,
     source: ArtifactSource,
 }
 
@@ -44,7 +45,7 @@ impl AddArtifact {
     pub fn new(
         kind: ArtifactKind,
         name: String,
-        version: SemverVersion,
+        version: Version,
         source: ArtifactSource,
     ) -> Self {
         Self { kind, name, version, source }
@@ -57,7 +58,7 @@ impl AddArtifact {
     pub fn from_path(
         kind: ArtifactKind,
         name: Option<String>,
-        version: SemverVersion,
+        version: Version,
         path: Utf8PathBuf,
     ) -> Result<Self> {
         let name = match name {
@@ -85,7 +86,7 @@ impl AddArtifact {
     }
 
     /// Returns the version of the new artifact.
-    pub fn version(&self) -> &SemverVersion {
+    pub fn version(&self) -> &Version {
         &self.version
     }
 
