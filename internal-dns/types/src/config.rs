@@ -433,11 +433,19 @@ impl DnsConfigBuilder {
         );
         let zone = self.host_zone(zone_id, *http_address.ip())?;
         self.service_backend_zone(http_service, &zone, http_address.port())?;
-        self.service_backend_zone(
-            ServiceName::ClickhouseNative,
-            &zone,
-            CLICKHOUSE_TCP_PORT,
-        )?;
+
+        if http_service == ServiceName::Clickhouse {
+            self.service_backend_zone(
+                ServiceName::ClickhouseNative,
+                &zone,
+                CLICKHOUSE_TCP_PORT,
+            )?;
+            self.service_backend_zone(
+                ServiceName::ClickhouseAdminSingleServer,
+                &zone,
+                CLICKHOUSE_ADMIN_PORT,
+            )?;
+        }
 
         if http_service == ServiceName::ClickhouseServer {
             self.service_backend_zone(
@@ -687,7 +695,9 @@ mod test {
     use crate::{config::Zone, names::DNS_ZONE};
     use omicron_common::api::external::Generation;
     use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
-    use std::{collections::BTreeMap, io::Write, net::Ipv6Addr};
+    use std::{
+        collections::BTreeMap, io::Write, net::Ipv6Addr, net::SocketAddrV6,
+    };
 
     #[test]
     fn display_srv_service() {
@@ -701,8 +711,16 @@ mod test {
             "_clickhouse-admin-server._tcp",
         );
         assert_eq!(
+            ServiceName::ClickhouseAdminSingleServer.dns_name(),
+            "_clickhouse-admin-single-server._tcp",
+        );
+        assert_eq!(
             ServiceName::ClickhouseKeeper.dns_name(),
             "_clickhouse-keeper._tcp",
+        );
+        assert_eq!(
+            ServiceName::ClickhouseNative.dns_name(),
+            "_clickhouse-native._tcp",
         );
         assert_eq!(
             ServiceName::ClickhouseServer.dns_name(),
@@ -756,12 +774,19 @@ mod test {
     const ZONE2_UUID: &'static str = "001de000-c04e-4000-8000-000000000002";
     const ZONE3_UUID: &'static str = "001de000-c04e-4000-8000-000000000003";
     const ZONE4_UUID: &'static str = "001de000-c04e-4000-8000-000000000004";
+    const ZONE_CLICKHOUSE_UUID: &'static str =
+        "001de000-c04e-4000-8000-000000000005";
+    const ZONE_CLICKHOUSE_SERVER_UUID: &'static str =
+        "001de000-c04e-4000-8000-000000000006";
     const SLED1_IP: Ipv6Addr = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1);
     const SLED2_IP: Ipv6Addr = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 2);
     const ZONE1_IP: Ipv6Addr = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 1, 1);
     const ZONE2_IP: Ipv6Addr = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 1, 2);
     const ZONE3_IP: Ipv6Addr = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 1, 3);
     const ZONE4_IP: Ipv6Addr = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 1, 4);
+    const ZONE_CLICKHOUSE_IP: Ipv6Addr = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 1, 5);
+    const ZONE_CLICKHOUSE_SERVER_IP: Ipv6Addr =
+        Ipv6Addr::new(0, 0, 0, 0, 0, 0, 1, 6);
 
     #[test]
     fn test_builder_output() {
@@ -773,6 +798,10 @@ mod test {
         let zone2_uuid: OmicronZoneUuid = ZONE2_UUID.parse().unwrap();
         let zone3_uuid: OmicronZoneUuid = ZONE3_UUID.parse().unwrap();
         let zone4_uuid: OmicronZoneUuid = ZONE4_UUID.parse().unwrap();
+        let zone_clickhouse_uuid: OmicronZoneUuid =
+            ZONE_CLICKHOUSE_UUID.parse().unwrap();
+        let zone_clickhouse_server_uuid: OmicronZoneUuid =
+            ZONE_CLICKHOUSE_SERVER_UUID.parse().unwrap();
 
         let builder_empty = DnsConfigBuilder::new();
 
@@ -817,6 +846,20 @@ mod test {
             // populate the special `BOUNDARY_NTP_DNS_NAME`.
             b.service_backend_zone(ServiceName::BoundaryNtp, &zone2, 127)
                 .unwrap();
+
+            // Add clickhouse and clickhouse server zones, which have serveral services each
+            b.host_zone_clickhouse(
+                zone_clickhouse_uuid,
+                ServiceName::Clickhouse,
+                SocketAddrV6::new(ZONE_CLICKHOUSE_IP, 0, 0, 0),
+            )
+            .unwrap();
+            b.host_zone_clickhouse(
+                zone_clickhouse_server_uuid,
+                ServiceName::ClickhouseServer,
+                SocketAddrV6::new(ZONE_CLICKHOUSE_SERVER_IP, 0, 0, 0),
+            )
+            .unwrap();
 
             // A sharded service
             b.service_backend_sled(
