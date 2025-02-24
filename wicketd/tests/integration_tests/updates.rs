@@ -131,7 +131,13 @@ async fn test_updates() {
     match resp.into_inner() {
         GetInventoryResponse::Response { inventory, .. } => {
             let mut found = false;
-            for sp in &inventory.sps {
+            for sp in &inventory
+                .mgs
+                .as_ref()
+                .expect("Should have MGS inventory")
+                .inventory
+                .sps
+            {
                 if sp.id == target_sp {
                     assert!(sp.state.is_some(), "no state for target SP");
                     found = true;

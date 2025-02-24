@@ -31,7 +31,7 @@ use parse_display::FromStr;
 use rand::thread_rng;
 use rand::Rng;
 use schemars::JsonSchema;
-use semver;
+use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
@@ -492,56 +492,6 @@ fn name_schema(
         ..Default::default()
     }
     .into()
-}
-
-// TODO: remove wrapper for semver::Version once this PR goes through
-// https://github.com/GREsau/schemars/pull/195
-#[derive(
-    Clone,
-    Debug,
-    Serialize,
-    Deserialize,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    Display,
-    FromStr,
-)]
-#[display("{0}")]
-#[serde(transparent)]
-pub struct SemverVersion(pub semver::Version);
-
-impl SemverVersion {
-    pub const fn new(major: u64, minor: u64, patch: u64) -> Self {
-        Self(semver::Version::new(major, minor, patch))
-    }
-
-    /// This is the official ECMAScript-compatible validation regex for
-    /// semver:
-    /// <https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string>
-    const VALIDATION_REGEX: &'static str = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$";
-}
-
-impl JsonSchema for SemverVersion {
-    fn schema_name() -> String {
-        "SemverVersion".to_string()
-    }
-
-    fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        schemars::schema::SchemaObject {
-            instance_type: Some(schemars::schema::InstanceType::String.into()),
-            string: Some(Box::new(schemars::schema::StringValidation {
-                pattern: Some(Self::VALIDATION_REGEX.to_owned()),
-                ..Default::default()
-            })),
-            ..Default::default()
-        }
-        .into()
-    }
 }
 
 /// Name for a built-in role
@@ -3172,7 +3122,7 @@ pub struct TufRepoMeta {
     pub valid_until: DateTime<Utc>,
 
     /// The system version in artifacts.json.
-    pub system_version: SemverVersion,
+    pub system_version: Version,
 
     /// The file name of the repository.
     ///
@@ -3269,7 +3219,6 @@ mod test {
     use super::Generation;
     use super::RouteDestination;
     use super::RouteTarget;
-    use super::SemverVersion;
     use super::VpcFirewallRuleHostFilter;
     use super::VpcFirewallRuleTarget;
     use super::{
@@ -3282,61 +3231,21 @@ mod test {
     use crate::api::external::Error;
     use crate::api::external::Hostname;
     use crate::api::external::ResourceType;
+    use semver::Version;
     use std::convert::TryFrom;
     use std::str::FromStr;
 
-    #[test]
-    fn test_semver_validation() {
-        // Examples copied from
-        // https://github.com/dtolnay/semver/blob/cc2cfed67c17dfe6abae18726830bdb6d7cf740d/tests/test_version.rs#L13.
-        let valid = [
-            "1.2.3",
-            "1.2.3-alpha1",
-            "1.2.3+build5",
-            "1.2.3+5build",
-            "1.2.3-alpha1+build5",
-            "1.2.3-1.alpha1.9+build5.7.3aedf",
-            "1.2.3-0a.alpha1.9+05build.7.3aed",
-            "0.4.0-beta.1+0851523",
-            "1.1.0-beta-10",
-        ];
-        let invalid = [
-            // These examples are rejected by the validation regex.
-            "",
-            "1",
-            "1.2",
-            "1.2.3-",
-            "a.b.c",
-            "1.2.3 abc",
-            "1.2.3-01",
-        ];
-
-        let r = regress::Regex::new(SemverVersion::VALIDATION_REGEX)
-            .expect("validation regex is valid");
-        for input in valid {
-            let m = r
-                .find(input)
-                .unwrap_or_else(|| panic!("input {input} did not match regex"));
-            assert_eq!(m.start(), 0, "input {input} did not match start");
-            assert_eq!(m.end(), input.len(), "input {input} did not match end");
-        }
-
-        for input in invalid {
-            assert!(
-                r.find(input).is_none(),
-                "invalid input {input} should not match validation regex"
-            );
-        }
-    }
-
+    // This test originates from when we had a wrapper struct around
+    // `semver::Version`, but it's probably worth carrying this test that
+    // ensures the behavior we rely on is accurate.
     #[test]
     fn test_semver_serialize() {
         #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
         struct MyStruct {
-            version: SemverVersion,
+            version: Version,
         }
 
-        let v = MyStruct { version: SemverVersion::new(1, 2, 3) };
+        let v = MyStruct { version: Version::new(1, 2, 3) };
         let expected = "{\"version\":\"1.2.3\"}";
         assert_eq!(serde_json::to_string(&v).unwrap(), expected);
         assert_eq!(serde_json::from_str::<MyStruct>(expected).unwrap(), v);

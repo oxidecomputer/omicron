@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2022 Oxide Computer Company
+// Copyright 2025 Oxide Computer Company
 
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 
@@ -27,8 +27,8 @@ pub struct WicketdTestContext {
 
 impl WicketdTestContext {
     pub async fn setup(gateway: GatewayTestContext) -> Self {
-        // Can't be `const` because `SocketAddrV6::new()` isn't const yet
-        let localhost_port_0 = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
+        const LOCALHOST_PORT_0: SocketAddrV6 =
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
 
         // Reuse the log from the gateway context.
         let log = &gateway.logctx.log;
@@ -36,15 +36,16 @@ impl WicketdTestContext {
         let mgs_address = assert_ipv6(
             gateway
                 .server
-                .dropshot_server_for_address(localhost_port_0)
+                .dropshot_server_for_address(LOCALHOST_PORT_0)
                 .unwrap()
                 .local_addr(),
         );
+
         let args = wicketd::Args {
-            address: localhost_port_0,
-            artifact_address: localhost_port_0,
+            address: LOCALHOST_PORT_0,
+            artifact_address: LOCALHOST_PORT_0,
             mgs_address,
-            nexus_proxy_address: localhost_port_0,
+            nexus_proxy_address: LOCALHOST_PORT_0,
             baseboard: None,
             rack_subnet: None,
         };
