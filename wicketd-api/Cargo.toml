@@ -15,6 +15,7 @@ omicron-passwords.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 schemars.workspace = true
+semver.workspace = true
 serde.workspace = true
 sled-hardware-types.workspace = true
 slog.workspace = true

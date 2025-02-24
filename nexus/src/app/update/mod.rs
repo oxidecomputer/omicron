@@ -11,8 +11,9 @@ use nexus_db_model::TufRepoDescription;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::{
-    Error, SemverVersion, TufRepoInsertResponse, TufRepoInsertStatus,
+    Error, TufRepoInsertResponse, TufRepoInsertStatus,
 };
+use semver::Version;
 use update_common::artifacts::{ArtifactsWithPlan, ControlPlaneZonesMode};
 
 mod common_sp_update;
@@ -100,7 +101,7 @@ impl super::Nexus {
     pub(crate) async fn updates_get_repository(
         &self,
         opctx: &OpContext,
-        system_version: SemverVersion,
+        system_version: Version,
     ) -> Result<TufRepoDescription, HttpError> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
