@@ -442,28 +442,6 @@ impl Nexus {
             Some(address) => oximeter_db::Client::new(*address, &log),
         };
 
-        let webhook_delivery_client = reqwest::ClientBuilder::new()
-            // Per [RFD 538 § 4.3.1][1], webhook delivery does *not* follow
-            // redirects.
-            //
-            // [1]: https://rfd.shared.oxide.computer/rfd/538#_success
-            .redirect(reqwest::redirect::Policy::none())
-            // Per [RFD 538 § 4.3.2][1], the client must be able to connect to a
-            // webhook receiver endpoint within 10 seconds, or the delivery is
-            // considered failed.
-            //
-            // [1]: https://rfd.shared.oxide.computer/rfd/538#delivery-failure
-            .connect_timeout(std::time::Duration::from_secs(10))
-            // Per [RFD 538 § 4.3.2][1], a 30-second timeout is applied to
-            // each webhook delivery request.
-            //
-            // [1]: https://rfd.shared.oxide.computer/rfd/538#delivery-failure
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .map_err(|e| {
-                format!("failed to build webhook delivery client: {e}")
-            })?;
-
         // TODO-cleanup We may want to make the populator a first-class
         // background task.
         let populate_ctx = OpContext::for_background(
@@ -498,6 +476,11 @@ impl Nexus {
                 &config.deployment.external_dns_servers,
             ))
         };
+
+        let webhook_delivery_client =
+            webhook::delivery_client(&external_resolver).map_err(|e| {
+                format!("failed to build webhook delivery client: {e}")
+            })?;
 
         let nexus = Nexus {
             id: config.deployment.id,

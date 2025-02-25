@@ -4,6 +4,7 @@
 
 //! Webhooks
 
+use crate::app::external_dns;
 use anyhow::Context;
 use chrono::TimeDelta;
 use chrono::Utc;
@@ -36,6 +37,8 @@ use omicron_uuid_kinds::WebhookEventUuid;
 use omicron_uuid_kinds::WebhookReceiverUuid;
 use omicron_uuid_kinds::WebhookSecretUuid;
 use sha2::Sha256;
+use std::sync::Arc;
+use std::time::Duration;
 use std::time::Instant;
 
 impl super::Nexus {
@@ -138,14 +141,56 @@ impl super::Nexus {
     }
 }
 
-pub(crate) struct WebhookDeliveryClient<'a> {
+/// Construct a [`reqwest::Client`] configured for webhook delivery requests.
+pub(super) fn delivery_client(
+    external_dns: &Arc<external_dns::Resolver>,
+) -> Result<reqwest::Client, reqwest::Error> {
+    /// A wrapper around [`external_dns::Resolver`] which rejects IP addresses that
+    /// are underlay network IPs.
+    struct WebhookDnsResolver {
+        external_dns: Arc<external_dns::Resolver>,
+    }
+
+    impl reqwest::dns::Resolve for WebhookDnsResolver {
+        fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+            // TODO(eliza): this is where we have to actually return an error if the
+            // DNS name resolves to an underlay IP! Figure that out!
+            self.external_dns.resolve(name)
+        }
+    }
+
+    reqwest::Client::builder()
+        // Per [RFD 538 § 4.3.1][1], webhook delivery does *not* follow
+        // redirects.
+        //
+        // [1]: https://rfd.shared.oxide.computer/rfd/538#_success
+        .redirect(reqwest::redirect::Policy::none())
+        // Per [RFD 538 § 4.3.2][1], the client must be able to connect to a
+        // webhook receiver endpoint within 10 seconds, or the delivery is
+        // considered failed.
+        //
+        // [1]: https://rfd.shared.oxide.computer/rfd/538#delivery-failure
+        .connect_timeout(Duration::from_secs(10))
+        // Per [RFD 538 § 4.3.2][1], a 30-second timeout is applied to
+        // each webhook delivery request.
+        //
+        // [1]: https://rfd.shared.oxide.computer/rfd/538#delivery-failure
+        .timeout(Duration::from_secs(30))
+        // my god...it's full of Arcs...
+        .dns_resolver(Arc::new(WebhookDnsResolver {
+            external_dns: external_dns.clone(),
+        }))
+        .build()
+}
+
+pub(crate) struct WebhookReceiverClient<'a> {
     client: &'a reqwest::Client,
     rx: &'a WebhookReceiver,
     secrets: Vec<(WebhookSecretUuid, Hmac<Sha256>)>,
     hdr_rx_id: http::HeaderValue,
 }
 
-impl<'a> WebhookDeliveryClient<'a> {
+impl<'a> WebhookReceiverClient<'a> {
     pub(crate) fn new(
         client: &'a reqwest::Client,
         secrets: impl IntoIterator<Item = WebhookSecret>,
@@ -245,11 +290,6 @@ impl<'a> WebhookDeliveryClient<'a> {
         };
         let mut request = self
             .client
-            // TODO(eliza): this ain't gonna cut it! Rather than using the `reqwest`
-            // client, which performs its own DNS resolution, we gotta resolve the
-            // domain to an IP ourselves so that we can prevent SSRF by
-            // rejecting underlay network IPs. Which probably means managing our
-            // own client pool. Ag.
             .post(&self.rx.endpoint)
             .header(HDR_RX_ID, self.hdr_rx_id.clone())
             .header(HDR_DELIVERY_ID, delivery.id.to_string())
