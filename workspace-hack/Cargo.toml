@@ -34,8 +34,8 @@ byteorder = { version = "1.5.0" }
 bytes = { version = "1.9.0", features = ["serde"] }
 chrono = { version = "0.4.39", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
-clap = { version = "4.5.30", features = ["cargo", "derive", "env", "wrap_help"] }
-clap_builder = { version = "4.5.30", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+clap = { version = "4.5.31", features = ["cargo", "derive", "env", "wrap_help"] }
+clap_builder = { version = "4.5.31", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 console = { version = "0.15.10" }
 crossbeam-epoch = { version = "0.9.18" }
 crossbeam-utils = { version = "0.8.20" }
@@ -157,8 +157,8 @@ bytes = { version = "1.9.0", features = ["serde"] }
 cc = { version = "1.2.15", default-features = false, features = ["parallel"] }
 chrono = { version = "0.4.39", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
-clap = { version = "4.5.30", features = ["cargo", "derive", "env", "wrap_help"] }
-clap_builder = { version = "4.5.30", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+clap = { version = "4.5.31", features = ["cargo", "derive", "env", "wrap_help"] }
+clap_builder = { version = "4.5.31", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 console = { version = "0.15.10" }
 crossbeam-epoch = { version = "0.9.18" }
 crossbeam-utils = { version = "0.8.20" }
