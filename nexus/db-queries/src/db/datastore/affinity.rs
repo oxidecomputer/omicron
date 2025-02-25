@@ -1711,7 +1711,7 @@ mod tests {
             .unwrap();
         assert_eq!(members.len(), 1);
         assert_eq!(
-            external::AffinityGroupMember::Instance(instance,),
+            external::AffinityGroupMember::Instance(instance),
             members[0].clone().into()
         );
 
@@ -1800,8 +1800,8 @@ mod tests {
             .unwrap();
         assert_eq!(members.len(), 1);
         assert_eq!(
-            external::AntiAffinityGroupMember::Instance(instance,),
-            members[0].clone().into()
+            external::AntiAffinityGroupMember::Instance(instance),
+            members[0].clone()
         );
 
         // We can delete the member and observe an empty member list
@@ -1915,7 +1915,7 @@ mod tests {
             .unwrap();
         assert_eq!(members.len(), 1);
         assert_eq!(
-            external::AffinityGroupMember::Instance(instance,),
+            external::AffinityGroupMember::Instance(instance),
             members[0].clone().into()
         );
 
@@ -2029,8 +2029,8 @@ mod tests {
             .unwrap();
         assert_eq!(members.len(), 1);
         assert_eq!(
-            external::AntiAffinityGroupMember::Instance(instance,),
-            members[0].clone().into()
+            external::AntiAffinityGroupMember::Instance(instance),
+            members[0].clone()
         );
 
         // We can delete the member and observe an empty member list -- even
