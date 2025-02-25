@@ -204,15 +204,13 @@ pub async fn realize_blueprint_with_overrides(
         blueprint,
     );
 
-    let output = register_finalize_step(
-        &engine.for_component(ExecutionComponent::Cockroach),
-        reassign_saga_output,
-    );
-
     // All steps are registered, so execute the engine.
     let result = engine.execute().await?;
 
-    Ok(output.into_value(result.token()).await)
+    let needs_saga_recovery =
+        reassign_saga_output.into_value(result.token()).await;
+
+    Ok(RealizeBlueprintOutput { needs_saga_recovery })
 }
 
 // Convert a `Result<(), anyhow::Error>` into a `StepResult` containing either a
@@ -225,7 +223,7 @@ fn map_err_to_step_warning(
 ) -> StepResult<(), ReconfiguratorExecutionSpec> {
     match res {
         Ok(_) => StepSuccess::new(()).build(),
-        Err(e) => StepWarning::new((), e.to_string()).build(),
+        Err(e) => StepWarning::new((), format!("{e:#}")).build(),
     }
 }
 
@@ -616,7 +614,7 @@ fn register_reassign_sagas_step<'a>(
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
     nexus_id: OmicronZoneUuid,
-) -> StepHandle<ReassignSagaOutput> {
+) -> StepHandle<bool> {
     registrar
         .new_step(
             ExecutionStepId::Ensure,
@@ -633,24 +631,10 @@ fn register_reassign_sagas_step<'a>(
                 .context("failed to re-assign sagas");
                 match reassigned {
                     Ok(needs_saga_recovery) => {
-                        let output = ReassignSagaOutput {
-                            needs_saga_recovery,
-                            error: None,
-                        };
-                        StepSuccess::new(output).into()
+                        Ok(StepSuccess::new(needs_saga_recovery).build())
                     }
                     Err(error) => {
-                        // We treat errors as non-fatal here, but we still want
-                        // to log them. It's okay to just log the message here
-                        // without the chain of sources, since we collect the
-                        // full chain in the last step
-                        // (`register_finalize_step`).
-                        let message = error.to_string();
-                        let output = ReassignSagaOutput {
-                            needs_saga_recovery: false,
-                            error: Some(error),
-                        };
-                        StepWarning::new(output, message).into()
+                        Ok(StepWarning::new(false, error.to_string()).build())
                     }
                 }
             },
@@ -676,35 +660,4 @@ fn register_cockroachdb_settings_step<'a>(
             },
         )
         .register();
-}
-
-fn register_finalize_step(
-    registrar: &ComponentRegistrar<'_, '_>,
-    reassign_saga_output: StepHandle<ReassignSagaOutput>,
-) -> StepHandle<RealizeBlueprintOutput> {
-    registrar
-        .new_step(
-            ExecutionStepId::Finalize,
-            "Finalize and check for errors",
-            move |cx| async move {
-                let reassign_saga_output =
-                    reassign_saga_output.into_value(cx.token()).await;
-
-                let mut errors = Vec::new();
-                if let Some(error) = reassign_saga_output.error {
-                    errors.push(error);
-                }
-
-                if errors.is_empty() {
-                    StepSuccess::new(RealizeBlueprintOutput {
-                        needs_saga_recovery: reassign_saga_output
-                            .needs_saga_recovery,
-                    })
-                    .into()
-                } else {
-                    Err(merge_anyhow_list(errors))
-                }
-            },
-        )
-        .register()
 }
