@@ -518,7 +518,7 @@ omicron-zone-package = "0.12.0"
 oxide-client = { path = "clients/oxide-client" }
 oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
-oxnet = "0.1.0" # "0.1.1"
+oxnet = "0.1.1"
 once_cell = "1.20.2"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapi-manager-types = { path = "dev-tools/openapi-manager/types" }
@@ -886,9 +886,6 @@ opt-level = 3
 
 # [patch."https://github.com/oxidecomputer/typify"]
 # typify = { path = "../typify/typify" }
-
-[patch.crates-io]
-oxnet = { git = "https://github.com/oxidecomputer/oxnet", rev = "2b041e0698fe45e8fc9b0a8e169edecc1205a1bd" }
 
 #
 # We maintain a fork of pq-sys to address upstream issues.  See the
