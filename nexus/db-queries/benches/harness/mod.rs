@@ -9,6 +9,7 @@
 
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::pub_test_utils::helpers::create_project;
 use nexus_db_queries::db::pub_test_utils::TestDatabase;
 use nexus_db_queries::db::DataStore;
 use nexus_test_utils::sql::process_rows;
@@ -86,7 +87,7 @@ impl TestHarness {
         let db = TestDatabase::new_with_datastore(log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore).await;
+            create_project(&opctx, &datastore, "project").await;
         create_sleds(&datastore, sled_count).await;
 
         Self { db, authz_project }

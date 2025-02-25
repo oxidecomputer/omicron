@@ -20,18 +20,18 @@ use tokio::sync::Barrier;
 
 mod harness;
 
-use harness::db_utils::create_affinity_group;
-use harness::db_utils::create_affinity_group_member;
-use harness::db_utils::create_anti_affinity_group;
-use harness::db_utils::create_anti_affinity_group_member;
-use harness::db_utils::create_instance_record;
 use harness::db_utils::create_reservation;
-use harness::db_utils::delete_affinity_group;
-use harness::db_utils::delete_anti_affinity_group;
-use harness::db_utils::delete_instance_record;
 use harness::db_utils::delete_reservation;
 use harness::db_utils::max_resource_request_count;
 use harness::TestHarness;
+use nexus_db_queries::db::pub_test_utils::helpers::create_affinity_group;
+use nexus_db_queries::db::pub_test_utils::helpers::create_affinity_group_member;
+use nexus_db_queries::db::pub_test_utils::helpers::create_anti_affinity_group;
+use nexus_db_queries::db::pub_test_utils::helpers::create_anti_affinity_group_member;
+use nexus_db_queries::db::pub_test_utils::helpers::create_stopped_instance_record;
+use nexus_db_queries::db::pub_test_utils::helpers::delete_affinity_group;
+use nexus_db_queries::db::pub_test_utils::helpers::delete_anti_affinity_group;
+use nexus_db_queries::db::pub_test_utils::helpers::delete_instance_record;
 
 /////////////////////////////////////////////////////////////////
 //
@@ -130,7 +130,7 @@ async fn create_instances_with_groups(
 ) -> Vec<InstanceUuid> {
     let mut instance_ids = Vec::with_capacity(params.vmms);
     for i in 0..params.vmms {
-        let instance_id = create_instance_record(
+        let instance_id = create_stopped_instance_record(
             opctx,
             db,
             authz_project,
@@ -149,6 +149,7 @@ async fn create_instances_with_groups(
                         create_affinity_group_member(
                             opctx,
                             db,
+                            "project",
                             group.name,
                             instance_id,
                         )
@@ -159,6 +160,7 @@ async fn create_instances_with_groups(
                         create_anti_affinity_group_member(
                             opctx,
                             db,
+                            "project",
                             group.name,
                             instance_id,
                         )
@@ -297,10 +299,11 @@ async fn delete_test_groups(
     for group in all_groups {
         match group.flavor {
             GroupType::Affinity => {
-                delete_affinity_group(opctx, db, group.name).await;
+                delete_affinity_group(opctx, db, "project", group.name).await;
             }
             GroupType::AntiAffinity => {
-                delete_anti_affinity_group(opctx, db, group.name).await;
+                delete_anti_affinity_group(opctx, db, "project", group.name)
+                    .await;
             }
         }
     }
