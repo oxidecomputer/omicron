@@ -13,6 +13,7 @@ pub mod mgs;
 mod nexus_proxy;
 mod preflight_check;
 mod rss_config;
+mod transceivers;
 mod update_tracker;
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -41,6 +42,7 @@ use std::{
     net::{SocketAddr, SocketAddrV6},
     sync::Arc,
 };
+use transceivers::Manager as TransceiverManager;
 pub use update_tracker::{StartUpdateError, UpdateTracker};
 
 /// Command line arguments for wicketd
@@ -141,6 +143,12 @@ impl Server {
             mgs_manager.run().await;
         });
 
+        let transceiver_manager = TransceiverManager::new(&log);
+        let transceiver_handle = transceiver_manager.get_handle();
+        tokio::spawn(async move {
+            transceiver_manager.run().await;
+        });
+
         let (ipr_artifact, ipr_update_tracker) =
             crate::installinator_progress::new(&log);
 
@@ -187,6 +195,7 @@ impl Server {
                     bind_address: args.address,
                     mgs_handle,
                     mgs_client,
+                    transceiver_handle,
                     log: log.clone(),
                     local_switch_id: OnceLock::new(),
                     bootstrap_peers,

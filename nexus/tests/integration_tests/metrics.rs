@@ -397,9 +397,15 @@ pub async fn execute_timeseries_query(
 
     // Check for a timeseries-not-found error specifically.
     if rsp.status.is_client_error() {
-        let text = std::str::from_utf8(&rsp.body)
-            .expect("Timeseries query response body should be UTF-8");
-        if text.starts_with("Timeseries not found for: ") {
+        let err =
+            rsp.parsed_body::<HttpErrorResponseBody>().unwrap_or_else(|e| {
+                panic!(
+                    "could not parse body as `HttpErrorResponseBody`: {e:?}\n\
+                     query: {query}\nresponse: {rsp:#?}",
+                )
+            });
+
+        if err.message.starts_with("Timeseries not found for: ") {
             return None;
         }
     }

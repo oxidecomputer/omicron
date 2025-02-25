@@ -113,6 +113,8 @@ Query the control plane database (CockroachDB)
 Usage: omdb db [OPTIONS] <COMMAND>
 
 Commands:
+  replacements-to-do           Print any Crucible resources that are located on expunged physical
+                               disks
   rack                         Print information about the rack
   disks                        Print information about virtual disks
   dns                          Print information about internal and external DNS
@@ -163,6 +165,8 @@ Query the control plane database (CockroachDB)
 Usage: omdb db [OPTIONS] <COMMAND>
 
 Commands:
+  replacements-to-do           Print any Crucible resources that are located on expunged physical
+                               disks
   rack                         Print information about the rack
   disks                        Print information about virtual disks
   dns                          Print information about internal and external DNS
