@@ -2756,7 +2756,7 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore).await;
+            create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 4;
         let sleds = create_sleds(&datastore, SLED_COUNT).await;
@@ -2852,7 +2852,7 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore).await;
+            create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 4;
         let sleds = create_sleds(&datastore, SLED_COUNT).await;
@@ -2947,7 +2947,7 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore).await;
+            create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 4;
         let sleds = create_sleds(&datastore, SLED_COUNT).await;
