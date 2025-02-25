@@ -10,6 +10,7 @@ extern crate diesel;
 extern crate newtype_derive;
 
 mod address_lot;
+mod affinity;
 mod allow_list;
 mod bfd;
 mod bgp;
@@ -91,8 +92,7 @@ mod silo_user_password_hash;
 mod sled;
 mod sled_instance;
 mod sled_policy;
-mod sled_resource;
-mod sled_resource_kind;
+mod sled_resource_vmm;
 mod sled_state;
 mod sled_underlay_subnet_allocation;
 mod snapshot;
@@ -130,6 +130,7 @@ mod db {
 pub use self::macaddr::*;
 pub use self::unsigned::*;
 pub use address_lot::*;
+pub use affinity::*;
 pub use allow_list::*;
 pub use bfd::*;
 pub use bgp::*;
@@ -201,8 +202,7 @@ pub use silo_user_password_hash::*;
 pub use sled::*;
 pub use sled_instance::*;
 pub use sled_policy::to_db_sled_policy; // Do not expose DbSledPolicy
-pub use sled_resource::*;
-pub use sled_resource_kind::*;
+pub use sled_resource_vmm::*;
 pub use sled_state::*;
 pub use sled_underlay_subnet_allocation::*;
 pub use snapshot::*;

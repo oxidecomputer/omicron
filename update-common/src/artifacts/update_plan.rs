@@ -21,13 +21,13 @@ use futures::Stream;
 use futures::StreamExt;
 use futures::TryStreamExt;
 use hubtools::RawHubrisArchive;
-use omicron_common::api::external::SemverVersion;
 use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use omicron_common::update::ArtifactHash;
 use omicron_common::update::ArtifactHashId;
 use omicron_common::update::ArtifactId;
 use omicron_common::update::ArtifactKind;
+use semver::Version;
 use slog::info;
 use slog::Logger;
 use std::collections::btree_map;
@@ -45,7 +45,7 @@ use tufaceous_lib::RotArchives;
 /// repository.
 #[derive(Debug, Clone)]
 pub struct UpdatePlan {
-    pub system_version: SemverVersion,
+    pub system_version: Version,
     pub gimlet_sp: BTreeMap<Board, ArtifactIdData>,
     pub gimlet_rot_a: Vec<ArtifactIdData>,
     pub gimlet_rot_b: Vec<ArtifactIdData>,
@@ -109,7 +109,7 @@ struct RotSignTarget {
 #[derive(Debug)]
 pub struct UpdatePlanBuilder<'a> {
     // fields that mirror `UpdatePlan`
-    system_version: SemverVersion,
+    system_version: Version,
     gimlet_sp: BTreeMap<Board, ArtifactIdData>,
     gimlet_rot_a: Vec<ArtifactIdData>,
     gimlet_rot_b: Vec<ArtifactIdData>,
@@ -158,7 +158,7 @@ pub struct UpdatePlanBuilder<'a> {
 
 impl<'a> UpdatePlanBuilder<'a> {
     pub fn new(
-        system_version: SemverVersion,
+        system_version: Version,
         zone_mode: ControlPlaneZonesMode,
         log: &'a Logger,
     ) -> Result<Self, RepositoryError> {
@@ -932,7 +932,7 @@ impl<'a> UpdatePlanBuilder<'a> {
 
             let artifact_id = ArtifactId {
                 name: info.pkg.clone(),
-                version: SemverVersion(info.version.clone()),
+                version: info.version.clone(),
                 kind: KnownArtifactKind::Zone.into(),
             };
             self.record_extracted_artifact(
@@ -1465,8 +1465,8 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_bad_rot_versions() {
-        const VERSION_0: SemverVersion = SemverVersion::new(0, 0, 0);
-        const VERSION_1: SemverVersion = SemverVersion::new(0, 0, 1);
+        const VERSION_0: Version = Version::new(0, 0, 0);
+        const VERSION_1: Version = Version::new(0, 0, 1);
 
         let logctx = test_setup_log("test_bad_rot_version");
 
@@ -1637,8 +1637,8 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_multi_rot_version() {
-        const VERSION_0: SemverVersion = SemverVersion::new(0, 0, 0);
-        const VERSION_1: SemverVersion = SemverVersion::new(0, 0, 1);
+        const VERSION_0: Version = Version::new(0, 0, 0);
+        const VERSION_1: Version = Version::new(0, 0, 1);
 
         let logctx = test_setup_log("test_multi_rot_version");
 
@@ -1826,7 +1826,7 @@ mod tests {
     // is required.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_update_plan_from_artifacts() {
-        const VERSION_0: SemverVersion = SemverVersion::new(0, 0, 0);
+        const VERSION_0: Version = Version::new(0, 0, 0);
 
         let logctx = test_setup_log("test_update_plan_from_artifacts");
 
@@ -2131,7 +2131,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_bad_hubris_cabooses() {
-        const VERSION_0: SemverVersion = SemverVersion::new(0, 0, 0);
+        const VERSION_0: Version = Version::new(0, 0, 0);
 
         let logctx = test_setup_log("test_bad_hubris_cabooses");
 
@@ -2209,8 +2209,8 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_too_many_rot_bootloaders() {
-        const VERSION_0: SemverVersion = SemverVersion::new(0, 0, 0);
-        const VERSION_1: SemverVersion = SemverVersion::new(0, 0, 1);
+        const VERSION_0: Version = Version::new(0, 0, 0);
+        const VERSION_1: Version = Version::new(0, 0, 1);
 
         // The regular RoT can have multiple versions but _not_ the
         // bootloader
@@ -2278,7 +2278,7 @@ mod tests {
         // YYYY     BBBB     2.0.0
         // YYYY     CCCC     2.0.0
 
-        const VERSION_0: SemverVersion = SemverVersion::new(0, 0, 0);
+        const VERSION_0: Version = Version::new(0, 0, 0);
 
         let logctx = test_setup_log("test_update_plan_from_artifacts");
 
@@ -2442,7 +2442,7 @@ mod tests {
         // YYYY     BBBB
         // YYYY     CCCC
 
-        const VERSION_0: SemverVersion = SemverVersion::new(0, 0, 0);
+        const VERSION_0: Version = Version::new(0, 0, 0);
 
         let logctx = test_setup_log("test_update_plan_from_artifacts");
 
@@ -2490,7 +2490,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_split_control_plane() {
-        const VERSION_0: SemverVersion = SemverVersion::new(0, 0, 0);
+        const VERSION_0: Version = Version::new(0, 0, 0);
 
         let logctx = test_setup_log("test_split_control_plane");
 
@@ -2502,7 +2502,7 @@ mod tests {
             ));
             let metadata = Metadata::new(ArchiveType::Layer(LayerInfo {
                 pkg: name.to_owned(),
-                version: VERSION_0.0.clone(),
+                version: VERSION_0,
             }));
             metadata.append_to_tar(&mut tar, 0).unwrap();
             let data = tar.into_inner().unwrap().finish().unwrap();

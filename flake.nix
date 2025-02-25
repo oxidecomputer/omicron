@@ -80,7 +80,6 @@
       mgVersion = openAPIVersion
         ./tools/maghemite_mg_openapi_version;
 
-
       dendriteOpenAPI = downloadOpenAPI
         {
           repo = "dendrite";
@@ -88,19 +87,6 @@
           version = dendriteVersion;
         };
 
-      ddmOpenAPI = downloadOpenAPI
-        {
-          repo = "maghemite";
-          file = "ddm-admin.json";
-          version = openAPIVersion ./tools/maghemite_ddm_openapi_version;
-        };
-
-      mgOpenAPI = downloadOpenAPI
-        {
-          repo = "maghemite";
-          file = "mg-admin.json";
-          version = mgVersion;
-        };
 
       # given a list of strings of the form `PREFIX="SHA256"`, finds the string
       # starting with the provided `name` and returns the hash for that prefix.
@@ -409,9 +395,6 @@
             LIBCLANG_PATH = "${libclang.lib}/lib";
             OPENSSL_DIR = "${openssl.dev}";
             OPENSSL_LIB_DIR = "${openssl.out}/lib";
-
-            MG_OPENAPI_PATH = mgOpenAPI;
-            DDM_OPENAPI_PATH = ddmOpenAPI;
             DPD_OPENAPI_PATH = dendriteOpenAPI;
 
             # Needed by rustfmt-wrapper, see:

@@ -7,7 +7,6 @@
 use bootstrap_agent_api::Component;
 use camino::{Utf8Path, Utf8PathBuf};
 use omicron_brand_metadata::Metadata;
-use omicron_common::api::external::SemverVersion;
 use serde::{Deserialize, Serialize};
 
 #[derive(thiserror::Error, Debug)]
@@ -74,10 +73,7 @@ impl UpdateManager {
         let info = metadata
             .layer_info()
             .map_err(|err| Error::ZoneVersion { path: path.into(), err })?;
-        Ok(Component {
-            name: info.pkg.clone(),
-            version: SemverVersion(info.version.clone()),
-        })
+        Ok(Component { name: info.pkg.clone(), version: info.version.clone() })
     }
 
     pub async fn components_get(&self) -> Result<Vec<Component>, Error> {
@@ -105,11 +101,10 @@ impl UpdateManager {
 
                 // Extract the name and semver version
                 let name = "sled-agent".to_string();
-                let version = omicron_common::api::external::SemverVersion(
-                    semver::Version::parse(&version).map_err(|err| {
-                        Error::Semver { path: version_path.to_path_buf(), err }
-                    })?,
-                );
+                let version = version.parse().map_err(|err| Error::Semver {
+                    path: version_path.to_path_buf(),
+                    err,
+                })?;
 
                 components.push(crate::updates::Component { name, version });
             }
@@ -124,7 +119,7 @@ mod test {
     use super::*;
     use camino_tempfile::NamedUtf8TempFile;
     use flate2::write::GzEncoder;
-    use omicron_common::api::external::SemverVersion;
+    use semver::Version;
     use std::io::Write;
     use tar::Builder;
 
@@ -177,10 +172,7 @@ mod test {
             um.components_get().await.expect("Failed to get components");
         assert_eq!(components.len(), 1);
         assert_eq!(components[0].name, "test-pkg".to_string());
-        assert_eq!(
-            components[0].version,
-            SemverVersion(semver::Version::new(2, 0, 0))
-        );
+        assert_eq!(components[0].version, Version::new(2, 0, 0));
     }
 
     #[tokio::test]
@@ -202,9 +194,6 @@ mod test {
             um.components_get().await.expect("Failed to get components");
         assert_eq!(components.len(), 1);
         assert_eq!(components[0].name, "sled-agent".to_string());
-        assert_eq!(
-            components[0].version,
-            SemverVersion(semver::Version::new(1, 2, 3))
-        );
+        assert_eq!(components[0].version, Version::new(1, 2, 3));
     }
 }

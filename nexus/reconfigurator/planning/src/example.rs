@@ -418,12 +418,13 @@ impl ExampleSystemBuilder {
                 );
         }
 
-        for (i, (sled_id, sled_resources)) in
-            base_input.all_sled_resources(SledFilter::Commissioned).enumerate()
+        for (i, (sled_id, sled_details)) in
+            base_input.all_sleds(SledFilter::Commissioned).enumerate()
         {
             if self.create_disks_in_blueprint {
-                let _ =
-                    builder.sled_ensure_disks(sled_id, sled_resources).unwrap();
+                let _ = builder
+                    .sled_add_disks(sled_id, &sled_details.resources)
+                    .unwrap();
             }
             if self.create_zones {
                 let _ = builder.sled_ensure_zone_ntp(sled_id).unwrap();
@@ -446,7 +447,7 @@ impl ExampleSystemBuilder {
                 }
             }
             if self.create_zones {
-                for pool_name in sled_resources.zpools.keys() {
+                for pool_name in sled_details.resources.zpools.keys() {
                     let _ = builder
                         .sled_ensure_zone_crucible(sled_id, *pool_name)
                         .unwrap();
@@ -543,7 +544,8 @@ impl ZoneCount {
 mod tests {
     use chrono::{NaiveDateTime, TimeZone, Utc};
     use nexus_sled_agent_shared::inventory::{OmicronZoneConfig, ZoneKind};
-    use nexus_types::deployment::{BlueprintZoneConfig, BlueprintZoneFilter};
+    use nexus_types::deployment::BlueprintZoneConfig;
+    use nexus_types::deployment::BlueprintZoneDisposition;
     use omicron_test_utils::dev::test_setup_log;
 
     use super::*;
@@ -690,7 +692,7 @@ mod tests {
         kind: ZoneKind,
     ) -> Vec<&BlueprintZoneConfig> {
         blueprint
-            .all_omicron_zones(BlueprintZoneFilter::All)
+            .all_omicron_zones(BlueprintZoneDisposition::any)
             .filter_map(|(_, zone)| {
                 (zone.zone_type.kind() == kind).then_some(zone)
             })

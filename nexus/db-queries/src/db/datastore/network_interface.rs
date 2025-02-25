@@ -648,7 +648,12 @@ impl DataStore {
                 &*self.pool_connection_authorized(opctx).await?,
             )
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| match e {
+                DieselError::NotFound => Error::non_resourcetype_not_found(
+                    "instance has no primary NIC",
+                ),
+                e => public_error_from_diesel(e, ErrorHandler::Server),
+            })
     }
 
     /// Get network interface associated with a given probe.
