@@ -313,7 +313,11 @@ impl RackInitRequestBuilder {
         address: SocketAddrV6,
     ) {
         self.internal_dns_config
-            .host_zone_clickhouse(zone_id, ServiceName::Clickhouse, address)
+            .host_zone_clickhouse_single_node(
+                zone_id,
+                ServiceName::Clickhouse,
+                address,
+            )
             .expect("Failed to setup ClickHouse DNS");
     }
 }
