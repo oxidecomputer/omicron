@@ -9,6 +9,7 @@
 
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::pub_test_utils::helpers::create_project;
 use nexus_db_queries::db::pub_test_utils::TestDatabase;
 use nexus_db_queries::db::DataStore;
 use nexus_test_utils::sql::process_rows;
@@ -34,15 +35,32 @@ struct ContentionQuery {
 
 const QUERIES: [ContentionQuery; 4] = [
     ContentionQuery {
-        sql: "SELECT table_name, index_name, num_contention_events::TEXT FROM crdb_internal.cluster_contended_indexes",
+        sql: "SELECT
+            table_name, index_name, num_contention_events::TEXT
+            FROM crdb_internal.cluster_contended_indexes",
         description: "Indexes which are experiencing contention",
     },
     ContentionQuery {
-        sql: "SELECT table_name,num_contention_events::TEXT FROM crdb_internal.cluster_contended_tables",
+        sql: "SELECT
+            table_name,num_contention_events::TEXT
+            FROM crdb_internal.cluster_contended_tables",
         description: "Tables which are experiencing contention",
     },
     ContentionQuery {
-        sql: "WITH c AS (SELECT DISTINCT ON (table_id, index_id) table_id, index_id, num_contention_events AS events, cumulative_contention_time AS time FROM crdb_internal.cluster_contention_events) SELECT i.descriptor_name as table_name, i.index_name, c.events::TEXT, c.time::TEXT FROM crdb_internal.table_indexes AS i JOIN c ON i.descriptor_id = c.table_id AND i.index_id = c.index_id ORDER BY c.time DESC LIMIT 10;",
+        sql: "WITH c AS
+            (SELECT DISTINCT ON (table_id, index_id)
+                table_id,
+                index_id,
+                num_contention_events AS events,
+                cumulative_contention_time AS time
+            FROM crdb_internal.cluster_contention_events)
+            SELECT
+                i.descriptor_name as table_name,
+                i.index_name,
+                c.events::TEXT,
+                c.time::TEXT FROM crdb_internal.table_indexes AS i
+            JOIN c ON i.descriptor_id = c.table_id AND i.index_id = c.index_id
+            ORDER BY c.time DESC LIMIT 10;",
         description: "Top ten longest contention events, grouped by table + index",
     },
     ContentionQuery {
@@ -86,7 +104,7 @@ impl TestHarness {
         let db = TestDatabase::new_with_datastore(log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore).await;
+            create_project(&opctx, &datastore, "project").await;
         create_sleds(&datastore, sled_count).await;
 
         Self { db, authz_project }
