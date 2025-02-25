@@ -417,7 +417,7 @@ impl DataStore {
                 i64::from(pagparams.limit.get()),
             );
 
-        Ok(query
+        query
             .query::<(diesel::sql_types::Uuid, diesel::sql_types::Text)>()
             .load_async::<(Uuid, String)>(
                 &*self.pool_connection_authorized(opctx).await?,
@@ -428,16 +428,18 @@ impl DataStore {
             .map(|(id, label)| {
                 use external::AntiAffinityGroupMember as Member;
                 match label.as_str() {
-                    "affinity_group" => Member::AffinityGroup(
+                    "affinity_group" => Ok(Member::AffinityGroup(
                         AffinityGroupUuid::from_untyped_uuid(id),
-                    ),
-                    "instance" => {
-                        Member::Instance(InstanceUuid::from_untyped_uuid(id))
-                    }
-                    other => panic!("Unexpected label from query: {other}"),
+                    )),
+                    "instance" => Ok(Member::Instance(
+                        InstanceUuid::from_untyped_uuid(id),
+                    )),
+                    other => Err(external::Error::internal_error(&format!(
+                        "Unexpected label from database query: {other}"
+                    ))),
                 }
             })
-            .collect())
+            .collect()
     }
 
     pub async fn affinity_group_member_view(
