@@ -13,6 +13,7 @@ use std::env;
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 
+mod a4x2;
 mod check_features;
 mod check_workspace_deps;
 mod clippy;
@@ -40,6 +41,11 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Cmds {
+    /// Manage a4x2
+    #[cfg(target_os = "illumos")]
+    #[clap(subcommand)]
+    A4x2(a4x2::A4x2Cmds),
+
     /// Run Argon2 hash with specific parameters (quick performance check)
     Argon2(external::External),
 
@@ -112,6 +118,9 @@ enum Cmds {
 fn main() -> Result<()> {
     let args = Args::parse();
     match args.cmd {
+        #[cfg(target_os = "illumos")]
+        Cmds::A4x2(args) => a4x2::run_cmd(args),
+
         Cmds::Argon2(external) => {
             external.cargo_args(["--release"]).exec_example("argon2")
         }
