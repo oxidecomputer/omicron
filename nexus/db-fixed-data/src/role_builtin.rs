@@ -4,7 +4,7 @@
 //! Built-in roles
 
 use omicron_common::api;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 #[derive(Clone, Debug)]
 pub struct RoleBuiltinConfig {
@@ -13,72 +13,73 @@ pub struct RoleBuiltinConfig {
     pub description: &'static str,
 }
 
-pub static FLEET_ADMIN: Lazy<RoleBuiltinConfig> =
-    Lazy::new(|| RoleBuiltinConfig {
+pub static FLEET_ADMIN: LazyLock<RoleBuiltinConfig> =
+    LazyLock::new(|| RoleBuiltinConfig {
         resource_type: api::external::ResourceType::Fleet,
         role_name: "admin",
         description: "Fleet Administrator",
     });
 
-pub static FLEET_AUTHENTICATOR: Lazy<RoleBuiltinConfig> =
-    Lazy::new(|| RoleBuiltinConfig {
+pub static FLEET_AUTHENTICATOR: LazyLock<RoleBuiltinConfig> =
+    LazyLock::new(|| RoleBuiltinConfig {
         resource_type: api::external::ResourceType::Fleet,
         role_name: "external-authenticator",
         description: "Fleet External Authenticator",
     });
 
-pub static FLEET_VIEWER: Lazy<RoleBuiltinConfig> =
-    Lazy::new(|| RoleBuiltinConfig {
+pub static FLEET_VIEWER: LazyLock<RoleBuiltinConfig> =
+    LazyLock::new(|| RoleBuiltinConfig {
         resource_type: api::external::ResourceType::Fleet,
         role_name: "viewer",
         description: "Fleet Viewer",
     });
 
-pub static SILO_ADMIN: Lazy<RoleBuiltinConfig> =
-    Lazy::new(|| RoleBuiltinConfig {
+pub static SILO_ADMIN: LazyLock<RoleBuiltinConfig> =
+    LazyLock::new(|| RoleBuiltinConfig {
         resource_type: api::external::ResourceType::Silo,
         role_name: "admin",
         description: "Silo Administrator",
     });
 
-pub static BUILTIN_ROLES: Lazy<Vec<RoleBuiltinConfig>> = Lazy::new(|| {
-    vec![
-        FLEET_ADMIN.clone(),
-        FLEET_AUTHENTICATOR.clone(),
-        FLEET_VIEWER.clone(),
-        RoleBuiltinConfig {
-            resource_type: api::external::ResourceType::Fleet,
-            role_name: "collaborator",
-            description: "Fleet Collaborator",
-        },
-        SILO_ADMIN.clone(),
-        RoleBuiltinConfig {
-            resource_type: api::external::ResourceType::Silo,
-            role_name: "collaborator",
-            description: "Silo Collaborator",
-        },
-        RoleBuiltinConfig {
-            resource_type: api::external::ResourceType::Silo,
-            role_name: "viewer",
-            description: "Silo Viewer",
-        },
-        RoleBuiltinConfig {
-            resource_type: api::external::ResourceType::Project,
-            role_name: "admin",
-            description: "Project Administrator",
-        },
-        RoleBuiltinConfig {
-            resource_type: api::external::ResourceType::Project,
-            role_name: "collaborator",
-            description: "Project Collaborator",
-        },
-        RoleBuiltinConfig {
-            resource_type: api::external::ResourceType::Project,
-            role_name: "viewer",
-            description: "Project Viewer",
-        },
-    ]
-});
+pub static BUILTIN_ROLES: LazyLock<Vec<RoleBuiltinConfig>> =
+    LazyLock::new(|| {
+        vec![
+            FLEET_ADMIN.clone(),
+            FLEET_AUTHENTICATOR.clone(),
+            FLEET_VIEWER.clone(),
+            RoleBuiltinConfig {
+                resource_type: api::external::ResourceType::Fleet,
+                role_name: "collaborator",
+                description: "Fleet Collaborator",
+            },
+            SILO_ADMIN.clone(),
+            RoleBuiltinConfig {
+                resource_type: api::external::ResourceType::Silo,
+                role_name: "collaborator",
+                description: "Silo Collaborator",
+            },
+            RoleBuiltinConfig {
+                resource_type: api::external::ResourceType::Silo,
+                role_name: "viewer",
+                description: "Silo Viewer",
+            },
+            RoleBuiltinConfig {
+                resource_type: api::external::ResourceType::Project,
+                role_name: "admin",
+                description: "Project Administrator",
+            },
+            RoleBuiltinConfig {
+                resource_type: api::external::ResourceType::Project,
+                role_name: "collaborator",
+                description: "Project Collaborator",
+            },
+            RoleBuiltinConfig {
+                resource_type: api::external::ResourceType::Project,
+                role_name: "viewer",
+                description: "Project Viewer",
+            },
+        ]
+    });
 
 #[cfg(test)]
 mod test {

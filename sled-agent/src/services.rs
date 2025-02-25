@@ -96,7 +96,6 @@ use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use omicron_uuid_kinds::OmicronZoneUuid;
-use once_cell::sync::OnceCell;
 use rand::prelude::SliceRandom;
 use sled_agent_types::{
     time_sync::TimeSync,
@@ -115,7 +114,7 @@ use std::collections::HashSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use tokio::sync::{oneshot, MutexGuard};
@@ -729,12 +728,12 @@ pub struct ServiceManagerInner {
     bootstrap_vnic_allocator: VnicAllocator<Etherstub>,
     ddmd_client: DdmAdminClient,
     advertised_prefixes: Mutex<HashSet<Ipv6Subnet<SLED_PREFIX>>>,
-    sled_info: OnceCell<SledAgentInfo>,
+    sled_info: OnceLock<SledAgentInfo>,
     switch_zone_bootstrap_address: Ipv6Addr,
     storage: StorageHandle,
     zone_bundler: ZoneBundler,
-    ledger_directory_override: OnceCell<Utf8PathBuf>,
-    image_directory_override: OnceCell<Utf8PathBuf>,
+    ledger_directory_override: OnceLock<Utf8PathBuf>,
+    image_directory_override: OnceLock<Utf8PathBuf>,
 }
 
 // Late-binding information, only known once the sled agent is up and
@@ -817,13 +816,13 @@ impl ServiceManager {
                 ),
                 ddmd_client,
                 advertised_prefixes: Mutex::new(HashSet::new()),
-                sled_info: OnceCell::new(),
+                sled_info: OnceLock::new(),
                 switch_zone_bootstrap_address: bootstrap_networking
                     .switch_zone_bootstrap_ip,
                 storage,
                 zone_bundler,
-                ledger_directory_override: OnceCell::new(),
-                image_directory_override: OnceCell::new(),
+                ledger_directory_override: OnceLock::new(),
+                image_directory_override: OnceLock::new(),
             }),
         }
     }
@@ -4940,6 +4939,7 @@ mod illumos_tests {
         zone::MockZones,
     };
 
+    use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use std::os::unix::process::ExitStatusExt;
@@ -5176,6 +5176,7 @@ mod illumos_tests {
                         id,
                         zone_type,
                         filesystem_pool: None,
+                        image_source: OmicronZoneImageSource::InstallDataset,
                     }],
                 },
                 Some(&tmp_dir),
@@ -5202,6 +5203,7 @@ mod illumos_tests {
                     id,
                     zone_type: OmicronZoneType::InternalNtp { address },
                     filesystem_pool: None,
+                    image_source: OmicronZoneImageSource::InstallDataset,
                 }],
             },
             Some(&tmp_dir),
@@ -5784,6 +5786,7 @@ mod illumos_tests {
             id: id1,
             zone_type: OmicronZoneType::InternalNtp { address },
             filesystem_pool: None,
+            image_source: OmicronZoneImageSource::InstallDataset,
         }];
 
         let tmp_dir = String::from(test_config.config_dir.path().as_str());
@@ -5806,6 +5809,7 @@ mod illumos_tests {
             id: id2,
             zone_type: OmicronZoneType::InternalNtp { address },
             filesystem_pool: None,
+            image_source: OmicronZoneImageSource::InstallDataset,
         });
 
         // Now try to apply that list with an older generation number.  This
@@ -5869,6 +5873,7 @@ mod illumos_tests {
 
 #[cfg(test)]
 mod test {
+    use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use omicron_uuid_kinds::ZpoolUuid;
 
     use super::*;
@@ -5915,6 +5920,7 @@ mod test {
                 zone_type: OmicronZoneType::Oximeter {
                     address: "[::1]:0".parse().unwrap(),
                 },
+                image_source: OmicronZoneImageSource::InstallDataset,
             }
         }
 

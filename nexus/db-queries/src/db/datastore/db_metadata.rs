@@ -17,7 +17,7 @@ use nexus_db_model::SchemaUpgradeStep;
 use nexus_db_model::SchemaVersion;
 use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::SemverVersion;
+use semver::Version;
 use slog::{error, info, o, Logger};
 use std::ops::Bound;
 use std::str::FromStr;
@@ -32,7 +32,7 @@ use std::str::FromStr;
 // an auto-generated pre-release version.
 #[derive(Clone)]
 struct StepSemverVersion {
-    version: SemverVersion,
+    version: Version,
     i: usize,
 }
 
@@ -45,20 +45,19 @@ impl StepSemverVersion {
     //
     // By using "dot number" notation, we can order the pre-release
     // steps, which matters while comparing their order.
-    fn new(target_version: &SemverVersion, i: usize) -> anyhow::Result<Self> {
+    fn new(target_version: &Version, i: usize) -> anyhow::Result<Self> {
         let mut target_step_version = target_version.clone();
-        target_step_version.0.pre =
-            semver::Prerelease::new(&format!("step.{i}"))
-                .context("Cannot parse step as semver pre-release")?;
+        target_step_version.pre = semver::Prerelease::new(&format!("step.{i}"))
+            .context("Cannot parse step as semver pre-release")?;
         Ok(Self { version: target_step_version, i })
     }
 
     // Drops the pre-release information about this target version.
     //
     // This is the version we are upgrading to, using these incremental steps.
-    fn without_prerelease(&self) -> SemverVersion {
+    fn without_prerelease(&self) -> Version {
         let mut target_version = self.version.clone();
-        target_version.0.pre = semver::Prerelease::EMPTY;
+        target_version.pre = semver::Prerelease::EMPTY;
         target_version
     }
 
@@ -76,8 +75,8 @@ impl StepSemverVersion {
 // "found_target_version".
 fn skippable_version(
     log: &Logger,
-    target_step_version: &SemverVersion,
-    found_target_version: &Option<SemverVersion>,
+    target_step_version: &Version,
+    found_target_version: &Option<Version>,
 ) -> bool {
     if let Some(found_target_version) = found_target_version.as_ref() {
         info!(
@@ -119,7 +118,7 @@ impl DataStore {
     pub async fn ensure_schema(
         &self,
         log: &Logger,
-        desired_version: SemverVersion,
+        desired_version: Version,
         all_versions: Option<&AllSchemaVersions>,
     ) -> Result<(), anyhow::Error> {
         let (found_version, found_target_version) = self
@@ -205,7 +204,7 @@ impl DataStore {
             info!(log, "Attempting to upgrade schema");
 
             // For the rationale here, see: StepSemverVersion::new.
-            if target_version.semver().0.pre != semver::Prerelease::EMPTY {
+            if target_version.semver().pre != semver::Prerelease::EMPTY {
                 bail!("Cannot upgrade to version which includes pre-release");
             }
 
@@ -293,8 +292,8 @@ impl DataStore {
         log: &Logger,
         step: &SchemaUpgradeStep,
         target_step: &StepSemverVersion,
-        current_version: &SemverVersion,
-        found_target_version: &Option<SemverVersion>,
+        current_version: &Version,
+        found_target_version: &Option<Version>,
     ) -> Result<(), anyhow::Error> {
         if skippable_version(&log, &target_step.version, &found_target_version)
         {
@@ -344,7 +343,7 @@ impl DataStore {
 
     pub async fn database_schema_version(
         &self,
-    ) -> Result<(SemverVersion, Option<SemverVersion>), Error> {
+    ) -> Result<(Version, Option<Version>), Error> {
         use db::schema::db_metadata::dsl;
 
         let (version, target): (String, Option<String>) = dsl::db_metadata
@@ -354,12 +353,12 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        let version = SemverVersion::from_str(&version).map_err(|e| {
+        let version = Version::from_str(&version).map_err(|e| {
             Error::internal_error(&format!("Invalid schema version: {e}"))
         })?;
 
         if let Some(target) = target {
-            let target = SemverVersion::from_str(&target).map_err(|e| {
+            let target = Version::from_str(&target).map_err(|e| {
                 Error::internal_error(&format!("Invalid schema version: {e}"))
             })?;
             return Ok((version, Some(target)));
@@ -383,7 +382,7 @@ impl DataStore {
     // make progress.
     async fn prepare_schema_update(
         &self,
-        from_version: &SemverVersion,
+        from_version: &Version,
         target_step: &StepSemverVersion,
     ) -> Result<(), Error> {
         use db::schema::db_metadata::dsl;
@@ -425,8 +424,8 @@ impl DataStore {
     // configuration file.
     async fn apply_schema_update(
         &self,
-        current: &SemverVersion,
-        target: &SemverVersion,
+        current: &Version,
+        target: &Version,
         sql: &str,
     ) -> Result<(), Error> {
         let conn = self.pool_connection_unauthorized().await?;
@@ -462,7 +461,7 @@ impl DataStore {
     // - last_step: What we expect "target_version" must be to proceed.
     async fn finalize_schema_update(
         &self,
-        from_version: &SemverVersion,
+        from_version: &Version,
         last_step: &StepSemverVersion,
     ) -> Result<(), Error> {
         use db::schema::db_metadata::dsl;
@@ -522,7 +521,7 @@ mod test {
     // Helper to create the version directory and "up.sql".
     async fn add_upgrade<S: AsRef<str>>(
         config_dir_path: &Utf8Path,
-        version: SemverVersion,
+        version: Version,
         sql: S,
     ) {
         let dir = config_dir_path.join(version.to_string());
@@ -532,7 +531,7 @@ mod test {
 
     async fn add_upgrade_subcomponent<S: AsRef<str>>(
         config_dir_path: &Utf8Path,
-        version: SemverVersion,
+        version: Version,
         sql: S,
         i: usize,
     ) {
@@ -566,7 +565,7 @@ mod test {
         //
         // To trigger this action within a test, we manually set the "known to
         // DB" version.
-        let v0 = SemverVersion::new(0, 0, 0);
+        let v0 = Version::new(0, 0, 0);
         use db::schema::db_metadata::dsl;
         diesel::update(dsl::db_metadata.filter(dsl::singleton.eq(true)))
             .set(dsl::version.eq(v0.to_string()))
@@ -574,7 +573,7 @@ mod test {
             .await
             .expect("Failed to set version back to 0.0.0");
 
-        let v1 = SemverVersion::new(0, 0, 1);
+        let v1 = Version::new(0, 0, 1);
         let v2 = SCHEMA_VERSION;
 
         assert!(v0 < v1);
@@ -674,7 +673,7 @@ mod test {
         // Nexus will decide to upgrade to, at most, the version that its own binary understands.
         //
         // To trigger this action within a test, we manually set the "known to DB" version.
-        let v0 = SemverVersion::new(0, 0, 0);
+        let v0 = Version::new(0, 0, 0);
         use db::schema::db_metadata::dsl;
         diesel::update(dsl::db_metadata.filter(dsl::singleton.eq(true)))
             .set(dsl::version.eq(v0.to_string()))
@@ -682,7 +681,7 @@ mod test {
             .await
             .expect("Failed to set version back to 0.0.0");
 
-        let v1 = SemverVersion::new(1, 0, 0);
+        let v1 = Version::new(1, 0, 0);
         let v2 = SCHEMA_VERSION;
 
         assert!(v0 < v1);

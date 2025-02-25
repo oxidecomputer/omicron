@@ -7,8 +7,8 @@
 
 use clickhouse_admin_types::{ClickhouseKeeperClusterMembership, KeeperId};
 use nexus_types::deployment::{
-    Blueprint, BlueprintZoneFilter, BlueprintZoneType, BlueprintZonesConfig,
-    ClickhouseClusterConfig,
+    Blueprint, BlueprintZoneDisposition, BlueprintZoneType,
+    BlueprintZonesConfig, ClickhouseClusterConfig,
 };
 use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
 use slog::{error, Logger};
@@ -36,7 +36,7 @@ impl From<&BTreeMap<SledUuid, BlueprintZonesConfig>>
         let mut servers = BTreeSet::new();
         for (_, bp_zone_config) in Blueprint::filtered_zones(
             zones_by_sled_id,
-            BlueprintZoneFilter::ShouldBeRunning,
+            BlueprintZoneDisposition::is_in_service,
         ) {
             match bp_zone_config.zone_type {
                 BlueprintZoneType::ClickhouseKeeper(_) => {

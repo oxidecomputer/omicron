@@ -111,7 +111,6 @@ use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
-use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
@@ -1283,7 +1282,7 @@ async fn lookup_service_info(
     blueprint: &Blueprint,
 ) -> anyhow::Result<Option<ServiceInfo>> {
     let Some(zone_config) = blueprint
-        .all_omicron_zones(BlueprintZoneFilter::All)
+        .all_omicron_zones(BlueprintZoneDisposition::any)
         .find_map(|(_sled_id, zone_config)| {
             if zone_config.id.into_untyped_uuid() == service_id {
                 Some(zone_config)
@@ -6404,7 +6403,7 @@ async fn cmd_db_vmm_info(
     &VmmInfoArgs { uuid }: &VmmInfoArgs,
 ) -> Result<(), anyhow::Error> {
     use db::schema::migration::dsl as migration_dsl;
-    use db::schema::sled_resource::dsl as resource_dsl;
+    use db::schema::sled_resource_vmm::dsl as resource_dsl;
     use db::schema::vmm::dsl as vmm_dsl;
 
     let vmm = vmm_dsl::vmm
@@ -6440,20 +6439,20 @@ async fn cmd_db_vmm_info(
     );
 
     fn prettyprint_reservation(
-        resource: db::model::SledResource,
+        resource: db::model::SledResourceVmm,
         include_sled_id: bool,
     ) {
         use db::model::ByteCount;
-        let db::model::SledResource {
+        let db::model::SledResourceVmm {
             id: _,
             sled_id,
-            kind: _,
             resources:
                 db::model::Resources {
                     hardware_threads,
                     rss_ram: ByteCount(rss),
                     reservoir_ram: ByteCount(reservoir),
                 },
+            instance_id: _,
         } = resource;
         const SLED_ID: &'static str = "sled ID";
         const THREADS: &'static str = "hardware threads";
@@ -6468,10 +6467,10 @@ async fn cmd_db_vmm_info(
         println!("    {RESERVOIR:>WIDTH$}: {reservoir}");
     }
 
-    let reservations = resource_dsl::sled_resource
+    let reservations = resource_dsl::sled_resource_vmm
         .filter(resource_dsl::id.eq(uuid))
-        .select(db::model::SledResource::as_select())
-        .load_async::<db::model::SledResource>(
+        .select(db::model::SledResourceVmm::as_select())
+        .load_async::<db::model::SledResourceVmm>(
             &*datastore.pool_connection_for_tests().await?,
         )
         .await
