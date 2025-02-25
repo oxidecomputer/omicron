@@ -4,23 +4,39 @@
 
 //! Webhooks
 
+use anyhow::Context;
+use chrono::TimeDelta;
+use chrono::Utc;
+use hmac::{Hmac, Mac};
+use http::HeaderName;
+use http::HeaderValue;
+use nexus_db_model::WebhookReceiver;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::model::SqlU8;
+use nexus_db_queries::db::model::WebhookDelivery;
+use nexus_db_queries::db::model::WebhookDeliveryAttempt;
+use nexus_db_queries::db::model::WebhookDeliveryResult;
 use nexus_db_queries::db::model::WebhookEvent;
 use nexus_db_queries::db::model::WebhookEventClass;
 use nexus_db_queries::db::model::WebhookReceiverConfig;
 use nexus_db_queries::db::model::WebhookSecret;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::WebhookDeliveryUuid;
 use omicron_uuid_kinds::WebhookEventUuid;
 use omicron_uuid_kinds::WebhookReceiverUuid;
+use omicron_uuid_kinds::WebhookSecretUuid;
+use sha2::Sha256;
+use std::time::Instant;
 
 impl super::Nexus {
     pub fn webhook_receiver_lookup<'a>(
@@ -91,6 +107,14 @@ impl super::Nexus {
         Ok(event)
     }
 
+    pub fn webhook_receiver_probe(
+        &self,
+        _rx: lookup::WebhookReceiver<'_>,
+        _params: params::WebhookProbe,
+    ) -> Result<views::WebhookDelivery, Error> {
+        todo!()
+    }
+
     pub async fn webhook_receiver_secret_add(
         &self,
         opctx: &OpContext,
@@ -111,5 +135,250 @@ impl super::Nexus {
             "secret_id" => ?secret_id,
         );
         Ok(views::WebhookSecretId { id: secret_id.into_untyped_uuid() })
+    }
+}
+
+pub(crate) struct WebhookDeliveryClient<'a> {
+    client: &'a reqwest::Client,
+    rx: &'a WebhookReceiver,
+    secrets: Vec<(WebhookSecretUuid, Hmac<Sha256>)>,
+    hdr_rx_id: http::HeaderValue,
+}
+
+impl<'a> WebhookDeliveryClient<'a> {
+    pub(crate) fn new(
+        client: &'a reqwest::Client,
+        secrets: impl IntoIterator<Item = WebhookSecret>,
+        rx: &'a WebhookReceiver,
+    ) -> Result<Self, anyhow::Error> {
+        let secrets = secrets
+            .into_iter()
+            .map(|WebhookSecret { identity, secret, .. }| {
+                let mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())
+                    .expect("HMAC key can be any size; this should never fail");
+                (identity.id.into(), mac)
+            })
+            .collect::<Vec<_>>();
+
+        anyhow::ensure!(!secrets.is_empty(), "receiver has no secrets");
+        let hdr_rx_id = HeaderValue::try_from(rx.id().to_string())
+            .expect("UUIDs should always be a valid header value");
+        Ok(Self { client, secrets, hdr_rx_id, rx })
+    }
+
+    pub(crate) async fn send_delivery_request(
+        &mut self,
+        opctx: &OpContext,
+        delivery: &WebhookDelivery,
+        event_class: WebhookEventClass,
+    ) -> Result<WebhookDeliveryAttempt, anyhow::Error> {
+        const HDR_DELIVERY_ID: HeaderName =
+            HeaderName::from_static("x-oxide-delivery-id");
+        const HDR_RX_ID: HeaderName =
+            HeaderName::from_static("x-oxide-webhook-id");
+        const HDR_EVENT_ID: HeaderName =
+            HeaderName::from_static("x-oxide-event-id");
+        const HDR_EVENT_CLASS: HeaderName =
+            HeaderName::from_static("x-oxide-event-class");
+        const HDR_SIG: HeaderName =
+            HeaderName::from_static("x-oxide-signature");
+
+        #[derive(serde::Serialize, Debug)]
+        struct Payload<'a> {
+            event_class: WebhookEventClass,
+            event_id: WebhookEventUuid,
+            data: &'a serde_json::Value,
+            delivery: DeliveryMetadata<'a>,
+        }
+
+        #[derive(serde::Serialize, Debug)]
+        struct DeliveryMetadata<'a> {
+            id: WebhookDeliveryUuid,
+            webhook_id: WebhookReceiverUuid,
+            sent_at: &'a str,
+        }
+
+        // okay, actually do the thing...
+        let time_attempted = Utc::now();
+        let sent_at = time_attempted.to_rfc3339();
+        let payload = Payload {
+            event_class,
+            event_id: delivery.event_id.into(),
+            data: &delivery.payload,
+            delivery: DeliveryMetadata {
+                id: delivery.id.into(),
+                webhook_id: self.rx.id(),
+                sent_at: &sent_at,
+            },
+        };
+        // N.B. that we serialize the body "ourselves" rather than just
+        // passing it to `RequestBuilder::json` because we must access
+        // the serialized body in order to calculate HMAC signatures.
+        // This means we have to add the `Content-Type` ourselves below.
+        let body = match serde_json::to_vec(&payload) {
+            Ok(body) => body,
+            Err(e) => {
+                const MSG: &'static str =
+                    "event payload could not be serialized";
+                slog::error!(
+                    &opctx.log,
+                    "webhook {MSG}";
+                    "event_id" => %delivery.event_id,
+                    "event_class" => %event_class,
+                    "delivery_id" => %delivery.id,
+                    "error" => %e,
+                );
+
+                // This really shouldn't happen --- we expect the event
+                // payload will always be valid JSON. We could *probably*
+                // just panic here unconditionally, but it seems nicer to
+                // try and do the other events. But, if there's ever a bug
+                // that breaks serialization for *all* webhook payloads,
+                // I'd like the tests to fail in a more obvious way than
+                // eventually timing out waiting for the event to be
+                // delivered ...
+                if cfg!(debug_assertions) {
+                    panic!("{MSG}: {e}\npayload: {payload:#?}");
+                }
+                return Err(e).context(MSG);
+            }
+        };
+        let mut request = self
+            .client
+            // TODO(eliza): this ain't gonna cut it! Rather than using the `reqwest`
+            // client, which performs its own DNS resolution, we gotta resolve the
+            // domain to an IP ourselves so that we can prevent SSRF by
+            // rejecting underlay network IPs. Which probably means managing our
+            // own client pool. Ag.
+            .post(&self.rx.endpoint)
+            .header(HDR_RX_ID, self.hdr_rx_id.clone())
+            .header(HDR_DELIVERY_ID, delivery.id.to_string())
+            .header(HDR_EVENT_ID, delivery.event_id.to_string())
+            .header(HDR_EVENT_CLASS, event_class.to_string())
+            .header(http::header::CONTENT_TYPE, "application/json");
+
+        // For each secret assigned to this webhook, calculate the HMAC and add a signature header.
+        for (secret_id, mac) in &mut self.secrets {
+            mac.update(&body);
+            let sig_bytes = mac.finalize_reset().into_bytes();
+            let sig = hex::encode(&sig_bytes[..]);
+            request = request
+                .header(HDR_SIG, format!("a=sha256&id={secret_id}&s={sig}"));
+        }
+        let request = request.body(body).build();
+
+        let request = match request {
+            // We couldn't construct a request for some reason! This one's
+            // our fault, so don't penalize the receiver for it.
+            Err(e) => {
+                const MSG: &str = "failed to construct webhook request";
+                slog::error!(
+                    &opctx.log,
+                    "{MSG}";
+                    "event_id" => %delivery.event_id,
+                    "event_class" => %event_class,
+                    "delivery_id" => %delivery.id,
+                    "error" => %e,
+                    "payload" => ?payload,
+                );
+                return Err(e).context(MSG);
+            }
+            Ok(r) => r,
+        };
+        let t0 = Instant::now();
+        let result = self.client.execute(request).await;
+        let duration = t0.elapsed();
+        let (delivery_result, status) = match result {
+            // Builder errors are our fault, that's weird!
+            Err(e) if e.is_builder() => {
+                const MSG: &str =
+                    "internal error constructing webhook delivery request";
+                slog::error!(
+                    &opctx.log,
+                    "{MSG}";
+                    "event_id" => %delivery.event_id,
+                    "event_class" => %event_class,
+                    "delivery_id" => %delivery.id,
+                    "error" => %e,
+                );
+                return Err(e).context(MSG);
+            }
+            Err(e) => {
+                if let Some(status) = e.status() {
+                    slog::warn!(
+                        &opctx.log,
+                        "webhook receiver endpoint returned an HTTP error";
+                        "event_id" => %delivery.event_id,
+                        "event_class" => %event_class,
+                        "delivery_id" => %delivery.id,
+                        "response_status" => ?status,
+                        "response_duration" => ?duration,
+                    );
+                    (WebhookDeliveryResult::FailedHttpError, Some(status))
+                } else {
+                    let result = if e.is_connect() {
+                        WebhookDeliveryResult::FailedUnreachable
+                    } else if e.is_timeout() {
+                        WebhookDeliveryResult::FailedTimeout
+                    } else if e.is_redirect() {
+                        WebhookDeliveryResult::FailedHttpError
+                    } else {
+                        WebhookDeliveryResult::FailedUnreachable
+                    };
+                    slog::warn!(
+                        &opctx.log,
+                        "webhook delivery request failed";
+                        "event_id" => %delivery.event_id,
+                        "event_class" => %event_class,
+                        "delivery_id" => %delivery.id,
+                        "error" => %e,
+                    );
+                    (result, None)
+                }
+            }
+            Ok(rsp) => {
+                let status = rsp.status();
+                if status.is_success() {
+                    slog::debug!(
+                        &opctx.log,
+                        "webhook event delivered successfully";
+                        "event_id" => %delivery.event_id,
+                        "event_class" => %event_class,
+                        "delivery_id" => %delivery.id,
+                        "response_status" => ?status,
+                        "response_duration" => ?duration,
+                    );
+                    (WebhookDeliveryResult::Succeeded, Some(status))
+                } else {
+                    slog::warn!(
+                        &opctx.log,
+                        "webhook receiver endpoint returned an HTTP error";
+                        "event_id" => %delivery.event_id,
+                        "event_class" => %event_class,
+                        "delivery_id" => %delivery.id,
+                        "response_status" => ?status,
+                        "response_duration" => ?duration,
+                    );
+                    (WebhookDeliveryResult::FailedHttpError, Some(status))
+                }
+            }
+        };
+        // only include a response duration if we actually got a response back
+        let response_duration = status.map(|_| {
+            TimeDelta::from_std(duration).expect(
+                "because we set a 30-second response timeout, there is no \
+                    way a response duration could ever exceed the max \
+                    representable TimeDelta of `i64::MAX` milliseconds",
+            )
+        });
+
+        Ok(WebhookDeliveryAttempt {
+            delivery_id: delivery.id,
+            attempt: SqlU8::new(delivery.attempts.0 + 1),
+            result: delivery_result,
+            response_status: status.map(|s| s.as_u16() as i16),
+            response_duration,
+            time_created: chrono::Utc::now(),
+        })
     }
 }
