@@ -742,23 +742,23 @@ task: "tuf_artifact_replication"
     request ringbuf:
       <REDACTED_SECTION>
     last run:
-      list ok:      <LIST_OK_REDACTED>
-      list err:     0
-      put ok:       0
-      put err:      0
-      copy ok:      0
-      copy err:     0
-      delete ok:    0
-      delete err:   0
+      put config ok:    <PUT_CONFIG_OK_REDACTED>
+      put config err:   0
+      list ok:          <LIST_OK_REDACTED>
+      list err:         0
+      put ok:           0
+      put err:          0
+      copy ok:          0
+      copy err:         0
     lifetime:
-      list ok:      <LIST_OK_REDACTED>
-      list err:     0
-      put ok:       0
-      put err:      0
-      copy ok:      0
-      copy err:     0
-      delete ok:    0
-      delete err:   0
+      put config ok:    <PUT_CONFIG_OK_REDACTED>
+      put config err:   0
+      list ok:          <LIST_OK_REDACTED>
+      list err:         0
+      put ok:           0
+      put err:          0
+      copy ok:          0
+      copy err:         0
     local repos: 0
 
 task: "v2p_manager"
@@ -1241,23 +1241,23 @@ task: "tuf_artifact_replication"
     request ringbuf:
       <REDACTED_SECTION>
     last run:
-      list ok:      <LIST_OK_REDACTED>
-      list err:     0
-      put ok:       0
-      put err:      0
-      copy ok:      0
-      copy err:     0
-      delete ok:    0
-      delete err:   0
+      put config ok:    <PUT_CONFIG_OK_REDACTED>
+      put config err:   0
+      list ok:          <LIST_OK_REDACTED>
+      list err:         0
+      put ok:           0
+      put err:          0
+      copy ok:          0
+      copy err:         0
     lifetime:
-      list ok:      <LIST_OK_REDACTED>
-      list err:     0
-      put ok:       0
-      put err:      0
-      copy ok:      0
-      copy err:     0
-      delete ok:    0
-      delete err:   0
+      put config ok:    <PUT_CONFIG_OK_REDACTED>
+      put config err:   0
+      list ok:          <LIST_OK_REDACTED>
+      list err:         0
+      put ok:           0
+      put err:          0
+      copy ok:          0
+      copy err:         0
     local repos: 0
 
 task: "v2p_manager"
