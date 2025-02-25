@@ -56,11 +56,10 @@ impl UdpServer {
                     bail!("{multicast_addr} is not multicast!");
                 }
 
-                let interface_index =
-                    if_nametoindex(multicast_interface.as_str())
-                        .context(
-                            format!("if_nametoindex for {multicast_interface}")
-                        )?;
+                let interface_index = if_nametoindex(
+                    multicast_interface.as_str(),
+                )
+                .context(format!("if_nametoindex for {multicast_interface}"))?;
 
                 let sock =
                     UdpSocket::bind(bind_addr).await.with_context(|| {
