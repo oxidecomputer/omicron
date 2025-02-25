@@ -446,7 +446,8 @@ fn sled_reservation_benchmark(c: &mut Criterion) {
                 },
             ],
         },
-        // TODO create a test for "policy = Fail" groups.
+        // TODO(https://github.com/oxidecomputer/omicron/issues/7628):
+        // create a test for "policy = Fail" groups.
     ];
 
     for grouping in &group_patterns {
