@@ -2231,31 +2231,33 @@ pub mod test {
         verify_blueprint(&blueprint1);
 
         // Mark one sled as having a desired state of decommissioned.
-        let decommision_sled_id = blueprint1
-            .sled_state
-            .keys()
-            .copied()
-            .next()
-            .expect("at least one sled");
-        *blueprint1.sled_state.get_mut(&decommision_sled_id).unwrap() =
-            SledState::Decommissioned;
+        let decommision_sled_id =
+            blueprint1.sleds.keys().copied().next().expect("at least one sled");
 
         // We're going under the hood of the blueprint here; a sled can only get
         // to the decommissioned state if all its disks/datasets/zones have been
         // expunged, so do that too.
-        for mut zone in &mut blueprint1
-            .blueprint_zones
-            .get_mut(&decommision_sled_id)
-            .expect("has zones")
-            .zones
         {
-            zone.disposition = BlueprintZoneDisposition::Expunged {
-                as_of_generation: Generation::new(),
-                ready_for_cleanup: false,
-            };
+            let sled_config =
+                blueprint1.sleds.get_mut(&decommision_sled_id).unwrap();
+            sled_config.state = SledState::Decommissioned;
+
+            for mut zone in &mut sled_config.zones_config.zones {
+                zone.disposition = BlueprintZoneDisposition::Expunged {
+                    as_of_generation: Generation::new(),
+                    ready_for_cleanup: false,
+                };
+            }
+            for mut dataset in &mut sled_config.datasets_config.datasets {
+                dataset.disposition = BlueprintDatasetDisposition::Expunged;
+            }
+            for mut disk in &mut sled_config.disks_config.disks {
+                disk.disposition = BlueprintPhysicalDiskDisposition::Expunged {
+                    as_of_generation: Generation::new(),
+                    ready_for_cleanup: false,
+                };
+            }
         }
-        blueprint1.blueprint_datasets.remove(&decommision_sled_id);
-        blueprint1.blueprint_disks.remove(&decommision_sled_id);
 
         // Change the input to note that the sled is expunged, but still active.
         let mut builder = input.into_builder();
@@ -2281,7 +2283,7 @@ pub mod test {
 
         // We carried forward the desired state.
         assert_eq!(
-            blueprint2.sled_state.get(&decommision_sled_id).copied(),
+            blueprint2.sleds.get(&decommision_sled_id).map(|c| c.state),
             Some(SledState::Decommissioned)
         );
 
@@ -2294,9 +2296,10 @@ pub mod test {
             SledState::Decommissioned;
         let input = builder.build();
         for mut z in &mut blueprint2
-            .blueprint_zones
+            .sleds
             .get_mut(&decommision_sled_id)
             .unwrap()
+            .zones_config
             .zones
         {
             z.disposition = BlueprintZoneDisposition::Expunged {
@@ -2308,7 +2311,7 @@ pub mod test {
         // Generate a new blueprint. This desired sled state should still be
         // decommissioned, because we haven't implemented all the cleanup
         // necessary to prune sleds from the blueprint.
-        let mut blueprint3 = BlueprintBuilder::new_based_on(
+        let blueprint3 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint2,
             &input,
@@ -2319,27 +2322,7 @@ pub mod test {
         .build();
         verify_blueprint(&blueprint3);
         assert_eq!(
-            blueprint3.sled_state.get(&decommision_sled_id).copied(),
-            Some(SledState::Decommissioned),
-        );
-
-        // By hand, drop the decommissioned sled out of `sled_state`. This
-        // matches old builder behavior. Rerunning the builder should put it
-        // back, since it's still present in `blueprint_zones`.
-        blueprint3.sled_state.remove(&decommision_sled_id);
-        let blueprint4 = BlueprintBuilder::new_based_on(
-            &logctx.log,
-            &blueprint3,
-            &input,
-            &collection,
-            "test_decommissioned_sleds",
-        )
-        .expect("created builder")
-        .build();
-        eprintln!("{}", blueprint4.diff_since_blueprint(&blueprint3).display());
-        verify_blueprint(&blueprint4);
-        assert_eq!(
-            blueprint4.sled_state.get(&decommision_sled_id).copied(),
+            blueprint3.sleds.get(&decommision_sled_id).map(|c| c.state),
             Some(SledState::Decommissioned),
         );
 
@@ -2415,10 +2398,10 @@ pub mod test {
             }
 
             // We should have disks and a generation bump for every sled.
-            let parent_disk_gens = parent
-                .blueprint_disks
-                .iter()
-                .map(|(&sled_id, config)| (sled_id, config.generation));
+            let parent_disk_gens =
+                parent.sleds.iter().map(|(&sled_id, config)| {
+                    (sled_id, config.disks_config.generation)
+                });
             for (sled_id, parent_gen) in parent_disk_gens {
                 let EditedSled { disks: new_sled_disks, .. } =
                     builder.sled_editors.remove(&sled_id).unwrap().finalize();
@@ -2441,8 +2424,8 @@ pub mod test {
         let logctx = test_setup_log(TEST_NAME);
         let (_, _, blueprint) = example(&logctx.log, TEST_NAME);
 
-        for (_, zone_config) in &blueprint.blueprint_zones {
-            for zone in &zone_config.zones {
+        for (_, sled_config) in &blueprint.sleds {
+            for zone in &sled_config.zones_config.zones {
                 // The pool should only be optional for backwards compatibility.
                 let filesystem_pool = zone
                     .filesystem_pool
@@ -2542,9 +2525,10 @@ pub mod test {
 
         // Find the datasets we've expunged in the blueprint
         let expunged_datasets = blueprint
-            .blueprint_datasets
+            .sleds
             .get(&sled_id)
             .unwrap()
+            .datasets_config
             .datasets
             .iter()
             .filter_map(|dataset_config| {
@@ -2650,9 +2634,10 @@ pub mod test {
                     // Also remove this zone from the blueprint.
                     let mut removed_nexus = None;
                     parent
-                        .blueprint_zones
+                        .sleds
                         .get_mut(sled_id)
                         .expect("missing sled")
+                        .zones_config
                         .zones
                         .retain(|z| match &z.zone_type {
                             BlueprintZoneType::Nexus(z) => {
@@ -2913,8 +2898,9 @@ pub mod test {
         let mut expected_filesystem_pools = Vec::with_capacity(3);
         let mut expected_zones_config_gen = Vec::with_capacity(3);
 
-        for (sled_id, zones_config) in parent.blueprint_zones.iter_mut() {
-            let mut nexus = zones_config
+        for (sled_id, sled_config) in parent.sleds.iter_mut() {
+            let mut nexus = sled_config
+                .zones_config
                 .zones
                 .iter_mut()
                 .find(|z| z.zone_type.is_nexus())
@@ -2927,11 +2913,12 @@ pub mod test {
 
             match sled_ids.len() {
                 0 => {
-                    expected_zones_config_gen.push(zones_config.generation);
+                    expected_zones_config_gen
+                        .push(sled_config.zones_config.generation);
                 }
                 1 | 2 => {
                     expected_zones_config_gen
-                        .push(zones_config.generation.next());
+                        .push(sled_config.zones_config.generation.next());
                     nexus.filesystem_pool = None;
                 }
                 _ => unreachable!("unexpected number of sleds in test"),
@@ -2962,14 +2949,16 @@ pub mod test {
 
         // Check that our backfilling was correct.
         for (i, &sled_id) in sled_ids.iter().enumerate() {
-            let zones_config =
-                blueprint1.blueprint_zones.get(&sled_id).expect("found sled");
+            let sled_config =
+                blueprint1.sleds.get(&sled_id).expect("found sled");
             assert_eq!(
-                zones_config.generation, expected_zones_config_gen[i],
+                sled_config.zones_config.generation,
+                expected_zones_config_gen[i],
                 "unexpected generation on sled {i}"
             );
 
-            let nexus = zones_config
+            let nexus = sled_config
+                .zones_config
                 .zones
                 .iter()
                 .find(|z| z.zone_type.is_nexus())
@@ -3077,14 +3066,16 @@ pub mod test {
         expected_zones_config_gen[2] = expected_zones_config_gen[2].next();
         expected_filesystem_pools[2] = sled_2_new_nexus_zpool;
         for (i, &sled_id) in sled_ids.iter().enumerate() {
-            let zones_config =
-                blueprint2.blueprint_zones.get(&sled_id).expect("found sled");
+            let sled_config =
+                blueprint2.sleds.get(&sled_id).expect("found sled");
             assert_eq!(
-                zones_config.generation, expected_zones_config_gen[i],
+                sled_config.zones_config.generation,
+                expected_zones_config_gen[i],
                 "unexpected generation on sled {i}"
             );
 
-            let nexus = zones_config
+            let nexus = sled_config
+                .zones_config
                 .zones
                 .iter()
                 .find(|z| z.zone_type.is_nexus())

@@ -581,10 +581,7 @@ pub struct BlueprintZonesConfig {
 
 impl Default for BlueprintZonesConfig {
     fn default() -> Self {
-        Self {
-            generation: Generation::new(),
-            zones: IdMap::new(),
-        }
+        Self { generation: Generation::new(), zones: IdMap::new() }
     }
 }
 
@@ -1038,10 +1035,7 @@ pub struct BlueprintDatasetsConfig {
 
 impl Default for BlueprintDatasetsConfig {
     fn default() -> Self {
-        Self {
-            generation: Generation::new(),
-            datasets: IdMap::new(),
-        }
+        Self { generation: Generation::new(), datasets: IdMap::new() }
     }
 }
 

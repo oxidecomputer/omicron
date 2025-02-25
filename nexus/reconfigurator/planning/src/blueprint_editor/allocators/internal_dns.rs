@@ -105,18 +105,19 @@ pub mod test {
 
         // `ExampleSystem` adds an internal DNS server to every sled. Manually
         // prune out all but the first of them to give us space to add more.
-        for (_, zone_config) in blueprint1.blueprint_zones.iter_mut().skip(1) {
-            zone_config.zones.retain(|z| !z.zone_type.is_internal_dns());
+        for (_, sled_config) in blueprint1.sleds.iter_mut().skip(1) {
+            sled_config
+                .zones_config
+                .zones
+                .retain(|z| !z.zone_type.is_internal_dns());
         }
-        let npruned = blueprint1.blueprint_zones.len() - 1;
+        let npruned = blueprint1.sleds.len() - 1;
         assert!(npruned > 0);
 
         // Also prune out the zones' datasets, or we're left with an invalid
         // blueprint.
-        for (_, dataset_config) in
-            blueprint1.blueprint_datasets.iter_mut().skip(1)
-        {
-            dataset_config.datasets.retain(|dataset| {
+        for (_, sled_config) in blueprint1.sleds.iter_mut().skip(1) {
+            sled_config.datasets_config.datasets.retain(|dataset| {
                 // This is gross; once zone configs know explicit dataset IDs,
                 // we should retain by ID instead.
                 match &dataset.kind {

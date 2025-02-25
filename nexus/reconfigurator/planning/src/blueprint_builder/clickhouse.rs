@@ -293,6 +293,7 @@ pub mod test {
     use clickhouse_admin_types::ServerId;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
+    use std::collections::BTreeMap;
 
     fn initial_config(
         n_keeper_zones: u64,
