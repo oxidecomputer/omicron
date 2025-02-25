@@ -11,6 +11,7 @@ use crate::db::error::ErrorHandler;
 use crate::db::model::SqlU8;
 use crate::db::model::WebhookDelivery;
 use crate::db::model::WebhookDeliveryAttempt;
+use crate::db::model::WebhookDeliveryTrigger;
 use crate::db::model::WebhookEventClass;
 use crate::db::pagination::paginated;
 use crate::db::schema::webhook_delivery::dsl;
@@ -100,6 +101,10 @@ impl DataStore {
         let now =
             diesel::dsl::now.into_sql::<diesel::pg::sql_types::Timestamptz>();
         dsl::webhook_delivery
+            // Filter out deliveries triggered by probe requests, as those are
+            // executed synchronously by the probe endpoint, rather than by the
+            // webhook deliverator.
+            .filter(dsl::trigger.ne(WebhookDeliveryTrigger::Probe))
             .filter(dsl::time_completed.is_null())
             .filter(dsl::rx_id.eq(rx_id.into_untyped_uuid()))
             .filter(
@@ -332,22 +337,16 @@ mod test {
             .await
             .expect("can't create ye event");
 
-        let dispatch1 = WebhookDelivery::new(
-            &event,
-            &rx_id,
-            WebhookDeliveryTrigger::Dispatch,
-        );
+        let dispatch1 =
+            WebhookDelivery::new(&event, &rx_id, WebhookDeliveryTrigger::Event);
         let inserted = datastore
             .webhook_delivery_create_batch(&opctx, vec![dispatch1.clone()])
             .await
             .expect("dispatch 1 should insert");
         assert_eq!(inserted, 1, "first dispatched delivery should be created");
 
-        let dispatch2 = WebhookDelivery::new(
-            &event,
-            &rx_id,
-            WebhookDeliveryTrigger::Dispatch,
-        );
+        let dispatch2 =
+            WebhookDelivery::new(&event, &rx_id, WebhookDeliveryTrigger::Event);
         let inserted = datastore
             .webhook_delivery_create_batch(opctx, vec![dispatch2.clone()])
             .await

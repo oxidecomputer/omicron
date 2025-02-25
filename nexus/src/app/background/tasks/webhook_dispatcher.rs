@@ -148,7 +148,7 @@ impl WebhookDispatcher {
                     "event_class" => %event.event_class,
                     "glob" => ?sub.glob,
                 );
-                WebhookDelivery::new(&event, &rx.id(), WebhookDeliveryTrigger::Dispatch)
+                WebhookDelivery::new(&event, &rx.id(), WebhookDeliveryTrigger::Event)
             }).collect();
 
             let subscribed = if !deliveries.is_empty() {

@@ -1092,7 +1092,6 @@ pub struct WebhookSecretId {
 }
 
 /// A delivery attempt for a webhook event.
-
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookDelivery {
     /// The UUID of this delivery attempt.
@@ -1113,6 +1112,9 @@ pub struct WebhookDelivery {
     /// The time at which the webhook delivery was attempted, or `null` if
     /// webhook delivery has not yet been attempted (`state` is "pending").
     pub time_sent: Option<DateTime<Utc>>,
+
+    /// Why this delivery was performed.
+    pub trigger: WebhookDeliveryTrigger,
 
     /// Describes the response returned by the receiver endpoint.
     ///
@@ -1145,6 +1147,34 @@ pub enum WebhookDeliveryState {
     /// A connection to the receiver endpoint was successfully established, but
     /// no response was received within the delivery timeout.
     FailedTimeout,
+}
+
+/// The reason a webhook event was delivered
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WebhookDeliveryTrigger {
+    /// Delivery was triggered by the event occurring for the first time.
+    Event,
+    /// Delivery was triggered by a request to resend the event.
+    Resend,
+    /// This delivery is a liveness probe.
+    Probe,
+}
+
+impl WebhookDeliveryTrigger {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Event => "event",
+            Self::Resend => "resend",
+            Self::Probe => "probe",
+        }
+    }
+}
+
+impl fmt::Display for WebhookDeliveryTrigger {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// The response received from a webhook receiver endpoint.

@@ -5137,10 +5137,12 @@ ON omicron.public.webhook_event (
 -- Describes why a webhook delivery was triggered
 CREATE TYPE IF NOT EXISTS omicron.public.webhook_delivery_trigger AS ENUM (
     --  This delivery was triggered by the event being dispatched.
-    'dispatch',
+    'event',
     -- This delivery was triggered by an explicit call to the webhook event
     -- resend API.
-    'resend'
+    'resend',
+    --- This delivery is a liveness probe.
+    'probe'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
@@ -5185,7 +5187,7 @@ ON omicron.public.webhook_delivery (
     event_id, rx_id
 )
 WHERE
-    trigger = 'dispatch';
+    trigger = 'event';
 
 -- Index for looking up all webhook messages dispatched to a receiver ID
 CREATE INDEX IF NOT EXISTS lookup_webhook_dispatched_to_rx
