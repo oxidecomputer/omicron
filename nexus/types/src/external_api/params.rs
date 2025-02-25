@@ -2412,10 +2412,6 @@ pub struct WebhookCreate {
     /// webhook will not be subscribed to any events.
     #[serde(default)]
     pub events: Vec<String>,
-
-    /// If `true`, liveness probe requests will not be sent to this webhook receiver.
-    #[serde(default)]
-    pub disable_probes: bool,
 }
 
 /// Parameters to update a webhook configuration.
@@ -2431,9 +2427,6 @@ pub struct WebhookUpdate {
     ///
     /// If this list is empty, the webhook will not be subscribed to any events.
     pub events: Vec<String>,
-
-    /// If `true`, liveness probe requests will not be sent to this webhook receiver.
-    pub disable_probes: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

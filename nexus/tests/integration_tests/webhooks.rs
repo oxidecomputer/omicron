@@ -138,7 +138,6 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
             endpoint,
             secrets: vec!["my cool secret".to_string()],
             events: vec!["test.foo".to_string()],
-            disable_probes: false,
         },
     )
     .await;
@@ -220,7 +219,6 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
             endpoint,
             secrets: vec![SECRET1.to_string()],
             events: vec!["test.foo".to_string()],
-            disable_probes: false,
         },
     )
     .await;
@@ -323,7 +321,6 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
                 .expect("this should be a valid URL"),
             secrets: vec![BAR_SECRET.to_string()],
             events: vec!["test.foo.bar".to_string()],
-            disable_probes: false,
         },
     )
     .await;
@@ -360,7 +357,6 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
                 .expect("this should be a valid URL"),
             secrets: vec![BAZ_SECRET.to_string()],
             events: vec!["test.foo.baz".to_string()],
-            disable_probes: false,
         },
     )
     .await;
@@ -397,7 +393,6 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
                 .expect("this should be a valid URL"),
             secrets: vec![STAR_SECRET.to_string()],
             events: vec!["test.foo.*".to_string()],
-            disable_probes: false,
         },
     )
     .await;
@@ -486,7 +481,6 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
             endpoint,
             secrets: vec!["my cool secret".to_string()],
             events: vec!["test.foo".to_string()],
-            disable_probes: false,
         },
     )
     .await;

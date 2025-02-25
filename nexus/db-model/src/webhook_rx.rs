@@ -47,8 +47,7 @@ impl TryFrom<WebhookReceiverConfig> for views::Webhook {
             .into_iter()
             .map(WebhookSubscriptionKind::into_event_class_string)
             .collect();
-        let WebhookReceiver { identity, endpoint, probes_enabled, rcgen: _ } =
-            rx;
+        let WebhookReceiver { identity, endpoint, rcgen: _ } = rx;
         let WebhookReceiverIdentity { id, name, description, .. } = identity;
         let endpoint = endpoint.parse().map_err(|e| Error::InternalError {
             // This is an internal error, as we should not have ever allowed
@@ -62,7 +61,6 @@ impl TryFrom<WebhookReceiverConfig> for views::Webhook {
             endpoint,
             secrets,
             events,
-            disable_probes: !probes_enabled,
         })
     }
 }
@@ -84,7 +82,6 @@ pub struct WebhookReceiver {
     #[diesel(embed)]
     pub identity: WebhookReceiverIdentity,
     pub endpoint: String,
-    pub probes_enabled: bool,
 
     /// child resource generation number, per RFD 192
     pub rcgen: Generation,

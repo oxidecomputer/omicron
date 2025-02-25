@@ -318,7 +318,6 @@ mod test {
                     endpoint: "http://webhooks.example.com".parse().unwrap(),
                     secrets: vec!["my cool secret".to_string()],
                     events: vec!["test.*".to_string()],
-                    disable_probes: false,
                 },
             )
             .await

@@ -4978,9 +4978,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_receiver (
     -- Child resource generation
     rcgen INT NOT NULL,
     -- URL of the endpoint webhooks are delivered to.
-    endpoint STRING(512) NOT NULL,
-    -- Whether or not liveness probes are sent to this receiver.
-    probes_enabled BOOL NOT NULL
+    endpoint STRING(512) NOT NULL
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_webhook_rxs_by_id

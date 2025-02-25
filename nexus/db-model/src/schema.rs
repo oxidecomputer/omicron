@@ -2190,7 +2190,6 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         endpoint -> Text,
-        probes_enabled -> Bool,
         rcgen -> Int8,
     }
 }

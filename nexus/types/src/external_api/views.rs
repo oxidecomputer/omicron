@@ -1075,8 +1075,6 @@ pub struct Webhook {
     pub secrets: Vec<WebhookSecretId>,
     /// The list of event classes to which this receiver is subscribed.
     pub events: Vec<String>,
-    /// If `true`, liveness probe requests are not sent to this receiver.
-    pub disable_probes: bool,
 }
 
 /// A list of the IDs of secrets associated with a webhook.

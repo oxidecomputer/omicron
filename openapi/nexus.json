@@ -25053,10 +25053,6 @@
           "description": {
             "type": "string"
           },
-          "disable_probes": {
-            "description": "If `true`, liveness probe requests are not sent to this receiver.",
-            "type": "boolean"
-          },
           "endpoint": {
             "description": "The URL that webhook notification requests are sent to.",
             "type": "string",
@@ -25090,7 +25086,6 @@
         },
         "required": [
           "description",
-          "disable_probes",
           "endpoint",
           "events",
           "id",
@@ -25104,11 +25099,6 @@
         "properties": {
           "description": {
             "type": "string"
-          },
-          "disable_probes": {
-            "description": "If `true`, liveness probe requests will not be sent to this webhook receiver.",
-            "default": false,
-            "type": "boolean"
           },
           "endpoint": {
             "description": "The URL that webhook notification requests should be sent to",
@@ -25191,6 +25181,14 @@
             "type": "string",
             "format": "date-time"
           },
+          "trigger": {
+            "description": "Why this delivery was performed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WebhookDeliveryTrigger"
+              }
+            ]
+          },
           "webhook_id": {
             "description": "The UUID of the webhook receiver that this event was delivered to.",
             "allOf": [
@@ -25205,6 +25203,7 @@
           "event_id",
           "id",
           "state",
+          "trigger",
           "webhook_id"
         ]
       },
@@ -25303,6 +25302,32 @@
           }
         ]
       },
+      "WebhookDeliveryTrigger": {
+        "description": "The reason a webhook event was delivered",
+        "oneOf": [
+          {
+            "description": "Delivery was triggered by the event occurring for the first time.",
+            "type": "string",
+            "enum": [
+              "event"
+            ]
+          },
+          {
+            "description": "Delivery was triggered by a request to resend the event.",
+            "type": "string",
+            "enum": [
+              "resend"
+            ]
+          },
+          {
+            "description": "This delivery is a liveness probe.",
+            "type": "string",
+            "enum": [
+              "probe"
+            ]
+          }
+        ]
+      },
       "WebhookSecretCreate": {
         "type": "object",
         "properties": {
@@ -25350,10 +25375,6 @@
             "nullable": true,
             "type": "string"
           },
-          "disable_probes": {
-            "description": "If `true`, liveness probe requests will not be sent to this webhook receiver.",
-            "type": "boolean"
-          },
           "endpoint": {
             "description": "The URL that webhook notification requests should be sent to",
             "type": "string",
@@ -25376,7 +25397,6 @@
           }
         },
         "required": [
-          "disable_probes",
           "endpoint",
           "events"
         ]

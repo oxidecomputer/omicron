@@ -52,13 +52,8 @@ impl DataStore {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let params::WebhookCreate {
-            identity,
-            endpoint,
-            secrets,
-            events,
-            disable_probes,
-        } = params;
+        let params::WebhookCreate { identity, endpoint, secrets, events } =
+            params;
 
         let subscriptions = events
             .into_iter()
@@ -79,7 +74,6 @@ impl DataStore {
                         identity.clone(),
                     ),
                     endpoint: endpoint.to_string(),
-                    probes_enabled: !disable_probes,
                     rcgen: Generation::new(),
                 };
                 let subscriptions = subscriptions.clone();
@@ -509,7 +503,6 @@ mod test {
                         endpoint: format!("http://{name}").parse().unwrap(),
                         secrets: vec![name.to_string()],
                         events: vec![subscription.to_string()],
-                        disable_probes: false,
                     },
                 )
                 .await
