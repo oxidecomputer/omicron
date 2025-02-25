@@ -55,7 +55,7 @@ impl super::Nexus {
                 ..
             } => {
                 Err(Error::invalid_request(
-                    "when providing affinity_group as an ID project should not be specified",
+                    "when providing affinity_group as an ID, project should not be specified",
                 ))
             }
             _ => {
@@ -94,7 +94,7 @@ impl super::Nexus {
                 ..
             } => {
                 Err(Error::invalid_request(
-                    "when providing anti_affinity_group as an ID project should not be specified",
+                    "when providing anti_affinity_group as an ID, project should not be specified",
                 ))
             }
             _ => {
@@ -192,7 +192,7 @@ impl super::Nexus {
         self.db_datastore
             .affinity_group_update(opctx, &authz_group, updates.clone().into())
             .await
-            .map(|g| g.into())
+            .map(Into::into)
     }
 
     pub(crate) async fn anti_affinity_group_update(
@@ -210,7 +210,7 @@ impl super::Nexus {
                 updates.clone().into(),
             )
             .await
-            .map(|g| g.into())
+            .map(Into::into)
     }
 
     pub(crate) async fn affinity_group_delete(
