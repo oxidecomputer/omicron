@@ -16,7 +16,6 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
-use crate::db::model::ApplyBlueprintZoneFilterExt;
 use crate::db::model::ApplySledFilterExt;
 use crate::db::model::IncompleteVpc;
 use crate::db::model::InstanceNetworkInterface;
@@ -49,19 +48,20 @@ use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use futures::stream::{self, StreamExt};
+use futures::TryStreamExt;
 use ipnetwork::IpNetwork;
 use nexus_auth::authz::ApiResource;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V4;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V6;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_ID;
 use nexus_db_fixed_data::vpc::SERVICES_VPC_ID;
+use nexus_db_model::DbBpZoneDisposition;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::InternetGateway;
 use nexus_db_model::InternetGatewayIpAddress;
 use nexus_db_model::InternetGatewayIpPool;
 use nexus_db_model::IpPoolRange;
 use nexus_db_model::NetworkInterfaceKind;
-use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::SledFilter;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
@@ -78,6 +78,7 @@ use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRouteKind as ExternalRouteKind;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni as ExternalVni;
+use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterTarget;
 use oxnet::IpNet;
@@ -798,8 +799,11 @@ impl DataStore {
             )
             // Filter out services that are expunged and shouldn't be resolved
             // here.
-            .blueprint_zone_filter(
-                BlueprintZoneFilter::ShouldDeployVpcFirewallRules,
+            //
+            // TODO: We should reference a rendezvous table instead of filtering
+            // for in-service zones.
+            .filter(
+                bp_omicron_zone::disposition.eq(DbBpZoneDisposition::InService),
             )
             .filter(service_network_interface::vpc_id.eq(vpc_id))
             .filter(service_network_interface::time_deleted.is_null())
@@ -2560,6 +2564,21 @@ impl DataStore {
             }
         }
 
+        // Generally, we want all name lookups here to be fallible as we
+        // don't have strong links between destinations, targets, and their
+        // underlying resources. Such an error will be converted to a no-op
+        // for any child rules.
+        // However, we cannot allow 503s/CRDB communication failures to be
+        // be part of any router version -- we'll have omitted rules and
+        // sled-agent won't accept an update unless the version has bumped up.
+        // We'll eventually retry this router when the RPW is scheduled again.
+        fn allow_not_found<O>(e: Error) -> Option<Result<O, Error>> {
+            match e {
+                Error::ObjectNotFound { .. } | Error::NotFound { .. } => None,
+                e => Some(Err(e)),
+            }
+        }
+
         // VpcSubnet routes are control-plane managed, and have a foreign-key relationship
         // to subnets they mirror. Prefer this over name resolution when possible, knowing
         // that some user routes still require name resolution.
@@ -2571,11 +2590,12 @@ impl DataStore {
                     .vpc_subnet_id(id)
                     .fetch()
                     .await
-                    .ok()
-                    .map(|(.., subnet)| (id, subnet))
+                    .map_or_else(allow_not_found, |(.., subnet)| {
+                        Some(Ok((id, subnet)))
+                    })
             })
-            .collect::<HashMap<_, _>>()
-            .await;
+            .try_collect::<HashMap<_, _>>()
+            .await?;
 
         let mut subnets_by_name = subnets_by_id
             .values()
@@ -2588,15 +2608,17 @@ impl DataStore {
                 continue;
             }
 
-            let Some((.., subnet)) = db::lookup::LookupPath::new(opctx, self)
+            let Some(res) = db::lookup::LookupPath::new(opctx, self)
                 .vpc_id(vpc_id)
                 .vpc_subnet_name(Name::ref_cast(name))
                 .fetch()
                 .await
-                .ok()
+                .map_or_else(allow_not_found, |v| Some(Ok(v)))
             else {
                 continue;
             };
+
+            let (.., subnet) = res?;
 
             subnets_by_id.insert(subnet.id(), subnet.clone());
             subnets_by_name.insert(subnet.name().clone(), subnet);
@@ -2610,11 +2632,12 @@ impl DataStore {
                     .vpc_name(Name::ref_cast(&name))
                     .fetch()
                     .await
-                    .ok()
-                    .map(|(.., vpc)| (name, vpc))
+                    .map_or_else(allow_not_found, |(.., vpc)| {
+                        Some(Ok((name, vpc)))
+                    })
             })
-            .collect::<HashMap<_, _>>()
-            .await;
+            .try_collect::<HashMap<_, _>>()
+            .await?;
 
         let inetgws = stream::iter(inetgw_names)
             .filter_map(|name| async {
@@ -2623,11 +2646,12 @@ impl DataStore {
                     .internet_gateway_name(Name::ref_cast(&name))
                     .fetch()
                     .await
-                    .ok()
-                    .map(|(.., igw)| (name, igw))
+                    .map_or_else(allow_not_found, |(.., igw)| {
+                        Some(Ok((name, igw)))
+                    })
             })
-            .collect::<HashMap<_, _>>()
-            .await;
+            .try_collect::<HashMap<_, _>>()
+            .await?;
 
         let instances = stream::iter(instance_names)
             .filter_map(|name| async {
@@ -2636,10 +2660,11 @@ impl DataStore {
                     .instance_name(Name::ref_cast(&name))
                     .fetch()
                     .await
-                    .ok()
-                    .map(|(.., auth, inst)| (name, auth, inst))
+                    .map_or_else(allow_not_found, |(.., auth, inst)| {
+                        Some(Ok((name, auth, inst)))
+                    })
             })
-            .filter_map(|(name, authz_instance, instance)| async move {
+            .try_filter_map(|(name, authz_instance, instance)| async move {
                 // XXX: currently an instance can have one primary NIC,
                 //      and it is not dual-stack (v4 + v6). We need
                 //      to clarify what should be resolved in the v6 case.
@@ -2648,11 +2673,13 @@ impl DataStore {
                     &authz_instance,
                 )
                 .await
-                .ok()
-                .map(|primary_nic| (name, (instance, primary_nic)))
+                .map_or_else(allow_not_found, |primary_nic| {
+                    Some(Ok((name, (instance, primary_nic))))
+                })
+                .transpose()
             })
-            .collect::<HashMap<_, _>>()
-            .await;
+            .try_collect::<HashMap<_, _>>()
+            .await?;
 
         // See the discussion in `resolve_firewall_rules_for_sled_agent` on
         // how we should resolve name misses in route resolution.
@@ -2755,10 +2782,14 @@ impl DataStore {
                 (RouteTarget::InternetGateway(n), _) => inetgws
                     .get(&n)
                     .map(|igw| {
-                        (
-                            Some(RouterTarget::InternetGateway(Some(igw.id()))),
-                            Some(RouterTarget::InternetGateway(Some(igw.id()))),
-                        )
+                        let gateway_target = if is_services_vpc_gateway(igw) {
+                            InternetGatewayRouterTarget::System
+                        } else {
+                            InternetGatewayRouterTarget::Instance(igw.id())
+                        };
+                        let target =
+                            RouterTarget::InternetGateway(gateway_target);
+                        (Some(target), Some(target))
                     })
                     .unwrap_or_default(),
 
@@ -2826,6 +2857,11 @@ impl DataStore {
 
         Ok(())
     }
+}
+
+// Return true if this gateway belongs to the internal services VPC.
+fn is_services_vpc_gateway(igw: &InternetGateway) -> bool {
+    igw.vpc_id == *SERVICES_VPC_ID
 }
 
 #[cfg(test)]
@@ -3198,7 +3234,7 @@ mod tests {
             .expect("created blueprint builder");
             for &sled_id in &sled_ids {
                 builder
-                    .sled_ensure_disks(
+                    .sled_add_disks(
                         sled_id,
                         &planning_input
                             .sled_lookup(SledFilter::InService, sled_id)
@@ -3332,23 +3368,13 @@ mod tests {
             .expect("failed to undo ineligible sleds");
         assert_service_sled_ids(&datastore, &sled_ids).await;
 
-        // Make a new blueprint marking one of the zones as quiesced and one as
-        // expunged. Ensure that the sled with *quiesced* zone is returned by
-        // vpc_resolve_to_sleds, but the sled with the *expunged* zone is not.
-        // (But other services are still running.)
+        // Make a new blueprint marking one of the zones as expunged. Ensure
+        // that the sled  the expunged zone is not returned by
+        // vpc_resolve_to_sleds. (But other services are still running.)
         let bp4 = {
             let mut bp4 = bp3.clone();
             bp4.id = BlueprintUuid::new_v4();
             bp4.parent_blueprint_id = Some(bp3.id);
-
-            // Sled index 2's Nexus is quiesced (should be included).
-            let sled2 = bp4
-                .blueprint_zones
-                .get_mut(&sled_ids[2])
-                .expect("zones for sled");
-            sled2.zones.iter_mut().next().unwrap().disposition =
-                BlueprintZoneDisposition::Quiesced;
-            sled2.generation = sled2.generation.next();
 
             // Sled index 3's zone is expunged (should be excluded).
             let sled3 = bp4
@@ -3356,7 +3382,10 @@ mod tests {
                 .get_mut(&sled_ids[3])
                 .expect("zones for sled");
             sled3.zones.iter_mut().next().unwrap().disposition =
-                BlueprintZoneDisposition::Expunged;
+                BlueprintZoneDisposition::Expunged {
+                    as_of_generation: Generation::new(),
+                    ready_for_cleanup: false,
+                };
             sled3.generation = sled3.generation.next();
 
             bp4
@@ -3824,7 +3853,8 @@ mod tests {
             .unwrap();
 
         // Resolve the rules: we will have two entries generated by the
-        // VPC subnet (v4, v6).
+        // VPC subnet (v4, v6). The absence of an instance does not cause
+        // us to bail, it is simply a name resolution failure.
         let routes = datastore
             .vpc_resolve_router_rules(&opctx, authz_router.id())
             .await

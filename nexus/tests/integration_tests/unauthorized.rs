@@ -23,7 +23,7 @@ use nexus_test_utils_macros::nexus_test;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -183,8 +183,8 @@ enum SetupReq {
     },
 }
 
-pub static HTTP_SERVER: Lazy<httptest::Server> =
-    Lazy::new(|| {
+pub static HTTP_SERVER: LazyLock<httptest::Server> =
+    LazyLock::new(|| {
         // Run a httptest server
         let server = ServerBuilder::new().run().unwrap();
 
@@ -208,7 +208,7 @@ pub static HTTP_SERVER: Lazy<httptest::Server> =
     });
 
 /// List of requests to execute at setup time
-static SETUP_REQUESTS: Lazy<Vec<SetupReq>> = Lazy::new(|| {
+static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
     vec![
         // Create a separate Silo
         SetupReq::Post {
@@ -291,6 +291,37 @@ static SETUP_REQUESTS: Lazy<Vec<SetupReq>> = Lazy::new(|| {
             url: &DEMO_PROJECT_URL_INSTANCES,
             body: serde_json::to_value(&*DEMO_INSTANCE_CREATE).unwrap(),
             id_routes: vec!["/v1/instances/{id}"],
+        },
+        // Create a stopped Instance in the Project
+        SetupReq::Post {
+            url: &DEMO_PROJECT_URL_INSTANCES,
+            body: serde_json::to_value(&*DEMO_STOPPED_INSTANCE_CREATE).unwrap(),
+            id_routes: vec!["/v1/instances/{id}"],
+        },
+        // Create an affinity group in the Project
+        SetupReq::Post {
+            url: &DEMO_PROJECT_URL_AFFINITY_GROUPS,
+            body: serde_json::to_value(&*DEMO_AFFINITY_GROUP_CREATE).unwrap(),
+            id_routes: vec!["/v1/affinity-groups/{id}"],
+        },
+        // Add a member to the affinity group
+        SetupReq::Post {
+            url: &DEMO_AFFINITY_GROUP_INSTANCE_MEMBER_URL,
+            body: serde_json::Value::Null,
+            id_routes: vec![],
+        },
+        // Create an anti-affinity group in the Project
+        SetupReq::Post {
+            url: &DEMO_PROJECT_URL_ANTI_AFFINITY_GROUPS,
+            body: serde_json::to_value(&*DEMO_ANTI_AFFINITY_GROUP_CREATE)
+                .unwrap(),
+            id_routes: vec!["/v1/anti-affinity-groups/{id}"],
+        },
+        // Add a member to the anti-affinity group
+        SetupReq::Post {
+            url: &DEMO_ANTI_AFFINITY_GROUP_INSTANCE_MEMBER_URL,
+            body: serde_json::Value::Null,
+            id_routes: vec![],
         },
         // Lookup the previously created NIC
         SetupReq::Get {

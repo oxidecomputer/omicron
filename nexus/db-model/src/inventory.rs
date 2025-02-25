@@ -30,8 +30,10 @@ use diesel::pg::Pg;
 use diesel::serialize::ToSql;
 use diesel::{serialize, sql_types};
 use ipnetwork::IpNetwork;
-use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_sled_agent_shared::inventory::{OmicronZoneConfig, OmicronZoneType};
+use nexus_sled_agent_shared::inventory::{
+    OmicronZoneConfig, OmicronZoneDataset, OmicronZoneImageSource,
+    OmicronZoneType,
+};
 use nexus_types::inventory::{
     BaseboardId, Caboose, Collection, NvmeFirmware, PowerState, RotPage,
     RotSlot,
@@ -1654,6 +1656,7 @@ impl InvOmicronZone {
                 .filesystem_pool
                 .map(|id| ZpoolName::new_external(id.into())),
             zone_type,
+            image_source: OmicronZoneImageSource::InstallDataset,
         })
     }
 }
