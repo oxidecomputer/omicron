@@ -171,6 +171,13 @@ pub struct Nexus {
     /// Client to the timeseries database.
     timeseries_client: oximeter_db::Client,
 
+    /// `reqwest` client used for webhook delivery requests.
+    ///
+    /// This lives on the Nexus struct as we would like to use the same client
+    /// pool for the webhook deliverator background task and the webhook probe
+    /// API.
+    webhook_delivery_client: reqwest::Client,
+
     /// Contents of the trusted root role for the TUF repository.
     #[allow(dead_code)]
     updates_config: Option<UpdatesConfig>,
@@ -435,6 +442,28 @@ impl Nexus {
             Some(address) => oximeter_db::Client::new(*address, &log),
         };
 
+        let webhook_delivery_client = reqwest::ClientBuilder::new()
+            // Per [RFD 538 § 4.3.1][1], webhook delivery does *not* follow
+            // redirects.
+            //
+            // [1]: https://rfd.shared.oxide.computer/rfd/538#_success
+            .redirect(reqwest::redirect::Policy::none())
+            // Per [RFD 538 § 4.3.2][1], the client must be able to connect to a
+            // webhook receiver endpoint within 10 seconds, or the delivery is
+            // considered failed.
+            //
+            // [1]: https://rfd.shared.oxide.computer/rfd/538#delivery-failure
+            .connect_timeout(std::time::Duration::from_secs(10))
+            // Per [RFD 538 § 4.3.2][1], a 30-second timeout is applied to
+            // each webhook delivery request.
+            //
+            // [1]: https://rfd.shared.oxide.computer/rfd/538#delivery-failure
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|e| {
+                format!("failed to build webhook delivery client: {e}")
+            })?;
+
         // TODO-cleanup We may want to make the populator a first-class
         // background task.
         let populate_ctx = OpContext::for_background(
@@ -484,6 +513,7 @@ impl Nexus {
             populate_status,
             reqwest_client,
             timeseries_client,
+            webhook_delivery_client,
             updates_config: config.pkg.updates.clone(),
             tunables: config.pkg.tunables.clone(),
             opctx_alloc: OpContext::for_background(
@@ -564,6 +594,9 @@ impl Nexus {
                     resolver,
                     saga_starter: task_nexus.sagas.clone(),
                     producer_registry: task_registry,
+                    webhook_delivery_client: task_nexus
+                        .webhook_delivery_client
+                        .clone(),
 
                     saga_recovery: SagaRecoveryHelpers {
                         recovery_opctx: saga_recovery_opctx,

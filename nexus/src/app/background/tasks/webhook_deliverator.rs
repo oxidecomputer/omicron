@@ -30,7 +30,7 @@ use omicron_uuid_kinds::{
 use sha2::Sha256;
 use std::num::NonZeroU32;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio::task::JoinSet;
 // The Deliverator belongs to an elite order, a hallowed sub-category. He's got
 // esprit up to here. Right now he is preparing to carry out his third mission
@@ -112,21 +112,8 @@ impl WebhookDeliverator {
         datastore: Arc<DataStore>,
         cfg: DeliveryConfig,
         nexus_id: OmicronZoneUuid,
+        client: reqwest::Client,
     ) -> Self {
-        let client = reqwest::Client::builder()
-            // Per [RFD 538 § 4.3.1][1], webhook delivery does *not* follow
-            // redirects.
-            //
-            // [1]: https://rfd.shared.oxide.computer/rfd/538#_success
-            .redirect(reqwest::redirect::Policy::none())
-            // Per [RFD 538 § 4.3.2][1], the client must be able to connect to a
-            // webhook receiver endpoint within 10 seconds, or the delivery is
-            // considered failed.
-            //
-            // [1]: https://rfd.shared.oxide.computer/rfd/538#delivery-failure
-            .connect_timeout(Duration::from_secs(10))
-            .build()
-            .expect("failed to configure webhook deliverator client!");
         Self { datastore, nexus_id, cfg, client }
     }
 
@@ -364,14 +351,7 @@ impl WebhookDeliverator {
                     format!("a=sha256&id={secret_id}&s={sig}"),
                 );
             }
-            let request = request
-                .body(body)
-                // Per [RFD 538 § 4.3.2][1], a 30-second timeout is applied to
-                // each webhook delivery request.
-                //
-                // [1]: https://rfd.shared.oxide.computer/rfd/538#delivery-failure
-                .timeout(Duration::from_secs(30))
-                .build();
+            let request = request.body(body).build();
 
             let request = match request {
                 // We couldn't construct a request for some reason! This one's

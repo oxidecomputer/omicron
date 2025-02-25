@@ -967,7 +967,10 @@ impl BackgroundTasksInitializer {
                 period: period_secs,
                 task_impl: Box::new(
                     webhook_deliverator::WebhookDeliverator::new(
-                        datastore, cfg, nexus_id,
+                        datastore,
+                        cfg,
+                        nexus_id,
+                        args.webhook_delivery_client,
                     ),
                 ),
                 opctx: opctx.child(BTreeMap::new()),
@@ -1002,6 +1005,11 @@ pub struct BackgroundTasksData {
     pub saga_recovery: saga_recovery::SagaRecoveryHelpers<Arc<Nexus>>,
     /// Channel for TUF repository artifacts to be replicated out to sleds
     pub tuf_artifact_replication_rx: mpsc::Receiver<ArtifactsWithPlan>,
+    /// `reqwest::Client` for webhook delivery requests.
+    ///
+    /// This is shared with the external API as it's also used when sending
+    /// webhook liveness probe requests from the API.
+    pub webhook_delivery_client: reqwest::Client,
 }
 
 /// Starts the three DNS-propagation-related background tasks for either
