@@ -167,6 +167,11 @@ impl BlueprintZoneType {
         matches!(self, BlueprintZoneType::ExternalDns(_))
     }
 
+    /// Identifies whether this a CockroachDB zone
+    pub fn is_cockroach(&self) -> bool {
+        matches!(self, BlueprintZoneType::CockroachDb(_))
+    }
+
     /// Identifies whether this a Crucible (not Crucible pantry) zone
     pub fn is_crucible(&self) -> bool {
         matches!(self, BlueprintZoneType::Crucible(_))

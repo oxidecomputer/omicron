@@ -167,22 +167,14 @@ impl Sidecar {
         let (commands, commands_rx) = mpsc::unbounded_channel();
 
         let (local_addrs, inner_task, handler, responses_sent_count) =
-            if let Some(bind_addrs) = sidecar.common.bind_addrs {
+            if let Some(network_config) = &sidecar.common.network_config {
                 // bind to our two local "KSZ" ports
-                assert_eq!(bind_addrs.len(), 2);
                 let servers = future::try_join(
-                    UdpServer::new(
-                        bind_addrs[0],
-                        sidecar.common.multicast_addr,
-                        &log,
-                    ),
-                    UdpServer::new(
-                        bind_addrs[1],
-                        sidecar.common.multicast_addr,
-                        &log,
-                    ),
+                    UdpServer::new(&network_config[0], &log),
+                    UdpServer::new(&network_config[1], &log),
                 )
                 .await?;
+
                 let servers = [servers.0, servers.1];
                 let local_addrs =
                     [servers[0].local_addr(), servers[1].local_addr()];

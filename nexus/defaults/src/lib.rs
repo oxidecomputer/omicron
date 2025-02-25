@@ -5,11 +5,11 @@
 //! Default values for data in the Nexus API, when not provided explicitly in a request.
 
 use omicron_common::api::external;
-use once_cell::sync::Lazy;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
+use std::sync::LazyLock;
 
 /// The name provided for a default primary network interface for a guest
 /// instance.
@@ -18,12 +18,13 @@ pub const DEFAULT_PRIMARY_NIC_NAME: &str = "net0";
 /// The default IPv4 subnet range assigned to the default VPC Subnet, when
 /// the VPC is created, if one is not provided in the request. See
 /// <https://rfd.shared.oxide.computer/rfd/0021> for details.
-pub static DEFAULT_VPC_SUBNET_IPV4_BLOCK: Lazy<Ipv4Net> =
-    Lazy::new(|| Ipv4Net::new(Ipv4Addr::new(172, 30, 0, 0), 22).unwrap());
+pub static DEFAULT_VPC_SUBNET_IPV4_BLOCK: LazyLock<Ipv4Net> =
+    LazyLock::new(|| Ipv4Net::new(Ipv4Addr::new(172, 30, 0, 0), 22).unwrap());
 
-pub static DEFAULT_FIREWALL_RULES: Lazy<external::VpcFirewallRuleUpdateParams> =
-    Lazy::new(|| {
-        serde_json::from_str(r#"{
+pub static DEFAULT_FIREWALL_RULES: LazyLock<
+    external::VpcFirewallRuleUpdateParams,
+> = LazyLock::new(|| {
+    serde_json::from_str(r#"{
         "rules": [
             {
                 "name": "allow-internal-inbound",
@@ -57,7 +58,7 @@ pub static DEFAULT_FIREWALL_RULES: Lazy<external::VpcFirewallRuleUpdateParams> =
             }
         ]
     }"#).unwrap()
-    });
+});
 
 /// Generate a random VPC IPv6 prefix, in the range `fd00::/48`.
 pub fn random_vpc_ipv6_prefix() -> Result<Ipv6Net, external::Error> {
