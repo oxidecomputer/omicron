@@ -3333,6 +3333,18 @@ async fn test_instance_update_network_interface_transit_ips(
     let final_nic: InstanceNetworkInterface =
         object_get(client, &url_interface).await;
     assert_eq!(updated_nic.transit_ips, final_nic.transit_ips);
+
+    // As a final sanity test, we can still effectively remove spoof checking
+    // using the unspecified network address.
+    let allow_all = params::InstanceNetworkInterfaceUpdate {
+        transit_ips: vec!["0.0.0.0/0".parse().unwrap()],
+        ..base_update.clone()
+    };
+
+    let updated_nic: InstanceNetworkInterface =
+        object_put(client, &url_interface, &allow_all).await;
+
+    assert_eq!(allow_all.transit_ips, updated_nic.transit_ips);
 }
 
 /// This test specifically creates two NICs, the second of which will fail the

@@ -223,21 +223,19 @@ fn validate_transit_ips(ips: &[IpNet]) -> Result<(), Error> {
             (" block", "network")
         };
 
-        let base_ip = ip.addr();
-
-        if base_ip != ip.prefix() {
+        if !ip.is_network_address() {
             return Err(Error::invalid_request(format!(
                 "transit IP{count} {ip} has a non-zero host identifier"
             )));
         }
 
-        if base_ip.is_multicast() {
+        if ip.is_multicast() {
             return Err(Error::invalid_request(format!(
                 "transit IP{count} {ip} is a multicast {ty}"
             )));
         }
 
-        if base_ip.is_loopback() {
+        if ip.is_loopback() {
             return Err(Error::invalid_request(format!(
                 "transit IP{count} {ip} is a loopback {ty}"
             )));
@@ -246,25 +244,8 @@ fn validate_transit_ips(ips: &[IpNet]) -> Result<(), Error> {
         // Checking for overlapping CIDRs using all prior ips is O(n^2). This
         // is an infrequent check, and we can bound n if desired.
         // The fastest way to catch overlaps would be to make use of a trie for
-        // representing past `IpNet`s.
-        let overlap = &ips[..i].iter().find(|el| {
-            // Ensure ip and el have the same address family.
-            if ip.is_ipv4() != el.is_ipv4() {
-                return false;
-            }
-
-            let (maybe_parent, maybe_child) =
-                if ip.width() > el.width() { (*el, ip) } else { (ip, *el) };
-
-            // We know that prefix length checks will be valid here, given
-            // that we're reusing a valid prefix.
-            maybe_parent.prefix()
-                == IpNet::new_unchecked(
-                    maybe_child.addr(),
-                    maybe_parent.width(),
-                )
-                .prefix()
-        });
+        // representing past `IpNet`s per address family.
+        let overlap = &ips[..i].iter().find(|el| ip.overlaps(el));
 
         if let Some(past) = overlap {
             return Err(Error::invalid_request(format!(
