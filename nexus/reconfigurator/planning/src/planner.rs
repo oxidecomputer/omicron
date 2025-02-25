@@ -2676,8 +2676,8 @@ pub(crate) mod test {
 
         assert_eq!(summary.sleds_added.len(), 0);
         assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 4);
-        assert_eq!(summary.sleds_unchanged.len(), 1);
+        assert_eq!(summary.sleds_modified.len(), 3);
+        assert_eq!(summary.sleds_unchanged.len(), 2);
 
         assert_all_zones_expunged(&summary, expunged_sled_id, "expunged sled");
 
@@ -2687,7 +2687,6 @@ pub(crate) mod test {
         // non-provisionable sled should be unchanged.
         let mut remaining_modified_sleds = summary.sleds_modified.clone();
         remaining_modified_sleds.remove(&expunged_sled_id);
-        remaining_modified_sleds.remove(&decommissioned_sled_id);
 
         assert_eq!(remaining_modified_sleds.len(), 2);
         let mut total_new_nexus_zones = 0;
