@@ -15,7 +15,7 @@ use crate::db::error::ErrorHandler;
 use crate::db::model::to_db_sled_policy;
 use crate::db::model::AffinityPolicy;
 use crate::db::model::Sled;
-use crate::db::model::SledResource;
+use crate::db::model::SledResourceVmm;
 use crate::db::model::SledState;
 use crate::db::model::SledUpdate;
 use crate::db::pagination::paginated;
@@ -433,7 +433,7 @@ impl DataStore {
         propolis_id: PropolisUuid,
         resources: db::model::Resources,
         constraints: db::model::SledReservationConstraints,
-    ) -> CreateResult<db::model::SledResource> {
+    ) -> CreateResult<db::model::SledResourceVmm> {
         self.sled_reservation_create_inner(
             opctx,
             instance_id,
@@ -458,7 +458,8 @@ impl DataStore {
         propolis_id: PropolisUuid,
         resources: db::model::Resources,
         constraints: db::model::SledReservationConstraints,
-    ) -> Result<db::model::SledResource, SledReservationTransactionError> {
+    ) -> Result<db::model::SledResourceVmm, SledReservationTransactionError>
+    {
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -470,11 +471,11 @@ impl DataStore {
                 let resources = resources.clone();
 
                 async move {
-                    use db::schema::sled_resource::dsl as resource_dsl;
+                    use db::schema::sled_resource_vmm::dsl as resource_dsl;
                     // Check if resource ID already exists - if so, return it.
-                    let old_resource = resource_dsl::sled_resource
+                    let old_resource = resource_dsl::sled_resource_vmm
                         .filter(resource_dsl::id.eq(*propolis_id.as_untyped_uuid()))
-                        .select(SledResource::as_select())
+                        .select(SledResourceVmm::as_select())
                         .limit(1)
                         .load_async(&conn)
                         .await?;
@@ -525,7 +526,7 @@ impl DataStore {
                     // for this reservation.
                     let mut sled_targets = sled_dsl::sled
                         .left_join(
-                            resource_dsl::sled_resource
+                            resource_dsl::sled_resource_vmm
                                 .on(resource_dsl::sled_id.eq(sled_dsl::id)),
                         )
                         .group_by(sled_dsl::id)
@@ -586,18 +587,18 @@ impl DataStore {
                         err.bail(e)
                     })?;
 
-                    // Create a SledResource record, associate it with the target
+                    // Create a SledResourceVmm record, associate it with the target
                     // sled.
-                    let resource = SledResource::new_for_vmm(
+                    let resource = SledResourceVmm::new(
                         propolis_id,
                         instance_id,
                         sled_target,
                         resources,
                     );
 
-                    diesel::insert_into(resource_dsl::sled_resource)
+                    diesel::insert_into(resource_dsl::sled_resource_vmm)
                         .values(resource)
-                        .returning(SledResource::as_returning())
+                        .returning(SledResourceVmm::as_returning())
                         .get_result_async(&conn)
                         .await
                 }
@@ -614,11 +615,11 @@ impl DataStore {
     pub async fn sled_reservation_delete(
         &self,
         opctx: &OpContext,
-        resource_id: Uuid,
+        vmm_id: PropolisUuid,
     ) -> DeleteResult {
-        use db::schema::sled_resource::dsl as resource_dsl;
-        diesel::delete(resource_dsl::sled_resource)
-            .filter(resource_dsl::id.eq(resource_id))
+        use db::schema::sled_resource_vmm::dsl as resource_dsl;
+        diesel::delete(resource_dsl::sled_resource_vmm)
+            .filter(resource_dsl::id.eq(vmm_id.into_untyped_uuid()))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -1427,7 +1428,7 @@ pub(in crate::db::datastore) mod test {
             );
 
             datastore
-                .sled_reservation_delete(&opctx, resource.id)
+                .sled_reservation_delete(&opctx, resource.id.into())
                 .await
                 .unwrap();
         }
@@ -1695,7 +1696,7 @@ pub(in crate::db::datastore) mod test {
             opctx: &OpContext,
             datastore: &DataStore,
             all_groups: &AllGroups,
-        ) -> Result<db::model::SledResource, SledReservationTransactionError>
+        ) -> Result<db::model::SledResourceVmm, SledReservationTransactionError>
         {
             self.add_to_groups(&datastore, &all_groups).await;
             create_instance_reservation(&datastore, &opctx, self).await
@@ -1737,7 +1738,8 @@ pub(in crate::db::datastore) mod test {
         db: &DataStore,
         opctx: &OpContext,
         instance: &Instance,
-    ) -> Result<db::model::SledResource, SledReservationTransactionError> {
+    ) -> Result<db::model::SledResourceVmm, SledReservationTransactionError>
+    {
         // Pick a specific sled, if requested
         let constraints = db::model::SledReservationConstraintBuilder::new();
         let constraints = if let Some(sled_target) = instance.force_onto_sled {
