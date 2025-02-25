@@ -197,7 +197,7 @@ pub async fn realize_blueprint_with_overrides(
         nexus_id,
     );
 
-    let register_cockroach_output = register_cockroachdb_settings_step(
+    register_cockroachdb_settings_step(
         &engine.for_component(ExecutionComponent::Cockroach),
         &opctx,
         datastore,
@@ -207,7 +207,6 @@ pub async fn realize_blueprint_with_overrides(
     let output = register_finalize_step(
         &engine.for_component(ExecutionComponent::Cockroach),
         reassign_saga_output,
-        register_cockroach_output,
     );
 
     // All steps are registered, so execute the engine.
@@ -664,34 +663,24 @@ fn register_cockroachdb_settings_step<'a>(
     opctx: &'a OpContext,
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
-) -> StepHandle<Option<anyhow::Error>> {
+) {
     registrar
         .new_step(
             ExecutionStepId::Ensure,
             "Ensure CockroachDB settings",
             move |_cx| async move {
-                if let Err(error) =
+                let res =
                     cockroachdb::ensure_settings(&opctx, datastore, blueprint)
-                        .await
-                {
-                    // We treat errors as non-fatal here, but we still want to
-                    // log them. It's okay to just log the message here without
-                    // the chain of sources, since we collect the full chain in
-                    // the last step (`register_finalize_step`).
-                    let message = error.to_string();
-                    StepWarning::new(Some(error), message).into()
-                } else {
-                    StepSuccess::new(None).into()
-                }
+                        .await;
+                Ok(map_err_to_step_warning(res))
             },
         )
-        .register()
+        .register();
 }
 
 fn register_finalize_step(
     registrar: &ComponentRegistrar<'_, '_>,
     reassign_saga_output: StepHandle<ReassignSagaOutput>,
-    register_cockroach_output: StepHandle<Option<anyhow::Error>>,
 ) -> StepHandle<RealizeBlueprintOutput> {
     registrar
         .new_step(
@@ -700,13 +689,8 @@ fn register_finalize_step(
             move |cx| async move {
                 let reassign_saga_output =
                     reassign_saga_output.into_value(cx.token()).await;
-                let register_cockroach_output =
-                    register_cockroach_output.into_value(cx.token()).await;
 
                 let mut errors = Vec::new();
-                if let Some(error) = register_cockroach_output {
-                    errors.push(error);
-                }
                 if let Some(error) = reassign_saga_output.error {
                     errors.push(error);
                 }
