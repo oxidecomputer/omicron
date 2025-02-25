@@ -216,18 +216,17 @@ pub async fn realize_blueprint_with_overrides(
     Ok(output.into_value(result.token()).await)
 }
 
-// Convert a `Result<(), anyhow::Error>` nto a `StepResult` containing either a
-// `StepSuccess` or `StepWarning` and wrap it in `Result::Ok`.
+// Convert a `Result<(), anyhow::Error>` into a `StepResult` containing either a
+// `StepSuccess` or `StepWarning`.
 //
-// This is necessary because we never want to return an error from execution.
-// Doing so stops execution at the errored step and prevents other independent
-// steps after the errored step from executing.
-fn result_to_step_result(
+// Most steps use this to avoid stoping execution at the errored step, which
+// would prevent other independent steps after the errored step from executing.
+fn map_err_to_step_warning(
     res: Result<(), anyhow::Error>,
-) -> Result<StepResult<(), ReconfiguratorExecutionSpec>, anyhow::Error> {
+) -> StepResult<(), ReconfiguratorExecutionSpec> {
     match res {
-        Ok(_) => Ok(StepSuccess::new(()).build()),
-        Err(e) => Ok(StepWarning::new((), e.to_string()).build()),
+        Ok(_) => StepSuccess::new(()).build(),
+        Err(e) => StepWarning::new((), e.to_string()).build(),
     }
 }
 
@@ -342,7 +341,7 @@ fn register_deploy_disks_step<'a>(
                 )
                 .await
                 .map_err(merge_anyhow_list);
-                result_to_step_result(res)
+                Ok(map_err_to_step_warning(res))
             },
         )
         .register();
@@ -369,7 +368,7 @@ fn register_deploy_datasets_step<'a>(
                 )
                 .await
                 .map_err(merge_anyhow_list);
-                result_to_step_result(res)
+                Ok(map_err_to_step_warning(res))
             },
         )
         .register();
@@ -397,7 +396,7 @@ fn register_deploy_zones_step<'a>(
                 )
                 .await
                 .map_err(merge_anyhow_list);
-                result_to_step_result(res)
+                Ok(map_err_to_step_warning(res))
             },
         )
         .register();
@@ -429,7 +428,7 @@ fn register_plumb_firewall_rules_step<'a>(
                 )
                 .await
                 .context("failed to plumb service firewall rules to sleds");
-                result_to_step_result(res)
+                Ok(map_err_to_step_warning(res))
             },
         )
         .register();
@@ -461,7 +460,7 @@ fn register_dns_records_step<'a>(
                 )
                 .await
                 .map_err(|e| anyhow!("{}", InlineErrorChain::new(&e)));
-                result_to_step_result(res)
+                Ok(map_err_to_step_warning(res))
             },
         )
         .register();
@@ -489,7 +488,7 @@ fn register_cleanup_expunged_zones_step<'a>(
                 )
                 .await
                 .map_err(merge_anyhow_list);
-                result_to_step_result(res)
+                Ok(map_err_to_step_warning(res))
             },
         )
         .register();
@@ -519,7 +518,7 @@ fn register_decommission_sleds_step<'a>(
                 )
                 .await
                 .map_err(merge_anyhow_list);
-                result_to_step_result(res)
+                Ok(map_err_to_step_warning(res))
             },
         )
         .register();
@@ -545,7 +544,7 @@ fn register_decommission_disks_step<'a>(
                 )
                 .await
                 .map_err(merge_anyhow_list);
-                result_to_step_result(res)
+                Ok(map_err_to_step_warning(res))
             },
         )
         .register();
@@ -572,7 +571,7 @@ fn register_deploy_clickhouse_cluster_nodes_step<'a>(
                     )
                     .await
                     .map_err(merge_anyhow_list);
-                    return result_to_step_result(res);
+                    return Ok(map_err_to_step_warning(res));
                 }
 
                 StepSuccess::new(()).into()
@@ -600,7 +599,7 @@ fn register_deploy_clickhouse_single_node_step<'a>(
                         .filter(|(_, z)| z.zone_type.is_clickhouse()),
                 )
                 .await;
-                result_to_step_result(res)
+                Ok(map_err_to_step_warning(res))
             },
         )
         .register();
