@@ -3260,7 +3260,7 @@ mod tests {
             .service_create_network_interface_raw(
                 &opctx,
                 db_nic_from_zone(
-                    bp1.blueprint_zones[&sled_ids[2]].zones.first().unwrap(),
+                    bp1.sleds[&sled_ids[2]].zones_config.zones.first().unwrap(),
                 ),
             )
             .await
@@ -3274,10 +3274,11 @@ mod tests {
             let mut bp2 = bp1.clone();
             bp2.id = BlueprintUuid::new_v4();
             bp2.parent_blueprint_id = Some(bp1.id);
-            let sled2_zones = bp2
-                .blueprint_zones
+            let sled2_zones = &mut bp2
+                .sleds
                 .get_mut(&sled_ids[2])
-                .expect("zones for third sled");
+                .expect("config for third sled")
+                .zones_config;
             sled2_zones.zones.clear();
             sled2_zones.generation = sled2_zones.generation.next();
             bp2
@@ -3292,7 +3293,8 @@ mod tests {
         datastore
             .service_delete_network_interface(
                 &opctx,
-                bp1.blueprint_zones[&sled_ids[2]]
+                bp1.sleds[&sled_ids[2]]
+                    .zones_config
                     .zones
                     .first()
                     .unwrap()
@@ -3327,7 +3329,7 @@ mod tests {
                 .service_create_network_interface_raw(
                     &opctx,
                     db_nic_from_zone(
-                        bp3.blueprint_zones[&sled_id].zones.first().unwrap(),
+                        bp3.sleds[&sled_id].zones_config.zones.first().unwrap(),
                     ),
                 )
                 .await
@@ -3377,10 +3379,11 @@ mod tests {
             bp4.parent_blueprint_id = Some(bp3.id);
 
             // Sled index 3's zone is expunged (should be excluded).
-            let sled3 = bp4
-                .blueprint_zones
+            let sled3 = &mut bp4
+                .sleds
                 .get_mut(&sled_ids[3])
-                .expect("zones for sled");
+                .expect("config for sled")
+                .zones_config;
             sled3.zones.iter_mut().next().unwrap().disposition =
                 BlueprintZoneDisposition::Expunged {
                     as_of_generation: Generation::new(),

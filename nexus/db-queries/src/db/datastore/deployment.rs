@@ -57,6 +57,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
+use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::ClickhouseClusterConfig;
@@ -199,79 +200,83 @@ impl DataStore {
         let blueprint_id = BlueprintUuid::from(row_blueprint.id);
 
         let sled_states = blueprint
-            .sled_state
+            .sleds
             .iter()
-            .map(|(&sled_id, &state)| BpSledState {
+            .map(|(&sled_id, sled)| BpSledState {
                 blueprint_id: blueprint_id.into(),
                 sled_id: sled_id.into(),
-                sled_state: state.into(),
+                sled_state: sled.state.into(),
             })
             .collect::<Vec<_>>();
 
         let sled_omicron_physical_disks = blueprint
-            .blueprint_disks
+            .sleds
             .iter()
-            .map(|(sled_id, disks_config)| {
+            .map(|(sled_id, sled)| {
                 BpSledOmicronPhysicalDisks::new(
                     blueprint_id,
                     *sled_id,
-                    disks_config,
+                    &sled.disks_config,
                 )
             })
             .collect::<Vec<_>>();
         let omicron_physical_disks = blueprint
-            .blueprint_disks
+            .sleds
             .iter()
-            .flat_map(|(sled_id, disks_config)| {
-                disks_config.disks.iter().map(move |disk| {
+            .flat_map(|(sled_id, sled)| {
+                sled.disks_config.disks.iter().map(move |disk| {
                     BpOmicronPhysicalDisk::new(blueprint_id, *sled_id, disk)
                 })
             })
             .collect::<Vec<_>>();
 
         let sled_omicron_datasets = blueprint
-            .blueprint_datasets
+            .sleds
             .iter()
-            .map(|(sled_id, datasets_config)| {
+            .map(|(sled_id, sled)| {
                 BpSledOmicronDatasets::new(
                     blueprint_id,
                     *sled_id,
-                    datasets_config,
+                    &sled.datasets_config,
                 )
             })
             .collect::<Vec<_>>();
         let omicron_datasets = blueprint
-            .blueprint_datasets
+            .sleds
             .iter()
-            .flat_map(|(sled_id, datasets_config)| {
-                datasets_config.datasets.iter().map(move |dataset| {
+            .flat_map(|(sled_id, sled)| {
+                sled.datasets_config.datasets.iter().map(move |dataset| {
                     BpOmicronDataset::new(blueprint_id, *sled_id, dataset)
                 })
             })
             .collect::<Vec<_>>();
 
         let sled_omicron_zones = blueprint
-            .blueprint_zones
+            .sleds
             .iter()
-            .map(|(sled_id, zones_config)| {
-                BpSledOmicronZones::new(blueprint_id, *sled_id, zones_config)
+            .map(|(sled_id, sled)| {
+                BpSledOmicronZones::new(
+                    blueprint_id,
+                    *sled_id,
+                    &sled.zones_config,
+                )
             })
             .collect::<Vec<_>>();
         let omicron_zones = blueprint
-            .blueprint_zones
+            .sleds
             .iter()
-            .flat_map(|(sled_id, zones_config)| {
-                zones_config.zones.iter().map(move |zone| {
+            .flat_map(|(sled_id, sled)| {
+                sled.zones_config.zones.iter().map(move |zone| {
                     BpOmicronZone::new(blueprint_id, *sled_id, zone)
                         .map_err(|e| Error::internal_error(&format!("{:#}", e)))
                 })
             })
             .collect::<Result<Vec<_>, Error>>()?;
         let omicron_zone_nics = blueprint
-            .blueprint_zones
+            .sleds
             .values()
-            .flat_map(|zones_config| {
-                zones_config.zones.iter().filter_map(|zone| {
+            .flat_map(|sled| {
+                sled.zones_config.zones.iter().filter_map(|zone| {
                     BpOmicronZoneNic::new(blueprint_id, zone)
                         .with_context(|| format!("zone {}", zone.id))
                         .map_err(|e| Error::internal_error(&format!("{:#}", e)))
@@ -1056,12 +1061,45 @@ impl DataStore {
             }
         };
 
+        // Combine the four separately-stored maps into the one blueprint map.
+        let mut sleds = BTreeMap::new();
+        for (sled_id, zones_config) in blueprint_zones {
+            // Backwards compatibility: Before `BlueprintSledConfig` existed,
+            // the blueprint stored four independent maps, and had cases where
+            // the state, datasets, or disks could be omitted entirely. For now,
+            // we backfill these based on those cases (an omitted state could
+            // only happen if a sled was decommissioned, and omitted
+            // datasets/disks happened for expunged sleds - we can't correct for
+            // that, so we fill in an empty set and rely on expunged sleds not
+            // needing to know those details).
+            //
+            // Once we've archived all blueprints where this could be true, we
+            // should change these `unwrap_or`s to `bail!` instead.
+            let state = sled_state
+                .get(&sled_id)
+                .copied()
+                .unwrap_or(SledState::Decommissioned);
+            let disks_config = blueprint_disks
+                .remove(&sled_id)
+                .unwrap_or_else(BlueprintPhysicalDisksConfig::default);
+            let datasets_config = blueprint_datasets
+                .remove(&sled_id)
+                .unwrap_or_else(BlueprintDatasetsConfig::default);
+
+            sleds.insert(
+                sled_id,
+                BlueprintSledConfig {
+                    state,
+                    disks_config,
+                    datasets_config,
+                    zones_config,
+                },
+            );
+        }
+
         Ok(Blueprint {
             id: blueprint_id,
-            blueprint_zones,
-            blueprint_disks,
-            blueprint_datasets,
-            sled_state,
+            sleds,
             parent_blueprint_id,
             internal_dns_version,
             external_dns_version,
@@ -2014,6 +2052,7 @@ mod tests {
     use nexus_reconfigurator_planning::example::example;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_types::deployment::blueprint_zone_type;
+    use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneType;
@@ -2221,8 +2260,8 @@ mod tests {
             [blueprint1.id]
         );
 
-        // There ought to be no sleds or zones, and no parent blueprint.
-        assert_eq!(blueprint1.blueprint_zones.len(), 0);
+        // There ought to be no sleds and no parent blueprint.
+        assert_eq!(blueprint1.sleds.len(), 0);
         assert_eq!(blueprint1.parent_blueprint_id, None);
 
         // Trying to insert the same blueprint again should fail.
@@ -2272,13 +2311,10 @@ mod tests {
 
         // Check the number of blueprint elements against our collection.
         assert_eq!(
-            blueprint1.blueprint_zones.len(),
+            blueprint1.sleds.len(),
             planning_input.all_sled_ids(SledFilter::Commissioned).count(),
         );
-        assert_eq!(
-            blueprint1.blueprint_zones.len(),
-            collection.sled_agents.len()
-        );
+        assert_eq!(blueprint1.sleds.len(), collection.sled_agents.len());
         assert_eq!(
             blueprint1.all_omicron_zones(BlueprintZoneDisposition::any).count(),
             collection.all_omicron_zones().count()
@@ -2391,26 +2427,19 @@ mod tests {
 
         let diff = blueprint2.diff_since_blueprint(&blueprint1);
         println!("b1 -> b2: {}", diff.display());
-        println!("b1 disks: {:?}", blueprint1.blueprint_disks);
-        println!("b2 disks: {:?}", blueprint2.blueprint_disks);
+        println!("b1 sleds: {:?}", blueprint1.sleds);
+        println!("b2 sleds: {:?}", blueprint2.sleds);
         // Check that we added the new sled, as well as its disks and zones.
         assert_eq!(
             blueprint1
-                .blueprint_disks
-                .values()
-                .map(|c| c.disks.len())
-                .sum::<usize>()
+                .all_omicron_disks(BlueprintPhysicalDiskDisposition::any)
+                .count()
                 + new_sled_zpools.len(),
             blueprint2
-                .blueprint_disks
-                .values()
-                .map(|c| c.disks.len())
-                .sum::<usize>()
+                .all_omicron_disks(BlueprintPhysicalDiskDisposition::any)
+                .count()
         );
-        assert_eq!(
-            blueprint1.blueprint_zones.len() + 1,
-            blueprint2.blueprint_zones.len()
-        );
+        assert_eq!(blueprint1.sleds.len() + 1, blueprint2.sleds.len());
         assert_eq!(
             blueprint1.all_omicron_zones(BlueprintZoneDisposition::any).count()
                 + num_new_sled_zones,
@@ -2816,8 +2845,7 @@ mod tests {
             .await
             .expect("add range to service ip pool");
         let zone_id = OmicronZoneUuid::new_v4();
-        blueprint.blueprint_zones.insert(
-            sled_id,
+        blueprint.sleds.get_mut(&sled_id).unwrap().zones_config =
             BlueprintZonesConfig {
                 generation: omicron_common::api::external::Generation::new(),
                 zones: [BlueprintZoneConfig {
@@ -2859,8 +2887,7 @@ mod tests {
                 }]
                 .into_iter()
                 .collect(),
-            },
-        );
+            };
 
         blueprint
     }
