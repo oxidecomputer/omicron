@@ -422,13 +422,16 @@ async fn do_package(
     config: &Config,
     output_directory: &Utf8Path,
     disable_cache: bool,
+    no_rebuild: bool,
 ) -> Result<()> {
     create_dir_all(&output_directory)
         .map_err(|err| anyhow!("Cannot create output directory: {}", err))?;
 
     let ui = ProgressUI::new(config.log());
 
-    do_build(&config).await?;
+    if !no_rebuild {
+        do_build(&config).await?;
+    }
 
     let packages = config.packages_to_build();
 
@@ -881,10 +884,15 @@ async fn main() -> Result<()> {
             do_list_outputs(&get_config()?, &args.artifact_dir, intermediate)
                 .await?;
         }
-        SubCommand::Build(BuildCommand::Package { disable_cache, only }) => {
+        SubCommand::Build(BuildCommand::Package {
+            disable_cache,
+            only,
+            no_rebuild,
+        }) => {
             let mut config = get_config()?;
             config.set_only(only);
-            do_package(&config, &args.artifact_dir, disable_cache).await?;
+            do_package(&config, &args.artifact_dir, disable_cache, no_rebuild)
+                .await?;
         }
         SubCommand::Build(BuildCommand::Stamp { package_name, version }) => {
             do_stamp(
