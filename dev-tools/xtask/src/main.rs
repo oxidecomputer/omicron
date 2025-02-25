@@ -13,8 +13,7 @@ use std::env;
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 
-mod a4x2_deploy;
-mod a4x2_package;
+mod a4x2;
 mod check_features;
 mod check_workspace_deps;
 mod clippy;
@@ -43,8 +42,9 @@ struct Args {
 #[derive(Subcommand)]
 enum Cmds {
     /// Manage a4x2
+    #[cfg(target_os = "illumos")]
     #[clap(subcommand)]
-    A4x2(A4x2Cmds),
+    A4x2(a4x2::A4x2Cmds),
 
     /// Run Argon2 hash with specific parameters (quick performance check)
     Argon2(external::External),
@@ -115,20 +115,12 @@ enum Cmds {
     },
 }
 
-#[derive(Subcommand)]
-enum A4x2Cmds {
-    /// Generate a tarball with omicron packaged for deployment onto a4x2
-    Package(a4x2_package::A4x2PackageArgs),
-
-    /// Run a4x2 and deploy omicron onto it, and optionally run live-tests and end to end tests
-    Deploy(a4x2_deploy::A4x2DeployArgs),
-}
-
 fn main() -> Result<()> {
     let args = Args::parse();
     match args.cmd {
-        Cmds::A4x2(A4x2Cmds::Package(args)) => a4x2_package::run_cmd(args),
-        Cmds::A4x2(A4x2Cmds::Deploy(args)) => a4x2_deploy::run_cmd(args),
+        #[cfg(target_os = "illumos")]
+        Cmds::A4x2(args) => a4x2::run_cmd(args),
+
         Cmds::Argon2(external) => {
             external.cargo_args(["--release"]).exec_example("argon2")
         }

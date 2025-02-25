@@ -139,7 +139,7 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
         DeployCommand::Status => {
             // TODO: expand?
             print_a4x2_access_info(&sh, &env);
-        },
+        }
         DeployCommand::Start(_) | DeployCommand::RunTests(_) => {
             if !env.in_ci {
                 // Teardown previous deploy if it exists, before wiping the data
@@ -297,7 +297,11 @@ fn try_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
     // necessary so I'm leaving it out for now. We'll see if that's true.
     // So far it seems to be.
 
-    cmd!(sh, "pfexec route -n add {DEFAULT_OMICRON_SUBNET} {customer_edge_addr}").run()?;
+    cmd!(
+        sh,
+        "pfexec route -n add {DEFAULT_OMICRON_SUBNET} {customer_edge_addr}"
+    )
+    .run()?;
 
     // Not sure how this IP is fixed, but it is
     let api_url = DEFAULT_OMICRON_NEXUS_ADDR;
@@ -402,8 +406,11 @@ fn teardown_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
                     "teardown_a4x2: could not get gateway for a4x2 route from line {ln}"
                 ))?;
 
-                cmd!(sh, "pfexec route -n delete {DEFAULT_OMICRON_SUBNET} {gateway}")
-                    .run()?;
+                cmd!(
+                    sh,
+                    "pfexec route -n delete {DEFAULT_OMICRON_SUBNET} {gateway}"
+                )
+                .run()?;
 
                 had_gateway = true;
             }
