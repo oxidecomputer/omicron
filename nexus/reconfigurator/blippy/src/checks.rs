@@ -15,7 +15,6 @@ use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
-use nexus_types::external_api::views::SledState;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
@@ -42,54 +41,39 @@ fn check_multiple_map_keys(blippy: &mut Blippy<'_>) {
     // `blueprint_zones` should also have an entry in:
     //
     // * `sled_state`
-    // * `blueprint_disks` (only partially implemented - only active sleds are
-    //   present, which needs to be fixed before we can merge the maps)
-    // * `blueprint_datasets` (only partially implemented - only active sleds
-    //   are present, which needs to be fixed before we can merge the maps)
+    // * `blueprint_disks`
+    // * `blueprint_datasets`
     let blueprint = blippy.blueprint();
 
     for &sled_id in blueprint.blueprint_zones.keys() {
-        match blueprint.sled_state.get(&sled_id) {
-            Some(SledState::Active) => {
-                // sled is active; no note needed for `sled_state`, but we need
-                // to check `blueprint_datasets` and `blueprint_disks` too.
-                if !blueprint.blueprint_disks.contains_key(&sled_id) {
-                    blippy.push_sled_note(
-                        sled_id,
-                        Severity::BackwardsCompatibility,
-                        SledKind::MultimapInconsistency(
-                            MultimapInconsistency::PresentInZonesNotDisks,
-                        ),
-                    );
-                }
-                if !blueprint.blueprint_datasets.contains_key(&sled_id) {
-                    blippy.push_sled_note(
-                        sled_id,
-                        Severity::BackwardsCompatibility,
-                        SledKind::MultimapInconsistency(
-                            MultimapInconsistency::PresentInZonesNotDatasets,
-                        ),
-                    );
-                }
-            }
-            Some(SledState::Decommissioned) => {
-                // For now, we don't check `blueprint_disks` or
-                // `blueprint_datasets` because we know those entries are
-                // missing. But we should fix that!
-            }
-            None => {
-                blippy.push_sled_note(
-                    sled_id,
-                    Severity::BackwardsCompatibility,
-                    SledKind::MultimapInconsistency(
-                        MultimapInconsistency::PresentInZonesNotState,
-                    ),
-                );
+        if !blueprint.sled_state.contains_key(&sled_id) {
+            blippy.push_sled_note(
+                sled_id,
+                Severity::BackwardsCompatibility,
+                SledKind::MultimapInconsistency(
+                    MultimapInconsistency::PresentInZonesNotState,
+                ),
+            );
+        }
 
-                // Same as `Decommissioned`: For now, we don't check
-                // `blueprint_disks` or `blueprint_datasets` because we know
-                // those entries are missing. But we should fix that!
-            }
+        if !blueprint.blueprint_disks.contains_key(&sled_id) {
+            blippy.push_sled_note(
+                sled_id,
+                Severity::BackwardsCompatibility,
+                SledKind::MultimapInconsistency(
+                    MultimapInconsistency::PresentInZonesNotDisks,
+                ),
+            );
+        }
+
+        if !blueprint.blueprint_datasets.contains_key(&sled_id) {
+            blippy.push_sled_note(
+                sled_id,
+                Severity::BackwardsCompatibility,
+                SledKind::MultimapInconsistency(
+                    MultimapInconsistency::PresentInZonesNotDatasets,
+                ),
+            );
         }
     }
 
@@ -1859,33 +1843,27 @@ mod tests {
         let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME);
 
         let mut sled_ids = blueprint.blueprint_zones.keys();
-        let some_sled_0 = *sled_ids.next().expect("at least 1 sled");
-        let some_sled_1 = *sled_ids.next().expect("at least 2 sleds");
+        let some_sled = *sled_ids.next().expect("at least 1 sled");
 
-        // remove sled 0 from `sled_state`
+        // remove sled from each of the three non-`blueprint_zones` maps
         blueprint
             .sled_state
-            .remove(&some_sled_0)
+            .remove(&some_sled)
             .expect("removed sled 0 from sled_state");
-
-        // remove sled 1 from blueprint_disks and blueprint_datasets; we
-        // shouldn't need to use a second sled ID here, but for now we only
-        // expect disks/datasets entries for active sleds, so blippy only
-        // checks disks/datasets if the sled is in `sled_state`
-        blueprint
-            .blueprint_disks
-            .remove(&some_sled_1)
-            .expect("removed sled 1 from blueprint_disks");
         blueprint
             .blueprint_datasets
-            .remove(&some_sled_1)
+            .remove(&some_sled)
             .expect("removed sled 1 from blueprint_datasets");
+        blueprint
+            .blueprint_disks
+            .remove(&some_sled)
+            .expect("removed sled 1 from blueprint_disks");
 
         let expected_notes = [
             Note {
                 severity: Severity::BackwardsCompatibility,
                 kind: Kind::Sled {
-                    sled_id: some_sled_0,
+                    sled_id: some_sled,
                     kind: SledKind::MultimapInconsistency(
                         MultimapInconsistency::PresentInZonesNotState,
                     ),
@@ -1894,18 +1872,18 @@ mod tests {
             Note {
                 severity: Severity::BackwardsCompatibility,
                 kind: Kind::Sled {
-                    sled_id: some_sled_1,
+                    sled_id: some_sled,
                     kind: SledKind::MultimapInconsistency(
-                        MultimapInconsistency::PresentInZonesNotDisks,
+                        MultimapInconsistency::PresentInZonesNotDatasets,
                     ),
                 },
             },
             Note {
                 severity: Severity::BackwardsCompatibility,
                 kind: Kind::Sled {
-                    sled_id: some_sled_1,
+                    sled_id: some_sled,
                     kind: SledKind::MultimapInconsistency(
-                        MultimapInconsistency::PresentInZonesNotDatasets,
+                        MultimapInconsistency::PresentInZonesNotDisks,
                     ),
                 },
             },

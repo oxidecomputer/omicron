@@ -11,7 +11,7 @@ use crate::blueprint_editor::EditedSled;
 use crate::blueprint_editor::ExternalNetworkingChoice;
 use crate::blueprint_editor::ExternalNetworkingError;
 use crate::blueprint_editor::ExternalSnatNetworkingChoice;
-use crate::blueprint_editor::InternalDnsError;
+use crate::blueprint_editor::NoAvailableDnsSubnets;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
 use crate::planner::rng::PlannerRng;
@@ -60,6 +60,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -115,9 +116,11 @@ pub enum Error {
     #[error("error constructing resource allocator")]
     AllocatorInput(#[from] BlueprintResourceAllocatorInputError),
     #[error("error allocating internal DNS subnet")]
-    AllocateInternalDnsSubnet(#[from] InternalDnsError),
+    AllocateInternalDnsSubnet(#[from] NoAvailableDnsSubnets),
     #[error("error allocating external networking resources")]
     AllocateExternalNetworking(#[from] ExternalNetworkingError),
+    #[error("can only have {INTERNAL_DNS_REDUNDANCY} internal DNS servers")]
+    PolicySpecifiesTooManyInternalDnsServers,
 }
 
 /// Describes the result of an idempotent "ensure" operation
@@ -659,11 +662,8 @@ impl<'a> BlueprintBuilder<'a> {
             .map_err(Error::Planner)?;
 
             let allocator = BlueprintResourceAllocator::new(
-                self.sled_editors
-                    .iter()
-                    .map(|(sled_id, editor)| (*sled_id, editor)),
+                self.sled_editors.values(),
                 self.input.service_ip_pool_ranges().to_vec(),
-                self.input.target_internal_dns_zone_count(),
             )?;
 
             Ok::<_, Error>(allocator)
@@ -740,14 +740,6 @@ impl<'a> BlueprintBuilder<'a> {
                 );
             }
         }
-        // Preserving backwards compatibility, for now: datasets should only
-        // have entries for in-service sleds.
-        let in_service_sled_ids = self
-            .input
-            .all_sled_ids(SledFilter::InService)
-            .collect::<BTreeSet<_>>();
-        blueprint_datasets
-            .retain(|sled_id, _| in_service_sled_ids.contains(sled_id));
 
         // If we have the clickhouse cluster setup enabled via policy and we
         // don't yet have a `ClickhouseClusterConfiguration`, then we must
@@ -1426,25 +1418,6 @@ impl<'a> BlueprintBuilder<'a> {
 
         self.sled_add_zone(sled_id, zone)?;
         Ok(Ensure::Added)
-    }
-
-    /// Return the number of zones of a given kind that would be configured to
-    /// run on the given sled if this builder generated a blueprint.
-    ///
-    /// This value may change before a blueprint is actually generated if
-    /// further changes are made to the builder.
-    pub fn sled_num_running_zones_of_kind(
-        &self,
-        sled_id: SledUuid,
-        kind: ZoneKind,
-    ) -> usize {
-        let Some(editor) = self.sled_editors.get(&sled_id) else {
-            return 0;
-        };
-        editor
-            .zones(BlueprintZoneDisposition::is_in_service)
-            .filter(|z| z.zone_type.kind() == kind)
-            .count()
     }
 
     pub fn sled_add_zone_nexus(

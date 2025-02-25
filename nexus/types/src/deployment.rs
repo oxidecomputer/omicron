@@ -850,6 +850,22 @@ impl BlueprintZoneDisposition {
     pub fn is_expunged(self) -> bool {
         matches!(self, Self::Expunged { .. })
     }
+
+    /// Returns true if it's possible a zone with this disposition could be
+    /// running.
+    ///
+    /// This is true for both in-service zones and zones that have been expunged
+    /// but are not yet ready for cleanup (e.g., immediately after the planner
+    /// expunges a zone, there is a period of time where the zone continues to
+    /// run before execution notifies the sled to shut it down).
+    pub fn could_be_running(self) -> bool {
+        match self {
+            BlueprintZoneDisposition::InService => true,
+            BlueprintZoneDisposition::Expunged {
+                ready_for_cleanup, ..
+            } => !ready_for_cleanup,
+        }
+    }
 }
 
 impl fmt::Display for BlueprintZoneDisposition {
