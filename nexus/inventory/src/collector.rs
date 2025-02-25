@@ -409,6 +409,7 @@ mod test {
     use crate::StaticSledAgentEnumerator;
     use gateway_messages::SpPort;
     use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
+    use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use nexus_sled_agent_shared::inventory::OmicronZoneType;
     use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
     use nexus_types::inventory::Collection;
@@ -598,6 +599,7 @@ mod test {
                         address: zone_address,
                     },
                     filesystem_pool: Some(filesystem_pool),
+                    image_source: OmicronZoneImageSource::InstallDataset,
                 }],
             })
             .await

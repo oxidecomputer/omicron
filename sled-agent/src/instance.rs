@@ -47,7 +47,9 @@ use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
@@ -472,8 +474,31 @@ struct InstanceRunner {
 }
 
 impl InstanceRunner {
+    /// How long to wait for VMM shutdown to complete before forcefully
+    /// terminating the zone.
+    const STOP_GRACE_PERIOD: Duration = Duration::from_secs(60 * 10);
+
     async fn run(mut self, mut terminate_rx: mpsc::Receiver<TerminateRequest>) {
         use InstanceRequest::*;
+
+        // Timeout for stopping the instance gracefully.
+        //
+        // When we send Propolis a put-state request to transition to
+        // Stopped`, we start this timer. If Propolis does not report back
+        // that it has stopped the instance within `STOP_GRACE_PERIOD`, we
+        // will forcibly terminate the VMM. This is to ensure that a totally
+        // stuck VMM does not prevent the Propolis zone from being cleaned up.
+        let mut stop_timeout = None;
+        async fn stop_timeout_completed(
+            stop_timeout: &mut Option<Pin<Box<tokio::time::Sleep>>>,
+        ) {
+            if let Some(ref mut timeout) = stop_timeout {
+                timeout.await
+            } else {
+                std::future::pending().await
+            }
+        }
+
         while !self.should_terminate {
             tokio::select! {
                 biased;
@@ -539,6 +564,25 @@ impl InstanceRunner {
                         },
                     }
                 },
+
+                // We are waiting for the VMM to stop, and the grace period has
+                // elapsed without us hearing back from Propolis that it has
+                // stopped the instance. Time to terminate it violently!
+                //
+                // Note that this must be a lower priority in the `select!` than
+                // instance monitor requests, as we would prefer to honor a
+                // message from the instance monitor indicating a successful
+                // stop, even if we have reached the timeout.
+                _ = stop_timeout_completed(&mut stop_timeout) => {
+                    warn!(
+                        self.log,
+                        "Instance failed to stop within the grace period, \
+                         terminating it violently!",
+                    );
+                    let mark_failed = false;
+                    self.terminate(mark_failed).await;
+                }
+
                 // Requests to terminate the instance take priority over any
                 // other request to the instance.
                 request = terminate_rx.recv() => {
@@ -584,7 +628,22 @@ impl InstanceRunner {
                                 tx.send(Ok(self.current_state()))
                                     .map_err(|_| Error::FailedSendClientClosed)
                             },
-                            PutState{ state, tx } => {
+                            PutState { state, tx } => {
+                                // If we're going to stop the instance, start
+                                // the timeout after which we will forcefully
+                                // terminate the VMM.
+                                if let VmmStateRequested::Stopped = state {
+                                    // Only start the stop timeout if there
+                                    // isn't one already, so that additional
+                                    // requests to stop coming in don't reset
+                                    // the clock.
+                                    if stop_timeout.is_none() {
+                                        stop_timeout = Some(Box::pin(tokio::time::sleep(
+                                            Self::STOP_GRACE_PERIOD
+                                        )));
+                                    }
+                                }
+
                                 tx.send(self.put_state(state).await
                                     .map(|r| VmmPutStateResponse { updated_runtime: Some(r) })
                                     .map_err(|e| e.into()))
@@ -639,6 +698,7 @@ impl InstanceRunner {
 
             }
         }
+
         self.publish_state_to_nexus().await;
 
         // Okay, now that we've terminated the instance, drain any outstanding
@@ -2383,8 +2443,6 @@ mod tests {
 
     // note the "mock" here is different from the vnic/zone contexts above.
     // this is actually running code for a dropshot server from propolis.
-    // (might we want a locally-defined fake whose behavior we can control
-    // more directly from the test driver?)
     // TODO: factor out, this is also in sled-agent-sim.
     fn propolis_mock_server(
         log: &Logger,
@@ -2405,6 +2463,30 @@ mod tests {
         ));
 
         (srv, client)
+    }
+
+    async fn propolis_mock_set_mode(
+        client: &PropolisClient,
+        mode: propolis_mock_server::MockMode,
+    ) {
+        let url = format!("{}/mock/mode", client.baseurl());
+        client
+            .client()
+            .put(url)
+            .json(&mode)
+            .send()
+            .await
+            .expect("setting mock mode failed unexpectedly");
+    }
+
+    async fn propolis_mock_step(client: &PropolisClient) {
+        let url = format!("{}/mock/step", client.baseurl());
+        client
+            .client()
+            .put(url)
+            .send()
+            .await
+            .expect("single-stepping mock server failed unexpectedly");
     }
 
     async fn setup_storage_manager(log: &Logger) -> StorageManagerTestHarness {
@@ -2953,6 +3035,195 @@ mod tests {
         metrics_rx
             .try_recv()
             .expect_err("The metrics request queue should have one message");
+
+        storage_harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    // Tests a scenario in which a propolis-server process fails to stop in a
+    // timely manner (i.e. it's gotten stuck somehow). This test asserts that
+    // the sled-agent will eventually forcibly terminate the VMM process, tear
+    // down the zone, and tell Nexus that the VMM has been destroyed, even
+    // if Propolis can't shut itself down nicely.
+    #[tokio::test]
+    async fn test_instance_manager_stop_timeout() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_instance_manager_stop_timeout",
+        );
+        let log = logctx.log.new(o!(FileKv));
+
+        // automock'd things used during this test
+        let _mock_vnic_contexts = mock_vnic_contexts();
+        let _mock_zone_contexts = mock_zone_contexts();
+
+        let mut storage_harness = setup_storage_manager(&logctx.log).await;
+        let storage_handle = storage_harness.handle().clone();
+
+        let FakeNexusParts {
+            nexus_client,
+            mut state_rx,
+            _dns_server,
+            _nexus_server,
+        } = FakeNexusParts::new(&log).await;
+
+        let temp_guard = Utf8TempDir::new().unwrap();
+        let temp_dir = temp_guard.path().to_string();
+
+        let (services, _metrics_rx) = fake_instance_manager_services(
+            &log,
+            storage_handle,
+            nexus_client,
+            &temp_dir,
+        );
+        let InstanceManagerServices {
+            nexus_client,
+            vnic_allocator: _,
+            port_manager,
+            storage,
+            zone_bundler,
+            zone_builder_factory,
+            metrics_queue,
+        } = services;
+
+        let etherstub = Etherstub("mystub".to_string());
+
+        let vmm_reservoir_manager = VmmReservoirManagerHandle::stub_for_test();
+
+        let mgr = crate::instance_manager::InstanceManager::new(
+            logctx.log.new(o!("component" => "InstanceManager")),
+            nexus_client,
+            etherstub,
+            port_manager,
+            storage,
+            zone_bundler,
+            zone_builder_factory,
+            vmm_reservoir_manager,
+            metrics_queue,
+        )
+        .unwrap();
+
+        let (propolis_server, propolis_client) =
+            propolis_mock_server(&logctx.log);
+        let propolis_addr = propolis_server.local_addr();
+
+        let instance_id = InstanceUuid::new_v4();
+        let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
+        let zone_name = propolis_zone_name(&propolis_id);
+        let InstanceInitialState {
+            hardware,
+            vmm_runtime,
+            propolis_addr,
+            migration_id: _,
+        } = fake_instance_initial_state(propolis_addr);
+
+        let metadata = InstanceMetadata {
+            silo_id: Uuid::new_v4(),
+            project_id: Uuid::new_v4(),
+        };
+        let sled_identifiers = SledIdentifiers {
+            rack_id: Uuid::new_v4(),
+            sled_id: Uuid::new_v4(),
+            model: "fake-model".into(),
+            revision: 1,
+            serial: "fake-serial".into(),
+        };
+
+        mgr.ensure_registered(
+            propolis_id,
+            InstanceEnsureBody {
+                instance_id,
+                migration_id: None,
+                hardware,
+                vmm_runtime,
+                propolis_addr,
+                metadata,
+            },
+            sled_identifiers,
+        )
+        .await
+        .unwrap();
+
+        mgr.ensure_state(propolis_id, VmmStateRequested::Running)
+            .await
+            .unwrap();
+
+        timeout(
+            TIMEOUT_DURATION,
+            state_rx.wait_for(|maybe_state| match maybe_state {
+                ReceivedInstanceState::InstancePut(sled_inst_state) => {
+                    sled_inst_state.vmm_state.state == VmmState::Running
+                }
+                _ => false,
+            }),
+        )
+        .await
+        .expect("timed out waiting for InstanceState::Running in FakeNexus")
+        .expect("failed to receive VmmState' InstanceState");
+
+        // Place the mock propolis in single-step mode.
+        propolis_mock_set_mode(
+            &propolis_client,
+            propolis_mock_server::MockMode::SingleStep,
+        )
+        .await;
+
+        // Request the VMM stop
+        mgr.ensure_state(propolis_id, VmmStateRequested::Stopped)
+            .await
+            .unwrap();
+
+        // Single-step once.
+        propolis_mock_step(&propolis_client).await;
+
+        timeout(
+            TIMEOUT_DURATION,
+            state_rx.wait_for(|maybe_state| match maybe_state {
+                ReceivedInstanceState::InstancePut(sled_inst_state) => {
+                    sled_inst_state.vmm_state.state == VmmState::Stopping
+                }
+                _ => false,
+            }),
+        )
+        .await
+        .expect("timed out waiting for VmmState::Stopping in FakeNexus")
+        .expect("failed to receive FakeNexus' InstanceState");
+
+        // NOW WE STOP ADVANCING THE MOCK PROPOLIS STATE MACHINE --- IT WILL
+        // NEVER REACH `Stopped`.
+
+        // Expect that the `InstanceRunner` will attempt to halt and remove the
+        // zone.
+        let halt_ctx = MockZones::halt_and_remove_logged_context();
+        halt_ctx.expect().returning(move |_, name| {
+            assert_eq!(name, &zone_name);
+            Ok(())
+        });
+
+        // Now, pause time and advance the Tokio clock past the stop grace
+        // period. This should cause the stop timeout to fire, without requiring
+        // the test to actually wait for ten minutes.
+        tokio::time::pause();
+        tokio::time::advance(
+            super::InstanceRunner::STOP_GRACE_PERIOD + Duration::from_secs(1),
+        )
+        .await;
+        tokio::time::resume();
+
+        // The timeout should now fire and sled-agent will murder propolis,
+        // allowing the zone to be destroyed.
+
+        timeout(
+            TIMEOUT_DURATION,
+            state_rx.wait_for(|maybe_state| match maybe_state {
+                ReceivedInstanceState::InstancePut(sled_inst_state) => {
+                    sled_inst_state.vmm_state.state == VmmState::Destroyed
+                }
+                _ => false,
+            }),
+        )
+        .await
+        .expect("timed out waiting for VmmState::Stopped in FakeNexus")
+        .expect("failed to receive FakeNexus' InstanceState");
 
         storage_harness.cleanup().await;
         logctx.cleanup_successful();

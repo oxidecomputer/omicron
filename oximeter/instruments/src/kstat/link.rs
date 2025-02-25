@@ -231,7 +231,6 @@ mod tests {
                 rand::thread_rng()
                     .sample_iter(Uniform::new('a', 'z'))
                     .take(5)
-                    .map(char::from)
                     .collect::<String>(),
             );
             Self::create(&name);

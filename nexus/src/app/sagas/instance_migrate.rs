@@ -186,6 +186,7 @@ async fn sim_reserve_sled_resources(
 
     let resource = super::instance_common::reserve_vmm_resources(
         osagactx.nexus(),
+        InstanceUuid::from_untyped_uuid(params.instance.id()),
         propolis_id,
         u32::from(params.instance.ncpus.0 .0),
         params.instance.memory,
@@ -193,7 +194,7 @@ async fn sim_reserve_sled_resources(
     )
     .await?;
 
-    Ok(SledUuid::from_untyped_uuid(resource.sled_id))
+    Ok(resource.sled_id.into())
 }
 
 async fn sim_release_sled_resources(
@@ -202,10 +203,7 @@ async fn sim_release_sled_resources(
     let osagactx = sagactx.user_data();
     let propolis_id = sagactx.lookup::<PropolisUuid>("dst_propolis_id")?;
 
-    osagactx
-        .nexus()
-        .delete_sled_reservation(propolis_id.into_untyped_uuid())
-        .await?;
+    osagactx.nexus().delete_sled_reservation(propolis_id).await?;
     Ok(())
 }
 
