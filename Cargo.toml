@@ -675,7 +675,7 @@ toml = "0.8.19"
 toml_edit = "0.22.24"
 tough = { version = "0.19.0", features = [ "http" ] }
 transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
-trybuild = "1.0.101"
+trybuild = "1.0.103"
 tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }
 tui-tree-widget = "0.23.0"
