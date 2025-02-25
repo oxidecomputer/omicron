@@ -153,7 +153,7 @@ api_versions!([
 ])
 ----
 +
-Among other things, the `api_versions!` call defines constants like `VERSION_MY_CHANGE` that you'll use in the next step.
+Among other things, the `api_versions!` call turns these identifiers into named constants that you'll use in the next step.  For example, `(1, INITIAL)` defines a constant `VERSION_INITIAL` and `(2, MY_CHANGE)` defines the constant `VERSION_MY_CHANGE`.
 . Also in the API crate, make your API changes.  However, you have to preserve the behavior of previous versions of the API.
 +
 --
@@ -229,11 +229,15 @@ If you get any of this wrong, the tool should clearly report the problem.  For e
 
 Of course, we don't need or want to support each version of an API forever.  RFD 532 proposes supporting the one shipped in the last release, plus all the intermediate ones shipped in the current release.  The specific policy doesn't really matter here.
 
-To retire an old version, simply remove it from `api_versions!` and run `cargo xtask openapi generate`.
+To retire an old version:
+
+. Remove it from `api_versions!`.
+. Remove any references to its `VERSION_` identifier (these will show up as compile errors when you run `cargo xtask openapi generate`).
+. Run `cargo xtask openapi generate` to remove the old files.
 
 === Converting lockstep APIs to be versioned
 
-An existing lockstep API can be made versioned.  We'll use the example of `dns-server`:
+An existing lockstep API can be made versioned.  You would do this when transitioning an API to support online update.  We'll use the example of `dns-server`:
 
 . Initially, its OpenAPI document is stored in `openapi/dns-server.json`.
 . Run `git rm -f openapi/dns-server.json`.

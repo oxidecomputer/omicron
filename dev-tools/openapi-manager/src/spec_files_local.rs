@@ -6,7 +6,7 @@
 //! tree
 
 use crate::{
-    apis::{versioned_api_is_latest_symlink, ApiIdent, ManagedApis},
+    apis::{ApiIdent, ManagedApis},
     environment::ErrorAccumulator,
     spec_files_generic::{
         ApiFiles, ApiLoad, ApiSpecFile, ApiSpecFilesBuilder, AsRawFiles,
@@ -189,7 +189,7 @@ fn load_versioned_directory<T: ApiLoad + AsRawFiles>(
     for entry in entries {
         let file_name = entry.file_name();
 
-        if versioned_api_is_latest_symlink(&ident, file_name) {
+        if ident.versioned_api_is_latest_symlink(file_name) {
             // We should be looking at a symlink.
             let symlink = match entry.path().read_link_utf8() {
                 Ok(s) => s,

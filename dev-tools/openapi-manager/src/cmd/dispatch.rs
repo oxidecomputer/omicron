@@ -75,13 +75,15 @@ pub struct BlessedSourceArgs {
     /// then it will look at the merge-base of HEAD and "main", in directory
     /// "openapi" in that commit.
     ///
+    /// PATH is optional and defaults to "openapi".
+    ///
     /// The default behavior is equivalent to `--blessed-from-git=main:openapi`.
     /// Specifying this option is mainly useful if your branch's parent branch
     /// is *not* `main`.
     #[clap(
         long,
         env("OPENAPI_MGR_BLESSED_FROM_GIT"),
-        value_name("REVISION:PATH")
+        value_name("REVISION[:PATH]")
     )]
     pub blessed_from_git: Option<String>,
 
@@ -125,8 +127,6 @@ impl TryFrom<BlessedSourceArgs> for BlessedSource {
 pub struct GeneratedSourceArgs {
     /// Instead of generating OpenAPI documents directly from the API
     /// implementation, load OpenAPI documents from this directory.
-    ///
-    ///
     #[clap(long, value_name("DIRECTORY"))]
     pub generated_from_dir: Option<Utf8PathBuf>,
 }
@@ -224,7 +224,7 @@ impl CheckArgs {
 }
 
 // This code is not 0 or 1 (general anyhow errors) and indicates out-of-date.
-pub(crate) const NEEDS_UPDATE_EXIT_CODE: u8 = 2;
+pub(crate) const NEEDS_UPDATE_EXIT_CODE: u8 = 4;
 
 // This code indicates failures during generation, e.g. validation errors.
 pub(crate) const FAILURE_EXIT_CODE: u8 = 100;

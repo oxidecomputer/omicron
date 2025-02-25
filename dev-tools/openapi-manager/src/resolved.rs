@@ -4,7 +4,6 @@
 
 //! Resolve different sources of API information (blessed, local, upstream)
 
-use crate::apis::versioned_api_latest_symlink;
 use crate::apis::ApiIdent;
 use crate::apis::ManagedApi;
 use crate::apis::ManagedApis;
@@ -426,7 +425,7 @@ impl Fix<'_> {
                     CheckStale::New { expected } => expected,
                 };
                 Ok(vec![format!(
-                    "write {}: {:?}",
+                    "wrote {}: {:?}",
                     &path,
                     overwrite_file(&path, expected_contents)?
                 )])
@@ -434,7 +433,7 @@ impl Fix<'_> {
             Fix::FixSymlink { api_ident, link } => {
                 let path = root
                     .join(api_ident.to_string())
-                    .join(versioned_api_latest_symlink(api_ident));
+                    .join(api_ident.versioned_api_latest_symlink());
                 // We want the link to contain a relative path to a file in the
                 // same directory so that it's correct no matter where it's
                 // resolved from.
@@ -449,7 +448,7 @@ impl Fix<'_> {
                     }
                 };
                 fs_err::os::unix::fs::symlink(&target, &path)?;
-                Ok(vec![format!("write link {} -> {}", path, target)])
+                Ok(vec![format!("wrote link {} -> {}", path, target)])
             }
         }
     }
@@ -707,7 +706,7 @@ fn resolve_api_lockstep<'a>(
                 // Structurally, it's not possible to have more than one
                 // local file for a lockstep API because the file is named
                 // by the API itself.
-                panic!(
+                unreachable!(
                     "unexpectedly found more than one local OpenAPI \
                      document for lockstep API {}: {:?}",
                     api.ident(),

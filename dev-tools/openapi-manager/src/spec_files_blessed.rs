@@ -6,7 +6,7 @@
 //! source
 
 use crate::{
-    apis::{versioned_api_is_latest_symlink, ApiIdent, ManagedApis},
+    apis::{ApiIdent, ManagedApis},
     environment::ErrorAccumulator,
     git::{git_ls_tree, git_merge_base_head, git_show_file, GitRevision},
     spec_files_generic::{
@@ -122,7 +122,7 @@ impl BlessedFiles {
         let files_found = git_ls_tree(&commit, directory)?;
         for f in files_found {
             // We should be looking at either a single-component path
-            // ("api.json") or a file inside one level of directory hierarhcy
+            // ("api.json") or a file inside one level of directory hierarchy
             // ("api/api-1.2.3-hash.json").  Figure out which case we're in.
             let parts: Vec<_> = f.iter().collect();
             if parts.is_empty() || parts.len() > 2 {
@@ -142,7 +142,7 @@ impl BlessedFiles {
                 }
             } else if parts.len() == 2 {
                 if let Some(ident) = api_files.versioned_directory(parts[0]) {
-                    if versioned_api_is_latest_symlink(&ident, parts[1]) {
+                    if ident.versioned_api_is_latest_symlink(parts[1]) {
                         // This is the "latest" symlink.  We could dereference
                         // it and report it here, but it's not relevant for
                         // anything this tool does, so we don't bother.

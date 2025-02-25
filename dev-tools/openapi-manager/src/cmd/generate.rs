@@ -211,7 +211,10 @@ pub(crate) fn generate_impl(
     }
 
     if nproblems > 0 {
-        bail!("found problems after successfully fixing everything");
+        bail!(
+            "ERROR: found problems after successfully fixing everything \
+             (this is a BUG!)"
+        );
     } else {
         print_final_status(
             &styles,
@@ -258,7 +261,7 @@ fn fix_problems<'a, T>(
 ) where
     T: IntoIterator<Item = &'a Problem<'a>>,
 {
-    for p in problems.into_iter() {
+    for p in problems {
         // We should have already bailed out if there were any unfixable
         // problems.
         let fix = p.fix().expect("attempting to fix unfixable problem");
