@@ -271,16 +271,21 @@ fn register_support_bundle_failure_step<'a>(
     registrar
         .new_step(
             ExecutionStepId::Ensure,
-            "Mark support bundles as failed if they rely on an expunged disk or sled",
+            "Mark support bundles as failed if they rely on \
+             an expunged disk or sled",
             move |_cx| async move {
-                datastore
-                    .support_bundle_fail_expunged(
-                        &opctx, blueprint, nexus_id
-                    )
+                let res = match datastore
+                    .support_bundle_fail_expunged(&opctx, blueprint, nexus_id)
                     .await
-                    .map_err(|err| anyhow!(err))?;
-
-                StepSuccess::new(()).into()
+                {
+                    Ok(report) => StepSuccess::new(())
+                        .with_message(format!(
+                            "support bundle expunge report: {report:?}"
+                        ))
+                        .build(),
+                    Err(err) => StepWarning::new((), err.to_string()).build(),
+                };
+                Ok(res)
             },
         )
         .register();
@@ -382,7 +387,7 @@ fn register_deploy_zones_step<'a>(
             "Deploy Omicron zones",
             move |cx| async move {
                 let sleds_by_id = sleds.into_value(cx.token()).await;
-                omicron_zones::deploy_zones(
+                let res = omicron_zones::deploy_zones(
                     &opctx,
                     &sleds_by_id,
                     blueprint
@@ -391,9 +396,8 @@ fn register_deploy_zones_step<'a>(
                         .map(|(sled_id, sled)| (*sled_id, &sled.zones_config)),
                 )
                 .await
-                .map_err(merge_anyhow_list)?;
-
-                StepSuccess::new(()).into()
+                .map_err(merge_anyhow_list);
+                result_to_step_result(res)
             },
         )
         .register();
@@ -475,7 +479,7 @@ fn register_cleanup_expunged_zones_step<'a>(
             ExecutionStepId::Remove,
             "Cleanup expunged zones",
             move |_cx| async move {
-                omicron_zones::clean_up_expunged_zones(
+                let res = omicron_zones::clean_up_expunged_zones(
                     &opctx,
                     datastore,
                     resolver,
@@ -484,9 +488,8 @@ fn register_cleanup_expunged_zones_step<'a>(
                     ),
                 )
                 .await
-                .map_err(merge_anyhow_list)?;
-
-                StepSuccess::new(()).into()
+                .map_err(merge_anyhow_list);
+                result_to_step_result(res)
             },
         )
         .register();
@@ -616,11 +619,6 @@ fn register_reassign_sagas_step<'a>(
     blueprint: &'a Blueprint,
     nexus_id: OmicronZoneUuid,
 ) -> StepHandle<ReassignSagaOutput> {
-    // For this and subsequent steps, we'll assume that any errors that we
-    // encounter do *not* require stopping execution.  We'll just accumulate
-    // them and return them all at the end.
-    //
-    // TODO We should probably do this with more of the errors above, too.
     registrar
         .new_step(
             ExecutionStepId::Ensure,
