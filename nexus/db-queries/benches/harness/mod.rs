@@ -35,15 +35,32 @@ struct ContentionQuery {
 
 const QUERIES: [ContentionQuery; 4] = [
     ContentionQuery {
-        sql: "SELECT table_name, index_name, num_contention_events::TEXT FROM crdb_internal.cluster_contended_indexes",
+        sql: "SELECT
+            table_name, index_name, num_contention_events::TEXT
+            FROM crdb_internal.cluster_contended_indexes",
         description: "Indexes which are experiencing contention",
     },
     ContentionQuery {
-        sql: "SELECT table_name,num_contention_events::TEXT FROM crdb_internal.cluster_contended_tables",
+        sql: "SELECT
+            table_name,num_contention_events::TEXT
+            FROM crdb_internal.cluster_contended_tables",
         description: "Tables which are experiencing contention",
     },
     ContentionQuery {
-        sql: "WITH c AS (SELECT DISTINCT ON (table_id, index_id) table_id, index_id, num_contention_events AS events, cumulative_contention_time AS time FROM crdb_internal.cluster_contention_events) SELECT i.descriptor_name as table_name, i.index_name, c.events::TEXT, c.time::TEXT FROM crdb_internal.table_indexes AS i JOIN c ON i.descriptor_id = c.table_id AND i.index_id = c.index_id ORDER BY c.time DESC LIMIT 10;",
+        sql: "WITH c AS
+            (SELECT DISTINCT ON (table_id, index_id)
+                table_id,
+                index_id,
+                num_contention_events AS events,
+                cumulative_contention_time AS time
+            FROM crdb_internal.cluster_contention_events)
+            SELECT
+                i.descriptor_name as table_name,
+                i.index_name,
+                c.events::TEXT,
+                c.time::TEXT FROM crdb_internal.table_indexes AS i
+            JOIN c ON i.descriptor_id = c.table_id AND i.index_id = c.index_id
+            ORDER BY c.time DESC LIMIT 10;",
         description: "Top ten longest contention events, grouped by table + index",
     },
     ContentionQuery {
