@@ -180,6 +180,13 @@ impl SledEditor {
         }
     }
 
+    pub fn state(&self) -> SledState {
+        match &self.0 {
+            InnerSledEditor::Active(_) => SledState::Active,
+            InnerSledEditor::Decommissioned(edited_sled) => edited_sled.state,
+        }
+    }
+
     pub fn edit_counts(&self) -> SledEditCounts {
         match &self.0 {
             InnerSledEditor::Active(editor) => editor.edit_counts(),
@@ -334,6 +341,13 @@ impl SledEditor {
         zone_id: &OmicronZoneUuid,
     ) -> Result<bool, SledEditError> {
         self.as_active_mut()?.expunge_zone(zone_id)
+    }
+
+    pub fn mark_expunged_zone_ready_for_cleanup(
+        &mut self,
+        zone_id: &OmicronZoneUuid,
+    ) -> Result<bool, SledEditError> {
+        self.as_active_mut()?.mark_expunged_zone_ready_for_cleanup(zone_id)
     }
 
     /// Backwards compatibility / test helper: If we're given a blueprint that
@@ -599,6 +613,15 @@ impl ActiveSledEditor {
         }
 
         Ok(did_expunge)
+    }
+
+    pub fn mark_expunged_zone_ready_for_cleanup(
+        &mut self,
+        zone_id: &OmicronZoneUuid,
+    ) -> Result<bool, SledEditError> {
+        let did_mark_ready =
+            self.zones.mark_expunged_zone_ready_for_cleanup(zone_id)?;
+        Ok(did_mark_ready)
     }
 
     /// Backwards compatibility / test helper: If we're given a blueprint that

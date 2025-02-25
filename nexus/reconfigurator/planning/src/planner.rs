@@ -31,6 +31,7 @@ use nexus_types::external_api::views::PhysicalDiskPolicy;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
+use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::error;
@@ -95,8 +96,17 @@ impl<'a> Planner<'a> {
     }
 
     pub fn plan(mut self) -> Result<Blueprint, Error> {
+        self.check_input_validity()?;
         self.do_plan()?;
         Ok(self.blueprint.build())
+    }
+
+    fn check_input_validity(&self) -> Result<(), Error> {
+        if self.input.target_internal_dns_zone_count() > INTERNAL_DNS_REDUNDANCY
+        {
+            return Err(Error::PolicySpecifiesTooManyInternalDnsServers);
+        }
+        Ok(())
     }
 
     fn do_plan(&mut self) -> Result<(), Error> {
@@ -355,12 +365,78 @@ impl<'a> Planner<'a> {
                         ZoneExpungeReason::ClickhouseSingleNodeDisabled,
                     )?;
                 }
+
+                // Are there any expunged zones that haven't yet been marked as
+                // ready for cleanup? If so, check whether we can mark them,
+                // which requires us to check the inventory collection for two
+                // properties:
+                //
+                // 1. The zone is not running
+                // 2. The zone config generation from the sled is at least as
+                //    high as the generation in which the zone was expunged
+                self.check_zones_eligible_for_cleanup(sled_id)?;
             }
             // Has the sled been expunged? If so, expunge everything on this
             // sled from the blueprint.
             SledPolicy::Expunged => {
-                self.blueprint.expunge_sled(sled_id)?;
+                match self.blueprint.current_sled_state(sled_id)? {
+                    SledState::Active => {
+                        self.blueprint.expunge_sled(sled_id)?;
+                    }
+                    // If the sled is decommissioned, we've already expunged it
+                    // in a prior planning run.
+                    SledState::Decommissioned => (),
+                }
             }
+        }
+
+        Ok(())
+    }
+
+    fn check_zones_eligible_for_cleanup(
+        &mut self,
+        sled_id: SledUuid,
+    ) -> Result<(), Error> {
+        let Some(sled_inv) = self.inventory.sled_agents.get(&sled_id) else {
+            warn!(
+                self.log,
+                "skipping zones eligible for cleanup check \
+                (sled not present in latest inventory collection)";
+                "sled_id" => %sled_id,
+            );
+            return Ok(());
+        };
+
+        let mut zones_ready_for_cleanup = Vec::new();
+        for zone in self
+            .blueprint
+            .current_sled_zones(sled_id, BlueprintZoneDisposition::is_expunged)
+        {
+            match zone.disposition {
+                BlueprintZoneDisposition::Expunged {
+                    as_of_generation,
+                    ready_for_cleanup,
+                } if !ready_for_cleanup => {
+                    if sled_inv.omicron_zones.generation >= as_of_generation
+                        && !sled_inv
+                            .omicron_zones
+                            .zones
+                            .iter()
+                            .any(|z| z.id == zone.id)
+                    {
+                        zones_ready_for_cleanup.push(zone.id);
+                    }
+                }
+                BlueprintZoneDisposition::InService
+                | BlueprintZoneDisposition::Expunged { .. } => continue,
+            }
+        }
+
+        if !zones_ready_for_cleanup.is_empty() {
+            self.blueprint.mark_expunged_zones_ready_for_cleanup(
+                sled_id,
+                &zones_ready_for_cleanup,
+            )?;
         }
 
         Ok(())
@@ -659,10 +735,23 @@ impl<'a> Planner<'a> {
         // decommissioned.
         let mut num_existing_kind_zones = 0;
         for sled_id in self.input.all_sled_ids(SledFilter::InService) {
-            let num_zones_of_kind = self
+            let zone_kind = ZoneKind::from(zone_kind);
+
+            // Internal DNS is special: if we have an expunged internal DNS zone
+            // that might still be running, we want to count it here: we can't
+            // reuse its subnet until it's ready for cleanup. For all other
+            // services, we want to go ahead and replace them if they're below
+            // the desired count based on purely "in service vs expunged".
+            let disposition_filter = if zone_kind == ZoneKind::InternalDns {
+                BlueprintZoneDisposition::could_be_running
+            } else {
+                BlueprintZoneDisposition::is_in_service
+            };
+            num_existing_kind_zones += self
                 .blueprint
-                .sled_num_running_zones_of_kind(sled_id, zone_kind.into());
-            num_existing_kind_zones += num_zones_of_kind;
+                .current_sled_zones(sled_id, disposition_filter)
+                .filter(|z| z.zone_type.kind() == zone_kind)
+                .count();
         }
 
         let target_count = match zone_kind {
@@ -907,6 +996,7 @@ pub(crate) mod test {
     use clickhouse_admin_types::KeeperId;
     use expectorate::assert_contents;
     use nexus_types::deployment::blueprint_zone_type;
+    use nexus_types::deployment::blueprint_zone_type::InternalDns;
     use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::BlueprintDiffSummary;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
@@ -1523,7 +1613,7 @@ pub(crate) mod test {
             BlueprintZoneDisposition::Expunged {
                 as_of_generation: blueprint2.blueprint_zones[&sled_id]
                     .generation,
-                ready_for_cleanup: false,
+                ready_for_cleanup: true,
             }
         );
 
@@ -1721,7 +1811,7 @@ pub(crate) mod test {
                             as_of_generation: blueprint3.blueprint_zones
                                 [&sled_id]
                                 .generation,
-                            ready_for_cleanup: false,
+                            ready_for_cleanup: true,
                         }
                         && zone.zone_type.is_external_dns()
                 })
@@ -2409,10 +2499,12 @@ pub(crate) mod test {
         assert_eq!(zones_on_pool, zones_expunged);
 
         // We also should have added back a new zone for each kind that was
-        // removed, except the Crucible zone (which is specific to the disk).
-        // Remove the Crucible zone from our original count, then check against
-        // the added zones count.
+        // removed, except the Crucible zone (which is specific to the disk) and
+        // the internal DNS zone (which can't be replaced until the original
+        // zone is ready for cleanup per inventory). Remove these from our
+        // original counts, then check against the added zones count.
         assert_eq!(zone_kinds_on_pool.remove(&ZoneKind::Crucible), Some(1));
+        assert_eq!(zone_kinds_on_pool.remove(&ZoneKind::InternalDns), Some(1));
         let mut zone_kinds_added = BTreeMap::new();
         for zones in summary.diff.blueprint_zones.modified_values_diff() {
             for (_, z) in zones.zones.added {
@@ -2762,7 +2854,7 @@ pub(crate) mod test {
                 *modified_zone.disposition.after,
                 BlueprintZoneDisposition::Expunged {
                     as_of_generation: *modified_zones.generation.after,
-                    ready_for_cleanup: false,
+                    ready_for_cleanup: true,
                 },
                 "for {desc}, zone {} should have been marked expunged",
                 modified_zone.id.after
@@ -3905,6 +3997,359 @@ pub(crate) mod test {
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
                 .filter(|(_, z)| z.zone_type.is_clickhouse())
                 .count()
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_zones_marked_ready_for_cleanup_based_on_inventory() {
+        static TEST_NAME: &str =
+            "planner_zones_marked_ready_for_cleanup_based_on_inventory";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = logctx.log.clone();
+
+        // Use our example system.
+        let (mut collection, input, blueprint1) = example(&log, TEST_NAME);
+
+        // Find a Nexus zone we'll use for our test.
+        let (sled_id, nexus_config) = blueprint1
+            .blueprint_zones
+            .iter()
+            .find_map(|(sled_id, zones_config)| {
+                let nexus = zones_config
+                    .zones
+                    .iter()
+                    .find(|z| z.zone_type.is_nexus())?;
+                Some((*sled_id, nexus.clone()))
+            })
+            .expect("found a Nexus zone");
+
+        // Expunge the disk used by the Nexus zone.
+        let input = {
+            let nexus_zpool = nexus_config
+                .filesystem_pool
+                .as_ref()
+                .expect("Nexus has a filesystem pool");
+            let mut builder = input.into_builder();
+            builder
+                .sleds_mut()
+                .get_mut(&sled_id)
+                .expect("input has all sleds")
+                .resources
+                .zpools
+                .get_mut(&nexus_zpool.id())
+                .expect("input has Nexus disk")
+                .policy = PhysicalDiskPolicy::Expunged;
+            builder.build()
+        };
+
+        // Run the planner. It should expunge all zones on the disk we just
+        // expunged, including our Nexus zone, but not mark them as ready for
+        // cleanup yet.
+        let blueprint2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1,
+            &input,
+            "expunge disk",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
+        .plan()
+        .expect("planned");
+
+        // Helper to extract the Nexus zone's disposition in a blueprint.
+        let get_nexus_disposition = |bp: &Blueprint| {
+            bp.blueprint_zones.get(&sled_id).unwrap().zones.iter().find_map(
+                |z| {
+                    if z.id == nexus_config.id {
+                        Some(z.disposition)
+                    } else {
+                        None
+                    }
+                },
+            )
+        };
+
+        // This sled's zone config generation should have been bumped...
+        let bp2_generation =
+            blueprint2.blueprint_zones.get(&sled_id).unwrap().generation;
+        assert_eq!(
+            blueprint1.blueprint_zones.get(&sled_id).unwrap().generation.next(),
+            bp2_generation
+        );
+        // ... and the Nexus should should have the disposition we expect.
+        assert_eq!(
+            get_nexus_disposition(&blueprint2),
+            Some(BlueprintZoneDisposition::Expunged {
+                as_of_generation: bp2_generation,
+                ready_for_cleanup: false,
+            })
+        );
+
+        // Running the planner again should make no changes until the inventory
+        // reports that the zone is not running and that the sled has seen a
+        // new-enough generation. Try three variants that should do nothing:
+        //
+        // * same inventory as above
+        // * inventory reports a new generation (but zone still running)
+        // * inventory reports zone not running (but still the old generation)
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint2,
+            &input,
+            &collection,
+            TEST_NAME,
+        );
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint2,
+            &input,
+            &{
+                let mut collection = collection.clone();
+                collection
+                    .sled_agents
+                    .get_mut(&sled_id)
+                    .unwrap()
+                    .omicron_zones
+                    .generation = bp2_generation;
+                collection
+            },
+            TEST_NAME,
+        );
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint2,
+            &input,
+            &{
+                let mut collection = collection.clone();
+                collection
+                    .sled_agents
+                    .get_mut(&sled_id)
+                    .unwrap()
+                    .omicron_zones
+                    .zones
+                    .retain(|z| z.id != nexus_config.id);
+                collection
+            },
+            TEST_NAME,
+        );
+
+        // Now make both changes to the inventory.
+        {
+            let zones = &mut collection
+                .sled_agents
+                .get_mut(&sled_id)
+                .unwrap()
+                .omicron_zones;
+            zones.generation = bp2_generation;
+            zones.zones.retain(|z| z.id != nexus_config.id);
+        }
+
+        // Run the planner. It mark our Nexus zone as ready for cleanup now that
+        // the inventory conditions are satisfied.
+        let blueprint3 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint2,
+            &input,
+            "removed Nexus zone from inventory",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
+        .plan()
+        .expect("planned");
+
+        assert_eq!(
+            get_nexus_disposition(&blueprint3),
+            Some(BlueprintZoneDisposition::Expunged {
+                as_of_generation: bp2_generation,
+                ready_for_cleanup: true,
+            })
+        );
+
+        // ready_for_cleanup changes should not bump the config generation,
+        // since it doesn't affect what's sent to sled-agent.
+        assert_eq!(
+            blueprint3.blueprint_zones.get(&sled_id).unwrap().generation,
+            bp2_generation
+        );
+
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint3,
+            &input,
+            &collection,
+            TEST_NAME,
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_internal_dns_zone_replaced_after_marked_for_cleanup() {
+        static TEST_NAME: &str =
+            "planner_internal_dns_zone_replaced_after_marked_for_cleanup";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = logctx.log.clone();
+
+        // Use our example system.
+        let (mut collection, input, blueprint1) = example(&log, TEST_NAME);
+
+        // Find a internal DNS zone we'll use for our test.
+        let (sled_id, internal_dns_config) = blueprint1
+            .blueprint_zones
+            .iter()
+            .find_map(|(sled_id, zones_config)| {
+                let config = zones_config
+                    .zones
+                    .iter()
+                    .find(|z| z.zone_type.is_internal_dns())?;
+                Some((*sled_id, config.clone()))
+            })
+            .expect("found an Internal DNS zone");
+
+        // Expunge the disk used by the internal DNS zone.
+        let input = {
+            let internal_dns_zpool = internal_dns_config
+                .filesystem_pool
+                .as_ref()
+                .expect("internal DNS zone has a filesystem pool");
+            let mut builder = input.into_builder();
+            builder
+                .sleds_mut()
+                .get_mut(&sled_id)
+                .expect("input has all sleds")
+                .resources
+                .zpools
+                .get_mut(&internal_dns_zpool.id())
+                .expect("input has internal DNS disk")
+                .policy = PhysicalDiskPolicy::Expunged;
+            builder.build()
+        };
+
+        // Run the planner. It should expunge all zones on the disk we just
+        // expunged, including our DNS zone, but not mark them as ready for
+        // cleanup yet.
+        let blueprint2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1,
+            &input,
+            "expunge disk",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp2")))
+        .plan()
+        .expect("planned");
+
+        // Helper to extract the DNS zone's disposition in a blueprint.
+        let get_dns_disposition = |bp: &Blueprint| {
+            bp.blueprint_zones.get(&sled_id).unwrap().zones.iter().find_map(
+                |z| {
+                    if z.id == internal_dns_config.id {
+                        Some(z.disposition)
+                    } else {
+                        None
+                    }
+                },
+            )
+        };
+
+        // This sled's zone config generation should have been bumped...
+        let bp2_generation =
+            blueprint2.blueprint_zones.get(&sled_id).unwrap().generation;
+        assert_eq!(
+            blueprint1.blueprint_zones.get(&sled_id).unwrap().generation.next(),
+            bp2_generation
+        );
+        // ... and the DNS zone should should have the disposition we expect.
+        assert_eq!(
+            get_dns_disposition(&blueprint2),
+            Some(BlueprintZoneDisposition::Expunged {
+                as_of_generation: bp2_generation,
+                ready_for_cleanup: false,
+            })
+        );
+
+        // Running the planner again should make no changes until the inventory
+        // reports that the zone is not running and that the sled has seen a
+        // new-enough generation.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint2,
+            &input,
+            &collection,
+            TEST_NAME,
+        );
+
+        // Make the inventory changes necessary for cleanup to proceed.
+        {
+            let zones = &mut collection
+                .sled_agents
+                .get_mut(&sled_id)
+                .unwrap()
+                .omicron_zones;
+            zones.generation = bp2_generation;
+            zones.zones.retain(|z| z.id != internal_dns_config.id);
+        }
+
+        // Run the planner. It should mark our internal DNS zone as ready for
+        // cleanup now that the inventory conditions are satisfied, and also
+        // place a new internal DNS zone now that the original subnet is free to
+        // reuse.
+        let blueprint3 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint2,
+            &input,
+            "removed Nexus zone from inventory",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng(PlannerRng::from_seed((TEST_NAME, "bp3")))
+        .plan()
+        .expect("planned");
+
+        assert_eq!(
+            get_dns_disposition(&blueprint3),
+            Some(BlueprintZoneDisposition::Expunged {
+                as_of_generation: bp2_generation,
+                ready_for_cleanup: true,
+            })
+        );
+
+        let summary = blueprint3.diff_since_blueprint(&blueprint2);
+        eprintln!("{}", summary.display());
+
+        let mut added_count = 0;
+        for zones in summary.diff.blueprint_zones.modified_values_diff() {
+            added_count += zones.zones.added.len();
+            for (_, z) in zones.zones.added {
+                match &z.zone_type {
+                    BlueprintZoneType::InternalDns(internal_dns) => {
+                        let BlueprintZoneType::InternalDns(InternalDns {
+                            dns_address: orig_dns_address,
+                            ..
+                        }) = &internal_dns_config.zone_type
+                        else {
+                            unreachable!();
+                        };
+
+                        assert_eq!(internal_dns.dns_address, *orig_dns_address);
+                    }
+                    _ => panic!("unexpected added zone {z:?}"),
+                }
+            }
+        }
+        assert_eq!(added_count, 1);
+
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint3,
+            &input,
+            &collection,
+            TEST_NAME,
         );
 
         logctx.cleanup_successful();

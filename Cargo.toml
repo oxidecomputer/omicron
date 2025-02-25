@@ -569,7 +569,10 @@ progenitor-client = "0.9.1"
 bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "95d6a559890c94e3aa62c8adcd7c4e123ec4c6dc" }
 propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "95d6a559890c94e3aa62c8adcd7c4e123ec4c6dc" }
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "95d6a559890c94e3aa62c8adcd7c4e123ec4c6dc" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "95d6a559890c94e3aa62c8adcd7c4e123ec4c6dc" }
+# NOTE: propolis-mock-server is currently out of sync with other propolis deps,
+# but when we update propolis to a commit after 2652487, please just bump this
+# as well and delete this comment.
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "2652487c19ede2db2cbc634b0dee3a78848dfea1" }
 # NOTE: see above!
 proptest = "1.5.0"
 qorb = "0.2.1"
@@ -648,7 +651,7 @@ static_assertions = "1.1.0"
 steno = "0.4.1"
 strum = { version = "0.26", features = [ "derive" ] }
 subprocess = "0.2.9"
-supports-color = "3.0.1"
+supports-color = "3.0.2"
 swrite = "0.1.0"
 sync-ptr = "0.1.1"
 libsw = { version = "3.3.1", features = ["tokio"] }
@@ -663,9 +666,9 @@ textwrap = "0.16.1"
 test-strategy = "0.4.0"
 thiserror = "1.0"
 tofino = { git = "https://github.com/oxidecomputer/tofino", branch = "main" }
-tokio = "1.40.0"
+tokio = "1.43.0"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
-tokio-stream = "0.1.16"
+tokio-stream = "0.1.17"
 tokio-tungstenite = "0.23.1"
 tokio-util = { version = "0.7.12", features = ["io", "io-util"] }
 toml = "0.8.19"

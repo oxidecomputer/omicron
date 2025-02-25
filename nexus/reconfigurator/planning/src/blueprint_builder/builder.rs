@@ -11,7 +11,7 @@ use crate::blueprint_editor::EditedSled;
 use crate::blueprint_editor::ExternalNetworkingChoice;
 use crate::blueprint_editor::ExternalNetworkingError;
 use crate::blueprint_editor::ExternalSnatNetworkingChoice;
-use crate::blueprint_editor::InternalDnsError;
+use crate::blueprint_editor::NoAvailableDnsSubnets;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
 use crate::planner::rng::PlannerRng;
@@ -59,6 +59,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -114,9 +115,11 @@ pub enum Error {
     #[error("error constructing resource allocator")]
     AllocatorInput(#[from] BlueprintResourceAllocatorInputError),
     #[error("error allocating internal DNS subnet")]
-    AllocateInternalDnsSubnet(#[from] InternalDnsError),
+    AllocateInternalDnsSubnet(#[from] NoAvailableDnsSubnets),
     #[error("error allocating external networking resources")]
     AllocateExternalNetworking(#[from] ExternalNetworkingError),
+    #[error("can only have {INTERNAL_DNS_REDUNDANCY} internal DNS servers")]
+    PolicySpecifiesTooManyInternalDnsServers,
 }
 
 /// Describes the result of an idempotent "ensure" operation
@@ -658,11 +661,8 @@ impl<'a> BlueprintBuilder<'a> {
             .map_err(Error::Planner)?;
 
             let allocator = BlueprintResourceAllocator::new(
-                self.sled_editors
-                    .iter()
-                    .map(|(sled_id, editor)| (*sled_id, editor)),
+                self.sled_editors.values(),
                 self.input.service_ip_pool_ranges().to_vec(),
-                self.input.target_internal_dns_zone_count(),
             )?;
 
             Ok::<_, Error>(allocator)
@@ -828,6 +828,18 @@ impl<'a> BlueprintBuilder<'a> {
         }
     }
 
+    pub fn current_sled_state(
+        &self,
+        sled_id: SledUuid,
+    ) -> Result<SledState, Error> {
+        let editor = self.sled_editors.get(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to get sled state for unknown sled {sled_id}"
+            ))
+        })?;
+        Ok(editor.state())
+    }
+
     /// Set the desired state of the given sled.
     pub fn set_sled_decommissioned(
         &mut self,
@@ -935,9 +947,16 @@ impl<'a> BlueprintBuilder<'a> {
         // Expunging a disk expunges any datasets and zones that depend on it,
         // so expunging all in-service disks should have also expunged all
         // datasets and zones. Double-check that that's true.
+        let mut zones_ready_for_cleanup = Vec::new();
         for zone in editor.zones(BlueprintZoneDisposition::any) {
             match zone.disposition {
-                BlueprintZoneDisposition::Expunged { .. } => (),
+                BlueprintZoneDisposition::Expunged { .. } => {
+                    // Since this is a full sled expungement, we'll never see an
+                    // inventory collection indicating the zones are shut down,
+                    // nor do we need to: go ahead and mark any expunged zones
+                    // as ready for cleanup.
+                    zones_ready_for_cleanup.push(zone.id);
+                }
                 BlueprintZoneDisposition::InService => {
                     return Err(Error::Planner(anyhow!(
                         "expunged all disks but a zone \
@@ -957,6 +976,11 @@ impl<'a> BlueprintBuilder<'a> {
                 }
             }
         }
+        for zone_id in zones_ready_for_cleanup {
+            editor
+                .mark_expunged_zone_ready_for_cleanup(&zone_id)
+                .map_err(|err| Error::SledEditError { sled_id, err })?;
+        }
 
         // If we didn't expunge anything, this sled was presumably expunged in a
         // prior planning run. Only note the operation if we did anything.
@@ -972,6 +996,23 @@ impl<'a> BlueprintBuilder<'a> {
             });
         }
 
+        Ok(())
+    }
+
+    /// Mark expunged zones as ready for cleanup.
+    pub(crate) fn mark_expunged_zones_ready_for_cleanup(
+        &mut self,
+        sled_id: SledUuid,
+        zone_ids: &[OmicronZoneUuid],
+    ) -> Result<(), Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!("tried to expunge unknown sled {sled_id}"))
+        })?;
+        for zone_id in zone_ids {
+            editor
+                .mark_expunged_zone_ready_for_cleanup(zone_id)
+                .map_err(|err| Error::SledEditError { sled_id, err })?;
+        }
         Ok(())
     }
 
@@ -1380,25 +1421,6 @@ impl<'a> BlueprintBuilder<'a> {
 
         self.sled_add_zone(sled_id, zone)?;
         Ok(Ensure::Added)
-    }
-
-    /// Return the number of zones of a given kind that would be configured to
-    /// run on the given sled if this builder generated a blueprint.
-    ///
-    /// This value may change before a blueprint is actually generated if
-    /// further changes are made to the builder.
-    pub fn sled_num_running_zones_of_kind(
-        &self,
-        sled_id: SledUuid,
-        kind: ZoneKind,
-    ) -> usize {
-        let Some(editor) = self.sled_editors.get(&sled_id) else {
-            return 0;
-        };
-        editor
-            .zones(BlueprintZoneDisposition::is_in_service)
-            .filter(|z| z.zone_type.kind() == kind)
-            .count()
     }
 
     pub fn sled_add_zone_nexus(
