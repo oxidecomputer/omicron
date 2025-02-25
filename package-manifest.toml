@@ -654,10 +654,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "93cd0d642cf1b58f9f4528275e2a2aa758e9feb3"
+source.commit = "cb2b592e890ca9e93d8193e9765e2a62459d5fa8"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "b0b1b96d76cf179313305aa85857e469dd76d90e1c075305b72bd3675ef9538e"
+source.sha256 = "0f439a7f60c2c0d7d941376acd58aa091ab5a6849a5f00a57d34a3585a727437"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -669,10 +669,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "93cd0d642cf1b58f9f4528275e2a2aa758e9feb3"
+source.commit = "cb2b592e890ca9e93d8193e9765e2a62459d5fa8"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
-source.sha256 = "9db633384abe06f23c2b396c4beda3e34ec9bf74d538a914eb57198f6ba8992e"
+source.sha256 = "18b07ad8fe428a8ca0b89690d837ee57c484c64cdde2f01a4eda44cb5dcfc1b4"
 output.type = "zone"
 output.intermediate_only = true
 

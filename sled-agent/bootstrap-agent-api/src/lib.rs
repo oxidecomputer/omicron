@@ -11,9 +11,9 @@ use dropshot::{
     HttpError, HttpResponseOk, HttpResponseUpdatedNoContent, RequestContext,
     TypedBody,
 };
-use omicron_common::api::external::SemverVersion;
 use omicron_uuid_kinds::{RackInitUuid, RackResetUuid};
 use schemars::JsonSchema;
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::{
     rack_init::RackInitializeRequest, rack_ops::RackOperationStatus,
@@ -86,5 +86,5 @@ pub trait BootstrapAgentApi {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct Component {
     pub name: String,
-    pub version: SemverVersion,
+    pub version: Version,
 }
