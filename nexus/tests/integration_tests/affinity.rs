@@ -162,78 +162,60 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
         object_get_error(&self.client, &url, status).await
     }
 
-    async fn group_member_add(&self, group: &str, instance: &str) -> T::Member {
-        let url = group_member_instance_url(
-            T::URL_COMPONENT,
-            self.project,
-            group,
-            instance,
-        );
+    async fn group_member_add<M: GroupMemberish>(
+        &self,
+        group: &str,
+        member: &str,
+    ) -> T::Member {
+        let url = M::url(T::URL_COMPONENT, self.project, group, member);
         object_create(&self.client, &url, &()).await
     }
 
-    async fn group_member_add_expect_error(
+    async fn group_member_add_expect_error<M: GroupMemberish>(
         &self,
         group: &str,
-        instance: &str,
+        member: &str,
         status: StatusCode,
     ) -> HttpErrorResponseBody {
-        let url = group_member_instance_url(
-            T::URL_COMPONENT,
-            self.project,
-            group,
-            instance,
-        );
+        let url = M::url(T::URL_COMPONENT, self.project, group, member);
         object_create_error(&self.client, &url, &(), status).await
     }
 
-    async fn group_member_get(&self, group: &str, instance: &str) -> T::Member {
-        let url = group_member_instance_url(
-            T::URL_COMPONENT,
-            self.project,
-            group,
-            instance,
-        );
+    async fn group_member_get<M: GroupMemberish>(
+        &self,
+        group: &str,
+        member: &str,
+    ) -> T::Member {
+        let url = M::url(T::URL_COMPONENT, self.project, group, member);
         object_get(&self.client, &url).await
     }
 
-    async fn group_member_get_expect_error(
+    async fn group_member_get_expect_error<M: GroupMemberish>(
         &self,
         group: &str,
-        instance: &str,
+        member: &str,
         status: StatusCode,
     ) -> HttpErrorResponseBody {
-        let url = group_member_instance_url(
-            T::URL_COMPONENT,
-            self.project,
-            group,
-            instance,
-        );
+        let url = M::url(T::URL_COMPONENT, self.project, group, member);
         object_get_error(&self.client, &url, status).await
     }
 
-    async fn group_member_delete(&self, group: &str, instance: &str) {
-        let url = group_member_instance_url(
-            T::URL_COMPONENT,
-            self.project,
-            group,
-            instance,
-        );
+    async fn group_member_delete<M: GroupMemberish>(
+        &self,
+        group: &str,
+        member: &str,
+    ) {
+        let url = M::url(T::URL_COMPONENT, self.project, group, member);
         object_delete(&self.client, &url).await
     }
 
-    async fn group_member_delete_expect_error(
+    async fn group_member_delete_expect_error<M: GroupMemberish>(
         &self,
         group: &str,
-        instance: &str,
+        member: &str,
         status: StatusCode,
     ) -> HttpErrorResponseBody {
-        let url = group_member_instance_url(
-            T::URL_COMPONENT,
-            self.project,
-            group,
-            instance,
-        );
+        let url = M::url(T::URL_COMPONENT, self.project, group, member);
         object_delete_error(&self.client, &url, status).await
     }
 }
@@ -416,14 +398,44 @@ fn group_members_url(ty: &str, project: Option<&str>, group: &str) -> String {
     format!("/v1/{ty}/{group}/members{query_params}")
 }
 
-fn group_member_instance_url(
-    ty: &str,
-    project: Option<&str>,
-    group: &str,
-    instance: &str,
-) -> String {
-    let query_params = project_query_param_suffix(project);
-    format!("/v1/{ty}/{group}/members/instance/{instance}{query_params}")
+/// Describes shared logic between "things that can be group members".
+trait GroupMemberish {
+    fn url(
+        ty: &str,
+        project: Option<&str>,
+        group: &str,
+        member: &str,
+    ) -> String;
+}
+
+struct MemberInstance {}
+
+impl GroupMemberish for MemberInstance {
+    fn url(
+        ty: &str,
+        project: Option<&str>,
+        group: &str,
+        member: &str,
+    ) -> String {
+        let query_params = project_query_param_suffix(project);
+        format!("/v1/{ty}/{group}/members/instance/{member}{query_params}")
+    }
+}
+
+struct MemberAffinityGroup {}
+
+impl GroupMemberish for MemberAffinityGroup {
+    fn url(
+        ty: &str,
+        project: Option<&str>,
+        group: &str,
+        member: &str,
+    ) -> String {
+        let query_params = project_query_param_suffix(project);
+        format!(
+            "/v1/{ty}/{group}/members/affinity-group/{member}{query_params}"
+        )
+    }
 }
 
 #[nexus_test(extra_sled_agents = 2)]
@@ -484,7 +496,10 @@ async fn test_affinity_group_usage(cptestctx: &ControlPlaneTestContext) {
     // Add these instances to an affinity group
     for instance in &instances {
         project_api
-            .group_member_add(GROUP_NAME, &instance.identity.name.to_string())
+            .group_member_add::<MemberInstance>(
+                GROUP_NAME,
+                &instance.identity.name.to_string(),
+            )
             .await;
     }
 
@@ -495,7 +510,10 @@ async fn test_affinity_group_usage(cptestctx: &ControlPlaneTestContext) {
     // We can also list each member
     for instance in &instances {
         project_api
-            .group_member_get(GROUP_NAME, instance.identity.name.as_str())
+            .group_member_get::<MemberInstance>(
+                GROUP_NAME,
+                instance.identity.name.as_str(),
+            )
             .await;
     }
 
@@ -543,8 +561,8 @@ async fn test_anti_affinity_group_usage(cptestctx: &ControlPlaneTestContext) {
 
     const PROJECT_NAME: &'static str = "test-project";
     const GROUP_NAME: &'static str = "group";
+    const AFFINITY_GROUP_NAME: &'static str = "a-group";
     const EXPECTED_SLEDS: usize = 3;
-    const INSTANCE_COUNT: usize = EXPECTED_SLEDS;
 
     let api = ApiHelper::new(external_client);
 
@@ -562,69 +580,118 @@ async fn test_anti_affinity_group_usage(cptestctx: &ControlPlaneTestContext) {
     create_default_ip_pool(&external_client).await;
     api.create_project(PROJECT_NAME).await;
 
-    let project_api = api.use_project::<AntiAffinityType>(PROJECT_NAME);
+    let aa_project_api = api.use_project::<AntiAffinityType>(PROJECT_NAME);
+    let a_project_api = api.use_project::<AffinityType>(PROJECT_NAME);
 
-    let mut instances = Vec::new();
-    for i in 0..INSTANCE_COUNT {
-        instances.push(
-            project_api
-                .create_stopped_instance(&format!("test-instance-{i}"))
+    // Create both stopped instances and some affinity groups.
+    //
+    // All but two of the instances are going to be anti-affine from each other.
+    let mut aa_instances = Vec::new();
+    for i in 0..EXPECTED_SLEDS - 1 {
+        aa_instances.push(
+            aa_project_api
+                .create_stopped_instance(&format!("test-aa-instance-{i}"))
                 .await,
         );
     }
+    // These two instances will be affine with each other, but anti-affine from
+    // everything else (indirectly) through their affinity group.
+    let mut a_instances = Vec::new();
+    a_project_api.group_create(AFFINITY_GROUP_NAME).await;
+    for i in 0..2 {
+        let instance = a_project_api
+            .create_stopped_instance(&format!("test-a-instance-{i}"))
+            .await;
+        a_project_api
+            .group_member_add::<MemberInstance>(
+                AFFINITY_GROUP_NAME,
+                &instance.identity.name.to_string(),
+            )
+            .await;
+        a_instances.push(instance);
+    }
 
     // When we start, we observe no anti-affinity groups
-    let groups = project_api.groups_list().await;
+    let groups = aa_project_api.groups_list().await;
     assert!(groups.is_empty());
 
     // We can now create a group and observe it
-    let group = project_api.group_create(GROUP_NAME).await;
+    let group = aa_project_api.group_create(GROUP_NAME).await;
 
     // We can list it and also GET the group specifically
-    let groups = project_api.groups_list().await;
+    let groups = aa_project_api.groups_list().await;
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0].identity.id, group.identity.id);
 
-    let observed_group = project_api.group_get(GROUP_NAME).await;
+    let observed_group = aa_project_api.group_get(GROUP_NAME).await;
     assert_eq!(observed_group.identity.id, group.identity.id);
 
     // List all members of the anti-affinity group (expect nothing)
-    let members = project_api.group_members_list(GROUP_NAME).await;
+    let members = aa_project_api.group_members_list(GROUP_NAME).await;
     assert!(members.is_empty());
 
     // Add these instances to the anti-affinity group
-    for instance in &instances {
-        project_api
-            .group_member_add(GROUP_NAME, &instance.identity.name.to_string())
+    for instance in &aa_instances {
+        aa_project_api
+            .group_member_add::<MemberInstance>(
+                GROUP_NAME,
+                &instance.identity.name.to_string(),
+            )
             .await;
     }
+    // Add the affinity group to the anti-affinity group
+    aa_project_api
+        .group_member_add::<MemberAffinityGroup>(
+            GROUP_NAME,
+            AFFINITY_GROUP_NAME,
+        )
+        .await;
 
-    // List members again (expect all instances)
-    let members = project_api.group_members_list(GROUP_NAME).await;
-    assert_eq!(members.len(), instances.len());
+    // List members again (expect all instances, and the affinity group)
+    let members = aa_project_api.group_members_list(GROUP_NAME).await;
+    assert_eq!(members.len(), aa_instances.len() + 1);
 
     // We can also list each member
-    for instance in &instances {
-        project_api
-            .group_member_get(GROUP_NAME, instance.identity.name.as_str())
+    for instance in &aa_instances {
+        aa_project_api
+            .group_member_get::<MemberInstance>(
+                GROUP_NAME,
+                instance.identity.name.as_str(),
+            )
             .await;
     }
+    aa_project_api
+        .group_member_get::<MemberAffinityGroup>(
+            GROUP_NAME,
+            AFFINITY_GROUP_NAME,
+        )
+        .await;
 
     // Start the instances we created earlier.
     //
     // We don't actually care that they're "running" from the perspective of the
     // simulated sled agent, we just want placement to be triggered from Nexus.
-    for instance in &instances {
+    for instance in &aa_instances {
+        api.start_instance(&instance).await;
+    }
+    for instance in &a_instances {
         api.start_instance(&instance).await;
     }
 
-    let mut expected_instances = instances
+    let mut expected_aa_instances = aa_instances
+        .iter()
+        .map(|instance| instance.identity.id)
+        .collect::<BTreeSet<_>>();
+    let mut expected_a_instances = a_instances
         .iter()
         .map(|instance| instance.identity.id)
         .collect::<BTreeSet<_>>();
 
-    // We expect that each sled will have a since instance, as all of the
+    // We expect that each sled will have a single instance, as all of the
     // instances will want to be anti-located from each other.
+    //
+    // The only exception will be a single sled containing both of the
+    // affine instances, which should be separate from all others.
     for sled in &sleds {
         let observed_instances = api
             .sled_instance_list(&sled.identity.id.to_string())
@@ -633,22 +700,39 @@ async fn test_anti_affinity_group_usage(cptestctx: &ControlPlaneTestContext) {
             .map(|sled_instance| sled_instance.identity.id)
             .collect::<Vec<_>>();
 
-        assert_eq!(
-            observed_instances.len(),
-            1,
-            "All instances should be placed on distinct sleds"
-        );
-
-        assert!(
-            expected_instances.remove(&observed_instances[0]),
-            "The instance {} was observed on multiple sleds",
-            observed_instances[0]
-        );
+        match observed_instances.len() {
+            1 => {
+                // This should be one of the anti-affine instances
+                assert!(
+                    expected_aa_instances.remove(&observed_instances[0]),
+                    "The instance {} was observed too many times",
+                    observed_instances[0]
+                );
+            }
+            2 => {
+                // This should be one of the affine instances, anti-affine from
+                // others because of their affinity groups
+                for observed_instance in observed_instances {
+                    assert!(
+                        expected_a_instances.remove(&observed_instance),
+                        "The instance {} was observed too many times",
+                        observed_instance
+                    );
+                }
+            }
+            _ => panic!(
+                "Unexpected instance count on sled: {observed_instances:?}"
+            ),
+        }
     }
 
     assert!(
-        expected_instances.is_empty(),
-        "Did not find allocations for some instances: {expected_instances:?}"
+        expected_aa_instances.is_empty(),
+        "Did not find allocations for some anti-affine instances: {expected_aa_instances:?}"
+    );
+    assert!(
+        expected_a_instances.is_empty(),
+        "Did not find allocations for some affine instances: {expected_a_instances:?}"
     );
 }
 
@@ -702,9 +786,11 @@ async fn test_group_crud<T: AffinityGroupish>(client: &ClientTestContext) {
 
     // Add the instance to the affinity group
     let instance_name = &instance.identity.name.to_string();
-    project_api.group_member_add(GROUP_NAME, &instance_name).await;
+    project_api
+        .group_member_add::<MemberInstance>(GROUP_NAME, &instance_name)
+        .await;
     let response = project_api
-        .group_member_add_expect_error(
+        .group_member_add_expect_error::<MemberInstance>(
             GROUP_NAME,
             &instance_name,
             StatusCode::BAD_REQUEST,
@@ -723,13 +809,18 @@ async fn test_group_crud<T: AffinityGroupish>(client: &ClientTestContext) {
     let members = project_api.group_members_list(GROUP_NAME).await;
     assert_eq!(members.len(), 1);
     project_api
-        .group_member_get(GROUP_NAME, instance.identity.name.as_str())
+        .group_member_get::<MemberInstance>(
+            GROUP_NAME,
+            instance.identity.name.as_str(),
+        )
         .await;
 
     // Delete the member, observe that it is gone
-    project_api.group_member_delete(GROUP_NAME, &instance_name).await;
     project_api
-        .group_member_delete_expect_error(
+        .group_member_delete::<MemberInstance>(GROUP_NAME, &instance_name)
+        .await;
+    project_api
+        .group_member_delete_expect_error::<MemberInstance>(
             GROUP_NAME,
             &instance_name,
             StatusCode::NOT_FOUND,
@@ -738,7 +829,7 @@ async fn test_group_crud<T: AffinityGroupish>(client: &ClientTestContext) {
     let members = project_api.group_members_list(GROUP_NAME).await;
     assert_eq!(members.len(), 0);
     project_api
-        .group_member_get_expect_error(
+        .group_member_get_expect_error::<MemberInstance>(
             GROUP_NAME,
             &instance_name,
             StatusCode::NOT_FOUND,
@@ -840,21 +931,29 @@ async fn test_group_project_selector<T: AffinityGroupish>(
     // Group Members can be added by name or UUID
     let instance_name = instance.identity.name.as_str();
     let instance_id = instance.identity.id.to_string();
-    project_api.group_member_add(GROUP_NAME, instance_name).await;
-    project_api.group_member_delete(GROUP_NAME, instance_name).await;
-    no_project_api.group_member_add(&group_id, &instance_id).await;
-    no_project_api.group_member_delete(&group_id, &instance_id).await;
+    project_api
+        .group_member_add::<MemberInstance>(GROUP_NAME, instance_name)
+        .await;
+    project_api
+        .group_member_delete::<MemberInstance>(GROUP_NAME, instance_name)
+        .await;
+    no_project_api
+        .group_member_add::<MemberInstance>(&group_id, &instance_id)
+        .await;
+    no_project_api
+        .group_member_delete::<MemberInstance>(&group_id, &instance_id)
+        .await;
 
     // Trying to use UUIDs with the project selector is invalid
     project_api
-        .group_member_add_expect_error(
+        .group_member_add_expect_error::<MemberInstance>(
             GROUP_NAME,
             &instance_id,
             StatusCode::BAD_REQUEST,
         )
         .await;
     project_api
-        .group_member_add_expect_error(
+        .group_member_add_expect_error::<MemberInstance>(
             &group_id,
             instance_name,
             StatusCode::BAD_REQUEST,
@@ -863,21 +962,21 @@ async fn test_group_project_selector<T: AffinityGroupish>(
 
     // Using any names without the project selector is invalid
     no_project_api
-        .group_member_add_expect_error(
+        .group_member_add_expect_error::<MemberInstance>(
             GROUP_NAME,
             &instance_id,
             StatusCode::BAD_REQUEST,
         )
         .await;
     no_project_api
-        .group_member_add_expect_error(
+        .group_member_add_expect_error::<MemberInstance>(
             &group_id,
             instance_name,
             StatusCode::BAD_REQUEST,
         )
         .await;
     no_project_api
-        .group_member_add_expect_error(
+        .group_member_add_expect_error::<MemberInstance>(
             GROUP_NAME,
             instance_name,
             StatusCode::BAD_REQUEST,
