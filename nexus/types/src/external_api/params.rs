@@ -2449,10 +2449,19 @@ pub struct WebhookSecretSelector {
     /// ID of the secret.
     pub secret_id: Uuid,
 }
+
 #[derive(Deserialize, JsonSchema)]
 pub struct WebhookDeliveryPath {
     /// Selects the webhook receiver
     #[serde(flatten)]
     pub webhook: WebhookSelector,
     pub event_id: Uuid,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookProbe {
+    /// If true, resend all events that have not been delivered successfully if
+    /// the probe request succeeds.
+    #[serde(default)]
+    pub resend: bool,
 }

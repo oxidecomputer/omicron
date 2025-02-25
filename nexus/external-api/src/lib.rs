@@ -3545,6 +3545,21 @@ pub trait NexusExternalApi {
         path_params: Path<params::WebhookSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
+    /// Send a liveness probe request to a webhook receiver.
+    // TODO(eliza): this return type isn't quite right, as the response should
+    // have a typed body, but any status code, as we return a resposne with the
+    // status code from the webhook endpoint...
+    #[endpoint {
+        method = POST,
+        path = "/experimental/v1/webhooks/{webhook}/probe",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_probe(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::WebhookSelector>,
+        query_params: Query<params::WebhookProbe>,
+    ) -> Result<HttpResponseOk<views::WebhookDelivery>, HttpError>;
+
     /// List the IDs of secrets for a webhook receiver.
     #[endpoint {
         method = GET,

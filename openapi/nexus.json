@@ -981,6 +981,52 @@
         }
       }
     },
+    "/experimental/v1/webhooks/{webhook}/probe": {
+      "post": {
+        "tags": [
+          "system/webhooks"
+        ],
+        "summary": "Send a liveness probe request to a webhook receiver.",
+        "operationId": "webhook_probe",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "webhook",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "resend",
+            "description": "If true, resend all events that have not been delivered successfully if the probe request succeeds.",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookDelivery"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/experimental/v1/webhooks/{webhook}/secrets": {
       "get": {
         "tags": [

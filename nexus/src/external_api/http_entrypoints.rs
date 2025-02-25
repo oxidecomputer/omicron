@@ -7422,6 +7422,30 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn webhook_probe(
+        rqctx: RequestContext<Self::Context>,
+        _path_params: Path<params::WebhookSelector>,
+        _query_params: Query<params::WebhookProbe>,
+    ) -> Result<HttpResponseOk<views::WebhookDelivery>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            Err(nexus
+                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
+                .await
+                .into())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn webhook_secrets_list(
         rqctx: RequestContext<Self::Context>,
         _path_params: Path<params::WebhookSelector>,
