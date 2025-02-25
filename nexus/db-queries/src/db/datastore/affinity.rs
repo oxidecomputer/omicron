@@ -821,7 +821,9 @@ impl DataStore {
                 let err = err.clone();
                 use db::schema::anti_affinity_group::dsl as anti_affinity_group_dsl;
                 use db::schema::affinity_group::dsl as affinity_group_dsl;
-                use db::schema::anti_affinity_group_affinity_membership::dsl as membership_dsl;
+                use db::schema::affinity_group_instance_membership::dsl as a_instance_membership_dsl;
+                use db::schema::anti_affinity_group_affinity_membership::dsl as aa_affinity_membership_dsl;
+                use db::schema::sled_resource_vmm::dsl as resource_dsl;
 
                 async move {
                     // Check that the anti-affinity group exists
@@ -861,12 +863,44 @@ impl DataStore {
                             })
                         })?;
 
-                    // TODO: It's possible that the affinity group has members
-                    // which are already running. We should probably check this,
-                    // and prevent it, otherwise we could circumvent "policy =
-                    // fail" stances.
 
-                    diesel::insert_into(membership_dsl::anti_affinity_group_affinity_membership)
+                    // Check that the affinity group's members are not reserved.
+                    let has_reservation: bool = diesel::select(
+                            diesel::dsl::exists(
+                                a_instance_membership_dsl::affinity_group_instance_membership
+                                    .inner_join(
+                                        resource_dsl::sled_resource_vmm
+                                            .on(resource_dsl::instance_id.eq(a_instance_membership_dsl::instance_id.nullable()))
+                                    )
+                                    .filter(a_instance_membership_dsl::group_id.eq(
+                                        affinity_group_id.into_untyped_uuid()
+                                    ))
+                            )
+                        ).get_result_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            err.bail_retryable_or_else(e, |e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Server,
+                                )
+                            })
+                        })?;
+
+                    // NOTE: This check prevents us from violating affinity rules with "policy =
+                    // fail" stances, but it is possible that running instances already would
+                    // satisfy the affinity rules proposed by this new group addition.
+                    //
+                    // It would be possible to remove this error if we replaced it with affinity
+                    // rule checks.
+                    if has_reservation {
+                        return Err(err.bail(Error::invalid_request(
+                            "Affinity group with running instances cannot be \
+                             added to anti-affinity group. Try stopping them first.".to_string()
+                        )));
+                    }
+
+                    diesel::insert_into(aa_affinity_membership_dsl::anti_affinity_group_affinity_membership)
                         .values(AntiAffinityGroupAffinityMembership::new(
                             AntiAffinityGroupUuid::from_untyped_uuid(authz_anti_affinity_group.id()),
                             affinity_group_id,
