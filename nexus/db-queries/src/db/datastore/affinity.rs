@@ -1997,7 +1997,7 @@ mod tests {
         }
 
         // Order by UUID, regardless of member type
-        members.sort_unstable_by(|m1, m2| m1.id().cmp(&m2.id()));
+        members.sort_unstable_by_key(|m1| m1.id());
 
         // We can list all members
         let mut pagparams = DataPageParams {
