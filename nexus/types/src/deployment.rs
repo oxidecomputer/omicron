@@ -35,6 +35,7 @@ use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_common::disk::SharedDatasetConfig;
+use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -42,6 +43,7 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
+use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -363,6 +365,7 @@ impl BpTableData for BlueprintZonesConfig {
                 vec![
                     zone.kind().report_str().to_string(),
                     ZoneSortKey::id(&zone).to_string(),
+                    zone.image_source.to_string(),
                     zone.disposition.to_string(),
                     zone.underlay_ip().to_string(),
                 ],
@@ -728,6 +731,7 @@ pub struct BlueprintZoneConfig {
     /// zpool used for the zone's (transient) root filesystem
     pub filesystem_pool: Option<ZpoolName>,
     pub zone_type: BlueprintZoneType,
+    pub image_source: BlueprintZoneImageSource,
 }
 
 impl IdMappable for BlueprintZoneConfig {
@@ -770,12 +774,13 @@ impl From<BlueprintZoneConfig> for OmicronZoneConfig {
             filesystem_pool,
             zone_type,
             disposition: _disposition,
+            image_source,
         } = z;
         Self {
             id,
             filesystem_pool,
             zone_type: zone_type.into(),
-            image_source: OmicronZoneImageSource::InstallDataset,
+            image_source: image_source.into(),
         }
     }
 }
@@ -877,6 +882,71 @@ impl fmt::Display for BlueprintZoneDisposition {
                 } else {
                     "expunged ⏳".fmt(f)
                 }
+            }
+        }
+    }
+}
+
+/// Where a blueprint's image source is located.
+///
+/// This is the blueprint version of [`OmicronZoneImageSource`].
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    JsonSchema,
+    Deserialize,
+    Serialize,
+    Diffable,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum BlueprintZoneImageSource {
+    /// This zone's image source is whatever happens to be on the sled's
+    /// "install" dataset.
+    ///
+    /// This is whatever was put in place at the factory or by the latest
+    /// MUPdate. The image used here can vary by sled and even over time (if the
+    /// sled gets MUPdated again).
+    ///
+    /// Historically, this was the only source for zone images. In an system
+    /// with automated control-plane-driven update we expect to only use this
+    /// variant in emergencies where the system had to be recovered via MUPdate.
+    InstallDataset,
+
+    /// This zone's image source is the artifact matching this hash from the TUF
+    /// artifact store (aka "TUF repo depot").
+    ///
+    /// This originates from TUF repos uploaded to Nexus which are then
+    /// replicated out to all sleds.
+    #[serde(rename_all = "snake_case")]
+    Artifact { version: Version, hash: ArtifactHash },
+}
+
+impl From<BlueprintZoneImageSource> for OmicronZoneImageSource {
+    fn from(source: BlueprintZoneImageSource) -> Self {
+        match source {
+            BlueprintZoneImageSource::InstallDataset => {
+                OmicronZoneImageSource::InstallDataset
+            }
+            BlueprintZoneImageSource::Artifact { version: _, hash } => {
+                OmicronZoneImageSource::Artifact { hash }
+            }
+        }
+    }
+}
+
+impl fmt::Display for BlueprintZoneImageSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BlueprintZoneImageSource::InstallDataset => {
+                write!(f, "install dataset")
+            }
+            BlueprintZoneImageSource::Artifact { version, hash: _ } => {
+                write!(f, "artifact: version {version}")
             }
         }
     }
