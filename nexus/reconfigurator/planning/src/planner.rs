@@ -1092,7 +1092,7 @@ pub(crate) mod test {
         assert_eq!(summary.sleds_added.len(), 0);
         assert_eq!(summary.sleds_removed.len(), 0);
         assert_eq!(summary.sleds_modified.len(), 0);
-        assert_eq!(summary.sleds_unchanged.len(), 3);
+        assert_eq!(summary.diff.sleds.unchanged().count(), 3);
         assert_eq!(summary.total_zones_added(), 0);
         assert_eq!(summary.total_zones_removed(), 0);
         assert_eq!(summary.total_zones_modified(), 0);
@@ -2696,7 +2696,7 @@ pub(crate) mod test {
         assert_eq!(summary.sleds_added.len(), 0);
         assert_eq!(summary.sleds_removed.len(), 0);
         assert_eq!(summary.sleds_modified.len(), 3);
-        assert_eq!(summary.sleds_unchanged.len(), 2);
+        assert_eq!(summary.diff.sleds.unchanged().count(), 2);
 
         assert_all_zones_expunged(&summary, expunged_sled_id, "expunged sled");
 
@@ -2966,7 +2966,7 @@ pub(crate) mod test {
         assert_eq!(summary.sleds_removed.len(), 0);
         assert_eq!(summary.sleds_modified.len(), 0);
         assert_eq!(
-            summary.sleds_unchanged.len(),
+            summary.diff.sleds.unchanged().count(),
             ExampleSystemBuilder::DEFAULT_N_SLEDS
         );
 
@@ -3013,7 +3013,7 @@ pub(crate) mod test {
         assert_eq!(summary.sleds_removed.len(), 0);
         assert_eq!(summary.sleds_modified.len(), 0);
         assert_eq!(
-            summary.sleds_unchanged.len(),
+            summary.diff.sleds.unchanged().count(),
             ExampleSystemBuilder::DEFAULT_N_SLEDS
         );
 

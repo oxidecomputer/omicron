@@ -45,7 +45,6 @@ pub struct BlueprintDiffSummary<'a> {
     pub sleds_added: BTreeSet<SledUuid>,
     pub sleds_removed: BTreeSet<SledUuid>,
     pub sleds_modified: BTreeSet<SledUuid>,
-    pub sleds_unchanged: BTreeSet<SledUuid>,
 }
 
 impl<'a> BlueprintDiffSummary<'a> {
@@ -62,8 +61,6 @@ impl<'a> BlueprintDiffSummary<'a> {
             diff.sleds.added.keys().map(|k| **k).collect();
         let sleds_removed: BTreeSet<_> =
             diff.sleds.removed.keys().map(|k| **k).collect();
-        let sleds_unchanged: BTreeSet<_> =
-            diff.sleds.unchanged_keys().copied().collect();
         let sleds_modified: BTreeSet<_> =
             diff.sleds.modified_keys().copied().collect();
 
@@ -75,7 +72,6 @@ impl<'a> BlueprintDiffSummary<'a> {
             sleds_added,
             sleds_removed,
             sleds_modified,
-            sleds_unchanged,
         }
     }
 
@@ -107,11 +103,9 @@ impl<'a> BlueprintDiffSummary<'a> {
             .sleds
             .added
             .keys()
-            .copied()
-            .chain(self.diff.sleds.removed.keys().copied())
-            .chain(self.diff.sleds.modified_keys())
-            .chain(self.diff.sleds.unchanged_keys())
-            .copied()
+            .chain(self.diff.sleds.removed.keys())
+            .chain(self.diff.sleds.common.keys())
+            .map(|&&id| id)
     }
 
     ///  The number of zones added across all sleds
@@ -1931,15 +1925,6 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
     /// diff section because each section has different expectations for what
     /// before and after should be that can only be wrong if we have a bug
     /// constructing the diff.
-    fn sled_state_unchanged(&self, sled_id: &SledUuid) -> String {
-        self.summary
-            .diff
-            .sleds
-            .get_unchanged(sled_id)
-            .unwrap()
-            .state
-            .to_string()
-    }
     fn sled_state_added(&self, sled_id: &SledUuid) -> String {
         let after = self.summary.diff.sleds.added.get(sled_id).unwrap().state;
         format!("{after}")
@@ -1992,13 +1977,14 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
         // We put errors at the bottom to ensure they are seen immediately.
 
         // Write out tables for unchanged sleds
-        if !summary.sleds_unchanged.is_empty() {
+        let mut sleds_iter = summary.diff.sleds.unchanged().peekable();
+        if sleds_iter.peek().is_some() {
             writeln!(f, " UNCHANGED SLEDS:\n")?;
-            for sled_id in &summary.sleds_unchanged {
+            for (sled_id, sled) in sleds_iter {
                 writeln!(
                     f,
                     "  sled {sled_id} ({}):\n",
-                    self.sled_state_unchanged(sled_id)
+                    sled.state.to_string(),
                 )?;
                 self.write_tables(f, sled_id)?;
             }
