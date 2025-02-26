@@ -42,7 +42,6 @@ pub struct BlueprintDiffSummary<'a> {
     pub diff: BlueprintDiff<'a>,
     pub modified_sleds_diff: BTreeMap<SledUuid, BlueprintSledConfigDiff<'a>>,
     // TODO-john do we need these sets still?
-    pub all_sleds: BTreeSet<SledUuid>,
     pub sleds_added: BTreeSet<SledUuid>,
     pub sleds_removed: BTreeSet<SledUuid>,
     pub sleds_modified: BTreeSet<SledUuid>,
@@ -68,20 +67,11 @@ impl<'a> BlueprintDiffSummary<'a> {
         let sleds_modified: BTreeSet<_> =
             diff.sleds.modified_keys().copied().collect();
 
-        let all_sleds = sleds_added
-            .iter()
-            .chain(sleds_removed.iter())
-            .chain(sleds_modified.iter())
-            .chain(sleds_unchanged.iter())
-            .cloned()
-            .collect();
-
         BlueprintDiffSummary {
             before,
             after,
             diff,
             modified_sleds_diff,
-            all_sleds,
             sleds_added,
             sleds_removed,
             sleds_modified,
@@ -109,6 +99,19 @@ impl<'a> BlueprintDiffSummary<'a> {
 
         self.diff.clickhouse_cluster_config.before
             != self.diff.clickhouse_cluster_config.after
+    }
+
+    /// All sled IDs present in the diff in any way
+    pub fn all_sled_ids(&self) -> impl Iterator<Item = SledUuid> + '_ {
+        self.diff
+            .sleds
+            .added
+            .keys()
+            .copied()
+            .chain(self.diff.sleds.removed.keys().copied())
+            .chain(self.diff.sleds.modified_keys())
+            .chain(self.diff.sleds.unchanged_keys())
+            .copied()
     }
 
     ///  The number of zones added across all sleds
@@ -772,20 +775,20 @@ impl BpDiffZones {
         summary: &'a BlueprintDiffSummary<'a>,
     ) -> Self {
         let mut diffs = BpDiffZones::default();
-        for sled_id in &summary.all_sleds {
-            if let Some(added) = summary.added_zones(sled_id) {
-                diffs.added.insert(*sled_id, added);
+        for sled_id in summary.all_sled_ids() {
+            if let Some(added) = summary.added_zones(&sled_id) {
+                diffs.added.insert(sled_id, added);
             }
-            if let Some(removed) = summary.removed_zones(sled_id) {
-                diffs.removed.insert(*sled_id, removed);
+            if let Some(removed) = summary.removed_zones(&sled_id) {
+                diffs.removed.insert(sled_id, removed);
             }
-            if let Some(unchanged) = summary.unchanged_zones(sled_id) {
-                diffs.unchanged.insert(*sled_id, unchanged);
+            if let Some(unchanged) = summary.unchanged_zones(&sled_id) {
+                diffs.unchanged.insert(sled_id, unchanged);
             }
-            if let Some((modified, errors)) = summary.modified_zones(sled_id) {
-                diffs.modified.insert(*sled_id, modified);
+            if let Some((modified, errors)) = summary.modified_zones(&sled_id) {
+                diffs.modified.insert(sled_id, modified);
                 if !errors.errors.is_empty() {
-                    diffs.errors.insert(*sled_id, errors);
+                    diffs.errors.insert(sled_id, errors);
                 }
             }
         }
@@ -1032,20 +1035,20 @@ pub struct BpDiffPhysicalDisks<'a> {
 impl<'a> BpDiffPhysicalDisks<'a> {
     pub fn from_diff_summary(summary: &'a BlueprintDiffSummary<'a>) -> Self {
         let mut diffs = BpDiffPhysicalDisks::default();
-        for sled_id in &summary.all_sleds {
-            if let Some(added) = summary.added_disks(sled_id) {
-                diffs.added.insert(*sled_id, added);
+        for sled_id in summary.all_sled_ids() {
+            if let Some(added) = summary.added_disks(&sled_id) {
+                diffs.added.insert(sled_id, added);
             }
-            if let Some(removed) = summary.removed_disks(sled_id) {
-                diffs.removed.insert(*sled_id, removed);
+            if let Some(removed) = summary.removed_disks(&sled_id) {
+                diffs.removed.insert(sled_id, removed);
             }
-            if let Some(unchanged) = summary.unchanged_disks(sled_id) {
-                diffs.unchanged.insert(*sled_id, unchanged);
+            if let Some(unchanged) = summary.unchanged_disks(&sled_id) {
+                diffs.unchanged.insert(sled_id, unchanged);
             }
-            if let Some((modified, errors)) = summary.modified_disks(sled_id) {
-                diffs.modified.insert(*sled_id, modified);
+            if let Some((modified, errors)) = summary.modified_disks(&sled_id) {
+                diffs.modified.insert(sled_id, modified);
                 if !errors.errors.is_empty() {
-                    diffs.errors.insert(*sled_id, errors);
+                    diffs.errors.insert(sled_id, errors);
                 }
             }
         }
@@ -1343,21 +1346,22 @@ impl BpDiffDatasets {
         summary: &'a BlueprintDiffSummary<'a>,
     ) -> Self {
         let mut diffs = BpDiffDatasets::default();
-        for sled_id in &summary.all_sleds {
-            if let Some(added) = summary.added_datasets(sled_id) {
-                diffs.added.insert(*sled_id, added);
+        for sled_id in summary.all_sled_ids() {
+            if let Some(added) = summary.added_datasets(&sled_id) {
+                diffs.added.insert(sled_id, added);
             }
-            if let Some(removed) = summary.removed_datasets(sled_id) {
-                diffs.removed.insert(*sled_id, removed);
+            if let Some(removed) = summary.removed_datasets(&sled_id) {
+                diffs.removed.insert(sled_id, removed);
             }
-            if let Some(unchanged) = summary.unchanged_datasets(sled_id) {
-                diffs.unchanged.insert(*sled_id, unchanged);
+            if let Some(unchanged) = summary.unchanged_datasets(&sled_id) {
+                diffs.unchanged.insert(sled_id, unchanged);
             }
-            if let Some((modified, errors)) = summary.modified_datasets(sled_id)
+            if let Some((modified, errors)) =
+                summary.modified_datasets(&sled_id)
             {
-                diffs.modified.insert(*sled_id, modified);
+                diffs.modified.insert(sled_id, modified);
                 if !errors.errors.is_empty() {
-                    diffs.errors.insert(*sled_id, errors);
+                    diffs.errors.insert(sled_id, errors);
                 }
             }
         }
