@@ -1050,7 +1050,7 @@ pub(crate) mod test {
             "diff between blueprints (expected no changes):\n{}",
             summary.display()
         );
-        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
         assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 0);
     }
@@ -1089,7 +1089,7 @@ pub(crate) mod test {
 
         let summary = blueprint2.diff_since_blueprint(&blueprint1);
         println!("1 -> 2 (expected no changes):\n{}", summary.display());
-        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
         assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 0);
         assert_eq!(summary.diff.sleds.unchanged().count(), 3);
@@ -1134,16 +1134,16 @@ pub(crate) mod test {
             &summary.display().to_string(),
         );
 
-        assert_eq!(summary.sleds_added.len(), 1);
+        assert_eq!(summary.diff.sleds.added.len(), 1);
         assert_eq!(summary.total_disks_added(), 10);
         assert_eq!(summary.total_datasets_added(), 21);
-        let sled_id = *summary.sleds_added.first().unwrap();
-        let sled_added = summary.diff.sleds.added.get(&sled_id).unwrap();
+        let (&sled_id, sled_added) =
+            summary.diff.sleds.added.first_key_value().unwrap();
         // We have defined elsewhere that the first generation contains no
         // zones.  So the first one with zones must be newer.  See
         // OmicronZonesConfig::INITIAL_GENERATION.
         assert!(sled_added.zones_config.generation > Generation::new());
-        assert_eq!(sled_id, new_sled_id);
+        assert_eq!(*sled_id, new_sled_id);
         assert_eq!(sled_added.zones_config.zones.len(), 1);
         assert!(matches!(
             sled_added.zones_config.zones.first().unwrap().kind(),
@@ -1169,7 +1169,7 @@ pub(crate) mod test {
         .expect("failed to plan");
         let summary = blueprint4.diff_since_blueprint(&blueprint3);
         println!("3 -> 4 (expected no changes):\n{}", summary.display());
-        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
         assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 0);
         verify_blueprint(&blueprint4);
@@ -1213,7 +1213,7 @@ pub(crate) mod test {
             "tests/output/planner_basic_add_sled_3_5.txt",
             &summary.display().to_string(),
         );
-        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
         assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 1);
         let sled_id = summary.diff.sleds.modified_keys().next().unwrap();
@@ -1309,7 +1309,7 @@ pub(crate) mod test {
             "1 -> 2 (added additional Nexus zones):\n{}",
             summary.display()
         );
-        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
         assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 1);
         let (changed_sled_id, changed_sled) =
@@ -1388,7 +1388,7 @@ pub(crate) mod test {
             "1 -> 2 (added additional Nexus zones):\n{}",
             summary.display()
         );
-        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
         assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 3);
 
@@ -1517,7 +1517,7 @@ pub(crate) mod test {
             "1 -> 2 (added additional internal DNS zones):\n{}",
             summary.display()
         );
-        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
         assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 2);
 
@@ -2007,7 +2007,7 @@ pub(crate) mod test {
             &summary.display().to_string(),
         );
 
-        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
         assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 1);
 
@@ -2300,7 +2300,7 @@ pub(crate) mod test {
 
         let summary = blueprint2.diff_since_blueprint(&blueprint1);
         println!("1 -> 2 (expunge a disk):\n{}", summary.display());
-        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
         assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 1);
 
@@ -2480,7 +2480,7 @@ pub(crate) mod test {
 
         let summary = blueprint2.diff_since_blueprint(&blueprint1);
         println!("1 -> 2 (expunge a disk):\n{}", summary.display());
-        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
         assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 1);
 
@@ -2687,7 +2687,7 @@ pub(crate) mod test {
         // cleanup, and we aren't performing garbage collection on zones or
         // sleds at the moment.
 
-        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
         assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 3);
         assert_eq!(summary.diff.sleds.unchanged().count(), 2);
@@ -2962,7 +2962,7 @@ pub(crate) mod test {
             "2 -> 3 (decommissioned {expunged_sled_id}):\n{}",
             summary.display()
         );
-        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
         assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 0);
         assert_eq!(
@@ -3009,7 +3009,7 @@ pub(crate) mod test {
             "3 -> 4 (removed from input {expunged_sled_id}):\n{}",
             summary.display()
         );
-        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
         assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 0);
         assert_eq!(

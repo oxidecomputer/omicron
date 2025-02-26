@@ -41,8 +41,6 @@ pub struct BlueprintDiffSummary<'a> {
     pub after: &'a Blueprint,
     pub diff: BlueprintDiff<'a>,
     pub modified_sleds_diff: BTreeMap<SledUuid, BlueprintSledConfigDiff<'a>>,
-    // TODO-john do we need these sets still?
-    pub sleds_added: BTreeSet<SledUuid>,
 }
 
 impl<'a> BlueprintDiffSummary<'a> {
@@ -52,19 +50,7 @@ impl<'a> BlueprintDiffSummary<'a> {
         let modified_sleds_diff =
             diff.sleds.modified_diff().map(|(k, v)| (*k, v)).collect();
 
-        // Collect sets of sled IDs of various categories.
-        //
-        // TODO-john do we still need these or can we use `diff.sleds` directly?
-        let sleds_added: BTreeSet<_> =
-            diff.sleds.added.keys().map(|k| **k).collect();
-
-        BlueprintDiffSummary {
-            before,
-            after,
-            diff,
-            modified_sleds_diff,
-            sleds_added,
-        }
+        BlueprintDiffSummary { before, after, diff, modified_sleds_diff }
     }
 
     /// Return a struct that can be used to display the diff.
@@ -1924,15 +1910,6 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
 
         Ok(())
     }
-
-    /// Helper methods to stringify sled states. These are separated by
-    /// diff section because each section has different expectations for what
-    /// before and after should be that can only be wrong if we have a bug
-    /// constructing the diff.
-    fn sled_state_added(&self, sled_id: &SledUuid) -> String {
-        let after = self.summary.diff.sleds.added.get(sled_id).unwrap().state;
-        format!("{after}")
-    }
 }
 
 impl fmt::Display for BlueprintDiffDisplay<'_> {
@@ -2002,14 +1979,10 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
         }
 
         // Write out tables for added sleds
-        if !summary.sleds_added.is_empty() {
+        if !summary.diff.sleds.added.is_empty() {
             writeln!(f, " ADDED SLEDS:\n")?;
-            for sled_id in &summary.sleds_added {
-                writeln!(
-                    f,
-                    "  sled {sled_id} ({}):\n",
-                    self.sled_state_added(sled_id)
-                )?;
+            for (sled_id, sled) in &summary.diff.sleds.added {
+                writeln!(f, "  sled {sled_id} ({}):\n", sled.state)?;
                 self.write_tables(f, sled_id)?;
             }
         }

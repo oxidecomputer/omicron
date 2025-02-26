@@ -2105,7 +2105,7 @@ pub mod test {
             "initial blueprint -> next blueprint (expected no changes):\n{}",
             summary.display()
         );
-        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
         assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 0);
 
@@ -2148,12 +2148,13 @@ pub mod test {
         assert_eq!(summary.diff.sleds.removed.len(), 0);
 
         // One sled was added.
-        assert_eq!(summary.sleds_added.len(), 1);
-        let sled_id = summary.sleds_added.first().unwrap();
-        let new_sled_zones = summary.added_zones(sled_id).unwrap();
+        assert_eq!(summary.diff.sleds.added.len(), 1);
+        let (&sled_id, new_sled) =
+            summary.diff.sleds.added.first_key_value().unwrap();
+        let new_sled_zones = &new_sled.zones_config;
         assert_eq!(*sled_id, new_sled_id);
         // The generation number should be newer than the initial default.
-        assert!(new_sled_zones.generation_after > Some(Generation::new()));
+        assert!(new_sled_zones.generation > Generation::new());
 
         // All zones' underlay addresses ought to be on the sled's subnet.
         for z in &new_sled_zones.zones {
