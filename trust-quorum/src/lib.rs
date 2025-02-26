@@ -3,11 +3,18 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Implementation of the oxide rack trust quorum protocol
+//!
+//! This protocol is written as a
+//! [no-IO](https://sans-io.readthedocs.io/how-to-sans-io.html) implementation.
+//! All persistent state and all networking is managed outside of this
+//! implementation. Callers interact with the protocol via the [`Node`] api
+//! which itself performs "environment" operations such as persisting state and
+//! sending messages via [`Output`] messages.
 
 use rack_secret::RackSecret;
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::time::Instant;
 use uuid::Uuid;
 use zeroize::ZeroizeOnDrop;
@@ -40,18 +47,26 @@ pub struct Epoch(u64);
 )]
 pub struct Threshold(pub u8);
 
+/// A unique identifier for a given trust quorum member.
+//
+/// This data is derived from the subject common name in the platform identity
+/// certificate that makes up part of the certificate chain used to establish
+/// [sprockets](https://github.com/oxidecomputer/sprockets) connections.
+///
+/// See RFDs 303 and 308 for more details.
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
-pub struct BaseboardId {
+pub struct PlatformId {
     part_number: String,
     serial_number: String,
 }
 
+/// A container to make messages between trust quorum nodes routable
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Envelope {
-    to: BaseboardId,
-    from: BaseboardId,
+    to: PlatformId,
+    from: PlatformId,
     msg: PeerMsg,
 }
 
@@ -62,7 +77,7 @@ pub enum Output {
     NexusRsp(NexusRsp),
     PersistPrepare(PrepareMsg),
     PersistCommit(CommitMsg),
-    PersistDecommissioned { from: BaseboardId, epoch: Epoch },
+    PersistDecommissioned { from: PlatformId, epoch: Epoch },
     PersistLrtqCancelled { lrtq_upgrade_id: Uuid },
 }
 
@@ -116,7 +131,7 @@ pub struct DecommissionedMetadata {
     epoch: Epoch,
 
     /// Which node this commit information was learned from  
-    from: BaseboardId,
+    from: PlatformId,
 }
 
 /// Data loaded from the ledger by sled-agent on instruction from Nexus
@@ -170,7 +185,16 @@ impl PersistentState {
     }
 }
 
-/// The state of a reconfiguration coordinator
+/// The state of a reconfiguration coordinator.
+///
+/// A coordinator can be any trust quorum node that is a member of both the old
+/// and new group. The coordinator is chosen by Nexus for a given epoch when a
+/// trust quorum reconfiguration is triggered. Reconfiguration is only performed
+/// when the control plane is up, as we use Nexus to persist prepares and ensure
+/// commitment happens, even if the system crashes while committing.  If a
+/// rack crash (such as a power outage) occurs before nexus is informed of the
+/// prepares, nexus will  skip the epoch and start a new reconfiguration. This
+/// allows progress to always be made with a full linearization of epochs.
 pub struct CoordinatorState {
     nexus_request_id: Uuid,
     start_time: Instant,
@@ -182,7 +206,7 @@ pub struct CoordinatorState {
     reconfigure: Reconfigure,
     // Received key shares for the last committed epoch
     // Only used if there actually is a last_committed_epoch
-    received_key_shares: BTreeMap<BaseboardId, Share>,
+    received_key_shares: BTreeMap<PlatformId, Share>,
     // Once we've received enough key shares for the last committed epoch (if
     // there is one), we can reconstruct the rack secret and drop the shares.
     last_committed_rack_secret: Option<RackSecret>,
@@ -191,7 +215,7 @@ pub struct CoordinatorState {
     // then populate a `PrepareMsg` for each member. When the member acknowledges
     // receipt, we will remove the prepare message. Once all members acknowledge
     // their prepare, we are done and can respond to nexus.
-    prepares: BTreeMap<BaseboardId, PrepareMsg>,
+    prepares: BTreeMap<PlatformId, PrepareMsg>,
 
     // The next retry timeout deadline
     retry_deadline: Instant,
@@ -229,14 +253,14 @@ impl CoordinatorState {
     }
 
     /// Do we have a key share for the given node?
-    pub fn has_key_share(&self, node: &BaseboardId) -> bool {
+    pub fn has_key_share(&self, node: &PlatformId) -> bool {
         self.received_key_shares.contains_key(node)
     }
 }
 
 /// A node capable of participating in trust quorum
 pub struct Node {
-    id: BaseboardId,
+    id: PlatformId,
     persistent_state: PersistentState,
     outgoing: Vec<Output>,
 
@@ -250,7 +274,7 @@ pub struct Node {
 
 impl Node {
     pub fn new(
-        id: BaseboardId,
+        id: PlatformId,
         lrtq_ledger_data: Option<LrtqLedgerData>,
     ) -> Node {
         Node {
@@ -262,7 +286,7 @@ impl Node {
         }
     }
 
-    pub fn id(&self) -> &BaseboardId {
+    pub fn id(&self) -> &PlatformId {
         &self.id
     }
 
@@ -292,7 +316,7 @@ impl Node {
 
     pub fn handle_peer_msg(
         &mut self,
-        from: BaseboardId,
+        from: PlatformId,
         msg: PeerMsg,
     ) -> impl Iterator<Item = Output> + '_ {
         match msg {
@@ -315,7 +339,7 @@ impl Node {
 
     // TODO: Logging?
     // We only handle this message if we are coordinating for `epoch`
-    fn handle_prepare_ack(&mut self, from: BaseboardId, epoch: Epoch) {
+    fn handle_prepare_ack(&mut self, from: PlatformId, epoch: Epoch) {
         let Some(mut coordinator_state) = self.coordinator_state.take() else {
             // Stale ack.
             return;
@@ -336,9 +360,11 @@ impl Node {
         self.coordinator_state = Some(coordinator_state);
     }
 
+    /// Become a coordinator of a reconfiguration for a given epoch.
+    ///
     /// Generate a new rack secret for the given epoch, encrypt the old one with
-    /// a key derived from the new rack secret, split the rack secret,
-    /// create a bunch of `PrepareMsgs` and send them to peer nodes.
+    /// a key derived from the new rack secret, split the rack secret, create a
+    /// bunch of `PrepareMsgs` and send them to peer nodes.
     fn coordinate_reconfiguration(
         &mut self,
         request_id: Uuid,
@@ -633,7 +659,8 @@ impl Node {
         Ok(())
     }
 
-    /// Verify that so far this node has only prepared epoch 0 and not yet committed it.
+    /// Verify that so far this node has only prepared epoch 0 and not yet
+    /// committed it.
     ///
     /// Send a reply to nexus if this is false, and return an error.
     ///
@@ -712,7 +739,7 @@ impl Node {
         Ok(())
     }
 
-    fn send_to_peer(&mut self, to: BaseboardId, msg: PeerMsg) {
+    fn send_to_peer(&mut self, to: PlatformId, msg: PeerMsg) {
         self.outgoing.push(Output::Envelope(Envelope {
             to,
             from: self.id.clone(),
@@ -736,7 +763,7 @@ impl Node {
         self.outgoing.push(Output::PersistCommit(msg));
     }
 
-    fn persist_decomissioned(&mut self, from: BaseboardId, epoch: Epoch) {
+    fn persist_decomissioned(&mut self, from: PlatformId, epoch: Epoch) {
         self.outgoing.push(Output::PersistDecommissioned { from, epoch });
     }
 

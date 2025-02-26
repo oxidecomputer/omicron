@@ -5,7 +5,7 @@
 //! A configuration of a trust quroum
 
 use crate::{
-    BaseboardId, EncryptedRackSecret, Epoch, RackId, ShareDigest, Threshold,
+    EncryptedRackSecret, Epoch, PlatformId, RackId, ShareDigest, Threshold,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -24,8 +24,8 @@ pub struct Configuration {
 
     /// We pick the first member of epoch 0 as coordinator when initializing from
     /// lrtq so we don't have to use an option
-    pub coordinator: BaseboardId,
-    pub members: BTreeMap<BaseboardId, ShareDigest>,
+    pub coordinator: PlatformId,
+    pub members: BTreeMap<PlatformId, ShareDigest>,
     pub threshold: Threshold,
 
     // There is no encrypted data for epoch 0

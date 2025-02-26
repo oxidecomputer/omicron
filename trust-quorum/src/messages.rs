@@ -5,7 +5,7 @@
 //! Messsages for the trust quorum protocol
 
 use crate::{
-    BaseboardId, Configuration, Epoch, RackId, Share, ShareDigest, Threshold,
+    Configuration, Epoch, PlatformId, RackId, Share, ShareDigest, Threshold,
 };
 use derive_more::From;
 use serde::{Deserialize, Serialize};
@@ -21,7 +21,7 @@ use uuid::Uuid;
 pub struct Reconfigure {
     pub epoch: Epoch,
     pub last_committed_epoch: Option<Epoch>,
-    pub members: BTreeSet<BaseboardId>,
+    pub members: BTreeSet<PlatformId>,
     pub threshold: Threshold,
 
     // The total timeout for the operation
@@ -71,7 +71,7 @@ pub enum NexusReqKind {
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct NexusRsp {
     pub request_id: Uuid,
-    pub from: BaseboardId,
+    pub from: PlatformId,
     pub kind: NexusRspKind,
 }
 
@@ -102,7 +102,7 @@ pub enum NexusRspKind {
 pub enum NexusRspError {
     #[error("sled was decommissioned on msg from {from:?} at epoch {epoch:?}: last prepared epoch = {last_prepared_epoch:?}")]
     SledDecommissioned {
-        from: BaseboardId,
+        from: PlatformId,
         epoch: Epoch,
         last_prepared_epoch: Option<Epoch>,
     },
@@ -162,7 +162,7 @@ pub struct CommittedMsg {
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct UpgradeFromLrtqMsg {
     pub upgrade_id: Uuid,
-    pub members: BTreeMap<BaseboardId, ShareDigest>,
+    pub members: BTreeMap<PlatformId, ShareDigest>,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -170,6 +170,7 @@ pub struct CancelUpgradeFromLrtqMsg {
     pub upgrade_id: Uuid,
 }
 
+/// Messages sent between trust quorum members over a sprockets channel
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
