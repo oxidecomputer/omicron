@@ -107,32 +107,24 @@ pub async fn database_inserter(
             // will only be run on single-node modality, so we want to ignore all
             // cases where the `ClickhouseClusterNative` service is not available.
             if let Some(cluster_client) = &cluster_client {
-                match cluster_client.ping().await {
-                    Ok(()) => {
-                        debug!(
-                            log,
-                            "inserting {} samples into cluster database",
-                            batch.len();
-                        );
-                        match cluster_client.insert_samples(&batch).await {
-                            Ok(()) => trace!(
-                                log,
-                                "successfully inserted samples into cluster";
-                            ),
-                            Err(e) => {
-                                warn!(
-                                    log,
-                                    "failed to insert some results into metric cluster DB";
-                                    InlineErrorChain::new(&e)
-                                );
-                            }
-                        }
-                    }
-                    Err(e) => info!(
+                debug!(
+                    log,
+                    "inserting {} samples into cluster database",
+                    batch.len();
+                );
+
+                match cluster_client.insert_samples(&batch).await {
+                    Ok(()) => trace!(
                         log,
-                        "ClickHouse cluster native connection unavailable";
-                        InlineErrorChain::new(&e)
+                        "successfully inserted samples into cluster";
                     ),
+                    Err(e) => {
+                        info!(
+                            log,
+                            "failed to insert some results into metric cluster DB";
+                            InlineErrorChain::new(&e)
+                        );
+                    }
                 }
             }
 
