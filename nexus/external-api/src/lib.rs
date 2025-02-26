@@ -1289,7 +1289,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::AffinityGroupPath>,
     ) -> Result<HttpResponseOk<views::AffinityGroup>, HttpError>;
 
-    /// List members of affinity group
+    /// List affinity group members
     #[endpoint {
         method = GET,
         path = "/v1/affinity-groups/{affinity_group}/members",
@@ -1397,7 +1397,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::AntiAffinityGroupPath>,
     ) -> Result<HttpResponseOk<views::AntiAffinityGroup>, HttpError>;
 
-    /// List members of anti-affinity group
+    /// List anti-affinity group members
     #[endpoint {
         method = GET,
         path = "/v1/anti-affinity-groups/{anti_affinity_group}/members",

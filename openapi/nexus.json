@@ -940,7 +940,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "List members of affinity group",
+        "summary": "List affinity group members",
         "operationId": "affinity_group_member_list",
         "parameters": [
           {
@@ -1416,7 +1416,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "List members of anti-affinity group",
+        "summary": "List anti-affinity group members",
         "operationId": "anti_affinity_group_member_list",
         "parameters": [
           {
