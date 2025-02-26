@@ -84,7 +84,8 @@ pub fn git_show_file(
 
 /// Begin assembling an invocation of git(1)
 fn git_start() -> Command {
-    Command::new("git")
+    let git = std::env::var("GIT").ok().unwrap_or_else(|| String::from("git"));
+    Command::new(&git)
 }
 
 /// Runs an assembled git(1) command, returning stdout on success and an error

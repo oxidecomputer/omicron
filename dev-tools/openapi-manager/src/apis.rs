@@ -257,7 +257,6 @@ impl ManagedApis {
 pub struct ApiIdent(String);
 NewtypeDebug! { () pub struct ApiIdent(String); }
 NewtypeDeref! { () pub struct ApiIdent(String); }
-// NewtypeDerefMut! { () pub struct ApiIdent(String); }
 NewtypeDisplay! { () pub struct ApiIdent(String); }
 NewtypeFrom! { () pub struct ApiIdent(String); }
 
