@@ -321,7 +321,7 @@ async-bb8-diesel = "0.2"
 async-trait = "0.1.86"
 atomicwrites = "0.4.4"
 authz-macros = { path = "nexus/authz-macros" }
-aws-lc-rs = "1.10.0"
+aws-lc-rs = "1.12.4"
 backoff = { version = "0.4.0", features = [ "tokio" ] }
 base64 = "0.22.1"
 bcs = "0.1.6"
