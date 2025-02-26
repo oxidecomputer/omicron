@@ -94,8 +94,8 @@ pub async fn database_inserter(
                 Err(e) => {
                     warn!(
                         log,
-                        "failed to insert some results into metric DB: {}",
-                        e.to_string()
+                        "failed to insert some results into metric DB";
+                        InlineErrorChain::new(&e)
                     );
                 }
             }
@@ -122,14 +122,16 @@ pub async fn database_inserter(
                             Err(e) => {
                                 warn!(
                                     log,
-                                    "failed to insert some results into metric cluster DB: {e}"
+                                    "failed to insert some results into metric cluster DB";
+                                    InlineErrorChain::new(&e)
                                 );
                             }
                         }
                     }
                     Err(e) => info!(
                         log,
-                        "ClickHouse cluster native connection unavailable: {e}"
+                        "ClickHouse cluster native connection unavailable";
+                        InlineErrorChain::new(&e)
                     ),
                 }
             }
