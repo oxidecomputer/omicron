@@ -1045,14 +1045,14 @@ pub(crate) mod test {
         .expect("created planner");
         let child_blueprint = planner.plan().expect("planning succeeded");
         verify_blueprint(&child_blueprint);
-        let diff = child_blueprint.diff_since_blueprint(&blueprint);
+        let summary = child_blueprint.diff_since_blueprint(&blueprint);
         eprintln!(
             "diff between blueprints (expected no changes):\n{}",
-            diff.display()
+            summary.display()
         );
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 0);
+        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.diff.sleds.modified().count(), 0);
     }
 
     /// Runs through a basic sequence of blueprints for adding a sled
@@ -1091,7 +1091,7 @@ pub(crate) mod test {
         println!("1 -> 2 (expected no changes):\n{}", summary.display());
         assert_eq!(summary.sleds_added.len(), 0);
         assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 0);
+        assert_eq!(summary.diff.sleds.modified().count(), 0);
         assert_eq!(summary.diff.sleds.unchanged().count(), 3);
         assert_eq!(summary.total_zones_added(), 0);
         assert_eq!(summary.total_zones_removed(), 0);
@@ -1150,7 +1150,7 @@ pub(crate) mod test {
             ZoneKind::InternalNtp
         ));
         assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 0);
+        assert_eq!(summary.diff.sleds.modified().count(), 0);
         verify_blueprint(&blueprint3);
 
         // Check that with no change in inventory, the planner makes no changes.
@@ -1171,7 +1171,7 @@ pub(crate) mod test {
         println!("3 -> 4 (expected no changes):\n{}", summary.display());
         assert_eq!(summary.sleds_added.len(), 0);
         assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 0);
+        assert_eq!(summary.diff.sleds.modified().count(), 0);
         verify_blueprint(&blueprint4);
 
         // Now update the inventory to have the requested NTP zone.
@@ -1215,8 +1215,8 @@ pub(crate) mod test {
         );
         assert_eq!(summary.sleds_added.len(), 0);
         assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 1);
-        let sled_id = summary.sleds_modified.first().unwrap();
+        assert_eq!(summary.diff.sleds.modified().count(), 1);
+        let sled_id = summary.diff.sleds.modified_keys().next().unwrap();
         assert_eq!(*sled_id, new_sled_id);
         // No removed or modified zones on this sled
         let zones_cfg_diff = summary.zones_on_modified_sled(sled_id).unwrap();
@@ -1311,17 +1311,13 @@ pub(crate) mod test {
         );
         assert_eq!(summary.sleds_added.len(), 0);
         assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 1);
-        let changed_sled_id = summary.sleds_modified.first().unwrap();
+        assert_eq!(summary.diff.sleds.modified().count(), 1);
+        let (changed_sled_id, changed_sled) =
+            summary.diff.sleds.modified().next().unwrap();
 
         assert_eq!(*changed_sled_id, sled_id);
         assert_eq!(
-            summary
-                .datasets_on_modified_sled(&sled_id)
-                .unwrap()
-                .datasets
-                .added
-                .len(),
+            changed_sled.diff_pair().datasets_config.datasets.added.len(),
             4
         );
 
@@ -1394,18 +1390,17 @@ pub(crate) mod test {
         );
         assert_eq!(summary.sleds_added.len(), 0);
         assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 3);
+        assert_eq!(summary.diff.sleds.modified().count(), 3);
 
         // All 3 sleds should get additional Nexus zones. We expect a total of
         // 11 new Nexus zones, which should be spread evenly across the three
         // sleds (two should get 4 and one should get 3).
         let mut total_new_nexus_zones = 0;
-        for sled_id in &summary.sleds_modified {
-            assert!(summary.removed_zones(sled_id).is_none());
-            let zones_cfg_diff =
-                summary.zones_on_modified_sled(sled_id).unwrap();
-            assert_eq!(zones_cfg_diff.zones.modified().count(), 0);
-            let zones_added = &zones_cfg_diff.zones.added;
+        for (sled_id, modified_sled) in summary.diff.sleds.modified() {
+            let zones_diff = &modified_sled.diff_pair().zones_config.zones;
+            assert!(zones_diff.removed.is_empty());
+            assert_eq!(zones_diff.modified().count(), 0);
+            let zones_added = &zones_diff.added;
             match zones_added.len() {
                 n @ (3 | 4) => {
                     total_new_nexus_zones += n;
@@ -1524,13 +1519,12 @@ pub(crate) mod test {
         );
         assert_eq!(summary.sleds_added.len(), 0);
         assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 2);
+        assert_eq!(summary.diff.sleds.modified().count(), 2);
 
         // 2 sleds should each get 1 additional internal DNS zone.
         let mut total_new_zones = 0;
-        for sled_id in &summary.sleds_modified {
-            let zones_diff =
-                &summary.zones_on_modified_sled(&sled_id).unwrap().zones;
+        for (sled_id, modified_sled) in summary.diff.sleds.modified() {
+            let zones_diff = &modified_sled.diff_pair().zones_config.zones;
             assert!(zones_diff.removed.is_empty());
             assert_eq!(zones_diff.modified().count(), 0);
             let zones_added = &zones_diff.added;
@@ -1924,7 +1918,7 @@ pub(crate) mod test {
             "1 -> 2 (some new disks, one expunged):\n{}",
             summary.display()
         );
-        assert_eq!(summary.sleds_modified.len(), 1);
+        assert_eq!(summary.diff.sleds.modified().count(), 1);
 
         // We should be adding a Crucible zone for each new in-service disk.
         assert_eq!(summary.total_zones_added(), NEW_IN_SERVICE_DISKS);
@@ -2015,7 +2009,7 @@ pub(crate) mod test {
 
         assert_eq!(summary.sleds_added.len(), 0);
         assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 1);
+        assert_eq!(summary.diff.sleds.modified().count(), 1);
 
         assert_eq!(summary.total_zones_added(), 0);
         assert_eq!(summary.total_zones_removed(), 0);
@@ -2308,7 +2302,7 @@ pub(crate) mod test {
         println!("1 -> 2 (expunge a disk):\n{}", summary.display());
         assert_eq!(summary.sleds_added.len(), 0);
         assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 1);
+        assert_eq!(summary.diff.sleds.modified().count(), 1);
 
         // We should be removing a single zone, associated with the Crucible
         // using that device.
@@ -2488,7 +2482,7 @@ pub(crate) mod test {
         println!("1 -> 2 (expunge a disk):\n{}", summary.display());
         assert_eq!(summary.sleds_added.len(), 0);
         assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 1);
+        assert_eq!(summary.diff.sleds.modified().count(), 1);
 
         // No zones should have been removed from the blueprint entirely.
         assert_eq!(summary.total_zones_removed(), 0);
@@ -2695,7 +2689,7 @@ pub(crate) mod test {
 
         assert_eq!(summary.sleds_added.len(), 0);
         assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 3);
+        assert_eq!(summary.diff.sleds.modified().count(), 3);
         assert_eq!(summary.diff.sleds.unchanged().count(), 2);
 
         assert_all_zones_expunged(&summary, expunged_sled_id, "expunged sled");
@@ -2704,17 +2698,23 @@ pub(crate) mod test {
         // should get additional Nexus zones. We expect a total of 6 new Nexus
         // zones, which should be split evenly between the two sleds, while the
         // non-provisionable sled should be unchanged.
-        let mut remaining_modified_sleds = summary.sleds_modified.clone();
-        remaining_modified_sleds.remove(&expunged_sled_id);
+        let remaining_modified_sleds = summary
+            .diff
+            .sleds
+            .modified()
+            .filter_map(|(&sled_id, sled)| {
+                (sled_id != expunged_sled_id).then_some((sled_id, sled))
+            })
+            .collect::<BTreeMap<_, _>>();
 
         assert_eq!(remaining_modified_sleds.len(), 2);
         let mut total_new_nexus_zones = 0;
-        for sled_id in remaining_modified_sleds {
+        for (sled_id, modified_sled) in remaining_modified_sleds {
             assert!(sled_id != nonprovisionable_sled_id);
             assert!(sled_id != expunged_sled_id);
             assert!(sled_id != decommissioned_sled_id);
             let zones_on_modified_sled =
-                &summary.zones_on_modified_sled(&sled_id).unwrap().zones;
+                &modified_sled.diff_pair().zones_config.zones;
             assert!(zones_on_modified_sled.removed.is_empty());
             let zones = &zones_on_modified_sled.added;
             for (_, zone) in zones {
@@ -2964,7 +2964,7 @@ pub(crate) mod test {
         );
         assert_eq!(summary.sleds_added.len(), 0);
         assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 0);
+        assert_eq!(summary.diff.sleds.modified().count(), 0);
         assert_eq!(
             summary.diff.sleds.unchanged().count(),
             ExampleSystemBuilder::DEFAULT_N_SLEDS
@@ -3011,7 +3011,7 @@ pub(crate) mod test {
         );
         assert_eq!(summary.sleds_added.len(), 0);
         assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 0);
+        assert_eq!(summary.diff.sleds.modified().count(), 0);
         assert_eq!(
             summary.diff.sleds.unchanged().count(),
             ExampleSystemBuilder::DEFAULT_N_SLEDS

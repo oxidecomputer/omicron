@@ -12,11 +12,11 @@ use super::blueprint_display::{
 };
 use super::{
     unwrap_or_none, zone_sort_key, BlueprintDatasetConfigDiff,
-    BlueprintDatasetDisposition, BlueprintDatasetsConfigDiff, BlueprintDiff,
-    BlueprintMetadata, BlueprintPhysicalDiskConfig,
-    BlueprintPhysicalDiskConfigDiff, BlueprintPhysicalDisksConfigDiff,
-    BlueprintSledConfigDiff, BlueprintZoneConfigDiff, BlueprintZonesConfigDiff,
-    ClickhouseClusterConfig, CockroachDbPreserveDowngrade,
+    BlueprintDatasetDisposition, BlueprintDiff, BlueprintMetadata,
+    BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskConfigDiff,
+    BlueprintPhysicalDisksConfigDiff, BlueprintSledConfigDiff,
+    BlueprintZoneConfigDiff, BlueprintZonesConfigDiff, ClickhouseClusterConfig,
+    CockroachDbPreserveDowngrade,
 };
 use daft::Diffable;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -44,7 +44,6 @@ pub struct BlueprintDiffSummary<'a> {
     // TODO-john do we need these sets still?
     pub sleds_added: BTreeSet<SledUuid>,
     pub sleds_removed: BTreeSet<SledUuid>,
-    pub sleds_modified: BTreeSet<SledUuid>,
 }
 
 impl<'a> BlueprintDiffSummary<'a> {
@@ -61,8 +60,6 @@ impl<'a> BlueprintDiffSummary<'a> {
             diff.sleds.added.keys().map(|k| **k).collect();
         let sleds_removed: BTreeSet<_> =
             diff.sleds.removed.keys().map(|k| **k).collect();
-        let sleds_modified: BTreeSet<_> =
-            diff.sleds.modified_keys().copied().collect();
 
         BlueprintDiffSummary {
             before,
@@ -71,7 +68,6 @@ impl<'a> BlueprintDiffSummary<'a> {
             modified_sleds_diff,
             sleds_added,
             sleds_removed,
-            sleds_modified,
         }
     }
 
@@ -83,18 +79,38 @@ impl<'a> BlueprintDiffSummary<'a> {
     /// Returns whether the diff reflects any changes or if the blueprints are
     /// equivalent.
     pub fn has_changes(&self) -> bool {
-        // Any changes to physical disks, datasets, or zones would be reflected
-        // in `self.sleds_modified`, `self.sleds_added`, or
-        // `self.sleds_removed`.
-        if !self.sleds_modified.is_empty()
-            || !self.sleds_added.is_empty()
-            || !self.sleds_removed.is_empty()
+        let BlueprintDiff {
+            // Fields in which changes are meaningful.
+            sleds,
+            clickhouse_cluster_config,
+            // Metadata fields for which changes don't reflect semantic
+            // changes from one blueprint to the next.
+            id: _,
+            parent_blueprint_id: _,
+            internal_dns_version: _,
+            external_dns_version: _,
+            cockroachdb_fingerprint: _,
+            cockroachdb_setting_preserve_downgrade: _,
+            creator: _,
+            comment: _,
+        } = &self.diff;
+
+        // Did we modify, add, or remove any sleds?
+        if sleds.modified().next().is_some()
+            || !sleds.added.is_empty()
+            || !sleds.removed.is_empty()
         {
             return true;
         }
 
-        self.diff.clickhouse_cluster_config.before
-            != self.diff.clickhouse_cluster_config.after
+        // Did the clickhouse config change?
+        if clickhouse_cluster_config.before != clickhouse_cluster_config.after {
+            return true;
+        }
+
+        // All fields checked or ignored; if we get here, there are no
+        // meaningful changes.
+        false
     }
 
     /// All sled IDs present in the diff in any way
@@ -217,14 +233,6 @@ impl<'a> BlueprintDiffSummary<'a> {
         sled_id: &SledUuid,
     ) -> Option<&BlueprintPhysicalDisksConfigDiff<'a>> {
         self.modified_sleds_diff.get(sled_id).map(|c| &c.disks_config)
-    }
-
-    /// Return the `BlueprintDatasetsConfigDiff` for a modified sled
-    pub fn datasets_on_modified_sled(
-        &self,
-        sled_id: &SledUuid,
-    ) -> Option<&BlueprintDatasetsConfigDiff<'a>> {
-        self.modified_sleds_diff.get(sled_id).map(|c| &c.datasets_config)
     }
 
     /// Iterate over all added zones on a sled
@@ -1934,17 +1942,6 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
             self.summary.diff.sleds.removed.get(sled_id).unwrap().state;
         format!("was {before}")
     }
-    fn sled_state_modified(&self, sled_id: &SledUuid) -> String {
-        let modified_sled =
-            self.summary.diff.sleds.get_modified(sled_id).unwrap();
-        let before = modified_sled.before.state;
-        let after = modified_sled.after.state;
-        if before != after {
-            format!("{before} -> {after}")
-        } else {
-            format!("{before}")
-        }
-    }
 }
 
 impl fmt::Display for BlueprintDiffDisplay<'_> {
@@ -1977,15 +1974,11 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
         // We put errors at the bottom to ensure they are seen immediately.
 
         // Write out tables for unchanged sleds
-        let mut sleds_iter = summary.diff.sleds.unchanged().peekable();
-        if sleds_iter.peek().is_some() {
+        let mut unchanged_iter = summary.diff.sleds.unchanged().peekable();
+        if unchanged_iter.peek().is_some() {
             writeln!(f, " UNCHANGED SLEDS:\n")?;
-            for (sled_id, sled) in sleds_iter {
-                writeln!(
-                    f,
-                    "  sled {sled_id} ({}):\n",
-                    sled.state.to_string(),
-                )?;
+            for (sled_id, sled) in unchanged_iter {
+                writeln!(f, "  sled {sled_id} ({}):\n", sled.state)?;
                 self.write_tables(f, sled_id)?;
             }
         }
@@ -2004,14 +1997,19 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
         }
 
         // Write out tables for modified sleds
-        if !summary.sleds_modified.is_empty() {
+        let mut modified_iter = summary.diff.sleds.modified().peekable();
+        if modified_iter.peek().is_some() {
             writeln!(f, " MODIFIED SLEDS:\n")?;
-            for sled_id in &summary.sleds_modified {
-                writeln!(
-                    f,
-                    "  sled {sled_id} ({}):\n",
-                    self.sled_state_modified(sled_id)
-                )?;
+            for (sled_id, sled) in modified_iter {
+                if sled.before.state != sled.after.state {
+                    writeln!(
+                        f,
+                        "  sled {sled_id} ({} -> {}):\n",
+                        sled.before.state, sled.after.state,
+                    )?;
+                } else {
+                    writeln!(f, "  sled {sled_id} ({}):\n", sled.before.state)?;
+                }
                 self.write_tables(f, sled_id)?;
             }
         }

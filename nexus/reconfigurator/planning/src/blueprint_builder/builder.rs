@@ -2100,14 +2100,14 @@ pub mod test {
 
         let blueprint2 = builder.build();
         verify_blueprint(&blueprint2);
-        let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        let summary = blueprint2.diff_since_blueprint(&blueprint1);
         println!(
             "initial blueprint -> next blueprint (expected no changes):\n{}",
-            diff.display()
+            summary.display()
         );
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 0);
+        assert_eq!(summary.sleds_added.len(), 0);
+        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.diff.sleds.modified().count(), 0);
 
         // The next step is adding these zones to a new sled.
         let mut sled_id_rng = rng.next_sled_id_rng();
@@ -2137,17 +2137,20 @@ pub mod test {
 
         let blueprint3 = builder.build();
         verify_blueprint(&blueprint3);
-        let diff = blueprint3.diff_since_blueprint(&blueprint2);
-        println!("expecting new NTP and Crucible zones:\n{}", diff.display());
+        let summary = blueprint3.diff_since_blueprint(&blueprint2);
+        println!(
+            "expecting new NTP and Crucible zones:\n{}",
+            summary.display()
+        );
 
         // No sleds were changed or removed.
-        assert_eq!(diff.sleds_modified.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
+        assert_eq!(summary.diff.sleds.modified().count(), 0);
+        assert_eq!(summary.sleds_removed.len(), 0);
 
         // One sled was added.
-        assert_eq!(diff.sleds_added.len(), 1);
-        let sled_id = diff.sleds_added.first().unwrap();
-        let new_sled_zones = diff.added_zones(sled_id).unwrap();
+        assert_eq!(summary.sleds_added.len(), 1);
+        let sled_id = summary.sleds_added.first().unwrap();
+        let new_sled_zones = summary.added_zones(sled_id).unwrap();
         assert_eq!(*sled_id, new_sled_id);
         // The generation number should be newer than the initial default.
         assert!(new_sled_zones.generation_after > Some(Generation::new()));
