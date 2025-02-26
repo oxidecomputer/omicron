@@ -33,13 +33,11 @@ pub enum ServiceName {
     ClickhouseAdminSingleServer,
     /// The native TCP interface to a ClickHouse server.
     ///
-    /// NOTE: This is used for either single-node or a replicated cluster.
+    /// NOTE: This is used for a single-node ClickHouse installation.
     ClickhouseNative,
     /// The native TCP interface to a ClickHouse server.
     ///
-    /// NOTE: This is a temporary service name for replicated cluster.
-    /// Once we are no longer running noth installations side by side,
-    /// this will be removed
+    /// NOTE: This is used for a replicated cluster ClickHouse installation.
     ClickhouseClusterNative,
     /// The TCP interface to a ClickHouse Keeper server.
     ClickhouseKeeper,
