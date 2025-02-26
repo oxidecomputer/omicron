@@ -1123,10 +1123,9 @@ pub struct WebhookDelivery {
     /// "failed_unreachable").
     pub response: Option<WebhookDeliveryResponse>,
 
-    /// The UUID of a previous delivery attempt that this is a repeat of, if
-    /// this was a resending of a previous delivery. If this is the first time
-    /// this event has been delivered, this is `null`.
-    pub resent_for: Option<Uuid>,
+    /// Attempt number, starting at 1. If this is a retry of a previous failed
+    /// delivery, this value indicates that.
+    pub attempt: usize,
 }
 
 /// The state of a webhook delivery attempt.

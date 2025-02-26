@@ -123,27 +123,30 @@ impl super::Nexus {
             ReceiverClient::new(&self.webhook_delivery_client, secrets, &rx)?;
         let delivery = WebhookDelivery::new_probe(&authz_rx.id(), &self.id);
 
-        let attempt = match client
-            .send_delivery_request(opctx, &delivery, WebhookEventClass::Probe)
-            .await
-        {
-            Ok(attempt) => attempt,
-            Err(e) => {
-                slog::error!(
-                    &opctx.log,
-                    "failed to probe webhook receiver";
-                    "rx_id" => %authz_rx.id(),
-                    "rx_name" => %rx.name(),
-                    "delivery_id" => %delivery.id,
-                    "error" => %e,
-                );
-                return Err(Error::InternalError {
-                    internal_message: e.to_string(),
-                });
-            }
-        };
+        const CLASS: WebhookEventClass = WebhookEventClass::Probe;
 
-        todo!()
+        let attempt =
+            match client.send_delivery_request(opctx, &delivery, CLASS).await {
+                Ok(attempt) => attempt,
+                Err(e) => {
+                    slog::error!(
+                        &opctx.log,
+                        "failed to probe webhook receiver";
+                        "rx_id" => %authz_rx.id(),
+                        "rx_name" => %rx.name(),
+                        "delivery_id" => %delivery.id,
+                        "error" => %e,
+                    );
+                    return Err(Error::InternalError {
+                        internal_message: e.to_string(),
+                    });
+                }
+            };
+
+        // TODO(eliza): this is where we would resend all the failed stuff
+        // if requested...
+
+        Ok(delivery.to_api_delivery(CLASS, Some(&attempt)))
     }
 
     pub async fn webhook_receiver_secret_add(

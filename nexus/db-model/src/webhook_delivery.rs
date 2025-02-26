@@ -9,8 +9,10 @@ use crate::typed_uuid::DbTypedUuid;
 use crate::SqlU8;
 use crate::WebhookDeliveryTrigger;
 use crate::WebhookEvent;
+use crate::WebhookEventClass;
 use chrono::{DateTime, TimeDelta, Utc};
 use nexus_types::external_api::views;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::{
     OmicronZoneKind, OmicronZoneUuid, WebhookDeliveryKind, WebhookDeliveryUuid,
     WebhookEventKind, WebhookEventUuid, WebhookReceiverKind,
@@ -136,9 +138,24 @@ impl WebhookDelivery {
 
     pub fn to_api_delivery(
         &self,
-        attempt: &WebhookDeliveryAttempt,
+        event_class: WebhookEventClass,
+        attempt: Option<&WebhookDeliveryAttempt>,
     ) -> views::WebhookDelivery {
-        todo!()
+        views::WebhookDelivery {
+            id: self.id.into_untyped_uuid(),
+            webhook_id: self.rx_id.into(),
+            event_class: event_class.as_str().to_owned(),
+            event_id: self.event_id.into(),
+            state: attempt
+                .map(|attempt| attempt.result.into())
+                .unwrap_or(views::WebhookDeliveryState::Pending),
+            trigger: self.trigger.into(),
+            response: attempt.and_then(WebhookDeliveryAttempt::response_view),
+            time_sent: attempt.map(|attempt| attempt.time_created),
+            attempt: attempt
+                .map(|attempt| attempt.attempt.0 as usize)
+                .unwrap_or(1),
+        }
     }
 }
 
@@ -169,6 +186,15 @@ pub struct WebhookDeliveryAttempt {
     pub response_duration: Option<TimeDelta>,
 
     pub time_created: DateTime<Utc>,
+}
+
+impl WebhookDeliveryAttempt {
+    fn response_view(&self) -> Option<views::WebhookDeliveryResponse> {
+        Some(views::WebhookDeliveryResponse {
+            status: self.response_status? as u16, // i hate that this has to signed in the database...
+            duration_ms: self.response_duration?.num_milliseconds() as usize,
+        })
+    }
 }
 
 impl From<WebhookDeliveryResult> for views::WebhookDeliveryState {

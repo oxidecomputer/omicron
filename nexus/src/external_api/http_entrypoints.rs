@@ -7424,8 +7424,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn webhook_probe(
         rqctx: RequestContext<Self::Context>,
-        _path_params: Path<params::WebhookSelector>,
-        _query_params: Query<params::WebhookProbe>,
+        path_params: Path<params::WebhookSelector>,
+        query_params: Query<params::WebhookProbe>,
     ) -> Result<HttpResponseOk<views::WebhookDelivery>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -7434,10 +7434,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
-            Err(nexus
-                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
-                .await
-                .into())
+            let webhook_selector = path_params.into_inner();
+            let probe_params = query_params.into_inner();
+            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let delivery =
+                nexus.webhook_receiver_probe(&opctx, rx, probe_params).await?;
+            // TODO(eliza): send the status code that came back from the probe req...
+            Ok(HttpResponseOk(delivery))
         };
         apictx
             .context
