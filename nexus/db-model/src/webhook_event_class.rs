@@ -24,6 +24,7 @@ impl_enum_type!(
     #[diesel(sql_type = WebhookEventClassEnum)]
     pub enum WebhookEventClass;
 
+    Probe => b"probe"
     TestFoo => b"test.foo"
     TestFooBar => b"test.foo.bar"
     TestFooBaz => b"test.foo.baz"
@@ -37,6 +38,7 @@ impl WebhookEventClass {
         // declared a single time, rather than twice (in both `impl_enum_type!`
         // and here)...
         match self {
+            Self::Probe => "probe",
             Self::TestFoo => "test.foo",
             Self::TestFooBar => "test.foo.bar",
             Self::TestFooBaz => "test.foo.baz",

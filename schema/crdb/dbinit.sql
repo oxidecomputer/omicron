@@ -5011,6 +5011,8 @@ ON omicron.public.webhook_secret (
 --
 -- When creating new event classes, be sure to add them here!
 CREATE TYPE IF NOT EXISTS omicron.public.webhook_event_class AS ENUM (
+    -- Liveness probes, which are technically not real events, but, you know...
+    'probe',
     -- Test classes used to test globbing.
     --
     -- These are not publicly exposed.

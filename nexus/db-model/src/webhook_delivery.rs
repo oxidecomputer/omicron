@@ -13,7 +13,8 @@ use chrono::{DateTime, TimeDelta, Utc};
 use nexus_types::external_api::views;
 use omicron_uuid_kinds::{
     OmicronZoneKind, OmicronZoneUuid, WebhookDeliveryKind, WebhookDeliveryUuid,
-    WebhookEventKind, WebhookReceiverKind, WebhookReceiverUuid,
+    WebhookEventKind, WebhookEventUuid, WebhookReceiverKind,
+    WebhookReceiverUuid,
 };
 use serde::Deserialize;
 use serde::Serialize;
@@ -121,7 +122,7 @@ impl WebhookDelivery {
             // not having the event UUID not point to an entry in the events table
             // that doesn't exist, perhaps we'd rather just put one entry in there
             // for probes rather than create a new one for each probe...
-            event_id: WebhookEventUud::new_v4().into(),
+            event_id: WebhookEventUuid::new_v4().into(),
             rx_id: (*rx_id).into(),
             trigger: WebhookDeliveryTrigger::Probe,
             payload: serde_json::json!({}),
@@ -131,6 +132,13 @@ impl WebhookDelivery {
             deliverator_id: Some((*deliverator_id).into()),
             time_delivery_started: Some(Utc::now()),
         }
+    }
+
+    pub fn to_api_delivery(
+        &self,
+        attempt: &WebhookDeliveryAttempt,
+    ) -> views::WebhookDelivery {
+        todo!()
     }
 }
 
