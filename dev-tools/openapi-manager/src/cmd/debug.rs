@@ -61,9 +61,9 @@ pub(crate) fn debug_impl(
         }
 
         for version in api.iter_versions_semver() {
-            // unwrap(): there should be a resolution for every managed API
-            let resolution =
-                resolved.resolution_for_api_version(ident, version).unwrap();
+            let resolution = resolved
+                .resolution_for_api_version(ident, version)
+                .expect("must have a resolution for every managed API");
             print!("        version {}: {}: ", version, resolution.kind());
 
             let problems: Vec<_> = resolution.problems().collect();

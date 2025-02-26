@@ -653,8 +653,9 @@ fn resolve_api<'a>(
             .collect();
 
         // Check the "latest" symlink.
-        // unwrap(): the "generated" source should always have a latest link.
-        let latest_generated = api_generated.latest_link().unwrap();
+        let latest_generated = api_generated.latest_link().expect(
+            "\"generated\" source should always have a \"latest\" link",
+        );
         let symlink = match api_local.and_then(|l| l.latest_link()) {
             Some(latest_local) if latest_local == latest_generated => None,
             Some(latest_local) => Some(Problem::LatestLinkStale {
@@ -682,19 +683,17 @@ fn resolve_api_lockstep<'a>(
 ) -> BTreeMap<semver::Version, Resolution<'a>> {
     assert!(api.is_lockstep());
 
-    // unwrap(): Lockstep APIs have exactly one version.
+    // unwrap(): Lockstep APIs by construction always have exactly one version.
     let version = iter_only(api.iter_versions_semver())
         .with_context(|| {
             format!("list of versions for lockstep API {}", api.ident())
         })
         .unwrap();
 
-    // unwrap(): We should always have generated an OpenAPI document for
-    // each supported version.
     let generated = api_generated
         .versions()
         .get(version)
-        .expect("at least one OpenAPI document for version of lockstep API");
+        .expect("generated OpenAPI document for lockstep API");
 
     // We may or may not have found a local OpenAPI document for this API.
     let local = api_local

@@ -90,8 +90,10 @@ impl GeneratedFiles {
                     api_files.load_contents(file_name, contents);
                 }
             } else {
-                // unwrap(): this returns `Some` for versioned APIs.
-                let supported_versions = api.iter_versioned_versions().unwrap();
+                let supported_versions = api.iter_versioned_versions().expect(
+                    "iter_versioned_versions() returns `Some` for versioned \
+                     APIs",
+                );
                 let mut latest = None;
                 for supported_version in supported_versions {
                     let version = supported_version.semver();
@@ -105,7 +107,6 @@ impl GeneratedFiles {
                     api_files.load_contents(file_name, contents);
                 }
 
-                // unwrap(): there must have been at least one version
                 api_files.load_latest_link(
                     api.ident(),
                     latest.expect("at least one version of supported API"),
