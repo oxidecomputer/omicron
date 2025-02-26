@@ -1102,7 +1102,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "88da5a13c620b4ca0078845707ea9c3faf11edbc3ffd8497d11d686211cd1ac0"
 dependencies = [
  "serde",
- "toml 0.8.19",
+ "toml 0.8.20",
 ]
 
 [[package]]
@@ -1952,7 +1952,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-rustls 0.24.1",
- "toml 0.8.19",
+ "toml 0.8.20",
  "twox-hash",
  "uuid",
  "vergen",
@@ -2571,7 +2571,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
- "toml 0.8.19",
+ "toml 0.8.20",
  "uuid",
 ]
 
@@ -2659,7 +2659,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "toml 0.8.19",
+ "toml 0.8.20",
  "typify 0.3.0",
  "uuid",
 ]
@@ -2706,7 +2706,7 @@ dependencies = [
  "slog-term",
  "tokio",
  "tokio-rustls 0.25.0",
- "toml 0.8.19",
+ "toml 0.8.20",
  "usdt",
  "uuid",
  "version_check",
@@ -2757,7 +2757,7 @@ dependencies = [
  "thiserror 2.0.11",
  "tokio",
  "tokio-rustls 0.25.0",
- "toml 0.8.19",
+ "toml 0.8.20",
  "usdt",
  "uuid",
  "version_check",
@@ -2973,7 +2973,7 @@ dependencies = [
  "socket2",
  "thiserror 1.0.69",
  "tokio",
- "toml 0.8.19",
+ "toml 0.8.20",
  "uuid",
 ]
 
@@ -4572,7 +4572,7 @@ dependencies = [
  "smf",
  "thiserror 1.0.69",
  "tokio",
- "toml 0.8.19",
+ "toml 0.8.20",
  "uuid",
  "whoami",
  "zone 0.3.0",
@@ -5823,7 +5823,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "tokio-postgres",
- "toml 0.8.19",
+ "toml 0.8.20",
  "uuid",
 ]
 
@@ -6777,7 +6777,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-postgres",
- "toml 0.8.19",
+ "toml 0.8.20",
  "url",
 ]
 
@@ -6818,7 +6818,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-postgres",
- "toml 0.8.19",
+ "toml 0.8.20",
  "url",
 ]
 
@@ -6865,7 +6865,7 @@ dependencies = [
  "test-strategy",
  "thiserror 1.0.69",
  "tokio",
- "toml 0.8.19",
+ "toml 0.8.20",
  "uuid",
 ]
 
@@ -6911,7 +6911,7 @@ dependencies = [
  "subprocess",
  "tokio",
  "tokio-postgres",
- "toml 0.8.19",
+ "toml 0.8.20",
 ]
 
 [[package]]
@@ -6966,7 +6966,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-tungstenite 0.23.1",
- "toml 0.8.19",
+ "toml 0.8.20",
  "uuid",
 ]
 
@@ -7021,7 +7021,7 @@ dependencies = [
  "petgraph 0.6.5",
  "serde",
  "subprocess",
- "toml 0.8.19",
+ "toml 0.8.20",
 ]
 
 [[package]]
@@ -7272,7 +7272,7 @@ dependencies = [
  "tar",
  "thiserror 1.0.69",
  "tokio",
- "toml 0.8.19",
+ "toml 0.8.20",
  "walkdir",
 ]
 
@@ -7333,7 +7333,7 @@ dependencies = [
  "slog-term",
  "tar",
  "tokio",
- "toml 0.8.19",
+ "toml 0.8.20",
  "tufaceous-lib",
 ]
 
@@ -7451,7 +7451,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "toml 0.8.19",
+ "toml 0.8.20",
  "usdt",
  "uuid",
  "walkdir",
@@ -7565,7 +7565,6 @@ dependencies = [
  "getrandom 0.2.15",
  "group",
  "hashbrown 0.15.1",
- "heck 0.4.1",
  "hex",
  "hickory-proto",
  "hmac",
@@ -7578,6 +7577,7 @@ dependencies = [
  "inout",
  "itertools 0.10.5",
  "itertools 0.12.1",
+ "itertools 0.14.0",
  "lalrpop-util",
  "lazy_static",
  "libc",
@@ -7945,7 +7945,7 @@ dependencies = [
  "oximeter-types",
  "prettyplease",
  "syn 2.0.96",
- "toml 0.8.19",
+ "toml 0.8.20",
  "uuid",
 ]
 
@@ -8019,7 +8019,7 @@ dependencies = [
  "subprocess",
  "thiserror 1.0.69",
  "tokio",
- "toml 0.8.19",
+ "toml 0.8.20",
  "uuid",
 ]
 
@@ -8166,7 +8166,7 @@ dependencies = [
  "serde",
  "slog-error-chain",
  "syn 2.0.96",
- "toml 0.8.19",
+ "toml 0.8.20",
 ]
 
 [[package]]
@@ -8651,7 +8651,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9cd31dcfdbbd7431a807ef4df6edd6473228e94d5c805e8cf671227a21bad068"
 dependencies = [
  "anyhow",
- "itertools 0.12.1",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "rand 0.8.5",
@@ -10240,7 +10240,7 @@ dependencies = [
  "serde",
  "tempfile",
  "thiserror 1.0.69",
- "toml 0.8.19",
+ "toml 0.8.20",
  "toolchain_find",
 ]
 
@@ -11050,7 +11050,7 @@ dependencies = [
  "slog",
  "strum",
  "thiserror 1.0.69",
- "toml 0.8.19",
+ "toml 0.8.20",
  "uuid",
 ]
 
@@ -11344,7 +11344,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.96",
@@ -11380,7 +11380,7 @@ dependencies = [
  "slog-dtrace",
  "thiserror 1.0.69",
  "tokio",
- "toml 0.8.19",
+ "toml 0.8.20",
 ]
 
 [[package]]
@@ -11427,7 +11427,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-rustls 0.26.0",
- "toml 0.8.19",
+ "toml 0.8.20",
  "x509-cert",
  "zeroize",
 ]
@@ -12354,9 +12354,9 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.8.19"
+version = "0.8.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1ed1f98e3fdc28d6d910e6737ae6ab1a93bf1985935a1193e68f93eeb68d24e"
+checksum = "cd87a5cdd6ffab733b2f74bc4fd7ee5fff6634124999ac278c35fc78c6120148"
 dependencies = [
  "serde",
  "serde_spanned",
@@ -12579,7 +12579,7 @@ dependencies = [
  "serde_json",
  "target-triple",
  "termcolor",
- "toml 0.8.19",
+ "toml 0.8.20",
 ]
 
 [[package]]
@@ -12643,7 +12643,7 @@ dependencies = [
  "slog",
  "tar",
  "tokio",
- "toml 0.8.19",
+ "toml 0.8.20",
  "tough",
  "url",
  "zip 2.1.3",
@@ -13460,7 +13460,7 @@ dependencies = [
  "textwrap",
  "tokio",
  "tokio-util",
- "toml 0.8.19",
+ "toml 0.8.20",
  "toml_edit 0.22.24",
  "transceiver-controller",
  "tui-tree-widget",
@@ -13492,7 +13492,7 @@ dependencies = [
  "slog",
  "thiserror 1.0.69",
  "tokio",
- "toml 0.8.19",
+ "toml 0.8.20",
  "transceiver-controller",
  "update-engine",
 ]
@@ -13585,7 +13585,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "toml 0.8.19",
+ "toml 0.8.20",
  "tough",
  "transceiver-controller",
  "tufaceous",
@@ -13982,7 +13982,7 @@ dependencies = [
  "swrite",
  "tabled 0.15.0",
  "textwrap",
- "toml 0.8.19",
+ "toml 0.8.20",
  "usdt",
 ]
 

@@ -63,7 +63,6 @@ generic-array = { version = "0.14.7", default-features = false, features = ["mor
 getrandom = { version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.15.1" }
-heck = { version = "0.4.1" }
 hex = { version = "0.4.3", features = ["serde"] }
 hickory-proto = { version = "0.24.3", features = ["text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
@@ -71,7 +70,7 @@ hyper = { version = "1.5.2", features = ["full"] }
 idna = { version = "1.0.3" }
 indexmap = { version = "2.7.1", features = ["serde"] }
 inout = { version = "0.1.3", default-features = false, features = ["std"] }
-itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
+itertools-582f2526e08bb6a0 = { package = "itertools", version = "0.14.0" }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
@@ -186,7 +185,6 @@ generic-array = { version = "0.14.7", default-features = false, features = ["mor
 getrandom = { version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.15.1" }
-heck = { version = "0.4.1" }
 hex = { version = "0.4.3", features = ["serde"] }
 hickory-proto = { version = "0.24.3", features = ["text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
@@ -194,7 +192,7 @@ hyper = { version = "1.5.2", features = ["full"] }
 idna = { version = "1.0.3" }
 indexmap = { version = "2.7.1", features = ["serde"] }
 inout = { version = "0.1.3", default-features = false, features = ["std"] }
-itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
+itertools-582f2526e08bb6a0 = { package = "itertools", version = "0.14.0" }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
@@ -336,6 +334,7 @@ dof = { version = "0.3.0", default-features = false, features = ["des"] }
 hyper-rustls = { version = "0.27.3", default-features = false, features = ["http1", "http2", "ring", "tls12", "webpki-tokio"] }
 hyper-util = { version = "0.1.10", features = ["full"] }
 indicatif = { version = "0.17.11", features = ["rayon"] }
+itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.20.3" }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
@@ -350,6 +349,7 @@ dof = { version = "0.3.0", default-features = false, features = ["des"] }
 hyper-rustls = { version = "0.27.3", default-features = false, features = ["http1", "http2", "ring", "tls12", "webpki-tokio"] }
 hyper-util = { version = "0.1.10", features = ["full"] }
 indicatif = { version = "0.17.11", features = ["rayon"] }
+itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.20.3" }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
