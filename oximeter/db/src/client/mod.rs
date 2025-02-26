@@ -86,7 +86,7 @@ mod probes {
 pub struct Client {
     _id: Uuid,
     log: Logger,
-    pub pool: DebugIgnore<native::connection::Pool>,
+    pool: DebugIgnore<native::connection::Pool>,
     schema: Mutex<BTreeMap<TimeseriesName, TimeseriesSchema>>,
     request_timeout: Duration,
 }
