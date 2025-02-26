@@ -72,8 +72,8 @@ pub struct BlessedSourceArgs {
     ///
     /// The REVISION is not used as-is; instead, the tool always looks at the
     /// merge-base between HEAD and REVISION.  So if you provide main:openapi,
-    /// then it will look at the merge-base of HEAD and "main", in directory
-    /// "openapi" in that commit.
+    /// then it will look at the merge-base of HEAD and "origin/main", in
+    /// directory "openapi" in that commit.
     ///
     /// PATH is optional and defaults to "openapi".
     ///
@@ -111,7 +111,7 @@ impl TryFrom<BlessedSourceArgs> for BlessedSource {
         }
 
         let (revision_str, maybe_directory) = match &b.blessed_from_git {
-            None => ("main", None),
+            None => ("origin/main", None),
             Some(arg) => match arg.split_once(":") {
                 Some((r, d)) => (r, Some(d)),
                 None => (arg.as_str(), None),
@@ -382,7 +382,7 @@ mod test {
         assert_matches!(
             source,
             BlessedSource::GitRevisionMergeBase { revision, directory}
-                if *revision == "main" && directory == "openapi"
+                if *revision == "origin/main" && directory == "openapi"
         );
 
         // Override branch only

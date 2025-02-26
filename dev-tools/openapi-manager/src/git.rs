@@ -25,12 +25,16 @@ pub fn git_merge_base_head(
     revision: &GitRevision,
 ) -> anyhow::Result<GitRevision> {
     let mut cmd = git_start();
-    cmd.arg("merge-base").arg("HEAD").arg(revision.as_str());
+    cmd.arg("merge-base").arg("--all").arg("HEAD").arg(revision.as_str());
     let label = cmd_label(&cmd);
     let stdout = do_run(&mut cmd)?;
     let stdout = stdout.trim();
     if stdout.contains(" ") || stdout.contains("\n") {
-        bail!("unexpected output from {} (contains whitespace)", label);
+        bail!(
+            "unexpected output from {} (contains whitespace -- \
+             multiple merge bases?)",
+            label
+        );
     }
     Ok(GitRevision::from(stdout.to_owned()))
 }
@@ -77,7 +81,7 @@ pub fn git_show_file(
     path: &Utf8Path,
 ) -> anyhow::Result<Vec<u8>> {
     let mut cmd = git_start();
-    cmd.arg("show").arg(format!("{}:{}", revision, path));
+    cmd.arg("cat-file").arg("blob").arg(format!("{}:{}", revision, path));
     let stdout = do_run(&mut cmd)?;
     Ok(stdout.into_bytes())
 }
