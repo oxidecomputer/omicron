@@ -5185,7 +5185,7 @@ dependencies = [
 [[package]]
 name = "libipcc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/libipcc?rev=fdffa212373a8f92473ea5f411088912bf458d5f#fdffa212373a8f92473ea5f411088912bf458d5f"
+source = "git+https://github.com/oxidecomputer/ipcc-rs?rev=524eb8f125003dff50b9703900c6b323f00f9e1b#524eb8f125003dff50b9703900c6b323f00f9e1b"
 dependencies = [
  "cfg-if",
  "libc",
@@ -11398,7 +11398,7 @@ dependencies = [
 [[package]]
 name = "sprockets-tls"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sprockets.git?rev=cc13773832df1e38257cdc511adfaad72954bbe1#cc13773832df1e38257cdc511adfaad72954bbe1"
+source = "git+https://github.com/oxidecomputer/sprockets.git?rev=6d31fa63217c6a51061dc4afa1ebe175a0021981#6d31fa63217c6a51061dc4afa1ebe175a0021981"
 dependencies = [
  "anyhow",
  "attest-data",
