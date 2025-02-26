@@ -15,7 +15,7 @@ use async_bb8_diesel::AsyncRunQueryDsl as _;
 use diesel::insert_into;
 use diesel::prelude::*;
 use nexus_types::external_api::views;
-use omicron_common::api::external::{CreateResult, LookupResult};
+use omicron_common::api::external::{CreateResult, Error, LookupResult};
 
 impl DataStore {
     /// Fetch the current target release, i.e., the row with the largest
@@ -92,24 +92,26 @@ impl DataStore {
                 }
                 TargetReleaseSource::SystemVersion => {
                     use crate::db::schema::tuf_repo;
-                    views::TargetReleaseSource::SystemVersion(
-                        tuf_repo::table
-                            .select(tuf_repo::system_version)
-                            .filter(tuf_repo::id.eq(
-                                target_release.tuf_repo_id.expect(
-                                    "CONSTRAINT tuf_repo_for_system_version",
-                                ),
-                            ))
-                            .first_async::<SemverVersion>(&*conn)
-                            .await
-                            .map_err(|e| {
-                                public_error_from_diesel(
-                                    e,
-                                    ErrorHandler::Server,
-                                )
-                            })?
-                            .into(),
-                    )
+                    if let Some(tuf_repo_id) = target_release.tuf_repo_id {
+                        views::TargetReleaseSource::SystemVersion(
+                            tuf_repo::table
+                                .select(tuf_repo::system_version)
+                                .filter(tuf_repo::id.eq(tuf_repo_id))
+                                .first_async::<SemverVersion>(&*conn)
+                                .await
+                                .map_err(|e| {
+                                    public_error_from_diesel(
+                                        e,
+                                        ErrorHandler::Server,
+                                    )
+                                })?
+                                .into(),
+                        )
+                    } else {
+                        return Err(Error::invalid_request(
+                            "missing TUF repo ID for specified system version",
+                        ));
+                    }
                 }
             },
         })
