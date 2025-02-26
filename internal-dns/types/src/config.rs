@@ -479,6 +479,11 @@ impl DnsConfigBuilder {
         let zone = self.host_zone(zone_id, *http_address.ip())?;
         self.service_backend_zone(http_service, &zone, http_address.port())?;
         self.service_backend_zone(
+            ServiceName::ClickhouseClusterNative,
+            &zone,
+            CLICKHOUSE_TCP_PORT,
+        )?;
+        self.service_backend_zone(
             ServiceName::ClickhouseAdminServer,
             &zone,
             CLICKHOUSE_ADMIN_PORT,

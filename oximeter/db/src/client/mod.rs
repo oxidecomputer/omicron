@@ -42,6 +42,7 @@ use oximeter::types::Sample;
 use oximeter::Measurement;
 use oximeter::TimeseriesName;
 use qorb::pool::Pool;
+use qorb::policy::Policy;
 use qorb::resolver::BoxedResolver;
 use qorb::resolvers::single_host::SingleHostResolver;
 use regex::Regex;
@@ -85,14 +86,14 @@ mod probes {
 pub struct Client {
     _id: Uuid,
     log: Logger,
-    pool: DebugIgnore<native::connection::Pool>,
+    pub pool: DebugIgnore<native::connection::Pool>,
     schema: Mutex<BTreeMap<TimeseriesName, TimeseriesSchema>>,
     request_timeout: Duration,
 }
 
 impl Client {
     /// Construct a Clickhouse client of the database with a connection pool.
-    pub fn new_with_pool(native_resolver: BoxedResolver, log: &Logger) -> Self {
+    pub fn new_with_pool(native_resolver: BoxedResolver, log: &Logger, claim_policy: Option<Policy>) -> Self {
         let id = Uuid::new_v4();
         let log = log.new(slog::o!(
             "component" => "clickhouse-client",
@@ -100,10 +101,14 @@ impl Client {
         ));
         let schema = Mutex::new(BTreeMap::new());
         let request_timeout = DEFAULT_REQUEST_TIMEOUT;
+        let policy = match claim_policy {
+            Some(p) => p,
+            None => qorb::policy::Policy::default(),
+        };
         let native_pool = match Pool::new(
             native_resolver,
             Arc::new(native::connection::Connector),
-            qorb::policy::Policy::default(),
+            policy,
         ) {
             Ok(pool) => {
                 debug!(log, "registered USDT probes");
@@ -1030,14 +1035,21 @@ impl Client {
         sql: &str,
         block: Block,
     ) -> Result<QueryResult, Error> {
-        trace!(
+        //    trace!(
+        //        self.log,
+        //        "inserting data";
+        //        "sql" => sql,
+        //        "n_rows" => block.n_rows(),
+        //        "n_columns" => block.n_columns(),
+        //    );
+        let mut handle = self.pool.claim().await?;
+        debug!(
             self.log,
-            "inserting data";
+            "inserting data to {:#?}", handle.server_info(); // This prints information about the clickhouse server oximeter is talking to
             "sql" => sql,
             "n_rows" => block.n_rows(),
             "n_columns" => block.n_columns(),
         );
-        let mut handle = self.pool.claim().await?;
         let id = usdt::UniqueId::new();
         probes::sql__query__start!(|| (&id, sql));
         let now = tokio::time::Instant::now();

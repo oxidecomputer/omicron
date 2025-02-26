@@ -20,6 +20,7 @@ use slog::trace;
 use slog::warn;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
+use uuid::Uuid;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::interval;
@@ -32,6 +33,7 @@ use tokio::time::interval;
 pub async fn database_inserter(
     log: Logger,
     client: Client,
+    cluster_client: Option<Client>,
     batch_size: usize,
     batch_interval: Duration,
     mut rx: mpsc::Receiver<CollectionTaskOutput>,
@@ -96,6 +98,50 @@ pub async fn database_inserter(
                         "failed to insert some results into metric DB: {}",
                         e.to_string()
                     );
+                }
+            }
+            if let Some(cluster_client) = &cluster_client {
+                let batch_id = Uuid::new_v4();
+                debug!(
+                    log,
+                    "DEBUG: getting ready to ping {}: {}",
+                    batch_id,
+                    chrono::Utc::now()
+                );
+                // TODO-K: set claim timeout, or dns lookup
+                match cluster_client.ping().await {
+                    Ok(()) => {
+                        debug!(
+                            log,
+                            "inserting {} samples into cluster database",
+                            batch.len();
+                            "batch_id" => ?batch_id,
+                        "time" => ?chrono::Utc::now()
+                        );
+                        match cluster_client.insert_samples(&batch).await {
+                            Ok(()) => trace!(
+                                log,
+                                "successfully inserted samples into cluster";
+                                "batch_id" => ?batch_id,
+                        "time" => ?chrono::Utc::now()
+                            ),
+                            Err(e) => {
+                                warn!(
+                        log,
+                        "failed to insert some results into metric cluster DB: {}",
+                        e.to_string();
+                        "batch_id" => ?batch_id,
+                        "time" => ?chrono::Utc::now()
+                    );
+                            }
+                        }
+                    }
+                    Err(_) => info!(
+                        log,
+                        "ClickHouse cluster native connection unavailable";
+                        "batch_id" => ?batch_id,
+                        "time" => ?chrono::Utc::now()
+                    ),
                 }
             }
             // TODO-correctness The `insert_samples` call above may fail. The method itself needs

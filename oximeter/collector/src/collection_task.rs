@@ -794,6 +794,7 @@ impl CollectionTask {
         TaskAction::Continue(())
     }
 
+    // TODO-K: We shouldn't spawn a task because of this?
     /// Handle a single collection response from the inner collection task.
     ///
     /// This takes responses from the spawned task that actually does

@@ -27,6 +27,7 @@ use oximeter_db::Client;
 use oximeter_db::DbWrite;
 use qorb::claim::Handle;
 use qorb::pool::Pool;
+use qorb::policy::Policy;
 use qorb::resolver::BoxedResolver;
 use slog::debug;
 use slog::error;
@@ -58,6 +59,9 @@ pub struct OximeterAgent {
     collection_target: self_stats::OximeterCollector,
     // Handle to the TX-side of a channel for collecting results from the collection tasks.
     result_sender: mpsc::Sender<CollectionTaskOutput>,
+    // Temporary handle to the TX-side of a channel for collecting results from the
+    // collection tasks for a cluster
+    // cluster_result_sender: mpsc::Sender<CollectionTaskOutput>,
     // Handle to each Tokio task collection from a single producer.
     collection_tasks: Arc<Mutex<BTreeMap<Uuid, CollectionTaskHandle>>>,
     // The interval on which we refresh our list of producers from Nexus.
@@ -86,15 +90,15 @@ impl OximeterAgent {
         replicated: bool,
     ) -> Result<Self, Error> {
         let (result_sender, result_receiver) = mpsc::channel(8);
-        let (_cluster_result_sender, cluster_result_receiver) =
-            mpsc::channel(8);
+        // let (cluster_result_sender, cluster_result_receiver) =
+        //     mpsc::channel(8);
         let log = log.new(o!(
             "component" => "oximeter-agent",
             "collector_id" => id.to_string(),
             "collector_ip" => address.ip().to_string(),
         ));
         let insertion_log = log.new(o!("component" => "results-sink"));
-        let cluster_insertion_log = insertion_log.clone();
+        // let cluster_insertion_log = insertion_log.clone();
 
         // Determine the version of the database.
         //
@@ -110,7 +114,7 @@ impl OximeterAgent {
         // - The DB doesn't exist at all. This reports a version number of 0. We
         // need to create the DB here, at the latest version. This is used in
         // fresh installations and tests.
-        let client = Client::new_with_pool(native_resolver, &log);
+        let client = Client::new_with_pool(native_resolver, &log, None);
         match client.check_db_is_at_expected_version().await {
             Ok(_) => {}
             Err(oximeter_db::Error::DatabaseVersionMismatch {
@@ -128,13 +132,6 @@ impl OximeterAgent {
             Err(e) => return Err(Error::from(e)),
         }
 
-        // Temporary additional client that writes to a replicated cluster
-        // This will be removed once we phase out the single node installation.
-        //
-        // We don't need to check whether the DB is at the expected version since
-        // this is already handled by reconfigurator via clickhouse-admin.
-        let cluster_client = Client::new_with_pool(cluster_resolver, &log);
-
         // Set up tracking of statistics about ourselves.
         let collection_target = self_stats::OximeterCollector {
             collector_id: id,
@@ -142,11 +139,23 @@ impl OximeterAgent {
             collector_port: address.port(),
         };
 
+        // Temporary additional client that writes to a replicated cluster
+        // This will be removed once we phase out the single node installation.
+        //
+        // We don't need to check whether the DB is at the expected version since
+        // this is already handled by reconfigurator via clickhouse-admin.
+        let claim_policy = Policy {
+            claim_timeout: Duration::from_millis(100),
+            ..Default::default()
+        };
+        let cluster_client = Client::new_with_pool(cluster_resolver, &log, Some(claim_policy));
+
         // Spawn the task for aggregating and inserting all metrics
         tokio::spawn(async move {
             crate::results_sink::database_inserter(
                 insertion_log,
                 client,
+                Some(cluster_client),
                 db_config.batch_size,
                 Duration::from_secs(db_config.batch_interval),
                 result_receiver,
@@ -154,22 +163,27 @@ impl OximeterAgent {
             .await
         });
 
-        tokio::spawn(async move {
-            crate::results_sink::database_inserter(
-                cluster_insertion_log,
-                cluster_client,
-                db_config.batch_size,
-                Duration::from_secs(db_config.batch_interval),
-                cluster_result_receiver,
-            )
-            .await
-        });
+        // TODO-K: here we insert all cluster metrics
+        // let debuglog = log.clone();
+        // tokio::spawn(async move {
+        //     debug!(debuglog, "DEBUG: {:#?}", cluster_client.pool);
+        //     crate::results_sink::database_inserter(
+        //         cluster_insertion_log,
+        //         client,
+        //         cluster_client,
+        //         db_config.batch_size,
+        //         Duration::from_secs(db_config.batch_interval),
+        //         cluster_result_receiver,
+        //     )
+        //     .await
+        // });
 
         let self_ = Self {
             id,
             log,
             collection_target,
             result_sender,
+            //   cluster_result_sender,
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
             refresh_interval,
             refresh_task: Arc::new(StdMutex::new(None)),
@@ -243,6 +257,7 @@ impl OximeterAgent {
                 results_sink::database_inserter(
                     insertion_log,
                     client,
+                    None,
                     db_config.batch_size,
                     Duration::from_secs(db_config.batch_interval),
                     result_receiver,
@@ -299,6 +314,7 @@ impl OximeterAgent {
         Ok(())
     }
 
+    // TODO-K: We shouldn't spawn a task because of this?
     // Internal implementation that registers a producer, assuming the lock on
     // the map is held.
     async fn register_producer_locked(
