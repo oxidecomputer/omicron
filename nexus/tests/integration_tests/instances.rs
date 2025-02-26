@@ -32,7 +32,9 @@ use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::object_create_error;
 use nexus_test_utils::resource_helpers::object_delete;
 use nexus_test_utils::resource_helpers::object_delete_error;
+use nexus_test_utils::resource_helpers::object_get;
 use nexus_test_utils::resource_helpers::object_put;
+use nexus_test_utils::resource_helpers::object_put_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::wait_for_producer;
@@ -3114,6 +3116,235 @@ async fn test_instance_update_network_interfaces(
     .unwrap();
     assert!(!iface.primary);
     assert_eq!(iface.identity.name, if_params[0].identity.name);
+}
+
+#[nexus_test]
+async fn test_instance_update_network_interface_transit_ips(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "transit-ips-test";
+    let nic_name = "net0";
+
+    create_project_and_pool(&client).await;
+
+    // Create a stopped instance with a single network interface.
+    let instance = create_instance_with(
+        &client,
+        PROJECT_NAME,
+        instance_name,
+        &params::InstanceNetworkInterfaceAttachment::Default,
+        vec![],
+        vec![],
+        false,
+        Default::default(),
+    )
+    .await;
+
+    let url_interface = format!(
+        "/v1/network-interfaces/{nic_name}?instance={}",
+        instance.identity.id
+    );
+
+    let base_update = params::InstanceNetworkInterfaceUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: None,
+            description: None,
+        },
+        primary: false,
+        transit_ips: vec![
+            "10.0.0.0/9".parse().unwrap(),
+            "10.128.0.0/9".parse().unwrap(),
+            "1.1.1.1/32".parse().unwrap(),
+        ],
+    };
+
+    // Verify that a selection of transit IPs (mixture of private and global
+    // unicast, no overlaps) is accepted.
+    let updated_nic: InstanceNetworkInterface =
+        object_put(client, &url_interface, &base_update).await;
+
+    assert_eq!(base_update.transit_ips, updated_nic.transit_ips);
+
+    // Non-canonical form (e.g., host identifier is nonzero) subnets should
+    // be rejected.
+    let with_extra_bits = params::InstanceNetworkInterfaceUpdate {
+        transit_ips: vec![
+            "10.0.0.0/9".parse().unwrap(),
+            "10.128.0.0/9".parse().unwrap(),
+            //  Invalid vvv
+            "172.30.255.255/24".parse().unwrap(),
+        ],
+        ..base_update.clone()
+    };
+    let err = object_put_error(
+        client,
+        &url_interface,
+        &with_extra_bits,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        err.message,
+        "transit IP block 172.30.255.255/24 has a non-zero host identifier",
+    );
+
+    // Multicast IP blocks should be rejected.
+    let with_mc1 = params::InstanceNetworkInterfaceUpdate {
+        transit_ips: vec![
+            "10.0.0.0/9".parse().unwrap(),
+            "10.128.0.0/9".parse().unwrap(),
+            "224.0.0.0/4".parse().unwrap(),
+        ],
+        ..base_update.clone()
+    };
+    let err = object_put_error(
+        client,
+        &url_interface,
+        &with_mc1,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        err.message,
+        "transit IP block 224.0.0.0/4 is a multicast network",
+    );
+
+    let with_mc2 = params::InstanceNetworkInterfaceUpdate {
+        transit_ips: vec![
+            "10.0.0.0/9".parse().unwrap(),
+            "10.128.0.0/9".parse().unwrap(),
+            "230.20.20.128/32".parse().unwrap(),
+        ],
+        ..base_update.clone()
+    };
+    let err = object_put_error(
+        client,
+        &url_interface,
+        &with_mc2,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        err.message,
+        "transit IP 230.20.20.128/32 is a multicast address",
+    );
+
+    // Loopback ranges.
+    let with_lo1 = params::InstanceNetworkInterfaceUpdate {
+        transit_ips: vec![
+            "10.0.0.0/9".parse().unwrap(),
+            "10.128.0.0/9".parse().unwrap(),
+            "127.42.77.0/24".parse().unwrap(),
+        ],
+        ..base_update.clone()
+    };
+    let err = object_put_error(
+        client,
+        &url_interface,
+        &with_lo1,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        err.message,
+        "transit IP block 127.42.77.0/24 is a loopback network",
+    );
+
+    let with_lo2 = params::InstanceNetworkInterfaceUpdate {
+        transit_ips: vec![
+            "10.0.0.0/9".parse().unwrap(),
+            "10.128.0.0/9".parse().unwrap(),
+            "127.0.0.1/32".parse().unwrap(),
+        ],
+        ..base_update.clone()
+    };
+    let err = object_put_error(
+        client,
+        &url_interface,
+        &with_lo2,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(err.message, "transit IP 127.0.0.1/32 is a loopback address");
+
+    // Overlapping IP ranges should be rejected, as should identical ranges.
+    let with_dup1 = params::InstanceNetworkInterfaceUpdate {
+        transit_ips: vec![
+            "10.0.0.0/9".parse().unwrap(),
+            "10.128.0.0/9".parse().unwrap(),
+            "10.0.0.0/9".parse().unwrap(),
+        ],
+        ..base_update.clone()
+    };
+    let err = object_put_error(
+        client,
+        &url_interface,
+        &with_dup1,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        err.message,
+        "transit IP block 10.0.0.0/9 overlaps with 10.0.0.0/9",
+    );
+
+    let with_dup2 = params::InstanceNetworkInterfaceUpdate {
+        transit_ips: vec![
+            "10.0.0.0/9".parse().unwrap(),
+            "10.128.0.0/9".parse().unwrap(),
+            "10.128.32.0/24".parse().unwrap(),
+        ],
+        ..base_update.clone()
+    };
+    let err = object_put_error(
+        client,
+        &url_interface,
+        &with_dup2,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        err.message,
+        "transit IP block 10.128.32.0/24 overlaps with 10.128.0.0/9",
+    );
+
+    // Verify that we also catch more specific CIDRs appearing sooner in the list.
+    let with_dup3 = params::InstanceNetworkInterfaceUpdate {
+        transit_ips: vec![
+            "10.20.20.0/30".parse().unwrap(),
+            "10.0.0.0/8".parse().unwrap(),
+        ],
+        ..base_update.clone()
+    };
+    let err = object_put_error(
+        client,
+        &url_interface,
+        &with_dup3,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        err.message,
+        "transit IP block 10.0.0.0/8 overlaps with 10.20.20.0/30",
+    );
+
+    // ...and in the end, no changes have applied.
+    let final_nic: InstanceNetworkInterface =
+        object_get(client, &url_interface).await;
+    assert_eq!(updated_nic.transit_ips, final_nic.transit_ips);
+
+    // As a final sanity test, we can still effectively remove spoof checking
+    // using the unspecified network address.
+    let allow_all = params::InstanceNetworkInterfaceUpdate {
+        transit_ips: vec!["0.0.0.0/0".parse().unwrap()],
+        ..base_update.clone()
+    };
+
+    let updated_nic: InstanceNetworkInterface =
+        object_put(client, &url_interface, &allow_all).await;
+
+    assert_eq!(allow_all.transit_ips, updated_nic.transit_ips);
 }
 
 /// This test specifically creates two NICs, the second of which will fail the
