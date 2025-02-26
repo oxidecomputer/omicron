@@ -12,7 +12,7 @@ use crate::WebhookEvent;
 use chrono::{DateTime, TimeDelta, Utc};
 use nexus_types::external_api::views;
 use omicron_uuid_kinds::{
-    OmicronZoneKind, WebhookDeliveryKind, WebhookDeliveryUuid,
+    OmicronZoneKind, OmicronZoneUuid, WebhookDeliveryKind, WebhookDeliveryUuid,
     WebhookEventKind, WebhookReceiverKind, WebhookReceiverUuid,
 };
 use serde::Deserialize;
@@ -104,6 +104,32 @@ impl WebhookDelivery {
             time_completed: None,
             deliverator_id: None,
             time_delivery_started: None,
+        }
+    }
+
+    pub fn new_probe(
+        rx_id: &WebhookReceiverUuid,
+        deliverator_id: &OmicronZoneUuid,
+    ) -> Self {
+        Self {
+            // Just kinda make something up...
+            id: WebhookDeliveryUuid::new_v4().into(),
+
+            // XXX(eliza): hmm, should we just have one UUID for all probe events
+            // and treat them as redeliveries of one thing? Why or why not?
+            // UUIDs are basically free, right? On the other hand, if we care about
+            // not having the event UUID not point to an entry in the events table
+            // that doesn't exist, perhaps we'd rather just put one entry in there
+            // for probes rather than create a new one for each probe...
+            event_id: WebhookEventUud::new_v4().into(),
+            rx_id: (*rx_id).into(),
+            trigger: WebhookDeliveryTrigger::Probe,
+            payload: serde_json::json!({}),
+            attempts: SqlU8::new(1),
+            time_created: Utc::now(),
+            time_completed: None,
+            deliverator_id: Some((*deliverator_id).into()),
+            time_delivery_started: Some(Utc::now()),
         }
     }
 }

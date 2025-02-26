@@ -4,7 +4,7 @@
 use crate::app::authz;
 use crate::app::background::BackgroundTask;
 use crate::app::db::lookup::LookupPath;
-use crate::app::webhook::WebhookReceiverClient;
+use crate::app::webhook::ReceiverClient;
 use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::webhook_delivery::DeliveryAttemptState;
@@ -186,8 +186,7 @@ impl WebhookDeliverator {
             .webhook_rx_secret_list(opctx, &authz_rx)
             .await
             .map_err(|e| anyhow::anyhow!("could not list secrets: {e}"))?;
-        let mut client =
-            WebhookReceiverClient::new(&self.client, secrets, &rx)?;
+        let mut client = ReceiverClient::new(&self.client, secrets, &rx)?;
 
         let deliveries = self
             .datastore

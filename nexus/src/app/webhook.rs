@@ -110,11 +110,39 @@ impl super::Nexus {
         Ok(event)
     }
 
-    pub fn webhook_receiver_probe(
+    pub async fn webhook_receiver_probe(
         &self,
-        _rx: lookup::WebhookReceiver<'_>,
+        opctx: &OpContext,
+        rx: lookup::WebhookReceiver<'_>,
         _params: params::WebhookProbe,
     ) -> Result<views::WebhookDelivery, Error> {
+        let (authz_rx, rx) = rx.fetch_for(authz::Action::ListChildren).await?;
+        let secrets =
+            self.datastore().webhook_rx_secret_list(opctx, &authz_rx).await?;
+        let mut client =
+            ReceiverClient::new(&self.webhook_delivery_client, secrets, &rx)?;
+        let delivery = WebhookDelivery::new_probe(&authz_rx.id(), &self.id);
+
+        let attempt = match outcome = client
+            .send_delivery_request(opctx, &delivery, WebhookEventClass::Probe)
+            .await
+        {
+            Ok(attempt) => attempt,
+            Err(e) => {
+                slog::error!(
+                    &opctx.log,
+                    "failed to probe webhook receiver";
+                    "rx_id" => %authz_rx.id(),
+                    "rx_name" => %rx.name(),
+                    "delivery_id" => %delivery.id,
+                    "error" => %e,
+                );
+                return Err(Error::InternalError {
+                    internal_message: e.to_string(),
+                });
+            }
+        };
+
         todo!()
     }
 
@@ -183,19 +211,19 @@ pub(super) fn delivery_client(
         .build()
 }
 
-pub(crate) struct WebhookReceiverClient<'a> {
+pub(crate) struct ReceiverClient<'a> {
     client: &'a reqwest::Client,
     rx: &'a WebhookReceiver,
     secrets: Vec<(WebhookSecretUuid, Hmac<Sha256>)>,
     hdr_rx_id: http::HeaderValue,
 }
 
-impl<'a> WebhookReceiverClient<'a> {
+impl<'a> ReceiverClient<'a> {
     pub(crate) fn new(
         client: &'a reqwest::Client,
         secrets: impl IntoIterator<Item = WebhookSecret>,
         rx: &'a WebhookReceiver,
-    ) -> Result<Self, anyhow::Error> {
+    ) -> Result<Self, Error> {
         let secrets = secrets
             .into_iter()
             .map(|WebhookSecret { identity, secret, .. }| {
@@ -204,8 +232,11 @@ impl<'a> WebhookReceiverClient<'a> {
                 (identity.id.into(), mac)
             })
             .collect::<Vec<_>>();
-
-        anyhow::ensure!(!secrets.is_empty(), "receiver has no secrets");
+        if secrets.is_empty() {
+            return Err(Error::invalid_request(
+                "receiver has no secrets, so delivery requests cannot be sent",
+            ));
+        }
         let hdr_rx_id = HeaderValue::try_from(rx.id().to_string())
             .expect("UUIDs should always be a valid header value");
         Ok(Self { client, secrets, hdr_rx_id, rx })
