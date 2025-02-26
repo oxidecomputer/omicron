@@ -183,8 +183,9 @@ mod test {
     use nexus_types::deployment::{
         blueprint_zone_type, Blueprint, BlueprintDatasetsConfig,
         BlueprintPhysicalDisksConfig, BlueprintSledConfig, BlueprintTarget,
-        BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
-        BlueprintZonesConfig, CockroachDbPreserveDowngrade,
+        BlueprintZoneConfig, BlueprintZoneDisposition,
+        BlueprintZoneImageSource, BlueprintZoneType, BlueprintZonesConfig,
+        CockroachDbPreserveDowngrade,
     };
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external::Generation;
@@ -418,6 +419,7 @@ mod test {
                             http_address: "[::1]:12345".parse().unwrap(),
                         },
                     ),
+                    image_source: BlueprintZoneImageSource::InstallDataset,
                 }]
                 .into_iter()
                 .collect(),

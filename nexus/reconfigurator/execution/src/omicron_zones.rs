@@ -371,7 +371,7 @@ mod test {
     use nexus_types::deployment::{
         blueprint_zone_type, Blueprint, BlueprintDatasetsConfig,
         BlueprintPhysicalDisksConfig, BlueprintSledConfig, BlueprintTarget,
-        CockroachDbPreserveDowngrade,
+        BlueprintZoneImageSource, CockroachDbPreserveDowngrade,
     };
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external::Generation;
@@ -491,6 +491,7 @@ mod test {
                             http_address: "[::1]:0".parse().unwrap(),
                         },
                     ),
+                    image_source: BlueprintZoneImageSource::InstallDataset,
                 }]
                 .into_iter()
                 .collect(),
@@ -613,6 +614,7 @@ mod test {
                         address: "[::1]:0".parse().unwrap(),
                     },
                 ),
+                image_source: BlueprintZoneImageSource::InstallDataset,
             });
         }
 
@@ -705,6 +707,7 @@ mod test {
                     },
                 },
             ),
+            image_source: BlueprintZoneImageSource::InstallDataset,
         };
 
         // Start a mock cockroach-admin server.

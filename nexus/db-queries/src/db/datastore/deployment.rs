@@ -2055,6 +2055,7 @@ mod tests {
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
@@ -2884,6 +2885,7 @@ mod tests {
                             external_dns_servers: vec![],
                         },
                     ),
+                    image_source: BlueprintZoneImageSource::InstallDataset,
                 }]
                 .into_iter()
                 .collect(),

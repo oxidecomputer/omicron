@@ -332,6 +332,7 @@ mod test {
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::inventory::ZpoolName;
     use omicron_uuid_kinds::ZpoolUuid;
@@ -377,6 +378,7 @@ mod test {
                         },
                     },
                 ),
+                image_source: BlueprintZoneImageSource::InstallDataset,
             };
             zones.push(zone_config);
             config.keepers.insert(zone_id, keeper_id.into());
@@ -412,6 +414,7 @@ mod test {
                         },
                     },
                 ),
+                image_source: BlueprintZoneImageSource::InstallDataset,
             };
             zones.push(zone_config);
             config.servers.insert(zone_id, server_id.into());

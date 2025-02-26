@@ -318,6 +318,7 @@ mod test {
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_preparation::PlanningInputFromDb;
     use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
+    use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use nexus_sled_agent_shared::inventory::OmicronZoneType;
     use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -332,6 +333,7 @@ mod test {
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::CockroachDbClusterVersion;
@@ -583,11 +585,26 @@ mod test {
                 })
             }
         };
+        let image_source = match config.image_source {
+            OmicronZoneImageSource::InstallDataset => {
+                BlueprintZoneImageSource::InstallDataset
+            }
+            OmicronZoneImageSource::Artifact { .. } => {
+                // BlueprintZoneImageSource::Artifact has both a version and a
+                // hash in it, while OmicronZoneImageSource::Artifact only has a
+                // hash field. Rather than conjuring up a fake version, we
+                // simply panic here.
+                unreachable!(
+                    "this test does not use OmicronZoneImageSource::Artifact"
+                )
+            }
+        };
         Ok(BlueprintZoneConfig {
             disposition,
             id: config.id,
             filesystem_pool: config.filesystem_pool,
             zone_type,
+            image_source,
         })
     }
 
@@ -701,6 +718,7 @@ mod test {
                         ),
                     },
                 ),
+                image_source: BlueprintZoneImageSource::InstallDataset,
             },
         );
 

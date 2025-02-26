@@ -35,6 +35,7 @@ use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::ClickhouseClusterConfig;
@@ -1185,6 +1186,7 @@ impl<'a> BlueprintBuilder<'a> {
             id: self.rng.sled_rng(sled_id).next_zone(),
             filesystem_pool: Some(zpool),
             zone_type,
+            image_source: BlueprintZoneImageSource::InstallDataset,
         };
 
         self.sled_add_zone(sled_id, zone)
@@ -1236,6 +1238,7 @@ impl<'a> BlueprintBuilder<'a> {
             id,
             filesystem_pool: Some(pool_name),
             zone_type,
+            image_source: BlueprintZoneImageSource::InstallDataset,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1274,6 +1277,7 @@ impl<'a> BlueprintBuilder<'a> {
             id: self.rng.sled_rng(sled_id).next_zone(),
             filesystem_pool: Some(filesystem_pool),
             zone_type,
+            image_source: BlueprintZoneImageSource::InstallDataset,
         };
 
         self.sled_add_zone(sled_id, zone)?;
@@ -1334,6 +1338,7 @@ impl<'a> BlueprintBuilder<'a> {
             id: self.rng.sled_rng(sled_id).next_zone(),
             filesystem_pool: Some(filesystem_pool),
             zone_type,
+            image_source: BlueprintZoneImageSource::InstallDataset,
         };
 
         self.sled_add_zone(sled_id, zone)?;
@@ -1424,6 +1429,7 @@ impl<'a> BlueprintBuilder<'a> {
             id: nexus_id,
             filesystem_pool: Some(filesystem_pool),
             zone_type,
+            image_source: BlueprintZoneImageSource::InstallDataset,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1448,6 +1454,7 @@ impl<'a> BlueprintBuilder<'a> {
             id: oximeter_id,
             filesystem_pool: Some(filesystem_pool),
             zone_type,
+            image_source: BlueprintZoneImageSource::InstallDataset,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1471,6 +1478,7 @@ impl<'a> BlueprintBuilder<'a> {
             id: pantry_id,
             filesystem_pool: Some(filesystem_pool),
             zone_type,
+            image_source: BlueprintZoneImageSource::InstallDataset,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1504,6 +1512,7 @@ impl<'a> BlueprintBuilder<'a> {
             id: zone_id,
             filesystem_pool: Some(filesystem_pool),
             zone_type,
+            image_source: BlueprintZoneImageSource::InstallDataset,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1529,6 +1538,7 @@ impl<'a> BlueprintBuilder<'a> {
             id,
             filesystem_pool: Some(pool_name),
             zone_type,
+            image_source: BlueprintZoneImageSource::InstallDataset,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1556,6 +1566,7 @@ impl<'a> BlueprintBuilder<'a> {
             id: zone_id,
             filesystem_pool: Some(filesystem_pool),
             zone_type,
+            image_source: BlueprintZoneImageSource::InstallDataset,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1583,6 +1594,7 @@ impl<'a> BlueprintBuilder<'a> {
             id: zone_id,
             filesystem_pool: Some(filesystem_pool),
             zone_type,
+            image_source: BlueprintZoneImageSource::InstallDataset,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1710,6 +1722,7 @@ impl<'a> BlueprintBuilder<'a> {
                 id: new_zone_id,
                 filesystem_pool: Some(filesystem_pool),
                 zone_type,
+                image_source: BlueprintZoneImageSource::InstallDataset,
             },
         )
     }
@@ -2036,6 +2049,7 @@ pub mod test {
     use crate::example::SimRngState;
     use crate::planner::test::assert_planning_makes_no_changes;
     use crate::system::SledBuilder;
+    use expectorate::assert_contents;
     use nexus_reconfigurator_blippy::Blippy;
     use nexus_reconfigurator_blippy::BlippyReportSortKey;
     use nexus_types::deployment::BlueprintDatasetDisposition;
@@ -2044,7 +2058,9 @@ pub mod test {
     use omicron_common::address::IpRange;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
+    use omicron_common::update::ArtifactHash;
     use omicron_test_utils::dev::test_setup_log;
+    use semver::Version;
     use std::collections::BTreeSet;
     use std::mem;
 
@@ -3093,6 +3109,71 @@ pub mod test {
 
         // Check that the new blueprint is blippy-clean.
         verify_blueprint(&blueprint2);
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test that if an Omicron zone's image source changes, the diff reflects the change.
+    #[test]
+    fn test_zone_image_source_change_diff() {
+        static TEST_NAME: &str = "builder_zone_image_source_change_diff";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = logctx.log.clone();
+
+        // Use our example system.
+        let (system, blueprint1) =
+            ExampleSystemBuilder::new(&log, TEST_NAME).nsleds(1).build();
+
+        // Find a zone and change its image source.
+        let mut blueprint_builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint1,
+            &system.input,
+            &system.collection,
+            TEST_NAME,
+        )
+        .expect("built blueprint builder");
+        blueprint_builder.set_rng(PlannerRng::from_seed((TEST_NAME, "bp2")));
+
+        let sled_id = system
+            .input
+            .all_sled_ids(SledFilter::All)
+            .next()
+            .expect("system has one sled");
+        {
+            let editor = blueprint_builder
+                .sled_editors
+                .get_mut(&sled_id)
+                .expect("sled editor exists");
+            let mut zones = blueprint1
+                .sleds
+                .get(&sled_id)
+                .expect("sled exists")
+                .zones_config
+                .zones
+                .iter();
+            let zone_id = zones.next().expect("zone exists").id;
+            // Set the zone's image source to an artifact.
+            editor
+                .set_zone_image_source(
+                    &zone_id,
+                    BlueprintZoneImageSource::Artifact {
+                        version: Version::new(1, 2, 3),
+                        // The hash is not displayed in the diff -- only the
+                        // version is.
+                        hash: ArtifactHash([0x12; 32]),
+                    },
+                )
+                .expect("set zone image source successfully");
+        }
+
+        let blueprint2 = blueprint_builder.build();
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        let display = diff.display();
+        assert_contents(
+            "tests/output/zone_image_source_change_1.txt",
+            &display.to_string(),
+        );
 
         logctx.cleanup_successful();
     }
