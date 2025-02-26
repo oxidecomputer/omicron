@@ -243,8 +243,6 @@ impl DataStore {
 
                     // If this affinity group is a member in other anti-affinity
                     // groups, remove those memberships
-                    //
-                    // TODO: This needs testing
                     {
                         use db::schema::anti_affinity_group_affinity_membership::dsl as member_dsl;
                         diesel::delete(member_dsl::anti_affinity_group_affinity_membership)
@@ -2452,6 +2450,101 @@ mod tests {
         assert!(
             members.is_empty(),
             "No members should exist, but these do: {members:?}"
+        );
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Since this name is gnarly, just to be clear:
+    // - Affinity groups can be "members" within anti-affinity groups
+    // - If one of these memberships is alive when the affinity group is
+    // deleted, that membership should be automatically removed
+    //
+    // Basically, do not keep around a reference to a dead affinity group.
+    #[tokio::test]
+    async fn affinity_group_delete_group_deletes_membership_in_anti_affinity_groups(
+    ) {
+        // Setup
+        let logctx =
+            dev::test_setup_log("affinity_group_delete_group_deletes_membership_in_anti_affinity_groups");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a project and the groups
+        let (authz_project, ..) =
+            create_project(&opctx, &datastore, "my-project").await;
+        let affinity_group = create_affinity_group(
+            &opctx,
+            &datastore,
+            &authz_project,
+            "affinity",
+        )
+        .await
+        .unwrap();
+        let anti_affinity_group = create_anti_affinity_group(
+            &opctx,
+            &datastore,
+            &authz_project,
+            "anti-affinity",
+        )
+        .await
+        .unwrap();
+
+        let (.., authz_a_group) = LookupPath::new(opctx, datastore)
+            .affinity_group_id(affinity_group.id())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .unwrap();
+        let (.., authz_aa_group) = LookupPath::new(opctx, datastore)
+            .anti_affinity_group_id(anti_affinity_group.id())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .unwrap();
+
+        // Add the affinity group to the anti-affinity group.
+        let member = external::AntiAffinityGroupMember::AffinityGroup(
+            AffinityGroupUuid::from_untyped_uuid(affinity_group.id()),
+        );
+        datastore
+            .anti_affinity_group_member_add(
+                &opctx,
+                &authz_aa_group,
+                member.clone(),
+            )
+            .await
+            .unwrap();
+
+        // Right now, the affinity group is observable
+        datastore
+            .anti_affinity_group_member_view(
+                &opctx,
+                &authz_aa_group,
+                member.clone(),
+            )
+            .await
+            .expect("Group member should be visible - we just added it");
+
+        // Delete the affinity group (the member)
+        datastore.affinity_group_delete(&opctx, &authz_a_group).await.unwrap();
+
+        // The affinity group membership should have been revoked
+        let err = datastore
+            .anti_affinity_group_member_view(
+                &opctx,
+                &authz_aa_group,
+                member.clone(),
+            )
+            .await
+            .expect_err("Group member should no longer exist");
+        assert!(
+            matches!(
+                err,
+                Error::ObjectNotFound { type_name, .. }
+                if type_name == ResourceType::AntiAffinityGroupMember
+            ),
+            "Unexpected error: {err:?}"
         );
 
         // Clean up.
