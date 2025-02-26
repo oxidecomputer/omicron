@@ -2106,7 +2106,7 @@ pub mod test {
             summary.display()
         );
         assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 0);
 
         // The next step is adding these zones to a new sled.
@@ -2145,7 +2145,7 @@ pub mod test {
 
         // No sleds were changed or removed.
         assert_eq!(summary.diff.sleds.modified().count(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
 
         // One sled was added.
         assert_eq!(summary.sleds_added.len(), 1);

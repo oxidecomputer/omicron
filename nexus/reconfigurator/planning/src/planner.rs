@@ -1051,7 +1051,7 @@ pub(crate) mod test {
             summary.display()
         );
         assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 0);
     }
 
@@ -1090,7 +1090,7 @@ pub(crate) mod test {
         let summary = blueprint2.diff_since_blueprint(&blueprint1);
         println!("1 -> 2 (expected no changes):\n{}", summary.display());
         assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 0);
         assert_eq!(summary.diff.sleds.unchanged().count(), 3);
         assert_eq!(summary.total_zones_added(), 0);
@@ -1149,7 +1149,7 @@ pub(crate) mod test {
             sled_added.zones_config.zones.first().unwrap().kind(),
             ZoneKind::InternalNtp
         ));
-        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 0);
         verify_blueprint(&blueprint3);
 
@@ -1170,7 +1170,7 @@ pub(crate) mod test {
         let summary = blueprint4.diff_since_blueprint(&blueprint3);
         println!("3 -> 4 (expected no changes):\n{}", summary.display());
         assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 0);
         verify_blueprint(&blueprint4);
 
@@ -1214,7 +1214,7 @@ pub(crate) mod test {
             &summary.display().to_string(),
         );
         assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 1);
         let sled_id = summary.diff.sleds.modified_keys().next().unwrap();
         assert_eq!(*sled_id, new_sled_id);
@@ -1310,7 +1310,7 @@ pub(crate) mod test {
             summary.display()
         );
         assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 1);
         let (changed_sled_id, changed_sled) =
             summary.diff.sleds.modified().next().unwrap();
@@ -1389,7 +1389,7 @@ pub(crate) mod test {
             summary.display()
         );
         assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 3);
 
         // All 3 sleds should get additional Nexus zones. We expect a total of
@@ -1518,7 +1518,7 @@ pub(crate) mod test {
             summary.display()
         );
         assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 2);
 
         // 2 sleds should each get 1 additional internal DNS zone.
@@ -2008,7 +2008,7 @@ pub(crate) mod test {
         );
 
         assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 1);
 
         assert_eq!(summary.total_zones_added(), 0);
@@ -2301,7 +2301,7 @@ pub(crate) mod test {
         let summary = blueprint2.diff_since_blueprint(&blueprint1);
         println!("1 -> 2 (expunge a disk):\n{}", summary.display());
         assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 1);
 
         // We should be removing a single zone, associated with the Crucible
@@ -2481,7 +2481,7 @@ pub(crate) mod test {
         let summary = blueprint2.diff_since_blueprint(&blueprint1);
         println!("1 -> 2 (expunge a disk):\n{}", summary.display());
         assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 1);
 
         // No zones should have been removed from the blueprint entirely.
@@ -2688,7 +2688,7 @@ pub(crate) mod test {
         // sleds at the moment.
 
         assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 3);
         assert_eq!(summary.diff.sleds.unchanged().count(), 2);
 
@@ -2963,7 +2963,7 @@ pub(crate) mod test {
             summary.display()
         );
         assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 0);
         assert_eq!(
             summary.diff.sleds.unchanged().count(),
@@ -2984,8 +2984,8 @@ pub(crate) mod test {
         // table are kept forever -- but we need to test it.)
         //
         // Eventually, once zone and sled garbage collection is implemented,
-        // we'll expect that the blueprint's sleds_removed will become
-        // non-zero. At some point we may also want to remove entries from the
+        // we'll expect that the diff's `sleds.removed` will become
+        // non-empty. At some point we may also want to remove entries from the
         // sled table, but that's a future concern that would come after
         // blueprint cleanup is implemented.
         let mut builder = input.into_builder();
@@ -3010,7 +3010,7 @@ pub(crate) mod test {
             summary.display()
         );
         assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 0);
         assert_eq!(
             summary.diff.sleds.unchanged().count(),

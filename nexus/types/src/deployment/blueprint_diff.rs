@@ -43,7 +43,6 @@ pub struct BlueprintDiffSummary<'a> {
     pub modified_sleds_diff: BTreeMap<SledUuid, BlueprintSledConfigDiff<'a>>,
     // TODO-john do we need these sets still?
     pub sleds_added: BTreeSet<SledUuid>,
-    pub sleds_removed: BTreeSet<SledUuid>,
 }
 
 impl<'a> BlueprintDiffSummary<'a> {
@@ -58,8 +57,6 @@ impl<'a> BlueprintDiffSummary<'a> {
         // TODO-john do we still need these or can we use `diff.sleds` directly?
         let sleds_added: BTreeSet<_> =
             diff.sleds.added.keys().map(|k| **k).collect();
-        let sleds_removed: BTreeSet<_> =
-            diff.sleds.removed.keys().map(|k| **k).collect();
 
         BlueprintDiffSummary {
             before,
@@ -67,7 +64,6 @@ impl<'a> BlueprintDiffSummary<'a> {
             diff,
             modified_sleds_diff,
             sleds_added,
-            sleds_removed,
         }
     }
 
@@ -1937,11 +1933,6 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
         let after = self.summary.diff.sleds.added.get(sled_id).unwrap().state;
         format!("{after}")
     }
-    fn sled_state_removed(&self, sled_id: &SledUuid) -> String {
-        let before =
-            self.summary.diff.sleds.removed.get(sled_id).unwrap().state;
-        format!("was {before}")
-    }
 }
 
 impl fmt::Display for BlueprintDiffDisplay<'_> {
@@ -1984,14 +1975,10 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
         }
 
         // Write out tables for removed sleds
-        if !summary.sleds_removed.is_empty() {
+        if !summary.diff.sleds.removed.is_empty() {
             writeln!(f, " REMOVED SLEDS:\n")?;
-            for sled_id in &summary.sleds_removed {
-                writeln!(
-                    f,
-                    "  sled {sled_id} ({}):\n",
-                    self.sled_state_removed(sled_id)
-                )?;
+            for (sled_id, sled) in &summary.diff.sleds.removed {
+                writeln!(f, "  sled {sled_id} (was {}):\n", sled.state)?;
                 self.write_tables(f, sled_id)?;
             }
         }
