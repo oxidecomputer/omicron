@@ -123,7 +123,7 @@ impl super::Nexus {
             ReceiverClient::new(&self.webhook_delivery_client, secrets, &rx)?;
         let delivery = WebhookDelivery::new_probe(&authz_rx.id(), &self.id);
 
-        let attempt = match outcome = client
+        let attempt = match client
             .send_delivery_request(opctx, &delivery, WebhookEventClass::Probe)
             .await
         {
@@ -272,6 +272,7 @@ impl<'a> ReceiverClient<'a> {
             id: WebhookDeliveryUuid,
             webhook_id: WebhookReceiverUuid,
             sent_at: &'a str,
+            trigger: views::WebhookDeliveryTrigger,
         }
 
         // okay, actually do the thing...
@@ -285,6 +286,7 @@ impl<'a> ReceiverClient<'a> {
                 id: delivery.id.into(),
                 webhook_id: self.rx.id(),
                 sent_at: &sent_at,
+                trigger: delivery.trigger.into(),
             },
         };
         // N.B. that we serialize the body "ourselves" rather than just
@@ -302,6 +304,7 @@ impl<'a> ReceiverClient<'a> {
                     "event_id" => %delivery.event_id,
                     "event_class" => %event_class,
                     "delivery_id" => %delivery.id,
+                    "delivery_trigger" => %delivery.trigger,
                     "error" => %e,
                 );
 
@@ -349,6 +352,7 @@ impl<'a> ReceiverClient<'a> {
                     "event_id" => %delivery.event_id,
                     "event_class" => %event_class,
                     "delivery_id" => %delivery.id,
+                    "delivery_trigger" => %delivery.trigger,
                     "error" => %e,
                     "payload" => ?payload,
                 );
@@ -370,6 +374,7 @@ impl<'a> ReceiverClient<'a> {
                     "event_id" => %delivery.event_id,
                     "event_class" => %event_class,
                     "delivery_id" => %delivery.id,
+                    "delivery_trigger" => %delivery.trigger,
                     "error" => %e,
                 );
                 return Err(e).context(MSG);
@@ -382,6 +387,7 @@ impl<'a> ReceiverClient<'a> {
                         "event_id" => %delivery.event_id,
                         "event_class" => %event_class,
                         "delivery_id" => %delivery.id,
+                        "delivery_trigger" => %delivery.trigger,
                         "response_status" => ?status,
                         "response_duration" => ?duration,
                     );
@@ -402,6 +408,7 @@ impl<'a> ReceiverClient<'a> {
                         "event_id" => %delivery.event_id,
                         "event_class" => %event_class,
                         "delivery_id" => %delivery.id,
+                        "delivery_trigger" => %delivery.trigger,
                         "error" => %e,
                     );
                     (result, None)
@@ -416,6 +423,7 @@ impl<'a> ReceiverClient<'a> {
                         "event_id" => %delivery.event_id,
                         "event_class" => %event_class,
                         "delivery_id" => %delivery.id,
+                        "delivery_trigger" => %delivery.trigger,
                         "response_status" => ?status,
                         "response_duration" => ?duration,
                     );
@@ -427,6 +435,7 @@ impl<'a> ReceiverClient<'a> {
                         "event_id" => %delivery.event_id,
                         "event_class" => %event_class,
                         "delivery_id" => %delivery.id,
+                        "delivery_trigger" => %delivery.trigger,
                         "response_status" => ?status,
                         "response_duration" => ?duration,
                     );
