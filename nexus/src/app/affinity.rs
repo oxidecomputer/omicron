@@ -12,6 +12,7 @@ use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
+use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
@@ -247,7 +248,7 @@ impl super::Nexus {
             .affinity_group_member_list(opctx, &authz_affinity_group, pagparams)
             .await?
             .into_iter()
-            .map(Into::into)
+            .map(|(member, name)| member.to_external(name.into()))
             .collect())
     }
 
@@ -279,12 +280,14 @@ impl super::Nexus {
             affinity_group_lookup.lookup_for(authz::Action::Read).await?;
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Read).await?;
-        let member = external::AffinityGroupMember::Instance(
-            InstanceUuid::from_untyped_uuid(authz_instance.id()),
-        );
+        let member = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
         self.db_datastore
-            .affinity_group_member_view(opctx, &authz_affinity_group, member)
+            .affinity_group_member_instance_view(
+                opctx,
+                &authz_affinity_group,
+                member,
+            )
             .await
     }
 
@@ -342,20 +345,21 @@ impl super::Nexus {
     ) -> Result<external::AffinityGroupMember, Error> {
         let (.., authz_affinity_group) =
             affinity_group_lookup.lookup_for(authz::Action::Modify).await?;
-        let (.., authz_instance) =
-            instance_lookup.lookup_for(authz::Action::Read).await?;
-        let member = external::AffinityGroupMember::Instance(
-            InstanceUuid::from_untyped_uuid(authz_instance.id()),
-        );
+        let (.., authz_instance, instance) =
+            instance_lookup.fetch_for(authz::Action::Read).await?;
+        let member = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
         self.db_datastore
-            .affinity_group_member_add(
+            .affinity_group_member_instance_add(
                 opctx,
                 &authz_affinity_group,
                 member.clone(),
             )
             .await?;
-        Ok(member)
+        Ok(external::AffinityGroupMember::Instance {
+            id: member,
+            name: instance.name().clone(),
+        })
     }
 
     pub(crate) async fn anti_affinity_group_member_instance_add(
@@ -418,12 +422,14 @@ impl super::Nexus {
             affinity_group_lookup.lookup_for(authz::Action::Modify).await?;
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Read).await?;
-        let member = external::AffinityGroupMember::Instance(
-            InstanceUuid::from_untyped_uuid(authz_instance.id()),
-        );
+        let member = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
         self.db_datastore
-            .affinity_group_member_delete(opctx, &authz_affinity_group, member)
+            .affinity_group_member_instance_delete(
+                opctx,
+                &authz_affinity_group,
+                member,
+            )
             .await
     }
 

@@ -366,12 +366,8 @@ pub async fn create_affinity_group_member(
         .lookup_for(authz::Action::Modify)
         .await?;
 
-    db.affinity_group_member_add(
-        opctx,
-        &authz_group,
-        external::AffinityGroupMember::Instance(instance_id),
-    )
-    .await?;
+    db.affinity_group_member_instance_add(opctx, &authz_group, instance_id)
+        .await?;
     Ok(())
 }
 

@@ -1321,14 +1321,15 @@ pub enum FailureDomain {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum AffinityGroupMember {
-    /// An instance belonging to this group, identified by UUID.
-    Instance(InstanceUuid),
+    /// An instance belonging to this group
+    Instance { id: InstanceUuid, name: Name },
 }
 
+// TODO: Revisit this impl.. it was originally created for UUID-only members
 impl SimpleIdentity for AffinityGroupMember {
     fn id(&self) -> Uuid {
         match self {
-            AffinityGroupMember::Instance(id) => *id.as_untyped_uuid(),
+            AffinityGroupMember::Instance { id, .. } => *id.as_untyped_uuid(),
         }
     }
 }

@@ -1487,12 +1487,160 @@
         }
       }
     },
+    "/v1/anti-affinity-groups/{anti_affinity_group}/members/affinity-group/{affinity_group}": {
+      "get": {
+        "tags": [
+          "affinity"
+        ],
+        "summary": "Fetch an anti-affinity group member (where that member is an affinity group)",
+        "operationId": "anti_affinity_group_member_affinity_group_view",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "affinity_group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "anti_affinity_group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AntiAffinityGroupMember"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "affinity"
+        ],
+        "summary": "Add a member to an anti-affinity group (where that member is an affinity group)",
+        "operationId": "anti_affinity_group_member_affinity_group_add",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "affinity_group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "anti_affinity_group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AntiAffinityGroupMember"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "affinity"
+        ],
+        "summary": "Remove a member from an anti-affinity group (where that member is an affinity group)",
+        "operationId": "anti_affinity_group_member_affinity_group_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "affinity_group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "anti_affinity_group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/anti-affinity-groups/{anti_affinity_group}/members/instance/{instance}": {
       "get": {
         "tags": [
           "affinity"
         ],
-        "summary": "Fetch an anti-affinity group member",
+        "summary": "Fetch an anti-affinity group member (where that member is an instance)",
         "operationId": "anti_affinity_group_member_instance_view",
         "parameters": [
           {
@@ -1543,7 +1691,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Add a member to an anti-affinity group",
+        "summary": "Add a member to an anti-affinity group (where that member is an instance)",
         "operationId": "anti_affinity_group_member_instance_add",
         "parameters": [
           {
@@ -1594,7 +1742,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Remove a member from an anti-affinity group",
+        "summary": "Remove a member from an anti-affinity group (where that member is an instance)",
         "operationId": "anti_affinity_group_member_instance_delete",
         "parameters": [
           {
@@ -12218,7 +12366,19 @@
                 ]
               },
               "value": {
-                "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+                  },
+                  "name": {
+                    "$ref": "#/components/schemas/Name"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name"
+                ]
               }
             },
             "required": [
@@ -12487,25 +12647,6 @@
         "description": "A member of an Anti-Affinity Group\n\nMembership in a group is not exclusive - members may belong to multiple affinity / anti-affinity groups.",
         "oneOf": [
           {
-            "description": "An instance belonging to this group, identified by UUID.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "instance"
-                ]
-              },
-              "value": {
-                "$ref": "#/components/schemas/TypedUuidForInstanceKind"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
             "description": "An affinity group belonging to this group, identified by UUID.",
             "type": "object",
             "properties": {
@@ -12517,6 +12658,25 @@
               },
               "value": {
                 "$ref": "#/components/schemas/TypedUuidForAffinityGroupKind"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "An instance belonging to this group, identified by UUID.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/TypedUuidForInstanceKind"
               }
             },
             "required": [
