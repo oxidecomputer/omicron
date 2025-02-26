@@ -406,9 +406,14 @@ impl DataStore {
     ) -> ListResultVec<external::AntiAffinityGroupMember> {
         opctx.authorize(authz::Action::Read, authz_anti_affinity_group).await?;
 
+        let asc = match pagparams.direction {
+            dropshot::PaginationOrder::Ascending => true,
+            dropshot::PaginationOrder::Descending => false,
+        };
+
         let mut query = QueryBuilder::new()
             .sql(
-                "
+                "SELECT id,label FROM (
                 SELECT instance_id as id, 'instance' as label
                 FROM anti_affinity_group_instance_membership
                 WHERE group_id = ",
@@ -424,24 +429,23 @@ impl DataStore {
             )
             .param()
             .bind::<diesel::sql_types::Uuid, _>(authz_anti_affinity_group.id())
-            .sql(" ");
-
-        let (sort, cmp) = match pagparams.direction {
-            dropshot::PaginationOrder::Ascending => (" ORDER BY id ASC ", ">"),
-            dropshot::PaginationOrder::Descending => {
-                (" ORDER BY id DESC ", "<")
-            }
-        };
+            .sql(") ");
         if let Some(id) = pagparams.marker {
             query = query
                 .sql("WHERE id ")
-                .sql(cmp)
+                .sql(if asc { ">" } else { "<" })
                 .sql(" ")
                 .param()
                 .bind::<diesel::sql_types::Uuid, _>(*id);
         };
 
-        query = query.sql(sort);
+        query = query.sql(" ORDER BY id ");
+        if asc {
+            query = query.sql("ASC ");
+        } else {
+            query = query.sql("DESC ");
+        }
+
         query =
             query.sql(" LIMIT ").param().bind::<diesel::sql_types::BigInt, _>(
                 i64::from(pagparams.limit.get()),
@@ -1230,6 +1234,7 @@ mod tests {
     use nexus_types::external_api::params;
     use omicron_common::api::external::{
         self, ByteCount, DataPageParams, IdentityMetadataCreateParams,
+        SimpleIdentity,
     };
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::GenericUuid;
@@ -1884,6 +1889,172 @@ mod tests {
             .await
             .unwrap();
         assert!(members.is_empty());
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    // Anti-affinity group member listing has a slightly more complicated
+    // implementation, because it queries multiple tables and UNIONs them
+    // together.
+    //
+    // This test exists to validate that manual implementation.
+    #[tokio::test]
+    async fn anti_affinity_group_membership_list_extended() {
+        // Setup
+        let logctx =
+            dev::test_setup_log("anti_affinity_group_membership_list_extended");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a project and a group
+        let (authz_project, ..) =
+            create_project(&opctx, &datastore, "my-project").await;
+        let group = create_anti_affinity_group(
+            &opctx,
+            &datastore,
+            &authz_project,
+            "my-group",
+        )
+        .await
+        .unwrap();
+
+        let (.., authz_aa_group) = LookupPath::new(opctx, datastore)
+            .anti_affinity_group_id(group.id())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .unwrap();
+
+        // A new group should have no members
+        let pagparams = DataPageParams {
+            marker: None,
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        };
+        let members = datastore
+            .anti_affinity_group_member_list(
+                &opctx,
+                &authz_aa_group,
+                &pagparams,
+            )
+            .await
+            .unwrap();
+        assert!(members.is_empty());
+
+        // Add some groups and instances, so we have data to list over.
+
+        const INSTANCE_COUNT: usize = 3;
+        const AFFINITY_GROUP_COUNT: usize = 3;
+
+        let mut members = Vec::new();
+
+        for i in 0..INSTANCE_COUNT {
+            let instance = create_stopped_instance_record(
+                &opctx,
+                &datastore,
+                &authz_project,
+                &format!("instance-{i}"),
+            )
+            .await;
+
+            // Add the instance as a member to the group
+            let member = external::AntiAffinityGroupMember::Instance(instance);
+            datastore
+                .anti_affinity_group_member_add(
+                    &opctx,
+                    &authz_aa_group,
+                    member.clone(),
+                )
+                .await
+                .unwrap();
+            members.push(member);
+        }
+
+        for i in 0..AFFINITY_GROUP_COUNT {
+            let affinity_group = create_affinity_group(
+                &opctx,
+                &datastore,
+                &authz_project,
+                &format!("affinity-{i}"),
+            )
+            .await
+            .unwrap();
+
+            // Add the instance as a member to the group
+            let member = external::AntiAffinityGroupMember::AffinityGroup(
+                AffinityGroupUuid::from_untyped_uuid(affinity_group.id()),
+            );
+            datastore
+                .anti_affinity_group_member_add(
+                    &opctx,
+                    &authz_aa_group,
+                    member.clone(),
+                )
+                .await
+                .unwrap();
+            members.push(member);
+        }
+
+        // Order by UUID, regardless of member type
+        members.sort_unstable_by(|m1, m2| m1.id().cmp(&m2.id()));
+
+        // We can list all members
+        let mut pagparams = DataPageParams {
+            marker: None,
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        };
+        let observed_members = datastore
+            .anti_affinity_group_member_list(
+                &opctx,
+                &authz_aa_group,
+                &pagparams,
+            )
+            .await
+            .unwrap();
+        assert_eq!(observed_members, members);
+
+        // We can paginate over the results
+        let marker = members[2].id();
+        pagparams.marker = Some(&marker);
+        let observed_members = datastore
+            .anti_affinity_group_member_list(
+                &opctx,
+                &authz_aa_group,
+                &pagparams,
+            )
+            .await
+            .unwrap();
+        assert_eq!(observed_members, members[3..]);
+
+        // We can list limited results
+        pagparams.marker = Some(&marker);
+        pagparams.limit = NonZeroU32::new(2).unwrap();
+        let observed_members = datastore
+            .anti_affinity_group_member_list(
+                &opctx,
+                &authz_aa_group,
+                &pagparams,
+            )
+            .await
+            .unwrap();
+        assert_eq!(observed_members, members[3..5]);
+
+        // We can list in descending order too
+        members.reverse();
+        pagparams.marker = None;
+        pagparams.limit = NonZeroU32::new(100).unwrap();
+        pagparams.direction = dropshot::PaginationOrder::Descending;
+        let observed_members = datastore
+            .anti_affinity_group_member_list(
+                &opctx,
+                &authz_aa_group,
+                &pagparams,
+            )
+            .await
+            .unwrap();
+        assert_eq!(observed_members, members);
 
         // Clean up.
         db.terminate().await;

@@ -1337,7 +1337,9 @@ impl SimpleIdentity for AffinityGroupMember {
 ///
 /// Membership in a group is not exclusive - members may belong to multiple
 /// affinity / anti-affinity groups.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Hash, Eq,
+)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum AntiAffinityGroupMember {
     /// An affinity group belonging to this group, identified by UUID.
