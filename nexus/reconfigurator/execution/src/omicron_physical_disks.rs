@@ -22,11 +22,14 @@ use std::collections::BTreeMap;
 
 /// Idempotently ensure that the specified Omicron disks are deployed to the
 /// corresponding sleds
-pub(crate) async fn deploy_disks(
+pub(crate) async fn deploy_disks<'a, I>(
     opctx: &OpContext,
     sleds_by_id: &BTreeMap<SledUuid, Sled>,
-    sled_configs: &BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
-) -> Result<(), Vec<anyhow::Error>> {
+    sled_configs: I,
+) -> Result<(), Vec<anyhow::Error>>
+where
+    I: Iterator<Item = (SledUuid, &'a BlueprintPhysicalDisksConfig)>,
+{
     let errors: Vec<_> = stream::iter(sled_configs)
         .filter_map(|(sled_id, config)| async move {
             let log = opctx.log.new(o!(
@@ -168,11 +171,15 @@ mod test {
     use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::deployment::BlueprintDatasetsConfig;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
+    use nexus_types::deployment::BlueprintSledConfig;
+    use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::{
         Blueprint, BlueprintPhysicalDiskConfig, BlueprintPhysicalDisksConfig,
         BlueprintTarget, CockroachDbPreserveDowngrade, DiskFilter,
     };
+    use nexus_types::external_api::views::SledState;
     use nexus_types::identity::Asset;
     use omicron_common::api::external::DataPageParams;
     use omicron_common::api::external::Generation;
@@ -208,10 +215,21 @@ mod test {
             },
             Blueprint {
                 id,
-                blueprint_zones: BTreeMap::new(),
-                blueprint_disks,
-                blueprint_datasets: BTreeMap::new(),
-                sled_state: BTreeMap::new(),
+                sleds: blueprint_disks
+                    .into_iter()
+                    .map(|(sled_id, disks_config)| {
+                        (
+                            sled_id,
+                            BlueprintSledConfig {
+                                state: SledState::Active,
+                                disks_config,
+                                zones_config: BlueprintZonesConfig::default(),
+                                datasets_config:
+                                    BlueprintDatasetsConfig::default(),
+                            },
+                        )
+                    })
+                    .collect(),
                 cockroachdb_setting_preserve_downgrade:
                     CockroachDbPreserveDowngrade::DoNotModify,
                 parent_blueprint_id: None,
@@ -256,9 +274,16 @@ mod test {
         // Get a success result back when the blueprint has an empty set of
         // disks.
         let (_, blueprint) = create_blueprint(BTreeMap::new());
-        deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
-            .await
-            .expect("failed to deploy no disks");
+        deploy_disks(
+            &opctx,
+            &sleds_by_id,
+            blueprint
+                .sleds
+                .iter()
+                .map(|(sled_id, config)| (*sled_id, &config.disks_config)),
+        )
+        .await
+        .expect("failed to deploy no disks");
 
         // Disks are updated in a particular order, but each request contains
         // the full set of disks that must be running.
@@ -312,9 +337,16 @@ mod test {
         }
 
         // Execute it.
-        deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
-            .await
-            .expect("failed to deploy initial disks");
+        deploy_disks(
+            &opctx,
+            &sleds_by_id,
+            blueprint
+                .sleds
+                .iter()
+                .map(|(sled_id, config)| (*sled_id, &config.disks_config)),
+        )
+        .await
+        .expect("failed to deploy initial disks");
 
         s1.verify_and_clear();
         s2.verify_and_clear();
@@ -331,9 +363,16 @@ mod test {
                 )),
             );
         }
-        deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
-            .await
-            .expect("failed to deploy same disks");
+        deploy_disks(
+            &opctx,
+            &sleds_by_id,
+            blueprint
+                .sleds
+                .iter()
+                .map(|(sled_id, config)| (*sled_id, &config.disks_config)),
+        )
+        .await
+        .expect("failed to deploy same disks");
         s1.verify_and_clear();
         s2.verify_and_clear();
 
@@ -356,10 +395,16 @@ mod test {
             .respond_with(status_code(500)),
         );
 
-        let errors =
-            deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
-                .await
-                .expect_err("unexpectedly succeeded in deploying disks");
+        let errors = deploy_disks(
+            &opctx,
+            &sleds_by_id,
+            blueprint
+                .sleds
+                .iter()
+                .map(|(sled_id, config)| (*sled_id, &config.disks_config)),
+        )
+        .await
+        .expect_err("unexpectedly succeeded in deploying disks");
 
         println!("{:?}", errors);
         assert_eq!(errors.len(), 1);
@@ -400,10 +445,16 @@ mod test {
             })),
         );
 
-        let errors =
-            deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
-                .await
-                .expect_err("unexpectedly succeeded in deploying disks");
+        let errors = deploy_disks(
+            &opctx,
+            &sleds_by_id,
+            blueprint
+                .sleds
+                .iter()
+                .map(|(sled_id, config)| (*sled_id, &config.disks_config)),
+        )
+        .await
+        .expect_err("unexpectedly succeeded in deploying disks");
 
         println!("{:?}", errors);
         assert_eq!(errors.len(), 1);
