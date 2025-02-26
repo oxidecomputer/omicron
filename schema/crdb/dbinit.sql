@@ -216,37 +216,26 @@ CREATE INDEX IF NOT EXISTS lookup_sled_by_policy_and_state ON omicron.public.sle
     sled_state
 );
 
-CREATE TYPE IF NOT EXISTS omicron.public.sled_resource_kind AS ENUM (
-    -- omicron.public.vmm ; this is called "instance" for historical reasons.
-    'instance'
-    -- We expect to other resource kinds here in the future; e.g., to track
-    -- resources used by control plane services. For now, we only track
-    -- instances.
-);
-
--- Accounting for programs using resources on a sled
-CREATE TABLE IF NOT EXISTS omicron.public.sled_resource (
-    -- Should match the UUID of the corresponding resource
+-- Accounting for VMMs using resources on a sled
+CREATE TABLE IF NOT EXISTS omicron.public.sled_resource_vmm (
+    -- Should match the UUID of the corresponding VMM
     id UUID PRIMARY KEY,
 
     -- The sled where resources are being consumed
     sled_id UUID NOT NULL,
 
-    -- The maximum number of hardware threads usable by this resource
+    -- The maximum number of hardware threads usable by this VMM
     hardware_threads INT8 NOT NULL,
 
-    -- The maximum amount of RSS RAM provisioned to this resource
+    -- The maximum amount of RSS RAM provisioned to this VMM
     rss_ram INT8 NOT NULL,
 
-    -- The maximum amount of Reservoir RAM provisioned to this resource
+    -- The maximum amount of Reservoir RAM provisioned to this VMM
     reservoir_ram INT8 NOT NULL,
 
-    -- Identifies the type of the resource
-    kind omicron.public.sled_resource_kind NOT NULL,
-
-    -- The UUID of an instance, if this resource belongs to an instance.
+    -- The UUID of the instance to which this VMM belongs.
     --
-    -- This should eventually become NOT NULL for all instances, but is
+    -- This should eventually become NOT NULL for all VMMs, but is
     -- still nullable for backwards compatibility purposes. Specifically,
     -- the "instance start" saga can create rows in this table before creating
     -- rows for "omicron.public.vmm", which we would use for back-filling.
@@ -256,14 +245,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_resource (
     instance_id UUID
 );
 
--- Allow looking up all resources which reside on a sled
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_resource_by_sled ON omicron.public.sled_resource (
+-- Allow looking up all VMM resources which reside on a sled
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_vmm_resource_by_sled ON omicron.public.sled_resource_vmm (
     sled_id,
     id
 );
 
 -- Allow looking up all resources by instance
-CREATE INDEX IF NOT EXISTS lookup_resource_by_instance ON omicron.public.sled_resource (
+CREATE INDEX IF NOT EXISTS lookup_vmm_resource_by_instance ON omicron.public.sled_resource_vmm (
     instance_id
 );
 
@@ -5016,7 +5005,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '128.0.0', NULL)
+    (TRUE, NOW(), NOW(), '129.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

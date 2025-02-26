@@ -100,11 +100,7 @@ impl AbandonedVmmReaper {
             let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
             slog::trace!(opctx.log, "Deleting abandoned VMM"; "vmm" => %vmm_id);
             // Attempt to remove the abandoned VMM's sled resource reservation.
-            match self
-                .datastore
-                .sled_reservation_delete(opctx, vmm_id.into_untyped_uuid())
-                .await
-            {
+            match self.datastore.sled_reservation_delete(opctx, vmm_id).await {
                 Ok(_) => {
                     slog::trace!(
                         opctx.log,
@@ -200,7 +196,7 @@ mod tests {
     use nexus_db_model::ByteCount;
     use nexus_db_model::Generation;
     use nexus_db_model::Resources;
-    use nexus_db_model::SledResource;
+    use nexus_db_model::SledResourceVmm;
     use nexus_db_model::Vmm;
     use nexus_db_model::VmmRuntimeState;
     use nexus_db_model::VmmState;
@@ -283,7 +279,7 @@ mod tests {
                 ExpressionMethods, OptionalExtension, QueryDsl,
                 SelectableHelper,
             };
-            use nexus_db_queries::db::schema::sled_resource::dsl as sled_resource_dsl;
+            use nexus_db_queries::db::schema::sled_resource_vmm::dsl as sled_resource_vmm_dsl;
             use nexus_db_queries::db::schema::vmm::dsl as vmm_dsl;
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
@@ -302,18 +298,19 @@ mod tests {
                 "VMM record should have been deleted"
             );
 
-            let fetched_sled_resource = sled_resource_dsl::sled_resource
-                .filter(
-                    sled_resource_dsl::id
-                        .eq(self.destroyed_vmm_id.into_untyped_uuid()),
-                )
-                .select(SledResource::as_select())
-                .first_async::<SledResource>(&*conn)
-                .await
-                .optional()
-                .expect("sled resource query should succeed");
+            let fetched_sled_resource_vmm =
+                sled_resource_vmm_dsl::sled_resource_vmm
+                    .filter(
+                        sled_resource_vmm_dsl::id
+                            .eq(self.destroyed_vmm_id.into_untyped_uuid()),
+                    )
+                    .select(SledResourceVmm::as_select())
+                    .first_async::<SledResourceVmm>(&*conn)
+                    .await
+                    .optional()
+                    .expect("sled resource query should succeed");
             assert!(
-                dbg!(fetched_sled_resource).is_none(),
+                dbg!(fetched_sled_resource_vmm).is_none(),
                 "sled resource record should have been deleted"
             );
         }
@@ -394,7 +391,7 @@ mod tests {
     }
 
     #[nexus_test(server = crate::Server)]
-    async fn sled_resource_already_deleted(
+    async fn sled_resource_vmm_already_deleted(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let nexus = &cptestctx.server.server_context().nexus;
@@ -422,10 +419,7 @@ mod tests {
         assert!(!abandoned_vmms.is_empty());
 
         datastore
-            .sled_reservation_delete(
-                &opctx,
-                fixture.destroyed_vmm_id.into_untyped_uuid(),
-            )
+            .sled_reservation_delete(&opctx, fixture.destroyed_vmm_id)
             .await
             .expect(
                 "simulate another nexus marking the sled reservation deleted",
