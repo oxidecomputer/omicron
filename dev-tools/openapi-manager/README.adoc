@@ -200,6 +200,27 @@ Putting all this together, the tool is pretty straightforward.  For each support
 * If there is no blessed file for that version, then the version is locally-added.  There should be exactly one local file for it and it should exactly match the generated file.  The tool can fix any problems here by removing all local files and generating a new one based on the generated one.
 * The tool also ensures that a "latest" symlink exists and points to the highest-numbered OpenAPI document.
 
+```mermaid
+flowchart TD
+    HaveSupportedVersion["Have supported version<br/>(explicit list in Rust code)"]
+    QIsLockstep{"Is this a lockstep API?"}
+    IsLockstep["Make the local OpenAPI document match the generated one."]
+    QHaveBlessedSpec{"Is there an OpenAPI document in the blessed source (upstream)?"}
+    HaveBlessed["Verify that the generated OpenAPI document is compatible with the blessed document."]
+    NoBlessed["Make the local OpenAPI document match the generated one (and remove any others)"]
+    IsLatest{"Is it the latest version of this API?"}
+    NeedSymlink["Make the 'latest' symlink for this API refer to this version's OpenAPI document."]
+
+    HaveSupportedVersion --> QIsLockstep
+    QIsLockstep -->|"Yes"|IsLockstep
+    QIsLockstep -->|"No, it's versioned"|QHaveBlessedSpec
+    QHaveBlessedSpec -->|"Yes, it's a blessed version"| HaveBlessed
+    QHaveBlessedSpec -->|"No, it's a locally-added version"| NoBlessed
+    HaveBlessed --> IsLatest
+    NoBlessed --> IsLatest
+    IsLatest --> |"Yes"|NeedSymlink
+```
+
 You generally don't need to think about any of this to use the tool.  Like with lockstep APIs, you just use `cargo xtask openapi generate` to update the local files.  The only ways you're likely to run into trouble are:
 
 1. You forgot to define a new version.  In this case, you'll get an error about having changed a blessed version.  To fix this, you'll need to follow the steps above to make changes that don't affect older versions.
