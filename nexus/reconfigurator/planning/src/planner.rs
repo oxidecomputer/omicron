@@ -1219,7 +1219,13 @@ pub(crate) mod test {
         let sled_id = summary.diff.sleds.modified_keys().next().unwrap();
         assert_eq!(*sled_id, new_sled_id);
         // No removed or modified zones on this sled
-        let zones_cfg_diff = summary.zones_on_modified_sled(sled_id).unwrap();
+        let zones_cfg_diff = &summary
+            .diff
+            .sleds
+            .get_modified(sled_id)
+            .unwrap()
+            .diff_pair()
+            .zones_config;
         assert!(zones_cfg_diff.zones.removed.is_empty());
         assert_eq!(zones_cfg_diff.zones.modified().count(), 0);
         // 10 crucible zones addeed
@@ -1321,8 +1327,15 @@ pub(crate) mod test {
             4
         );
 
-        let zones_added =
-            &summary.zones_on_modified_sled(&sled_id).unwrap().zones.added;
+        let zones_added = &summary
+            .diff
+            .sleds
+            .get_modified(&sled_id)
+            .unwrap()
+            .diff_pair()
+            .zones_config
+            .zones
+            .added;
         assert_eq!(zones_added.len(), input.target_nexus_zone_count() - 1);
         for (_, zone) in zones_added {
             if zone.kind() != ZoneKind::Nexus {
@@ -2329,10 +2342,9 @@ pub(crate) mod test {
             DatasetKind::TransientZoneRoot,
             test_transient_zone_kind.clone(),
         ]);
-        let mut modified_zones = Vec::new();
-        for (_, modified_sled) in &summary.modified_sleds_diff {
-            modified_zones
-                .extend(modified_sled.zones_config.zones.modified_diff());
+        let mut modified_zone_configs = Vec::new();
+        for modified_sled in summary.diff.sleds.modified_values_diff() {
+            modified_zone_configs.push(modified_sled.zones_config);
             for modified in
                 modified_sled.datasets_config.datasets.modified_values_diff()
             {
@@ -2356,25 +2368,26 @@ pub(crate) mod test {
         }
         assert!(expected_kinds.is_empty());
 
+        assert_eq!(modified_zone_configs.len(), 1);
+        let modified_zone_config = modified_zone_configs.pop().unwrap();
+        assert!(modified_zone_config.zones.added.is_empty());
+        assert!(modified_zone_config.zones.removed.is_empty());
+        let mut modified_zones = modified_zone_config
+            .zones
+            .modified_values_diff()
+            .collect::<Vec<_>>();
         assert_eq!(modified_zones.len(), 1);
-        let (_, modified_zone) = modified_zones.into_iter().next().unwrap();
+        let modified_zone = modified_zones.pop().unwrap();
         assert!(
-            matches!(modified_zone.zone_type.before.kind(), ZoneKind::Crucible),
-            "Expected the modified zone to be a Crucible zone, but it was: {:?}",
+            modified_zone.zone_type.before.is_crucible(),
+            "Expected the modified zone to be a Crucible zone, \
+             but it was: {:?}",
             modified_zone.zone_type.before.kind()
         );
         assert_eq!(
             *modified_zone.disposition.after,
             BlueprintZoneDisposition::Expunged {
-                as_of_generation: summary
-                    .modified_sleds_diff
-                    .values()
-                    .next()
-                    .unwrap()
-                    .zones_config
-                    .generation
-                    .before
-                    .next(),
+                as_of_generation: modified_zone_config.generation.before.next(),
                 ready_for_cleanup: false,
             },
             "Should have expunged this zone"
@@ -2852,8 +2865,13 @@ pub(crate) mod test {
 
         // Run through all the common zones and ensure that all of them
         // have been marked expunged.
-        let modified_zones =
-            summary.zones_on_modified_sled(&expunged_sled_id).unwrap();
+        let modified_zones = &summary
+            .diff
+            .sleds
+            .get_modified(&expunged_sled_id)
+            .unwrap()
+            .diff_pair()
+            .zones_config;
         assert_eq!(
             modified_zones.generation.before.next(),
             *modified_zones.generation.after,

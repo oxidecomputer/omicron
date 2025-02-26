@@ -14,8 +14,7 @@ use super::{
     unwrap_or_none, zone_sort_key, BlueprintDatasetConfigDiff,
     BlueprintDatasetDisposition, BlueprintDiff, BlueprintMetadata,
     BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskConfigDiff,
-    BlueprintPhysicalDisksConfigDiff, BlueprintSledConfigDiff,
-    BlueprintZoneConfigDiff, BlueprintZonesConfigDiff, ClickhouseClusterConfig,
+    BlueprintZoneConfigDiff, ClickhouseClusterConfig,
     CockroachDbPreserveDowngrade,
 };
 use daft::Diffable;
@@ -40,17 +39,12 @@ pub struct BlueprintDiffSummary<'a> {
     pub before: &'a Blueprint,
     pub after: &'a Blueprint,
     pub diff: BlueprintDiff<'a>,
-    pub modified_sleds_diff: BTreeMap<SledUuid, BlueprintSledConfigDiff<'a>>,
 }
 
 impl<'a> BlueprintDiffSummary<'a> {
     pub fn new(before: &'a Blueprint, after: &'a Blueprint) -> Self {
         let diff = before.diff(after);
-
-        let modified_sleds_diff =
-            diff.sleds.modified_diff().map(|(k, v)| (*k, v)).collect();
-
-        BlueprintDiffSummary { before, after, diff, modified_sleds_diff }
+        BlueprintDiffSummary { before, after, diff }
     }
 
     /// Return a struct that can be used to display the diff.
@@ -114,8 +108,9 @@ impl<'a> BlueprintDiffSummary<'a> {
             .values()
             .fold(0, |acc, c| acc + c.zones_config.zones.len())
             + self
-                .modified_sleds_diff
-                .values()
+                .diff
+                .sleds
+                .modified_values_diff()
                 .fold(0, |acc, c| acc + c.zones_config.zones.added.len())
     }
 
@@ -127,14 +122,16 @@ impl<'a> BlueprintDiffSummary<'a> {
             .values()
             .fold(0, |acc, c| acc + c.zones_config.zones.len())
             + self
-                .modified_sleds_diff
-                .values()
+                .diff
+                .sleds
+                .modified_values_diff()
                 .fold(0, |acc, c| acc + c.zones_config.zones.removed.len())
     }
     ///  The number of zones modified across all sleds
     pub fn total_zones_modified(&self) -> usize {
-        self.modified_sleds_diff
-            .values()
+        self.diff
+            .sleds
+            .modified_values_diff()
             .fold(0, |acc, c| acc + c.zones_config.zones.modified().count())
     }
 
@@ -146,8 +143,9 @@ impl<'a> BlueprintDiffSummary<'a> {
             .values()
             .fold(0, |acc, c| acc + c.disks_config.disks.len())
             + self
-                .modified_sleds_diff
-                .values()
+                .diff
+                .sleds
+                .modified_values_diff()
                 .fold(0, |acc, c| acc + c.disks_config.disks.added.len())
     }
 
@@ -159,14 +157,16 @@ impl<'a> BlueprintDiffSummary<'a> {
             .values()
             .fold(0, |acc, c| acc + c.disks_config.disks.len())
             + self
-                .modified_sleds_diff
-                .values()
+                .diff
+                .sleds
+                .modified_values_diff()
                 .fold(0, |acc, c| acc + c.disks_config.disks.removed.len())
     }
     ///  The number of disks modified across all sleds
     pub fn total_disks_modified(&self) -> usize {
-        self.modified_sleds_diff
-            .values()
+        self.diff
+            .sleds
+            .modified_values_diff()
             .fold(0, |acc, c| acc + c.disks_config.disks.modified().count())
     }
 
@@ -178,8 +178,9 @@ impl<'a> BlueprintDiffSummary<'a> {
             .values()
             .fold(0, |acc, c| acc + c.datasets_config.datasets.len())
             + self
-                .modified_sleds_diff
-                .values()
+                .diff
+                .sleds
+                .modified_values_diff()
                 .fold(0, |acc, c| acc + c.datasets_config.datasets.added.len())
     }
 
@@ -190,31 +191,15 @@ impl<'a> BlueprintDiffSummary<'a> {
             .removed
             .values()
             .fold(0, |acc, c| acc + c.datasets_config.datasets.len())
-            + self.modified_sleds_diff.values().fold(0, |acc, c| {
+            + self.diff.sleds.modified_values_diff().fold(0, |acc, c| {
                 acc + c.datasets_config.datasets.removed.len()
             })
     }
     ///  The number of datasets modified across all sleds
     pub fn total_datasets_modified(&self) -> usize {
-        self.modified_sleds_diff.values().fold(0, |acc, c| {
+        self.diff.sleds.modified_values_diff().fold(0, |acc, c| {
             acc + c.datasets_config.datasets.modified().count()
         })
-    }
-
-    /// Return the `BlueprintZonesConfigDiff` for a modified sled
-    pub fn zones_on_modified_sled(
-        &self,
-        sled_id: &SledUuid,
-    ) -> Option<&BlueprintZonesConfigDiff<'a>> {
-        self.modified_sleds_diff.get(sled_id).map(|c| &c.zones_config)
-    }
-
-    /// Return the `BlueprintDisksConfigDiff` for a modified sled
-    pub fn disks_on_modified_sled(
-        &self,
-        sled_id: &SledUuid,
-    ) -> Option<&BlueprintPhysicalDisksConfigDiff<'a>> {
-        self.modified_sleds_diff.get(sled_id).map(|c| &c.disks_config)
     }
 
     /// Iterate over all added zones on a sled
@@ -233,7 +218,7 @@ impl<'a> BlueprintDiffSummary<'a> {
 
         // Then check if the sled is modified and there are any added zones
         let zones_cfg_diff =
-            &self.modified_sleds_diff.get(sled_id)?.zones_config;
+            &self.diff.sleds.get_modified(sled_id)?.diff_pair().zones_config;
         if zones_cfg_diff.zones.added.is_empty() {
             return None;
         }
@@ -263,7 +248,7 @@ impl<'a> BlueprintDiffSummary<'a> {
 
         // Then check if the sled is modified and there are any removed zones
         let zones_cfg_diff =
-            &self.modified_sleds_diff.get(sled_id)?.zones_config;
+            &self.diff.sleds.get_modified(sled_id)?.diff_pair().zones_config;
         if zones_cfg_diff.zones.removed.is_empty() {
             return None;
         }
@@ -281,7 +266,7 @@ impl<'a> BlueprintDiffSummary<'a> {
     ) -> Option<(BpDiffZonesModified, BpDiffZoneErrors)> {
         // Then check if the sled is modified and there are any modified zones
         let zones_cfg_diff =
-            &self.modified_sleds_diff.get(sled_id)?.zones_config;
+            &self.diff.sleds.get_modified(sled_id)?.diff_pair().zones_config;
         let mut modified_zones =
             zones_cfg_diff.zones.modified_values_diff().peekable();
         if modified_zones.peek().is_none() {
@@ -313,7 +298,7 @@ impl<'a> BlueprintDiffSummary<'a> {
 
         // Then check if the sled is modified and there are any unchanged zones
         let zones_cfg_diff =
-            &self.modified_sleds_diff.get(sled_id)?.zones_config;
+            &self.diff.sleds.get_modified(sled_id)?.diff_pair().zones_config;
         let mut unchanged_zones =
             zones_cfg_diff.zones.unchanged_values().peekable();
         if unchanged_zones.peek().is_none() {
@@ -345,7 +330,7 @@ impl<'a> BlueprintDiffSummary<'a> {
 
         // Then check if the sled is modified and there are any added disks
         let disks_cfg_diff =
-            &self.modified_sleds_diff.get(sled_id)?.disks_config;
+            &self.diff.sleds.get_modified(sled_id)?.diff_pair().disks_config;
         if disks_cfg_diff.disks.added.is_empty() {
             return None;
         }
@@ -375,7 +360,7 @@ impl<'a> BlueprintDiffSummary<'a> {
 
         // Then check if the sled is modified and there are any removed disks
         let disks_cfg_diff =
-            &self.modified_sleds_diff.get(sled_id)?.disks_config;
+            &self.diff.sleds.get_modified(sled_id)?.diff_pair().disks_config;
         if disks_cfg_diff.disks.removed.is_empty() {
             return None;
         }
@@ -405,7 +390,7 @@ impl<'a> BlueprintDiffSummary<'a> {
 
         // Then check if the sled is modified and there are any unchanged disks
         let disks_cfg_diff =
-            &self.modified_sleds_diff.get(sled_id)?.disks_config;
+            &self.diff.sleds.get_modified(sled_id)?.diff_pair().disks_config;
         let mut unchanged_disks =
             disks_cfg_diff.disks.unchanged_values().peekable();
         if unchanged_disks.peek().is_none() {
@@ -426,7 +411,7 @@ impl<'a> BlueprintDiffSummary<'a> {
     {
         // Check if the sled is modified and there are any modified disks
         let disks_cfg_diff =
-            &self.modified_sleds_diff.get(sled_id)?.disks_config;
+            &self.diff.sleds.get_modified(sled_id)?.diff_pair().disks_config;
         let mut modified_disks =
             disks_cfg_diff.disks.modified_values_diff().peekable();
         if modified_disks.peek().is_none() {
@@ -458,7 +443,7 @@ impl<'a> BlueprintDiffSummary<'a> {
 
         // Then check if the sled is modified and there are any added datasets
         let datasets_cfg_diff =
-            &self.modified_sleds_diff.get(sled_id)?.datasets_config;
+            &self.diff.sleds.get_modified(sled_id)?.diff_pair().datasets_config;
         if datasets_cfg_diff.datasets.added.is_empty() {
             return None;
         }
@@ -488,7 +473,7 @@ impl<'a> BlueprintDiffSummary<'a> {
 
         // Then check if the sled is modified and there are any removed datasets
         let datasets_cfg_diff =
-            &self.modified_sleds_diff.get(sled_id)?.datasets_config;
+            &self.diff.sleds.get_modified(sled_id)?.diff_pair().datasets_config;
         if datasets_cfg_diff.datasets.removed.is_empty() {
             return None;
         }
@@ -518,7 +503,7 @@ impl<'a> BlueprintDiffSummary<'a> {
 
         // Then check if the sled is modified and there are any unchanged datasets
         let datasets_cfg_diff =
-            &self.modified_sleds_diff.get(sled_id)?.datasets_config;
+            &self.diff.sleds.get_modified(sled_id)?.diff_pair().datasets_config;
         let mut unchanged_datasets =
             datasets_cfg_diff.datasets.unchanged_values().peekable();
         if unchanged_datasets.peek().is_none() {
@@ -538,7 +523,7 @@ impl<'a> BlueprintDiffSummary<'a> {
     ) -> Option<(BpDiffDatasetsModified, BpDiffDatasetErrors)> {
         // Check if the sled is modified and there are any modified datasets
         let datasets_cfg_diff =
-            &self.modified_sleds_diff.get(sled_id)?.datasets_config;
+            self.diff.sleds.get_modified(sled_id)?.diff_pair().datasets_config;
         let mut modified_datasets =
             datasets_cfg_diff.datasets.modified_values_diff().peekable();
         if modified_datasets.peek().is_none() {
