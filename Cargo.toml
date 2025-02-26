@@ -600,7 +600,7 @@ rustls = "0.22.2"
 rustls-pemfile = "2.2.0"
 rustyline = "14.0.0"
 samael = { version = "0.0.18", features = ["xmlsec"] }
-schemars = "0.8.21"
+schemars = "0.8.22"
 secrecy = "0.8.0"
 semver = { version = "1.0.25", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
