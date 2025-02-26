@@ -182,9 +182,9 @@ mod test {
     };
     use nexus_types::deployment::{
         blueprint_zone_type, Blueprint, BlueprintDatasetsConfig,
-        BlueprintPhysicalDisksConfig, BlueprintTarget, BlueprintZoneConfig,
-        BlueprintZoneDisposition, BlueprintZoneType, BlueprintZonesConfig,
-        CockroachDbPreserveDowngrade,
+        BlueprintPhysicalDisksConfig, BlueprintSledConfig, BlueprintTarget,
+        BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
+        BlueprintZonesConfig, CockroachDbPreserveDowngrade,
     };
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external::Generation;
@@ -211,17 +211,24 @@ mod test {
         datastore: &DataStore,
         opctx: &OpContext,
         blueprint_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
-        blueprint_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
-        blueprint_datasets: BTreeMap<SledUuid, BlueprintDatasetsConfig>,
         dns_version: Generation,
     ) -> (BlueprintTarget, Blueprint) {
         let id = BlueprintUuid::new_v4();
-        // Assume all sleds are active.
-        let sled_state = blueprint_zones
-            .keys()
-            .copied()
-            .map(|sled_id| (sled_id, SledState::Active))
-            .collect::<BTreeMap<_, _>>();
+        // Assume all sleds are active with no disks or datasets.
+        let blueprint_sleds = blueprint_zones
+            .into_iter()
+            .map(|(sled_id, zones_config)| {
+                (
+                    sled_id,
+                    BlueprintSledConfig {
+                        state: SledState::Active,
+                        zones_config,
+                        disks_config: BlueprintPhysicalDisksConfig::default(),
+                        datasets_config: BlueprintDatasetsConfig::default(),
+                    },
+                )
+            })
+            .collect();
 
         // Ensure the blueprint we're creating is the current target (required
         // for successful blueprint realization). This requires its parent to be
@@ -238,10 +245,7 @@ mod test {
         };
         let blueprint = Blueprint {
             id,
-            blueprint_zones,
-            blueprint_disks,
-            blueprint_datasets,
-            sled_state,
+            sleds: blueprint_sleds,
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: Some(current_target.target_id),
@@ -365,15 +369,8 @@ mod test {
         // complete and report a successful (empty) summary.
         let generation = Generation::new();
         let blueprint = Arc::new(
-            create_blueprint(
-                &datastore,
-                &opctx,
-                BTreeMap::new(),
-                BTreeMap::new(),
-                BTreeMap::new(),
-                generation,
-            )
-            .await,
+            create_blueprint(&datastore, &opctx, BTreeMap::new(), generation)
+                .await,
         );
         let blueprint_id = blueprint.1.id;
         blueprint_tx.send(Some(blueprint)).unwrap();
@@ -439,8 +436,6 @@ mod test {
                 (sled_id1, make_zones(BlueprintZoneDisposition::InService)),
                 (sled_id2, make_zones(BlueprintZoneDisposition::InService)),
             ]),
-            BTreeMap::new(),
-            BTreeMap::new(),
             generation,
         )
         .await;

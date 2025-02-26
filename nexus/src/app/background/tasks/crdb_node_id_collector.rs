@@ -262,10 +262,11 @@ mod tests {
             iter::once(sled_id),
             "test",
         );
-        let bp_zones = blueprint
-            .blueprint_zones
+        let bp_zones = &mut blueprint
+            .sleds
             .get_mut(&sled_id)
-            .expect("found entry for test sled");
+            .expect("found entry for test sled")
+            .zones_config;
 
         let zpool_id = ZpoolUuid::new_v4();
         let make_crdb_zone_config =
