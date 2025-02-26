@@ -325,7 +325,7 @@ mod test {
         .unwrap_err();
         assert_eq!(error.kind(), clap::error::ErrorKind::ArgumentConflict);
         assert!(error.to_string().contains(
-            "error: the argument '--blessed-from-git <REVISION:PATH>' cannot \
+            "error: the argument '--blessed-from-git <REVISION[:PATH]>' cannot \
              be used with '--blessed-from-dir <DIRECTORY>"
         ));
     }
