@@ -20,7 +20,6 @@ use slog::trace;
 use slog::warn;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
-use uuid::Uuid;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::interval;
@@ -100,50 +99,41 @@ pub async fn database_inserter(
                     );
                 }
             }
+
+            // Our internal testing rack will be running a ClickHouse cluster
+            // alongside a single-node installation for a while. We want to handle
+            // the case of these two installations running alongside each other, and
+            // oximeter writing to both of them. On our production racks ClickHouse
+            // will only be run on single-node modality, so we want to ignore all
+            // cases where the `ClickhouseClusterNative` service is not available.
             if let Some(cluster_client) = &cluster_client {
-                let batch_id = Uuid::new_v4();
-                debug!(
-                    log,
-                    "DEBUG: getting ready to ping {}: {}",
-                    batch_id,
-                    chrono::Utc::now()
-                );
-                // TODO-K: set claim timeout, or dns lookup
                 match cluster_client.ping().await {
                     Ok(()) => {
                         debug!(
                             log,
                             "inserting {} samples into cluster database",
                             batch.len();
-                            "batch_id" => ?batch_id,
-                        "time" => ?chrono::Utc::now()
                         );
                         match cluster_client.insert_samples(&batch).await {
                             Ok(()) => trace!(
                                 log,
                                 "successfully inserted samples into cluster";
-                                "batch_id" => ?batch_id,
-                        "time" => ?chrono::Utc::now()
                             ),
                             Err(e) => {
                                 warn!(
-                        log,
-                        "failed to insert some results into metric cluster DB: {}",
-                        e.to_string();
-                        "batch_id" => ?batch_id,
-                        "time" => ?chrono::Utc::now()
-                    );
+                                    log,
+                                    "failed to insert some results into metric cluster DB: {e}"
+                                );
                             }
                         }
                     }
-                    Err(_) => info!(
+                    Err(e) => info!(
                         log,
-                        "ClickHouse cluster native connection unavailable";
-                        "batch_id" => ?batch_id,
-                        "time" => ?chrono::Utc::now()
+                        "ClickHouse cluster native connection unavailable: {e}"
                     ),
                 }
             }
+
             // TODO-correctness The `insert_samples` call above may fail. The method itself needs
             // better handling of partially-inserted results in that case, but we may need to retry
             // or otherwise handle an error here as well.

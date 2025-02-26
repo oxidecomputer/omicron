@@ -41,8 +41,8 @@ use oximeter::schema::TimeseriesKey;
 use oximeter::types::Sample;
 use oximeter::Measurement;
 use oximeter::TimeseriesName;
-use qorb::pool::Pool;
 use qorb::policy::Policy;
+use qorb::pool::Pool;
 use qorb::resolver::BoxedResolver;
 use qorb::resolvers::single_host::SingleHostResolver;
 use regex::Regex;
@@ -92,8 +92,13 @@ pub struct Client {
 }
 
 impl Client {
-    /// Construct a Clickhouse client of the database with a connection pool.
-    pub fn new_with_pool(native_resolver: BoxedResolver, log: &Logger, claim_policy: Option<Policy>) -> Self {
+    /// Construct a Clickhouse client of the database with a connection pool
+    /// and an optional qorb claim policy.
+    pub fn new_with_pool(
+        native_resolver: BoxedResolver,
+        log: &Logger,
+        claim_policy: Option<Policy>,
+    ) -> Self {
         let id = Uuid::new_v4();
         let log = log.new(slog::o!(
             "component" => "clickhouse-client",
@@ -101,10 +106,7 @@ impl Client {
         ));
         let schema = Mutex::new(BTreeMap::new());
         let request_timeout = DEFAULT_REQUEST_TIMEOUT;
-        let policy = match claim_policy {
-            Some(p) => p,
-            None => qorb::policy::Policy::default(),
-        };
+        let policy = claim_policy.unwrap_or_default();
         let native_pool = match Pool::new(
             native_resolver,
             Arc::new(native::connection::Connector),
@@ -1035,21 +1037,14 @@ impl Client {
         sql: &str,
         block: Block,
     ) -> Result<QueryResult, Error> {
-        //    trace!(
-        //        self.log,
-        //        "inserting data";
-        //        "sql" => sql,
-        //        "n_rows" => block.n_rows(),
-        //        "n_columns" => block.n_columns(),
-        //    );
-        let mut handle = self.pool.claim().await?;
-        debug!(
+        trace!(
             self.log,
-            "inserting data to {:#?}", handle.server_info(); // This prints information about the clickhouse server oximeter is talking to
+            "inserting data";
             "sql" => sql,
             "n_rows" => block.n_rows(),
             "n_columns" => block.n_columns(),
         );
+        let mut handle = self.pool.claim().await?;
         let id = usdt::UniqueId::new();
         probes::sql__query__start!(|| (&id, sql));
         let now = tokio::time::Instant::now();
