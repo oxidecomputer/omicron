@@ -68,6 +68,18 @@ builder: "non_trivial"
       "data": "::1:4"
     }
   ],
+  "001de000-c04e-4000-8000-000000000005.host": [
+    {
+      "type": "AAAA",
+      "data": "::1:5"
+    }
+  ],
+  "001de000-c04e-4000-8000-000000000006.host": [
+    {
+      "type": "AAAA",
+      "data": "::1:6"
+    }
+  ],
   "_boundary-ntp._tcp": [
     {
       "type": "SRV",
@@ -76,6 +88,61 @@ builder: "non_trivial"
         "weight": 0,
         "port": 127,
         "target": "001de000-c04e-4000-8000-000000000002.host.control-plane.oxide.internal"
+      }
+    }
+  ],
+  "_clickhouse-admin-server._tcp": [
+    {
+      "type": "SRV",
+      "data": {
+        "prio": 0,
+        "weight": 0,
+        "port": 8888,
+        "target": "001de000-c04e-4000-8000-000000000006.host.control-plane.oxide.internal"
+      }
+    }
+  ],
+  "_clickhouse-admin-single-server._tcp": [
+    {
+      "type": "SRV",
+      "data": {
+        "prio": 0,
+        "weight": 0,
+        "port": 8888,
+        "target": "001de000-c04e-4000-8000-000000000005.host.control-plane.oxide.internal"
+      }
+    }
+  ],
+  "_clickhouse-native._tcp": [
+    {
+      "type": "SRV",
+      "data": {
+        "prio": 0,
+        "weight": 0,
+        "port": 9000,
+        "target": "001de000-c04e-4000-8000-000000000005.host.control-plane.oxide.internal"
+      }
+    }
+  ],
+  "_clickhouse-server._tcp": [
+    {
+      "type": "SRV",
+      "data": {
+        "prio": 0,
+        "weight": 0,
+        "port": 0,
+        "target": "001de000-c04e-4000-8000-000000000006.host.control-plane.oxide.internal"
+      }
+    }
+  ],
+  "_clickhouse._tcp": [
+    {
+      "type": "SRV",
+      "data": {
+        "prio": 0,
+        "weight": 0,
+        "port": 0,
+        "target": "001de000-c04e-4000-8000-000000000005.host.control-plane.oxide.internal"
       }
     }
   ],

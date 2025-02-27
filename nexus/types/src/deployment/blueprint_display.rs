@@ -163,6 +163,7 @@ impl BpTableColumn {
 }
 
 /// A row in a [`BpTable`]
+#[derive(Debug)]
 pub struct BpTableRow {
     state: BpDiffState,
     columns: Vec<BpTableColumn>,
@@ -223,7 +224,13 @@ impl BpTable {
             self.column_names.iter().map(|s| s.len()).collect();
 
         for row in &self.rows {
-            assert_eq!(row.columns.len(), widths.len());
+            assert_eq!(
+                row.columns.len(),
+                widths.len(),
+                "for {}, number of header columns matches number of columns in row: {:?}",
+                self.table_name,
+                row
+            );
             for (i, s) in row.columns.iter().enumerate() {
                 widths[i] = usize::max(s.len(), widths[i]);
             }
@@ -332,7 +339,7 @@ impl BpTableSchema for BpPhysicalDisksTableSchema {
     }
 
     fn column_names(&self) -> &'static [&'static str] {
-        &["vendor", "model", "serial"]
+        &["vendor", "model", "serial", "disposition"]
     }
 }
 
@@ -362,7 +369,7 @@ impl BpTableSchema for BpOmicronZonesTableSchema {
         "omicron zones"
     }
     fn column_names(&self) -> &'static [&'static str] {
-        &["zone type", "zone id", "disposition", "underlay IP"]
+        &["zone type", "zone id", "image source", "disposition", "underlay IP"]
     }
 }
 

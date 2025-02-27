@@ -906,7 +906,12 @@ mod tests {
             task ({count}) differs from the number reported by the always-ded \
             producer server itself ({server_count})"
         );
-        assert_eq!(stats.failed_collections.len(), 1);
+        assert_eq!(
+            stats.failed_collections.len(),
+            1,
+            "unexpected failed_collections content: {:?}",
+            stats.failed_collections,
+        );
         logctx.cleanup_successful();
     }
 
