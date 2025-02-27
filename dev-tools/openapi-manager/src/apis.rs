@@ -47,21 +47,6 @@ pub struct ManagedApiConfig {
     pub extra_validation: Option<fn(&OpenAPI, ValidationContext<'_>)>,
 }
 
-// XXX-dap-last-step rip this out and convert callers
-impl From<crate::spec::ApiSpec> for ManagedApiConfig {
-    fn from(value: crate::spec::ApiSpec) -> Self {
-        ManagedApiConfig {
-            ident: value.file_stem,
-            versions: value.versions,
-            title: value.title,
-            description: value.description,
-            boundary: value.boundary,
-            api_description: value.api_description,
-            extra_validation: value.extra_validation,
-        }
-    }
-}
-
 /// Used internally to describe an API managed by this tool
 #[derive(Debug)]
 pub struct ManagedApi {
@@ -309,7 +294,6 @@ pub enum Versions {
 
 impl Versions {
     /// Constructor for a lockstep API
-    #[allow(dead_code)] // XXX-dap-last-step
     pub fn new_lockstep(version: semver::Version) -> Versions {
         Versions::Lockstep { version }
     }
