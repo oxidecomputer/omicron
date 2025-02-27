@@ -57,14 +57,24 @@ async fn main() -> Result<()> {
         request_timeout,
     );
 
-    wait_for_ping(&logctx.log, &client1).await?;
-    wait_for_ping(&logctx.log, &client2).await?;
+    wait_for_ping(&logctx.log, &client1).await.context(format!(
+        "client 1 timeout with deployment configuration: {:#?}",
+        deployment
+    ))?;
+    wait_for_ping(&logctx.log, &client2).await.context(format!(
+        "client 2 timeout with deployment configuration: {:#?}",
+        deployment
+    ))?;
     wait_for_keepers(
         &logctx.log,
         &deployment,
         (1..=num_keepers).map(KeeperId).collect(),
     )
-    .await?;
+    .await
+    .context(format!(
+        "keeper servers failure with deployment configuration: {:#?}",
+        deployment
+    ))?;
 
     Ok(())
 }
