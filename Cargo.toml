@@ -449,7 +449,7 @@ internal-dns-resolver = { path = "internal-dns/resolver" }
 internal-dns-types = { path = "internal-dns/types" }
 ipcc = { path = "ipcc" }
 ipnet = "2.9"
-itertools = "0.13.0"
+itertools = "0.14.0"
 internet-checksum = "0.2"
 ipnetwork = { version = "0.21", features = ["schemars", "serde"] }
 ispf = { git = "https://github.com/oxidecomputer/ispf" }
