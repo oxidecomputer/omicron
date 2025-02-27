@@ -324,48 +324,27 @@ impl OximeterAgent {
         }
     }
 
-    /// Forces a collection from all producers.
-    ///
-    /// Returns once all those values have been inserted into ClickHouse,
-    /// or an error occurs trying to perform the collection.
+    /// Enqueue requests to forces collection from all producers.
     ///
     /// NOTE: This collection is best effort, as the name implies. It's possible
-    /// that we lose track of requests internally, in cases where there are
-    /// many concurrent calls. Callers should strive to avoid this, since it
-    /// rarely makes sense to do that.
+    /// that we successfully enqueue requests for some producers and not all, in
+    /// cases where there are many concurrent calls. This method _does not_ wait
+    /// for the requested collections to be performed; it is "fire and forget".
+    /// avoid this, since it rarely makes sense to do that.
     pub async fn try_force_collection(
         &self,
     ) -> Result<(), ForcedCollectionError> {
-        let mut collection_oneshots = vec![];
+        let mut res = Ok(());
         let collection_tasks = self.collection_tasks.lock().await;
         for (_id, task) in collection_tasks.iter() {
-            // Scrape from each producer, into oximeter...
-            let rx = task.collect();
-            // ... and keep track of the token that indicates once the metric
-            // has made it into ClickHouse.
-            collection_oneshots.push(rx);
-        }
-        drop(collection_tasks);
-
-        // Only return once all producers finish processing the token we
-        // provided.
-        //
-        // NOTE: This can either mean that the collection completed
-        // successfully, or an error occurred in the collection pathway.
-        //
-        // We use `join_all` to ensure that all futures are run, rather than
-        // bailing on the first error. We extract the first error we received,
-        // or map an actual `RecvError` to `Closed`, since it does really mean
-        // the other side hung up without sending.
-        let results = futures::future::join_all(collection_oneshots).await;
-        for result in results.into_iter() {
-            match result {
-                Ok(Ok(_)) => {}
-                Ok(Err(e)) => return Err(e),
-                Err(_) => return Err(ForcedCollectionError::Closed),
+            // Try to trigger a collection on each task; if any fails, we'll
+            // take that error as our overall return value. (If multiple fail,
+            // we'll return the error of the last one that failed.)
+            if let Err(err) = task.try_force_collect() {
+                res = Err(err);
             }
         }
-        Ok(())
+        res
     }
 
     /// List existing producers.
