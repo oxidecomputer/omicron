@@ -106,25 +106,43 @@ pub async fn database_inserter(
             // oximeter writing to both of them. On our production racks ClickHouse
             // will only be run on single-node modality, so we want to ignore all
             // cases where the `ClickhouseClusterNative` service is not available.
+            //
+            // Even though we set a `claim_timeout` of 100ms on the Qorb pool
+            // policy, we need to ping to verify connectivity before proceeding.
+            // Qorb by design keeps the claim in a queue if it fails to claim
+            // a request. This is because backend may gain slots or come online
+            // later.
+            //
+            // In this case, we do not want to wait because this functionality
+            // clogs up oximeter when there is only a single-node installation
+            // available.
             if let Some(cluster_client) = &cluster_client {
-                debug!(
-                    log,
-                    "inserting {} samples into cluster database",
-                    batch.len();
-                );
-
-                match cluster_client.insert_samples(&batch).await {
-                    Ok(()) => trace!(
-                        log,
-                        "successfully inserted samples into cluster";
-                    ),
-                    Err(e) => {
-                        info!(
+                match cluster_client.ping().await {
+                    Ok(()) => {
+                        debug!(
                             log,
-                            "failed to insert some results into metric cluster DB";
-                            InlineErrorChain::new(&e)
+                            "inserting {} samples into cluster database",
+                            batch.len();
                         );
+                        match cluster_client.insert_samples(&batch).await {
+                            Ok(()) => trace!(
+                                log,
+                                "successfully inserted samples into cluster";
+                            ),
+                            Err(e) => {
+                                warn!(
+                                    log,
+                                    "failed to insert some results into metric cluster DB";
+                                    InlineErrorChain::new(&e)
+                                );
+                            }
+                        }
                     }
+                    Err(e) => info!(
+                        log,
+                        "ClickHouse cluster native connection unavailable";
+                        InlineErrorChain::new(&e)
+                    ),
                 }
             }
 
