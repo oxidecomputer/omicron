@@ -87,6 +87,8 @@ pub struct WebhookDelivery {
     /// or permanently failed.
     pub time_completed: Option<DateTime<Utc>>,
 
+    pub failed_permanently: bool,
+
     pub deliverator_id: Option<DbTypedUuid<OmicronZoneKind>>,
     pub time_delivery_started: Option<DateTime<Utc>>,
 }
@@ -109,6 +111,7 @@ impl WebhookDelivery {
             time_completed: None,
             deliverator_id: None,
             time_delivery_started: None,
+            failed_permanently: false,
         }
     }
 
@@ -134,6 +137,7 @@ impl WebhookDelivery {
             time_completed: None,
             deliverator_id: Some((*deliverator_id).into()),
             time_delivery_started: Some(Utc::now()),
+            failed_permanently: false,
         }
     }
 
@@ -201,16 +205,10 @@ impl WebhookDeliveryAttempt {
 impl From<WebhookDeliveryResult> for WebhookDeliveryState {
     fn from(result: WebhookDeliveryResult) -> Self {
         match result {
-            WebhookDeliveryResult::FailedHttpError => {
-                WebhookDeliveryState::FailedHttpError
-            }
-            WebhookDeliveryResult::FailedTimeout => {
-                WebhookDeliveryState::FailedTimeout
-            }
-            WebhookDeliveryResult::FailedUnreachable => {
-                WebhookDeliveryState::FailedUnreachable
-            }
-            WebhookDeliveryResult::Succeeded => WebhookDeliveryState::Delivered,
+            WebhookDeliveryResult::FailedHttpError => Self::FailedHttpError,
+            WebhookDeliveryResult::FailedTimeout => Self::FailedTimeout,
+            WebhookDeliveryResult::FailedUnreachable => Self::FailedUnreachable,
+            WebhookDeliveryResult::Succeeded => Self::Delivered,
         }
     }
 }
@@ -221,17 +219,13 @@ impl WebhookDeliveryResult {
     pub fn from_api_state(state: WebhookDeliveryState) -> Option<Self> {
         match state {
             WebhookDeliveryState::FailedHttpError => {
-                Some(WebhookDeliveryResult::FailedHttpError)
+                Some(Self::FailedHttpError)
             }
-            WebhookDeliveryState::FailedTimeout => {
-                Some(WebhookDeliveryResult::FailedTimeout)
-            }
+            WebhookDeliveryState::FailedTimeout => Some(Self::FailedTimeout),
             WebhookDeliveryState::FailedUnreachable => {
-                Some(WebhookDeliveryResult::FailedUnreachable)
+                Some(Self::FailedUnreachable)
             }
-            WebhookDeliveryState::Delivered => {
-                Some(WebhookDeliveryResult::Succeeded)
-            }
+            WebhookDeliveryState::Delivered => Some(Self::Succeeded),
             WebhookDeliveryState::Pending => None,
         }
     }

@@ -6,6 +6,7 @@
 
 use super::DataStore;
 use crate::context::OpContext;
+use crate::db::datastore::RunnableQuery;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::SqlU8;
@@ -13,8 +14,10 @@ use crate::db::model::WebhookDelivery;
 use crate::db::model::WebhookDeliveryAttempt;
 use crate::db::model::WebhookDeliveryResult;
 use crate::db::model::WebhookDeliveryTrigger;
+use crate::db::model::WebhookEvent;
 use crate::db::model::WebhookEventClass;
 use crate::db::pagination::paginated_multicolumn;
+use crate::db::schema;
 use crate::db::schema::webhook_delivery::dsl;
 use crate::db::schema::webhook_delivery_attempt::dsl as attempt_dsl;
 use crate::db::schema::webhook_event::dsl as event_dsl;
@@ -77,6 +80,54 @@ impl DataStore {
             .execute_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Returns a list of all permanently-failed deliveries which are eligible
+    /// to resend should a liveness probe with `resend=true` succeed.
+    pub async fn webhook_rx_list_resendable_events(
+        &self,
+        opctx: &OpContext,
+        rx_id: &WebhookReceiverUuid,
+    ) -> ListResultVec<WebhookEvent> {
+        Self::rx_list_resendable_events_query(*rx_id)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    fn rx_list_resendable_events_query(
+        rx_id: WebhookReceiverUuid,
+    ) -> impl RunnableQuery<WebhookEvent> {
+        use diesel::dsl::*;
+        let (delivery, also_delivery) = diesel::alias!(
+            schema::webhook_delivery as delivery,
+            schema::webhook_delivery as also_delivey
+        );
+        event_dsl::webhook_event
+            .filter(event_dsl::event_class.ne(WebhookEventClass::Probe))
+            .inner_join(
+                delivery.on(delivery.field(dsl::event_id).eq(event_dsl::id)),
+            )
+            .filter(delivery.field(dsl::rx_id).eq(rx_id.into_untyped_uuid()))
+            .filter(not(exists(
+                also_delivery
+                    .select(also_delivery.field(dsl::id))
+                    .filter(
+                        also_delivery.field(dsl::event_id).eq(event_dsl::id),
+                    )
+                    .filter(
+                        also_delivery.field(dsl::failed_permanently).eq(&false),
+                    )
+                    .filter(
+                        also_delivery
+                            .field(dsl::trigger)
+                            .ne(WebhookDeliveryTrigger::Probe),
+                    ),
+            )))
+            .select(WebhookEvent::as_select())
+            // the inner join means we may return the same event multiple times,
+            // so only return distinct events.
+            .distinct()
     }
 
     pub async fn webhook_rx_delivery_list_attempts(
@@ -331,7 +382,7 @@ impl DataStore {
         // its retry attempts?
         let succeeded =
             attempt.result == nexus_db_model::WebhookDeliveryResult::Succeeded;
-        let failed_permanently = *attempt.attempt >= MAX_ATTEMPTS;
+        let failed_permanently = !succeeded && *attempt.attempt >= MAX_ATTEMPTS;
         let (completed, new_nexus_id) = if succeeded || failed_permanently {
             // If the delivery has succeeded or failed permanently, set the
             // "time_completed" timestamp to mark it as finished. Also, leave
@@ -342,6 +393,7 @@ impl DataStore {
             // Otherwise, "unlock" the delivery for other nexii.
             (None, None)
         };
+
         let prev_attempts = SqlU8::new((*attempt.attempt) - 1);
         let UpdateAndQueryResult { status, found } =
             diesel::update(dsl::webhook_delivery)
@@ -356,6 +408,7 @@ impl DataStore {
                     // in place and use it to determine the attempt number?
                     dsl::attempts.eq(attempt.attempt),
                     dsl::deliverator_id.eq(new_nexus_id),
+                    dsl::failed_permanently.eq(failed_permanently),
                 ))
                 .check_if_exists::<WebhookDelivery>(delivery.id)
                 .execute_and_check(&conn)
@@ -394,9 +447,11 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::db::explain::ExplainableAsync;
     use crate::db::model::WebhookDeliveryTrigger;
     use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::raw_query_builder::expectorate_query_contents;
     use nexus_types::external_api::params;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
@@ -522,6 +577,46 @@ mod test {
         assert!(!all_deliveries.contains(&dispatch2.id));
         assert!(all_deliveries.contains(&resend1.id));
         assert!(all_deliveries.contains(&resend2.id));
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn expectorate_rx_list_resendable() {
+        let query = DataStore::rx_list_resendable_events_query(
+            WebhookReceiverUuid::nil(),
+        );
+
+        expectorate_query_contents(
+            &query,
+            "tests/output/webhook_rx_list_resendable_events.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn explain_rx_list_resendable_events() {
+        let logctx = dev::test_setup_log("explain_rx_list_resendable_events");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let query = DataStore::rx_list_resendable_events_query(
+            WebhookReceiverUuid::nil(),
+        );
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        eprintln!("{explanation}");
+
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

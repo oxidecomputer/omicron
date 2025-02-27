@@ -2256,7 +2256,8 @@ table! {
         time_created -> Timestamptz,
         time_completed -> Nullable<Timestamptz>,
         deliverator_id -> Nullable<Uuid>,
-        time_delivery_started -> Nullable<Timestamptz>
+        time_delivery_started -> Nullable<Timestamptz>,
+        failed_permanently -> Bool,
     }
 }
 

@@ -5185,7 +5185,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
     -- If this is set, then this webhook message has either been delivered
     -- successfully, or is considered permanently failed.
     time_completed TIMESTAMPTZ,
-
+    -- If true, this webhook delivery has failed permanently and is eligible to
+    -- be resent.
+    failed_permanently BOOLEAN NOT NULL,
     -- Deliverator coordination bits
     deliverator_id UUID,
     time_delivery_started TIMESTAMPTZ,
@@ -5195,6 +5197,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
         (deliverator_id IS NULL) OR (
             (deliverator_id IS NOT NULL) AND (time_delivery_started IS NOT NULL)
         )
+    ),
+    CONSTRAINT failed_permanently_only_if_completed CHECK (
+        (failed_permanently IS false) OR (failed_permanently AND (time_completed IS NOT NULL))
     )
 );
 
@@ -5214,6 +5219,13 @@ CREATE INDEX IF NOT EXISTS lookup_webhook_dispatched_to_rx
 ON omicron.public.webhook_delivery (
     rx_id, event_id
 );
+
+-- Index for looking up all delivery attempts for an event
+CREATE INDEX IF NOT EXISTS lookup_deliveries_for_event
+ON omicron.public.webhook_delivery (
+    event_id
+);
+
 
 -- Index for looking up all currently in-flight webhook messages, and ordering
 -- them by their creation times.
