@@ -124,3 +124,5 @@ async fn siu_destroyed_mark_vmm_deleted(
         .map(|_| ())
         .map_err(ActionError::action_failed)
 }
+
+// TODO

@@ -155,7 +155,8 @@ async fn spc_create_vpc_params(
 mod test {
     use crate::{
         app::sagas::project_create::Params,
-        app::sagas::project_create::SagaProjectCreate, external_api::params,
+        app::sagas::project_create::SagaProjectCreate,
+        app::sagas::test::assert_dag_unchanged, external_api::params,
     };
     use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use diesel::{
@@ -303,5 +304,17 @@ mod test {
             log,
         )
         .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        let opctx = test_opctx(&cptestctx);
+        let authz_silo = opctx.authn.silo_required().unwrap();
+        let params = new_test_params(&opctx, authz_silo);
+
+        assert_dag_unchanged::<SagaProjectCreate>(
+            "project_create.json",
+            params,
+        );
     }
 }

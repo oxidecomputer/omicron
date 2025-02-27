@@ -391,3 +391,44 @@ async fn sfd_set_detached_state(
 
     Ok(())
 }
+
+#[cfg(test)]
+pub(crate) mod test {
+    use super::*;
+
+    use crate::{
+        app::authn, app::sagas::test::assert_dag_unchanged,
+        app::sagas::test_helpers,
+    };
+    use nexus_test_utils_macros::nexus_test;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        let opctx = test_helpers::test_opctx(&cptestctx);
+
+        assert_dag_unchanged::<SagaFinalizeDisk>(
+            "finalize_disk.json",
+            Params {
+                serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+                silo_id: Uuid::new_v4(),
+                project_id: Uuid::new_v4(),
+                disk_id: Uuid::new_v4(),
+                snapshot_name: None,
+            },
+        );
+
+        assert_dag_unchanged::<SagaFinalizeDisk>(
+            "finalize_disk_with_snapshot.json",
+            Params {
+                serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+                silo_id: Uuid::new_v4(),
+                project_id: Uuid::new_v4(),
+                disk_id: Uuid::new_v4(),
+                snapshot_name: Some("snap".parse().unwrap()),
+            },
+        );
+    }
+}

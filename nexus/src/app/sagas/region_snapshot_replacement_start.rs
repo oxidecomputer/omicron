@@ -1221,6 +1221,7 @@ pub(crate) mod test {
         app::db::lookup::LookupPath, app::db::DataStore,
         app::saga::create_saga_dag,
         app::sagas::region_snapshot_replacement_start::*,
+        app::sagas::test::assert_dag_unchanged,
         app::sagas::test_helpers::test_opctx, app::RegionAllocationStrategy,
     };
     use nexus_db_model::PhysicalDiskPolicy;
@@ -2122,5 +2123,27 @@ pub(crate) mod test {
 
         assert_eq!(snapshot_allocated_regions.len(), 1);
         assert!(snapshot_allocated_regions.iter().all(|(_, r)| r.read_only()));
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        let opctx = test_opctx(cptestctx);
+
+        let request = RegionSnapshotReplacement::new_from_read_only_region(
+            Uuid::new_v4(),
+        );
+
+        let params = Params {
+            serialized_authn: Serialized::for_opctx(&opctx),
+            request,
+            allocation_strategy: RegionAllocationStrategy::Random {
+                seed: None,
+            },
+        };
+
+        assert_dag_unchanged::<SagaRegionSnapshotReplacementStart>(
+            "region_snapshot_replacement_start.json",
+            params,
+        );
     }
 }

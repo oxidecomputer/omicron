@@ -306,3 +306,49 @@ async fn siu_fetch_state_and_start_real_saga(
 
     Ok(())
 }
+
+#[cfg(test)]
+pub(crate) mod test {
+    use super::*;
+
+    use crate::{
+        app::authn::saga::Serialized, app::sagas::test::assert_dag_unchanged,
+        app::sagas::test_helpers::test_opctx,
+    };
+    use nexus_test_utils_macros::nexus_test;
+    use omicron_common::api::external::LookupType;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        let opctx = test_opctx(&cptestctx);
+
+        let silo = authz::Silo::new(
+            authz::FLEET,
+            Uuid::new_v4(),
+            LookupType::ByName("silo".to_string()),
+        );
+
+        let project = authz::Project::new(
+            silo.clone(),
+            Uuid::new_v4(),
+            LookupType::ByName("project".to_string()),
+        );
+
+        let params = Params {
+            serialized_authn: Serialized::for_opctx(&opctx),
+            authz_instance: authz::Instance::new(
+                project,
+                Uuid::new_v4(),
+                LookupType::ByName("instance".to_string()),
+            ),
+        };
+
+        assert_dag_unchanged::<SagaInstanceUpdate>(
+            "instance_update.json",
+            params,
+        );
+    }
+}

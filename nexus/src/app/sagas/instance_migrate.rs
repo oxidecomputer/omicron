@@ -570,6 +570,7 @@ async fn sim_instance_migrate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::sagas::test::assert_dag_unchanged;
     use crate::app::sagas::test_helpers;
     use crate::external_api::params;
     use dropshot::test_util::ClientTestContext;
@@ -810,5 +811,52 @@ mod tests {
             _,
         >(nexus, make_params, after_saga, log)
         .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        let opctx = test_helpers::test_opctx(&cptestctx);
+
+        assert_dag_unchanged::<SagaInstanceMigrate>(
+            "instance_migrate.json",
+            Params {
+                serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+                instance: db::model::Instance::new(
+                    InstanceUuid::new_v4(),
+                    Uuid::new_v4(), // project_id
+                    &params::InstanceCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: INSTANCE_NAME.parse().unwrap(),
+                            description: format!(
+                                "instance {:?}",
+                                INSTANCE_NAME
+                            ),
+                        },
+                        ncpus: InstanceCpuCount(2),
+                        memory: ByteCount::from_gibibytes_u32(2),
+                        hostname: INSTANCE_NAME.parse().unwrap(),
+                        user_data: b"#cloud-config".to_vec(),
+                        ssh_public_keys: Some(Vec::new()),
+                        network_interfaces:
+                            params::InstanceNetworkInterfaceAttachment::None,
+                        external_ips: vec![],
+                        disks: vec![],
+                        boot_disk: None,
+                        start: true,
+                        auto_restart_policy: Default::default(),
+                    },
+                ),
+                src_vmm: db::model::Vmm::new(
+                    PropolisUuid::new_v4(),
+                    InstanceUuid::new_v4(),
+                    SledUuid::new_v4(),
+                    "fd00:1122:3344::101".parse().unwrap(),
+                    15000,
+                ),
+                migrate_params: InstanceMigrateRequest {
+                    dst_sled_id: Uuid::new_v4(),
+                },
+            },
+        );
     }
 }

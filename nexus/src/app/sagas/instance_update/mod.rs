@@ -1473,6 +1473,7 @@ mod test {
     use crate::app::db::model::Instance;
     use crate::app::db::model::VmmRuntimeState;
     use crate::app::saga::create_saga_dag;
+    use crate::app::sagas::test::assert_dag_unchanged;
     use crate::app::sagas::test_helpers;
     use crate::app::OpContext;
     use crate::external_api::params;
@@ -2871,5 +2872,28 @@ mod test {
         );
 
         RealParams { authz_instance, serialized_authn, update, orig_lock }
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        let opctx = test_helpers::test_opctx(&cptestctx);
+        let _project_id = setup_test_project(&cptestctx.external_client).await;
+
+        let (_state, params) = setup_active_vmm_destroyed_test(cptestctx).await;
+        let mut params = make_real_params(cptestctx, &opctx, params).await;
+
+        assert!(params.update.network_config.is_some());
+        assert!(params.update.deprovision.is_some());
+        assert!(params.update.destroy_active_vmm.is_some());
+        assert!(params.update.destroy_target_vmm.is_none());
+
+        params.update.destroy_target_vmm = Some(PropolisUuid::new_v4());
+
+        assert_dag_unchanged::<SagaDoActualInstanceUpdate>(
+            "do_actual_instance_update.json",
+            params,
+        );
+
+        // TODO other variants
     }
 }

@@ -793,6 +793,7 @@ async fn sis_ensure_running(
 
 #[cfg(test)]
 mod test {
+    use crate::app::sagas::test::assert_dag_unchanged;
     use crate::app::{saga::create_saga_dag, sagas::test_helpers};
     use crate::external_api::params;
     use dropshot::test_util::ClientTestContext;
@@ -1060,5 +1061,43 @@ mod test {
             .await
         );
         assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx).await);
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        let opctx = test_helpers::test_opctx(&cptestctx);
+
+        assert_dag_unchanged::<SagaInstanceStart>(
+            "instance_start.json",
+            Params {
+                serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+                db_instance: db::model::Instance::new(
+                    InstanceUuid::new_v4(),
+                    Uuid::new_v4(), // project_id
+                    &params::InstanceCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: INSTANCE_NAME.parse().unwrap(),
+                            description: format!(
+                                "instance {:?}",
+                                INSTANCE_NAME
+                            ),
+                        },
+                        ncpus: InstanceCpuCount(2),
+                        memory: ByteCount::from_gibibytes_u32(2),
+                        hostname: INSTANCE_NAME.parse().unwrap(),
+                        user_data: b"#cloud-config".to_vec(),
+                        ssh_public_keys: Some(Vec::new()),
+                        network_interfaces:
+                            params::InstanceNetworkInterfaceAttachment::None,
+                        external_ips: vec![],
+                        disks: vec![],
+                        boot_disk: None,
+                        start: true,
+                        auto_restart_policy: Default::default(),
+                    },
+                ),
+                reason: Reason::User,
+            },
+        );
     }
 }

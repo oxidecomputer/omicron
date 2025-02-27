@@ -43,6 +43,7 @@ pub(crate) struct Params {
     pub create_params: params::InstanceCreate,
     pub boundary_switches: HashSet<SwitchLocation>,
 }
+
 // Several nodes in this saga are wrapped in their own subsaga so that they can
 // have a parameter that denotes which node they are (e.g., which NIC or which
 // external IP).  They also need the outer saga's parameters.
@@ -1145,9 +1146,11 @@ async fn sic_move_to_stopped(
 #[cfg(test)]
 pub mod test {
     use crate::{
-        app::saga::create_saga_dag, app::sagas::instance_create::Params,
+        app::authn, app::saga::create_saga_dag,
+        app::sagas::instance_create::Params,
         app::sagas::instance_create::SagaInstanceCreate,
-        app::sagas::test_helpers, external_api::params,
+        app::sagas::test::assert_dag_unchanged, app::sagas::test_helpers,
+        external_api::params,
     };
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{
@@ -1422,5 +1425,68 @@ pub mod test {
         )
         .await;
         verify_clean_slate(&cptestctx).await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        let opctx = test_helpers::test_opctx(&cptestctx);
+
+        assert_dag_unchanged::<SagaInstanceCreate>(
+            "instance_create.json",
+            Params {
+                serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+                project_id: Uuid::new_v4(),
+                create_params: params::InstanceCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "inst".parse().unwrap(),
+                        description: "desc".to_string(),
+                    },
+                    ncpus: InstanceCpuCount::try_from(2).unwrap(),
+                    memory: ByteCount::from_gibibytes_u32(4),
+                    hostname: "inst".parse().unwrap(),
+                    user_data: vec![],
+                    ssh_public_keys: None,
+                    network_interfaces:
+                        params::InstanceNetworkInterfaceAttachment::Default,
+                    external_ips: vec![params::ExternalIpCreate::Ephemeral {
+                        pool: None,
+                    }],
+                    boot_disk: Some(params::InstanceDiskAttachment::Attach(
+                        params::InstanceDiskAttach {
+                            name: DISK_NAME.parse().unwrap(),
+                        },
+                    )),
+                    disks: vec![
+                        params::InstanceDiskAttachment::Create(
+                            params::DiskCreate {
+                                identity: IdentityMetadataCreateParams {
+                                    name: "disk1".parse().unwrap(),
+                                    description: "desc".to_string(),
+                                },
+                                disk_source: params::DiskSource::Blank {
+                                    block_size: 512_u32.try_into().unwrap(),
+                                },
+                                size: ByteCount::from_gibibytes_u32(2),
+                            },
+                        ),
+                        params::InstanceDiskAttachment::Create(
+                            params::DiskCreate {
+                                identity: IdentityMetadataCreateParams {
+                                    name: "disk2".parse().unwrap(),
+                                    description: "desc".to_string(),
+                                },
+                                disk_source: params::DiskSource::Blank {
+                                    block_size: 512_u32.try_into().unwrap(),
+                                },
+                                size: ByteCount::from_gibibytes_u32(2),
+                            },
+                        ),
+                    ],
+                    start: false,
+                    auto_restart_policy: Default::default(),
+                },
+                boundary_switches: HashSet::from([SwitchLocation::Switch0]),
+            },
+        );
     }
 }

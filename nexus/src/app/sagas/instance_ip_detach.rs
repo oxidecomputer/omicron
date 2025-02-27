@@ -285,6 +285,7 @@ pub(crate) mod test {
             saga::create_saga_dag,
             sagas::{
                 instance_ip_attach::{self, test::ip_manip_test_setup},
+                test::assert_dag_unchanged,
                 test_helpers,
             },
         },
@@ -574,5 +575,25 @@ pub(crate) mod test {
             let dag = create_saga_dag::<SagaInstanceIpDetach>(params).unwrap();
             test_helpers::actions_succeed_idempotently(nexus, dag).await;
         }
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        let client = &cptestctx.external_client;
+        let apictx = &cptestctx.server.server_context();
+        let nexus = &apictx.nexus;
+        let opctx = test_helpers::test_opctx(cptestctx);
+        let datastore = &nexus.db_datastore;
+
+        let _ = ip_manip_test_setup(&client).await;
+        let _instance =
+            create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
+
+        let params = new_test_params(&opctx, datastore, false).await;
+
+        assert_dag_unchanged::<SagaInstanceIpDetach>(
+            "instance_ip_detach.json",
+            params,
+        );
     }
 }

@@ -123,6 +123,7 @@ pub(crate) mod test {
     use crate::app::saga::create_saga_dag;
     use crate::app::sagas::test_helpers;
     use crate::{
+        app::sagas::test::assert_dag_unchanged,
         app::sagas::vpc_subnet_delete::Params,
         app::sagas::vpc_subnet_delete::SagaVpcSubnetDelete,
         external_api::params,
@@ -204,5 +205,18 @@ pub(crate) mod test {
         let params = new_test_params(cptestctx, project_id).await;
         let dag = create_saga_dag::<SagaVpcSubnetDelete>(params).unwrap();
         test_helpers::actions_succeed_idempotently(nexus, dag).await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        let client = &cptestctx.external_client;
+        let project_id = create_org_and_project(&client).await;
+
+        let params = new_test_params(cptestctx, project_id).await;
+
+        assert_dag_unchanged::<SagaVpcSubnetDelete>(
+            "vpc_subnet_delete.json",
+            params,
+        );
     }
 }

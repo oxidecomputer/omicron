@@ -648,8 +648,8 @@ async fn svc_notify_sleds(
 #[cfg(test)]
 pub(crate) mod test {
     use crate::{
-        app::sagas::vpc_create::Params, app::sagas::vpc_create::SagaVpcCreate,
-        external_api::params,
+        app::sagas::test::assert_dag_unchanged, app::sagas::vpc_create::Params,
+        app::sagas::vpc_create::SagaVpcCreate, external_api::params,
     };
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{
@@ -1052,5 +1052,24 @@ pub(crate) mod test {
             log,
         )
         .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        let client = &cptestctx.external_client;
+        let opctx = test_opctx(&cptestctx);
+
+        let project_id = create_org_and_project(&client).await;
+
+        let authz_project = get_authz_project(
+            &cptestctx,
+            project_id,
+            authz::Action::CreateChild,
+        )
+        .await;
+
+        let params = new_test_params(&opctx, authz_project);
+
+        assert_dag_unchanged::<SagaVpcCreate>("vpc_create.json", params);
     }
 }

@@ -163,7 +163,8 @@ mod test {
         app::saga::create_saga_dag,
         app::sagas::instance_create::test::verify_clean_slate,
         app::sagas::instance_delete::Params,
-        app::sagas::instance_delete::SagaInstanceDelete, external_api::params,
+        app::sagas::instance_delete::SagaInstanceDelete,
+        app::sagas::test::assert_dag_unchanged, external_api::params,
     };
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::{
@@ -331,5 +332,25 @@ mod test {
         .await;
 
         verify_clean_slate(&cptestctx).await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        DiskTest::new(cptestctx).await;
+        let client = &cptestctx.external_client;
+        create_org_project_and_disk(&client).await;
+
+        let params = new_test_params(
+            &cptestctx,
+            create_instance(&cptestctx, new_instance_create_params())
+                .await
+                .id(),
+        )
+        .await;
+
+        assert_dag_unchanged::<SagaInstanceDelete>(
+            "instance_delete.json",
+            params,
+        );
     }
 }

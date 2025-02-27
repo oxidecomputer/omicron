@@ -1762,3 +1762,43 @@ async fn srrd_finish_saga(
 
     Ok(())
 }
+
+#[cfg(test)]
+pub(crate) mod test {
+    use super::*;
+
+    use crate::{
+        app::authn::saga::Serialized, app::sagas::test::assert_dag_unchanged,
+        app::sagas::test_helpers::test_opctx,
+    };
+    use nexus_db_model::RegionReplacement;
+    use nexus_db_model::RegionReplacementState;
+    use nexus_test_utils_macros::nexus_test;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        let opctx = test_opctx(&cptestctx);
+
+        let request = RegionReplacement {
+            id: Uuid::new_v4(),
+            request_time: Utc::now(),
+            old_region_id: Uuid::new_v4(),
+            volume_id: VolumeUuid::new_v4().into(),
+            old_region_volume_id: None,
+            new_region_id: None,
+            replacement_state: RegionReplacementState::Requested,
+            operating_saga_id: None,
+        };
+
+        let params =
+            Params { serialized_authn: Serialized::for_opctx(&opctx), request };
+
+        assert_dag_unchanged::<SagaRegionReplacementDrive>(
+            "region_replacement_drive.json",
+            params,
+        );
+    }
+}

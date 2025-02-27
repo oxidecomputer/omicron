@@ -768,6 +768,7 @@ pub(crate) mod test {
         app::sagas::region_replacement_start::find_only_new_region,
         app::sagas::region_replacement_start::Params,
         app::sagas::region_replacement_start::SagaRegionReplacementStart,
+        app::sagas::test::assert_dag_unchanged,
         app::sagas::test_helpers::test_opctx, app::RegionAllocationStrategy,
     };
     use chrono::Utc;
@@ -1248,5 +1249,34 @@ pub(crate) mod test {
             nexus, dag,
         )
         .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        let opctx = test_opctx(&cptestctx);
+
+        let request = RegionReplacement {
+            id: Uuid::new_v4(),
+            request_time: Utc::now(),
+            old_region_id: Uuid::new_v4(),
+            volume_id: VolumeUuid::new_v4().into(),
+            old_region_volume_id: None,
+            new_region_id: None,
+            replacement_state: RegionReplacementState::Requested,
+            operating_saga_id: None,
+        };
+
+        let params = Params {
+            serialized_authn: Serialized::for_opctx(&opctx),
+            request: request.clone(),
+            allocation_strategy: RegionAllocationStrategy::Random {
+                seed: None,
+            },
+        };
+
+        assert_dag_unchanged::<SagaRegionReplacementStart>(
+            "region_replacement_start.json",
+            params,
+        );
     }
 }

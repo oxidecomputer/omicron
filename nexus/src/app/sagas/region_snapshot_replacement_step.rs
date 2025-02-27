@@ -625,3 +625,38 @@ async fn rsrss_update_request_record(
 
     Ok(())
 }
+
+#[cfg(test)]
+pub(crate) mod test {
+    use super::*;
+
+    use crate::{
+        app::sagas::test::assert_dag_unchanged,
+        app::sagas::test_helpers::test_opctx,
+    };
+    use nexus_db_model::RegionSnapshotReplacementStep;
+    use nexus_db_queries::authn::saga::Serialized;
+    use nexus_test_utils_macros::nexus_test;
+    use omicron_uuid_kinds::VolumeUuid;
+    use uuid::Uuid;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        let opctx = test_opctx(&cptestctx);
+        let request = RegionSnapshotReplacementStep::new(
+            Uuid::new_v4(),
+            VolumeUuid::new_v4(),
+        );
+
+        let params =
+            Params { serialized_authn: Serialized::for_opctx(&opctx), request };
+
+        assert_dag_unchanged::<SagaRegionSnapshotReplacementStep>(
+            "region_snapshot_replacement_step.json",
+            params,
+        );
+    }
+}

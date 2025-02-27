@@ -185,10 +185,68 @@ fn make_action_registry() -> ActionRegistry {
         region_snapshot_replacement_finish::SagaRegionSnapshotReplacementFinish
     ];
 
+    // If you add a new saga, make sure to add a `assert_dag_unchanged` test!
+    // See block comment in the `mod test` below.
+
     #[cfg(test)]
     <test_saga::SagaTest as NexusSaga>::register_actions(&mut registry);
 
     registry
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    /// As of the time of this writing, we don't have a good way to address the
+    /// problem seen in omicron#7623:
+    ///
+    /// - a saga was created with Nexus version N
+    /// - it gets stuck in some retry loop (see the comment for
+    ///   '[ProgenitorOperationRetry]')
+    /// - a Nexus upgrade is performed, and Nexus version N+1 changes either the
+    ///   structure of the saga, or the code for one (or more) of the saga nodes.
+    ///
+    /// In particular, Steno does not support running a saga across changes like
+    /// this, and will panic in certain cases (as it should!). The panic seen in
+    /// 7623 was due to the lookup in a descendant node for a particular
+    /// ancestor's output not finding that serialized output. Note if the
+    /// expected serialized type of that ancestor had changed, Steno would have
+    /// thrown a Deserialize error and unwound the saga instead of panicking.
+    ///
+    /// There's no easy solution to this problem:
+    ///
+    /// - if we tell Nexus to stop starting new sagas, there is no guarantee
+    ///   that we can wait for all currently running sagas to either complete or
+    ///   unwind - they may be stuck in this retry loop.
+    ///
+    /// - requiring that every change to a saga result in a different saga
+    ///   version (eg disk_create_v1, disk_create_v2) would allow Nexus to run
+    ///   sagas created in previous versions, but allowing a world where sagas
+    ///   created with any previous version of Nexus to potentially be running
+    ///   restricts the type of refactors that can occur: imagining that there
+    ///   is a schema change related to how disks are stored or provisioned, one
+    ///   would have to prove that all sagas that expect the previous schema are
+    ///   no longer running before applying that schema update.
+    ///
+    /// - timing out sagas necessarily leads to the question of what to set the
+    ///   timeout to
+    ///
+    /// Better tooling can address some of these concerns, but in lieu of a
+    /// solution, using an expectorate test to assert that the DAG of a saga
+    /// does not change can be a warning that these concerns need to be
+    /// addressed during review.
+    pub(crate) fn assert_dag_unchanged<T: NexusSaga>(
+        contents_file: &str,
+        params: T::Params,
+    ) {
+        let builder = steno::DagBuilder::new(steno::SagaName::new(T::NAME));
+        let dag = T::make_saga_dag(&params, builder).unwrap();
+        expectorate::assert_contents(
+            format!("tests/dag_output/{contents_file}"),
+            &serde_json::to_string(&dag).unwrap(),
+        );
+    }
 }
 
 pub(super) async fn saga_generate_uuid<UserType: SagaType>(

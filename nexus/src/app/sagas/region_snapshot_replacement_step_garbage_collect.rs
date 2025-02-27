@@ -123,7 +123,10 @@ async fn srsgs_update_request_record(
 
 #[cfg(test)]
 pub(crate) mod test {
-    use crate::app::sagas::region_snapshot_replacement_step_garbage_collect::*;
+    use crate::app::sagas::{
+        region_snapshot_replacement_step_garbage_collect::*,
+        test::assert_dag_unchanged, test_helpers::test_opctx,
+    };
     use nexus_db_model::RegionSnapshotReplacementStep;
     use nexus_db_model::RegionSnapshotReplacementStepState;
     use nexus_db_queries::authn::saga::Serialized;
@@ -248,5 +251,25 @@ pub(crate) mod test {
             .await
             .unwrap()
             .is_none());
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        let opctx = test_opctx(&cptestctx);
+        let request = RegionSnapshotReplacementStep::new(
+            Uuid::new_v4(),
+            VolumeUuid::new_v4(),
+        );
+
+        let params = Params {
+            serialized_authn: Serialized::for_opctx(&opctx),
+            old_snapshot_volume_id: VolumeUuid::new_v4(),
+            request,
+        };
+
+        assert_dag_unchanged::<SagaRegionSnapshotReplacementStepGarbageCollect>(
+            "region_snapshot_replacement_step_garbage_collect.json",
+            params,
+        );
     }
 }

@@ -209,6 +209,7 @@ pub(crate) mod test {
     use crate::{
         app::sagas::region_replacement_finish::Params,
         app::sagas::region_replacement_finish::SagaRegionReplacementFinish,
+        app::sagas::test::assert_dag_unchanged, app::sagas::test_helpers,
     };
     use async_bb8_diesel::AsyncRunQueryDsl;
     use chrono::Utc;
@@ -354,5 +355,32 @@ pub(crate) mod test {
             .await
             .unwrap()
             .is_none());
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        let opctx = test_helpers::test_opctx(&cptestctx);
+
+        let request = RegionReplacement {
+            id: Uuid::new_v4(),
+            request_time: Utc::now(),
+            old_region_id: Uuid::new_v4(),
+            volume_id: VolumeUuid::new_v4().into(),
+            old_region_volume_id: None,
+            new_region_id: None,
+            replacement_state: RegionReplacementState::Requested,
+            operating_saga_id: None,
+        };
+
+        let params = Params {
+            serialized_authn: Serialized::for_opctx(&opctx),
+            region_volume_id: VolumeUuid::new_v4(),
+            request,
+        };
+
+        assert_dag_unchanged::<SagaRegionReplacementFinish>(
+            "region_replacement_finish.json",
+            params,
+        );
     }
 }

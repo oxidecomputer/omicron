@@ -819,8 +819,10 @@ fn randomize_volume_construction_request_ids(
 #[cfg(test)]
 pub(crate) mod test {
     use crate::{
-        app::saga::create_saga_dag, app::sagas::disk_create::Params,
-        app::sagas::disk_create::SagaDiskCreate, external_api::params,
+        app::authn, app::saga::create_saga_dag,
+        app::sagas::disk_create::Params,
+        app::sagas::disk_create::SagaDiskCreate,
+        app::sagas::test::assert_dag_unchanged, external_api::params,
     };
     use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use diesel::{
@@ -1159,5 +1161,46 @@ pub(crate) mod test {
 
         destroy_disk(&cptestctx).await;
         verify_clean_slate(&cptestctx, &test).await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        let opctx = test_opctx(&cptestctx);
+
+        assert_dag_unchanged::<SagaDiskCreate>(
+            "disk_create.json",
+            Params {
+                serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+                project_id: Uuid::new_v4(),
+                create_params: params::DiskCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "test".parse().unwrap(),
+                        description: "test".into(),
+                    },
+                    disk_source: params::DiskSource::Image {
+                        image_id: Uuid::new_v4(),
+                    },
+                    size: ByteCount::from_gibibytes_u32(2),
+                },
+            },
+        );
+
+        assert_dag_unchanged::<SagaDiskCreate>(
+            "disk_create_importing_blocks.json",
+            Params {
+                serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+                project_id: Uuid::new_v4(),
+                create_params: params::DiskCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "test".parse().unwrap(),
+                        description: "test".into(),
+                    },
+                    disk_source: params::DiskSource::ImportingBlocks {
+                        block_size: 512_u32.try_into().unwrap(),
+                    },
+                    size: ByteCount::from_gibibytes_u32(2),
+                },
+            },
+        );
     }
 }

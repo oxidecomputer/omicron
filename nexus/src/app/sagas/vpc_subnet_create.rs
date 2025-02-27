@@ -343,6 +343,7 @@ pub(crate) mod test {
     use crate::app::saga::create_saga_dag;
     use crate::app::sagas::test_helpers;
     use crate::{
+        app::sagas::test::assert_dag_unchanged,
         app::sagas::vpc_subnet_create::Params,
         app::sagas::vpc_subnet_create::SagaVpcSubnetCreate,
         external_api::params,
@@ -606,5 +607,23 @@ pub(crate) mod test {
             new_test_params(&opctx, authz_vpc, db_vpc, authz_system_router);
         let dag = create_saga_dag::<SagaVpcSubnetCreate>(params).unwrap();
         test_helpers::actions_succeed_idempotently(nexus, dag).await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        let client = &cptestctx.external_client;
+        let project_id = create_org_and_project(&client).await;
+        let opctx = test_opctx(&cptestctx);
+
+        let (authz_vpc, db_vpc, authz_system_router) =
+            get_vpc_state(&cptestctx, project_id).await;
+
+        let params =
+            new_test_params(&opctx, authz_vpc, db_vpc, authz_system_router);
+
+        assert_dag_unchanged::<SagaVpcSubnetCreate>(
+            "vpc_subnet_create.json",
+            params,
+        );
     }
 }

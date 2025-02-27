@@ -537,3 +537,30 @@ async fn svd_hard_delete_volume_record(
 
     Ok(true)
 }
+
+#[cfg(test)]
+pub(crate) mod test {
+    use super::*;
+
+    use crate::{
+        app::authn, app::sagas::test::assert_dag_unchanged,
+        app::sagas::test_helpers,
+    };
+    use nexus_test_utils_macros::nexus_test;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        let opctx = test_helpers::test_opctx(&cptestctx);
+
+        assert_dag_unchanged::<SagaVolumeDelete>(
+            "volume_delete.json",
+            Params {
+                serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+                volume_id: VolumeUuid::new_v4(),
+            },
+        );
+    }
+}

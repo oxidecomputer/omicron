@@ -324,7 +324,10 @@ impl NexusSaga for SagaInstanceIpAttach {
 #[cfg(test)]
 pub(crate) mod test {
     use super::*;
-    use crate::app::{db, saga::create_saga_dag, sagas::test_helpers};
+    use crate::app::{
+        db, saga::create_saga_dag, sagas::test::assert_dag_unchanged,
+        sagas::test_helpers,
+    };
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
@@ -599,5 +602,24 @@ pub(crate) mod test {
             let dag = create_saga_dag::<SagaInstanceIpAttach>(params).unwrap();
             test_helpers::actions_succeed_idempotently(nexus, dag).await;
         }
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        let client = &cptestctx.external_client;
+        let apictx = &cptestctx.server.server_context();
+        let nexus = &apictx.nexus;
+        let opctx = test_helpers::test_opctx(cptestctx);
+        let datastore = &nexus.db_datastore;
+
+        let _project_id = ip_manip_test_setup(&client).await;
+        let _instance =
+            create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
+        let params = new_test_params(&opctx, datastore, false).await;
+
+        assert_dag_unchanged::<SagaInstanceIpAttach>(
+            "instance_ip_attach.json",
+            params,
+        );
     }
 }

@@ -182,8 +182,10 @@ async fn sdd_account_space_undo(
 #[cfg(test)]
 pub(crate) mod test {
     use crate::{
-        app::saga::create_saga_dag, app::sagas::disk_delete::Params,
+        app::authn, app::saga::create_saga_dag,
+        app::sagas::disk_delete::Params,
         app::sagas::disk_delete::SagaDiskDelete,
+        app::sagas::test::assert_dag_unchanged,
     };
     use nexus_db_model::Disk;
     use nexus_db_queries::authn::saga::Serialized;
@@ -193,6 +195,8 @@ pub(crate) mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::params;
     use omicron_common::api::external::Name;
+    use omicron_uuid_kinds::VolumeUuid;
+    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -277,5 +281,20 @@ pub(crate) mod test {
             &cptestctx, &test,
         )
         .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        let opctx = test_opctx(&cptestctx);
+
+        assert_dag_unchanged::<SagaDiskDelete>(
+            "disk_delete.json",
+            Params {
+                serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+                project_id: Uuid::new_v4(),
+                disk_id: Uuid::new_v4(),
+                volume_id: VolumeUuid::new_v4(),
+            },
+        );
     }
 }

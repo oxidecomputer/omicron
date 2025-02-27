@@ -161,3 +161,77 @@ async fn ssd_account_space(
 async fn ssd_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
     Ok(())
 }
+
+#[cfg(test)]
+pub(crate) mod test {
+    use super::*;
+
+    use crate::{
+        app::authn::saga::Serialized, app::sagas::test::assert_dag_unchanged,
+        app::sagas::test_helpers,
+    };
+    use chrono::Utc;
+    use nexus_test_utils_macros::nexus_test;
+    use omicron_common::api::external;
+    use omicron_common::api::external::LookupType;
+    use omicron_uuid_kinds::VolumeUuid;
+    use uuid::Uuid;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        let opctx = test_helpers::test_opctx(&cptestctx);
+
+        let silo = authz::Silo::new(
+            authz::FLEET,
+            Uuid::new_v4(),
+            LookupType::ByName("silo".to_string()),
+        );
+
+        let project = authz::Project::new(
+            silo.clone(),
+            Uuid::new_v4(),
+            LookupType::ByName("project".to_string()),
+        );
+
+        let params = Params {
+            serialized_authn: Serialized::for_opctx(&opctx),
+            authz_snapshot: authz::Snapshot::new(
+                project,
+                Uuid::new_v4(),
+                LookupType::ByName("snapshot".to_string()),
+            ),
+            snapshot: db::model::Snapshot {
+                identity: db::model::SnapshotIdentity {
+                    id: Uuid::new_v4(),
+                    name: external::Name::try_from("snapshot".to_string())
+                        .unwrap()
+                        .into(),
+                    description: "snapshot".into(),
+
+                    time_created: Utc::now(),
+                    time_modified: Utc::now(),
+                    time_deleted: None,
+                },
+
+                project_id: Uuid::new_v4(),
+                disk_id: Uuid::new_v4(),
+                volume_id: VolumeUuid::new_v4().into(),
+                destination_volume_id: VolumeUuid::new_v4().into(),
+
+                gen: db::model::Generation::new(),
+                state: db::model::SnapshotState::Creating,
+                block_size: db::model::BlockSize::AdvancedFormat,
+
+                size: external::ByteCount::from_gibibytes_u32(2).into(),
+            },
+        };
+
+        assert_dag_unchanged::<SagaSnapshotDelete>(
+            "snapshot_delete.json",
+            params,
+        );
+    }
+}

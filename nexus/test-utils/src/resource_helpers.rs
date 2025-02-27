@@ -495,6 +495,31 @@ pub async fn create_snapshot(
     .await
 }
 
+pub async fn create_project_image(
+    client: &ClientTestContext,
+    project_name: &str,
+    image_name: &str,
+) -> views::Image {
+    let params = params::ImageCreate {
+        identity: IdentityMetadataCreateParams {
+            name: image_name.parse().unwrap(),
+            description: String::from(
+                "you can boot any image, as long as it's alpine",
+            ),
+        },
+        source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
+        os: "alpine".to_string(),
+        version: "edge".to_string(),
+    };
+
+    object_create(
+        client,
+        &format!("/v1/images?project={project_name}"),
+        &params,
+    )
+    .await
+}
+
 pub async fn delete_disk(
     client: &ClientTestContext,
     project_name: &str,

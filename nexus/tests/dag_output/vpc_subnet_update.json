@@ -1,0 +1,1 @@
+{"saga_name":"vpc-subnet-update","graph":{"nodes":[{"Action":{"name":"output","label":"VpcSubnetUpdate","action_name":"vpc_subnet_update.vpc_subnet_update"}},{"Action":{"name":"no_result","label":"VpcNotifyRpw","action_name":"vpc_subnet_update.vpc_notify_rpw"}}],"node_holes":[],"edge_property":"directed","edges":[[0,1,null]]},"first_nodes":[0],"last_nodes":[1]}

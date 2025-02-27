@@ -122,3 +122,44 @@ async fn sid_delete_image_record(
 
     Ok(())
 }
+
+#[cfg(test)]
+pub(crate) mod test {
+    use super::*;
+
+    use crate::{
+        app::authn, app::sagas::test::assert_dag_unchanged,
+        app::sagas::test_helpers,
+    };
+    use nexus_db_queries::db::lookup::LookupPath;
+    use nexus_test_utils::resource_helpers::create_project;
+    use nexus_test_utils::resource_helpers::create_project_image;
+    use nexus_test_utils_macros::nexus_test;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        let client = &cptestctx.external_client;
+        let datastore = cptestctx.server.server_context().nexus.datastore();
+        let opctx = test_helpers::test_opctx(&cptestctx);
+
+        create_project(&client, "project").await;
+        let image = create_project_image(&client, "project", "image").await;
+
+        let (.., authz_image, image) = LookupPath::new(&opctx, &datastore)
+            .project_image_id(image.identity.id)
+            .fetch()
+            .await
+            .unwrap();
+
+        assert_dag_unchanged::<SagaImageDelete>(
+            "image_delete.json",
+            Params {
+                serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+                image_param: ImageParam::Project { authz_image, image },
+            },
+        );
+    }
+}

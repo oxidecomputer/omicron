@@ -1764,6 +1764,7 @@ mod test {
     use super::*;
 
     use crate::app::saga::create_saga_dag;
+    use crate::app::sagas::test::assert_dag_unchanged;
     use crate::app::sagas::test_helpers;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{
@@ -2597,5 +2598,40 @@ mod test {
 
         // Expect 200
         assert!(output.is_ok());
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn assert_saga_dags_unchanged(cptestctx: &ControlPlaneTestContext) {
+        let opctx = test_opctx(&cptestctx);
+
+        let params = new_test_params(
+            &opctx,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Name::from_str(DISK_NAME).unwrap().into(),
+            Some(Uuid::new_v4()),
+            false, // use the pantry
+        );
+
+        assert_dag_unchanged::<SagaSnapshotCreate>(
+            "snapshot_create_with_pantry.json",
+            params,
+        );
+
+        let params = new_test_params(
+            &opctx,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Name::from_str(DISK_NAME).unwrap().into(),
+            Some(Uuid::new_v4()),
+            true, // do not use the pantry
+        );
+
+        assert_dag_unchanged::<SagaSnapshotCreate>(
+            "snapshot_create.json",
+            params,
+        );
     }
 }
