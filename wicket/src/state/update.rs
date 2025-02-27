@@ -17,12 +17,12 @@ use crate::{
 };
 
 use super::{ComponentId, ParsableComponentId, ALL_COMPONENT_IDS};
-use omicron_common::api::internal::nexus::KnownArtifactKind;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::fmt::Display;
+use tufaceous_artifact::KnownArtifactKind;
 
 // Represents a version and the signature (optional) associated
 // with a particular artifact. This allows for multiple versions

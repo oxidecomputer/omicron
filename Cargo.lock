@@ -2154,18 +2154,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8566979429cf69b49a5c740c60791108e86440e8be149bbea4fe54d2c32d6e2"
 
 [[package]]
-name = "datatest-stable"
-version = "0.2.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a560b3fd20463b56397bd457aa71243ccfdcffe696050b66e3b1e0ec0457e7f1"
-dependencies = [
- "camino",
- "fancy-regex",
- "libtest-mimic",
- "walkdir",
-]
-
-[[package]]
 name = "db-dev"
 version = "0.1.0"
 dependencies = [
@@ -3046,12 +3034,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a5d9305ccc6942a704f4335694ecd3de2ea531b114ac2d51f5f843750787a92f"
 
 [[package]]
-name = "escape8259"
-version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5692dd7b5a1978a5aeb0ce83b7655c58ca8efdcb79d21036ea249da95afec2c6"
-
-[[package]]
 name = "event-listener"
 version = "2.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3106,17 +3088,6 @@ name = "fallible-streaming-iterator"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
-
-[[package]]
-name = "fancy-regex"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "531e46835a22af56d1e3b66f04844bed63158bc094a628bec1d321d9b4c44bf2"
-dependencies = [
- "bit-set",
- "regex-automata",
- "regex-syntax 0.8.5",
-]
 
 [[package]]
 name = "fastrand"
@@ -4740,6 +4711,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
+ "tufaceous-artifact",
  "tufaceous-lib",
  "update-engine",
  "uuid",
@@ -5276,18 +5248,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0673364c1ef7a1674241dbad9ba2415354103d6126451f01eeb7aaa25d6b4fce"
 dependencies = [
  "tokio",
-]
-
-[[package]]
-name = "libtest-mimic"
-version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc0bda45ed5b3a2904262c1bb91e526127aa70e7ef3758aba2ef93cf896b9b58"
-dependencies = [
- "clap",
- "escape8259",
- "termcolor",
- "threadpool",
 ]
 
 [[package]]
@@ -5876,6 +5836,7 @@ dependencies = [
  "strum",
  "thiserror 1.0.69",
  "tokio",
+ "tufaceous-artifact",
  "uuid",
 ]
 
@@ -6609,16 +6570,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "num_cpus"
-version = "1.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4161fcb6d602d4d2081af7c3a45852d875a03dd337a6bfdd6e06407b61342a43"
-dependencies = [
- "hermit-abi 0.3.9",
- "libc",
-]
-
-[[package]]
 name = "num_enum"
 version = "0.5.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6704,17 +6655,6 @@ dependencies = [
  "serde",
  "serde_json",
  "unicode-normalization",
-]
-
-[[package]]
-name = "omicron-brand-metadata"
-version = "0.1.0"
-dependencies = [
- "omicron-workspace-hack",
- "semver 1.0.25",
- "serde",
- "serde_json",
- "tar",
 ]
 
 [[package]]
@@ -6858,6 +6798,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "toml 0.8.20",
+ "tufaceous-artifact",
  "uuid",
 ]
 
@@ -7157,6 +7098,7 @@ dependencies = [
  "tokio-util",
  "tough",
  "tufaceous",
+ "tufaceous-artifact",
  "tufaceous-lib",
  "update-common",
  "update-engine",
@@ -7311,7 +7253,6 @@ dependencies = [
  "fs-err",
  "futures",
  "hex",
- "omicron-common",
  "omicron-pins",
  "omicron-workspace-hack",
  "omicron-zone-package",
@@ -7326,6 +7267,7 @@ dependencies = [
  "tar",
  "tokio",
  "toml 0.8.20",
+ "tufaceous-artifact",
  "tufaceous-lib",
 ]
 
@@ -7391,7 +7333,6 @@ dependencies = [
  "nexus-reconfigurator-blippy",
  "nexus-sled-agent-shared",
  "nexus-types",
- "omicron-brand-metadata",
  "omicron-common",
  "omicron-ddm-admin-client",
  "omicron-test-utils",
@@ -7444,6 +7385,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "toml 0.8.20",
+ "tufaceous-brand-metadata",
  "usdt",
  "uuid",
  "walkdir",
@@ -7520,6 +7462,7 @@ dependencies = [
  "bitflags 1.3.2",
  "bitflags 2.6.0",
  "bstr",
+ "buf-list",
  "byteorder",
  "bytes",
  "cc",
@@ -7644,6 +7587,7 @@ dependencies = [
  "zerocopy 0.8.10",
  "zeroize",
  "zip 0.6.6",
+ "zip 2.1.3",
 ]
 
 [[package]]
@@ -12027,15 +11971,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "threadpool"
-version = "1.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d050e60b33d41c19108b32cea32164033a9013fe3b46cbd4457559bfbf77afaa"
-dependencies = [
- "num_cpus",
-]
-
-[[package]]
 name = "time"
 version = "0.3.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12577,33 +12512,54 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=iliana%2Fdraft#a987c58acc861e0f2201226177a104116189ffb9"
 dependencies = [
  "anyhow",
- "assert_cmd",
  "camino",
  "chrono",
  "clap",
  "console",
- "datatest-stable",
- "fs-err",
  "humantime",
- "omicron-common",
- "omicron-test-utils",
- "omicron-workspace-hack",
- "predicates",
  "semver 1.0.25",
  "slog",
  "slog-async",
  "slog-envlogger",
  "slog-term",
- "tempfile",
  "tokio",
+ "tufaceous-artifact",
  "tufaceous-lib",
+]
+
+[[package]]
+name = "tufaceous-artifact"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=iliana%2Fdraft#a987c58acc861e0f2201226177a104116189ffb9"
+dependencies = [
+ "parse-display",
+ "proptest",
+ "schemars",
+ "semver 1.0.25",
+ "serde",
+ "serde_human_bytes",
+ "strum",
+ "test-strategy",
+]
+
+[[package]]
+name = "tufaceous-brand-metadata"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=iliana%2Fdraft#a987c58acc861e0f2201226177a104116189ffb9"
+dependencies = [
+ "semver 1.0.25",
+ "serde",
+ "serde_json",
+ "tar",
 ]
 
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=iliana%2Fdraft#a987c58acc861e0f2201226177a104116189ffb9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12621,10 +12577,6 @@ dependencies = [
  "hex",
  "hubtools",
  "itertools 0.13.0",
- "omicron-brand-metadata",
- "omicron-common",
- "omicron-test-utils",
- "omicron-workspace-hack",
  "parse-size",
  "rand 0.8.5",
  "semver 1.0.25",
@@ -12637,6 +12589,8 @@ dependencies = [
  "tokio",
  "toml 0.8.20",
  "tough",
+ "tufaceous-artifact",
+ "tufaceous-brand-metadata",
  "url",
  "zip 2.1.3",
 ]
@@ -12974,7 +12928,6 @@ dependencies = [
  "futures",
  "hex",
  "hubtools",
- "omicron-brand-metadata",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -12988,6 +12941,8 @@ dependencies = [
  "tokio-util",
  "tough",
  "tufaceous",
+ "tufaceous-artifact",
+ "tufaceous-brand-metadata",
  "tufaceous-lib",
 ]
 
@@ -13455,6 +13410,7 @@ dependencies = [
  "toml 0.8.20",
  "toml_edit 0.22.24",
  "transceiver-controller",
+ "tufaceous-artifact",
  "tui-tree-widget",
  "unicode-width 0.1.14",
  "update-engine",
@@ -13581,6 +13537,7 @@ dependencies = [
  "tough",
  "transceiver-controller",
  "tufaceous",
+ "tufaceous-artifact",
  "tufaceous-lib",
  "update-common",
  "update-engine",
