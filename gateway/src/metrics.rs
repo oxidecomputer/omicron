@@ -782,8 +782,9 @@ impl SpPoller {
                     //
                     // See this comment for details on what Tctl values mean:
                     // https://github.com/illumos/illumos-gate/blob/6cf3cc9d1e40f89e90135a48f74f03f879fce639/usr/src/uts/intel/io/amdzen/smntemp.c#L21-L57
-                    let is_tctl =
-                        sensor == "CPU" && target.component_kind == "sbtsi";
+                    let is_tctl = (sensor == "CPU"
+                        && target.component_kind == "sbtsi")
+                        || m.kind == MeasurementKind::CpuTctl;
                     // First, if there's a measurement error, increment the
                     // error count metric. We will synthesize a missing sample
                     // for the sensor's metric as well, after we produce the
@@ -794,6 +795,7 @@ impl SpPoller {
                     // cloning it in *case* there's an error.
                     if let Err(error) = m.value {
                         let kind = match m.kind {
+                            MeasurementKind::CpuTctl => "amd_cpu_tctl",
                             MeasurementKind::Temperature if is_tctl => {
                                 "amd_cpu_tctl"
                             }
@@ -850,6 +852,10 @@ impl SpPoller {
                     let sample = match (m.value, m.kind) {
                         // The CPU's Tctl value gets reported as a separate
                         // metric, as it is dimensionless.
+                        (Ok(datum), MeasurementKind::CpuTctl) => Sample::new(
+                            target,
+                            &metric::AmdCpuTctl { sensor, datum },
+                        ),
                         (Ok(datum), MeasurementKind::Temperature)
                             if is_tctl =>
                         {
@@ -865,6 +871,12 @@ impl SpPoller {
                             Sample::new(
                                 target,
                                 &metric::Temperature { sensor, datum },
+                            )
+                        }
+                        (Err(_), MeasurementKind::CpuTctl) => {
+                            Sample::new_missing(
+                                target,
+                                &metric::AmdCpuTctl { sensor, datum: 0.0 },
                             )
                         }
                         (Err(_), MeasurementKind::Temperature) if is_tctl => {
@@ -1204,6 +1216,9 @@ fn comms_error_str(error: CommunicationError) -> &'static str {
         }
         CommunicationError::BadTrailingDataSize { .. } => {
             "bad_trailing_data_size"
+        }
+        CommunicationError::BadDecompressionSize { .. } => {
+            "bad_decompression_size"
         }
     }
 }
