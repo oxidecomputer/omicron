@@ -678,6 +678,7 @@ pub mod test {
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
@@ -917,6 +918,7 @@ pub mod test {
                         },
                     },
                 ),
+                image_source: BlueprintZoneImageSource::InstallDataset,
             }
         };
 
