@@ -128,7 +128,7 @@ impl WebhookDelivery {
             rx_id: (*rx_id).into(),
             trigger: WebhookDeliveryTrigger::Probe,
             payload: serde_json::json!({}),
-            attempts: SqlU8::new(1),
+            attempts: SqlU8::new(0),
             time_created: Utc::now(),
             time_completed: None,
             deliverator_id: Some((*deliverator_id).into()),
