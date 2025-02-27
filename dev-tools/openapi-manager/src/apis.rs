@@ -192,7 +192,6 @@ impl ManagedApis {
         ManagedApis::new(
             crate::omicron::all_apis()
                 .into_iter()
-                .map(ManagedApiConfig::from)
                 .map(ManagedApi::from)
                 .collect(),
         )
