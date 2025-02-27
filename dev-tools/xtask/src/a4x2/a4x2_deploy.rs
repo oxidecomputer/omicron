@@ -182,28 +182,23 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
             // (and perhaps others?), to help diagnose a4x2 launch failures, and
             // provide context alongside live tests.
 
-            // If we are in CI, we do not need to tear down, because the system
-            // state is about to be wiped from existence anyway.
-            if !env.in_ci {
-                // Outside of CI, we do not tear down if we are just running the
-                // start command, or if the user requested to leave a4x2 up
-                // after running the tests.
-                match args.command {
-                    DeployCommand::RunTests(RunTestsArgs {
-                        leave_running: false,
-                        ..
-                    }) => {
-                        // We ignore any error here, because the result we
-                        // actually want to produce is whether tests passed
-                        let _ = teardown_a4x2(&sh, &env);
-                    }
+            // We do not tear down if we are just running the start command, or
+            // if the user requested to leave a4x2 up after running the tests.
+            match args.command {
+                DeployCommand::RunTests(RunTestsArgs {
+                    leave_running: false,
+                    ..
+                }) => {
+                    // We ignore any error here, because the result we
+                    // actually want to produce is whether tests passed
+                    let _ = teardown_a4x2(&sh, &env);
+                }
 
-                    _ => {
-                        // If we are leaving a4x2 up, we ought to be nice and
-                        // print some information to the user so they can get
-                        // into the system
-                        print_a4x2_access_info(&sh, &env);
-                    }
+                _ => {
+                    // If we are leaving a4x2 up, we ought to be nice and
+                    // print some information to the user so they can get
+                    // into the system
+                    print_a4x2_access_info(&sh, &env);
                 }
             }
 
