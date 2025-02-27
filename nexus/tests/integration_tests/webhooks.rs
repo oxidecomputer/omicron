@@ -646,9 +646,6 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
 
 #[nexus_test]
 async fn test_probe(cptestctx: &ControlPlaneTestContext) {
-    let nexus = cptestctx.server.server_context().nexus.clone();
-
-    let datastore = nexus.datastore();
     let server = httpmock::MockServer::start_async().await;
 
     // Create a webhook receiver.
@@ -664,24 +661,30 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
 
     // First, configure the receiver server to return a successful response but
     // only after the delivery timeout has elapsed.
-    let mock = server
-        .mock_async(move |when, then| {
-            when.method(POST)
-                .header("x-oxide-event-class", "probe")
-                .and(is_valid_for_webhook(&webhook))
-                .is_true(signature_verifies(
-                    webhook.secrets[0].id,
-                    MY_COOL_SECRET.as_bytes().to_vec(),
-                ))
-                .json_body_includes(body);
-            then
-                // Delivery timeout is 30 seconds.
-                .delay(Duration::from_secs(35))
-                // After the timeout, return something that would be considered
-                // a success.
-                .status(200);
-        })
-        .await;
+    let mock = {
+        let webhook = webhook.clone();
+        let body = body.clone();
+        server
+            .mock_async(move |when, then| {
+                when.method(POST)
+                    .header("x-oxide-event-class", "probe")
+                    .and(is_valid_for_webhook(&webhook))
+                    .is_true(signature_verifies(
+                        webhook.secrets[0].id,
+                        MY_COOL_SECRET.as_bytes().to_vec(),
+                    ))
+                    .json_body_includes(body);
+                then
+                    // Delivery timeout is 30 seconds.
+                    // TODO(eliza): it would be really nice if this test didn't
+                    // have to wait 30 seconds...
+                    .delay(Duration::from_secs(35))
+                    // After the timeout, return something that would be considered
+                    // a success.
+                    .status(200);
+            })
+            .await
+    };
 
     // Send a probe. The probe should fail due to a timeout.
     let probe1 = webhook_send_probe(
@@ -691,7 +694,7 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
         http::StatusCode::OK,
     )
     .await;
-    dbg!(probe1);
+    dbg!(&probe1);
 
     mock.assert_async().await;
 
@@ -702,19 +705,23 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
 
     // Next, configure the receiver server to return a 5xx error
     mock.delete_async().await;
-    let mock = server
-        .mock_async(move |when, then| {
-            when.method(POST)
-                .header("x-oxide-event-class", "probe")
-                .and(is_valid_for_webhook(&webhook))
-                .is_true(signature_verifies(
-                    webhook.secrets[0].id,
-                    MY_COOL_SECRET.as_bytes().to_vec(),
-                ))
-                .json_body_includes(body);
-            then.status(503);
-        })
-        .await;
+    let mock = {
+        let webhook = webhook.clone();
+        let body = body.clone();
+        server
+            .mock_async(move |when, then| {
+                when.method(POST)
+                    .header("x-oxide-event-class", "probe")
+                    .and(is_valid_for_webhook(&webhook))
+                    .is_true(signature_verifies(
+                        webhook.secrets[0].id,
+                        MY_COOL_SECRET.as_bytes().to_vec(),
+                    ))
+                    .json_body_includes(body);
+                then.status(503);
+            })
+            .await
+    };
 
     let probe2 = webhook_send_probe(
         &cptestctx,
@@ -723,7 +730,7 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
         http::StatusCode::OK,
     )
     .await;
-    dbg!(probe2);
+    dbg!(&probe2);
 
     mock.assert_async().await;
     assert_eq!(probe2.attempt, 1);
@@ -736,20 +743,24 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
     );
 
     mock.delete_async().await;
-    // Finally,  configure the receiver server to return a success.
-    let mock = server
-        .mock_async(move |when, then| {
-            when.method(POST)
-                .header("x-oxide-event-class", "probe")
-                .and(is_valid_for_webhook(&webhook))
-                .is_true(signature_verifies(
-                    webhook.secrets[0].id,
-                    MY_COOL_SECRET.as_bytes().to_vec(),
-                ))
-                .json_body_includes(body);
-            then.status(200);
-        })
-        .await;
+    // Finally, configure the receiver server to return a success.
+    let mock = {
+        let webhook = webhook.clone();
+        let body = body.clone();
+        server
+            .mock_async(move |when, then| {
+                when.method(POST)
+                    .header("x-oxide-event-class", "probe")
+                    .and(is_valid_for_webhook(&webhook))
+                    .is_true(signature_verifies(
+                        webhook.secrets[0].id,
+                        MY_COOL_SECRET.as_bytes().to_vec(),
+                    ))
+                    .json_body_includes(body);
+                then.status(200);
+            })
+            .await
+    };
 
     let probe3 = webhook_send_probe(
         &cptestctx,
@@ -758,7 +769,7 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
         http::StatusCode::OK,
     )
     .await;
-    dbg!(probe3);
+    dbg!(&probe3);
     mock.assert_async().await;
     assert_eq!(probe3.attempt, 1);
     assert_eq!(probe3.event_class, "probe");
