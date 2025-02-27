@@ -117,8 +117,12 @@ export RUSTC_BOOTSTRAP=1
 # omicron-nexus at the same time, which uses significant memory to compile on
 # illumos. To mitigate this we build everything except omicron-nexus's bin/test
 # targets first, then finish the build after.
-ptime -m cargo build -Z unstable-options --timings=json --workspace --exclude=omicron-nexus --tests --locked --verbose 1>> "$OUTPUT_DIR/crate-build-timings.json"
-ptime -m cargo build -Z unstable-options --timings=json --workspace --tests --locked --verbose 1>> "$OUTPUT_DIR/crate-build-timings.json"
+ptime -m cargo build -Z unstable-options --timings=json \
+    --workspace --exclude=omicron-nexus --tests --locked --verbose \
+    1>> "$OUTPUT_DIR/crate-build-timings.json"
+ptime -m cargo build -Z unstable-options --timings=json \
+    --workspace --tests --locked --verbose \
+    1>> "$OUTPUT_DIR/crate-build-timings.json"
 
 #
 # We apply our own timeout to ensure that we get a normal failure on timeout
