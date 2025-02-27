@@ -98,6 +98,7 @@ use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use omicron_uuid_kinds::OmicronZoneUuid;
 use rand::prelude::SliceRandom;
 use sled_agent_types::{
+    sled::SWITCH_ZONE_BASEBOARD_FILE,
     time_sync::TimeSync,
     zone_bundle::{ZoneBundleCause, ZoneBundleMetadata},
 };
@@ -137,8 +138,6 @@ const CLICKHOUSE_SERVER_BINARY: &str =
 const CLICKHOUSE_KEEPER_BINARY: &str =
     "/opt/oxide/clickhouse_keeper/clickhouse";
 const CLICKHOUSE_BINARY: &str = "/opt/oxide/clickhouse/clickhouse";
-
-pub const SWITCH_ZONE_BASEBOARD_FILE: &str = "/opt/oxide/baseboard.json";
 
 #[derive(thiserror::Error, Debug, slog_error_chain::SlogInlineError)]
 pub enum Error {
