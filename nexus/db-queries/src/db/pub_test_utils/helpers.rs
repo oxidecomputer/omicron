@@ -386,10 +386,10 @@ pub async fn create_anti_affinity_group_member(
         .lookup_for(authz::Action::Modify)
         .await?;
 
-    db.anti_affinity_group_member_add(
+    db.anti_affinity_group_member_instance_add(
         opctx,
         &authz_group,
-        external::AntiAffinityGroupMember::Instance(instance_id),
+        instance_id,
     )
     .await?;
     Ok(())

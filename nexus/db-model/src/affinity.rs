@@ -253,13 +253,15 @@ impl AntiAffinityGroupInstanceMembership {
     ) -> Self {
         Self { group_id: group_id.into(), instance_id: instance_id.into() }
     }
-}
 
-impl From<AntiAffinityGroupInstanceMembership>
-    for external::AntiAffinityGroupMember
-{
-    fn from(member: AntiAffinityGroupInstanceMembership) -> Self {
-        Self::Instance(member.instance_id.into())
+    pub fn to_external(
+        self,
+        member_name: external::Name,
+    ) -> external::AntiAffinityGroupMember {
+        external::AntiAffinityGroupMember::Instance {
+            id: self.instance_id.into(),
+            name: member_name,
+        }
     }
 }
 
@@ -280,12 +282,13 @@ impl AntiAffinityGroupAffinityMembership {
             affinity_group_id: affinity_group_id.into(),
         }
     }
-}
-
-impl From<AntiAffinityGroupAffinityMembership>
-    for external::AntiAffinityGroupMember
-{
-    fn from(member: AntiAffinityGroupAffinityMembership) -> Self {
-        Self::AffinityGroup(member.affinity_group_id.into())
+    pub fn to_external(
+        self,
+        member_name: external::Name,
+    ) -> external::AntiAffinityGroupMember {
+        external::AntiAffinityGroupMember::AffinityGroup {
+            id: self.affinity_group_id.into(),
+            name: member_name,
+        }
     }
 }
