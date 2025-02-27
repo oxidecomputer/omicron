@@ -2263,6 +2263,7 @@ table! {
 allow_tables_to_appear_in_same_query!(webhook_receiver, webhook_delivery);
 joinable!(webhook_delivery -> webhook_receiver (rx_id));
 allow_tables_to_appear_in_same_query!(webhook_delivery, webhook_event);
+allow_tables_to_appear_in_same_query!(webhook_delivery_attempt, webhook_event);
 joinable!(webhook_delivery -> webhook_event (event_id));
 
 table! {

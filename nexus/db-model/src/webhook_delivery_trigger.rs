@@ -22,6 +22,7 @@ impl_enum_type!(
         Deserialize,
         AsExpression,
         FromSqlRow,
+        strum::VariantArray,
     )]
     #[diesel(sql_type = WebhookDeliveryTriggerEnum)]
     #[serde(rename_all = "snake_case")]
@@ -32,6 +33,10 @@ impl_enum_type!(
     Probe => b"probe"
 
 );
+
+impl WebhookDeliveryTrigger {
+    pub const ALL: &'static [Self] = <Self as strum::VariantArray>::VARIANTS;
+}
 
 impl fmt::Display for WebhookDeliveryTrigger {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

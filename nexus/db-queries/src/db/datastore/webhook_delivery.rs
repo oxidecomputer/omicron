@@ -11,9 +11,10 @@ use crate::db::error::ErrorHandler;
 use crate::db::model::SqlU8;
 use crate::db::model::WebhookDelivery;
 use crate::db::model::WebhookDeliveryAttempt;
+use crate::db::model::WebhookDeliveryResult;
 use crate::db::model::WebhookDeliveryTrigger;
 use crate::db::model::WebhookEventClass;
-use crate::db::pagination::paginated;
+use crate::db::pagination::paginated_multicolumn;
 use crate::db::schema::webhook_delivery::dsl;
 use crate::db::schema::webhook_delivery_attempt::dsl as attempt_dsl;
 use crate::db::schema::webhook_event::dsl as event_dsl;
@@ -77,15 +78,39 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    pub async fn webhook_rx_delivery_list(
+    pub async fn webhook_rx_delivery_list_attempts(
         &self,
         opctx: &OpContext,
         rx_id: &WebhookReceiverUuid,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<WebhookDelivery> {
+        triggers: &'static [WebhookDeliveryTrigger],
+        results: &'static [WebhookDeliveryResult],
+        pagparams: &DataPageParams<'_, (Uuid, SqlU8)>,
+    ) -> ListResultVec<(
+        WebhookDelivery,
+        Option<WebhookDeliveryAttempt>,
+        WebhookEventClass,
+    )> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        paginated(dsl::webhook_delivery, dsl::id, pagparams)
+        let query = dsl::webhook_delivery.left_join(
+            attempt_dsl::webhook_delivery_attempt
+                .on(dsl::id.eq(attempt_dsl::delivery_id)),
+        );
+        paginated_multicolumn(query, (dsl::id, attempt_dsl::attempt), pagparams)
             .filter(dsl::rx_id.eq(rx_id.into_untyped_uuid()))
+            .filter(dsl::trigger.eq_any(triggers))
+            .filter(
+                attempt_dsl::result
+                    .eq_any(results)
+                    .or(attempt_dsl::result.is_null()),
+            )
+            .inner_join(
+                event_dsl::webhook_event.on(dsl::event_id.eq(event_dsl::id)),
+            )
+            .select((
+                WebhookDelivery::as_select(),
+                Option::<WebhookDeliveryAttempt>::as_select(),
+                event_dsl::event_class,
+            ))
             .load_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -388,17 +413,29 @@ mod test {
             Paginator::new(crate::db::datastore::SQL_BATCH_SIZE);
         while let Some(p) = paginator.next() {
             let deliveries = datastore
-                .webhook_rx_delivery_list(
+                .webhook_rx_delivery_list_attempts(
                     &opctx,
                     &rx_id,
+                    WebhookDeliveryTrigger::ALL,
+                    WebhookDeliveryResult::ALL,
                     &p.current_pagparams(),
                 )
                 .await
                 .unwrap();
-            paginator = p.found_batch(&deliveries, &|d: &WebhookDelivery| {
-                d.id.into_untyped_uuid()
+            paginator = p.found_batch(&deliveries, &|(d, a, _): &(
+                WebhookDelivery,
+                Option<WebhookDeliveryAttempt>,
+                WebhookEventClass,
+            )| {
+                (
+                    *d.id.as_untyped_uuid(),
+                    a.as_ref()
+                        .map(|attempt| attempt.attempt)
+                        .unwrap_or(SqlU8::new(0)),
+                )
             });
-            all_deliveries.extend(deliveries.into_iter().map(|d| d.id));
+            all_deliveries
+                .extend(deliveries.into_iter().map(|(d, _, _)| dbg!(d).id));
         }
 
         assert!(all_deliveries.contains(&dispatch1.id));

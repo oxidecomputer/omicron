@@ -42,3 +42,9 @@ pub struct WebhookEvent {
 
     pub num_dispatched: i64,
 }
+
+impl WebhookEvent {
+    /// UUID of the singleton event entry for webhook liveness probes.
+    pub const PROBE_EVENT_ID: uuid::Uuid =
+        uuid::Uuid::from_u128(0x001de000_7768_4000_8000_000000000001);
+}
