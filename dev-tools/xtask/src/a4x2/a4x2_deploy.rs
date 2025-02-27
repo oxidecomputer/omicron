@@ -316,25 +316,25 @@ fn try_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
     // - stall
     //
     // Stalling is why we do a timeout, and we need to handle timeout both at
-    // the TCP level and the HTTP level. `curl -m 5` will hard-out after 5
-    // seconds no matter what's going on.
+    // the TCP level and the HTTP level. `curl --max-time 5` will hard-out after
+    // 5 seconds no matter what's going on.
     //
     // That 5 seconds is arbitrary, but it's been working well over in
     // rackletteadm, from which this logic is copied.
-    //
-    // We could replace curl with rust code, but make sure we do the same thing!
-    while retries > 0 && cmd!(sh, "curl -s -m 5 {api_url}").run().is_err() {
+    while retries > 0 && cmd!(sh, "curl --silent --fail --show-error --max-time 5 {api_url}").run().is_err() {
         retries -= 1;
         thread::sleep(time::Duration::from_secs(25));
 
         if retries % 5 == 0 {
-            // I see no reason to error while printing the date
             let _ = cmd!(sh, "date").run();
         }
     }
 
     if retries == 0 {
         bail!("timed out waiting for control plane");
+    } else {
+        eprintln!("control plane is up:");
+        let _ = cmd!(sh, "date").run();
     }
 
     Ok(())
@@ -497,8 +497,7 @@ fn get_node_ip(sh: &Shell, env: &Environment, node: &str) -> Result<String> {
 
 /// effectively curl | bash, but reads the full script before running bash
 fn exec_remote_script(sh: &Shell, url: &str) -> Result<()> {
-    // this could use reqwest instead honestly
-    let script = cmd!(sh, "curl -sSfL --retry 10 {url}").read()?;
+    let script = cmd!(sh, "curl --silent --fail --show-error --location --retry 10 {url}").read()?;
     cmd!(sh, "bash").stdin(&script).run()?;
     Ok(())
 }
