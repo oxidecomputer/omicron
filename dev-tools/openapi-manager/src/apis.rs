@@ -190,7 +190,7 @@ pub struct ManagedApis {
 impl ManagedApis {
     pub fn all() -> anyhow::Result<ManagedApis> {
         ManagedApis::new(
-            crate::spec::all_apis()
+            crate::omicron::all_apis()
                 .into_iter()
                 .map(ManagedApiConfig::from)
                 .map(ManagedApi::from)
