@@ -356,17 +356,22 @@ fn run_tests(sh: &Shell, env: &Environment, args: &RunTestsArgs) -> Result<()> {
         let mut ssh_args_owned = vec!["-i", "../a4x2-ssh-key"];
         ssh_args_owned.extend_from_slice(&INSECURE_SSH_ARGS);
         let ssh_args = &ssh_args_owned;
+        use super::{LIVE_TEST_BUNDLE_NAME, LIVE_TEST_BUNDLE_DIR, LIVE_TEST_BUNDLE_SCRIPT};
 
-        cmd!(sh, "scp {ssh_args...} live-tests-bundle.tgz {ssh_host}:/zone/oxz_switch/root/root").run()?;
+        cmd!(sh, "scp {ssh_args...} {LIVE_TEST_BUNDLE_NAME} {ssh_host}:/zone/oxz_switch/root/root").run()?;
 
         // If you want any change in functionality for the test runner, update
         // run-live-tests over in a4x2_package.rs. Don't add it here!
-        let switch_zone_script = r#"
+        //
+        // The weird replace() is for quote-escaping, as we shove this into a
+        // single-quote string right below when creating the script to run over
+        // ssh.
+        let switch_zone_script = format!(r#"
             set -euxo pipefail
-            tar xvzf live-tests-bundle.tgz
-            cd live-tests-bundle
-            ./run-live-tests
-        "#;
+            tar xvzf '{LIVE_TEST_BUNDLE_NAME}'
+            cd '{LIVE_TEST_BUNDLE_DIR}'
+            ./'{LIVE_TEST_BUNDLE_SCRIPT}'
+        "#).replace("'", "'\"'\"'");
 
         let remote_script =
             format!("zlogin oxz_switch bash -c '{switch_zone_script}'");

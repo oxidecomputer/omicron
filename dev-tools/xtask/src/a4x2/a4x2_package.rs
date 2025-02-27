@@ -199,7 +199,7 @@ fn build_live_tests(sh: &Shell, env: &Environment) -> Result<()> {
     let cargo = &env.cargo;
     cmd!(sh, "{cargo} xtask live-tests").run()?;
 
-    let live_test_bundle_dir = env.work_dir.join("live-tests-bundle");
+    let live_test_bundle_dir = env.work_dir.join(super::LIVE_TEST_BUNDLE_DIR);
     sh.create_dir(&live_test_bundle_dir)?;
 
     // a tar within a tar, a door behind a door
@@ -214,7 +214,7 @@ fn build_live_tests(sh: &Shell, env: &Environment) -> Result<()> {
 
     // Finally, the script that will run nextest
     // TODO: should we make this into a rust program that runs in the VM?
-    let switch_zone_script_path = live_test_bundle_dir.join("run-live-tests");
+    let switch_zone_script_path = live_test_bundle_dir.join(super::LIVE_TEST_BUNDLE_SCRIPT);
     let switch_zone_script = r#"
         set -euxo pipefail
         /opt/oxide/omdb/bin/omdb -w nexus blueprints target enable current
@@ -234,7 +234,8 @@ fn build_live_tests(sh: &Shell, env: &Environment) -> Result<()> {
     // intentionally relative path so the tarball gets relative paths
     let _popdir = sh.push_dir(&env.work_dir);
     let bundle_dir_name = live_test_bundle_dir.file_name().unwrap();
-    cmd!(sh, "tar -czf {out_dir}/live-tests-bundle.tgz {bundle_dir_name}/")
+    use super::LIVE_TEST_BUNDLE_NAME;
+    cmd!(sh, "tar -czf {out_dir}/{LIVE_TEST_BUNDLE_NAME} {bundle_dir_name}/")
         .run()?;
 
     Ok(())
