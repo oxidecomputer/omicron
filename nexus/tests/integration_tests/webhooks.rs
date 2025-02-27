@@ -14,7 +14,7 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::{params, views};
+use nexus_types::external_api::{params, shared, views};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_uuid_kinds::WebhookEventUuid;
 use omicron_uuid_kinds::WebhookReceiverUuid;
@@ -701,7 +701,7 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(probe1.attempt, 1);
     assert_eq!(probe1.event_class, "probe");
     assert_eq!(probe1.trigger, views::WebhookDeliveryTrigger::Probe);
-    assert_eq!(probe1.state, views::WebhookDeliveryState::FailedTimeout);
+    assert_eq!(probe1.state, shared::WebhookDeliveryState::FailedTimeout);
 
     // Next, configure the receiver server to return a 5xx error
     mock.delete_async().await;
@@ -736,7 +736,7 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(probe2.attempt, 1);
     assert_eq!(probe2.event_class, "probe");
     assert_eq!(probe2.trigger, views::WebhookDeliveryTrigger::Probe);
-    assert_eq!(probe2.state, views::WebhookDeliveryState::FailedHttpError);
+    assert_eq!(probe2.state, shared::WebhookDeliveryState::FailedHttpError);
     assert_ne!(
         probe2.id, probe1.id,
         "a new delivery ID should be assigned to each probe"
@@ -774,7 +774,7 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(probe3.attempt, 1);
     assert_eq!(probe3.event_class, "probe");
     assert_eq!(probe3.trigger, views::WebhookDeliveryTrigger::Probe);
-    assert_eq!(probe3.state, views::WebhookDeliveryState::Delivered);
+    assert_eq!(probe3.state, shared::WebhookDeliveryState::Delivered);
     assert_ne!(
         probe3.id, probe1.id,
         "a new delivery ID should be assigned to each probe"

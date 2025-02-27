@@ -11,6 +11,7 @@ use crate::WebhookDeliveryTrigger;
 use crate::WebhookEvent;
 use crate::WebhookEventClass;
 use chrono::{DateTime, TimeDelta, Utc};
+use nexus_types::external_api::shared::WebhookDeliveryState;
 use nexus_types::external_api::views;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::{
@@ -148,7 +149,7 @@ impl WebhookDelivery {
             event_id: self.event_id.into(),
             state: attempt
                 .map(|attempt| attempt.result.into())
-                .unwrap_or(views::WebhookDeliveryState::Pending),
+                .unwrap_or(WebhookDeliveryState::Pending),
             trigger: self.trigger.into(),
             response: attempt.and_then(WebhookDeliveryAttempt::response_view),
             time_sent: attempt.map(|attempt| attempt.time_created),
@@ -197,25 +198,41 @@ impl WebhookDeliveryAttempt {
     }
 }
 
-impl From<WebhookDeliveryResult> for views::WebhookDeliveryState {
+impl From<WebhookDeliveryResult> for WebhookDeliveryState {
     fn from(result: WebhookDeliveryResult) -> Self {
         match result {
             WebhookDeliveryResult::FailedHttpError => {
-                views::WebhookDeliveryState::FailedHttpError
+                WebhookDeliveryState::FailedHttpError
             }
             WebhookDeliveryResult::FailedTimeout => {
-                views::WebhookDeliveryState::FailedTimeout
+                WebhookDeliveryState::FailedTimeout
             }
             WebhookDeliveryResult::FailedUnreachable => {
-                views::WebhookDeliveryState::FailedUnreachable
+                WebhookDeliveryState::FailedUnreachable
             }
-            WebhookDeliveryResult::Succeeded => {
-                views::WebhookDeliveryState::Delivered
-            }
+            WebhookDeliveryResult::Succeeded => WebhookDeliveryState::Delivered,
         }
     }
 }
 
 impl WebhookDeliveryResult {
     pub const ALL: &'static [Self] = <Self as strum::VariantArray>::VARIANTS;
+
+    pub fn from_api_state(state: WebhookDeliveryState) -> Option<Self> {
+        match state {
+            WebhookDeliveryState::FailedHttpError => {
+                Some(WebhookDeliveryResult::FailedHttpError)
+            }
+            WebhookDeliveryState::FailedTimeout => {
+                Some(WebhookDeliveryResult::FailedTimeout)
+            }
+            WebhookDeliveryState::FailedUnreachable => {
+                Some(WebhookDeliveryResult::FailedUnreachable)
+            }
+            WebhookDeliveryState::Delivered => {
+                Some(WebhookDeliveryResult::Succeeded)
+            }
+            WebhookDeliveryState::Pending => None,
+        }
+    }
 }

@@ -25,6 +25,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::TimeDelta;
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
+use nexus_types::external_api::shared::WebhookDeliveryState;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -83,7 +84,7 @@ impl DataStore {
         opctx: &OpContext,
         rx_id: &WebhookReceiverUuid,
         triggers: &'static [WebhookDeliveryTrigger],
-        results: &'static [WebhookDeliveryResult],
+        states: impl IntoIterator<Item = WebhookDeliveryState>,
         pagparams: &DataPageParams<'_, (Uuid, SqlU8)>,
     ) -> ListResultVec<(
         WebhookDelivery,
@@ -91,29 +92,108 @@ impl DataStore {
         WebhookEventClass,
     )> {
         let conn = self.pool_connection_authorized(opctx).await?;
+        // The way we construct this query is a bit complex, so let's break down
+        // why we do it this way.
+        //
+        // We would like to list delivery attempts that  are in the provided
+        // `states`. If a delivery has been attempted at least once, there will
+        // be a record in the `webhook_delivery_attempts` table including a
+        // `result` column that contains a `WebhookDeliveryResult`. The
+        // `WebhookDeliveryResult` SQL enum represents the subset of
+        // `WebhookDeliveryState`s that are not `Pending` (e.g. the delivery
+        // attempt has succeeded or failed). On the other hand, if a delivery
+        // has not yet been attempted, there will be *no* corresponding records
+        // in `webhook_delivery_attempts`. So, based on whether or not the
+        // requested list of states includes `Pending`, we either want to select
+        // all delivery records where there is a corresponding attempt record in
+        // one of the requested states (if we don't want `Pending` deliveries),
+        // *OR*, we want to select all deliveries where there is a corresponding
+        // attempt record in the requested states *and* all delivery records
+        // where there is no corresponding attempt record (because the delivery
+        // is pending). Due to diesel being Like That, whether or not we add an
+        // `OR result IS NULL` clause changes the type of the query being built,
+        // so we must do that last, and execute the query in one of two `if`
+        // branches based on whether or not this clause is added.
+        //
+        // Additionally, we must paginate this query by both delivery ID and
+        // attempt number, since we may return multiple attempts of the same
+        // delivery. Because `paginated_multicolumn` requiers that the
+        // paginated expression implement `diesel::QuerySource`, we must first
+        // construct a selection by JOINing the delivery table and the attempt
+        // table, without applying any filters, pass the joined tables to
+        // `paginated_multicolumn`, and _then_ filtering the paginated query and
+        // JOINing again with the `event` table to get the event class as well.
+        //
+        // Neither of these weird contortions actually change the resultant SQL
+        // for the query, but they make the code for cosntructing it a bit
+        // wacky, so I figured it was worth writing this down for future
+        // generations.
+        let mut includes_pending = false;
+        let states = states
+            .into_iter()
+            .filter_map(|state| {
+                if state == WebhookDeliveryState::Pending {
+                    includes_pending = true;
+                }
+                WebhookDeliveryResult::from_api_state(state)
+            })
+            .collect::<Vec<_>>();
+
+        // Join the delivery table with the attempts table. If a delivery has
+        // not been attempted yet, there will be no attempts, so this is a LEFT
+        // JOIN.
         let query = dsl::webhook_delivery.left_join(
             attempt_dsl::webhook_delivery_attempt
                 .on(dsl::id.eq(attempt_dsl::delivery_id)),
         );
-        paginated_multicolumn(query, (dsl::id, attempt_dsl::attempt), pagparams)
-            .filter(dsl::rx_id.eq(rx_id.into_untyped_uuid()))
-            .filter(dsl::trigger.eq_any(triggers))
-            .filter(
-                attempt_dsl::result
-                    .eq_any(results)
-                    .or(attempt_dsl::result.is_null()),
-            )
-            .inner_join(
-                event_dsl::webhook_event.on(dsl::event_id.eq(event_dsl::id)),
-            )
-            .select((
-                WebhookDelivery::as_select(),
-                Option::<WebhookDeliveryAttempt>::as_select(),
-                event_dsl::event_class,
-            ))
-            .load_async(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+
+        // Paginate the query, ordering by the delivery ID and then the attempt
+        // number of the attempt.
+        let query = paginated_multicolumn(
+            query,
+            (dsl::id, attempt_dsl::attempt),
+            pagparams,
+        )
+        // Select only deliveries that are to the receiver we're interested in,
+        // and were initiated by the triggers we're interested in.
+        .filter(
+            dsl::rx_id
+                .eq(rx_id.into_untyped_uuid())
+                .and(dsl::trigger.eq_any(triggers)),
+        )
+        // Finally, join again with the event table on the delivery's event ID,
+        // so that we can grab the event class of the event that initiated this delivery.
+        .inner_join(
+            event_dsl::webhook_event.on(dsl::event_id.eq(event_dsl::id)),
+        )
+        .select((
+            WebhookDelivery::as_select(),
+            Option::<WebhookDeliveryAttempt>::as_select(),
+            event_dsl::event_class,
+        ));
+
+        // Before we actually execute the query, add a filter clause to select
+        // only attempts in the requested states. This branches on
+        // `includes_pending` as whether or not we care about pending deliveries
+        // adds an additional clause, changing the type of all the diesel junk
+        // and preventing us from assigning the query to the same variable in
+        // both cases, so we just run it immediatel.
+        if includes_pending {
+            query
+                .filter(
+                    attempt_dsl::result
+                        .eq_any(states)
+                        .or(attempt_dsl::result.is_null()),
+                )
+                .load_async(&*conn)
+                .await
+        } else {
+            query
+                .filter(attempt_dsl::result.eq_any(states))
+                .load_async(&*conn)
+                .await
+        }
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn webhook_rx_delivery_list_ready(
@@ -417,7 +497,7 @@ mod test {
                     &opctx,
                     &rx_id,
                     WebhookDeliveryTrigger::ALL,
-                    WebhookDeliveryResult::ALL,
+                    std::iter::once(WebhookDeliveryState::Pending),
                     &p.current_pagparams(),
                 )
                 .await

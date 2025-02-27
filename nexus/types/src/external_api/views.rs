@@ -1105,7 +1105,7 @@ pub struct WebhookDelivery {
     pub event_id: WebhookEventUuid,
 
     /// The state of the delivery attempt.
-    pub state: WebhookDeliveryState,
+    pub state: shared::WebhookDeliveryState,
 
     /// The time at which the webhook delivery was attempted, or `null` if
     /// webhook delivery has not yet been attempted (`state` is "pending").
@@ -1126,24 +1126,6 @@ pub struct WebhookDelivery {
     /// Attempt number, starting at 1. If this is a retry of a previous failed
     /// delivery, this value indicates that.
     pub attempt: usize,
-}
-
-/// The state of a webhook delivery attempt.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum WebhookDeliveryState {
-    /// The webhook event has not yet been delivered.
-    Pending,
-    /// The webhook event has been delivered successfully.
-    Delivered,
-    /// A webhook request was sent to the endpoint, and it
-    /// returned a HTTP error status code indicating an error.
-    FailedHttpError,
-    /// The webhook request could not be sent to the receiver endpoint.
-    FailedUnreachable,
-    /// A connection to the receiver endpoint was successfully established, but
-    /// no response was received within the delivery timeout.
-    FailedTimeout,
 }
 
 /// The reason a webhook event was delivered
