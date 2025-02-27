@@ -26,6 +26,8 @@ use gateway_messages::sp_impl::{BoundsChecked, DeviceDescription};
 use gateway_messages::CfpaPage;
 use gateway_messages::ComponentAction;
 use gateway_messages::ComponentActionResponse;
+use gateway_messages::DumpSegment;
+use gateway_messages::DumpTask;
 use gateway_messages::Header;
 use gateway_messages::MgsRequest;
 use gateway_messages::MgsResponse;
@@ -1501,6 +1503,30 @@ impl SpHandler for Handler {
                 })),
             }
         }
+    }
+
+    fn get_task_dump_count(&mut self) -> Result<u32, SpError> {
+        debug!(&self.log, "received get_task_dump_count");
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn task_dump_read_start(
+        &mut self,
+        index: u32,
+        _key: [u8; 16],
+    ) -> Result<DumpTask, SpError> {
+        debug!(&self.log, "received task_dump_read_start"; "index" => index);
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn task_dump_read_continue(
+        &mut self,
+        _key: [u8; 16],
+        seq: u32,
+        _buf: &mut [u8],
+    ) -> Result<Option<DumpSegment>, SpError> {
+        debug!(&self.log, "received task_dump_read_continue"; "seq" => seq);
+        Err(SpError::RequestUnsupportedForSp)
     }
 }
 
