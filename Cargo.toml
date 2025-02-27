@@ -528,7 +528,7 @@ openssl = "0.10"
 openssl-sys = "0.9"
 opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "cd9aa6467c5e62c6d97f6aafa2150d6930e3a0fa" }
 oso = "0.27"
-owo-colors = "4.1.0"
+owo-colors = "4.2.0"
 oximeter = { path = "oximeter/oximeter" }
 oximeter-api = { path = "oximeter/api" }
 oximeter-client = { path = "clients/oximeter-client" }
