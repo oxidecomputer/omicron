@@ -654,7 +654,7 @@ subprocess = "0.2.9"
 supports-color = "3.0.2"
 swrite = "0.1.0"
 sync-ptr = "0.1.1"
-libsw = { version = "3.3.1", features = ["tokio"] }
+libsw = { version = "3.4.0", features = ["tokio"] }
 syn = { version = "2.0" }
 tabled = "0.15.0"
 tar = "0.4"
