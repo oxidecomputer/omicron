@@ -29,7 +29,6 @@ use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use slog::Logger;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 
 /// Arguments to the "omdb reconfigurator" subcommand
@@ -274,9 +273,11 @@ async fn cmd_reconfigurator_history(
     }
 
     let mut prev: Option<BlueprintUuid> = None;
-    let mut whole_blueprints = BTreeMap::new();
+    let mut prev_blueprint: Option<Blueprint> = None;
     for t in targets {
         let target_id = BlueprintUuid::from(t.blueprint_id);
+        let this_previous = prev_blueprint.take();
+        prev_blueprint = None;
 
         print!(
             "{:>5} {} {} {:>8}",
@@ -307,27 +308,20 @@ async fn cmd_reconfigurator_history(
                 all_blueprints.get(&target_id),
             ) {
                 (true, Some(previous), Some(_)) => {
-                    blueprint_load(
-                        opctx,
-                        datastore,
-                        &mut whole_blueprints,
-                        previous.id,
-                    )
-                    .await?;
-                    blueprint_load(
-                        opctx,
-                        datastore,
-                        &mut whole_blueprints,
-                        target_id,
-                    )
-                    .await?;
-                    let previous_blueprint =
-                        whole_blueprints.get(&previous.id).unwrap();
+                    let previous_blueprint = match this_previous {
+                        Some(p) => p,
+                        None => {
+                            blueprint_load(opctx, datastore, previous.id)
+                                .await?
+                        }
+                    };
+                    assert_eq!(previous_blueprint.id, previous.id);
                     let current_blueprint =
-                        whole_blueprints.get(&target_id).unwrap();
+                        blueprint_load(opctx, datastore, target_id).await?;
                     let diff = current_blueprint
                         .diff_since_blueprint(&previous_blueprint);
                     println!("{}", diff.display());
+                    prev_blueprint = Some(current_blueprint);
                 }
                 _ => (),
             };
@@ -342,21 +336,13 @@ async fn cmd_reconfigurator_history(
 async fn blueprint_load(
     opctx: &OpContext,
     datastore: &DataStore,
-    cache: &mut BTreeMap<BlueprintUuid, Blueprint>,
     id: BlueprintUuid,
-) -> anyhow::Result<()> {
-    match cache.entry(id) {
-        Entry::Occupied(_) => (),
-        Entry::Vacant(v) => {
-            let id = *id.as_untyped_uuid();
-            let authz_blueprint =
-                authz::Blueprint::new(authz::FLEET, id, LookupType::ById(id));
-            let blueprint = datastore
-                .blueprint_read(opctx, &authz_blueprint)
-                .await
-                .with_context(|| format!("read blueprint {}", id))?;
-            v.insert(blueprint);
-        }
-    };
-    Ok(())
+) -> anyhow::Result<Blueprint> {
+    let id = *id.as_untyped_uuid();
+    let authz_blueprint =
+        authz::Blueprint::new(authz::FLEET, id, LookupType::ById(id));
+    datastore
+        .blueprint_read(opctx, &authz_blueprint)
+        .await
+        .with_context(|| format!("read blueprint {}", id))
 }
