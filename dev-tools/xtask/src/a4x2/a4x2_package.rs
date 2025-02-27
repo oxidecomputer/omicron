@@ -9,7 +9,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
 use sha2::Digest;
 use std::env;
-use std::fs;
+use fs_err as fs;
 use std::io::{Read, Write};
 use walkdir::WalkDir;
 use xshell::{cmd, Shell};

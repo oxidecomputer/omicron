@@ -9,7 +9,7 @@ use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use serde_json::Value;
 use std::env;
-use std::fs;
+use fs_err as fs;
 use std::{thread, time};
 use xshell::{cmd, Shell};
 
