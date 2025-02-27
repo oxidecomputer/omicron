@@ -5240,9 +5240,19 @@ dependencies = [
 
 [[package]]
 name = "libsw"
-version = "3.3.1"
+version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0673364c1ef7a1674241dbad9ba2415354103d6126451f01eeb7aaa25d6b4fce"
+checksum = "e3ddea9d2e47169bb9fbdecb418eab1ef43c20c68c37eef7ae69712db1313d0a"
+dependencies = [
+ "libsw-core",
+ "tokio",
+]
+
+[[package]]
+name = "libsw-core"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bae8635b70a7de1ebb752a5fa90aff0420ff0ff223b2d1958e2fea85019532f3"
 dependencies = [
  "tokio",
 ]
