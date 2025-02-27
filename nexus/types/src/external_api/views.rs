@@ -1129,7 +1129,7 @@ pub struct WebhookDelivery {
 }
 
 /// The state of a webhook delivery attempt.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WebhookDeliveryState {
     /// The webhook event has not yet been delivered.
@@ -1147,7 +1147,7 @@ pub enum WebhookDeliveryState {
 }
 
 /// The reason a webhook event was delivered
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WebhookDeliveryTrigger {
     /// Delivery was triggered by the event occurring for the first time.

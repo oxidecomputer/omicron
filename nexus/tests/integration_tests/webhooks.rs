@@ -9,6 +9,9 @@ use httpmock::prelude::*;
 use nexus_db_model::WebhookEventClass;
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::background::activate_background_task;
+use nexus_test_utils::http_testing::AuthnMode;
+use nexus_test_utils::http_testing::NexusRequest;
+use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::{params, views};
@@ -16,10 +19,13 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_uuid_kinds::WebhookEventUuid;
 use omicron_uuid_kinds::WebhookReceiverUuid;
 use sha2::Sha256;
+use std::time::Duration;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
+
+const WEBHOOKS_BASE_PATH: &str = "/experimental/v1/webhooks";
 
 async fn webhook_create(
     ctx: &ControlPlaneTestContext,
@@ -27,11 +33,30 @@ async fn webhook_create(
 ) -> views::Webhook {
     resource_helpers::object_create::<params::WebhookCreate, views::Webhook>(
         &ctx.external_client,
-        "/experimental/v1/webhooks",
+        WEBHOOKS_BASE_PATH,
         params,
     )
     .await
 }
+
+fn my_great_webhook_params(
+    mock: &httpmock::MockServer,
+) -> params::WebhookCreate {
+    params::WebhookCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "my-great-webhook".parse().unwrap(),
+            description: String::from("my great webhook"),
+        },
+        endpoint: mock
+            .url("/webhooks")
+            .parse()
+            .expect("this should be a valid URL"),
+        secrets: vec![MY_COOL_SECRET.to_string()],
+        events: vec!["test.foo".to_string()],
+    }
+}
+
+const MY_COOL_SECRET: &str = "my cool secret";
 
 async fn secret_add(
     ctx: &ControlPlaneTestContext,
@@ -43,10 +68,32 @@ async fn secret_add(
         views::WebhookSecretId,
     >(
         &ctx.external_client,
-        &format!("/experimental/v1/webhooks/{webhook_id}/secrets"),
+        &format!("{WEBHOOKS_BASE_PATH}/{webhook_id}/secrets"),
         params,
     )
     .await
+}
+
+async fn webhook_send_probe(
+    ctx: &ControlPlaneTestContext,
+    webhook_id: &WebhookReceiverUuid,
+    resend: bool,
+    status: http::StatusCode,
+) -> views::WebhookDelivery {
+    let pathparams = if resend { "?resend=true" } else { "" };
+    let path = format!("{WEBHOOKS_BASE_PATH}/{webhook_id}/probe{pathparams}");
+    NexusRequest::new(
+        RequestBuilder::new(&ctx.external_client, http::Method::POST, &path)
+            .expect_status(Some(status)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap_or_else(|e| {
+        panic!("failed to make \"POST\" request to {path}: {e}")
+    })
+    .parsed_body()
+    .unwrap()
 }
 
 fn is_valid_for_webhook(
@@ -124,23 +171,10 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
     let server = httpmock::MockServer::start_async().await;
 
     let id = WebhookEventUuid::new_v4();
-    let endpoint =
-        server.url("/webhooks").parse().expect("this should be a valid URL");
 
     // Create a webhook receiver.
-    let webhook = webhook_create(
-        &cptestctx,
-        &params::WebhookCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "my-great-webhook".parse().unwrap(),
-                description: String::from("my great webhook"),
-            },
-            endpoint,
-            secrets: vec!["my cool secret".to_string()],
-            events: vec!["test.foo".to_string()],
-        },
-    )
-    .await;
+    let webhook =
+        webhook_create(&cptestctx, &my_great_webhook_params(&server)).await;
     dbg!(&webhook);
 
     let mock = {
@@ -161,7 +195,7 @@ async fn test_event_delivery(cptestctx: &ControlPlaneTestContext) {
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
                         webhook.secrets[0].id,
-                        "my cool secret".as_bytes().to_vec(),
+                        MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
                 then.status(200);
@@ -467,23 +501,10 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
     let server = httpmock::MockServer::start_async().await;
 
     let id = WebhookEventUuid::new_v4();
-    let endpoint =
-        server.url("/webhooks").parse().expect("this should be a valid URL");
 
     // Create a webhook receiver.
-    let webhook = webhook_create(
-        &cptestctx,
-        &params::WebhookCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "my-great-webhook".parse().unwrap(),
-                description: String::from("my great webhook"),
-            },
-            endpoint,
-            secrets: vec!["my cool secret".to_string()],
-            events: vec!["test.foo".to_string()],
-        },
-    )
-    .await;
+    let webhook =
+        webhook_create(&cptestctx, &my_great_webhook_params(&server)).await;
     dbg!(&webhook);
 
     let mock = {
@@ -504,7 +525,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
                         webhook.secrets[0].id,
-                        "my cool secret".as_bytes().to_vec(),
+                        MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
                 then.status(500);
@@ -560,7 +581,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
                         webhook.secrets[0].id,
-                        "my cool secret".as_bytes().to_vec(),
+                        MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
                 then.status(503);
@@ -601,7 +622,7 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
                     .and(is_valid_for_webhook(&webhook))
                     .is_true(signature_verifies(
                         webhook.secrets[0].id,
-                        "my cool secret".as_bytes().to_vec(),
+                        MY_COOL_SECRET.as_bytes().to_vec(),
                     ))
                     .json_body_includes(body);
                 then.status(200);
@@ -621,4 +642,134 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
         activate_background_task(internal_client, "webhook_deliverator").await
     );
     mock.assert_async().await;
+}
+
+#[nexus_test]
+async fn test_probe(cptestctx: &ControlPlaneTestContext) {
+    let nexus = cptestctx.server.server_context().nexus.clone();
+
+    let datastore = nexus.datastore();
+    let server = httpmock::MockServer::start_async().await;
+
+    // Create a webhook receiver.
+    let webhook =
+        webhook_create(&cptestctx, &my_great_webhook_params(&server)).await;
+    dbg!(&webhook);
+
+    let body = serde_json::json!({
+        "event_class": "probe",
+        "data": {}
+    })
+    .to_string();
+
+    // First, configure the receiver server to return a successful response but
+    // only after the delivery timeout has elapsed.
+    let mock = server
+        .mock_async(move |when, then| {
+            when.method(POST)
+                .header("x-oxide-event-class", "probe")
+                .and(is_valid_for_webhook(&webhook))
+                .is_true(signature_verifies(
+                    webhook.secrets[0].id,
+                    MY_COOL_SECRET.as_bytes().to_vec(),
+                ))
+                .json_body_includes(body);
+            then
+                // Delivery timeout is 30 seconds.
+                .delay(Duration::from_secs(35))
+                // After the timeout, return something that would be considered
+                // a success.
+                .status(200);
+        })
+        .await;
+
+    // Send a probe. The probe should fail due to a timeout.
+    let probe1 = webhook_send_probe(
+        &cptestctx,
+        &webhook.id,
+        false,
+        http::StatusCode::OK,
+    )
+    .await;
+    dbg!(probe1);
+
+    mock.assert_async().await;
+
+    assert_eq!(probe1.attempt, 1);
+    assert_eq!(probe1.event_class, "probe");
+    assert_eq!(probe1.trigger, views::WebhookDeliveryTrigger::Probe);
+    assert_eq!(probe1.state, views::WebhookDeliveryState::FailedTimeout);
+
+    // Next, configure the receiver server to return a 5xx error
+    mock.delete_async().await;
+    let mock = server
+        .mock_async(move |when, then| {
+            when.method(POST)
+                .header("x-oxide-event-class", "probe")
+                .and(is_valid_for_webhook(&webhook))
+                .is_true(signature_verifies(
+                    webhook.secrets[0].id,
+                    MY_COOL_SECRET.as_bytes().to_vec(),
+                ))
+                .json_body_includes(body);
+            then.status(503);
+        })
+        .await;
+
+    let probe2 = webhook_send_probe(
+        &cptestctx,
+        &webhook.id,
+        false,
+        http::StatusCode::OK,
+    )
+    .await;
+    dbg!(probe2);
+
+    mock.assert_async().await;
+    assert_eq!(probe2.attempt, 1);
+    assert_eq!(probe2.event_class, "probe");
+    assert_eq!(probe2.trigger, views::WebhookDeliveryTrigger::Probe);
+    assert_eq!(probe2.state, views::WebhookDeliveryState::FailedHttpError);
+    assert_ne!(
+        probe2.id, probe1.id,
+        "a new delivery ID should be assigned to each probe"
+    );
+
+    mock.delete_async().await;
+    // Finally,  configure the receiver server to return a success.
+    let mock = server
+        .mock_async(move |when, then| {
+            when.method(POST)
+                .header("x-oxide-event-class", "probe")
+                .and(is_valid_for_webhook(&webhook))
+                .is_true(signature_verifies(
+                    webhook.secrets[0].id,
+                    MY_COOL_SECRET.as_bytes().to_vec(),
+                ))
+                .json_body_includes(body);
+            then.status(200);
+        })
+        .await;
+
+    let probe3 = webhook_send_probe(
+        &cptestctx,
+        &webhook.id,
+        false,
+        http::StatusCode::OK,
+    )
+    .await;
+    dbg!(probe3);
+    mock.assert_async().await;
+    assert_eq!(probe3.attempt, 1);
+    assert_eq!(probe3.event_class, "probe");
+    assert_eq!(probe3.trigger, views::WebhookDeliveryTrigger::Probe);
+    assert_eq!(probe3.state, views::WebhookDeliveryState::Delivered);
+    assert_ne!(
+        probe3.id, probe1.id,
+        "a new delivery ID should be assigned to each probe"
+    );
+    assert_ne!(
+        probe3.id, probe2.id,
+        "a new delivery ID should be assigned to each probe"
+    );
 }
