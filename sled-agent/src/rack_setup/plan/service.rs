@@ -15,9 +15,9 @@ use nexus_sled_agent_shared::inventory::{
 use nexus_types::deployment::{
     blueprint_zone_type, BlueprintPhysicalDiskConfig,
     BlueprintPhysicalDiskDisposition, BlueprintPhysicalDisksConfig,
-    BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
-    OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
-    OmicronZoneExternalSnatIp,
+    BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneImageSource,
+    BlueprintZoneType, OmicronZoneExternalFloatingAddr,
+    OmicronZoneExternalFloatingIp, OmicronZoneExternalSnatIp,
 };
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet,
@@ -435,6 +435,7 @@ impl Plan {
                         gz_address_index: i.try_into().expect("Giant indices?"),
                     },
                 ),
+                image_source: BlueprintZoneImageSource::InstallDataset,
             });
         }
 
@@ -467,6 +468,7 @@ impl Plan {
                     },
                 ),
                 filesystem_pool,
+                image_source: BlueprintZoneImageSource::InstallDataset,
             });
         }
 
@@ -517,6 +519,7 @@ impl Plan {
                     },
                 ),
                 filesystem_pool,
+                image_source: BlueprintZoneImageSource::InstallDataset,
             });
         }
 
@@ -561,6 +564,7 @@ impl Plan {
                     },
                 ),
                 filesystem_pool,
+                image_source: BlueprintZoneImageSource::InstallDataset,
             });
         }
 
@@ -591,6 +595,7 @@ impl Plan {
                     blueprint_zone_type::Oximeter { address },
                 ),
                 filesystem_pool,
+                image_source: BlueprintZoneImageSource::InstallDataset,
             })
         }
 
@@ -607,7 +612,11 @@ impl Plan {
             let http_port = omicron_common::address::CLICKHOUSE_HTTP_PORT;
             let http_address = SocketAddrV6::new(ip, http_port, 0, 0);
             dns_builder
-                .host_zone_clickhouse(id, ServiceName::Clickhouse, http_address)
+                .host_zone_clickhouse_single_node(
+                    id,
+                    ServiceName::Clickhouse,
+                    http_address,
+                )
                 .unwrap();
             let dataset_name =
                 sled.alloc_dataset_from_u2s(DatasetKind::Clickhouse)?;
@@ -624,6 +633,7 @@ impl Plan {
                     },
                 ),
                 filesystem_pool,
+                image_source: BlueprintZoneImageSource::InstallDataset,
             });
         }
 
@@ -654,6 +664,7 @@ impl Plan {
                     blueprint_zone_type::CruciblePantry { address },
                 ),
                 filesystem_pool,
+                image_source: BlueprintZoneImageSource::InstallDataset,
             });
         }
 
@@ -685,6 +696,7 @@ impl Plan {
                         },
                     ),
                     filesystem_pool: Some(pool.clone()),
+                    image_source: BlueprintZoneImageSource::InstallDataset,
                 });
             }
         }
@@ -739,6 +751,7 @@ impl Plan {
                 id,
                 zone_type,
                 filesystem_pool,
+                image_source: BlueprintZoneImageSource::InstallDataset,
             });
         }
 

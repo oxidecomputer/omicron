@@ -755,7 +755,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Create an affinity group",
+        "summary": "Create affinity group",
         "operationId": "affinity_group_create",
         "parameters": [
           {
@@ -803,7 +803,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Fetch an affinity group",
+        "summary": "Fetch affinity group",
         "operationId": "affinity_group_view",
         "parameters": [
           {
@@ -847,7 +847,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Update an affinity group",
+        "summary": "Update affinity group",
         "operationId": "affinity_group_update",
         "parameters": [
           {
@@ -901,7 +901,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Delete an affinity group",
+        "summary": "Delete affinity group",
         "operationId": "affinity_group_delete",
         "parameters": [
           {
@@ -940,7 +940,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "List members of an affinity group",
+        "summary": "List affinity group members",
         "operationId": "affinity_group_member_list",
         "parameters": [
           {
@@ -1016,7 +1016,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Fetch an affinity group member",
+        "summary": "Fetch affinity group member",
         "operationId": "affinity_group_member_instance_view",
         "parameters": [
           {
@@ -1067,7 +1067,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Add a member to an affinity group",
+        "summary": "Add member to affinity group",
         "operationId": "affinity_group_member_instance_add",
         "parameters": [
           {
@@ -1118,7 +1118,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Remove a member from an affinity group",
+        "summary": "Remove member from affinity group",
         "operationId": "affinity_group_member_instance_delete",
         "parameters": [
           {
@@ -1231,7 +1231,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Create an anti-affinity group",
+        "summary": "Create anti-affinity group",
         "operationId": "anti_affinity_group_create",
         "parameters": [
           {
@@ -1279,7 +1279,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Fetch an anti-affinity group",
+        "summary": "Fetch anti-affinity group",
         "operationId": "anti_affinity_group_view",
         "parameters": [
           {
@@ -1323,7 +1323,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Update an anti-affinity group",
+        "summary": "Update anti-affinity group",
         "operationId": "anti_affinity_group_update",
         "parameters": [
           {
@@ -1377,7 +1377,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Delete an anti-affinity group",
+        "summary": "Delete anti-affinity group",
         "operationId": "anti_affinity_group_delete",
         "parameters": [
           {
@@ -1416,7 +1416,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "List members of an anti-affinity group",
+        "summary": "List anti-affinity group members",
         "operationId": "anti_affinity_group_member_list",
         "parameters": [
           {
@@ -1492,7 +1492,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Fetch an anti-affinity group member",
+        "summary": "Fetch anti-affinity group member",
         "operationId": "anti_affinity_group_member_instance_view",
         "parameters": [
           {
@@ -1543,7 +1543,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Add a member to an anti-affinity group",
+        "summary": "Add member to anti-affinity group",
         "operationId": "anti_affinity_group_member_instance_add",
         "parameters": [
           {
@@ -1594,7 +1594,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Remove a member from an anti-affinity group",
+        "summary": "Remove member from anti-affinity group",
         "operationId": "anti_affinity_group_member_instance_delete",
         "parameters": [
           {
