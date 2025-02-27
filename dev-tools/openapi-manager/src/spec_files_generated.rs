@@ -13,7 +13,7 @@ use crate::{
         AsRawFiles,
     },
 };
-use anyhow::bail;
+use anyhow::{anyhow, bail};
 use std::{collections::BTreeMap, ops::Deref};
 
 /// Newtype wrapper around [`ApiSpecFile`] to describe OpenAPI documents
@@ -85,9 +85,19 @@ impl GeneratedFiles {
         for api in apis.iter_apis() {
             if api.is_lockstep() {
                 for version in api.iter_versions_semver() {
-                    let contents = api.generate_spec_bytes(version)?;
-                    let file_name = ApiSpecFileName::new_lockstep(api);
-                    api_files.load_contents(file_name, contents);
+                    match api.generate_spec_bytes(version) {
+                        Err(error) => {
+                            api_files.load_error(error.context(format!(
+                                "generating OpenAPI document for lockstep \
+                                 API {:?}",
+                                api.ident()
+                            )))
+                        }
+                        Ok(contents) => {
+                            let file_name = ApiSpecFileName::new_lockstep(api);
+                            api_files.load_contents(file_name, contents);
+                        }
+                    }
                 }
             } else {
                 let supported_versions = api.iter_versioned_versions().expect(
@@ -97,20 +107,37 @@ impl GeneratedFiles {
                 let mut latest = None;
                 for supported_version in supported_versions {
                     let version = supported_version.semver();
-                    let contents = api.generate_spec_bytes(version)?;
-                    let file_name = ApiSpecFileName::new_versioned(
-                        api,
-                        version.clone(),
-                        &contents,
-                    );
-                    latest = Some(file_name.clone());
-                    api_files.load_contents(file_name, contents);
+                    match api.generate_spec_bytes(version) {
+                        Err(error) => {
+                            api_files.load_error(error.context(format!(
+                                "generating OpenAPI document for versioned \
+                                 API {:?} version {}",
+                                api.ident(),
+                                version
+                            )))
+                        }
+                        Ok(contents) => {
+                            let file_name = ApiSpecFileName::new_versioned(
+                                api,
+                                version.clone(),
+                                &contents,
+                            );
+                            latest = Some(file_name.clone());
+                            api_files.load_contents(file_name, contents);
+                        }
+                    }
                 }
 
-                api_files.load_latest_link(
-                    api.ident(),
-                    latest.expect("at least one version of supported API"),
-                );
+                match latest {
+                    Some(latest) => {
+                        api_files.load_latest_link(api.ident(), latest)
+                    }
+                    None => api_files.load_error(anyhow!(
+                        "versioned API {:?} symlink: there is no working \
+                             version (fix above error(s) first)",
+                        api.ident(),
+                    )),
+                }
             }
         }
 
