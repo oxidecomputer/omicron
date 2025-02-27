@@ -3,10 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use futures::Future;
-use omicron_common::{
-    api::internal::nexus::KnownArtifactKind,
-    update::{ArtifactHash, ArtifactHashId},
-};
+use omicron_common::update::{ArtifactHash, ArtifactHashId};
+use tufaceous_artifact::KnownArtifactKind;
 
 pub(crate) fn dummy_artifact_hash_id(
     kind: KnownArtifactKind,

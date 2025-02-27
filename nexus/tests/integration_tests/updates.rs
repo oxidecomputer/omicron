@@ -21,7 +21,6 @@ use nexus_test_utils::{load_test_config, test_setup, test_setup_with_config};
 use omicron_common::api::external::{
     TufRepoGetResponse, TufRepoInsertResponse, TufRepoInsertStatus,
 };
-use omicron_common::api::internal::nexus::KnownArtifactKind;
 use omicron_sled_agent::sim;
 use pretty_assertions::assert_eq;
 use semver::Version;
@@ -29,6 +28,7 @@ use serde::Deserialize;
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::io::Write;
+use tufaceous_artifact::KnownArtifactKind;
 use tufaceous_lib::assemble::{DeserializedManifest, ManifestTweak};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

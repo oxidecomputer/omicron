@@ -13,13 +13,11 @@ use installinator_common::{
     InstallinatorStepId, StepContext, StepHandle, StepProgress, StepSuccess,
     StepWarning, UpdateEngine,
 };
+use omicron_common::update::{ArtifactHash, ArtifactHashId};
 use omicron_common::FileKv;
-use omicron_common::{
-    api::internal::nexus::KnownArtifactKind,
-    update::{ArtifactHash, ArtifactHashId, ArtifactKind},
-};
 use sha2::{Digest, Sha256};
 use slog::{error, warn, Drain};
+use tufaceous_artifact::{ArtifactKind, KnownArtifactKind};
 use tufaceous_lib::ControlPlaneZoneImages;
 use update_engine::StepResult;
 

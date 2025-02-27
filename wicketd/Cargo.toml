@@ -69,6 +69,7 @@ wicketd-api.workspace = true
 wicketd-client.workspace = true
 omicron-workspace-hack.workspace = true
 semver.workspace = true
+tufaceous-artifact.workspace = true
 
 [[bin]]
 name = "wicketd"

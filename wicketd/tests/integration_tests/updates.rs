@@ -13,11 +13,9 @@ use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
 use installinator::HOST_PHASE_2_FILE_NAME;
 use maplit::btreeset;
-use omicron_common::{
-    api::internal::nexus::KnownArtifactKind,
-    update::{ArtifactHashId, ArtifactKind},
-};
+use omicron_common::update::ArtifactHashId;
 use tokio::sync::oneshot;
+use tufaceous_artifact::{ArtifactKind, KnownArtifactKind};
 use update_engine::NestedError;
 use uuid::Uuid;
 use wicket::OutputKind;
@@ -45,7 +43,7 @@ async fn test_updates() {
     let args = tufaceous::Args::try_parse_from([
         "tufaceous",
         "assemble",
-        "../tufaceous/manifests/fake.toml",
+        "../update-common/manifests/fake.toml",
         archive_path.as_str(),
     ])
     .expect("args parsed correctly");
@@ -283,7 +281,7 @@ async fn test_installinator_fetch() {
     let args = tufaceous::Args::try_parse_from([
         "tufaceous",
         "assemble",
-        "../tufaceous/manifests/fake.toml",
+        "../update-common/manifests/fake.toml",
         archive_path.as_str(),
     ])
     .expect("args parsed correctly");
@@ -422,7 +420,7 @@ async fn test_update_races() {
     let args = tufaceous::Args::try_parse_from([
         "tufaceous",
         "assemble",
-        "../tufaceous/manifests/fake.toml",
+        "../update-common/manifests/fake.toml",
         archive_path.as_str(),
     ])
     .expect("args parsed correctly");
