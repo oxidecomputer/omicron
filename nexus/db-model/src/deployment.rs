@@ -138,7 +138,7 @@ impl From<BpTarget> for nexus_types::deployment::BlueprintTarget {
     }
 }
 
-/// See [`nexus_types::deployment::Blueprint::sled_state`].
+/// See [`nexus_types::deployment::BlueprintSledConfig::state`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_sled_state)]
 pub struct BpSledState {
