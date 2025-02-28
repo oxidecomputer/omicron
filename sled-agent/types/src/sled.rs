@@ -17,6 +17,8 @@ use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
 use uuid::Uuid;
 
+pub const SWITCH_ZONE_BASEBOARD_FILE: &str = "/opt/oxide/baseboard.json";
+
 /// A representation of a Baseboard ID as used in the inventory subsystem
 /// This type is essentially the same as a `Baseboard` except it doesn't have a
 /// revision or HW type (Gimlet, PC, Unknown).
