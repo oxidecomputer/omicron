@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::metrics_queries::MetricsNotYet;
-use super::metrics_queries::MetricsQuerier;
+use super::metrics_querier::MetricsNotYet;
+use super::metrics_querier::MetricsQuerier;
 use crate::integration_tests::instances::{
     create_project_and_pool, instance_post, instance_simulate, InstanceOp,
 };

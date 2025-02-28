@@ -5,8 +5,8 @@
 //! Tests basic disk support in the API
 
 use super::instances::instance_wait_for_state;
-use super::metrics_queries::MetricsNotYet;
-use super::metrics_queries::MetricsQuerier;
+use super::metrics_querier::MetricsNotYet;
+use super::metrics_querier::MetricsQuerier;
 use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;

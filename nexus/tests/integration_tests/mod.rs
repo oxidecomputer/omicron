@@ -28,7 +28,7 @@ mod instances;
 mod internet_gateway;
 mod ip_pools;
 mod metrics;
-mod metrics_queries;
+mod metrics_querier;
 mod oximeter;
 mod pantry;
 mod password_login;
