@@ -7,9 +7,9 @@
 use anyhow::Result;
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
+use fs_err as fs;
 use sha2::Digest;
 use std::env;
-use fs_err as fs;
 use std::io::{Read, Write};
 use walkdir::WalkDir;
 use xshell::{cmd, Shell};
@@ -214,7 +214,8 @@ fn build_live_tests(sh: &Shell, env: &Environment) -> Result<()> {
 
     // Finally, the script that will run nextest
     // TODO: should we make this into a rust program that runs in the VM?
-    let switch_zone_script_path = live_test_bundle_dir.join(super::LIVE_TEST_BUNDLE_SCRIPT);
+    let switch_zone_script_path =
+        live_test_bundle_dir.join(super::LIVE_TEST_BUNDLE_SCRIPT);
     let switch_zone_script = r#"
         set -euxo pipefail
         /opt/oxide/omdb/bin/omdb -w nexus blueprints target enable current
