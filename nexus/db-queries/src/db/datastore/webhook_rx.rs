@@ -371,6 +371,50 @@ impl DataStore {
     }
 
     //
+    // Glob reprocessing
+    //
+
+    pub async fn webhook_glob_list_outdated(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<WebhookRxEventGlob> {
+        use crate::db::model::{DbSemverVersion, SCHEMA_VERSION};
+
+        let (current_version, target_version) =
+            self.database_schema_version().await.map_err(|e| {
+                e.internal_context("couldn't load db schema version")
+            })?;
+
+        if let Some(target) = target_version {
+            return Err(Error::InternalError {
+                internal_message: format!(
+                    "webhook glob reprocessing must wait until the migration \
+                    from {current_version} to {target} has completed",
+                ),
+            });
+        }
+        if current_version != SCHEMA_VERSION {
+            return Err(Error::InternalError {
+                internal_message: format!(
+                    "cannot reprocess webhook globs, as our schema version \
+                    ({SCHEMA_VERSION}) doess not match the current version \
+                    ({current_version})",
+                ),
+            });
+        }
+
+        glob_dsl::webhook_rx_event_glob
+            .filter(
+                glob_dsl::schema_version
+                    .ne(DbSemverVersion::from(SCHEMA_VERSION)),
+            )
+            .select(WebhookRxEventGlob::as_select())
+            .load_async(&*self.pool_connection_authorized(&opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    //
     // Secrets
     //
 
