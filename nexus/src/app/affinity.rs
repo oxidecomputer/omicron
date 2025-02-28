@@ -242,10 +242,9 @@ impl super::Nexus {
         let (.., authz_affinity_group) = affinity_group_lookup
             .lookup_for(authz::Action::ListChildren)
             .await?;
-        Ok(self
-            .db_datastore
+        self.db_datastore
             .affinity_group_member_list(opctx, &authz_affinity_group, pagparams)
-            .await?)
+            .await
     }
 
     pub(crate) async fn anti_affinity_group_member_list(
