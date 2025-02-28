@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use chrono::Utc;
 use dropshot::HttpErrorResponseBody;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -13,11 +14,14 @@ use nexus_types::external_api::views::OxqlQueryResult;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
+use oximeter::Datum;
+use oximeter::Measurement;
 use oximeter::TimeseriesSchema;
 use serde::de::DeserializeOwned;
 use slog::Logger;
 use std::borrow::Cow;
 use std::time::Duration;
+use uuid::Uuid;
 
 enum TimeseriesQueryResult {
     TimeseriesNotFound,
@@ -91,11 +95,78 @@ impl<'a, N> MetricsQuerier<'a, N> {
     where
         F: Fn(Vec<TimeseriesSchema>) -> Result<T, MetricsNotYet>,
     {
-        self.wait_for_objects("/v1/system/timeseries/schemas", cond).await
+        let endpoint = "/v1/system/timeseries/schemas";
+        self.wait_for_objects(|| endpoint.to_string(), cond).await
     }
 
-    async fn wait_for_objects<F, T, U>(&self, endpoint: &str, cond: F) -> T
+    pub async fn wait_for_latest_system_metric<F, T>(
+        &self,
+        metric_name: &str,
+        silo_id: Option<Uuid>,
+        cond: F,
+    ) -> T
     where
+        F: Fn(i64) -> Result<T, MetricsNotYet>,
+    {
+        let endpoint = || {
+            let id_param = match silo_id {
+                Some(id) => format!("&silo={}", id),
+                None => "".to_string(),
+            };
+            format!(
+                "/v1/system/metrics/{metric_name}?start_time={:?}&end_time={:?}&order=descending&limit=1{id_param}",
+                self.ctx.start_time,
+                Utc::now(),
+            )
+        };
+        self.wait_for_latest_metric(endpoint, cond).await
+    }
+
+    pub async fn wait_for_latest_silo_metric<F, T>(
+        &self,
+        metric_name: &str,
+        project_id: Option<Uuid>,
+        cond: F,
+    ) -> T
+    where
+        F: Fn(i64) -> Result<T, MetricsNotYet>,
+    {
+        let endpoint = || {
+            let id_param = match project_id {
+                Some(id) => format!("&project={}", id),
+                None => "".to_string(),
+            };
+            format!(
+                "/v1/metrics/{metric_name}?start_time={:?}&end_time={:?}&order=descending&limit=1{id_param}",
+                self.ctx.start_time,
+                Utc::now(),
+            )
+        };
+        self.wait_for_latest_metric(endpoint, cond).await
+    }
+
+    async fn wait_for_latest_metric<F, G, T>(&self, endpoint: G, cond: F) -> T
+    where
+        F: Fn(i64) -> Result<T, MetricsNotYet>,
+        G: Fn() -> String,
+    {
+        self.wait_for_objects(endpoint, |mut measurements: Vec<Measurement>| {
+            let item = match measurements.len() {
+                0 => return Err(MetricsNotYet::new("no measurements found")),
+                1 => measurements.pop().unwrap(),
+                n => unreachable!("limit=1 returned {n} measurements"),
+            };
+            match item.datum() {
+                Datum::I64(c) => cond(*c),
+                _ => panic!("Unexpected datum type {:?}", item.datum()),
+            }
+        })
+        .await
+    }
+
+    async fn wait_for_objects<F, G, T, U>(&self, endpoint: G, cond: F) -> T
+    where
+        G: Fn() -> String,
         F: Fn(Vec<U>) -> Result<T, MetricsNotYet>,
         U: DeserializeOwned,
     {
@@ -109,7 +180,7 @@ impl<'a, N> MetricsQuerier<'a, N> {
 
                 let page = objects_list_page_authz::<U>(
                     &self.ctx.external_client,
-                    endpoint,
+                    &endpoint(),
                 )
                 .await;
 
@@ -135,7 +206,8 @@ impl<'a, N> MetricsQuerier<'a, N> {
             Err(poll::Error::TimedOut(duration)) => {
                 panic!(
                     "Timed out after {duration:?} waiting for objects list \
-                    success, endpoint: '{endpoint}'"
+                    success, endpoint: '{}'",
+                    endpoint(),
                 );
             }
             Err(poll::Error::PermanentError(_)) => unreachable!(

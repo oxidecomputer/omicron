@@ -111,28 +111,30 @@ async fn assert_system_metrics(
     cpus: i64,
     ram: i64,
 ) {
-    cptestctx
-        .oximeter
-        .try_force_collect()
-        .await
-        .expect("Could not force oximeter collection");
-    assert_eq!(
-        get_latest_system_metric(
-            cptestctx,
-            "virtual_disk_space_provisioned",
-            silo_id,
-        )
-        .await,
-        disk
-    );
-    assert_eq!(
-        get_latest_system_metric(cptestctx, "cpus_provisioned", silo_id).await,
-        cpus
-    );
-    assert_eq!(
-        get_latest_system_metric(cptestctx, "ram_provisioned", silo_id).await,
-        ram
-    );
+    let metrics_querier = MetricsQuerier::new(cptestctx);
+
+    for (metric_name, value) in [
+        ("virtual_disk_space_provisioned", disk),
+        ("cpus_provisioned", cpus),
+        ("ram_provisioned", ram),
+    ] {
+        metrics_querier
+            .wait_for_latest_system_metric(
+                metric_name,
+                silo_id,
+                |measurement| {
+                    if measurement == value {
+                        Ok(())
+                    } else {
+                        Err(MetricsNotYet::new(format!(
+                            "waiting for {metric_name}={value} \
+                             (currently {measurement})"
+                        )))
+                    }
+                },
+            )
+            .await;
+    }
 }
 
 async fn assert_silo_metrics(
@@ -142,28 +144,30 @@ async fn assert_silo_metrics(
     cpus: i64,
     ram: i64,
 ) {
-    cptestctx
-        .oximeter
-        .try_force_collect()
-        .await
-        .expect("Could not force oximeter collection");
-    assert_eq!(
-        get_latest_silo_metric(
-            cptestctx,
-            "virtual_disk_space_provisioned",
-            project_id,
-        )
-        .await,
-        disk
-    );
-    assert_eq!(
-        get_latest_silo_metric(cptestctx, "cpus_provisioned", project_id).await,
-        cpus
-    );
-    assert_eq!(
-        get_latest_silo_metric(cptestctx, "ram_provisioned", project_id).await,
-        ram
-    );
+    let metrics_querier = MetricsQuerier::new(cptestctx);
+
+    for (metric_name, value) in [
+        ("virtual_disk_space_provisioned", disk),
+        ("cpus_provisioned", cpus),
+        ("ram_provisioned", ram),
+    ] {
+        metrics_querier
+            .wait_for_latest_silo_metric(
+                metric_name,
+                project_id,
+                |measurement| {
+                    if measurement == value {
+                        Ok(())
+                    } else {
+                        Err(MetricsNotYet::new(format!(
+                            "waiting for {metric_name}={value} \
+                             (currently {measurement})"
+                        )))
+                    }
+                },
+            )
+            .await;
+    }
 }
 
 async fn assert_404(
