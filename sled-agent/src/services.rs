@@ -98,6 +98,7 @@ use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use omicron_uuid_kinds::OmicronZoneUuid;
 use rand::prelude::SliceRandom;
 use sled_agent_types::{
+    sled::SWITCH_ZONE_BASEBOARD_FILE,
     time_sync::TimeSync,
     zone_bundle::{ZoneBundleCause, ZoneBundleMetadata},
 };
@@ -109,6 +110,7 @@ use sled_storage::config::MountConfig;
 use sled_storage::dataset::{CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
@@ -136,8 +138,6 @@ const CLICKHOUSE_SERVER_BINARY: &str =
 const CLICKHOUSE_KEEPER_BINARY: &str =
     "/opt/oxide/clickhouse_keeper/clickhouse";
 const CLICKHOUSE_BINARY: &str = "/opt/oxide/clickhouse/clickhouse";
-
-pub const SWITCH_ZONE_BASEBOARD_FILE: &str = "/opt/oxide/baseboard.json";
 
 #[derive(thiserror::Error, Debug, slog_error_chain::SlogInlineError)]
 pub enum Error {
@@ -1049,7 +1049,45 @@ impl ServiceManager {
     async fn advertise_prefix_of_address(&self, address: Ipv6Addr) {
         let subnet = Ipv6Subnet::new(address);
         if self.inner.advertised_prefixes.lock().await.insert(subnet) {
-            self.inner.ddmd_client.advertise_prefix(subnet);
+            // Spawn a background task to notify our local ddmd of this
+            // prefix so it can advertise it to other sleds.
+            //
+            // TODO-correctness Spawning a task here is NOT correct; we need to
+            // withdraw our advertisement for this prefix if the zone providing
+            // it is shut down, which we can't do correctly if we've spawned an
+            // infinite retry loop here. This is omicron#7377.
+            tokio::spawn({
+                let prefix = subnet.net();
+                let ddmd_client = self.inner.ddmd_client.clone();
+                async move {
+                    retry_notify(
+                        retry_policy_internal_service_aggressive(),
+                        || async {
+                            info!(
+                                ddmd_client.log(),
+                                "Sending prefix to \
+                                 ddmd for advertisement";
+                                "prefix" => ?prefix,
+                            );
+                            ddmd_client
+                                .advertise_prefixes(vec![prefix])
+                                .await?;
+                            Ok(())
+                        },
+                        |err, duration| {
+                            info!(
+                                ddmd_client.log(),
+                                "Failed to notify ddmd \
+                                 of our prefix (will retry)";
+                                "retry_after" => ?duration,
+                                InlineErrorChain::new(&err),
+                            );
+                        },
+                    )
+                    .await
+                    .expect("retry policy retries until success");
+                }
+            });
         }
     }
 

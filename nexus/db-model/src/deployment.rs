@@ -25,7 +25,6 @@ use chrono::{DateTime, Utc};
 use clickhouse_admin_types::{KeeperId, ServerId};
 use ipnetwork::IpNetwork;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintDatasetsConfig;
@@ -39,6 +38,7 @@ use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
+use nexus_types::deployment::{blueprint_zone_type, BlueprintZoneImageSource};
 use nexus_types::deployment::{
     OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
     OmicronZoneExternalSnatIp,
@@ -138,7 +138,7 @@ impl From<BpTarget> for nexus_types::deployment::BlueprintTarget {
     }
 }
 
-/// See [`nexus_types::deployment::Blueprint::sled_state`].
+/// See [`nexus_types::deployment::BlueprintSledConfig::state`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_sled_state)]
 pub struct BpSledState {
@@ -957,6 +957,7 @@ impl BpOmicronZone {
                 .filesystem_pool
                 .map(|id| ZpoolName::new_external(id.into())),
             zone_type,
+            image_source: BlueprintZoneImageSource::InstallDataset,
         })
     }
 }
