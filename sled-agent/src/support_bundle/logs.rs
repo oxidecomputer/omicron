@@ -43,9 +43,16 @@ fn err_str(err: &dyn std::error::Error) -> String {
 impl From<Error> for HttpError {
     fn from(err: Error) -> Self {
         match err {
+            Error::InvalidLogDir(_) => {
+                HttpError::for_bad_request(None, "Invalid log dir".to_string())
+            }
             Error::NotAFile => {
                 HttpError::for_bad_request(None, "Not a file".to_string())
             }
+            Error::NotFound(path) => HttpError::for_not_found(
+                None,
+                format!("Log file {path} not found"),
+            ),
             err => HttpError::for_internal_error(err_str(&err)),
         }
     }
@@ -82,8 +89,13 @@ impl<'a> SupportBundleLogs<'a> {
 
         let normalized = normalize_path(req);
         let valid_path = validate_log_dir(&valid_dirs, normalized)?;
-        // XXX map NotFound to 404
-        let mut file = tokio::fs::File::open(&valid_path).await?;
+        let mut file = match tokio::fs::File::open(&valid_path).await {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(Error::NotFound(valid_path));
+            }
+            Err(e) => return Err(e.into()),
+        };
         let metadata = file.metadata().await?;
 
         if !metadata.is_file() {
@@ -94,7 +106,6 @@ impl<'a> SupportBundleLogs<'a> {
             http::HeaderValue::from_static("text/plain");
         let content_type = Some(CONTENT_TYPE);
 
-        // TODO: add support for actual range requests
         if let Some(range) = range {
             // If this has a range request, we need to validate the range
             // and put bounds on the part of the file we're reading.
@@ -126,7 +137,9 @@ impl<'a> SupportBundleLogs<'a> {
                 None,
                 metadata.len(),
                 content_type,
-                ReaderStream::new(file),
+                // The take here is load bearing as we want to cap continously
+                // growing log files.
+                ReaderStream::new(file.take(metadata.len())),
             )?)
         }
     }

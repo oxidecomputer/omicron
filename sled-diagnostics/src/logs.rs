@@ -18,6 +18,12 @@ pub struct SledDiagnosticsLogs {
     logs: BTreeMap<Zone, Service>,
 }
 
+impl SledDiagnosticsLogs {
+    pub fn logs(&self) -> &BTreeMap<Zone, Service> {
+        &self.logs
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum SledDiagnosticsLogError {
     #[error("Failed to find log paths: {0}")]
