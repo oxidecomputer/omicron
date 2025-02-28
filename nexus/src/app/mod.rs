@@ -430,7 +430,7 @@ impl Nexus {
             None => {
                 let native_resolver =
                     qorb_resolver.for_service(ServiceName::ClickhouseNative);
-                oximeter_db::Client::new_with_pool(native_resolver, &log)
+                oximeter_db::Client::new_with_resolver(native_resolver, &log)
             }
             Some(address) => oximeter_db::Client::new(*address, &log),
         };

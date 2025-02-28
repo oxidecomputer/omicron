@@ -41,6 +41,7 @@ use oximeter::schema::TimeseriesKey;
 use oximeter::types::Sample;
 use oximeter::Measurement;
 use oximeter::TimeseriesName;
+use qorb::policy::Policy;
 use qorb::pool::Pool;
 use qorb::resolver::BoxedResolver;
 use qorb::resolvers::single_host::SingleHostResolver;
@@ -91,8 +92,22 @@ pub struct Client {
 }
 
 impl Client {
-    /// Construct a Clickhouse client of the database with a connection pool.
-    pub fn new_with_pool(native_resolver: BoxedResolver, log: &Logger) -> Self {
+    /// Construct a Clickhouse client of the database with a resolver for the
+    /// connection pool.
+    pub fn new_with_resolver(
+        native_resolver: BoxedResolver,
+        log: &Logger,
+    ) -> Self {
+        Self::new_with_pool_policy(native_resolver, Default::default(), log)
+    }
+
+    /// Construct a ClickHouse client with a specific qorb connection pool
+    /// policy.
+    pub fn new_with_pool_policy(
+        native_resolver: BoxedResolver,
+        policy: Policy,
+        log: &Logger,
+    ) -> Self {
         let id = Uuid::new_v4();
         let log = log.new(slog::o!(
             "component" => "clickhouse-client",
@@ -103,7 +118,7 @@ impl Client {
         let native_pool = match Pool::new(
             native_resolver,
             Arc::new(native::connection::Connector),
-            qorb::policy::Policy::default(),
+            policy,
         ) {
             Ok(pool) => {
                 debug!(log, "registered USDT probes");
@@ -1383,6 +1398,7 @@ mod tests {
     use oximeter::Metric;
     use oximeter::Target;
     use std::net::Ipv6Addr;
+    use std::net::SocketAddrV6;
     use std::path::PathBuf;
     use std::pin::Pin;
     use std::time::Duration;
@@ -2048,28 +2064,28 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    #[derive(Debug, Default, PartialEq, oximeter::Target)]
+    struct MyTarget {
+        id: i64,
+    }
+
+    // These two metrics share a target and have no fields. Thus they have the same timeseries
+    // keys. This test is to verify we can distinguish between them, which relies on their
+    // names.
+    #[derive(Debug, Default, PartialEq, oximeter::Metric)]
+    struct FirstMetric {
+        datum: i64,
+    }
+
+    #[derive(Debug, Default, PartialEq, oximeter::Metric)]
+    struct SecondMetric {
+        datum: i64,
+    }
+
     async fn test_differentiate_by_timeseries_name_impl(
         _: &ClickHouseDeployment,
         client: Client,
     ) {
-        #[derive(Debug, Default, PartialEq, oximeter::Target)]
-        struct MyTarget {
-            id: i64,
-        }
-
-        // These two metrics share a target and have no fields. Thus they have the same timeseries
-        // keys. This test is to verify we can distinguish between them, which relies on their
-        // names.
-        #[derive(Debug, Default, PartialEq, oximeter::Metric)]
-        struct FirstMetric {
-            datum: i64,
-        }
-
-        #[derive(Debug, Default, PartialEq, oximeter::Metric)]
-        struct SecondMetric {
-            datum: i64,
-        }
-
         let target = MyTarget::default();
         let first_metric = FirstMetric::default();
         let second_metric = SecondMetric::default();
@@ -4838,6 +4854,95 @@ mod tests {
             10,
             "Read incorrect database version",
         );
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    // Regression for https://github.com/oxidecomputer/omicron/issues/7674.
+    #[tokio::test]
+    async fn insert_samples_fails_fast() {
+        let logctx = test_setup_log("insert_samples_fails_fast");
+
+        // First, setup the database as usual.
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.native_address().into(), &logctx.log);
+        client
+            .initialize_db_with_version(false, OXIMETER_VERSION)
+            .await
+            .unwrap();
+
+        // Now, pretend that we've collected a bunch of samples and try to
+        // insert them. The bug in #7674 would cause this to take a huge amount
+        // of time, proportional to the qorb pool claim timeout multiplied by
+        // the number of samples. But we should expect this to fail very
+        // quickly, when it first learns that the database isn't reachable.
+        //
+        // It would be nice to do this by simulating the server itself going out
+        // to lunch. That's tricky, especially in CI -- if we kill the database,
+        // another one might be started by another test, and take the ports the
+        // previous one used.
+        //
+        // Instead, we'll simulate this by creating a new _client_, pointing at
+        // a bogus address. To start, build a lot of samples.
+        let target = MyTarget::default();
+        let metric = FirstMetric::default();
+        const N_SAMPLES: usize = 1000;
+        let mut samples = Vec::with_capacity(N_SAMPLES);
+        for _ in 0..N_SAMPLES {
+            samples.push(Sample::new(&target, &metric).unwrap());
+        }
+
+        // Next, create a client that will never resolve, but whose claim
+        // timeout is pretty short.
+        const TEST_TIMEOUT: Duration = Duration::from_secs(30);
+        const CLAIM_TIMEOUT: Duration = Duration::from_secs(1);
+        assert!(TEST_TIMEOUT > CLAIM_TIMEOUT);
+        const BOGUS_ADDR: SocketAddr = SocketAddr::V6(SocketAddrV6::new(
+            Ipv6Addr::new(0x2001, 0xdb8, 0x0, 0x0, 0x0, 0x0, 0x0, 0x01),
+            0,
+            0,
+            0,
+        ));
+        let resolver = Box::new(SingleHostResolver::new(BOGUS_ADDR));
+        let policy = Policy {
+            claim_timeout: Duration::from_secs(1),
+            ..Default::default()
+        };
+        let new_client =
+            Client::new_with_pool_policy(resolver, policy, &logctx.log);
+
+        // And then assert that when we try to insert samples, we _fail_ rather
+        // than timeout. Timing out here would only happen if we tried to do
+        // something stupid like resolve the address for each sample...who'd
+        // ever do that?!
+        let fut = tokio::time::timeout(
+            TEST_TIMEOUT,
+            new_client.insert_samples(&samples),
+        );
+        match fut.await {
+            Ok(Ok(())) => panic!(
+                "Client::insert_samples() should have failed, \
+                since it's trying to insert to a non-existent database"
+            ),
+            Ok(Err(e)) => {
+                assert!(
+                    matches!(e, Error::Connection(_)),
+                    "Expected this to fail with a qorb connection \
+                    error, but found {:?}",
+                    e,
+                );
+            }
+            Err(_) => {
+                panic!(
+                    "Client::insert_samples() timed out after {:?}! \
+                    This method should have failed after the \
+                    default qorb claim timeout of 30s instead!",
+                    TEST_TIMEOUT,
+                )
+            }
+        }
+
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
