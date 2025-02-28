@@ -375,46 +375,99 @@ impl DataStore {
         opctx: &OpContext,
         authz_affinity_group: &authz::AffinityGroup,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<(AffinityGroupInstanceMembership, Name)> {
+    ) -> ListResultVec<external::AffinityGroupMember> {
         opctx.authorize(authz::Action::Read, authz_affinity_group).await?;
 
-        use db::schema::affinity_group_instance_membership::dsl;
-        use db::schema::instance::dsl as instance_dsl;
+        let mut query = QueryBuilder::new()
+            .sql("
+                SELECT instance_id as id, name
+                FROM affinity_group_instance_membership
+                INNER JOIN instance
+                ON instance.id = affinity_group_instance_membership.instance_id
+                WHERE instance.time_deleted IS NULL AND group_id = ",
+            )
+            .param()
+            .bind::<diesel::sql_types::Uuid, _>(authz_affinity_group.id())
+            .sql(" ");
+
+        let (direction, limit) = match pagparams {
+            PaginatedBy::Id(p) => (p.direction, p.limit),
+            PaginatedBy::Name(p) => (p.direction, p.limit),
+        };
+        let asc = match direction {
+            dropshot::PaginationOrder::Ascending => true,
+            dropshot::PaginationOrder::Descending => false,
+        };
+
         match pagparams {
-            PaginatedBy::Id(pagparams) => paginated(
-                dsl::affinity_group_instance_membership,
-                dsl::instance_id,
-                &pagparams,
-            ),
-            PaginatedBy::Name(_) => {
-                return Err(Error::invalid_request(
-                    "Cannot paginate group members by name",
-                ));
-            }
+            PaginatedBy::Id(DataPageParams { marker, .. }) => {
+                if let Some(id) = marker {
+                    query = query
+                        .sql("WHERE id ")
+                        .sql(if asc { ">" } else { "<" })
+                        .sql(" ")
+                        .param()
+                        .bind::<diesel::sql_types::Uuid, _>(**id);
+                };
+                query = query.sql(" ORDER BY id ");
+            },
+            PaginatedBy::Name(DataPageParams { marker, .. }) => {
+                if let Some(name) = marker {
+                    query = query
+                        .sql("WHERE name ")
+                        .sql(if asc { ">" } else { "<" })
+                        .sql(" ")
+                        .param()
+                        .bind::<diesel::sql_types::Text, _>(Name((*name).clone()));
+                };
+                query = query.sql(" ORDER BY name ");
+
+            },
         }
-        .filter(dsl::group_id.eq(authz_affinity_group.id()))
-        .inner_join(
-            instance_dsl::instance.on(instance_dsl::id.eq(dsl::instance_id)),
-        )
-        .filter(instance_dsl::time_deleted.is_null())
-        .select((
-            AffinityGroupInstanceMembership::as_select(),
-            instance_dsl::name,
-        ))
-        .load_async(&*self.pool_connection_authorized(opctx).await?)
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        if asc {
+            query = query.sql("ASC ");
+        } else {
+            query = query.sql("DESC ");
+        }
+
+        query =
+            query.sql(" LIMIT ").param().bind::<diesel::sql_types::BigInt, _>(
+                i64::from(limit.get()),
+            );
+
+        query
+            .query::<(
+                diesel::sql_types::Uuid,
+                diesel::sql_types::Text,
+            )>()
+            .load_async::<(Uuid, Name)>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+            .into_iter()
+            .map(|(id, name)| {
+                Ok(external::AffinityGroupMember::Instance {
+                    id: InstanceUuid::from_untyped_uuid(id),
+                    name: name.into(),
+                })
+            })
+            .collect()
     }
 
     pub async fn anti_affinity_group_member_list(
         &self,
         opctx: &OpContext,
         authz_anti_affinity_group: &authz::AntiAffinityGroup,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<external::AntiAffinityGroupMember> {
         opctx.authorize(authz::Action::Read, authz_anti_affinity_group).await?;
 
-        let asc = match pagparams.direction {
+        let (direction, limit) = match pagparams {
+            PaginatedBy::Id(p) => (p.direction, p.limit),
+            PaginatedBy::Name(p) => (p.direction, p.limit),
+        };
+        let asc = match direction {
             dropshot::PaginationOrder::Ascending => true,
             dropshot::PaginationOrder::Descending => false,
         };
@@ -445,16 +498,32 @@ impl DataStore {
             .param()
             .bind::<diesel::sql_types::Uuid, _>(authz_anti_affinity_group.id())
             .sql(") ");
-        if let Some(id) = pagparams.marker {
-            query = query
-                .sql("WHERE id ")
-                .sql(if asc { ">" } else { "<" })
-                .sql(" ")
-                .param()
-                .bind::<diesel::sql_types::Uuid, _>(*id);
-        };
 
-        query = query.sql(" ORDER BY id ");
+        match pagparams {
+            PaginatedBy::Id(DataPageParams { marker, .. }) => {
+                if let Some(id) = marker {
+                    query = query
+                        .sql("WHERE id ")
+                        .sql(if asc { ">" } else { "<" })
+                        .sql(" ")
+                        .param()
+                        .bind::<diesel::sql_types::Uuid, _>(**id);
+                };
+                query = query.sql(" ORDER BY id ");
+            },
+            PaginatedBy::Name(DataPageParams { marker, .. }) => {
+                if let Some(name) = marker {
+                    query = query
+                        .sql("WHERE name ")
+                        .sql(if asc { ">" } else { "<" })
+                        .sql(" ")
+                        .param()
+                        .bind::<diesel::sql_types::Text, _>(Name((*name).clone()));
+                };
+                query = query.sql(" ORDER BY name ");
+
+            },
+        }
         if asc {
             query = query.sql("ASC ");
         } else {
@@ -463,7 +532,7 @@ impl DataStore {
 
         query =
             query.sql(" LIMIT ").param().bind::<diesel::sql_types::BigInt, _>(
-                i64::from(pagparams.limit.get()),
+                i64::from(limit.get()),
             );
 
         query
@@ -1223,7 +1292,7 @@ mod tests {
     use nexus_types::external_api::params;
     use omicron_common::api::external::{
         self, ByteCount, DataPageParams, IdentityMetadataCreateParams,
-        SimpleIdentity,
+        SimpleIdentityOrName,
     };
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::GenericUuid;
@@ -1766,7 +1835,7 @@ mod tests {
             .await
             .unwrap()
             .into_iter()
-            .map(|(m, _)| m.instance_id.into())
+            .map(|m| InstanceUuid::from_untyped_uuid(m.id()))
             .collect::<Vec<_>>();
         assert_eq!(members.len(), 1);
         assert_eq!(instance, members[0]);
@@ -1819,11 +1888,11 @@ mod tests {
             .unwrap();
 
         // A new group should have no members
-        let pagparams = DataPageParams {
+        let pagparams = PaginatedBy::Id(DataPageParams {
             marker: None,
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
-        };
+        });
         let members = datastore
             .anti_affinity_group_member_list(&opctx, &authz_group, &pagparams)
             .await
@@ -1915,11 +1984,11 @@ mod tests {
             .unwrap();
 
         // A new group should have no members
-        let pagparams = DataPageParams {
+        let pagparams = PaginatedBy::Id(DataPageParams {
             marker: None,
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
-        };
+        });
         let members = datastore
             .anti_affinity_group_member_list(
                 &opctx,
@@ -1996,11 +2065,11 @@ mod tests {
         members.sort_unstable_by_key(|m1| m1.id());
 
         // We can list all members
-        let mut pagparams = DataPageParams {
+        let pagparams = PaginatedBy::Id(DataPageParams {
             marker: None,
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
-        };
+        });
         let observed_members = datastore
             .anti_affinity_group_member_list(
                 &opctx,
@@ -2013,7 +2082,12 @@ mod tests {
 
         // We can paginate over the results
         let marker = members[2].id();
-        pagparams.marker = Some(&marker);
+        let pagparams = PaginatedBy::Id(DataPageParams {
+            marker: Some(&marker),
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        });
+
         let observed_members = datastore
             .anti_affinity_group_member_list(
                 &opctx,
@@ -2025,8 +2099,11 @@ mod tests {
         assert_eq!(observed_members, members[3..]);
 
         // We can list limited results
-        pagparams.marker = Some(&marker);
-        pagparams.limit = NonZeroU32::new(2).unwrap();
+        let pagparams = PaginatedBy::Id(DataPageParams {
+            marker: Some(&marker),
+            limit: NonZeroU32::new(2).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        });
         let observed_members = datastore
             .anti_affinity_group_member_list(
                 &opctx,
@@ -2039,9 +2116,11 @@ mod tests {
 
         // We can list in descending order too
         members.reverse();
-        pagparams.marker = None;
-        pagparams.limit = NonZeroU32::new(100).unwrap();
-        pagparams.direction = dropshot::PaginationOrder::Descending;
+        let pagparams = PaginatedBy::Id(DataPageParams {
+            marker: None,
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Descending
+        });
         let observed_members = datastore
             .anti_affinity_group_member_list(
                 &opctx,
@@ -2085,12 +2164,11 @@ mod tests {
             .unwrap();
 
         // A new group should have no members
-        let pagparams_id = DataPageParams {
+        let pagbyid = PaginatedBy::Id(DataPageParams {
             marker: None,
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
-        };
-        let pagbyid = PaginatedBy::Id(pagparams_id);
+        });
         let members = datastore
             .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
             .await
@@ -2139,7 +2217,7 @@ mod tests {
             .await
             .unwrap()
             .into_iter()
-            .map(|(m, _)| m.instance_id.into())
+            .map(|m| InstanceUuid::from_untyped_uuid(m.id()))
             .collect::<Vec<_>>();
         assert_eq!(members.len(), 1);
         assert_eq!(instance, members[0]);
@@ -2193,11 +2271,11 @@ mod tests {
             .unwrap();
 
         // A new group should have no members
-        let pagparams = DataPageParams {
+        let pagparams = PaginatedBy::Id(DataPageParams {
             marker: None,
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
-        };
+        });
         let members = datastore
             .anti_affinity_group_member_list(&opctx, &authz_group, &pagparams)
             .await
@@ -2327,11 +2405,11 @@ mod tests {
             .unwrap();
 
         // A new group should have no members
-        let pagparams = DataPageParams {
+        let pagparams = PaginatedBy::Id(DataPageParams {
             marker: None,
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
-        };
+        });
         let members = datastore
             .anti_affinity_group_member_list(
                 &opctx,
@@ -2468,12 +2546,11 @@ mod tests {
             .unwrap();
 
         // A new group should have no members
-        let pagparams_id = DataPageParams {
+        let pagbyid = PaginatedBy::Id(DataPageParams {
             marker: None,
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
-        };
-        let pagbyid = PaginatedBy::Id(pagparams_id);
+        });
         let members = datastore
             .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
             .await
@@ -2545,11 +2622,11 @@ mod tests {
             .unwrap();
 
         // A new group should have no members
-        let pagparams = DataPageParams {
+        let pagparams = PaginatedBy::Id(DataPageParams {
             marker: None,
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
-        };
+        });
         let members = datastore
             .anti_affinity_group_member_list(
                 &opctx,
@@ -2732,12 +2809,11 @@ mod tests {
             .unwrap();
 
         // A new group should have no members
-        let pagparams_id = DataPageParams {
+        let pagbyid = PaginatedBy::Id(DataPageParams {
             marker: None,
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
-        };
-        let pagbyid = PaginatedBy::Id(pagparams_id);
+        });
         let members = datastore
             .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
             .await
@@ -2808,11 +2884,11 @@ mod tests {
             .unwrap();
 
         // A new group should have no members
-        let pagparams = DataPageParams {
+        let pagparams = PaginatedBy::Id(DataPageParams {
             marker: None,
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
-        };
+        });
         let members = datastore
             .anti_affinity_group_member_list(&opctx, &authz_group, &pagparams)
             .await
@@ -3339,12 +3415,11 @@ mod tests {
         //
         // Two calls to "affinity_group_member_add" should be the same
         // as a single call.
-        let pagparams_id = DataPageParams {
+        let pagbyid = PaginatedBy::Id(DataPageParams {
             marker: None,
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
-        };
-        let pagbyid = PaginatedBy::Id(pagparams_id);
+        });
         let members = datastore
             .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
             .await
@@ -3458,11 +3533,11 @@ mod tests {
         //
         // Two calls to "anti_affinity_group_member_instance_add" should be the same
         // as a single call.
-        let pagparams = DataPageParams {
+        let pagparams = PaginatedBy::Id(DataPageParams {
             marker: None,
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
-        };
+        });
         let members = datastore
             .anti_affinity_group_member_list(&opctx, &authz_group, &pagparams)
             .await

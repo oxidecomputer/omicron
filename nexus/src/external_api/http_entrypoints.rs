@@ -54,7 +54,6 @@ use nexus_types::{
     },
 };
 use omicron_common::api::external::http_pagination::data_page_params_for;
-use omicron_common::api::external::http_pagination::id_pagination;
 use omicron_common::api::external::http_pagination::marker_for_id;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
@@ -2577,7 +2576,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn affinity_group_member_list(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
+        query_params: Query<PaginatedByNameOrId<params::OptionalProjectSelector>>,
         path_params: Path<params::AffinityGroupPath>,
     ) -> Result<HttpResponseOk<ResultsPage<AffinityGroupMember>>, HttpError>
     {
@@ -2589,8 +2588,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
             let pag_params = data_page_params_for(&rqctx, &query)?;
-            let scan_params = ScanById::from_query(&query)?;
-            let paginated_by = id_pagination(&pag_params, scan_params)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
 
             let group_selector = params::AffinityGroupSelector {
                 project: scan_params.selector.project.clone(),
@@ -2605,10 +2604,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &paginated_by,
                 )
                 .await?;
-            Ok(HttpResponseOk(ScanById::results_page(
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
                 &query,
                 affinity_group_member_instances,
-                &marker_for_id,
+                &marker_for_name_or_id,
             )?))
         };
         apictx
@@ -2912,7 +2911,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn anti_affinity_group_member_list(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
+        query_params: Query<PaginatedByNameOrId<params::OptionalProjectSelector>>,
         path_params: Path<params::AntiAffinityGroupPath>,
     ) -> Result<HttpResponseOk<ResultsPage<AntiAffinityGroupMember>>, HttpError>
     {
@@ -2924,7 +2923,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
             let pag_params = data_page_params_for(&rqctx, &query)?;
-            let scan_params = ScanById::from_query(&query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
 
             let group_selector = params::AntiAffinityGroupSelector {
                 project: scan_params.selector.project.clone(),
@@ -2936,13 +2936,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .anti_affinity_group_member_list(
                     &opctx,
                     &group_lookup,
-                    &pag_params,
+                    &paginated_by,
                 )
                 .await?;
-            Ok(HttpResponseOk(ScanById::results_page(
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
                 &query,
                 group_members,
-                &marker_for_id,
+                &marker_for_name_or_id,
             )?))
         };
         apictx

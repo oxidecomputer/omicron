@@ -1325,11 +1325,16 @@ pub enum AffinityGroupMember {
     Instance { id: InstanceUuid, name: Name },
 }
 
-// TODO: Revisit this impl.. it was originally created for UUID-only members
-impl SimpleIdentity for AffinityGroupMember {
+impl SimpleIdentityOrName for AffinityGroupMember {
     fn id(&self) -> Uuid {
         match self {
             AffinityGroupMember::Instance { id, .. } => *id.as_untyped_uuid(),
+        }
+    }
+
+    fn name(&self) -> &Name {
+        match self {
+            AffinityGroupMember::Instance { name, .. } => name,
         }
     }
 }
@@ -1350,8 +1355,7 @@ pub enum AntiAffinityGroupMember {
     Instance { id: InstanceUuid, name: Name },
 }
 
-// TODO: revisit this impl too
-impl SimpleIdentity for AntiAffinityGroupMember {
+impl SimpleIdentityOrName for AntiAffinityGroupMember {
     fn id(&self) -> Uuid {
         match self {
             AntiAffinityGroupMember::AffinityGroup { id, .. } => {
@@ -1360,6 +1364,13 @@ impl SimpleIdentity for AntiAffinityGroupMember {
             AntiAffinityGroupMember::Instance { id, .. } => {
                 *id.as_untyped_uuid()
             }
+        }
+    }
+
+    fn name(&self) -> &Name {
+        match self {
+            AntiAffinityGroupMember::AffinityGroup { name, .. } => name,
+            AntiAffinityGroupMember::Instance { name, .. } => name,
         }
     }
 }
