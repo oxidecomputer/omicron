@@ -384,7 +384,7 @@ dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { path = "clients/dpd-client" }
-dropshot = { version = "0.15.1", features = [ "usdt-probes" ] }
+dropshot = { version = "0.16.0", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.18"
 either = "1.14.0"
 expectorate = "1.1.0"
@@ -662,7 +662,7 @@ tempfile = "3.10"
 term = "0.7"
 termios = "0.3"
 termtree = "0.5.1"
-textwrap = "0.16.1"
+textwrap = { version = "0.16.1", features = [ "terminal_size" ] }
 test-strategy = "0.4.0"
 thiserror = "1.0"
 tofino = { git = "https://github.com/oxidecomputer/tofino", branch = "main" }
@@ -868,6 +868,7 @@ opt-level = 3
 # [patch.crates-io]
 # diesel = { path = "../../diesel/diesel" }
 # dropshot = { path = "../dropshot/dropshot" }
+# dropshot_endpoint = { path = "../dropshot/dropshot_endpoint" }
 # progenitor = { path = "../progenitor/progenitor" }
 # progenitor-client = { path = "../progenitor/progenitor-client" }
 # steno = { path = "../steno" }
