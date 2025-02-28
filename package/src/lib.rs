@@ -117,6 +117,9 @@ pub enum BuildCommand {
         /// Limit to building only these packages
         #[clap(long)]
         only: Vec<PackageName>,
+        /// Do not rebuild, just repack
+        #[clap(long)]
+        no_rebuild: bool,
     },
     /// Stamps semver versions onto packages within a manifest
     Stamp {
