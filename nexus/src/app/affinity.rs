@@ -245,8 +245,7 @@ impl super::Nexus {
         Ok(self
             .db_datastore
             .affinity_group_member_list(opctx, &authz_affinity_group, pagparams)
-            .await?
-        )
+            .await?)
     }
 
     pub(crate) async fn anti_affinity_group_member_list(

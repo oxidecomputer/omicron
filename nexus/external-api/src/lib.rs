@@ -1297,7 +1297,9 @@ pub trait NexusExternalApi {
     }]
     async fn affinity_group_member_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedByNameOrId<params::OptionalProjectSelector>>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
         path_params: Path<params::AffinityGroupPath>,
     ) -> Result<HttpResponseOk<ResultsPage<AffinityGroupMember>>, HttpError>;
 
@@ -1405,7 +1407,9 @@ pub trait NexusExternalApi {
     }]
     async fn anti_affinity_group_member_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedByNameOrId<params::OptionalProjectSelector>>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
         path_params: Path<params::AntiAffinityGroupPath>,
     ) -> Result<HttpResponseOk<ResultsPage<AntiAffinityGroupMember>>, HttpError>;
 
