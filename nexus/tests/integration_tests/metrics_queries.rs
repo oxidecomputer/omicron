@@ -55,6 +55,32 @@ impl<'a, N> MetricsQuerier<'a, N> {
             .await
     }
 
+    pub async fn project_timeseries_query_until<F, T>(
+        &self,
+        project: &str,
+        query: &str,
+        cond: F,
+    ) -> T
+    where
+        F: Fn(Vec<oxql_types::Table>) -> Result<T, MetricsNotYet>,
+    {
+        self.timeseries_query_until(
+            &format!("/v1/timeseries/query?project={project}"),
+            query,
+            cond,
+        )
+        .await
+    }
+
+    pub async fn project_timeseries_query(
+        &self,
+        project: &str,
+        query: &str,
+    ) -> Vec<oxql_types::Table> {
+        self.project_timeseries_query_until(project, query, |tables| Ok(tables))
+            .await
+    }
+
     async fn timeseries_query_until<F, T>(
         &self,
         endpoint: &str,
