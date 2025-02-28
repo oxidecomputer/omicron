@@ -9,6 +9,7 @@ use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::webhook_delivery::DeliveryAttemptState;
 pub use nexus_db_queries::db::datastore::webhook_delivery::DeliveryConfig;
+use nexus_db_queries::db::model::WebhookDeliveryResult;
 use nexus_db_queries::db::model::WebhookReceiver;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
@@ -280,7 +281,7 @@ impl WebhookDeliverator {
                 }
             };
 
-            match self
+            if let Err(e) = self
                 .datastore
                 .webhook_delivery_finish_attempt(
                     opctx,
@@ -290,24 +291,27 @@ impl WebhookDeliverator {
                 )
                 .await
             {
-                Err(e) => {
-                    const MSG: &str =
-                        "failed to mark webhook delivery as finished";
-                    slog::error!(
-                        &opctx.log,
-                        "{MSG}";
-                        "event_id" => %delivery.event_id,
-                        "event_class" => %event_class,
-                        "delivery_id" => %delivery_id,
-                        "error" => %e,
-                    );
-                    delivery_status
-                        .delivery_errors
-                        .insert(delivery_id, format!("{MSG}: {e}"));
-                }
-                Ok(_) => {
-                    delivery_status.delivered_ok += 1;
-                }
+                const MSG: &str = "failed to mark webhook delivery as finished";
+                slog::error!(
+                    &opctx.log,
+                    "{MSG}";
+                    "event_id" => %delivery.event_id,
+                    "event_class" => %event_class,
+                    "delivery_id" => %delivery_id,
+                    "error" => %e,
+                );
+                delivery_status
+                    .delivery_errors
+                    .insert(delivery_id, format!("{MSG}: {e}"));
+            }
+
+            if delivery_attempt.result == WebhookDeliveryResult::Succeeded {
+                delivery_status.delivered_ok += 1;
+            } else {
+                delivery_status.failed_deliveries.push(
+                    delivery
+                        .to_api_delivery(event_class, Some(&delivery_attempt)),
+                );
             }
         }
 
