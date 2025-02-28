@@ -241,6 +241,7 @@ mod tests {
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneImageSource;
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
@@ -262,10 +263,11 @@ mod tests {
             iter::once(sled_id),
             "test",
         );
-        let bp_zones = blueprint
-            .blueprint_zones
+        let bp_zones = &mut blueprint
+            .sleds
             .get_mut(&sled_id)
-            .expect("found entry for test sled");
+            .expect("found entry for test sled")
+            .zones_config;
 
         let zpool_id = ZpoolUuid::new_v4();
         let make_crdb_zone_config =
@@ -283,6 +285,7 @@ mod tests {
                         },
                     },
                 ),
+                image_source: BlueprintZoneImageSource::InstallDataset,
             };
 
         // Add three CRDB zones with known addresses; the first and third are
@@ -323,6 +326,7 @@ mod tests {
                     address: "[::1]:0".parse().unwrap(),
                 },
             ),
+            image_source: BlueprintZoneImageSource::InstallDataset,
         });
 
         // We expect to see CRDB zones 1 and 3 with their IPs but the ports

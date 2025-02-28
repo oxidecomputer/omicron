@@ -9,6 +9,7 @@ use nexus_types::deployment::id_map::Entry;
 use nexus_types::deployment::id_map::IdMap;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -26,6 +27,13 @@ pub enum ZonesEditError {
     MarkNonexistentZoneReadyForCleanup { id: OmicronZoneUuid },
     #[error("tried to mark a non-expunged zone as ready for cleanup: {id}")]
     MarkNonExpungedZoneReadyForCleanup { id: OmicronZoneUuid },
+    #[error(
+        "tried to set image source for nonexistent zone {id} to {image_source:?}"
+    )]
+    SetImageSourceForNonexistentZone {
+        id: OmicronZoneUuid,
+        image_source: BlueprintZoneImageSource,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -175,6 +183,28 @@ impl ZonesEditor {
                 Ok(did_mark_ready)
             }
         }
+    }
+
+    /// Set the image source for a zone, returning the old image source.
+    pub fn set_zone_image_source(
+        &mut self,
+        zone_id: &OmicronZoneUuid,
+        image_source: BlueprintZoneImageSource,
+    ) -> Result<BlueprintZoneImageSource, ZonesEditError> {
+        let mut config = self.zones.get_mut(zone_id).ok_or_else(|| {
+            ZonesEditError::SetImageSourceForNonexistentZone {
+                id: *zone_id,
+                image_source: image_source.clone(),
+            }
+        })?;
+
+        let old_image_source = config.image_source.clone();
+        if old_image_source != image_source {
+            self.counts.updated += 1;
+        }
+        config.image_source = image_source;
+
+        Ok(old_image_source)
     }
 
     fn expunge_impl(
