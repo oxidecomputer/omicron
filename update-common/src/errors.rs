@@ -7,9 +7,9 @@
 use camino::Utf8PathBuf;
 use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
-use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use omicron_common::update::{ArtifactHashId, ArtifactId, ArtifactKind};
+use semver::Version;
 use slog::error;
 use thiserror::Error;
 
@@ -144,8 +144,8 @@ pub enum RepositoryError {
     )]
     MultipleVersionsPresent {
         kind: KnownArtifactKind,
-        v1: SemverVersion,
-        v2: SemverVersion,
+        v1: Version,
+        v2: Version,
     },
     #[error("Caboose mismatch between A {a:?} and B {b:?}")]
     CabooseMismatch { a: String, b: String },

@@ -43,8 +43,10 @@ use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
+use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
@@ -313,7 +315,11 @@ impl RackInitRequestBuilder {
         address: SocketAddrV6,
     ) {
         self.internal_dns_config
-            .host_zone_clickhouse(zone_id, ServiceName::Clickhouse, address)
+            .host_zone_clickhouse_single_node(
+                zone_id,
+                ServiceName::Clickhouse,
+                address,
+            )
             .expect("Failed to setup ClickHouse DNS");
     }
 }
@@ -494,6 +500,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     dataset: OmicronZoneDataset { pool_name },
                 },
             ),
+            image_source: BlueprintZoneImageSource::InstallDataset,
         });
         self.database = Some(database);
     }
@@ -544,6 +551,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     dataset: OmicronZoneDataset { pool_name },
                 },
             ),
+            image_source: BlueprintZoneImageSource::InstallDataset,
         });
     }
 
@@ -759,6 +767,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     transit_ips: vec![],
                 },
             }),
+            image_source: BlueprintZoneImageSource::InstallDataset,
         });
 
         self.nexus_internal = Some(nexus_internal);
@@ -828,11 +837,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         };
 
         let blueprint = {
-            let mut blueprint_zones = BTreeMap::new();
-            let mut blueprint_disks = BTreeMap::new();
+            let mut blueprint_sleds = BTreeMap::new();
             let mut disk_index = 0;
-            let mut blueprint_datasets = BTreeMap::new();
-            let mut sled_state = BTreeMap::new();
 
             // The first sled agent is the only one that'll have configured
             // blueprint zones, but the others all need to have disks.
@@ -845,20 +851,10 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             {
                 let sled_id = sled_agent.sled_agent_id();
 
-                sled_state.insert(sled_id, SledState::Active);
-
                 let mut disks = IdMap::new();
                 let mut datasets = IdMap::new();
 
-                if let Some(zones) = maybe_zones {
-                    blueprint_zones.insert(
-                        sled_id,
-                        BlueprintZonesConfig {
-                            generation: Generation::new().next(),
-                            zones: zones.iter().cloned().collect(),
-                        },
-                    );
-
+                let zones_config = if let Some(zones) = maybe_zones {
                     for zone in zones {
                         if let Some(zpool) = &zone.filesystem_pool {
                             disks.insert(BlueprintPhysicalDiskConfig {
@@ -894,15 +890,16 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                             });
                         }
                     }
+                    BlueprintZonesConfig {
+                        generation: Generation::new().next(),
+                        zones: zones.iter().cloned().collect(),
+                    }
                 } else {
-                    blueprint_zones.insert(
-                        sled_id,
-                        BlueprintZonesConfig {
-                            generation: Generation::new().next(),
-                            zones: IdMap::new(),
-                        },
-                    );
-                }
+                    BlueprintZonesConfig {
+                        generation: Generation::new().next(),
+                        zones: IdMap::new(),
+                    }
+                };
 
                 // Populate extra fake disks, giving each sled 10 total.
                 if disks.len() < 10 {
@@ -922,29 +919,26 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     }
                 }
 
-                blueprint_disks.insert(
+                blueprint_sleds.insert(
                     sled_id,
-                    BlueprintPhysicalDisksConfig {
-                        generation: Generation::new().next(),
-                        disks,
-                    },
-                );
-
-                blueprint_datasets.insert(
-                    sled_id,
-                    BlueprintDatasetsConfig {
-                        generation: Generation::new().next(),
-                        datasets,
+                    BlueprintSledConfig {
+                        state: SledState::Active,
+                        disks_config: BlueprintPhysicalDisksConfig {
+                            generation: Generation::new().next(),
+                            disks,
+                        },
+                        datasets_config: BlueprintDatasetsConfig {
+                            generation: Generation::new().next(),
+                            datasets,
+                        },
+                        zones_config,
                     },
                 );
             }
 
             Blueprint {
                 id: BlueprintUuid::new_v4(),
-                blueprint_zones,
-                blueprint_disks,
-                blueprint_datasets,
-                sled_state,
+                sleds: blueprint_sleds,
                 parent_blueprint_id: None,
                 internal_dns_version: dns_config.generation,
                 external_dns_version: Generation::new(),
@@ -1184,6 +1178,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             zone_type: BlueprintZoneType::CruciblePantry(
                 blueprint_zone_type::CruciblePantry { address },
             ),
+            image_source: BlueprintZoneImageSource::InstallDataset,
         });
     }
 
@@ -1251,6 +1246,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     },
                 },
             ),
+            image_source: BlueprintZoneImageSource::InstallDataset,
         });
 
         self.external_dns = Some(dns);
@@ -1293,6 +1289,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     gz_address_index: 0,
                 },
             ),
+            image_source: BlueprintZoneImageSource::InstallDataset,
         });
 
         self.internal_dns = Some(dns);

@@ -2,25 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use nexus_types::deployment::BlueprintZoneConfig;
-use nexus_types::deployment::BlueprintZoneType;
-use nexus_types::deployment::blueprint_zone_type::InternalDns;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::ReservedRackSubnet;
-use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use std::collections::BTreeSet;
 
 #[derive(Debug, thiserror::Error)]
-pub enum InternalDnsInputError {
-    #[error("can only have {INTERNAL_DNS_REDUNDANCY} internal DNS servers")]
-    TooManyDnsServers,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum InternalDnsError {
-    #[error("no reserved subnets available for internal DNS")]
-    NoAvailableDnsSubnets,
-}
+#[error("no reserved subnets available for internal DNS")]
+pub struct NoAvailableDnsSubnets;
 
 /// Internal DNS zones are not allocated an address in the sled's subnet.
 /// Instead, they get a /64 subnet of the "reserved" rack subnet (so that
@@ -33,28 +21,8 @@ pub struct InternalDnsSubnetAllocator {
 }
 
 impl InternalDnsSubnetAllocator {
-    pub fn new<'a>(
-        running_omicron_zones: impl Iterator<Item = &'a BlueprintZoneConfig>,
-        target_redundancy: usize,
-    ) -> Result<Self, InternalDnsInputError> {
-        let in_use = running_omicron_zones
-            .filter_map(|zone_config| match zone_config.zone_type {
-                BlueprintZoneType::InternalDns(InternalDns {
-                    dns_address,
-                    ..
-                }) => Some(DnsSubnet::from_addr(*dns_address.ip())),
-                _ => None,
-            })
-            .collect::<BTreeSet<DnsSubnet>>();
-
-        // TODO-cleanup This is the only reason we take `target_redundancy`; do
-        // we have another use for it in the future, or should someone else do
-        // this check?
-        if target_redundancy > INTERNAL_DNS_REDUNDANCY {
-            return Err(InternalDnsInputError::TooManyDnsServers);
-        }
-
-        Ok(Self { in_use })
+    pub fn new(in_use: BTreeSet<DnsSubnet>) -> Self {
+        Self { in_use }
     }
 
     /// Allocate the first available DNS subnet, or call a function to generate
@@ -65,7 +33,7 @@ impl InternalDnsSubnetAllocator {
     pub fn alloc(
         &mut self,
         rack_subnet: ReservedRackSubnet,
-    ) -> Result<DnsSubnet, InternalDnsError> {
+    ) -> Result<DnsSubnet, NoAvailableDnsSubnets> {
         let new = if let Some(first) = self.in_use.first() {
             // Take the first available DNS subnet. We currently generate
             // all `INTERNAL_DNS_REDUNDANCY` subnets and subtract any
@@ -78,7 +46,7 @@ impl InternalDnsSubnetAllocator {
             if let Some(first) = avail.next() {
                 *first
             } else {
-                return Err(InternalDnsError::NoAvailableDnsSubnets);
+                return Err(NoAvailableDnsSubnets);
             }
         } else {
             rack_subnet.get_dns_subnet(1)
@@ -114,6 +82,8 @@ pub mod test {
     use crate::blueprint_builder::test::verify_blueprint;
     use crate::example::ExampleSystemBuilder;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneType;
+    use nexus_types::deployment::blueprint_zone_type::InternalDns;
     use omicron_common::disk::DatasetKind;
     use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
     use omicron_test_utils::dev::test_setup_log;
@@ -128,25 +98,26 @@ pub mod test {
         assert!(INTERNAL_DNS_REDUNDANCY > 1);
 
         // Use our example system to create a blueprint and input.
-        let (example, mut blueprint1) =
+        let (_, mut blueprint1) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
                 .nsleds(INTERNAL_DNS_REDUNDANCY)
                 .build();
 
         // `ExampleSystem` adds an internal DNS server to every sled. Manually
         // prune out all but the first of them to give us space to add more.
-        for (_, zone_config) in blueprint1.blueprint_zones.iter_mut().skip(1) {
-            zone_config.zones.retain(|z| !z.zone_type.is_internal_dns());
+        for (_, sled_config) in blueprint1.sleds.iter_mut().skip(1) {
+            sled_config
+                .zones_config
+                .zones
+                .retain(|z| !z.zone_type.is_internal_dns());
         }
-        let npruned = blueprint1.blueprint_zones.len() - 1;
+        let npruned = blueprint1.sleds.len() - 1;
         assert!(npruned > 0);
 
         // Also prune out the zones' datasets, or we're left with an invalid
         // blueprint.
-        for (_, dataset_config) in
-            blueprint1.blueprint_datasets.iter_mut().skip(1)
-        {
-            dataset_config.datasets.retain(|dataset| {
+        for (_, sled_config) in blueprint1.sleds.iter_mut().skip(1) {
+            sled_config.datasets_config.datasets.retain(|dataset| {
                 // This is gross; once zone configs know explicit dataset IDs,
                 // we should retain by ID instead.
                 match &dataset.kind {
@@ -165,10 +136,17 @@ pub mod test {
         let mut allocator = InternalDnsSubnetAllocator::new(
             blueprint1
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-                .map(|(_sled_id, zone_config)| zone_config),
-            example.input.target_internal_dns_zone_count(),
-        )
-        .expect("can't create allocator");
+                .filter_map(|(_sled_id, zone_config)| {
+                    match zone_config.zone_type {
+                        BlueprintZoneType::InternalDns(InternalDns {
+                            dns_address,
+                            ..
+                        }) => Some(DnsSubnet::from_addr(*dns_address.ip())),
+                        _ => None,
+                    }
+                })
+                .collect(),
+        );
 
         // There should be exactly one subnet allocated.
         assert_eq!(allocator.len(), 1, "should be 1 subnets allocated");

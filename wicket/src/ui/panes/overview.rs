@@ -22,12 +22,22 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
+use transceiver_controller::ApplicationDescriptor;
+use transceiver_controller::CmisDatapath;
+use transceiver_controller::Datapath;
+use transceiver_controller::PowerMode;
+use transceiver_controller::PowerState;
+use transceiver_controller::ReceiverPower;
+use transceiver_controller::SffComplianceCode;
+use transceiver_controller::VendorInfo;
+use transceiver_controller::message::ExtendedStatus;
 use wicket_common::inventory::RotState;
 use wicket_common::inventory::SpComponentCaboose;
 use wicket_common::inventory::SpComponentInfo;
 use wicket_common::inventory::SpComponentPresence;
 use wicket_common::inventory::SpIgnition;
 use wicket_common::inventory::SpState;
+use wicket_common::inventory::Transceiver;
 
 enum PopupKind {
     Ignition,
@@ -1115,7 +1125,178 @@ fn inventory_description(component: &Component) -> Text {
         }
     }
 
+    // If this is a switch, describe any transceivers.
+    if let Component::Switch { transceivers, .. } = component {
+        // blank line separator
+        spans.push(Line::default());
+
+        let mut label = vec![Span::styled("Transceivers: ", label_style)];
+        if transceivers.is_empty() {
+            label.push(Span::styled("None", warn_style));
+            spans.push(label.into());
+        } else {
+            spans.push(label.into());
+            for transceiver in transceivers {
+                // Top-level bullet for the port itself. We're not sure what
+                // details we can print about the transceiver yet.
+                spans.push(
+                    vec![
+                        bullet(),
+                        Span::styled(&transceiver.port, label_style),
+                    ]
+                    .into(),
+                );
+
+                // Now print as much of the details for this transceiver as we
+                // can, starting with the vendor name.
+                let vendor_details =
+                    extract_vendor_details(transceiver.vendor.as_ref());
+                for detail in vendor_details {
+                    spans.push(
+                        vec![
+                            nest_bullet(),
+                            Span::styled(detail.label, label_style),
+                            Span::styled(detail.detail, detail.style),
+                        ]
+                        .into(),
+                    );
+                }
+
+                let (media_type_style, media_type) =
+                    extract_media_type(transceiver.datapath.as_ref());
+                spans.push(
+                    vec![
+                        nest_bullet(),
+                        Span::styled("Media type: ", label_style),
+                        Span::styled(media_type, media_type_style),
+                    ]
+                    .into(),
+                );
+
+                let (fpga_power_style, fpga_power) =
+                    format_transceiver_status(transceiver.status.as_ref());
+                spans.push(
+                    vec![
+                        nest_bullet(),
+                        Span::styled("Power at FPGA: ", label_style),
+                        Span::styled(fpga_power, fpga_power_style),
+                    ]
+                    .into(),
+                );
+
+                let (module_power_style, module_power) =
+                    format_transceiver_power_state(transceiver.power.as_ref());
+                spans.push(
+                    vec![
+                        nest_bullet(),
+                        Span::styled("Power at module: ", label_style),
+                        Span::styled(module_power, module_power_style),
+                    ]
+                    .into(),
+                );
+
+                let (temp_style, temp) = format_transceiver_temperature(
+                    transceiver
+                        .monitors
+                        .as_ref()
+                        .map(|m| m.temperature)
+                        .ok_or(FailedToRead),
+                );
+                spans.push(
+                    vec![
+                        nest_bullet(),
+                        Span::styled("Temperature: ", label_style),
+                        Span::styled(temp, temp_style),
+                    ]
+                    .into(),
+                );
+
+                let (voltage_style, voltage) = format_transceiver_voltage(
+                    transceiver
+                        .monitors
+                        .as_ref()
+                        .map(|m| m.supply_voltage)
+                        .ok_or(FailedToRead),
+                );
+                spans.push(
+                    vec![
+                        nest_bullet(),
+                        Span::styled("Voltage: ", label_style),
+                        Span::styled(voltage, voltage_style),
+                    ]
+                    .into(),
+                );
+
+                let n_lanes = n_expected_lanes(transceiver);
+                let mut line = vec![nest_bullet()];
+                line.extend(format_transceiver_receive_power(
+                    n_lanes,
+                    transceiver
+                        .monitors
+                        .as_ref()
+                        .map(|m| m.receiver_power.as_deref())
+                        .ok_or(FailedToRead),
+                ));
+                spans.push(line.into());
+
+                let mut line = vec![nest_bullet()];
+                line.extend(format_transceiver_transmit_power(
+                    n_lanes,
+                    transceiver
+                        .monitors
+                        .as_ref()
+                        .map(|m| m.transmitter_power.as_deref())
+                        .ok_or(FailedToRead),
+                ));
+                spans.push(line.into());
+            }
+        }
+    };
+
     Text::from(spans)
+}
+
+struct VendorLine {
+    label: String,
+    detail: String,
+    style: Style,
+}
+
+fn extract_vendor_details(vendor: Option<&VendorInfo>) -> Vec<VendorLine> {
+    let mut out = Vec::with_capacity(4);
+    if let Some(vendor) = &vendor {
+        out.push(VendorLine {
+            label: "Vendor: ".to_string(),
+            detail: vendor.vendor.name.clone(),
+            style: style::text_success(),
+        });
+        out.push(VendorLine {
+            label: "Model: ".to_string(),
+            detail: vendor.vendor.part.clone(),
+            style: style::text_success(),
+        });
+        out.push(VendorLine {
+            label: "Serial: ".to_string(),
+            detail: vendor.vendor.serial.clone(),
+            style: style::text_success(),
+        });
+        out.push(VendorLine {
+            label: "Management interface: ".to_string(),
+            detail: vendor.identifier.to_string(),
+            style: style::text_success(),
+        });
+    } else {
+        for label in
+            ["Vendor: ", "Model: ", "Serial: ", "Management interface: "]
+        {
+            out.push(VendorLine {
+                label: label.to_string(),
+                detail: "Failed to read!".to_string(),
+                style: style::text_warning(),
+            })
+        }
+    }
+    out
 }
 
 // Helper function for appending caboose details to a section of the
@@ -1178,4 +1359,293 @@ fn append_caboose(
     let mut version_spans =
         vec![prefix.clone(), Span::styled("Version: ", label_style)];
     version_spans.push(Span::styled(version, ok_style));
+}
+
+/// Helper to indicate when we've failed to read data from a transceiver module.
+struct FailedToRead;
+
+impl FailedToRead {
+    fn to_ui_elements(self) -> (Style, String) {
+        (style::text_warning(), String::from("Failed to read!"))
+    }
+}
+
+fn unsupported_ui_elements() -> (Style, String) {
+    (style::text_dim(), String::from("Unsupported"))
+}
+
+// Print relevant transceiver status bits.
+//
+// We know the transceiver is present by construction, so print the power state
+// and any faults.
+fn format_transceiver_status(
+    status: Option<&ExtendedStatus>,
+) -> (Style, String) {
+    let Some(status) = status else { return FailedToRead.to_ui_elements() };
+    if status.contains(ExtendedStatus::ENABLED) {
+        if status.contains(ExtendedStatus::POWER_GOOD) {
+            return (style::text_success(), String::from("Enabled"));
+        }
+        let message = if status.contains(ExtendedStatus::FAULT_POWER_TIMEOUT) {
+            String::from("Timeout fault")
+        } else if status.contains(ExtendedStatus::FAULT_POWER_LOST) {
+            String::from("Power lost")
+        } else if status.contains(ExtendedStatus::DISABLED_BY_SP) {
+            String::from("Disabled by SP")
+        } else {
+            format!("Unknown: {}", status)
+        };
+        (style::text_failure(), message)
+    } else {
+        (style::text_warning(), String::from("Disabled"))
+    }
+}
+
+fn format_transceiver_power_state(
+    power: Option<&PowerMode>,
+) -> (Style, String) {
+    let Some(power) = power else { return FailedToRead.to_ui_elements() };
+    let style = match power.state {
+        PowerState::Off => style::text_warning(),
+        PowerState::Low => style::text_warning(),
+        PowerState::High => style::text_success(),
+    };
+    (
+        style,
+        format!(
+            "{}{}",
+            power.state,
+            // "Software override" means that the module's power is controlled
+            // by writing to a specific register, rather than through a hardware
+            // signal / pin.
+            if matches!(power.software_override, Some(true)) {
+                " (Software control)"
+            } else {
+                ""
+            }
+        ),
+    )
+}
+
+/// Format the transceiver temperature.
+fn format_transceiver_temperature(
+    maybe_temp: Result<Option<f32>, FailedToRead>,
+) -> (Style, String) {
+    let t = match maybe_temp {
+        Ok(Some(t)) => t,
+        Ok(None) => return unsupported_ui_elements(),
+        Err(e) => return e.to_ui_elements(),
+    };
+    const MIN_WARNING_TEMP: f32 = 15.0;
+    const MAX_WARNING_TEMP: f32 = 50.0;
+    let temp = format!("{t:0.2} °C");
+    let style = if t < MIN_WARNING_TEMP || t > MAX_WARNING_TEMP {
+        style::text_warning()
+    } else {
+        style::text_success()
+    };
+    (style, temp)
+}
+
+/// Format the transceiver voltage.
+fn format_transceiver_voltage(
+    maybe_voltage: Result<Option<f32>, FailedToRead>,
+) -> (Style, String) {
+    let v = match maybe_voltage {
+        Ok(Some(v)) => v,
+        Ok(None) => return unsupported_ui_elements(),
+        Err(e) => return e.to_ui_elements(),
+    };
+    const MIN_WARNING_VOLTAGE: f32 = 3.0;
+    const MAX_WARNING_VOLTAGE: f32 = 3.7;
+    let voltage = format!("{v:0.2} V");
+    let style = if v < MIN_WARNING_VOLTAGE || v > MAX_WARNING_VOLTAGE {
+        style::text_warning()
+    } else {
+        style::text_success()
+    };
+    (style, voltage)
+}
+
+/// Format the transceiver received optical power.
+fn format_transceiver_receive_power(
+    n_lanes: Option<usize>,
+    receiver_power: Result<Option<&[ReceiverPower]>, FailedToRead>,
+) -> Vec<Span> {
+    let pow = match receiver_power {
+        Ok(Some(p)) if !p.is_empty() => p,
+        // Either not supported at all, or list of power is empty.
+        Ok(None) | Ok(Some(_)) => {
+            let elems = unsupported_ui_elements();
+            return vec![
+                Span::styled("Rx power: ", style::text_label()),
+                Span::styled(elems.1, elems.0),
+            ];
+        }
+        // Failed to read entirely
+        Err(e) => {
+            let elems = e.to_ui_elements();
+            return vec![
+                Span::styled("Rx power: ", style::text_label()),
+                Span::styled(elems.1, elems.0),
+            ];
+        }
+    };
+
+    const MIN_WARNING_POWER: f32 = 0.5;
+    const MAX_WARNING_POWER: f32 = 2.5;
+    assert!(!pow.is_empty());
+    let mut out = Vec::with_capacity(pow.len() + 2);
+
+    // Push the label itself.
+    let kind = if matches!(&pow[0], ReceiverPower::Average(_)) {
+        "Avg"
+    } else {
+        "Peak-to-peak"
+    };
+    let label = format!("Rx power (mW, {}): [", kind);
+    out.push(Span::styled(label, style::text_label()));
+
+    // Push each Rx power measurement, styling it if it's above the
+    // limit.
+    let n_lanes = n_lanes.unwrap_or(pow.len());
+    for (lane, meas) in pow[..n_lanes].iter().enumerate() {
+        let style = if meas.value() < MIN_WARNING_POWER
+            || meas.value() > MAX_WARNING_POWER
+        {
+            style::text_warning()
+        } else {
+            style::text_success()
+        };
+        let measurement = format!("{:0.3}", meas.value());
+        out.push(Span::styled(measurement, style));
+        if lane < n_lanes - 1 {
+            out.push(Span::styled(", ", style::text_label()));
+        }
+    }
+    out.push(Span::styled("]", style::text_label()));
+    out
+}
+
+/// Format the transceiver transmitted optical power.
+fn format_transceiver_transmit_power(
+    n_lanes: Option<usize>,
+    transmitter_power: Result<Option<&[f32]>, FailedToRead>,
+) -> Vec<Span> {
+    let pow = match transmitter_power {
+        Ok(Some(p)) if !p.is_empty() => p,
+        // Either not supported at all, or list of power is empty.
+        Ok(None) | Ok(Some(_)) => {
+            let elems = unsupported_ui_elements();
+            return vec![
+                Span::styled("Tx power: ", style::text_label()),
+                Span::styled(elems.1, elems.0),
+            ];
+        }
+        // Failed to read entirely
+        Err(e) => {
+            let elems = e.to_ui_elements();
+            return vec![
+                Span::styled("Tx power: ", style::text_label()),
+                Span::styled(elems.1, elems.0),
+            ];
+        }
+    };
+
+    const MIN_WARNING_POWER: f32 = 0.5;
+    const MAX_WARNING_POWER: f32 = 2.5;
+    assert!(!pow.is_empty());
+    let mut out = Vec::with_capacity(pow.len() + 2);
+    out.push(Span::styled("Tx power (mW): [", style::text_label()));
+    let n_lanes = n_lanes.unwrap_or(pow.len());
+    for (lane, meas) in pow[..n_lanes].iter().enumerate() {
+        let style = if *meas < MIN_WARNING_POWER || *meas > MAX_WARNING_POWER {
+            style::text_warning()
+        } else {
+            style::text_success()
+        };
+        let measurement = format!("{:0.3}", meas);
+        out.push(Span::styled(measurement, style));
+        if lane < n_lanes - 1 {
+            out.push(Span::styled(", ", style::text_label()));
+        }
+    }
+    out.push(Span::styled("]", style::text_label()));
+    out
+}
+
+fn extract_media_type(datapath: Option<&Datapath>) -> (Style, String) {
+    let Some(datapath) = datapath else {
+        return FailedToRead.to_ui_elements();
+    };
+    match datapath {
+        Datapath::Cmis { datapaths, .. } => {
+            let Some(media_type) = datapaths.values().next().map(|p| {
+                let CmisDatapath { application, .. } = p;
+                let ApplicationDescriptor { media_id, .. } = application;
+                media_id.to_string()
+            }) else {
+                return (style::text_warning(), String::from("Unknown"));
+            };
+            (style::text_success(), media_type)
+        }
+        Datapath::Sff8636 { specification, .. } => {
+            (style::text_success(), specification.to_string())
+        }
+    }
+}
+
+/// Return the number of expected media lanes in the transceiver.
+///
+/// If we aren't sure, return `None`.
+fn n_expected_lanes(tr: &Transceiver) -> Option<usize> {
+    let Some(datapath) = &tr.datapath else {
+        return None;
+    };
+    match datapath {
+        Datapath::Cmis { datapaths, .. } => datapaths
+            .values()
+            .next()
+            .map(|CmisDatapath { lane_status, .. }| lane_status.len())
+            .or(Some(4)),
+        Datapath::Sff8636 { specification, .. } => match specification {
+            SffComplianceCode::Extended(code) => {
+                use transceiver_controller::ExtendedSpecificationComplianceCode::*;
+                match code {
+                    Id100GBaseSr4 => Some(4),
+                    Id100GBaseLr4 => Some(4),
+                    Id100GBCwdm4 => Some(4),
+                    Id100GBaseCr4 => Some(4),
+                    Id100GSwdm4 => Some(4),
+                    Id100GBaseFr1 => Some(1),
+                    Id100GBaseLr1 => Some(1),
+                    Id200GBaseFr4 => Some(4),
+                    Id200GBaseLr4 => Some(4),
+                    Id400GBaseDr4 => Some(4),
+                    Id100GPam4BiDi => Some(2),
+                    Unspecified | Id100GAoc5en5 | Id100GBaseEr4
+                    | Id100GBaseSr10 | Id100GPsm4 | Id100GAcc | Obsolete
+                    | Id25GBaseCrS | Id25GBaseCrN | Id10MbEth
+                    | Id40GBaseEr4 | Id4x10GBaseSr | Id40GPsm4
+                    | IdG959p1i12d1 | IdG959p1s12d2 | IdG9592p1l1d1
+                    | Id10GBaseT | Id100GClr4 | Id100GAoc10en12
+                    | Id100GAcc10en12 | Id100GeDwdm2 | Id100GWdm
+                    | Id10GBaseTSr | Id5GBaseT | Id2p5GBaseT | Id40GSwdm4
+                    | Id10GBaseBr | Id25GBaseBr | Id50GBaseBr | Id4wdm10
+                    | Id4wdm20 | Id4wdm40 | Id100GBaseDr | Id100GFr
+                    | Id100GLr | Id100GBaseSr1 | Id100GBaseVr1
+                    | Id100GBaseSr12 | Id100GBaseVr12 | Id100GLr120Caui4
+                    | Id100GLr130Caui4 | Id100GLr140Caui4 | Id100GLr120
+                    | Id100GLr130 | Id100GLr140 | IdAcc50GAUI10en6
+                    | IdAcc50GAUI10en62 | IdAcc50GAUI2p6en4
+                    | IdAcc50GAUI2p6en41 | Id100GBaseCr1 | Id50GBaseCr
+                    | Id50GBaseSr | Id50GBaseFr | Id50GBaseEr | Id200GPsm4
+                    | Id50GBaseLr | Id400GBaseFr4 | Id400GBaseLr4
+                    | Id400GGLr410 | Id400GBaseZr | Id256GfcSw4 | Id64Gfc
+                    | Id128Gfc | Reserved(_) => None,
+                }
+            }
+            SffComplianceCode::Ethernet(_) => None,
+        },
+    }
 }

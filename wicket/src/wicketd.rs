@@ -496,14 +496,8 @@ impl WicketdManager {
                 // TODO: We should really be using ETAGs here
                 match client.get_inventory(&params).await {
                     Ok(val) => match val.into_inner() {
-                        GetInventoryResponse::Response {
-                            inventory,
-                            mgs_last_seen,
-                        } => {
-                            let _ = tx.send(Event::Inventory {
-                                inventory,
-                                mgs_last_seen,
-                            });
+                        GetInventoryResponse::Response { inventory } => {
+                            let _ = tx.send(Event::Inventory { inventory });
                         }
                         GetInventoryResponse::Unavailable => {
                             // Nothing to do here. We keep a running total from

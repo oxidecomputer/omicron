@@ -183,60 +183,39 @@ impl ManagementSwitch {
     ) -> Result<Self, StartupError> {
         let log = log.new(o!("component" => "ManagementSwitch"));
 
-        // Skim over our port configs - either all should be simulated or all
-        // should be switch zone interfaces. Reject a mix.
-        let mut shared_socket = None;
-        for (i, port_desc) in config.port.iter().enumerate() {
-            if i == 0 {
-                // First item: either create a shared socket (if we're going to
-                // share one socket among multiple switch zone VLAN interfaces)
-                // or leave it as `None` (if we're going to be connecting to
-                // simulated SPs by address).
-                if let SwitchPortConfig::SwitchZoneInterface { .. } =
-                    &port_desc.config
-                {
-                    shared_socket = Some(
-                        SharedSocket::bind(
-                            config.udp_listen_port,
-                            Arc::clone(&host_phase2_provider),
-                            log.clone(),
-                        )
-                        .await?,
-                    );
-                }
-            } else {
-                match (&shared_socket, &port_desc.config) {
-                    // OK - config is consistent
-                    (Some(_), SwitchPortConfig::SwitchZoneInterface { .. })
-                    | (None, SwitchPortConfig::Simulated { .. }) => (),
-
-                    // not OK - config is mixed
-                    (None, SwitchPortConfig::SwitchZoneInterface { .. })
-                    | (Some(_), SwitchPortConfig::Simulated { .. }) => {
-                        return Err(StartupError::InvalidConfig {
-                            reasons: vec![concat!(
-                                "switch port contains a mixture of `simulated`",
-                                " and `switch-zone-interface`"
-                            )
-                            .to_string()],
-                        });
-                    }
-                }
-            }
-        }
-
         // Convert our config into actual SP handles and sockets, keyed by
         // `SwitchPort` (newtype around an index into `config.port`).
+        let mut shared_socket = None;
         let mut port_to_handle = Vec::with_capacity(config.port.len());
         let mut port_to_desc = Vec::with_capacity(config.port.len());
         let mut port_to_ignition_target = Vec::with_capacity(config.port.len());
         let mut interface_to_port = HashMap::with_capacity(config.port.len());
         let retry_config = config.rpc_retry_config.into();
+
         for (i, port_desc) in config.port.into_iter().enumerate() {
             let single_sp = match &port_desc.config {
                 SwitchPortConfig::SwitchZoneInterface { interface } => {
+                    // Create a shared socket if we're going to be sharing one
+                    // socket among mulitple switch zone VLAN interfaces
+                    let socket = match &mut shared_socket {
+                        None => {
+                            shared_socket = Some(
+                                SharedSocket::bind(
+                                    config.udp_listen_port,
+                                    Arc::clone(&host_phase2_provider),
+                                    log.clone(),
+                                )
+                                .await?,
+                            );
+
+                            shared_socket.as_ref().unwrap()
+                        }
+
+                        Some(v) => v,
+                    };
+
                     SingleSp::new(
-                        shared_socket.as_ref().unwrap(),
+                        &socket,
                         gateway_sp_comms::SwitchPortConfig {
                             discovery_addr: default_discovery_addr(),
                             interface: interface.clone(),
@@ -245,6 +224,7 @@ impl ManagementSwitch {
                     )
                     .await
                 }
+
                 SwitchPortConfig::Simulated { addr, .. } => {
                     // Bind a new socket for each simulated switch port.
                     let bind_addr: SocketAddrV6 =

@@ -954,13 +954,12 @@ table! {
 }
 
 table! {
-    sled_resource (id) {
+    sled_resource_vmm (id) {
         id -> Uuid,
         sled_id -> Uuid,
         hardware_threads -> Int8,
         rss_ram -> Int8,
         reservoir_ram -> Int8,
-        kind -> crate::SledResourceKindEnum,
         instance_id -> Nullable<Uuid>,
     }
 }
@@ -1729,6 +1728,8 @@ table! {
         pool_id -> Uuid,
 
         disposition -> crate::DbBpPhysicalDiskDispositionEnum,
+        disposition_expunged_as_of_generation -> Nullable<Int8>,
+        disposition_expunged_ready_for_cleanup -> Bool,
     }
 }
 
@@ -2103,7 +2104,7 @@ allow_tables_to_appear_in_same_query!(
     identity_provider,
     console_session,
     sled,
-    sled_resource,
+    sled_resource_vmm,
     support_bundle,
     router_route,
     vmm,

@@ -46,6 +46,7 @@ use uuid::Uuid;
 // The implementation of Nexus is large, and split into a number of submodules
 // by resource.
 mod address_lot;
+mod affinity;
 mod allow_list;
 pub(crate) mod background;
 mod bfd;
@@ -429,7 +430,7 @@ impl Nexus {
             None => {
                 let native_resolver =
                     qorb_resolver.for_service(ServiceName::ClickhouseNative);
-                oximeter_db::Client::new_with_pool(native_resolver, &log)
+                oximeter_db::Client::new_with_resolver(native_resolver, &log)
             }
             Some(address) => oximeter_db::Client::new(*address, &log),
         };

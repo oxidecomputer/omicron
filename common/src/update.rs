@@ -4,27 +4,28 @@
 
 use std::{borrow::Cow, convert::Infallible, fmt, str::FromStr};
 
-use crate::api::{external::SemverVersion, internal::nexus::KnownArtifactKind};
+use crate::api::internal::nexus::KnownArtifactKind;
 use hex::FromHexError;
 use schemars::{
     JsonSchema,
     gen::SchemaGenerator,
     schema::{Schema, SchemaObject},
 };
+use semver::Version;
 use serde::{Deserialize, Serialize};
 
 /// Description of the `artifacts.json` target found in rack update
 /// repositories.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ArtifactsDocument {
-    pub system_version: SemverVersion,
+    pub system_version: Version,
     pub artifacts: Vec<Artifact>,
 }
 
 impl ArtifactsDocument {
     /// Creates an artifacts document with the provided system version and an
     /// empty list of artifacts.
-    pub fn empty(system_version: SemverVersion) -> Self {
+    pub fn empty(system_version: Version) -> Self {
         Self { system_version, artifacts: Vec::new() }
     }
 }
@@ -47,7 +48,7 @@ pub struct Artifact {
     /// In the future when [`KnownArtifactKind::ControlPlane`] is split up into
     /// separate zones, `name` will be the zone name.
     pub name: String,
-    pub version: SemverVersion,
+    pub version: Version,
     pub kind: ArtifactKind,
     pub target: String,
 }
@@ -89,7 +90,7 @@ pub struct ArtifactId {
     pub name: String,
 
     /// The artifact's version.
-    pub version: SemverVersion,
+    pub version: Version,
 
     /// The kind of artifact this is.
     pub kind: ArtifactKind,

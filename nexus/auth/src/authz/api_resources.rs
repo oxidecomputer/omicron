@@ -715,6 +715,22 @@ authz_resource! {
 }
 
 authz_resource! {
+    name = "AffinityGroup",
+    parent = "Project",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = InProject,
+}
+
+authz_resource! {
+    name = "AntiAffinityGroup",
+    parent = "Project",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = InProject,
+}
+
+authz_resource! {
     name = "InstanceNetworkInterface",
     parent = "Instance",
     primary_key = Uuid,

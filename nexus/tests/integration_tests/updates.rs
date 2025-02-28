@@ -19,12 +19,12 @@ use nexus_test_utils::background::wait_tuf_artifact_replication_step;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::{load_test_config, test_setup, test_setup_with_config};
 use omicron_common::api::external::{
-    SemverVersion, TufRepoGetResponse, TufRepoInsertResponse,
-    TufRepoInsertStatus,
+    TufRepoGetResponse, TufRepoInsertResponse, TufRepoInsertStatus,
 };
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use omicron_sled_agent::sim;
 use pretty_assertions::assert_eq;
+use semver::Version;
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::fmt::Debug;
@@ -368,7 +368,7 @@ fn make_upload_request<'a>(
 
 fn make_get_request(
     client: &dropshot::test_util::ClientTestContext,
-    system_version: SemverVersion,
+    system_version: Version,
     expected_status: StatusCode,
 ) -> NexusRequest<'_> {
     let request = NexusRequest::new(

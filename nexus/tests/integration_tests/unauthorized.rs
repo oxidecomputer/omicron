@@ -292,6 +292,37 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
             body: serde_json::to_value(&*DEMO_INSTANCE_CREATE).unwrap(),
             id_routes: vec!["/v1/instances/{id}"],
         },
+        // Create a stopped Instance in the Project
+        SetupReq::Post {
+            url: &DEMO_PROJECT_URL_INSTANCES,
+            body: serde_json::to_value(&*DEMO_STOPPED_INSTANCE_CREATE).unwrap(),
+            id_routes: vec!["/v1/instances/{id}"],
+        },
+        // Create an affinity group in the Project
+        SetupReq::Post {
+            url: &DEMO_PROJECT_URL_AFFINITY_GROUPS,
+            body: serde_json::to_value(&*DEMO_AFFINITY_GROUP_CREATE).unwrap(),
+            id_routes: vec!["/v1/affinity-groups/{id}"],
+        },
+        // Add a member to the affinity group
+        SetupReq::Post {
+            url: &DEMO_AFFINITY_GROUP_INSTANCE_MEMBER_URL,
+            body: serde_json::Value::Null,
+            id_routes: vec![],
+        },
+        // Create an anti-affinity group in the Project
+        SetupReq::Post {
+            url: &DEMO_PROJECT_URL_ANTI_AFFINITY_GROUPS,
+            body: serde_json::to_value(&*DEMO_ANTI_AFFINITY_GROUP_CREATE)
+                .unwrap(),
+            id_routes: vec!["/v1/anti-affinity-groups/{id}"],
+        },
+        // Add a member to the anti-affinity group
+        SetupReq::Post {
+            url: &DEMO_ANTI_AFFINITY_GROUP_INSTANCE_MEMBER_URL,
+            body: serde_json::Value::Null,
+            id_routes: vec![],
+        },
         // Lookup the previously created NIC
         SetupReq::Get {
             url: &DEMO_INSTANCE_NIC_URL,

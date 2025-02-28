@@ -129,6 +129,10 @@ pub fn text_warning() -> Style {
     Style::default().fg(OX_YELLOW)
 }
 
+pub fn text_dim() -> Style {
+    Style::default().fg(OX_GRAY).add_modifier(Modifier::DIM)
+}
+
 pub const CHECK_ICON: char = '✓';
 pub const CROSS_ICON: char = '✗';
 pub const WARN_ICON: char = '⚠';

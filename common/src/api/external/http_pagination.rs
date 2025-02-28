@@ -311,6 +311,19 @@ pub type PaginatedByNameOrId<Selector = ()> = PaginationParams<
 pub type PageSelectorByNameOrId<Selector = ()> =
     PageSelector<ScanByNameOrId<Selector>, NameOrId>;
 
+pub fn id_pagination<'a, Selector>(
+    pag_params: &'a DataPageParams<Uuid>,
+    scan_params: &'a ScanById<Selector>,
+) -> Result<PaginatedBy<'a>, HttpError>
+where
+    Selector:
+        Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize,
+{
+    match scan_params.sort_by {
+        IdSortMode::IdAscending => Ok(PaginatedBy::Id(pag_params.clone())),
+    }
+}
+
 pub fn name_or_id_pagination<'a, Selector>(
     pag_params: &'a DataPageParams<NameOrId>,
     scan_params: &'a ScanByNameOrId<Selector>,

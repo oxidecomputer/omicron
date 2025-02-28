@@ -278,6 +278,7 @@ mod tests {
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
         region_id: RegionUuid,
+        disk_id: PhysicalDiskUuid,
     }
 
     impl TestFixture {
@@ -301,7 +302,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            Self { zpool_id, dataset_id, region_id }
+            Self { zpool_id, dataset_id, region_id, disk_id }
         }
 
         async fn delete_region(&self, datastore: &DataStore) {
@@ -399,7 +400,7 @@ mod tests {
         let mut task = DecommissionedDiskCleaner::new(datastore.clone(), false);
 
         datastore
-            .physical_disk_decommission_all_expunged(&opctx)
+            .physical_disk_decommission(&opctx, fixture.disk_id)
             .await
             .unwrap();
 
@@ -433,9 +434,10 @@ mod tests {
         let mut task = DecommissionedDiskCleaner::new(datastore.clone(), false);
 
         datastore
-            .physical_disk_decommission_all_expunged(&opctx)
+            .physical_disk_decommission(&opctx, fixture.disk_id)
             .await
             .unwrap();
+
         fixture.delete_region(&datastore).await;
 
         // Setup: Disk is decommissioned and has no regions.

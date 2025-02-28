@@ -9,10 +9,8 @@ use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use fs_err::{self as fs};
 use futures::TryStreamExt;
-use omicron_common::{
-    api::external::SemverVersion,
-    update::{Artifact, ArtifactsDocument},
-};
+use omicron_common::update::{Artifact, ArtifactsDocument};
+use semver::Version;
 use std::{collections::BTreeSet, num::NonZeroU64};
 use tough::{
     ExpirationEnforcement, Repository, RepositoryLoader, TargetName,
@@ -33,7 +31,7 @@ impl OmicronRepo {
     pub async fn initialize(
         log: &slog::Logger,
         repo_path: &Utf8Path,
-        system_version: SemverVersion,
+        system_version: Version,
         keys: Vec<Key>,
         expiry: DateTime<Utc>,
     ) -> Result<Self> {
@@ -256,7 +254,7 @@ impl OmicronRepoEditor {
     async fn initialize(
         repo_path: Utf8PathBuf,
         root: SignedRole<Root>,
-        system_version: SemverVersion,
+        system_version: Version,
     ) -> Result<Self> {
         let metadata_dir = repo_path.join("metadata");
         let targets_dir = repo_path.join("targets");

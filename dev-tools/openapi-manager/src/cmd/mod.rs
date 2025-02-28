@@ -2,12 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::process::ExitCode;
+//! openapi-manager library facilities for implementing the openapi-manager
+//! command-line tool
 
-use clap::Parser;
-use openapi_manager::App;
+// helpers
+pub mod dispatch;
 
-fn main() -> ExitCode {
-    let app = App::parse();
-    app.exec().unwrap()
-}
+// subcommands
+mod check;
+mod debug;
+mod generate;
+mod list;

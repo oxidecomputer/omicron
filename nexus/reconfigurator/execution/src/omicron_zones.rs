@@ -40,14 +40,17 @@ pub(crate) struct DeployZonesDone(());
 
 /// Idempotently ensure that the specified Omicron zones are deployed to the
 /// corresponding sleds
-pub(crate) async fn deploy_zones(
+pub(crate) async fn deploy_zones<'a, I>(
     opctx: &OpContext,
     sleds_by_id: &BTreeMap<SledUuid, Sled>,
-    zones: &BTreeMap<SledUuid, BlueprintZonesConfig>,
-) -> Result<DeployZonesDone, Vec<anyhow::Error>> {
+    zones: I,
+) -> Result<DeployZonesDone, Vec<anyhow::Error>>
+where
+    I: Iterator<Item = (SledUuid, &'a BlueprintZonesConfig)>,
+{
     let errors: Vec<_> = stream::iter(zones)
         .filter_map(|(sled_id, config)| async move {
-            let db_sled = match sleds_by_id.get(sled_id) {
+            let db_sled = match sleds_by_id.get(&sled_id) {
                 Some(sled) => sled,
                 None => {
                     if config.are_all_zones_expunged() {
@@ -358,9 +361,11 @@ mod test {
     };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
-        Blueprint, BlueprintTarget, CockroachDbPreserveDowngrade,
-        blueprint_zone_type,
+        Blueprint, BlueprintDatasetsConfig, BlueprintPhysicalDisksConfig,
+        BlueprintSledConfig, BlueprintTarget, BlueprintZoneImageSource,
+        CockroachDbPreserveDowngrade, blueprint_zone_type,
     };
+    use nexus_types::external_api::views::SledState;
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::BlueprintUuid;
@@ -386,10 +391,22 @@ mod test {
             },
             Blueprint {
                 id,
-                blueprint_zones,
-                blueprint_disks: BTreeMap::new(),
-                blueprint_datasets: BTreeMap::new(),
-                sled_state: BTreeMap::new(),
+                sleds: blueprint_zones
+                    .into_iter()
+                    .map(|(sled_id, zones_config)| {
+                        (
+                            sled_id,
+                            BlueprintSledConfig {
+                                state: SledState::Active,
+                                zones_config,
+                                disks_config:
+                                    BlueprintPhysicalDisksConfig::default(),
+                                datasets_config:
+                                    BlueprintDatasetsConfig::default(),
+                            },
+                        )
+                    })
+                    .collect(),
                 cockroachdb_setting_preserve_downgrade:
                     CockroachDbPreserveDowngrade::DoNotModify,
                 parent_blueprint_id: None,
@@ -434,9 +451,16 @@ mod test {
         // Get a success result back when the blueprint has an empty set of
         // zones.
         let (_, blueprint) = create_blueprint(BTreeMap::new());
-        _ = deploy_zones(&opctx, &sleds_by_id, &blueprint.blueprint_zones)
-            .await
-            .expect("failed to deploy no zones");
+        _ = deploy_zones(
+            &opctx,
+            &sleds_by_id,
+            blueprint
+                .sleds
+                .iter()
+                .map(|(sled_id, config)| (*sled_id, &config.zones_config)),
+        )
+        .await
+        .expect("failed to deploy no zones");
 
         // Zones are updated in a particular order, but each request contains
         // the full set of zones that must be running.
@@ -459,6 +483,7 @@ mod test {
                             http_address: "[::1]:0".parse().unwrap(),
                         },
                     ),
+                    image_source: BlueprintZoneImageSource::InstallDataset,
                 }]
                 .into_iter()
                 .collect(),
@@ -492,9 +517,16 @@ mod test {
         }
 
         // Execute it.
-        _ = deploy_zones(&opctx, &sleds_by_id, &blueprint.blueprint_zones)
-            .await
-            .expect("failed to deploy initial zones");
+        _ = deploy_zones(
+            &opctx,
+            &sleds_by_id,
+            blueprint
+                .sleds
+                .iter()
+                .map(|(sled_id, config)| (*sled_id, &config.zones_config)),
+        )
+        .await
+        .expect("failed to deploy initial zones");
 
         s1.verify_and_clear();
         s2.verify_and_clear();
@@ -509,9 +541,16 @@ mod test {
                 .respond_with(status_code(204)),
             );
         }
-        _ = deploy_zones(&opctx, &sleds_by_id, &blueprint.blueprint_zones)
-            .await
-            .expect("failed to deploy same zones");
+        _ = deploy_zones(
+            &opctx,
+            &sleds_by_id,
+            blueprint
+                .sleds
+                .iter()
+                .map(|(sled_id, config)| (*sled_id, &config.zones_config)),
+        )
+        .await
+        .expect("failed to deploy same zones");
         s1.verify_and_clear();
         s2.verify_and_clear();
 
@@ -532,10 +571,16 @@ mod test {
             .respond_with(status_code(500)),
         );
 
-        let errors =
-            deploy_zones(&opctx, &sleds_by_id, &blueprint.blueprint_zones)
-                .await
-                .expect_err("unexpectedly succeeded in deploying zones");
+        let errors = deploy_zones(
+            &opctx,
+            &sleds_by_id,
+            blueprint
+                .sleds
+                .iter()
+                .map(|(sled_id, config)| (*sled_id, &config.zones_config)),
+        )
+        .await
+        .expect_err("unexpectedly succeeded in deploying zones");
 
         println!("{:?}", errors);
         assert_eq!(errors.len(), 1);
@@ -563,6 +608,7 @@ mod test {
                         address: "[::1]:0".parse().unwrap(),
                     },
                 ),
+                image_source: BlueprintZoneImageSource::InstallDataset,
             });
         }
 
@@ -610,9 +656,16 @@ mod test {
         }
 
         // Activate the task
-        _ = deploy_zones(&opctx, &sleds_by_id, &blueprint.blueprint_zones)
-            .await
-            .expect("failed to deploy last round of zones");
+        _ = deploy_zones(
+            &opctx,
+            &sleds_by_id,
+            blueprint
+                .sleds
+                .iter()
+                .map(|(sled_id, config)| (*sled_id, &config.zones_config)),
+        )
+        .await
+        .expect("failed to deploy last round of zones");
         s1.verify_and_clear();
         s2.verify_and_clear();
     }
@@ -648,6 +701,7 @@ mod test {
                     },
                 },
             ),
+            image_source: BlueprintZoneImageSource::InstallDataset,
         };
 
         // Start a mock cockroach-admin server.

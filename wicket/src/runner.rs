@@ -122,10 +122,17 @@ impl RunnerCore {
                 self.screen.resize(&mut self.state, width, height);
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
-            Event::Inventory { inventory, mgs_last_seen } => {
-                self.state.service_status.reset_mgs(mgs_last_seen);
-                self.state.service_status.reset_wicketd(Duration::ZERO);
+            Event::Inventory { inventory } => {
+                if let Some(mgs) = &inventory.mgs {
+                    self.state.service_status.reset_mgs(mgs.last_seen);
+                }
+                if let Some(transceivers) = &inventory.transceivers {
+                    self.state
+                        .service_status
+                        .reset_transceivers(transceivers.last_seen);
+                }
                 self.state.inventory.update_inventory(inventory)?;
+                self.state.service_status.reset_wicketd(Duration::ZERO);
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
             Event::ArtifactsAndEventReports {

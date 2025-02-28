@@ -9,7 +9,6 @@ use super::{
 use crate::app::sagas::ActionError;
 use nexus_db_queries::authn;
 use omicron_common::api::external::Error;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use serde::{Deserialize, Serialize};
@@ -89,7 +88,7 @@ async fn siu_destroyed_release_sled_resources(
 
     osagactx
         .datastore()
-        .sled_reservation_delete(&opctx, vmm_id.into_untyped_uuid())
+        .sled_reservation_delete(&opctx, vmm_id)
         .await
         .or_else(|err| {
             // Necessary for idempotency

@@ -9,11 +9,17 @@ use http::method::Method;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::DiskTest;
+use nexus_test_utils::resource_helpers::create_affinity_group;
+use nexus_test_utils::resource_helpers::create_anti_affinity_group;
+use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_floating_ip;
-use nexus_test_utils::resource_helpers::{
-    DiskTest, create_default_ip_pool, create_disk, create_project, create_vpc,
-    object_create, project_get, projects_list,
-};
+use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::create_vpc;
+use nexus_test_utils::resource_helpers::object_create;
+use nexus_test_utils::resource_helpers::project_get;
+use nexus_test_utils::resource_helpers::projects_list;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
@@ -386,6 +392,70 @@ async fn test_project_deletion_with_vpc(cptestctx: &ControlPlaneTestContext) {
         .await
         .unwrap();
     NexusRequest::object_delete(client, &vpc_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    delete_project(&project_url, &client).await;
+}
+
+#[nexus_test]
+async fn test_project_deletion_with_affinity_group(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create a project that we'll use for testing.
+    let name = "springfield-squidport";
+    let project_url = format!("/v1/projects/{}", name);
+
+    create_project(&client, &name).await;
+    delete_project_default_subnet(&name, &client).await;
+    delete_project_default_vpc(&name, &client).await;
+
+    let group_name = "just-rainsticks";
+    create_affinity_group(&client, name, group_name).await;
+
+    assert_eq!(
+        "project to be deleted contains an affinity group: just-rainsticks",
+        delete_project_expect_fail(&project_url, &client).await,
+    );
+
+    let group_url =
+        format!("/v1/affinity-groups/{group_name}?project={}", name);
+    NexusRequest::object_delete(client, &group_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    delete_project(&project_url, &client).await;
+}
+
+#[nexus_test]
+async fn test_project_deletion_with_anti_affinity_group(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create a project that we'll use for testing.
+    let name = "springfield-squidport";
+    let project_url = format!("/v1/projects/{}", name);
+
+    create_project(&client, &name).await;
+    delete_project_default_subnet(&name, &client).await;
+    delete_project_default_vpc(&name, &client).await;
+
+    let group_name = "just-rainsticks";
+    create_anti_affinity_group(&client, name, group_name).await;
+
+    assert_eq!(
+        "project to be deleted contains an anti affinity group: just-rainsticks",
+        delete_project_expect_fail(&project_url, &client).await,
+    );
+
+    let group_url =
+        format!("/v1/anti-affinity-groups/{group_name}?project={}", name);
+    NexusRequest::object_delete(client, &group_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await

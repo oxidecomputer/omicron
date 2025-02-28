@@ -577,6 +577,16 @@ pub enum SwitchLocation {
     Switch1,
 }
 
+impl SwitchLocation {
+    /// Return the location of the other switch, not ourself.
+    pub const fn other(&self) -> Self {
+        match self {
+            SwitchLocation::Switch0 => SwitchLocation::Switch1,
+            SwitchLocation::Switch1 => SwitchLocation::Switch0,
+        }
+    }
+}
+
 impl fmt::Display for SwitchLocation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

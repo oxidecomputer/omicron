@@ -18,11 +18,11 @@ use crate::{
 
 use super::{ALL_COMPONENT_IDS, ComponentId, ParsableComponentId};
 use omicron_common::api::internal::nexus::KnownArtifactKind;
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::fmt::Display;
-use wicketd_client::types::SemverVersion;
 
 // Represents a version and the signature (optional) associated
 // with a particular artifact. This allows for multiple versions
@@ -30,14 +30,14 @@ use wicketd_client::types::SemverVersion;
 // sign is currently only used for RoT artifacts
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArtifactVersions {
-    pub version: SemverVersion,
+    pub version: Version,
     pub sign: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RackUpdateState {
     pub items: BTreeMap<ComponentId, UpdateItem>,
-    pub system_version: Option<SemverVersion>,
+    pub system_version: Option<Version>,
     pub artifacts: Vec<ArtifactData>,
     pub artifact_versions: BTreeMap<KnownArtifactKind, Vec<ArtifactVersions>>,
     // The update item currently selected is recorded in
@@ -114,7 +114,7 @@ impl RackUpdateState {
     pub fn update_artifacts_and_reports(
         &mut self,
         logger: &Logger,
-        system_version: Option<SemverVersion>,
+        system_version: Option<Version>,
         artifacts: Vec<ArtifactData>,
         reports: EventReportMap,
     ) {

@@ -318,6 +318,7 @@ mod test {
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_preparation::PlanningInputFromDb;
     use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
+    use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use nexus_sled_agent_shared::inventory::OmicronZoneType;
     use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -325,9 +326,13 @@ mod test {
     use nexus_test_utils::resource_helpers::create_silo;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::Blueprint;
+    use nexus_types::deployment::BlueprintDatasetsConfig;
+    use nexus_types::deployment::BlueprintPhysicalDisksConfig;
+    use nexus_types::deployment::BlueprintSledConfig;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::CockroachDbClusterVersion;
@@ -580,11 +585,26 @@ mod test {
                 })
             }
         };
+        let image_source = match config.image_source {
+            OmicronZoneImageSource::InstallDataset => {
+                BlueprintZoneImageSource::InstallDataset
+            }
+            OmicronZoneImageSource::Artifact { .. } => {
+                // BlueprintZoneImageSource::Artifact has both a version and a
+                // hash in it, while OmicronZoneImageSource::Artifact only has a
+                // hash field. Rather than conjuring up a fake version, we
+                // simply panic here.
+                unreachable!(
+                    "this test does not use OmicronZoneImageSource::Artifact"
+                )
+            }
+        };
         Ok(BlueprintZoneConfig {
             disposition,
             id: config.id,
             filesystem_pool: config.filesystem_pool,
             zone_type,
+            image_source,
         })
     }
 
@@ -621,47 +641,47 @@ mod test {
             ipnet::Ipv6Net::new(rack_subnet_base, RACK_PREFIX).unwrap();
         let possible_sled_subnets = rack_subnet.subnets(SLED_PREFIX).unwrap();
 
-        // Convert the inventory `OmicronZonesConfig`s into
-        // `BlueprintZonesConfig`. This is going to get more painful over time
-        // as we add to blueprints, but for now we can make this work.
-        let mut blueprint_zones = BTreeMap::new();
-
-        // Also assume any sled in the collection is active.
-        let mut sled_state = BTreeMap::new();
+        let mut blueprint_sleds = BTreeMap::new();
 
         for (sled_id, sa) in collection.sled_agents {
-            blueprint_zones.insert(
+            // Convert the inventory `OmicronZonesConfig`s into
+            // `BlueprintZonesConfig`. This is going to get more painful over
+            // time as we add to blueprints, but for now we can make this work.
+            let zones_config = BlueprintZonesConfig {
+                generation: sa.omicron_zones.generation,
+                zones: sa
+                    .omicron_zones
+                    .zones
+                    .into_iter()
+                    .map(|config| -> BlueprintZoneConfig {
+                        deprecated_omicron_zone_config_to_blueprint_zone_config(
+                            config,
+                            BlueprintZoneDisposition::InService,
+                            // We don't get external IP IDs in inventory
+                            // collections. We'll just make one up for every
+                            // zone that needs one here. This is gross.
+                            Some(ExternalIpUuid::new_v4()),
+                        )
+                        .expect("failed to convert zone config")
+                    })
+                    .collect(),
+            };
+            blueprint_sleds.insert(
                 sled_id,
-                BlueprintZonesConfig {
-                    generation: sa.omicron_zones.generation,
-                    zones: sa.omicron_zones
-                        .zones
-                        .into_iter()
-                        .map(|config| -> BlueprintZoneConfig {
-                           deprecated_omicron_zone_config_to_blueprint_zone_config(
-                                config,
-                                BlueprintZoneDisposition::InService,
-                                // We don't get external IP IDs in inventory
-                                // collections. We'll just make one up for every
-                                // zone that needs one here. This is gross.
-                                Some(ExternalIpUuid::new_v4()),
-                            )
-                            .expect("failed to convert zone config")
-                        })
-                        .collect(),
+                BlueprintSledConfig {
+                    state: SledState::Active,
+                    disks_config: BlueprintPhysicalDisksConfig::default(),
+                    datasets_config: BlueprintDatasetsConfig::default(),
+                    zones_config,
                 },
             );
-            sled_state.insert(sled_id, SledState::Active);
         }
 
         let dns_empty = dns_config_empty();
         let initial_dns_generation = dns_empty.generation;
         let mut blueprint = Blueprint {
             id: BlueprintUuid::new_v4(),
-            blueprint_zones,
-            blueprint_disks: BTreeMap::new(),
-            blueprint_datasets: BTreeMap::new(),
-            sled_state,
+            sleds: blueprint_sleds,
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
@@ -678,7 +698,7 @@ mod test {
         // not currently in service.
         let out_of_service_id = OmicronZoneUuid::new_v4();
         let out_of_service_addr = Ipv6Addr::LOCALHOST;
-        blueprint.blueprint_zones.values_mut().next().unwrap().zones.insert(
+        blueprint.sleds.values_mut().next().unwrap().zones_config.zones.insert(
             BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::Expunged {
                     as_of_generation: Generation::new(),
@@ -698,13 +718,14 @@ mod test {
                         ),
                     },
                 ),
+                image_source: BlueprintZoneImageSource::InstallDataset,
             },
         );
 
         // To generate the blueprint's DNS config, we need to make up a
         // different set of information about the Quiesced fake system.
         let sleds_by_id = blueprint
-            .blueprint_zones
+            .sleds
             .keys()
             .zip(possible_sled_subnets)
             .enumerate()
@@ -1030,8 +1051,8 @@ mod test {
         // Change the zone disposition to expunged for the nexus zone on the
         // first sled. This should ensure we don't get an external DNS record
         // back for that sled.
-        let (_, bp_zones_config) =
-            blueprint.blueprint_zones.iter_mut().next().unwrap();
+        let bp_zones_config =
+            &mut blueprint.sleds.values_mut().next().unwrap().zones_config;
         let mut nexus_zone = bp_zones_config
             .zones
             .iter_mut()

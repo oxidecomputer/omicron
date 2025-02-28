@@ -154,12 +154,13 @@ impl DataStore {
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use db::schema::physical_disk::dsl;
+        let now = Utc::now();
 
         diesel::update(
             dsl::physical_disk.filter(dsl::id.eq(to_db_typed_uuid(id))),
         )
         .filter(dsl::time_deleted.is_null())
-        .set(dsl::disk_policy.eq(policy))
+        .set((dsl::disk_policy.eq(policy), dsl::time_modified.eq(now)))
         .execute_async(&*self.pool_connection_authorized(&opctx).await?)
         .await
         .map_err(|err| public_error_from_diesel(err, ErrorHandler::Server))?;
@@ -174,12 +175,13 @@ impl DataStore {
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use db::schema::physical_disk::dsl;
+        let now = Utc::now();
 
         diesel::update(
             dsl::physical_disk.filter(dsl::id.eq(to_db_typed_uuid(id))),
         )
         .filter(dsl::time_deleted.is_null())
-        .set(dsl::disk_state.eq(state))
+        .set((dsl::disk_state.eq(state), dsl::time_modified.eq(now)))
         .execute_async(&*self.pool_connection_authorized(&opctx).await?)
         .await
         .map_err(|err| public_error_from_diesel(err, ErrorHandler::Server))?;
@@ -281,19 +283,27 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Decommissions all expunged disks.
-    pub async fn physical_disk_decommission_all_expunged(
+    /// Decommissions a single expunged disk.
+    ///
+    /// This is a no-op if the disk is already decommissioned.
+    pub async fn physical_disk_decommission(
         &self,
         opctx: &OpContext,
+        id: PhysicalDiskUuid,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         use db::schema::physical_disk::dsl;
-
+        let now = Utc::now();
         let conn = &*self.pool_connection_authorized(&opctx).await?;
         diesel::update(dsl::physical_disk)
+            .filter(dsl::id.eq(to_db_typed_uuid(id)))
             .filter(dsl::time_deleted.is_null())
-            .physical_disk_filter(DiskFilter::ExpungedButActive)
-            .set(dsl::disk_state.eq(PhysicalDiskState::Decommissioned))
+            .filter(dsl::disk_policy.eq(PhysicalDiskPolicy::Expunged))
+            .filter(dsl::disk_state.ne(PhysicalDiskState::Decommissioned))
+            .set((
+                dsl::disk_state.eq(PhysicalDiskState::Decommissioned),
+                dsl::time_modified.eq(now),
+            ))
             .execute_async(conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;

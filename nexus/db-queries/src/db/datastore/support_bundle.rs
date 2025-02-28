@@ -533,8 +533,9 @@ mod test {
 
         fn new_from_blueprint(blueprint: &Blueprint) -> Vec<Self> {
             let mut sleds = vec![];
-            for (sled, datasets) in &blueprint.blueprint_datasets {
-                let pools = datasets
+            for (sled, config) in &blueprint.sleds {
+                let pools = config
+                    .datasets_config
                     .datasets
                     .iter()
                     .filter_map(|dataset| {
@@ -932,11 +933,11 @@ mod test {
     fn get_in_service_nexuses_from_blueprint(
         bp: &Blueprint,
     ) -> Vec<OmicronZoneUuid> {
-        bp.blueprint_zones
+        bp.sleds
             .values()
-            .flat_map(|zones_config| {
+            .flat_map(|sled_config| {
                 let mut nexus_zones = vec![];
-                for zone in &zones_config.zones {
+                for zone in &sled_config.zones_config.zones {
                     if matches!(zone.zone_type, BlueprintZoneType::Nexus(_))
                         && zone.disposition.is_in_service()
                     {
@@ -952,11 +953,11 @@ mod test {
         bp: &Blueprint,
         filter: BlueprintDatasetFilter,
     ) -> Vec<DatasetUuid> {
-        bp.blueprint_datasets
+        bp.sleds
             .values()
-            .flat_map(|datasets_config| {
+            .flat_map(|sled_config| {
                 let mut debug_datasets = vec![];
-                for dataset in datasets_config.datasets.iter() {
+                for dataset in sled_config.datasets_config.datasets.iter() {
                     if matches!(dataset.kind, DebugDatasetKind)
                         && dataset.disposition.matches(filter)
                     {
@@ -969,8 +970,8 @@ mod test {
     }
 
     fn expunge_dataset_for_bundle(bp: &mut Blueprint, bundle: &SupportBundle) {
-        for datasets in bp.blueprint_datasets.values_mut() {
-            for mut dataset in datasets.datasets.iter_mut() {
+        for sled in bp.sleds.values_mut() {
+            for mut dataset in sled.datasets_config.datasets.iter_mut() {
                 if dataset.id == bundle.dataset_id.into() {
                     dataset.disposition = BlueprintDatasetDisposition::Expunged;
                 }
@@ -979,8 +980,8 @@ mod test {
     }
 
     fn expunge_nexus_for_bundle(bp: &mut Blueprint, bundle: &SupportBundle) {
-        for zones in bp.blueprint_zones.values_mut() {
-            for mut zone in &mut zones.zones {
+        for sled in bp.sleds.values_mut() {
+            for mut zone in &mut sled.zones_config.zones {
                 if zone.id == bundle.assigned_nexus.unwrap().into() {
                     zone.disposition = BlueprintZoneDisposition::Expunged {
                         as_of_generation: *Generation::new(),

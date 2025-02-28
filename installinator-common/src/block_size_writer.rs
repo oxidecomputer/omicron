@@ -196,7 +196,7 @@ mod tests {
     #[proptest]
     fn proptest_block_writer(
         chunks: Vec<Vec<u8>>,
-        #[strategy((16_usize..4096))] block_size: usize,
+        #[strategy(16_usize..4096)] block_size: usize,
     ) {
         with_test_runtime(move || async move {
             proptest_block_writer_impl(chunks, block_size)

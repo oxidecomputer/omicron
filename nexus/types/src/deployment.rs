@@ -35,6 +35,7 @@ use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_common::disk::SharedDatasetConfig;
+use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -42,6 +43,7 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
+use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -147,26 +149,8 @@ pub struct Blueprint {
     /// unique identifier for this blueprint
     pub id: BlueprintUuid,
 
-    /// A map of sled id -> desired state of the sled.
-    ///
-    /// A sled is considered part of the control plane cluster iff it has an
-    /// entry in this map.
-    pub sled_state: BTreeMap<SledUuid, SledState>,
-
-    /// A map of sled id -> zones deployed on each sled, along with the
-    /// [`BlueprintZoneDisposition`] for each zone.
-    ///
-    /// Unlike `sled_state`, this map may contain entries for sleds that are no
-    /// longer a part of the control plane cluster (e.g., sleds that have been
-    /// decommissioned, but still have expunged zones where cleanup has not yet
-    /// completed).
-    pub blueprint_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
-
-    /// A map of sled id -> disks in use on each sled.
-    pub blueprint_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
-
-    /// A map of sled id -> datasets in use on each sled
-    pub blueprint_datasets: BTreeMap<SledUuid, BlueprintDatasetsConfig>,
+    /// A map of sled id -> desired configuration of the sled.
+    pub sleds: BTreeMap<SledUuid, BlueprintSledConfig>,
 
     /// which blueprint this blueprint is based on
     pub parent_blueprint_id: Option<BlueprintUuid>,
@@ -233,7 +217,12 @@ impl Blueprint {
     where
         F: FnMut(BlueprintZoneDisposition) -> bool,
     {
-        Blueprint::filtered_zones(&self.blueprint_zones, filter)
+        Blueprint::filtered_zones(
+            self.sleds
+                .iter()
+                .map(|(sled_id, config)| (*sled_id, &config.zones_config)),
+            filter,
+        )
     }
 
     /// Iterate over the [`BlueprintZoneConfig`] instances that match the
@@ -241,19 +230,37 @@ impl Blueprint {
     //
     // This is a scoped function so that it can be used in the
     // `BlueprintBuilder` during planning as well as in the `Blueprint`.
-    pub fn filtered_zones<F>(
-        zones_by_sled_id: &BTreeMap<SledUuid, BlueprintZonesConfig>,
+    pub fn filtered_zones<'a, I, F>(
+        zones_by_sled_id: I,
         mut filter: F,
-    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)>
+    ) -> impl Iterator<Item = (SledUuid, &'a BlueprintZoneConfig)>
     where
+        I: Iterator<Item = (SledUuid, &'a BlueprintZonesConfig)>,
         F: FnMut(BlueprintZoneDisposition) -> bool,
     {
         zones_by_sled_id
-            .iter()
             .flat_map(move |(sled_id, z)| {
-                z.zones.iter().map(move |z| (*sled_id, z))
+                z.zones.iter().map(move |z| (sled_id, z))
             })
             .filter(move |(_, z)| filter(z.disposition))
+    }
+
+    /// Iterate over the [`BlueprintPhysicalDiskConfig`] instances in the
+    /// blueprint that match the provided filter, along with the associated
+    /// sled id.
+    pub fn all_omicron_disks<F>(
+        &self,
+        mut filter: F,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintPhysicalDiskConfig)>
+    where
+        F: FnMut(BlueprintPhysicalDiskDisposition) -> bool,
+    {
+        self.sleds
+            .iter()
+            .flat_map(move |(sled_id, config)| {
+                config.disks_config.disks.iter().map(|disk| (*sled_id, disk))
+            })
+            .filter(move |(_, d)| filter(d.disposition))
     }
 
     /// Iterate over the [`BlueprintDatasetsConfig`] instances in the blueprint.
@@ -261,17 +268,21 @@ impl Blueprint {
         &self,
         filter: BlueprintDatasetFilter,
     ) -> impl Iterator<Item = (SledUuid, &BlueprintDatasetConfig)> {
-        self.blueprint_datasets
+        self.sleds
             .iter()
-            .flat_map(move |(sled_id, datasets)| {
-                datasets.datasets.iter().map(|dataset| (*sled_id, dataset))
+            .flat_map(move |(sled_id, config)| {
+                config
+                    .datasets_config
+                    .datasets
+                    .iter()
+                    .map(|dataset| (*sled_id, dataset))
             })
             .filter(move |(_, d)| d.disposition.matches(filter))
     }
 
     /// Iterate over the ids of all sleds in the blueprint
     pub fn sleds(&self) -> impl Iterator<Item = SledUuid> + '_ {
-        self.blueprint_zones.keys().copied()
+        self.sleds.keys().copied()
     }
 
     /// Summarize the difference between two blueprints.
@@ -292,17 +303,25 @@ impl Blueprint {
     }
 }
 
-impl BpTableData for &BlueprintPhysicalDisksConfig {
+impl BpTableData for BlueprintPhysicalDisksConfig {
     fn bp_generation(&self) -> BpGeneration {
         BpGeneration::Value(self.generation)
     }
 
     fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
-        let sorted_disk_ids: BTreeSet<DiskIdentity> =
-            self.disks.iter().map(|d| d.identity.clone()).collect();
+        let mut disks: Vec<_> = self.disks.iter().cloned().collect();
+        disks.sort_unstable_by_key(|d| d.identity.clone());
 
-        sorted_disk_ids.into_iter().map(move |d| {
-            BpTableRow::from_strings(state, vec![d.vendor, d.model, d.serial])
+        disks.into_iter().map(move |d| {
+            BpTableRow::from_strings(
+                state,
+                vec![
+                    d.identity.vendor,
+                    d.identity.model,
+                    d.identity.serial,
+                    d.disposition.to_string(),
+                ],
+            )
         })
     }
 }
@@ -337,6 +356,7 @@ impl BpTableData for BlueprintZonesConfig {
                 vec![
                     zone.kind().report_str().to_string(),
                     ZoneSortKey::id(&zone).to_string(),
+                    zone.image_source.to_string(),
                     zone.disposition.to_string(),
                     zone.underlay_ip().to_string(),
                 ],
@@ -451,10 +471,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
         // this method to update the display.
         let Blueprint {
             id,
-            sled_state,
-            blueprint_zones,
-            blueprint_disks,
-            blueprint_datasets,
+            sleds,
             parent_blueprint_id,
             // These two cockroachdb_* fields are handled by
             // `make_cockroachdb_table()`, called below.
@@ -484,101 +501,40 @@ impl fmt::Display for BlueprintDisplay<'_> {
         // Keep track of any sled_ids that have been seen in the first loop.
         let mut seen_sleds = BTreeSet::new();
 
-        // Loop through all sleds that have physical disks and print a table of
-        // those physical disks.
-        //
-        // If there are corresponding zones, print those as well.
-        for (sled_id, disks) in blueprint_disks {
+        // Loop through all sleds and print tables for their disks, datasets,
+        // and zones.
+        for (sled_id, config) in sleds {
             // Construct the disks subtable
             let disks_table = BpTable::new(
                 BpPhysicalDisksTableSchema {},
-                disks.bp_generation(),
-                disks.rows(BpDiffState::Unchanged).collect(),
+                config.disks_config.bp_generation(),
+                config.disks_config.rows(BpDiffState::Unchanged).collect(),
             );
 
             // Look up the sled state
-            let sled_state = sled_state
-                .get(sled_id)
-                .map(|state| state.to_string())
-                .unwrap_or_else(|| {
-                    "blueprint error: unknown sled state".to_string()
-                });
+            let sled_state = config.state;
             writeln!(
                 f,
                 "\n  sled: {sled_id} ({sled_state})\n\n{disks_table}\n",
             )?;
 
             // Construct the datasets subtable
-            if let Some(datasets) = blueprint_datasets.get(sled_id) {
-                let datasets_tab = BpTable::new(
-                    BpDatasetsTableSchema {},
-                    datasets.bp_generation(),
-                    datasets.rows(BpDiffState::Unchanged).collect(),
-                );
-                writeln!(f, "{datasets_tab}\n")?;
-            }
+            let datasets_tab = BpTable::new(
+                BpDatasetsTableSchema {},
+                config.datasets_config.bp_generation(),
+                config.datasets_config.rows(BpDiffState::Unchanged).collect(),
+            );
+            writeln!(f, "{datasets_tab}\n")?;
 
             // Construct the zones subtable
-            if let Some(zones) = blueprint_zones.get(sled_id) {
-                let zones_tab = BpTable::new(
-                    BpOmicronZonesTableSchema {},
-                    zones.bp_generation(),
-                    zones.rows(BpDiffState::Unchanged).collect(),
-                );
-                writeln!(f, "{zones_tab}\n")?;
-            }
+            let zones_tab = BpTable::new(
+                BpOmicronZonesTableSchema {},
+                config.zones_config.bp_generation(),
+                config.zones_config.rows(BpDiffState::Unchanged).collect(),
+            );
+            writeln!(f, "{zones_tab}\n")?;
+
             seen_sleds.insert(sled_id);
-        }
-
-        // Now create and display a table of zones/datasets on sleds that don't
-        // have physical disks.
-        //
-        // This should basically be impossible, so we warn if it occurs.
-        for (sled_id, zones) in blueprint_zones {
-            if !seen_sleds.contains(sled_id) && !zones.zones.is_empty() {
-                writeln!(
-                    f,
-                    "!{sled_id}\n{}\n{}\n\n",
-                    "WARNING: Zones exist without physical disks!",
-                    BpTable::new(
-                        BpOmicronZonesTableSchema {},
-                        zones.bp_generation(),
-                        zones.rows(BpDiffState::Unchanged).collect()
-                    )
-                )?;
-                if let Some(datasets) = blueprint_datasets.get(sled_id) {
-                    writeln!(
-                        f,
-                        "{}\n{}\n",
-                        "WARNING: Datasets also exist without physical disks!",
-                        BpTable::new(
-                            BpDatasetsTableSchema {},
-                            datasets.bp_generation(),
-                            datasets.rows(BpDiffState::Unchanged).collect(),
-                        )
-                    )?;
-                }
-                seen_sleds.insert(sled_id);
-            }
-        }
-
-        // Finally, create and display a table of datasets on sleds that don't
-        // have disks or zones.
-        //
-        // This should basically be impossible, so we warn if it occurs.
-        for (sled_id, datasets) in blueprint_datasets {
-            if !seen_sleds.contains(sled_id) && !datasets.datasets.is_empty() {
-                writeln!(
-                    f,
-                    "!{sled_id}\n{}\n{}\n\n",
-                    "WARNING: Datasets exist without physical disks or zones!",
-                    BpTable::new(
-                        BpDatasetsTableSchema {},
-                        datasets.bp_generation(),
-                        datasets.rows(BpDiffState::Unchanged).collect(),
-                    )
-                )?;
-            }
         }
 
         if let Some((t1, t2, t3)) = self.make_clickhouse_cluster_config_tables()
@@ -591,6 +547,19 @@ impl fmt::Display for BlueprintDisplay<'_> {
 
         Ok(())
     }
+}
+
+/// Information about the configuration of a sled as recorded in a blueprint.
+///
+/// Part of [`Blueprint`].
+#[derive(
+    Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+pub struct BlueprintSledConfig {
+    pub state: SledState,
+    pub disks_config: BlueprintPhysicalDisksConfig,
+    pub datasets_config: BlueprintDatasetsConfig,
+    pub zones_config: BlueprintZonesConfig,
 }
 
 /// Information about an Omicron zone as recorded in a blueprint.
@@ -611,6 +580,12 @@ pub struct BlueprintZonesConfig {
 
     /// The set of running zones.
     pub zones: IdMap<BlueprintZoneConfig>,
+}
+
+impl Default for BlueprintZonesConfig {
+    fn default() -> Self {
+        Self { generation: Generation::new(), zones: IdMap::new() }
+    }
 }
 
 impl BlueprintZonesConfig {
@@ -702,6 +677,7 @@ pub struct BlueprintZoneConfig {
     /// zpool used for the zone's (transient) root filesystem
     pub filesystem_pool: Option<ZpoolName>,
     pub zone_type: BlueprintZoneType,
+    pub image_source: BlueprintZoneImageSource,
 }
 
 impl IdMappable for BlueprintZoneConfig {
@@ -744,12 +720,13 @@ impl From<BlueprintZoneConfig> for OmicronZoneConfig {
             filesystem_pool,
             zone_type,
             disposition: _disposition,
+            image_source,
         } = z;
         Self {
             id,
             filesystem_pool,
             zone_type: zone_type.into(),
-            image_source: OmicronZoneImageSource::InstallDataset,
+            image_source: image_source.into(),
         }
     }
 }
@@ -819,6 +796,22 @@ impl BlueprintZoneDisposition {
     pub fn is_expunged(self) -> bool {
         matches!(self, Self::Expunged { .. })
     }
+
+    /// Returns true if it's possible a zone with this disposition could be
+    /// running.
+    ///
+    /// This is true for both in-service zones and zones that have been expunged
+    /// but are not yet ready for cleanup (e.g., immediately after the planner
+    /// expunges a zone, there is a period of time where the zone continues to
+    /// run before execution notifies the sled to shut it down).
+    pub fn could_be_running(self) -> bool {
+        match self {
+            BlueprintZoneDisposition::InService => true,
+            BlueprintZoneDisposition::Expunged {
+                ready_for_cleanup, ..
+            } => !ready_for_cleanup,
+        }
+    }
 }
 
 impl fmt::Display for BlueprintZoneDisposition {
@@ -835,6 +828,71 @@ impl fmt::Display for BlueprintZoneDisposition {
                 } else {
                     "expunged ⏳".fmt(f)
                 }
+            }
+        }
+    }
+}
+
+/// Where a blueprint's image source is located.
+///
+/// This is the blueprint version of [`OmicronZoneImageSource`].
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    JsonSchema,
+    Deserialize,
+    Serialize,
+    Diffable,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum BlueprintZoneImageSource {
+    /// This zone's image source is whatever happens to be on the sled's
+    /// "install" dataset.
+    ///
+    /// This is whatever was put in place at the factory or by the latest
+    /// MUPdate. The image used here can vary by sled and even over time (if the
+    /// sled gets MUPdated again).
+    ///
+    /// Historically, this was the only source for zone images. In an system
+    /// with automated control-plane-driven update we expect to only use this
+    /// variant in emergencies where the system had to be recovered via MUPdate.
+    InstallDataset,
+
+    /// This zone's image source is the artifact matching this hash from the TUF
+    /// artifact store (aka "TUF repo depot").
+    ///
+    /// This originates from TUF repos uploaded to Nexus which are then
+    /// replicated out to all sleds.
+    #[serde(rename_all = "snake_case")]
+    Artifact { version: Version, hash: ArtifactHash },
+}
+
+impl From<BlueprintZoneImageSource> for OmicronZoneImageSource {
+    fn from(source: BlueprintZoneImageSource) -> Self {
+        match source {
+            BlueprintZoneImageSource::InstallDataset => {
+                OmicronZoneImageSource::InstallDataset
+            }
+            BlueprintZoneImageSource::Artifact { version: _, hash } => {
+                OmicronZoneImageSource::Artifact { hash }
+            }
+        }
+    }
+}
+
+impl fmt::Display for BlueprintZoneImageSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BlueprintZoneImageSource::InstallDataset => {
+                write!(f, "install dataset")
+            }
+            BlueprintZoneImageSource::Artifact { version, hash: _ } => {
+                write!(f, "artifact: version {version}")
             }
         }
     }
@@ -869,34 +927,91 @@ pub enum BlueprintDatasetFilter {
     JsonSchema,
     Deserialize,
     Serialize,
-    EnumIter,
     Diffable,
 )]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BlueprintPhysicalDiskDisposition {
     /// The physical disk is in-service.
     InService,
 
     /// The physical disk is permanently gone.
-    Expunged,
+    Expunged {
+        /// Generation of the parent config in which this disk became expunged.
+        as_of_generation: Generation,
+
+        /// True if Reconfiguration knows that this disk has been expunged.
+        ///
+        /// In the current implementation, this means either:
+        ///
+        /// a) the sled where the disk was residing has been expunged.
+        ///
+        /// b) the planner has observed an inventory collection where the
+        /// disk expungement was seen by the sled agent on the sled where the
+        /// disk was previously in service. This is indicated by the inventory
+        /// reporting a disk generation at least as high as `as_of_generation`.
+        ready_for_cleanup: bool,
+    },
 }
 
 impl BlueprintPhysicalDiskDisposition {
-    /// Returns true if the disk disposition matches this filter.
-    pub fn matches(self, filter: DiskFilter) -> bool {
+    /// Always returns true.
+    ///
+    /// This is intended for use with methods that take a filtering
+    /// closure operating on a `BlueprintPhysicalDiskDisposition` (e.g.,
+    /// `Blueprint::all_omicron_disks()`), allowing callers to make it clear
+    /// they accept any disposition via
+    ///
+    /// ```rust,ignore
+    /// blueprint.all_omicron_disks(BlueprintPhysicalDiskDisposition::any)
+    /// ```
+    pub fn any(self) -> bool {
+        true
+    }
+
+    /// Returns true if `self` is `BlueprintZoneDisposition::InService`
+    pub fn is_in_service(self) -> bool {
+        matches!(self, Self::InService)
+    }
+
+    /// Returns true if `self` is `BlueprintPhysicalDiskDisposition::Expunged
+    /// { .. }`, regardless of the details contained within that variant.
+    pub fn is_expunged(self) -> bool {
+        matches!(self, Self::Expunged { .. })
+    }
+
+    /// Returns true if `self` is `BlueprintPhysicalDiskDisposition::Expunged
+    /// {ready_for_cleanup: true, ..}`
+    pub fn is_ready_for_cleanup(self) -> bool {
+        matches!(self, Self::Expunged { ready_for_cleanup: true, .. })
+    }
+
+    /// Return the generation when a disk was expunged or `None` if the disk
+    /// was not expunged.
+    pub fn expunged_as_of_generation(&self) -> Option<Generation> {
         match self {
-            Self::InService => match filter {
-                DiskFilter::All => true,
-                DiskFilter::InService => true,
-                // TODO remove this variant?
-                DiskFilter::ExpungedButActive => false,
-            },
-            Self::Expunged => match filter {
-                DiskFilter::All => true,
-                DiskFilter::InService => false,
-                // TODO remove this variant?
-                DiskFilter::ExpungedButActive => true,
-            },
+            BlueprintPhysicalDiskDisposition::Expunged {
+                as_of_generation,
+                ..
+            } => Some(*as_of_generation),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for BlueprintPhysicalDiskDisposition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            // Neither `write!(f, "...")` nor `f.write_str("...")` obey fill
+            // and alignment (used above), but this does.
+            BlueprintPhysicalDiskDisposition::InService => "in service".fmt(f),
+            BlueprintPhysicalDiskDisposition::Expunged {
+                ready_for_cleanup: true,
+                ..
+            } => "expunged ✓".fmt(f),
+            BlueprintPhysicalDiskDisposition::Expunged {
+                ready_for_cleanup: false,
+                ..
+            } => "expunged ⏳".fmt(f),
         }
     }
 }
@@ -907,6 +1022,7 @@ impl BlueprintPhysicalDiskDisposition {
 )]
 pub struct BlueprintPhysicalDiskConfig {
     pub disposition: BlueprintPhysicalDiskDisposition,
+    #[daft(leaf)]
     pub identity: DiskIdentity,
     pub id: PhysicalDiskUuid,
     pub pool_id: ZpoolUuid,
@@ -939,7 +1055,7 @@ impl BlueprintPhysicalDisksConfig {
                 .disks
                 .into_iter()
                 .filter_map(|d| {
-                    if d.disposition.matches(DiskFilter::InService) {
+                    if d.disposition.is_in_service() {
                         Some(d.into())
                     } else {
                         None
@@ -985,6 +1101,12 @@ impl From<BlueprintPhysicalDiskConfig> for OmicronPhysicalDiskConfig {
 pub struct BlueprintDatasetsConfig {
     pub generation: Generation,
     pub datasets: IdMap<BlueprintDatasetConfig>,
+}
+
+impl Default for BlueprintDatasetsConfig {
+    fn default() -> Self {
+        Self { generation: Generation::new(), datasets: IdMap::new() }
+    }
 }
 
 impl BlueprintDatasetsConfig {

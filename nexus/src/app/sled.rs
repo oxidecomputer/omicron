@@ -170,7 +170,7 @@ impl super::Nexus {
         propolis_id: PropolisUuid,
         resources: db::model::Resources,
         constraints: db::model::SledReservationConstraints,
-    ) -> Result<db::model::SledResource, Error> {
+    ) -> Result<db::model::SledResourceVmm, Error> {
         self.db_datastore
             .sled_reservation_create(
                 &self.opctx_alloc,
@@ -184,10 +184,10 @@ impl super::Nexus {
 
     pub(crate) async fn delete_sled_reservation(
         &self,
-        resource_id: Uuid,
+        vmm_id: PropolisUuid,
     ) -> Result<(), Error> {
         self.db_datastore
-            .sled_reservation_delete(&self.opctx_alloc, resource_id)
+            .sled_reservation_delete(&self.opctx_alloc, vmm_id)
             .await
     }
 

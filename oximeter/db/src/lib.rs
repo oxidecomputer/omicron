@@ -4,7 +4,7 @@
 
 //! Tools for interacting with the control plane telemetry database.
 
-// Copyright 2024 Oxide Computer Company
+// Copyright 2025 Oxide Computer Company
 
 use crate::query::StringFieldSelector;
 use anyhow::Context as _;
@@ -188,6 +188,9 @@ impl From<crate::oxql::Error> for Error {
         Error::Oxql(e)
     }
 }
+
+/// Alias for a connection to the database claimed from a `qorb` pool.
+pub(crate) type Handle = qorb::claim::Handle<crate::native::Connection>;
 
 /// The target identifies the resource or component about which metric data is produced.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

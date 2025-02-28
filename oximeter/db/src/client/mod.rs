@@ -16,6 +16,7 @@ mod sql;
 pub use self::dbwrite::DbWrite;
 pub use self::dbwrite::TestDbWrite;
 use crate::Error;
+use crate::Handle;
 use crate::Metric;
 use crate::Target;
 use crate::Timeseries;
@@ -37,10 +38,12 @@ use dropshot::PaginationOrder;
 use dropshot::ResultsPage;
 use dropshot::WhichPage;
 use omicron_common::backoff;
+use omicron_common::backoff::Backoff as _;
 use oximeter::Measurement;
 use oximeter::TimeseriesName;
 use oximeter::schema::TimeseriesKey;
 use oximeter::types::Sample;
+use qorb::policy::Policy;
 use qorb::pool::Pool;
 use qorb::resolver::BoxedResolver;
 use qorb::resolvers::single_host::SingleHostResolver;
@@ -52,6 +55,7 @@ use slog::error;
 use slog::info;
 use slog::trace;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::btree_map::Entry;
@@ -91,8 +95,22 @@ pub struct Client {
 }
 
 impl Client {
-    /// Construct a Clickhouse client of the database with a connection pool.
-    pub fn new_with_pool(native_resolver: BoxedResolver, log: &Logger) -> Self {
+    /// Construct a Clickhouse client of the database with a resolver for the
+    /// connection pool.
+    pub fn new_with_resolver(
+        native_resolver: BoxedResolver,
+        log: &Logger,
+    ) -> Self {
+        Self::new_with_pool_policy(native_resolver, Default::default(), log)
+    }
+
+    /// Construct a ClickHouse client with a specific qorb connection pool
+    /// policy.
+    pub fn new_with_pool_policy(
+        native_resolver: BoxedResolver,
+        policy: Policy,
+        log: &Logger,
+    ) -> Self {
         let id = Uuid::new_v4();
         let log = log.new(slog::o!(
             "component" => "clickhouse-client",
@@ -103,7 +121,7 @@ impl Client {
         let native_pool = match Pool::new(
             native_resolver,
             Arc::new(native::connection::Connector),
-            qorb::policy::Policy::default(),
+            policy,
         ) {
             Ok(pool) => {
                 debug!(log, "registered USDT probes");
@@ -181,7 +199,7 @@ impl Client {
 
     /// Ping the ClickHouse server to verify connectivity.
     pub async fn ping(&self) -> Result<(), Error> {
-        let mut handle = self.pool.claim().await?;
+        let mut handle = self.claim_connection().await?;
         trace!(self.log, "acquired native pool claim");
         handle.ping().await.map_err(Error::Native)?;
         trace!(self.log, "successful ping of ClickHouse server");
@@ -233,11 +251,16 @@ impl Client {
         }
 
         let query = query_builder.build();
+        let mut handle = self.claim_connection().await?;
         let info = match query.field_query() {
             Some(field_query) => {
-                self.select_matching_timeseries_info(&field_query, &schema)
-                    .await?
-                    .1
+                self.select_matching_timeseries_info(
+                    &mut handle,
+                    &field_query,
+                    &schema,
+                )
+                .await?
+                .1
             }
             None => BTreeMap::new(),
         };
@@ -253,7 +276,13 @@ impl Client {
             // a way that is arbitrary with respect to the query.
             Err(Error::InvalidLimitQuery)
         } else {
-            self.select_timeseries_with_keys(&query, &info, &schema).await
+            self.select_timeseries_with_keys(
+                &mut handle,
+                &query,
+                &info,
+                &schema,
+            )
+            .await
         }
     }
 
@@ -288,18 +317,29 @@ impl Client {
         }
 
         let query = query_builder.build();
+        let mut handle = self.claim_connection().await?;
         let info = match query.field_query() {
             Some(field_query) => {
-                self.select_matching_timeseries_info(&field_query, &schema)
-                    .await?
-                    .1
+                self.select_matching_timeseries_info(
+                    &mut handle,
+                    &field_query,
+                    &schema,
+                )
+                .await?
+                .1
             }
             None => BTreeMap::new(),
         };
         let results = if info.is_empty() {
             vec![]
         } else {
-            self.select_timeseries_with_keys(&query, &info, &schema).await?
+            self.select_timeseries_with_keys(
+                &mut handle,
+                &query,
+                &info,
+                &schema,
+            )
+            .await?
         };
         Ok(ResultsPage::new(results, &params, |_, _| {
             NonZeroU32::try_from(limit.get() + offset).unwrap()
@@ -321,7 +361,8 @@ impl Client {
         if let Some(s) = schema.get(name) {
             return Ok(Some(s.clone()));
         }
-        self.get_schema_locked(&mut schema).await?;
+        let mut handle = self.claim_connection().await?;
+        self.get_schema_locked(&mut handle, &mut schema).await?;
         Ok(schema.get(name).map(Clone::clone))
     }
 
@@ -360,7 +401,9 @@ impl Client {
                 )
             }
         };
-        let result = self.execute_with_block(&sql).await?;
+        let result = self
+            .execute_with_block(&mut self.claim_connection().await?, &sql)
+            .await?;
         let Some(block) = result.data.as_ref() else {
             error!(
                 self.log,
@@ -421,7 +464,7 @@ impl Client {
             }
             match name.parse() {
                 Ok(ver) => {
-                    debug!(log, "valid version dir"; "ver" => ver);
+                    debug!(log, "valid version dir"; "ver" => %ver);
                     assert!(versions.insert(ver), "Versions should be unique");
                 }
                 Err(e) => warn!(
@@ -445,8 +488,25 @@ impl Client {
         desired_version: u64,
         schema_dir: impl AsRef<Path>,
     ) -> Result<(), Error> {
+        let mut handle = self.claim_connection().await?;
+        self.ensure_schema_with_handle(
+            &mut handle,
+            replicated,
+            desired_version,
+            schema_dir,
+        )
+        .await
+    }
+
+    async fn ensure_schema_with_handle(
+        &self,
+        handle: &mut Handle,
+        replicated: bool,
+        desired_version: u64,
+        schema_dir: impl AsRef<Path>,
+    ) -> Result<(), Error> {
         let schema_dir = schema_dir.as_ref();
-        let latest = self.read_latest_version().await?;
+        let latest = self.read_latest_version_with_handle(handle).await?;
         if latest == desired_version {
             debug!(
                 self.log,
@@ -491,7 +551,9 @@ impl Client {
         let mut current = latest;
         for version in versions_to_apply {
             if let Err(e) = self
-                .apply_one_schema_upgrade(replicated, *version, schema_dir)
+                .apply_one_schema_upgrade(
+                    handle, replicated, *version, schema_dir,
+                )
                 .await
             {
                 error!(
@@ -506,7 +568,7 @@ impl Client {
                 return Err(e);
             }
             current = *version;
-            self.insert_version(current).await?;
+            self.insert_version(handle, current).await?;
         }
         Ok(())
     }
@@ -533,6 +595,7 @@ impl Client {
 
     async fn apply_one_schema_upgrade(
         &self,
+        handle: &mut Handle,
         replicated: bool,
         next_version: u64,
         schema_dir: impl AsRef<Path>,
@@ -561,7 +624,7 @@ impl Client {
                 "path" => path.display(),
                 "filename" => &name,
             );
-            match self.execute_native(&sql).await {
+            match self.execute_native(handle, &sql).await {
                 Ok(_) => debug!(
                     self.log,
                     "successfully applied schema upgrade file";
@@ -595,7 +658,8 @@ impl Client {
                 "schema upgrade includes list of timeseries to be deleted";
                 "n_timeseries" => to_delete.len(),
             );
-            self.expunge_timeseries_by_name(replicated, &to_delete).await?;
+            self.expunge_timeseries_by_name(handle, replicated, &to_delete)
+                .await?;
         }
         Ok(())
     }
@@ -730,7 +794,8 @@ impl Client {
         info!(self.log, "reading db version");
 
         // Read the version from the DB
-        let version = self.read_latest_version().await?;
+        let mut handle = self.claim_connection().await?;
+        let version = self.read_latest_version_with_handle(&mut handle).await?;
         info!(self.log, "read oximeter database version"; "version" => version);
 
         // Decide how to conform the on-disk version with this version of
@@ -758,18 +823,28 @@ impl Client {
         }
 
         info!(self.log, "inserting current version"; "version" => expected_version);
-        self.insert_version(expected_version).await?;
+        self.insert_version(&mut handle, expected_version).await?;
         Ok(())
     }
 
     /// Read the latest version applied in the database.
     pub async fn read_latest_version(&self) -> Result<u64, Error> {
+        let mut handle = self.claim_connection().await?;
+        self.read_latest_version_with_handle(&mut handle).await
+    }
+
+    /// Read the latest version applied in the database, with an existing
+    /// connection.
+    async fn read_latest_version_with_handle(
+        &self,
+        handle: &mut Handle,
+    ) -> Result<u64, Error> {
         const ALIAS: &str = "max_version";
         const QUERY: &str = const_format::formatcp!(
             "SELECT MAX(value) AS {ALIAS} FROM {db_name}.version;",
             db_name = crate::DATABASE_NAME,
         );
-        match self.execute_with_block(QUERY).await {
+        match self.execute_with_block(handle, QUERY).await {
             Ok(result) => {
                 let Some(data) = &result.data else {
                     error!(
@@ -860,29 +935,35 @@ impl Client {
         }
     }
 
-    async fn insert_version(&self, version: u64) -> Result<(), Error> {
+    async fn insert_version(
+        &self,
+        handle: &mut Handle,
+        version: u64,
+    ) -> Result<(), Error> {
         let sql = format!(
             "INSERT INTO {db_name}.version (*) VALUES ({version}, now());",
             db_name = crate::DATABASE_NAME,
         );
-        self.execute_native(&sql).await
+        self.execute_native(handle, &sql).await
     }
 
     /// Verifies if instance is part of oximeter_cluster
     pub async fn is_oximeter_cluster(&self) -> Result<bool, Error> {
         const QUERY: &str =
             const_format::formatcp!("SHOW CLUSTER {}", crate::CLUSTER_NAME);
-        self.execute_with_block(QUERY).await.and_then(|result| {
-            result
-                .data
-                .ok_or_else(|| {
-                    Error::Database(String::from(
-                        "Query for `oximeter` cluster unexpectedly \
+        self.execute_with_block(&mut self.claim_connection().await?, QUERY)
+            .await
+            .and_then(|result| {
+                result
+                    .data
+                    .ok_or_else(|| {
+                        Error::Database(String::from(
+                            "Query for `oximeter` cluster unexpectedly \
                     returned an empty data block",
-                    ))
-                })
-                .map(|block| block.n_rows() > 0)
-        })
+                        ))
+                    })
+                    .map(|block| block.n_rows() > 0)
+            })
     }
 
     // Verifies that the schema for a sample matches the schema in the database,
@@ -897,6 +978,7 @@ impl Client {
     // time.
     async fn verify_or_cache_sample_schema(
         &self,
+        handle: &mut Handle,
         sample: &Sample,
     ) -> Result<Option<TimeseriesSchema>, Error> {
         let sample_schema = TimeseriesSchema::from(sample);
@@ -910,7 +992,7 @@ impl Client {
         // read of the DB), then we check that the derived schema matches. If
         // not, we can insert it in the cache and the DB.
         if !schema.contains_key(&name) {
-            self.get_schema_locked(&mut schema).await?;
+            self.get_schema_locked(handle, &mut schema).await?;
         }
         match schema.entry(name) {
             Entry::Occupied(entry) => {
@@ -942,11 +1024,12 @@ impl Client {
     // query.
     async fn select_matching_timeseries_info(
         &self,
+        handle: &mut Handle,
         field_query: &str,
         schema: &TimeseriesSchema,
     ) -> Result<(QuerySummary, BTreeMap<TimeseriesKey, (Target, Metric)>), Error>
     {
-        let result = self.execute_with_block(field_query).await?;
+        let result = self.execute_with_block(handle, field_query).await?;
         let summary = result.query_summary();
         let Some(block) = &result.data else {
             error!(
@@ -972,6 +1055,7 @@ impl Client {
     // measurements from timeseries with those keys.
     async fn select_timeseries_with_keys(
         &self,
+        handle: &mut Handle,
         query: &query::SelectQuery,
         info: &BTreeMap<TimeseriesKey, (Target, Metric)>,
         schema: &TimeseriesSchema,
@@ -980,7 +1064,7 @@ impl Client {
         let keys = info.keys().copied().collect::<Vec<_>>();
         let measurement_query = query.measurement_query(&keys);
         let Some(block) =
-            self.execute_with_block(&measurement_query).await?.data
+            self.execute_with_block(handle, &measurement_query).await?.data
         else {
             error!(
                 self.log,
@@ -1027,6 +1111,7 @@ impl Client {
     // Insert data using the native TCP interface.
     async fn insert_native(
         &self,
+        handle: &mut Handle,
         sql: &str,
         block: Block,
     ) -> Result<QueryResult, Error> {
@@ -1037,7 +1122,6 @@ impl Client {
             "n_rows" => block.n_rows(),
             "n_columns" => block.n_columns(),
         );
-        let mut handle = self.pool.claim().await?;
         let id = usdt::UniqueId::new();
         probes::sql__query__start!(|| (&id, sql));
         let now = tokio::time::Instant::now();
@@ -1057,8 +1141,12 @@ impl Client {
     }
 
     // Execute a generic SQL statement, using the native TCP interface.
-    async fn execute_native(&self, sql: &str) -> Result<(), Error> {
-        self.execute_with_block(sql).await.map(|_| ())
+    async fn execute_native(
+        &self,
+        handle: &mut Handle,
+        sql: &str,
+    ) -> Result<(), Error> {
+        self.execute_with_block(handle, sql).await.map(|_| ())
     }
 
     // Execute a generic SQL statement, returning the query result as a data
@@ -1067,6 +1155,7 @@ impl Client {
     // TODO-robustness This currently does no validation of the statement.
     async fn execute_with_block(
         &self,
+        handle: &mut Handle,
         sql: &str,
     ) -> Result<QueryResult, Error> {
         trace!(
@@ -1075,7 +1164,6 @@ impl Client {
             "sql" => sql,
         );
 
-        let mut handle = self.pool.claim().await?;
         let id = usdt::UniqueId::new();
         probes::sql__query__start!(|| (&id, sql));
         let now = tokio::time::Instant::now();
@@ -1096,6 +1184,7 @@ impl Client {
     // Can only be called after acquiring the lock around `self.schema`.
     async fn get_schema_locked(
         &self,
+        handle: &mut Handle,
         schema: &mut BTreeMap<TimeseriesName, TimeseriesSchema>,
     ) -> Result<(), Error> {
         debug!(self.log, "retrieving timeseries schema from database");
@@ -1124,7 +1213,7 @@ impl Client {
                 )
             }
         };
-        let body = self.execute_with_block(&sql).await?;
+        let body = self.execute_with_block(handle, &sql).await?;
         let Some(data) = body.data.as_ref() else {
             trace!(self.log, "no new timeseries schema in database");
             return Ok(());
@@ -1151,49 +1240,71 @@ impl Client {
     /// will continue to retry the operation until it succeeds.
     async fn expunge_timeseries_by_name(
         &self,
+        handle: &mut Handle,
         replicated: bool,
         to_delete: &[TimeseriesName],
     ) -> Result<(), Error> {
-        let op = || async {
-            self.expunge_timeseries_by_name_once(replicated, to_delete)
+        // NOTE: We're effectively inlining `backoff::retry_notify_ext()` here,
+        // which is intentional. We have a `&mut Handle`, that we want to pass
+        // to our operation. But that needs to be `impl FnMut` based on the type
+        // signature of `retry_notify_ext()`, which means the closure here can't
+        // capture that exclusive reference.
+        //
+        // That type signature is overly-constraining in this case.
+        let mut backoff = backoff::retry_policy_internal_service();
+        let mut call_count = 0;
+        loop {
+            let Err(e) = self
+                .expunge_timeseries_by_name_once(handle, replicated, to_delete)
                 .await
-                .map_err(|err| match err {
-                    Error::DatabaseUnavailable(_) | Error::Connection(_) => {
-                        backoff::BackoffError::transient(err)
-                    }
-                    _ => backoff::BackoffError::permanent(err),
-                })
-        };
-        let notify = |error, count, delay| {
-            warn!(
-                self.log,
-                "failed to delete some timeseries";
-                "error" => ?error,
-                "call_count" => count,
-                "retry_after" => ?delay,
+            else {
+                return Ok(());
+            };
+            call_count += 1;
+
+            // We always have a next-backoff, so let's just check if the error
+            // is permanent.
+            let delay = backoff.next_backoff().expect(
+                "internal service retry policy should have no max time",
             );
-        };
-        backoff::retry_notify_ext(
-            backoff::retry_policy_internal_service(),
-            op,
-            notify,
-        )
-        .await
+            match e {
+                Error::DatabaseUnavailable(_) | Error::Connection(_) => {
+                    warn!(
+                        self.log,
+                        "failed to delete some timeseries";
+                        "error" => InlineErrorChain::new(&e),
+                        "call_count" => call_count,
+                        "retry_after" => ?delay,
+                    );
+                    tokio::time::sleep(delay).await;
+                }
+                _ => {
+                    error!(
+                        self.log,
+                        "permanent error deleting some timeseries";
+                        "error" => InlineErrorChain::new(&e),
+                        "call_count" => %call_count,
+                    );
+                    return Err(e);
+                }
+            }
+        }
     }
 
     /// Attempt to delete the named timeseries once.
     async fn expunge_timeseries_by_name_once(
         &self,
+        handle: &mut Handle,
         replicated: bool,
         to_delete: &[TimeseriesName],
     ) -> Result<(), Error> {
         // The version table should not have any matching data, but let's avoid
         // it entirely anyway.
         let tables = self
-            .list_oximeter_database_tables(ListDetails {
-                include_version: false,
-                replicated,
-            })
+            .list_oximeter_database_tables(
+                handle,
+                ListDetails { include_version: false, replicated },
+            )
             .await?;
 
         // This size is arbitrary, and just something to avoid enormous requests
@@ -1233,7 +1344,7 @@ impl Client {
                     "table_name" => table,
                     "n_timeseries" => chunk.len(),
                 );
-                self.execute_native(&sql).await?;
+                self.execute_native(handle, &sql).await?;
             }
         }
         Ok(())
@@ -1260,16 +1371,17 @@ impl Client {
 
     /// Useful for testing and introspection
     pub async fn list_replicated_tables(&self) -> Result<Vec<String>, Error> {
-        self.list_oximeter_database_tables(ListDetails {
-            include_version: true,
-            replicated: true,
-        })
+        self.list_oximeter_database_tables(
+            &mut self.claim_connection().await?,
+            ListDetails { include_version: true, replicated: true },
+        )
         .await
     }
 
     /// List tables in the oximeter database.
     async fn list_oximeter_database_tables(
         &self,
+        handle: &mut Handle,
         ListDetails { include_version, replicated }: ListDetails,
     ) -> Result<Vec<String>, Error> {
         let mut sql = format!(
@@ -1286,7 +1398,7 @@ impl Client {
             sql.push_str(" AND engine = 'ReplicatedMergeTree'");
         }
         let col = self
-            .execute_with_block(&sql)
+            .execute_with_block(handle, &sql)
             .await
             .and_then(|result| {
                 result.data.ok_or_else(|| {
@@ -1313,6 +1425,11 @@ impl Client {
             )));
         };
         Ok(names)
+    }
+
+    /// Claim a connection to the database from the qorb connection pool.
+    async fn claim_connection(&self) -> Result<Handle, Error> {
+        self.pool.claim().await.map_err(Error::from)
     }
 }
 
@@ -1383,6 +1500,7 @@ mod tests {
     use oximeter::histogram::Histogram;
     use oximeter::types::MissingDatum;
     use std::net::Ipv6Addr;
+    use std::net::SocketAddrV6;
     use std::path::PathBuf;
     use std::pin::Pin;
     use std::time::Duration;
@@ -1816,7 +1934,9 @@ mod tests {
             datum: 1,
         };
         let sample = Sample::new(&bad_name, &metric).unwrap();
-        let result = client.verify_or_cache_sample_schema(&sample).await;
+        let mut handle = client.claim_connection().await.unwrap();
+        let result =
+            client.verify_or_cache_sample_schema(&mut handle, &sample).await;
         assert!(matches!(result, Err(Error::SchemaMismatch { .. })));
     }
 
@@ -1840,8 +1960,11 @@ mod tests {
 
         // Verify that this sample is considered new, i.e., we return rows to update the timeseries
         // schema table.
-        let result =
-            client.verify_or_cache_sample_schema(&sample).await.unwrap();
+        let mut handle = client.claim_connection().await.unwrap();
+        let result = client
+            .verify_or_cache_sample_schema(&mut handle, &sample)
+            .await
+            .unwrap();
         assert!(
             matches!(result, Some(_)),
             "When verifying a new sample, the rows to be inserted should be returned"
@@ -1873,8 +1996,11 @@ mod tests {
 
         // This should no longer return a new row to be inserted for the schema of this sample, as
         // any schema have been included above.
-        let result =
-            client.verify_or_cache_sample_schema(&sample).await.unwrap();
+        let mut handle = client.claim_connection().await.unwrap();
+        let result = client
+            .verify_or_cache_sample_schema(&mut handle, &sample)
+            .await
+            .unwrap();
         assert!(
             matches!(result, None),
             "After inserting new schema, it should no longer be considered new"
@@ -1885,7 +2011,7 @@ mod tests {
             "SELECT * FROM oximeter.timeseries_schema FORMAT JSONEachRow;";
         let schema = TimeseriesSchema::from_block(
             client
-                .execute_with_block(sql)
+                .execute_with_block(&mut handle, sql)
                 .await
                 .expect("Failed to select schema")
                 .data
@@ -2017,10 +2143,10 @@ mod tests {
             expected_count: usize,
         ) {
             let ValueArray::UInt64(counts) = client
-                .execute_with_block(&format!(
-                    "SELECT COUNT() FROM oximeter.{};",
-                    table
-                ))
+                .execute_with_block(
+                    &mut client.claim_connection().await.unwrap(),
+                    &format!("SELECT COUNT() FROM oximeter.{};", table),
+                )
                 .await
                 .expect("Failed to select count of rows")
                 .data
@@ -2065,28 +2191,28 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    #[derive(Debug, Default, PartialEq, oximeter::Target)]
+    struct MyTarget {
+        id: i64,
+    }
+
+    // These two metrics share a target and have no fields. Thus they have the same timeseries
+    // keys. This test is to verify we can distinguish between them, which relies on their
+    // names.
+    #[derive(Debug, Default, PartialEq, oximeter::Metric)]
+    struct FirstMetric {
+        datum: i64,
+    }
+
+    #[derive(Debug, Default, PartialEq, oximeter::Metric)]
+    struct SecondMetric {
+        datum: i64,
+    }
+
     async fn test_differentiate_by_timeseries_name_impl(
         _: &ClickHouseDeployment,
         client: Client,
     ) {
-        #[derive(Debug, Default, PartialEq, oximeter::Target)]
-        struct MyTarget {
-            id: i64,
-        }
-
-        // These two metrics share a target and have no fields. Thus they have the same timeseries
-        // keys. This test is to verify we can distinguish between them, which relies on their
-        // names.
-        #[derive(Debug, Default, PartialEq, oximeter::Metric)]
-        struct FirstMetric {
-            datum: i64,
-        }
-
-        #[derive(Debug, Default, PartialEq, oximeter::Metric)]
-        struct SecondMetric {
-            datum: i64,
-        }
-
         let target = MyTarget::default();
         let first_metric = FirstMetric::default();
         let second_metric = SecondMetric::default();
@@ -2692,8 +2818,9 @@ mod tests {
 
         let original_schema = client.schema.lock().await.clone();
         let mut schema = client.schema.lock().await;
+        let mut handle = client.claim_connection().await.unwrap();
         client
-            .get_schema_locked(&mut schema)
+            .get_schema_locked(&mut handle, &mut schema)
             .await
             .expect("Failed to get timeseries schema");
         assert_eq!(&original_schema, &*schema, "Schema shouldn't change");
@@ -2927,8 +3054,9 @@ mod tests {
         let field_table = field_table_name(field_value.field_type());
         let insert_sql =
             format!("INSERT INTO oximeter.{field_table} FORMAT NATIVE");
+        let mut handle = client.claim_connection().await.unwrap();
         client
-            .insert_native(&insert_sql, inserted_block.clone())
+            .insert_native(&mut handle, &insert_sql, inserted_block.clone())
             .await
             .expect("Failed to insert field row");
 
@@ -2936,7 +3064,7 @@ mod tests {
         let select_sql =
             format!("SELECT * FROM oximeter.{field_table} LIMIT 1",);
         let block = client
-            .execute_with_block(&select_sql)
+            .execute_with_block(&mut handle, &select_sql)
             .await
             .expect("Failed to select field row")
             .data
@@ -3268,8 +3396,9 @@ mod tests {
         );
         println!("Expected measurement: {:#?}", measurement);
         println!("Inserted block: {:#?}", inserted_block);
+        let mut handle = client.claim_connection().await.unwrap();
         client
-            .insert_native(&insert_sql, inserted_block)
+            .insert_native(&mut handle, &insert_sql, inserted_block)
             .await
             .expect("Failed to insert measurement block");
 
@@ -3281,7 +3410,7 @@ mod tests {
             measurement.timestamp().format(crate::DATABASE_TIMESTAMP_FORMAT),
         );
         let selected_block = client
-            .execute_with_block(&select_sql)
+            .execute_with_block(&mut handle, &select_sql)
             .await
             .expect("Failed to select measurement row")
             .data
@@ -3305,14 +3434,17 @@ mod tests {
         maybe_filter: Option<&str>,
     ) -> usize {
         client
-            .execute_with_block(&format!(
-                "SELECT COUNT() AS count \
+            .execute_with_block(
+                &mut client.claim_connection().await.unwrap(),
+                &format!(
+                    "SELECT COUNT() AS count \
             FROM oximeter.timeseries_schema \
             {}",
-                maybe_filter
-                    .map(|f| format!("WHERE {f}"))
-                    .unwrap_or_else(String::new)
-            ))
+                    maybe_filter
+                        .map(|f| format!("WHERE {f}"))
+                        .unwrap_or_else(String::new)
+                ),
+            )
             .await
             .expect("Failed to SELECT from database")
             .data
@@ -3445,7 +3577,10 @@ mod tests {
 
         // Bump the version of the database to a "too new" version
         client
-            .insert_version(model::OXIMETER_VERSION + 1)
+            .insert_version(
+                &mut client.claim_connection().await.unwrap(),
+                model::OXIMETER_VERSION + 1,
+            )
             .await
             .expect("Failed to insert very new DB version");
 
@@ -3591,14 +3726,16 @@ mod tests {
         //
         // First, insert the sample into the local cache. This method also
         // checks the DB, since this schema doesn't exist in the cache.
+        let mut handle = client.claim_connection().await.unwrap();
         let UnrolledSampleRows { new_schema, .. } =
-            client.unroll_samples(&samples).await;
+            client.unroll_samples(&mut handle, &samples).await;
         assert_eq!(client.schema.lock().await.len(), 1);
 
         // Next, we'll kill the database, and then try to insert the schema.
         // That will fail, since the DB is now inaccessible.
         wipe_db(&db, &client).await;
-        let res = client.save_new_schema_or_remove(new_schema).await;
+        let res =
+            client.save_new_schema_or_remove(&mut handle, new_schema).await;
         assert!(res.is_err(), "Should have failed since the DB is gone");
         assert!(
             client.schema.lock().await.is_empty(),
@@ -3796,20 +3933,27 @@ mod tests {
         // We'll test moving from version 1, which just creates a database and
         // table, to version 2, which adds two columns to that table in
         // different SQL files.
+        let mut handle = client.claim_connection().await.unwrap();
         client
-            .execute_native(&format!("CREATE DATABASE {test_name};"))
+            .execute_native(
+                &mut handle,
+                &format!("CREATE DATABASE {test_name};"),
+            )
             .await
             .unwrap();
         client
-            .execute_native(&format!(
-                "\
+            .execute_native(
+                &mut handle,
+                &format!(
+                    "\
             CREATE TABLE {test_name}.tbl (\
                 `col0` UInt8 \
             )\
             ENGINE = MergeTree()
             ORDER BY `col0`;\
         "
-            ))
+                ),
+            )
             .await
             .unwrap();
 
@@ -3837,6 +3981,7 @@ mod tests {
         // Apply the upgrade itself.
         client
             .apply_one_schema_upgrade(
+                &mut handle,
                 replicated,
                 NEXT_VERSION,
                 schema_dir.path(),
@@ -3846,12 +3991,15 @@ mod tests {
 
         // Check that it actually worked!
         let block = client
-            .execute_with_block(&format!(
-                "\
+            .execute_with_block(
+                &mut handle,
+                &format!(
+                    "\
             SELECT name, type FROM system.columns \
             WHERE database = '{test_name}' AND table = 'tbl' \
             ORDER BY name"
-            ))
+                ),
+            )
             .await
             .expect("Failed to run query")
             .data
@@ -4013,20 +4161,27 @@ mod tests {
         // the `test_apply_one_schema_upgrade` test, but we split the two
         // modifications over two versions, rather than as multiple schema
         // upgrades in one version bump.
+        let mut handle = client.claim_connection().await.unwrap();
         client
-            .execute_native(&format!("CREATE DATABASE {test_name};"))
+            .execute_native(
+                &mut handle,
+                &format!("CREATE DATABASE {test_name};"),
+            )
             .await
             .unwrap();
         client
-            .execute_native(&format!(
-                "\
+            .execute_native(
+                &mut handle,
+                &format!(
+                    "\
             CREATE TABLE {test_name}.tbl (\
                 `col0` UInt8 \
             )\
             ENGINE = MergeTree()
             ORDER BY `col0`;\
         "
-            ))
+                ),
+            )
             .await
             .unwrap();
 
@@ -4061,12 +4216,15 @@ mod tests {
 
         // Check that it actually worked!
         let block = client
-            .execute_with_block(&format!(
-                "\
+            .execute_with_block(
+                &mut handle,
+                &format!(
+                    "\
             SELECT name, type FROM system.columns \
             WHERE database = '{test_name}' AND table = 'tbl' \
             ORDER BY name"
-            ))
+                ),
+            )
             .await
             .expect("Failed to run query")
             .data
@@ -4090,7 +4248,8 @@ mod tests {
             &["UInt8", "UInt16", "String"],
         );
 
-        let latest_version = client.read_latest_version().await.unwrap();
+        let latest_version =
+            client.read_latest_version_with_handle(&mut handle).await.unwrap();
         assert_eq!(
             latest_version,
             *VERSIONS.last().unwrap(),
@@ -4464,6 +4623,7 @@ mod tests {
     ) -> BTreeMap<String, serde_json::Map<String, serde_json::Value>> {
         let block = client
             .execute_with_block(
+                &mut client.claim_connection().await.unwrap(),
                 "SELECT \
                     name, \
                     engine_full, \
@@ -4628,19 +4788,20 @@ mod tests {
         assert_eq!(all_timeseries.len(), 2);
 
         // Count the number of records in all tables, by timeseries.
+        let mut handle = client.claim_connection().await.unwrap();
         let mut records_by_timeseries: BTreeMap<_, Vec<_>> = BTreeMap::new();
         let all_tables = client
-            .list_oximeter_database_tables(ListDetails {
-                include_version: false,
-                replicated,
-            })
+            .list_oximeter_database_tables(
+                &mut handle,
+                ListDetails { include_version: false, replicated },
+            )
             .await
             .unwrap();
         for table in all_tables.iter() {
             let sql =
                 format!("SELECT * FROM {}.{}", crate::DATABASE_NAME, table,);
             for row in client
-                .execute_with_block(&sql)
+                .execute_with_block(&mut handle, &sql)
                 .await
                 .expect("failed to execute query")
                 .data
@@ -4675,7 +4836,12 @@ mod tests {
         // Let's run the "schema upgrade", which should only delete these
         // particular timeseries.
         client
-            .ensure_schema(replicated, NEXT_VERSION, schema_dir.path())
+            .ensure_schema_with_handle(
+                &mut handle,
+                replicated,
+                NEXT_VERSION,
+                schema_dir.path(),
+            )
             .await
             .unwrap();
 
@@ -4692,7 +4858,7 @@ mod tests {
                 &to_delete[0].to_string(),
             );
             let count = client
-                .execute_with_block(&sql)
+                .execute_with_block(&mut handle, &sql)
                 .await
                 .expect("failed to get count of timeseries")
                 .data
@@ -4716,7 +4882,7 @@ mod tests {
             let sql =
                 format!("SELECT * FROM {}.{}", crate::DATABASE_NAME, table,);
             for row in client
-                .execute_with_block(&sql)
+                .execute_with_block(&mut handle, &sql)
                 .await
                 .expect("failed to execute query")
                 .data
@@ -4812,9 +4978,13 @@ mod tests {
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
         let client = Client::new(db.native_address().into(), &logctx.log);
         init_db(&db, &client).await;
-        client.execute_native("DROP TABLE oximeter.version").await.unwrap();
+        let mut handle = client.claim_connection().await.unwrap();
+        client
+            .execute_native(&mut handle, "DROP TABLE oximeter.version")
+            .await
+            .unwrap();
         assert_eq!(
-            client.read_latest_version().await.unwrap(),
+            client.read_latest_version_with_handle(&mut handle).await.unwrap(),
             0,
             "Reading the database version when there is no \
             version table should return 0",
@@ -4848,14 +5018,104 @@ mod tests {
         let mut db =
             ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
         let client = Client::new(db.native_address().into(), &logctx.log);
+        let mut handle = client.claim_connection().await.unwrap();
         init_db(&db, &client).await;
-        client.insert_version(1).await.unwrap();
-        client.insert_version(10).await.unwrap();
+        client.insert_version(&mut handle, 1).await.unwrap();
+        client.insert_version(&mut handle, 10).await.unwrap();
         assert_eq!(
-            client.read_latest_version().await.unwrap(),
+            client.read_latest_version_with_handle(&mut handle).await.unwrap(),
             10,
             "Read incorrect database version",
         );
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    // Regression for https://github.com/oxidecomputer/omicron/issues/7674.
+    #[tokio::test]
+    async fn insert_samples_fails_fast() {
+        let logctx = test_setup_log("insert_samples_fails_fast");
+
+        // First, setup the database as usual.
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.native_address().into(), &logctx.log);
+        client
+            .initialize_db_with_version(false, OXIMETER_VERSION)
+            .await
+            .unwrap();
+
+        // Now, pretend that we've collected a bunch of samples and try to
+        // insert them. The bug in #7674 would cause this to take a huge amount
+        // of time, proportional to the qorb pool claim timeout multiplied by
+        // the number of samples. But we should expect this to fail very
+        // quickly, when it first learns that the database isn't reachable.
+        //
+        // It would be nice to do this by simulating the server itself going out
+        // to lunch. That's tricky, especially in CI -- if we kill the database,
+        // another one might be started by another test, and take the ports the
+        // previous one used.
+        //
+        // Instead, we'll simulate this by creating a new _client_, pointing at
+        // a bogus address. To start, build a lot of samples.
+        let target = MyTarget::default();
+        let metric = FirstMetric::default();
+        const N_SAMPLES: usize = 1000;
+        let mut samples = Vec::with_capacity(N_SAMPLES);
+        for _ in 0..N_SAMPLES {
+            samples.push(Sample::new(&target, &metric).unwrap());
+        }
+
+        // Next, create a client that will never resolve, but whose claim
+        // timeout is pretty short.
+        const TEST_TIMEOUT: Duration = Duration::from_secs(30);
+        const CLAIM_TIMEOUT: Duration = Duration::from_secs(1);
+        assert!(TEST_TIMEOUT > CLAIM_TIMEOUT);
+        const BOGUS_ADDR: SocketAddr = SocketAddr::V6(SocketAddrV6::new(
+            Ipv6Addr::new(0x2001, 0xdb8, 0x0, 0x0, 0x0, 0x0, 0x0, 0x01),
+            0,
+            0,
+            0,
+        ));
+        let resolver = Box::new(SingleHostResolver::new(BOGUS_ADDR));
+        let policy = Policy {
+            claim_timeout: Duration::from_secs(1),
+            ..Default::default()
+        };
+        let new_client =
+            Client::new_with_pool_policy(resolver, policy, &logctx.log);
+
+        // And then assert that when we try to insert samples, we _fail_ rather
+        // than timeout. Timing out here would only happen if we tried to do
+        // something stupid like resolve the address for each sample...who'd
+        // ever do that?!
+        let fut = tokio::time::timeout(
+            TEST_TIMEOUT,
+            new_client.insert_samples(&samples),
+        );
+        match fut.await {
+            Ok(Ok(())) => panic!(
+                "Client::insert_samples() should have failed, \
+                since it's trying to insert to a non-existent database"
+            ),
+            Ok(Err(e)) => {
+                assert!(
+                    matches!(e, Error::Connection(_)),
+                    "Expected this to fail with a qorb connection \
+                    error, but found {:?}",
+                    e,
+                );
+            }
+            Err(_) => {
+                panic!(
+                    "Client::insert_samples() timed out after {:?}! \
+                    This method should have failed after the \
+                    default qorb claim timeout of 30s instead!",
+                    TEST_TIMEOUT,
+                )
+            }
+        }
+
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

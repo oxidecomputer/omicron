@@ -14,11 +14,15 @@ use illumos_utils::dladm;
 use illumos_utils::dladm::Dladm;
 use illumos_utils::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::SLED_PREFIX;
+use omicron_common::backoff::retry_notify;
+use omicron_common::backoff::retry_policy_internal_service_aggressive;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use sled_hardware::underlay;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
 use slog::info;
+use slog_error_chain::InlineErrorChain;
 
 const MG_DDM_SERVICE_FMRI: &str = "svc:/oxide/mg-ddm";
 const MG_DDM_MANIFEST_PATH: &str = "/opt/oxide/mg-ddm/pkg/ddm/manifest.xml";
@@ -77,7 +81,33 @@ pub(crate) async fn bootstrap_sled(
     // Spawn a background task to notify our local ddmd of our bootstrap address
     // so it can advertise it to other sleds.
     let ddmd_client = DdmAdminClient::localhost(&log)?;
-    ddmd_client.advertise_prefix(Ipv6Subnet::new(ip));
+    tokio::spawn({
+        let prefix = Ipv6Subnet::<SLED_PREFIX>::new(ip).net();
+        async move {
+            retry_notify(
+                retry_policy_internal_service_aggressive(),
+                || async {
+                    info!(
+                        ddmd_client.log(),
+                        "Sending prefix to ddmd for advertisement";
+                        "prefix" => ?prefix,
+                    );
+                    ddmd_client.advertise_prefixes(vec![prefix]).await?;
+                    Ok(())
+                },
+                |err, duration| {
+                    info!(
+                        ddmd_client.log(),
+                        "Failed to notify ddmd of our address (will retry)";
+                        "retry_after" => ?duration,
+                        InlineErrorChain::new(&err),
+                    );
+                },
+            )
+            .await
+            .expect("retry policy retries until success");
+        }
+    });
 
     Ok(())
 }

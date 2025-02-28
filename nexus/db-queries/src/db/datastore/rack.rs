@@ -1008,14 +1008,18 @@ mod test {
         SledBuilder, SystemDescription,
     };
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-    use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
+    use nexus_types::deployment::{
+        BlueprintDatasetsConfig, BlueprintPhysicalDisksConfig,
+        BlueprintSledConfig, BlueprintZonesConfig,
+    };
     use nexus_types::deployment::{
         BlueprintZoneConfig, OmicronZoneExternalFloatingAddr,
         OmicronZoneExternalFloatingIp,
     };
     use nexus_types::deployment::{
-        BlueprintZoneDisposition, OmicronZoneExternalSnatIp,
+        BlueprintZoneDisposition, BlueprintZoneImageSource,
+        OmicronZoneExternalSnatIp,
     };
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::external_api::views::SledState;
@@ -1050,10 +1054,7 @@ mod test {
                 rack_subnet: nexus_test_utils::RACK_SUBNET.parse().unwrap(),
                 blueprint: Blueprint {
                     id: BlueprintUuid::new_v4(),
-                    blueprint_zones: BTreeMap::new(),
-                    blueprint_disks: BTreeMap::new(),
-                    blueprint_datasets: BTreeMap::new(),
-                    sled_state: BTreeMap::new(),
+                    sleds: BTreeMap::new(),
                     cockroachdb_setting_preserve_downgrade:
                         CockroachDbPreserveDowngrade::DoNotModify,
                     parent_blueprint_id: None,
@@ -1302,10 +1303,23 @@ mod test {
         }
     }
 
-    fn sled_states_active(
-        sled_ids: impl Iterator<Item = SledUuid>,
-    ) -> BTreeMap<SledUuid, SledState> {
-        sled_ids.map(|sled_id| (sled_id, SledState::Active)).collect()
+    fn make_sled_config_only_zones(
+        blueprint_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
+    ) -> BTreeMap<SledUuid, BlueprintSledConfig> {
+        blueprint_zones
+            .into_iter()
+            .map(|(sled_id, zones_config)| {
+                (
+                    sled_id,
+                    BlueprintSledConfig {
+                        state: SledState::Active,
+                        disks_config: BlueprintPhysicalDisksConfig::default(),
+                        datasets_config: BlueprintDatasetsConfig::default(),
+                        zones_config,
+                    },
+                )
+            })
+            .collect()
     }
 
     #[tokio::test]
@@ -1401,6 +1415,7 @@ mod test {
                                 },
                             },
                         ),
+                        image_source: BlueprintZoneImageSource::InstallDataset,
                     },
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
@@ -1435,6 +1450,7 @@ mod test {
                                 },
                             },
                         ),
+                        image_source: BlueprintZoneImageSource::InstallDataset,
                     },
                 ]
                 .into_iter()
@@ -1477,6 +1493,7 @@ mod test {
                                 },
                             },
                         ),
+                        image_source: BlueprintZoneImageSource::InstallDataset,
                     },
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
@@ -1511,6 +1528,7 @@ mod test {
                                 },
                             },
                         ),
+                        image_source: BlueprintZoneImageSource::InstallDataset,
                     },
                 ]
                 .into_iter()
@@ -1530,6 +1548,7 @@ mod test {
                             address: "[::1]:80".parse().unwrap(),
                         },
                     ),
+                    image_source: BlueprintZoneImageSource::InstallDataset,
                 }]
                 .into_iter()
                 .collect(),
@@ -1537,10 +1556,7 @@ mod test {
         );
         let blueprint = Blueprint {
             id: BlueprintUuid::new_v4(),
-            sled_state: sled_states_active(blueprint_zones.keys().copied()),
-            blueprint_zones,
-            blueprint_disks: BTreeMap::new(),
-            blueprint_datasets: BTreeMap::new(),
+            sleds: make_sled_config_only_zones(blueprint_zones),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
@@ -1735,6 +1751,7 @@ mod test {
                                 },
                             },
                         ),
+                        image_source: BlueprintZoneImageSource::InstallDataset,
                     },
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
@@ -1767,6 +1784,7 @@ mod test {
                                 },
                             },
                         ),
+                        image_source: BlueprintZoneImageSource::InstallDataset,
                     },
                 ]
                 .into_iter()
@@ -1800,10 +1818,7 @@ mod test {
 
         let blueprint = Blueprint {
             id: BlueprintUuid::new_v4(),
-            sled_state: sled_states_active(blueprint_zones.keys().copied()),
-            blueprint_zones,
-            blueprint_disks: BTreeMap::new(),
-            blueprint_datasets: BTreeMap::new(),
+            sleds: make_sled_config_only_zones(blueprint_zones),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
@@ -2004,6 +2019,7 @@ mod test {
                             },
                         },
                     ),
+                    image_source: BlueprintZoneImageSource::InstallDataset,
                 }]
                 .into_iter()
                 .collect(),
@@ -2011,10 +2027,7 @@ mod test {
         );
         let blueprint = Blueprint {
             id: BlueprintUuid::new_v4(),
-            sled_state: sled_states_active(blueprint_zones.keys().copied()),
-            blueprint_zones,
-            blueprint_disks: BTreeMap::new(),
-            blueprint_datasets: BTreeMap::new(),
+            sleds: make_sled_config_only_zones(blueprint_zones),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
@@ -2112,6 +2125,7 @@ mod test {
                                 },
                             },
                         ),
+                        image_source: BlueprintZoneImageSource::InstallDataset,
                     },
                     BlueprintZoneConfig {
                         disposition: BlueprintZoneDisposition::InService,
@@ -2144,6 +2158,7 @@ mod test {
                                 },
                             },
                         ),
+                        image_source: BlueprintZoneImageSource::InstallDataset,
                     },
                 ]
                 .into_iter()
@@ -2153,10 +2168,7 @@ mod test {
 
         let blueprint = Blueprint {
             id: BlueprintUuid::new_v4(),
-            sled_state: sled_states_active(blueprint_zones.keys().copied()),
-            blueprint_zones,
-            blueprint_disks: BTreeMap::new(),
-            blueprint_datasets: BTreeMap::new(),
+            sleds: make_sled_config_only_zones(blueprint_zones),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
