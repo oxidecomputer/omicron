@@ -2,6 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+/// This module does not perform any integration tests of its own; it provides
+/// [`MetricsQuerier`] for other integration tests to use.
+
 use chrono::Utc;
 use dropshot::HttpErrorResponseBody;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -23,11 +26,8 @@ use std::borrow::Cow;
 use std::time::Duration;
 use uuid::Uuid;
 
-enum TimeseriesQueryResult {
-    TimeseriesNotFound,
-    Ok(Vec<oxql_types::Table>),
-}
-
+/// Error response expected for many of the condition closures passed to various
+/// methods of [`MetricsQuerier`] when the condition has not yet been satisfied.
 pub(super) struct MetricsNotYet {
     note: Cow<'static, str>,
 }
@@ -41,18 +41,52 @@ impl MetricsNotYet {
     }
 }
 
+/// Helper for integration tests that want to interrogate metrics recorded into
+/// Clickhouse via Oximeter.
+///
+/// Many tests want to assert something of the form "after $MY_THING has
+/// started, what metrics have been recorded about it?" But this is a difficult
+/// question to ask without introducing flakiness, because there are multiple
+/// levels of asynchrony involved:
+///
+/// * Has the metric producer registered itself with Nexus yet?
+/// * Has Nexus told Oximeter about it yet?
+/// * Has Oximeter made a collection pass since the test did
+///   $ACTIVITY_OF_INTEREST?
+/// * Has the data collected by Oximeter been sent to Clickhouse yet?
+/// * If multinode Clickhouse is in play, has the data been replicated yet?
+///
+/// For the first two items, we have [`nexus_test_utils::wait_for_producer`].
+/// This type helps with the final three items.
+///
+/// Oximeter provides a `try_force_collect()` method. Historically, this would
+/// block until the collection was entirely complete (i.e., a new collection was
+/// made and all data collected had been inserted into single-node Clickhouse).
+/// With the move to multi-node Clickhouse, `try_force_collect()` is now "fire
+/// and forget": it instructs Oximeter to make a collection "soon", but does not
+/// wait for that collection to start nor for the data to be inserted.
+///
+/// `MetricsQuerier` provides a handful of methods that wrap
+/// [`wait_for_condition`] to allow tests to repeatedly issue metric queries
+/// until some condition is met. It's expected that tests will use a mix of
+/// returning an [`MetricsNotYet`] error (when the result indicates the metrics
+/// the test is waiting for haven't been inserted yet) and typical `assert!` /
+/// `panic!` tests (when the result indicates the data has been inserted but is
+/// somehow incorrect).
 pub(super) struct MetricsQuerier<'a, N> {
     ctx: &'a ControlPlaneTestContext<N>,
 }
 
 impl<'a, N> MetricsQuerier<'a, N> {
     const POLL_INTERVAL: Duration = Duration::from_secs(1);
-    const POLL_MAX: Duration = Duration::from_secs(30);
+    const POLL_MAX: Duration = Duration::from_secs(60);
 
     pub fn new(ctx: &'a ControlPlaneTestContext<N>) -> Self {
         Self { ctx }
     }
 
+    /// Repeatedly run a query against the system timeseries table until `cond`
+    /// returns `Ok(_)`.
     pub async fn system_timeseries_query_until<F, T>(
         &self,
         query: &str,
@@ -65,6 +99,8 @@ impl<'a, N> MetricsQuerier<'a, N> {
             .await
     }
 
+    /// Repeatedly run a query against a project's timeseries table until `cond`
+    /// returns `Ok(_)`.
     pub async fn project_timeseries_query_until<F, T>(
         &self,
         project: &str,
@@ -82,6 +118,12 @@ impl<'a, N> MetricsQuerier<'a, N> {
         .await
     }
 
+    /// Repeatedly run a query against a project's timeseries table with no
+    /// extra condition (i.e., this is `project_timeseries_query_until` that
+    /// always returns `Ok(_)`).
+    ///
+    /// This is still more involved than directly issuing queries, because it
+    /// handles the case of "the timeseries itself does not yet exist".
     pub async fn project_timeseries_query(
         &self,
         project: &str,
@@ -91,6 +133,8 @@ impl<'a, N> MetricsQuerier<'a, N> {
             .await
     }
 
+    /// Repeatedly fetch the system timeseries schema until `cond` returns
+    /// `Ok(_)`.
     pub async fn wait_for_timeseries_schema<F, T>(&self, cond: F) -> T
     where
         F: Fn(Vec<TimeseriesSchema>) -> Result<T, MetricsNotYet>,
@@ -99,6 +143,7 @@ impl<'a, N> MetricsQuerier<'a, N> {
         self.wait_for_objects(|| endpoint.to_string(), cond).await
     }
 
+    /// Repeatedly fetch a specific disk metric until `cond` returns `Ok(_)`.
     pub async fn wait_for_disk_metric<F, T>(
         &self,
         project_name: &str,
@@ -119,6 +164,8 @@ impl<'a, N> MetricsQuerier<'a, N> {
         self.wait_for_objects(endpoint, cond).await
     }
 
+    /// Repeatedly fetch the single newest system metric until `cond` returns
+    /// `Ok(_)`.
     pub async fn wait_for_latest_system_metric<F, T>(
         &self,
         metric_name: &str,
@@ -142,6 +189,8 @@ impl<'a, N> MetricsQuerier<'a, N> {
         self.wait_for_latest_metric(endpoint, cond).await
     }
 
+    /// Repeatedly fetch the single newest silo metric until `cond` returns
+    /// `Ok(_)`.
     pub async fn wait_for_latest_silo_metric<F, T>(
         &self,
         metric_name: &str,
@@ -358,4 +407,9 @@ impl<'a, N> MetricsQuerier<'a, N> {
                 .tables,
         )
     }
+}
+
+enum TimeseriesQueryResult {
+    TimeseriesNotFound,
+    Ok(Vec<oxql_types::Table>),
 }
