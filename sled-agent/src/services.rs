@@ -111,7 +111,6 @@ use sled_storage::config::MountConfig;
 use sled_storage::dataset::{CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
-use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
@@ -728,7 +727,7 @@ pub struct ServiceManagerInner {
     underlay_vnic: EtherstubVnic,
     bootstrap_vnic_allocator: VnicAllocator<Etherstub>,
     ddm_reconciler: DdmReconciler,
-    sled_info: OnceCell<SledAgentInfo>,
+    sled_info: OnceLock<SledAgentInfo>,
     switch_zone_bootstrap_address: Ipv6Addr,
     storage: StorageHandle,
     zone_bundler: ZoneBundler,
@@ -815,7 +814,7 @@ impl ServiceManager {
                     bootstrap_networking.bootstrap_etherstub,
                 ),
                 ddm_reconciler,
-                sled_info: OnceCell::new(),
+                sled_info: OnceLock::new(),
                 switch_zone_bootstrap_address: bootstrap_networking
                     .switch_zone_bootstrap_ip,
                 storage,
