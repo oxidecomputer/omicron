@@ -1473,7 +1473,7 @@ dependencies = [
  "daft",
  "derive_more",
  "expectorate",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "omicron-common",
  "omicron-workspace-hack",
  "schemars",
@@ -3184,9 +3184,9 @@ checksum = "b3ea1ec5f8307826a5b71094dd91fc04d4ae75d5709b20ad351c7fb4815c86ec"
 
 [[package]]
 name = "flate2"
-version = "1.0.35"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c936bfdafb507ebbf50b8074c54fa31c5be9a1e7e5f467dd659697041407d07c"
+checksum = "11faaf5a5236997af9848be0bef4db95824b1d534ebc64d0f0c6cf3e67bd38dc"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
@@ -4529,7 +4529,7 @@ dependencies = [
  "futures",
  "http",
  "ipnetwork",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "libc",
  "macaddr",
  "mockall",
@@ -4698,7 +4698,7 @@ dependencies = [
  "installinator-client",
  "installinator-common",
  "ipcc",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "libc",
  "omicron-common",
  "omicron-ddm-admin-client",
@@ -5253,9 +5253,19 @@ dependencies = [
 
 [[package]]
 name = "libsw"
-version = "3.3.1"
+version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0673364c1ef7a1674241dbad9ba2415354103d6126451f01eeb7aaa25d6b4fce"
+checksum = "e3ddea9d2e47169bb9fbdecb418eab1ef43c20c68c37eef7ae69712db1313d0a"
+dependencies = [
+ "libsw-core",
+ "tokio",
+]
+
+[[package]]
+name = "libsw-core"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bae8635b70a7de1ebb752a5fa90aff0420ff0ff223b2d1958e2fea85019532f3"
 dependencies = [
  "tokio",
 ]
@@ -5586,9 +5596,9 @@ checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
 name = "miniz_oxide"
-version = "0.8.0"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2d80299ef12ff69b16a84bb182e3b9df68b5a91574d3d4fa6e41b65deec4df1"
+checksum = "8e3e04debbb59698c15bacbb6d93584a8c0ca9cc3213cb423d31f760d8843ce5"
 dependencies = [
  "adler2",
 ]
@@ -5892,7 +5902,7 @@ dependencies = [
  "internal-dns-resolver",
  "internal-dns-types",
  "ipnetwork",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "macaddr",
  "nexus-auth",
  "nexus-config",
@@ -6153,7 +6163,7 @@ dependencies = [
  "indexmap 2.7.1",
  "internal-dns-resolver",
  "ipnet",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "maplit",
  "nexus-config",
  "nexus-inventory",
@@ -7056,7 +7066,7 @@ dependencies = [
  "internal-dns-resolver",
  "internal-dns-types",
  "ipnetwork",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "lldpd-client",
  "macaddr",
  "mg-admin-client",
@@ -7181,7 +7191,7 @@ dependencies = [
  "internal-dns-resolver",
  "internal-dns-types",
  "ipnetwork",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "multimap",
  "nexus-client",
  "nexus-config",
@@ -7371,7 +7381,7 @@ dependencies = [
  "internal-dns-resolver",
  "internal-dns-types",
  "ipnetwork",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "key-manager",
  "libc",
  "macaddr",
@@ -7560,7 +7570,6 @@ dependencies = [
  "inout",
  "itertools 0.10.5",
  "itertools 0.12.1",
- "itertools 0.14.0",
  "lalrpop-util",
  "lazy_static",
  "libc",
@@ -7719,7 +7728,7 @@ dependencies = [
  "hex",
  "indent_write",
  "installinator-api",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "newtype_derive",
  "nexus-external-api",
  "nexus-internal-api",
@@ -7881,9 +7890,9 @@ dependencies = [
 
 [[package]]
 name = "owo-colors"
-version = "4.1.0"
+version = "4.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb37767f6569cd834a413442455e0f066d0d522de8630436e2a1761d9726ba56"
+checksum = "1036865bb9422d3300cf723f657c2851d0e9ab12567854b1f4eba3d77decf564"
 
 [[package]]
 name = "oxide-client"
@@ -8044,7 +8053,7 @@ dependencies = [
  "highway",
  "iana-time-zone",
  "indexmap 2.7.1",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "libc",
  "nom",
  "num",
@@ -9691,7 +9700,7 @@ dependencies = [
  "humantime",
  "indent_write",
  "internal-dns-types",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "nexus-client",
  "nexus-db-queries",
  "nexus-inventory",
@@ -12633,7 +12642,7 @@ dependencies = [
  "futures",
  "hex",
  "hubtools",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "omicron-brand-metadata",
  "omicron-common",
  "omicron-test-utils",
@@ -13441,7 +13450,7 @@ dependencies = [
  "humantime",
  "indexmap 2.7.1",
  "indicatif",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "maplit",
  "omicron-common",
  "omicron-passwords",
@@ -13562,7 +13571,7 @@ dependencies = [
  "installinator-common",
  "internal-dns-resolver",
  "internal-dns-types",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "maplit",
  "omicron-certificates",
  "omicron-common",
@@ -14254,10 +14263,10 @@ dependencies = [
  "dropshot 0.16.0",
  "illumos-utils",
  "omicron-common",
- "omicron-sled-agent",
  "omicron-workspace-hack",
  "oxnet",
  "serde_json",
+ "sled-agent-types",
  "sled-hardware-types",
  "slog",
  "tokio",
