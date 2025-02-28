@@ -58,6 +58,7 @@ pub struct CurrentRssUserConfigInsensitive {
 /// This is the "write" version of [`CurrentRssUserConfigInsensitive`], with
 /// some different fields.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PutRssUserConfigInsensitive {
     /// List of slot numbers only.
     ///
