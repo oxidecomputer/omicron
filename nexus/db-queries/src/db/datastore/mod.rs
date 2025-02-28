@@ -99,6 +99,7 @@ mod support_bundle;
 mod switch;
 mod switch_interface;
 mod switch_port;
+mod target_release;
 #[cfg(test)]
 pub(crate) mod test_utils;
 mod update;
