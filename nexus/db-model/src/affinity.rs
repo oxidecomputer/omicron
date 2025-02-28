@@ -231,10 +231,12 @@ impl AffinityGroupInstanceMembership {
     pub fn to_external(
         self,
         member_name: external::Name,
+        run_state: external::InstanceState,
     ) -> external::AffinityGroupMember {
         external::AffinityGroupMember::Instance {
             id: self.instance_id.into(),
             name: member_name,
+            run_state,
         }
     }
 }
@@ -257,10 +259,12 @@ impl AntiAffinityGroupInstanceMembership {
     pub fn to_external(
         self,
         member_name: external::Name,
+        run_state: external::InstanceState,
     ) -> external::AntiAffinityGroupMember {
         external::AntiAffinityGroupMember::Instance {
             id: self.instance_id.into(),
             name: member_name,
+            run_state,
         }
     }
 }

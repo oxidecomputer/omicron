@@ -114,11 +114,24 @@ impl InstanceAndActiveVmm {
         instance: &Instance,
         active_vmm: Option<&Vmm>,
     ) -> external::InstanceState {
+        let instance_state = instance.runtime_state.nexus_state;
+        let migration_id = instance.runtime_state.migration_id;
+        let vmm_state = active_vmm.map(|vmm| vmm.runtime.state);
+
+        Self::determine_effective_state_inner(
+            instance_state,
+            migration_id,
+            vmm_state,
+        )
+    }
+
+    pub fn determine_effective_state_inner(
+        instance_state: InstanceState,
+        migration_id: Option<Uuid>,
+        vmm_state: Option<VmmState>,
+    ) -> external::InstanceState {
         use crate::db::model::InstanceState;
         use crate::db::model::VmmState;
-
-        let instance_state = instance.runtime_state.nexus_state;
-        let vmm_state = active_vmm.map(|vmm| vmm.runtime.state);
 
         // We want to only report that an instance is `Stopped` when a new
         // `instance-start` saga is able to proceed. That means that:
@@ -145,9 +158,7 @@ impl InstanceAndActiveVmm {
             //   instance-update saga will come along and remove the active VMM
             //   and migration IDs.
             //
-            (InstanceState::Vmm, Some(_))
-                if instance.runtime_state.migration_id.is_some() =>
-            {
+            (InstanceState::Vmm, Some(_)) if migration_id.is_some() => {
                 external::InstanceState::Migrating
             }
             // - An instance with a "stopped" or "destroyed" VMM needs to be

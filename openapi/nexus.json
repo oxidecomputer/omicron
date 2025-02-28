@@ -12373,11 +12373,15 @@
                   },
                   "name": {
                     "$ref": "#/components/schemas/Name"
+                  },
+                  "run_state": {
+                    "$ref": "#/components/schemas/InstanceState"
                   }
                 },
                 "required": [
                   "id",
-                  "name"
+                  "name",
+                  "run_state"
                 ]
               }
             },
@@ -12695,11 +12699,15 @@
                   },
                   "name": {
                     "$ref": "#/components/schemas/Name"
+                  },
+                  "run_state": {
+                    "$ref": "#/components/schemas/InstanceState"
                   }
                 },
                 "required": [
                   "id",
-                  "name"
+                  "name",
+                  "run_state"
                 ]
               }
             },

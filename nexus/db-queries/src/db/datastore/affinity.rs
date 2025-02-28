@@ -10,6 +10,7 @@ use crate::authz::ApiResource;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::datastore::InstanceAndActiveVmm;
 use crate::db::datastore::OpContext;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
@@ -21,8 +22,12 @@ use crate::db::model::AntiAffinityGroup;
 use crate::db::model::AntiAffinityGroupAffinityMembership;
 use crate::db::model::AntiAffinityGroupInstanceMembership;
 use crate::db::model::AntiAffinityGroupUpdate;
+use crate::db::model::InstanceState;
+use crate::db::model::InstanceStateEnum;
 use crate::db::model::Name;
 use crate::db::model::Project;
+use crate::db::model::VmmState;
+use crate::db::model::VmmStateEnum;
 use crate::db::pagination::paginated;
 use crate::db::raw_query_builder::QueryBuilder;
 use crate::transaction_retry::OptionalError;
@@ -381,15 +386,26 @@ impl DataStore {
         let mut query = QueryBuilder::new()
             .sql(
                 "
-                SELECT instance_id as id, name
+                SELECT * FROM (
+                SELECT
+                    instance.id as id,
+                    instance.name as name,
+                    instance.state,
+                    instance.migration_id,
+                    vmm.state
                 FROM affinity_group_instance_membership
                 INNER JOIN instance
                 ON instance.id = affinity_group_instance_membership.instance_id
-                WHERE instance.time_deleted IS NULL AND group_id = ",
+                LEFT JOIN vmm
+                ON instance.active_propolis_id = vmm.id
+                WHERE
+                    instance.time_deleted IS NULL AND
+                    vmm.time_deleted IS NULL AND
+                    group_id = ",
             )
             .param()
             .bind::<diesel::sql_types::Uuid, _>(authz_affinity_group.id())
-            .sql(" ");
+            .sql(") ");
 
         let (direction, limit) = match pagparams {
             PaginatedBy::Id(p) => (p.direction, p.limit),
@@ -404,7 +420,7 @@ impl DataStore {
             PaginatedBy::Id(DataPageParams { marker, .. }) => {
                 if let Some(id) = marker {
                     query = query
-                        .sql("AND id ")
+                        .sql("WHERE id ")
                         .sql(if asc { ">" } else { "<" })
                         .sql(" ")
                         .param()
@@ -415,7 +431,7 @@ impl DataStore {
             PaginatedBy::Name(DataPageParams { marker, .. }) => {
                 if let Some(name) = marker {
                     query = query
-                        .sql("AND name ")
+                        .sql("WHERE name ")
                         .sql(if asc { ">" } else { "<" })
                         .sql(" ")
                         .param()
@@ -438,17 +454,28 @@ impl DataStore {
             .bind::<diesel::sql_types::BigInt, _>(i64::from(limit.get()));
 
         query
-            .query::<(diesel::sql_types::Uuid, diesel::sql_types::Text)>()
-            .load_async::<(Uuid, Name)>(
+            .query::<(
+                diesel::sql_types::Uuid,
+                diesel::sql_types::Text,
+                InstanceStateEnum,
+                diesel::sql_types::Nullable<diesel::sql_types::Uuid>,
+                diesel::sql_types::Nullable<VmmStateEnum>,
+            )>()
+            .load_async::<(Uuid, Name, InstanceState, Option<Uuid>, Option<VmmState>)>(
                 &*self.pool_connection_authorized(opctx).await?,
             )
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
             .into_iter()
-            .map(|(id, name)| {
+            .map(|(id, name, instance_state, migration_id, vmm_state)| {
                 Ok(external::AffinityGroupMember::Instance {
                     id: InstanceUuid::from_untyped_uuid(id),
                     name: name.into(),
+                    run_state: InstanceAndActiveVmm::determine_effective_state_inner(
+                        instance_state,
+                        migration_id,
+                        vmm_state,
+                    ),
                 })
             })
             .collect()
@@ -473,26 +500,43 @@ impl DataStore {
 
         let mut query = QueryBuilder::new()
             .sql(
-                "SELECT id,name,label
+                "SELECT id,name,label,instance_state,migration_id,vmm_state
                 FROM (
-                    SELECT instance_id as id, name, 'instance' as label
+                    SELECT
+                        instance.id as id,
+                        instance.name as name,
+                        'instance' as label,
+                        instance.state as instance_state,
+                        instance.migration_id as migration_id,
+                        vmm.state as vmm_state
                     FROM anti_affinity_group_instance_membership
                     INNER JOIN instance
                     ON instance.id = anti_affinity_group_instance_membership.instance_id
-                    WHERE instance.time_deleted IS NULL AND
-                          group_id = ",
+                    LEFT JOIN vmm
+                    ON instance.active_propolis_id = vmm.id
+                    WHERE
+                        instance.time_deleted IS NULL AND
+                        vmm.time_deleted IS NULL AND
+                        group_id = ",
             )
             .param()
             .bind::<diesel::sql_types::Uuid, _>(authz_anti_affinity_group.id())
             .sql(
                 "
                 UNION
-                    SELECT affinity_group_id as id, name, 'affinity_group' as label
+                    SELECT
+                        affinity_group.id as id,
+                        affinity_group.name as name,
+                        'affinity_group' as label,
+                        NULL as instance_state,
+                        NULL as migration_id,
+                        NULL as vmm_state
                     FROM anti_affinity_group_affinity_membership
                     INNER JOIN affinity_group
                     ON affinity_group.id = anti_affinity_group_affinity_membership.affinity_group_id
-                    WHERE affinity_group.time_deleted IS NULL AND
-                         anti_affinity_group_id = ",
+                    WHERE
+                        affinity_group.time_deleted IS NULL AND
+                        anti_affinity_group_id = ",
             )
             .param()
             .bind::<diesel::sql_types::Uuid, _>(authz_anti_affinity_group.id())
@@ -540,24 +584,46 @@ impl DataStore {
                 diesel::sql_types::Uuid,
                 diesel::sql_types::Text,
                 diesel::sql_types::Text,
+                diesel::sql_types::Nullable<InstanceStateEnum>,
+                diesel::sql_types::Nullable<diesel::sql_types::Uuid>,
+                diesel::sql_types::Nullable<VmmStateEnum>,
             )>()
-            .load_async::<(Uuid, Name, String)>(
+            .load_async::<(
+                Uuid,
+                Name,
+                String,
+                Option<InstanceState>,
+                Option<Uuid>,
+                Option<VmmState>,
+            )>(
                 &*self.pool_connection_authorized(opctx).await?,
             )
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
             .into_iter()
-            .map(|(id, name, label)| {
+            .map(|(id, name, label, instance_state, migration_id, vmm_state)| {
                 use external::AntiAffinityGroupMember as Member;
                 match label.as_str() {
                     "affinity_group" => Ok(Member::AffinityGroup {
                         id: AffinityGroupUuid::from_untyped_uuid(id),
                         name: name.into(),
                     }),
-                    "instance" => Ok(Member::Instance {
-                        id: InstanceUuid::from_untyped_uuid(id),
-                        name: name.into(),
-                    }),
+                    "instance" => {
+                        let Some(instance_state) = instance_state else {
+                            return Err(external::Error::internal_error(
+                                "Anti-Affinity instance member missing state in database"
+                            ));
+                        };
+                        Ok(Member::Instance {
+                            id: InstanceUuid::from_untyped_uuid(id),
+                            name: name.into(),
+                            run_state: InstanceAndActiveVmm::determine_effective_state_inner(
+                                instance_state,
+                                migration_id,
+                                vmm_state,
+                            ),
+                        })
+                    },
                     other => Err(external::Error::internal_error(&format!(
                         "Unexpected label from database query: {other}"
                     ))),
@@ -577,6 +643,7 @@ impl DataStore {
 
         use db::schema::affinity_group_instance_membership::dsl;
         use db::schema::instance::dsl as instance_dsl;
+        use db::schema::vmm::dsl as vmm_dsl;
         dsl::affinity_group_instance_membership
             .filter(dsl::group_id.eq(authz_affinity_group.id()))
             .filter(dsl::instance_id.eq(instance_id.into_untyped_uuid()))
@@ -585,13 +652,34 @@ impl DataStore {
                     .on(instance_dsl::id.eq(dsl::instance_id)),
             )
             .filter(instance_dsl::time_deleted.is_null())
+            .left_join(vmm_dsl::vmm.on(
+                instance_dsl::active_propolis_id.eq(vmm_dsl::id.nullable()),
+            ))
+            .filter(vmm_dsl::time_deleted.is_null())
             .select((
                 AffinityGroupInstanceMembership::as_select(),
                 instance_dsl::name,
+                instance_dsl::state,
+                instance_dsl::migration_id,
+                vmm_dsl::state.nullable(),
             ))
-            .get_result_async::<(AffinityGroupInstanceMembership, Name)>(&*conn)
+            .get_result_async::<(
+                AffinityGroupInstanceMembership,
+                Name,
+                InstanceState,
+                Option<Uuid>,
+                Option<VmmState>,
+            )>(&*conn)
             .await
-            .map(|(member, name)| member.to_external(name.into()))
+            .map(|(member, name, instance_state, migration_id, vmm_state)| {
+                let run_state =
+                    InstanceAndActiveVmm::determine_effective_state_inner(
+                        instance_state,
+                        migration_id,
+                        vmm_state,
+                    );
+                member.to_external(name.into(), run_state)
+            })
             .map_err(|e| {
                 public_error_from_diesel(
                     e,
@@ -614,6 +702,7 @@ impl DataStore {
 
         use db::schema::anti_affinity_group_instance_membership::dsl;
         use db::schema::instance::dsl as instance_dsl;
+        use db::schema::vmm::dsl as vmm_dsl;
         dsl::anti_affinity_group_instance_membership
             .filter(dsl::group_id.eq(authz_anti_affinity_group.id()))
             .filter(dsl::instance_id.eq(instance_id.into_untyped_uuid()))
@@ -622,15 +711,34 @@ impl DataStore {
                     .on(instance_dsl::id.eq(dsl::instance_id)),
             )
             .filter(instance_dsl::time_deleted.is_null())
+            .left_join(vmm_dsl::vmm.on(
+                instance_dsl::active_propolis_id.eq(vmm_dsl::id.nullable()),
+            ))
+            .filter(vmm_dsl::time_deleted.is_null())
             .select((
                 AntiAffinityGroupInstanceMembership::as_select(),
                 instance_dsl::name,
+                instance_dsl::state,
+                instance_dsl::migration_id,
+                vmm_dsl::state.nullable(),
             ))
-            .get_result_async::<(AntiAffinityGroupInstanceMembership, Name)>(
-                &*conn,
-            )
+            .get_result_async::<(
+                AntiAffinityGroupInstanceMembership,
+                Name,
+                InstanceState,
+                Option<Uuid>,
+                Option<VmmState>,
+            )>(&*conn)
             .await
-            .map(|(member, name)| member.to_external(name.into()))
+            .map(|(member, name, instance_state, migration_id, vmm_state)| {
+                let run_state =
+                    InstanceAndActiveVmm::determine_effective_state_inner(
+                        instance_state,
+                        migration_id,
+                        vmm_state,
+                    );
+                member.to_external(name.into(), run_state)
+            })
             .map_err(|e| {
                 public_error_from_diesel(
                     e,
@@ -2009,6 +2117,7 @@ mod tests {
             let member = external::AffinityGroupMember::Instance {
                 id: instance,
                 name: name.try_into().unwrap(),
+                run_state: external::InstanceState::Stopped,
             };
             datastore
                 .affinity_group_member_instance_add(
@@ -2188,6 +2297,7 @@ mod tests {
             let member = external::AntiAffinityGroupMember::Instance {
                 id: instance,
                 name: name.try_into().unwrap(),
+                run_state: external::InstanceState::Stopped,
             };
             datastore
                 .anti_affinity_group_member_instance_add(

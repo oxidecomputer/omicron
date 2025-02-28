@@ -1067,6 +1067,7 @@ pub struct IdentityMetadataUpdateParams {
     Debug,
     Deserialize,
     Eq,
+    Hash,
     Ord,
     PartialEq,
     PartialOrd,
@@ -1322,7 +1323,7 @@ pub enum FailureDomain {
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum AffinityGroupMember {
     /// An instance belonging to this group
-    Instance { id: InstanceUuid, name: Name },
+    Instance { id: InstanceUuid, name: Name, run_state: InstanceState },
 }
 
 impl SimpleIdentityOrName for AffinityGroupMember {
@@ -1352,7 +1353,7 @@ pub enum AntiAffinityGroupMember {
     AffinityGroup { id: AffinityGroupUuid, name: Name },
 
     /// An instance belonging to this group
-    Instance { id: InstanceUuid, name: Name },
+    Instance { id: InstanceUuid, name: Name, run_state: InstanceState },
 }
 
 impl SimpleIdentityOrName for AntiAffinityGroupMember {
