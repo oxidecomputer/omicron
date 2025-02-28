@@ -303,19 +303,6 @@ async fn test_system_timeseries_schema_list(
         .expect("Failed to find HTTP request latency histogram schema");
 }
 
-/// Run an OxQL query until it succeeds or panics.
-pub async fn system_timeseries_query(
-    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
-    query: impl ToString,
-) -> Vec<oxql_types::Table> {
-    timeseries_query_until_success(
-        cptestctx,
-        "/v1/system/timeseries/query",
-        query,
-    )
-    .await
-}
-
 /// Run a project-scoped OxQL query until it succeeds or panics.
 pub async fn project_timeseries_query(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
@@ -430,26 +417,22 @@ pub async fn execute_timeseries_query(
 async fn test_instance_watcher_metrics(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
 ) {
-    macro_rules! assert_gte {
+    macro_rules! check_gte {
         ($a:expr, $b:expr) => {{
             let a = $a;
             let b = $b;
-            assert!(
-                $a >= $b,
-                concat!(
-                    "assertion failed: ",
-                    stringify!($a),
-                    " >= ",
-                    stringify!($b),
-                    ", ",
-                    stringify!($a),
-                    " = {:?}, ",
-                    stringify!($b),
-                    " = {:?}",
-                ),
-                a,
-                b
-            );
+            if a < b {
+                return Err(MetricsNotYet::new(format!(
+                    concat!(
+                        "waiting for ",
+                        stringify!($a),
+                        " (currently {:?}) to be >= ",
+                        stringify!($b),
+                        " (currently {:?})"
+                    ),
+                    a, b
+                )));
+            }
         }};
     }
     const INSTANCE_ID_FIELD: &str = "instance_id";
@@ -470,13 +453,6 @@ async fn test_instance_watcher_metrics(
 
         let _ = activate_background_task(&internal_client, "instance_watcher")
             .await;
-
-        // Make sure that the latest metrics have been collected.
-        cptestctx
-            .oximeter
-            .try_force_collect()
-            .await
-            .expect("Could not force oximeter collection");
     };
 
     #[track_caller]
@@ -484,7 +460,7 @@ async fn test_instance_watcher_metrics(
         table: &oxql_types::Table,
         instance_id: InstanceUuid,
         state: &'static str,
-    ) -> i64 {
+    ) -> Result<i64, MetricsNotYet> {
         use oxql_types::point::ValueArray;
         let uuid = FieldValue::Uuid(instance_id.into_untyped_uuid());
         let state = FieldValue::String(state.into());
@@ -492,12 +468,12 @@ async fn test_instance_watcher_metrics(
             ts.fields.get(INSTANCE_ID_FIELD) == Some(&uuid)
                 && ts.fields.get(STATE_FIELD) == Some(&state)
         });
-        let Some(timeseries) = timeserieses.next() else {
-            panic!(
+        let timeseries = timeserieses.next().ok_or_else(|| {
+            MetricsNotYet::new(format!(
                 "missing timeseries for instance {instance_id}, state {state}\n\
                 found: {table:#?}"
-            )
-        };
+            ))
+        })?;
         if let Some(timeseries) = timeserieses.next() {
             panic!(
                 "multiple timeseries for instance {instance_id}, state {state}: \
@@ -507,7 +483,7 @@ async fn test_instance_watcher_metrics(
         }
         match timeseries.points.values(0) {
             Some(ValueArray::Integer(ref vals)) => {
-                vals.iter().filter_map(|&v| v).sum()
+                Ok(vals.iter().filter_map(|&v| v).sum())
             }
             x => panic!(
                 "expected timeseries for instance {instance_id}, \
@@ -531,13 +507,21 @@ async fn test_instance_watcher_metrics(
     // activate the instance watcher background task.
     activate_instance_watcher().await;
 
-    let metrics = system_timeseries_query(&cptestctx, OXQL_QUERY).await;
-    let checks = metrics
-        .iter()
-        .find(|t| t.name() == "virtual_machine:check")
-        .expect("missing virtual_machine:check");
-    let ts = dbg!(count_state(&checks, instance1_uuid, STATE_STARTING));
-    assert_gte!(ts, 1);
+    let metrics_querier = MetricsQuerier::new(&cptestctx);
+    metrics_querier
+        .system_timeseries_query_until(OXQL_QUERY, |metrics| {
+            let checks = metrics
+                .iter()
+                .find(|t| t.name() == "virtual_machine:check")
+                .ok_or_else(|| {
+                    MetricsNotYet::new("missing virtual_machine:check")
+                })?;
+            let ts =
+                dbg!(count_state(&checks, instance1_uuid, STATE_STARTING)?);
+            check_gte!(ts, 1);
+            Ok(())
+        })
+        .await;
 
     // okay, make another instance
     eprintln!("--- creating instance 2 ---");
@@ -547,15 +531,21 @@ async fn test_instance_watcher_metrics(
     // activate the instance watcher background task.
     activate_instance_watcher().await;
 
-    let metrics = system_timeseries_query(&cptestctx, OXQL_QUERY).await;
-    let checks = metrics
-        .iter()
-        .find(|t| t.name() == "virtual_machine:check")
-        .expect("missing virtual_machine:check");
-    let ts1 = dbg!(count_state(&checks, instance1_uuid, STATE_STARTING));
-    let ts2 = dbg!(count_state(&checks, instance2_uuid, STATE_STARTING));
-    assert_gte!(ts1, 2);
-    assert_gte!(ts2, 1);
+    metrics_querier
+        .system_timeseries_query_until(OXQL_QUERY, |metrics| {
+            let checks = metrics
+                .iter()
+                .find(|t| t.name() == "virtual_machine:check")
+                .expect("missing virtual_machine:check");
+            let ts1 =
+                dbg!(count_state(&checks, instance1_uuid, STATE_STARTING)?);
+            let ts2 =
+                dbg!(count_state(&checks, instance2_uuid, STATE_STARTING)?);
+            check_gte!(ts1, 2);
+            check_gte!(ts2, 1);
+            Ok(())
+        })
+        .await;
 
     // poke instance 1 to get it into the running state
     eprintln!("--- starting instance 1 ---");
@@ -564,18 +554,24 @@ async fn test_instance_watcher_metrics(
     // activate the instance watcher background task.
     activate_instance_watcher().await;
 
-    let metrics = system_timeseries_query(&cptestctx, OXQL_QUERY).await;
-    let checks = metrics
-        .iter()
-        .find(|t| t.name() == "virtual_machine:check")
-        .expect("missing virtual_machine:check");
-    let ts1_starting =
-        dbg!(count_state(&checks, instance1_uuid, STATE_STARTING));
-    let ts1_running = dbg!(count_state(&checks, instance1_uuid, STATE_RUNNING));
-    let ts2 = dbg!(count_state(&checks, instance2_uuid, STATE_STARTING));
-    assert_gte!(ts1_starting, 2);
-    assert_gte!(ts1_running, 1);
-    assert_gte!(ts2, 2);
+    metrics_querier
+        .system_timeseries_query_until(OXQL_QUERY, |metrics| {
+            let checks = metrics
+                .iter()
+                .find(|t| t.name() == "virtual_machine:check")
+                .expect("missing virtual_machine:check");
+            let ts1_starting =
+                dbg!(count_state(&checks, instance1_uuid, STATE_STARTING)?);
+            let ts1_running =
+                dbg!(count_state(&checks, instance1_uuid, STATE_RUNNING)?);
+            let ts2 =
+                dbg!(count_state(&checks, instance2_uuid, STATE_STARTING)?);
+            check_gte!(ts1_starting, 2);
+            check_gte!(ts1_running, 1);
+            check_gte!(ts2, 2);
+            Ok(())
+        })
+        .await;
 
     // poke instance 2 to get it into the Running state.
     eprintln!("--- starting instance 2 ---");
@@ -589,25 +585,31 @@ async fn test_instance_watcher_metrics(
     // activate the instance watcher background task.
     activate_instance_watcher().await;
 
-    let metrics = system_timeseries_query(&cptestctx, OXQL_QUERY).await;
-    let checks = metrics
-        .iter()
-        .find(|t| t.name() == "virtual_machine:check")
-        .expect("missing virtual_machine:check");
+    metrics_querier
+        .system_timeseries_query_until(OXQL_QUERY, |metrics| {
+            let checks = metrics
+                .iter()
+                .find(|t| t.name() == "virtual_machine:check")
+                .expect("missing virtual_machine:check");
 
-    let ts1_starting =
-        dbg!(count_state(&checks, instance1_uuid, STATE_STARTING));
-    let ts1_running = dbg!(count_state(&checks, instance1_uuid, STATE_RUNNING));
-    let ts1_stopping =
-        dbg!(count_state(&checks, instance1_uuid, STATE_STOPPING));
-    let ts2_starting =
-        dbg!(count_state(&checks, instance2_uuid, STATE_STARTING));
-    let ts2_running = dbg!(count_state(&checks, instance2_uuid, STATE_RUNNING));
-    assert_gte!(ts1_starting, 2);
-    assert_gte!(ts1_running, 1);
-    assert_gte!(ts1_stopping, 1);
-    assert_gte!(ts2_starting, 2);
-    assert_gte!(ts2_running, 1);
+            let ts1_starting =
+                dbg!(count_state(&checks, instance1_uuid, STATE_STARTING)?);
+            let ts1_running =
+                dbg!(count_state(&checks, instance1_uuid, STATE_RUNNING)?);
+            let ts1_stopping =
+                dbg!(count_state(&checks, instance1_uuid, STATE_STOPPING)?);
+            let ts2_starting =
+                dbg!(count_state(&checks, instance2_uuid, STATE_STARTING)?);
+            let ts2_running =
+                dbg!(count_state(&checks, instance2_uuid, STATE_RUNNING)?);
+            check_gte!(ts1_starting, 2);
+            check_gte!(ts1_running, 1);
+            check_gte!(ts1_stopping, 1);
+            check_gte!(ts2_starting, 2);
+            check_gte!(ts2_running, 1);
+            Ok(())
+        })
+        .await;
 
     // simulate instance 1 completing its stop, which will remove it from the
     // set of active instances in CRDB. now, it won't be checked again.
@@ -618,24 +620,30 @@ async fn test_instance_watcher_metrics(
     // activate the instance watcher background task.
     activate_instance_watcher().await;
 
-    let metrics = system_timeseries_query(&cptestctx, OXQL_QUERY).await;
-    let checks = metrics
-        .iter()
-        .find(|t| t.name() == "virtual_machine:check")
-        .expect("missing virtual_machine:check");
-    let ts1_starting =
-        dbg!(count_state(&checks, instance1_uuid, STATE_STARTING));
-    let ts1_running = dbg!(count_state(&checks, instance1_uuid, STATE_RUNNING));
-    let ts1_stopping =
-        dbg!(count_state(&checks, instance1_uuid, STATE_STOPPING));
-    let ts2_starting =
-        dbg!(count_state(&checks, instance2_uuid, STATE_STARTING));
-    let ts2_running = dbg!(count_state(&checks, instance2_uuid, STATE_RUNNING));
-    assert_gte!(ts1_starting, 2);
-    assert_gte!(ts1_running, 1);
-    assert_gte!(ts1_stopping, 1);
-    assert_gte!(ts2_starting, 2);
-    assert_gte!(ts2_running, 2);
+    metrics_querier
+        .system_timeseries_query_until(OXQL_QUERY, |metrics| {
+            let checks = metrics
+                .iter()
+                .find(|t| t.name() == "virtual_machine:check")
+                .expect("missing virtual_machine:check");
+            let ts1_starting =
+                dbg!(count_state(&checks, instance1_uuid, STATE_STARTING)?);
+            let ts1_running =
+                dbg!(count_state(&checks, instance1_uuid, STATE_RUNNING)?);
+            let ts1_stopping =
+                dbg!(count_state(&checks, instance1_uuid, STATE_STOPPING)?);
+            let ts2_starting =
+                dbg!(count_state(&checks, instance2_uuid, STATE_STARTING)?);
+            let ts2_running =
+                dbg!(count_state(&checks, instance2_uuid, STATE_RUNNING)?);
+            check_gte!(ts1_starting, 2);
+            check_gte!(ts1_running, 1);
+            check_gte!(ts1_stopping, 1);
+            check_gte!(ts2_starting, 2);
+            check_gte!(ts2_running, 2);
+            Ok(())
+        })
+        .await;
 }
 
 #[nexus_test]
