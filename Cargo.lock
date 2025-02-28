@@ -7615,6 +7615,7 @@ dependencies = [
  "qorb",
  "quote",
  "rand 0.8.5",
+ "rand_core 0.9.2",
  "regex",
  "regex-automata",
  "regex-syntax 0.8.5",
@@ -9612,11 +9613,11 @@ dependencies = [
 
 [[package]]
 name = "rand_seeder"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a9febe641d2842ffc76ee962668a17578767c4e01735e4802b21ed9a24b2e4e"
+checksum = "502927fdfc3c9645d53e0c95bb2d53783b5a15bfeaeeb96f7703c21fbb76841e"
 dependencies = [
- "rand_core 0.6.4",
+ "rand_core 0.9.2",
 ]
 
 [[package]]
