@@ -6,12 +6,15 @@ use dropshot::HttpErrorResponseBody;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views::OxqlQueryResult;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
+use oximeter::TimeseriesSchema;
+use serde::de::DeserializeOwned;
 use slog::Logger;
 use std::borrow::Cow;
 use std::time::Duration;
@@ -39,6 +42,9 @@ pub(super) struct MetricsQuerier<'a, N> {
 }
 
 impl<'a, N> MetricsQuerier<'a, N> {
+    const POLL_INTERVAL: Duration = Duration::from_secs(1);
+    const POLL_MAX: Duration = Duration::from_secs(30);
+
     pub fn new(ctx: &'a ControlPlaneTestContext<N>) -> Self {
         Self { ctx }
     }
@@ -81,6 +87,63 @@ impl<'a, N> MetricsQuerier<'a, N> {
             .await
     }
 
+    pub async fn wait_for_timeseries_schema<F, T>(&self, cond: F) -> T
+    where
+        F: Fn(Vec<TimeseriesSchema>) -> Result<T, MetricsNotYet>,
+    {
+        self.wait_for_objects("/v1/system/timeseries/schemas", cond).await
+    }
+
+    async fn wait_for_objects<F, T, U>(&self, endpoint: &str, cond: F) -> T
+    where
+        F: Fn(Vec<U>) -> Result<T, MetricsNotYet>,
+        U: DeserializeOwned,
+    {
+        let result = wait_for_condition(
+            || async {
+                self.ctx
+                    .oximeter
+                    .try_force_collect()
+                    .await
+                    .expect("sent trigger to force oximeter collection");
+
+                let page = objects_list_page_authz::<U>(
+                    &self.ctx.external_client,
+                    endpoint,
+                )
+                .await;
+
+                match cond(page.items) {
+                    Ok(res) => Ok(res),
+                    Err(MetricsNotYet { note }) => {
+                        info!(
+                            self.log(),
+                            "Metrics condition not yet true (will retry)";
+                            "note" => %note,
+                        );
+                        Err(CondCheckError::<()>::NotYet)
+                    }
+                }
+            },
+            &Self::POLL_INTERVAL,
+            &Self::POLL_MAX,
+        )
+        .await;
+
+        match result {
+            Ok(r) => r,
+            Err(poll::Error::TimedOut(duration)) => {
+                panic!(
+                    "Timed out after {duration:?} waiting for objects list \
+                    success, endpoint: '{endpoint}'"
+                );
+            }
+            Err(poll::Error::PermanentError(_)) => unreachable!(
+                "wait_for_condition closure never returns permanent errors"
+            ),
+        }
+    }
+
     async fn timeseries_query_until<F, T>(
         &self,
         endpoint: &str,
@@ -90,9 +153,6 @@ impl<'a, N> MetricsQuerier<'a, N> {
     where
         F: Fn(Vec<oxql_types::Table>) -> Result<T, MetricsNotYet>,
     {
-        const POLL_INTERVAL: Duration = Duration::from_secs(1);
-        const POLL_MAX: Duration = Duration::from_secs(30);
-
         let result = wait_for_condition(
             || async {
                 self.ctx
@@ -128,16 +188,16 @@ impl<'a, N> MetricsQuerier<'a, N> {
                     }
                 }
             },
-            &POLL_INTERVAL,
-            &POLL_MAX,
+            &Self::POLL_INTERVAL,
+            &Self::POLL_MAX,
         )
         .await;
 
         match result {
             Ok(r) => r,
-            Err(poll::Error::TimedOut(_)) => {
+            Err(poll::Error::TimedOut(duration)) => {
                 panic!(
-                    "Timed out after {POLL_MAX:?} waiting for timeseries query \
+                    "Timed out after {duration:?} waiting for timeseries query \
                     success, endpoint: '{endpoint}', query: '{query}'");
             }
             Err(poll::Error::PermanentError(_)) => unreachable!(

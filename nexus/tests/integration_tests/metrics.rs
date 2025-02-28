@@ -281,23 +281,18 @@ async fn test_system_timeseries_schema_list(
     // We should be able to fetch the list of timeseries, and it should include
     // Nexus's HTTP latency distribution. This is defined in Nexus itself, and
     // should always exist after we've registered as a producer and start
-    // producing data. Force a collection to ensure that happens.
-    cptestctx
-        .oximeter
-        .try_force_collect()
-        .await
-        .expect("Could not force oximeter collection");
-    let client = &cptestctx.external_client;
-    let url = "/v1/system/timeseries/schemas";
-    let schema =
-        objects_list_page_authz::<TimeseriesSchema>(client, &url).await;
-    schema
-        .items
-        .iter()
-        .find(|sc| {
-            sc.timeseries_name == "http_service:request_latency_histogram"
+    // producing data.
+    MetricsQuerier::new(&cptestctx)
+        .wait_for_timeseries_schema(|schemas: Vec<TimeseriesSchema>| {
+            if schemas.iter().any(|sc| {
+                sc.timeseries_name == "http_service:request_latency_histogram"
+            }) {
+                Ok(())
+            } else {
+                Err(MetricsNotYet::new("waiting for request_latency_histogram"))
+            }
         })
-        .expect("Failed to find HTTP request latency histogram schema");
+        .await;
 }
 
 #[nexus_test]
