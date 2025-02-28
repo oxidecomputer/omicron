@@ -44,36 +44,6 @@ pub async fn query_for_metrics(
     measurements
 }
 
-pub async fn get_latest_system_metric(
-    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
-    metric_name: &str,
-    silo_id: Option<Uuid>,
-) -> i64 {
-    let client = &cptestctx.external_client;
-    let id_param = match silo_id {
-        Some(id) => format!("&silo={}", id),
-        None => "".to_string(),
-    };
-    let url = format!(
-        "/v1/system/metrics/{metric_name}?start_time={:?}&end_time={:?}&order=descending&limit=1{}",
-        cptestctx.start_time,
-        Utc::now(),
-        id_param,
-    );
-    let measurements =
-        objects_list_page_authz::<Measurement>(client, &url).await;
-
-    // prevent more confusing error on next line
-    assert!(measurements.items.len() == 1, "Expected exactly one measurement");
-
-    let item = &measurements.items[0];
-    let datum = match item.datum() {
-        Datum::I64(c) => c,
-        _ => panic!("Unexpected datum type {:?}", item.datum()),
-    };
-    return *datum;
-}
-
 pub async fn get_latest_silo_metric(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
     metric_name: &str,
@@ -104,7 +74,7 @@ pub async fn get_latest_silo_metric(
     return *datum;
 }
 
-async fn assert_system_metrics(
+pub async fn assert_system_metrics(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
     silo_id: Option<Uuid>,
     disk: i64,
@@ -137,7 +107,7 @@ async fn assert_system_metrics(
     }
 }
 
-async fn assert_silo_metrics(
+pub async fn assert_silo_metrics(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
     project_id: Option<Uuid>,
     disk: i64,
