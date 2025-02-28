@@ -10,9 +10,7 @@
 //! * Periodically ensuring mg-ddm is configured to report Oximeter stats
 //! * Periodically ensuring that all prefixes we're supposed to advertise are
 //!   advertised, and no prefixes we used to advertise are still advertised
-//!
-//! In both cases, changes from sled-agent trigger reconcilation without waiting
-//! for the typical period tick.
+//! * Updating either of these immediately when changes are requested
 
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
@@ -202,7 +200,9 @@ impl Worker {
     }
 
     async fn try_reconcile_prefixes(&mut self) {
-        // Get the current set of prefixes we should be advertising.
+        // Get the current set of prefixes we should be advertising. This only
+        // holds the watch lock long enough to call `current()`; we release it
+        // before moving on to sending a request to DDM.
         let prefixes = self.prefixes.borrow_and_update().current();
 
         // Ask DDM what prefixes we've originated.
