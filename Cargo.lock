@@ -959,7 +959,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor 0.9.1",
- "regress 0.9.1",
+ "regress",
  "reqwest",
  "schemars",
  "semver 1.0.25",
@@ -2666,7 +2666,7 @@ dependencies = [
  "progenitor-client 0.9.1",
  "quote",
  "rand 0.8.5",
- "regress 0.9.1",
+ "regress",
  "reqwest",
  "rustfmt-wrapper",
  "schemars",
@@ -3812,16 +3812,6 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.14.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
-dependencies = [
- "ahash",
- "allocator-api2",
-]
-
-[[package]]
-name = "hashbrown"
 version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a9bfc1af68b1726ea47d3d5109de126281def866b33970e10fbab11b5dafab3"
@@ -4556,7 +4546,7 @@ dependencies = [
  "oxide-vpc",
  "oxlog",
  "oxnet",
- "regress 0.9.1",
+ "regress",
  "schemars",
  "serde",
  "serde_json",
@@ -4765,7 +4755,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "progenitor 0.9.1",
- "regress 0.9.1",
+ "regress",
  "reqwest",
  "schemars",
  "serde",
@@ -5802,7 +5792,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor 0.9.1",
- "regress 0.9.1",
+ "regress",
  "reqwest",
  "schemars",
  "serde",
@@ -6856,7 +6846,7 @@ dependencies = [
  "progenitor-client 0.9.1",
  "proptest",
  "rand 0.8.5",
- "regress 0.9.1",
+ "regress",
  "reqwest",
  "schemars",
  "semver 1.0.25",
@@ -7600,7 +7590,6 @@ dependencies = [
  "num-integer",
  "num-iter",
  "num-traits",
- "once_cell",
  "openapiv3",
  "peg-runtime",
  "pem-rfc7468",
@@ -7924,7 +7913,7 @@ dependencies = [
  "progenitor 0.9.1",
  "progenitor-client 0.9.1",
  "rand 0.8.5",
- "regress 0.9.1",
+ "regress",
  "reqwest",
  "serde",
  "serde_json",
@@ -9853,21 +9842,11 @@ checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
 name = "regress"
-version = "0.9.1"
+version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0eae2a1ebfecc58aff952ef8ccd364329abe627762f5bf09ff42eb9d98522479"
+checksum = "78ef7fa9ed0256d64a688a3747d0fef7a88851c18a5e1d57f115f38ec2e09366"
 dependencies = [
- "hashbrown 0.14.5",
- "memchr",
-]
-
-[[package]]
-name = "regress"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1541daf4e4ed43a0922b7969bdc2170178bcacc5dabf7e39bc508a9fa3953a7a"
-dependencies = [
- "hashbrown 0.14.5",
+ "hashbrown 0.15.1",
  "memchr",
 ]
 
@@ -11032,7 +11011,7 @@ dependencies = [
  "oxnet",
  "progenitor 0.9.1",
  "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=95d6a559890c94e3aa62c8adcd7c4e123ec4c6dc)",
- "regress 0.9.1",
+ "regress",
  "reqwest",
  "schemars",
  "serde",
@@ -12806,7 +12785,7 @@ dependencies = [
  "log",
  "proc-macro2",
  "quote",
- "regress 0.10.1",
+ "regress",
  "schemars",
  "semver 1.0.25",
  "serde",
@@ -12826,7 +12805,7 @@ dependencies = [
  "log",
  "proc-macro2",
  "quote",
- "regress 0.10.1",
+ "regress",
  "schemars",
  "semver 1.0.25",
  "serde",
@@ -13657,7 +13636,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor 0.9.1",
- "regress 0.9.1",
+ "regress",
  "reqwest",
  "schemars",
  "semver 1.0.25",
