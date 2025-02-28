@@ -10,6 +10,7 @@ use crate::authz::ApiResource;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::datastore::InstanceAndActiveVmm;
 use crate::db::datastore::OpContext;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
@@ -21,8 +22,12 @@ use crate::db::model::AntiAffinityGroup;
 use crate::db::model::AntiAffinityGroupAffinityMembership;
 use crate::db::model::AntiAffinityGroupInstanceMembership;
 use crate::db::model::AntiAffinityGroupUpdate;
+use crate::db::model::InstanceState;
+use crate::db::model::InstanceStateEnum;
 use crate::db::model::Name;
 use crate::db::model::Project;
+use crate::db::model::VmmState;
+use crate::db::model::VmmStateEnum;
 use crate::db::pagination::paginated;
 use crate::db::raw_query_builder::QueryBuilder;
 use crate::transaction_retry::OptionalError;
@@ -375,99 +380,250 @@ impl DataStore {
         opctx: &OpContext,
         authz_affinity_group: &authz::AffinityGroup,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<AffinityGroupInstanceMembership> {
+    ) -> ListResultVec<external::AffinityGroupMember> {
         opctx.authorize(authz::Action::Read, authz_affinity_group).await?;
 
-        use db::schema::affinity_group_instance_membership::dsl;
-        match pagparams {
-            PaginatedBy::Id(pagparams) => paginated(
-                dsl::affinity_group_instance_membership,
-                dsl::instance_id,
-                &pagparams,
-            ),
-            PaginatedBy::Name(_) => {
-                return Err(Error::invalid_request(
-                    "Cannot paginate group members by name",
-                ));
-            }
-        }
-        .filter(dsl::group_id.eq(authz_affinity_group.id()))
-        .select(AffinityGroupInstanceMembership::as_select())
-        .load_async(&*self.pool_connection_authorized(opctx).await?)
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
+        let mut query = QueryBuilder::new()
+            .sql(
+                "
+                SELECT * FROM (
+                SELECT
+                    instance.id as id,
+                    instance.name as name,
+                    instance.state,
+                    instance.migration_id,
+                    vmm.state
+                FROM affinity_group_instance_membership
+                INNER JOIN instance
+                ON instance.id = affinity_group_instance_membership.instance_id
+                LEFT JOIN vmm
+                ON instance.active_propolis_id = vmm.id
+                WHERE
+                    instance.time_deleted IS NULL AND
+                    vmm.time_deleted IS NULL AND
+                    group_id = ",
+            )
+            .param()
+            .bind::<diesel::sql_types::Uuid, _>(authz_affinity_group.id())
+            .sql(") ");
 
-    pub async fn anti_affinity_group_member_list(
-        &self,
-        opctx: &OpContext,
-        authz_anti_affinity_group: &authz::AntiAffinityGroup,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<external::AntiAffinityGroupMember> {
-        opctx.authorize(authz::Action::Read, authz_anti_affinity_group).await?;
-
-        let asc = match pagparams.direction {
+        let (direction, limit) = match pagparams {
+            PaginatedBy::Id(p) => (p.direction, p.limit),
+            PaginatedBy::Name(p) => (p.direction, p.limit),
+        };
+        let asc = match direction {
             dropshot::PaginationOrder::Ascending => true,
             dropshot::PaginationOrder::Descending => false,
         };
 
-        let mut query = QueryBuilder::new()
-            .sql(
-                "SELECT id,label FROM (
-                SELECT instance_id as id, 'instance' as label
-                FROM anti_affinity_group_instance_membership
-                WHERE group_id = ",
-            )
-            .param()
-            .bind::<diesel::sql_types::Uuid, _>(authz_anti_affinity_group.id())
-            .sql(
-                "
-                UNION
-                SELECT affinity_group_id as id, 'affinity_group' as label
-                FROM anti_affinity_group_affinity_membership
-                WHERE anti_affinity_group_id = ",
-            )
-            .param()
-            .bind::<diesel::sql_types::Uuid, _>(authz_anti_affinity_group.id())
-            .sql(") ");
-        if let Some(id) = pagparams.marker {
-            query = query
-                .sql("WHERE id ")
-                .sql(if asc { ">" } else { "<" })
-                .sql(" ")
-                .param()
-                .bind::<diesel::sql_types::Uuid, _>(*id);
-        };
-
-        query = query.sql(" ORDER BY id ");
+        match pagparams {
+            PaginatedBy::Id(DataPageParams { marker, .. }) => {
+                if let Some(id) = marker {
+                    query = query
+                        .sql("WHERE id ")
+                        .sql(if asc { ">" } else { "<" })
+                        .sql(" ")
+                        .param()
+                        .bind::<diesel::sql_types::Uuid, _>(**id);
+                };
+                query = query.sql(" ORDER BY id ");
+            }
+            PaginatedBy::Name(DataPageParams { marker, .. }) => {
+                if let Some(name) = marker {
+                    query = query
+                        .sql("WHERE name ")
+                        .sql(if asc { ">" } else { "<" })
+                        .sql(" ")
+                        .param()
+                        .bind::<diesel::sql_types::Text, _>(Name(
+                            (*name).clone(),
+                        ));
+                };
+                query = query.sql(" ORDER BY name ");
+            }
+        }
         if asc {
             query = query.sql("ASC ");
         } else {
             query = query.sql("DESC ");
         }
 
-        query =
-            query.sql(" LIMIT ").param().bind::<diesel::sql_types::BigInt, _>(
-                i64::from(pagparams.limit.get()),
-            );
+        query = query
+            .sql(" LIMIT ")
+            .param()
+            .bind::<diesel::sql_types::BigInt, _>(i64::from(limit.get()));
 
         query
-            .query::<(diesel::sql_types::Uuid, diesel::sql_types::Text)>()
-            .load_async::<(Uuid, String)>(
+            .query::<(
+                diesel::sql_types::Uuid,
+                diesel::sql_types::Text,
+                InstanceStateEnum,
+                diesel::sql_types::Nullable<diesel::sql_types::Uuid>,
+                diesel::sql_types::Nullable<VmmStateEnum>,
+            )>()
+            .load_async::<(Uuid, Name, InstanceState, Option<Uuid>, Option<VmmState>)>(
                 &*self.pool_connection_authorized(opctx).await?,
             )
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
             .into_iter()
-            .map(|(id, label)| {
+            .map(|(id, name, instance_state, migration_id, vmm_state)| {
+                Ok(external::AffinityGroupMember::Instance {
+                    id: InstanceUuid::from_untyped_uuid(id),
+                    name: name.into(),
+                    run_state: InstanceAndActiveVmm::determine_effective_state_inner(
+                        instance_state,
+                        migration_id,
+                        vmm_state,
+                    ),
+                })
+            })
+            .collect()
+    }
+
+    pub async fn anti_affinity_group_member_list(
+        &self,
+        opctx: &OpContext,
+        authz_anti_affinity_group: &authz::AntiAffinityGroup,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<external::AntiAffinityGroupMember> {
+        opctx.authorize(authz::Action::Read, authz_anti_affinity_group).await?;
+
+        let (direction, limit) = match pagparams {
+            PaginatedBy::Id(p) => (p.direction, p.limit),
+            PaginatedBy::Name(p) => (p.direction, p.limit),
+        };
+        let asc = match direction {
+            dropshot::PaginationOrder::Ascending => true,
+            dropshot::PaginationOrder::Descending => false,
+        };
+
+        let mut query = QueryBuilder::new()
+            .sql(
+                "SELECT id,name,label,instance_state,migration_id,vmm_state
+                FROM (
+                    SELECT
+                        instance.id as id,
+                        instance.name as name,
+                        'instance' as label,
+                        instance.state as instance_state,
+                        instance.migration_id as migration_id,
+                        vmm.state as vmm_state
+                    FROM anti_affinity_group_instance_membership
+                    INNER JOIN instance
+                    ON instance.id = anti_affinity_group_instance_membership.instance_id
+                    LEFT JOIN vmm
+                    ON instance.active_propolis_id = vmm.id
+                    WHERE
+                        instance.time_deleted IS NULL AND
+                        vmm.time_deleted IS NULL AND
+                        group_id = ",
+            )
+            .param()
+            .bind::<diesel::sql_types::Uuid, _>(authz_anti_affinity_group.id())
+            .sql(
+                "
+                UNION
+                    SELECT
+                        affinity_group.id as id,
+                        affinity_group.name as name,
+                        'affinity_group' as label,
+                        NULL as instance_state,
+                        NULL as migration_id,
+                        NULL as vmm_state
+                    FROM anti_affinity_group_affinity_membership
+                    INNER JOIN affinity_group
+                    ON affinity_group.id = anti_affinity_group_affinity_membership.affinity_group_id
+                    WHERE
+                        affinity_group.time_deleted IS NULL AND
+                        anti_affinity_group_id = ",
+            )
+            .param()
+            .bind::<diesel::sql_types::Uuid, _>(authz_anti_affinity_group.id())
+            .sql(") ");
+
+        match pagparams {
+            PaginatedBy::Id(DataPageParams { marker, .. }) => {
+                if let Some(id) = marker {
+                    query = query
+                        .sql("WHERE id ")
+                        .sql(if asc { ">" } else { "<" })
+                        .sql(" ")
+                        .param()
+                        .bind::<diesel::sql_types::Uuid, _>(**id);
+                };
+                query = query.sql(" ORDER BY id ");
+            }
+            PaginatedBy::Name(DataPageParams { marker, .. }) => {
+                if let Some(name) = marker {
+                    query = query
+                        .sql("WHERE name ")
+                        .sql(if asc { ">" } else { "<" })
+                        .sql(" ")
+                        .param()
+                        .bind::<diesel::sql_types::Text, _>(Name(
+                            (*name).clone(),
+                        ));
+                };
+                query = query.sql(" ORDER BY name ");
+            }
+        }
+        if asc {
+            query = query.sql("ASC ");
+        } else {
+            query = query.sql("DESC ");
+        }
+
+        query = query
+            .sql(" LIMIT ")
+            .param()
+            .bind::<diesel::sql_types::BigInt, _>(i64::from(limit.get()));
+
+        query
+            .query::<(
+                diesel::sql_types::Uuid,
+                diesel::sql_types::Text,
+                diesel::sql_types::Text,
+                diesel::sql_types::Nullable<InstanceStateEnum>,
+                diesel::sql_types::Nullable<diesel::sql_types::Uuid>,
+                diesel::sql_types::Nullable<VmmStateEnum>,
+            )>()
+            .load_async::<(
+                Uuid,
+                Name,
+                String,
+                Option<InstanceState>,
+                Option<Uuid>,
+                Option<VmmState>,
+            )>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+            .into_iter()
+            .map(|(id, name, label, instance_state, migration_id, vmm_state)| {
                 use external::AntiAffinityGroupMember as Member;
                 match label.as_str() {
-                    "affinity_group" => Ok(Member::AffinityGroup(
-                        AffinityGroupUuid::from_untyped_uuid(id),
-                    )),
-                    "instance" => Ok(Member::Instance(
-                        InstanceUuid::from_untyped_uuid(id),
-                    )),
+                    "affinity_group" => Ok(Member::AffinityGroup {
+                        id: AffinityGroupUuid::from_untyped_uuid(id),
+                        name: name.into(),
+                    }),
+                    "instance" => {
+                        let Some(instance_state) = instance_state else {
+                            return Err(external::Error::internal_error(
+                                "Anti-Affinity instance member missing state in database"
+                            ));
+                        };
+                        Ok(Member::Instance {
+                            id: InstanceUuid::from_untyped_uuid(id),
+                            name: name.into(),
+                            run_state: InstanceAndActiveVmm::determine_effective_state_inner(
+                                instance_state,
+                                migration_id,
+                                vmm_state,
+                            ),
+                        })
+                    },
                     other => Err(external::Error::internal_error(&format!(
                         "Unexpected label from database query: {other}"
                     ))),
@@ -476,27 +632,54 @@ impl DataStore {
             .collect()
     }
 
-    pub async fn affinity_group_member_view(
+    pub async fn affinity_group_member_instance_view(
         &self,
         opctx: &OpContext,
         authz_affinity_group: &authz::AffinityGroup,
-        member: external::AffinityGroupMember,
+        instance_id: InstanceUuid,
     ) -> Result<external::AffinityGroupMember, Error> {
         opctx.authorize(authz::Action::Read, authz_affinity_group).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let instance_id = match member {
-            external::AffinityGroupMember::Instance(id) => id,
-        };
-
         use db::schema::affinity_group_instance_membership::dsl;
+        use db::schema::instance::dsl as instance_dsl;
+        use db::schema::vmm::dsl as vmm_dsl;
         dsl::affinity_group_instance_membership
             .filter(dsl::group_id.eq(authz_affinity_group.id()))
             .filter(dsl::instance_id.eq(instance_id.into_untyped_uuid()))
-            .select(AffinityGroupInstanceMembership::as_select())
-            .get_result_async(&*conn)
+            .inner_join(
+                instance_dsl::instance
+                    .on(instance_dsl::id.eq(dsl::instance_id)),
+            )
+            .filter(instance_dsl::time_deleted.is_null())
+            .left_join(vmm_dsl::vmm.on(
+                instance_dsl::active_propolis_id.eq(vmm_dsl::id.nullable()),
+            ))
+            .filter(vmm_dsl::time_deleted.is_null())
+            .select((
+                AffinityGroupInstanceMembership::as_select(),
+                instance_dsl::name,
+                instance_dsl::state,
+                instance_dsl::migration_id,
+                vmm_dsl::state.nullable(),
+            ))
+            .get_result_async::<(
+                AffinityGroupInstanceMembership,
+                Name,
+                InstanceState,
+                Option<Uuid>,
+                Option<VmmState>,
+            )>(&*conn)
             .await
-            .map(|m| m.into())
+            .map(|(member, name, instance_state, migration_id, vmm_state)| {
+                let run_state =
+                    InstanceAndActiveVmm::determine_effective_state_inner(
+                        instance_state,
+                        migration_id,
+                        vmm_state,
+                    );
+                member.to_external(name.into(), run_state)
+            })
             .map_err(|e| {
                 public_error_from_diesel(
                     e,
@@ -508,86 +691,121 @@ impl DataStore {
             })
     }
 
-    pub async fn anti_affinity_group_member_view(
+    pub async fn anti_affinity_group_member_instance_view(
         &self,
         opctx: &OpContext,
         authz_anti_affinity_group: &authz::AntiAffinityGroup,
-        member: external::AntiAffinityGroupMember,
+        instance_id: InstanceUuid,
     ) -> Result<external::AntiAffinityGroupMember, Error> {
         opctx.authorize(authz::Action::Read, authz_anti_affinity_group).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        match member {
-            external::AntiAffinityGroupMember::Instance(instance_id) => {
-                use db::schema::anti_affinity_group_instance_membership::dsl;
-                dsl::anti_affinity_group_instance_membership
-                    .filter(dsl::group_id.eq(authz_anti_affinity_group.id()))
-                    .filter(
-                        dsl::instance_id.eq(instance_id.into_untyped_uuid()),
-                    )
-                    .select(AntiAffinityGroupInstanceMembership::as_select())
-                    .get_result_async(&*conn)
-                    .await
-                    .map(|m| m.into())
-                    .map_err(|e| {
-                        public_error_from_diesel(
-                            e,
-                            ErrorHandler::NotFoundByLookup(
-                                ResourceType::AntiAffinityGroupMember,
-                                LookupType::by_id(
-                                    instance_id.into_untyped_uuid(),
-                                ),
-                            ),
-                        )
-                    })
-            }
-            external::AntiAffinityGroupMember::AffinityGroup(
-                affinity_group_id,
-            ) => {
-                use db::schema::anti_affinity_group_affinity_membership::dsl;
-                dsl::anti_affinity_group_affinity_membership
-                    .filter(
-                        dsl::anti_affinity_group_id
-                            .eq(authz_anti_affinity_group.id()),
-                    )
-                    .filter(
-                        dsl::affinity_group_id
-                            .eq(affinity_group_id.into_untyped_uuid()),
-                    )
-                    .select(AntiAffinityGroupAffinityMembership::as_select())
-                    .get_result_async(&*conn)
-                    .await
-                    .map(|m| m.into())
-                    .map_err(|e| {
-                        public_error_from_diesel(
-                            e,
-                            ErrorHandler::NotFoundByLookup(
-                                ResourceType::AntiAffinityGroupMember,
-                                LookupType::by_id(
-                                    affinity_group_id.into_untyped_uuid(),
-                                ),
-                            ),
-                        )
-                    })
-            }
-        }
+        use db::schema::anti_affinity_group_instance_membership::dsl;
+        use db::schema::instance::dsl as instance_dsl;
+        use db::schema::vmm::dsl as vmm_dsl;
+        dsl::anti_affinity_group_instance_membership
+            .filter(dsl::group_id.eq(authz_anti_affinity_group.id()))
+            .filter(dsl::instance_id.eq(instance_id.into_untyped_uuid()))
+            .inner_join(
+                instance_dsl::instance
+                    .on(instance_dsl::id.eq(dsl::instance_id)),
+            )
+            .filter(instance_dsl::time_deleted.is_null())
+            .left_join(vmm_dsl::vmm.on(
+                instance_dsl::active_propolis_id.eq(vmm_dsl::id.nullable()),
+            ))
+            .filter(vmm_dsl::time_deleted.is_null())
+            .select((
+                AntiAffinityGroupInstanceMembership::as_select(),
+                instance_dsl::name,
+                instance_dsl::state,
+                instance_dsl::migration_id,
+                vmm_dsl::state.nullable(),
+            ))
+            .get_result_async::<(
+                AntiAffinityGroupInstanceMembership,
+                Name,
+                InstanceState,
+                Option<Uuid>,
+                Option<VmmState>,
+            )>(&*conn)
+            .await
+            .map(|(member, name, instance_state, migration_id, vmm_state)| {
+                let run_state =
+                    InstanceAndActiveVmm::determine_effective_state_inner(
+                        instance_state,
+                        migration_id,
+                        vmm_state,
+                    );
+                member.to_external(name.into(), run_state)
+            })
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::AntiAffinityGroupMember,
+                        LookupType::by_id(instance_id.into_untyped_uuid()),
+                    ),
+                )
+            })
     }
 
-    pub async fn affinity_group_member_add(
+    pub async fn anti_affinity_group_member_affinity_group_view(
+        &self,
+        opctx: &OpContext,
+        authz_anti_affinity_group: &authz::AntiAffinityGroup,
+        affinity_group_id: AffinityGroupUuid,
+    ) -> Result<external::AntiAffinityGroupMember, Error> {
+        opctx.authorize(authz::Action::Read, authz_anti_affinity_group).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use db::schema::affinity_group::dsl as affinity_group_dsl;
+        use db::schema::anti_affinity_group_affinity_membership::dsl;
+        dsl::anti_affinity_group_affinity_membership
+            .filter(
+                dsl::anti_affinity_group_id.eq(authz_anti_affinity_group.id()),
+            )
+            .filter(
+                dsl::affinity_group_id
+                    .eq(affinity_group_id.into_untyped_uuid()),
+            )
+            .inner_join(
+                affinity_group_dsl::affinity_group
+                    .on(affinity_group_dsl::id.eq(dsl::affinity_group_id)),
+            )
+            .select((
+                AntiAffinityGroupAffinityMembership::as_select(),
+                affinity_group_dsl::name,
+            ))
+            .get_result_async::<(AntiAffinityGroupAffinityMembership, Name)>(
+                &*conn,
+            )
+            .await
+            .map(|(member, name)| member.to_external(name.into()))
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::AntiAffinityGroupMember,
+                        LookupType::by_id(
+                            affinity_group_id.into_untyped_uuid(),
+                        ),
+                    ),
+                )
+            })
+    }
+
+    pub async fn affinity_group_member_instance_add(
         &self,
         opctx: &OpContext,
         authz_affinity_group: &authz::AffinityGroup,
-        member: external::AffinityGroupMember,
+        instance_id: InstanceUuid,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, authz_affinity_group).await?;
 
-        let instance_id = match member {
-            external::AffinityGroupMember::Instance(id) => id,
-        };
-
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.transaction_retry_wrapper("affinity_group_member_add")
+        self.transaction_retry_wrapper("affinity_group_member_instance_add")
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 use db::schema::affinity_group::dsl as group_dsl;
@@ -700,45 +918,19 @@ impl DataStore {
         Ok(())
     }
 
-    pub async fn anti_affinity_group_member_add(
-        &self,
-        opctx: &OpContext,
-        authz_anti_affinity_group: &authz::AntiAffinityGroup,
-        member: external::AntiAffinityGroupMember,
-    ) -> Result<(), Error> {
-        opctx
-            .authorize(authz::Action::Modify, authz_anti_affinity_group)
-            .await?;
-
-        match member {
-            external::AntiAffinityGroupMember::Instance(id) => {
-                self.anti_affinity_group_member_add_instance(
-                    opctx,
-                    authz_anti_affinity_group,
-                    id,
-                )
-                .await
-            }
-            external::AntiAffinityGroupMember::AffinityGroup(id) => {
-                self.anti_affinity_group_member_add_group(
-                    opctx,
-                    authz_anti_affinity_group,
-                    id,
-                )
-                .await
-            }
-        }
-    }
-
-    async fn anti_affinity_group_member_add_instance(
+    pub async fn anti_affinity_group_member_instance_add(
         &self,
         opctx: &OpContext,
         authz_anti_affinity_group: &authz::AntiAffinityGroup,
         instance_id: InstanceUuid,
     ) -> Result<(), Error> {
+        opctx
+            .authorize(authz::Action::Modify, authz_anti_affinity_group)
+            .await?;
+
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.transaction_retry_wrapper("anti_affinity_group_member_add_instance")
+        self.transaction_retry_wrapper("anti_affinity_group_member_instance_add")
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 use db::schema::anti_affinity_group::dsl as group_dsl;
@@ -842,15 +1034,19 @@ impl DataStore {
         Ok(())
     }
 
-    async fn anti_affinity_group_member_add_group(
+    pub async fn anti_affinity_group_member_affinity_group_add(
         &self,
         opctx: &OpContext,
         authz_anti_affinity_group: &authz::AntiAffinityGroup,
         affinity_group_id: AffinityGroupUuid,
     ) -> Result<(), Error> {
+        opctx
+            .authorize(authz::Action::Modify, authz_anti_affinity_group)
+            .await?;
+
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.transaction_retry_wrapper("anti_affinity_group_member_add_group")
+        self.transaction_retry_wrapper("anti_affinity_group_member_affinity_group_add")
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 use db::schema::anti_affinity_group::dsl as anti_affinity_group_dsl;
@@ -995,21 +1191,17 @@ impl DataStore {
         Ok(())
     }
 
-    pub async fn affinity_group_member_delete(
+    pub async fn affinity_group_member_instance_delete(
         &self,
         opctx: &OpContext,
         authz_affinity_group: &authz::AffinityGroup,
-        member: external::AffinityGroupMember,
+        instance_id: InstanceUuid,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, authz_affinity_group).await?;
 
-        let instance_id = match member {
-            external::AffinityGroupMember::Instance(id) => id,
-        };
-
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.transaction_retry_wrapper("affinity_group_member_delete")
+        self.transaction_retry_wrapper("affinity_group_member_instance_delete")
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 use db::schema::affinity_group::dsl as group_dsl;
@@ -1062,48 +1254,20 @@ impl DataStore {
         Ok(())
     }
 
-    pub async fn anti_affinity_group_member_delete(
-        &self,
-        opctx: &OpContext,
-        authz_anti_affinity_group: &authz::AntiAffinityGroup,
-        member: external::AntiAffinityGroupMember,
-    ) -> Result<(), Error> {
-        opctx
-            .authorize(authz::Action::Modify, authz_anti_affinity_group)
-            .await?;
-
-        match member {
-            external::AntiAffinityGroupMember::Instance(id) => {
-                self.anti_affinity_group_instance_member_delete(
-                    opctx,
-                    authz_anti_affinity_group,
-                    id,
-                )
-                .await
-            }
-            external::AntiAffinityGroupMember::AffinityGroup(id) => {
-                self.anti_affinity_group_affinity_member_delete(
-                    opctx,
-                    authz_anti_affinity_group,
-                    id,
-                )
-                .await
-            }
-        }
-    }
-
-    // Deletes an anti-affinity member, when that member is an instance
-    //
-    // See: [`Self::anti_affinity_group_member_delete`]
-    async fn anti_affinity_group_instance_member_delete(
+    /// Deletes an anti-affinity member, when that member is an instance
+    pub async fn anti_affinity_group_member_instance_delete(
         &self,
         opctx: &OpContext,
         authz_anti_affinity_group: &authz::AntiAffinityGroup,
         instance_id: InstanceUuid,
     ) -> Result<(), Error> {
+        opctx
+            .authorize(authz::Action::Modify, authz_anti_affinity_group)
+            .await?;
+
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.transaction_retry_wrapper("anti_affinity_group_instance_member_delete")
+        self.transaction_retry_wrapper("anti_affinity_group_member_instance_delete")
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 use db::schema::anti_affinity_group::dsl as group_dsl;
@@ -1156,18 +1320,20 @@ impl DataStore {
         Ok(())
     }
 
-    // Deletes an anti-affinity member, when that member is an affinity group
-    //
-    // See: [`Self::anti_affinity_group_member_delete`]
-    async fn anti_affinity_group_affinity_member_delete(
+    /// Deletes an anti-affinity member, when that member is an affinity group
+    pub async fn anti_affinity_group_member_affinity_group_delete(
         &self,
         opctx: &OpContext,
         authz_anti_affinity_group: &authz::AntiAffinityGroup,
         affinity_group_id: AffinityGroupUuid,
     ) -> Result<(), Error> {
+        opctx
+            .authorize(authz::Action::Modify, authz_anti_affinity_group)
+            .await?;
+
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.transaction_retry_wrapper("anti_affinity_group_affinity_member_delete")
+        self.transaction_retry_wrapper("anti_affinity_group_member_affinity_group_delete")
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 use db::schema::anti_affinity_group::dsl as group_dsl;
@@ -1234,7 +1400,7 @@ mod tests {
     use nexus_types::external_api::params;
     use omicron_common::api::external::{
         self, ByteCount, DataPageParams, IdentityMetadataCreateParams,
-        SimpleIdentity,
+        SimpleIdentityOrName,
     };
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::GenericUuid;
@@ -1767,11 +1933,7 @@ mod tests {
 
         // Add the instance as a member to the group
         datastore
-            .affinity_group_member_add(
-                &opctx,
-                &authz_group,
-                external::AffinityGroupMember::Instance(instance),
-            )
+            .affinity_group_member_instance_add(&opctx, &authz_group, instance)
             .await
             .unwrap();
 
@@ -1779,19 +1941,19 @@ mod tests {
         let members = datastore
             .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
             .await
-            .unwrap();
+            .unwrap()
+            .into_iter()
+            .map(|m| InstanceUuid::from_untyped_uuid(m.id()))
+            .collect::<Vec<_>>();
         assert_eq!(members.len(), 1);
-        assert_eq!(
-            external::AffinityGroupMember::Instance(instance),
-            members[0].clone().into()
-        );
+        assert_eq!(instance, members[0]);
 
         // We can delete the member and observe an empty member list
         datastore
-            .affinity_group_member_delete(
+            .affinity_group_member_instance_delete(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(instance),
+                instance,
             )
             .await
             .unwrap();
@@ -1834,11 +1996,11 @@ mod tests {
             .unwrap();
 
         // A new group should have no members
-        let pagparams = DataPageParams {
+        let pagparams = PaginatedBy::Id(DataPageParams {
             marker: None,
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
-        };
+        });
         let members = datastore
             .anti_affinity_group_member_list(&opctx, &authz_group, &pagparams)
             .await
@@ -1856,10 +2018,10 @@ mod tests {
 
         // Add the instance as a member to the group
         datastore
-            .anti_affinity_group_member_add(
+            .anti_affinity_group_member_instance_add(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(instance),
+                instance,
             )
             .await
             .unwrap();
@@ -1870,17 +2032,20 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(members.len(), 1);
-        assert_eq!(
-            external::AntiAffinityGroupMember::Instance(instance),
-            members[0].clone()
-        );
+        assert!(matches!(
+            members[0],
+            external::AntiAffinityGroupMember::Instance {
+                id,
+                ..
+            } if id == instance,
+        ));
 
         // We can delete the member and observe an empty member list
         datastore
-            .anti_affinity_group_member_delete(
+            .anti_affinity_group_member_instance_delete(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(instance),
+                instance,
             )
             .await
             .unwrap();
@@ -1889,6 +2054,175 @@ mod tests {
             .await
             .unwrap();
         assert!(members.is_empty());
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn affinity_group_membership_list_extended() {
+        // Setup
+        let logctx =
+            dev::test_setup_log("affinity_group_membership_list_extended");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a project and a group
+        let (authz_project, ..) =
+            create_project(&opctx, &datastore, "my-project").await;
+        let group = create_affinity_group(
+            &opctx,
+            &datastore,
+            &authz_project,
+            "my-group",
+        )
+        .await
+        .unwrap();
+
+        let (.., authz_group) = LookupPath::new(opctx, datastore)
+            .affinity_group_id(group.id())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .unwrap();
+
+        // A new group should have no members
+        let pagparams = PaginatedBy::Id(DataPageParams {
+            marker: None,
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        });
+        let members = datastore
+            .affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .await
+            .unwrap();
+        assert!(members.is_empty());
+
+        // Add some instances, so we have data to list over.
+
+        const INSTANCE_COUNT: usize = 6;
+
+        let mut members = Vec::new();
+        for i in 0..INSTANCE_COUNT {
+            let name = format!("instance-{i}");
+            let instance = create_stopped_instance_record(
+                &opctx,
+                &datastore,
+                &authz_project,
+                &name,
+            )
+            .await;
+
+            // Add the instance as a member to the group
+            let member = external::AffinityGroupMember::Instance {
+                id: instance,
+                name: name.try_into().unwrap(),
+                run_state: external::InstanceState::Stopped,
+            };
+            datastore
+                .affinity_group_member_instance_add(
+                    &opctx,
+                    &authz_group,
+                    instance,
+                )
+                .await
+                .unwrap();
+            members.push(member);
+        }
+
+        // Order by UUID
+        members.sort_unstable_by_key(|m1| m1.id());
+
+        // We can list all members
+        let pagparams = PaginatedBy::Id(DataPageParams {
+            marker: None,
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        });
+        let observed_members = datastore
+            .affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .await
+            .unwrap();
+        assert_eq!(observed_members, members);
+
+        // We can paginate over the results
+        let marker = members[2].id();
+        let pagparams = PaginatedBy::Id(DataPageParams {
+            marker: Some(&marker),
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        });
+
+        let observed_members = datastore
+            .affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .await
+            .unwrap();
+        assert_eq!(observed_members, members[3..]);
+
+        // We can list limited results
+        let pagparams = PaginatedBy::Id(DataPageParams {
+            marker: Some(&marker),
+            limit: NonZeroU32::new(2).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        });
+        let observed_members = datastore
+            .affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .await
+            .unwrap();
+        assert_eq!(observed_members, members[3..5]);
+
+        // We can list in descending order too
+        members.reverse();
+        let pagparams = PaginatedBy::Id(DataPageParams {
+            marker: None,
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Descending,
+        });
+        let observed_members = datastore
+            .affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .await
+            .unwrap();
+        assert_eq!(observed_members, members);
+
+        // Order by name
+        members.sort_unstable_by_key(|m1| m1.name().clone());
+
+        // We can list all members
+        let pagparams = PaginatedBy::Name(DataPageParams {
+            marker: None,
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        });
+        let observed_members = datastore
+            .affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .await
+            .unwrap();
+        assert_eq!(observed_members, members);
+        let marker = members[2].name();
+        let pagparams = PaginatedBy::Name(DataPageParams {
+            marker: Some(marker),
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        });
+
+        let observed_members = datastore
+            .affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .await
+            .unwrap();
+        assert_eq!(observed_members, members[3..]);
+
+        // We can list in descending order too
+        members.reverse();
+        let pagparams = PaginatedBy::Name(DataPageParams {
+            marker: None,
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Descending,
+        });
+        let observed_members = datastore
+            .affinity_group_member_list(&opctx, &authz_group, &pagparams)
+            .await
+            .unwrap();
+        assert_eq!(observed_members, members);
 
         // Clean up.
         db.terminate().await;
@@ -1927,11 +2261,11 @@ mod tests {
             .unwrap();
 
         // A new group should have no members
-        let pagparams = DataPageParams {
+        let pagparams = PaginatedBy::Id(DataPageParams {
             marker: None,
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
-        };
+        });
         let members = datastore
             .anti_affinity_group_member_list(
                 &opctx,
@@ -1950,21 +2284,26 @@ mod tests {
         let mut members = Vec::new();
 
         for i in 0..INSTANCE_COUNT {
+            let name = format!("instance-{i}");
             let instance = create_stopped_instance_record(
                 &opctx,
                 &datastore,
                 &authz_project,
-                &format!("instance-{i}"),
+                &name,
             )
             .await;
 
             // Add the instance as a member to the group
-            let member = external::AntiAffinityGroupMember::Instance(instance);
+            let member = external::AntiAffinityGroupMember::Instance {
+                id: instance,
+                name: name.try_into().unwrap(),
+                run_state: external::InstanceState::Stopped,
+            };
             datastore
-                .anti_affinity_group_member_add(
+                .anti_affinity_group_member_instance_add(
                     &opctx,
                     &authz_aa_group,
-                    member.clone(),
+                    instance,
                 )
                 .await
                 .unwrap();
@@ -1972,24 +2311,28 @@ mod tests {
         }
 
         for i in 0..AFFINITY_GROUP_COUNT {
+            let name = format!("affinity-{i}");
             let affinity_group = create_affinity_group(
                 &opctx,
                 &datastore,
                 &authz_project,
-                &format!("affinity-{i}"),
+                &name,
             )
             .await
             .unwrap();
 
+            let affinity_group_id =
+                AffinityGroupUuid::from_untyped_uuid(affinity_group.id());
             // Add the instance as a member to the group
-            let member = external::AntiAffinityGroupMember::AffinityGroup(
-                AffinityGroupUuid::from_untyped_uuid(affinity_group.id()),
-            );
+            let member = external::AntiAffinityGroupMember::AffinityGroup {
+                id: affinity_group_id,
+                name: name.try_into().unwrap(),
+            };
             datastore
-                .anti_affinity_group_member_add(
+                .anti_affinity_group_member_affinity_group_add(
                     &opctx,
                     &authz_aa_group,
-                    member.clone(),
+                    affinity_group_id,
                 )
                 .await
                 .unwrap();
@@ -2000,11 +2343,11 @@ mod tests {
         members.sort_unstable_by_key(|m1| m1.id());
 
         // We can list all members
-        let mut pagparams = DataPageParams {
+        let pagparams = PaginatedBy::Id(DataPageParams {
             marker: None,
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
-        };
+        });
         let observed_members = datastore
             .anti_affinity_group_member_list(
                 &opctx,
@@ -2017,7 +2360,12 @@ mod tests {
 
         // We can paginate over the results
         let marker = members[2].id();
-        pagparams.marker = Some(&marker);
+        let pagparams = PaginatedBy::Id(DataPageParams {
+            marker: Some(&marker),
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        });
+
         let observed_members = datastore
             .anti_affinity_group_member_list(
                 &opctx,
@@ -2029,8 +2377,11 @@ mod tests {
         assert_eq!(observed_members, members[3..]);
 
         // We can list limited results
-        pagparams.marker = Some(&marker);
-        pagparams.limit = NonZeroU32::new(2).unwrap();
+        let pagparams = PaginatedBy::Id(DataPageParams {
+            marker: Some(&marker),
+            limit: NonZeroU32::new(2).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        });
         let observed_members = datastore
             .anti_affinity_group_member_list(
                 &opctx,
@@ -2043,9 +2394,63 @@ mod tests {
 
         // We can list in descending order too
         members.reverse();
-        pagparams.marker = None;
-        pagparams.limit = NonZeroU32::new(100).unwrap();
-        pagparams.direction = dropshot::PaginationOrder::Descending;
+        let pagparams = PaginatedBy::Id(DataPageParams {
+            marker: None,
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Descending,
+        });
+        let observed_members = datastore
+            .anti_affinity_group_member_list(
+                &opctx,
+                &authz_aa_group,
+                &pagparams,
+            )
+            .await
+            .unwrap();
+        assert_eq!(observed_members, members);
+
+        // Order by name, regardless of member type
+        members.sort_unstable_by_key(|m1| m1.name().clone());
+
+        // We can list all members
+        let pagparams = PaginatedBy::Name(DataPageParams {
+            marker: None,
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        });
+        let observed_members = datastore
+            .anti_affinity_group_member_list(
+                &opctx,
+                &authz_aa_group,
+                &pagparams,
+            )
+            .await
+            .unwrap();
+        assert_eq!(observed_members, members);
+        let marker = members[2].name();
+        let pagparams = PaginatedBy::Name(DataPageParams {
+            marker: Some(marker),
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        });
+
+        let observed_members = datastore
+            .anti_affinity_group_member_list(
+                &opctx,
+                &authz_aa_group,
+                &pagparams,
+            )
+            .await
+            .unwrap();
+        assert_eq!(observed_members, members[3..]);
+
+        // We can list in descending order too
+        members.reverse();
+        let pagparams = PaginatedBy::Name(DataPageParams {
+            marker: None,
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Descending,
+        });
         let observed_members = datastore
             .anti_affinity_group_member_list(
                 &opctx,
@@ -2089,12 +2494,11 @@ mod tests {
             .unwrap();
 
         // A new group should have no members
-        let pagparams_id = DataPageParams {
+        let pagbyid = PaginatedBy::Id(DataPageParams {
             marker: None,
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
-        };
-        let pagbyid = PaginatedBy::Id(pagparams_id);
+        });
         let members = datastore
             .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
             .await
@@ -2114,11 +2518,7 @@ mod tests {
 
         // Cannot add the instance to the group while it's running.
         let err = datastore
-            .affinity_group_member_add(
-                &opctx,
-                &authz_group,
-                external::AffinityGroupMember::Instance(instance),
-            )
+            .affinity_group_member_instance_add(&opctx, &authz_group, instance)
             .await
             .expect_err(
                 "Shouldn't be able to add running instances to affinity groups",
@@ -2134,11 +2534,7 @@ mod tests {
         // If we have no reservation for the instance, we can add it to the group.
         delete_instance_reservation(&datastore, instance).await;
         datastore
-            .affinity_group_member_add(
-                &opctx,
-                &authz_group,
-                external::AffinityGroupMember::Instance(instance),
-            )
+            .affinity_group_member_instance_add(&opctx, &authz_group, instance)
             .await
             .unwrap();
 
@@ -2149,20 +2545,20 @@ mod tests {
         let members = datastore
             .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
             .await
-            .unwrap();
+            .unwrap()
+            .into_iter()
+            .map(|m| InstanceUuid::from_untyped_uuid(m.id()))
+            .collect::<Vec<_>>();
         assert_eq!(members.len(), 1);
-        assert_eq!(
-            external::AffinityGroupMember::Instance(instance),
-            members[0].clone().into()
-        );
+        assert_eq!(instance, members[0]);
 
         // We can delete the member and observe an empty member list -- even
         // though it's running!
         datastore
-            .affinity_group_member_delete(
+            .affinity_group_member_instance_delete(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(instance),
+                instance,
             )
             .await
             .unwrap();
@@ -2205,11 +2601,11 @@ mod tests {
             .unwrap();
 
         // A new group should have no members
-        let pagparams = DataPageParams {
+        let pagparams = PaginatedBy::Id(DataPageParams {
             marker: None,
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
-        };
+        });
         let members = datastore
             .anti_affinity_group_member_list(&opctx, &authz_group, &pagparams)
             .await
@@ -2228,10 +2624,10 @@ mod tests {
 
         // Cannot add the instance to the group while it's running.
         let err = datastore
-            .anti_affinity_group_member_add(
+            .anti_affinity_group_member_instance_add(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(instance),
+                instance,
             )
             .await
             .expect_err(
@@ -2248,10 +2644,10 @@ mod tests {
         // If we have no reservation for the instance, we can add it to the group.
         delete_instance_reservation(&datastore, instance).await;
         datastore
-            .anti_affinity_group_member_add(
+            .anti_affinity_group_member_instance_add(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(instance),
+                instance,
             )
             .await
             .unwrap();
@@ -2265,18 +2661,20 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(members.len(), 1);
-        assert_eq!(
-            external::AntiAffinityGroupMember::Instance(instance),
-            members[0].clone()
-        );
-
+        assert!(matches!(
+            members[0],
+            external::AntiAffinityGroupMember::Instance {
+                id,
+                ..
+            } if id == instance,
+        ));
         // We can delete the member and observe an empty member list -- even
         // though it's running!
         datastore
-            .anti_affinity_group_member_delete(
+            .anti_affinity_group_member_instance_delete(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(instance),
+                instance,
             )
             .await
             .unwrap();
@@ -2337,11 +2735,11 @@ mod tests {
             .unwrap();
 
         // A new group should have no members
-        let pagparams = DataPageParams {
+        let pagparams = PaginatedBy::Id(DataPageParams {
             marker: None,
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
-        };
+        });
         let members = datastore
             .anti_affinity_group_member_list(
                 &opctx,
@@ -2363,10 +2761,10 @@ mod tests {
 
         // Add the instance to the affinity group
         datastore
-            .affinity_group_member_add(
+            .affinity_group_member_instance_add(
                 &opctx,
                 &authz_a_group,
-                external::AffinityGroupMember::Instance(instance),
+                instance,
             )
             .await
             .unwrap();
@@ -2376,10 +2774,10 @@ mod tests {
 
         // Now, we cannot add the affinity group to the anti-affinity group
         let err = datastore
-            .anti_affinity_group_member_add(
+            .anti_affinity_group_member_affinity_group_add(
                 &opctx,
                 &authz_aa_group,
-                external::AntiAffinityGroupMember::AffinityGroup(affinity_group_id),
+                affinity_group_id,
             )
             .await
             .expect_err(
@@ -2397,12 +2795,10 @@ mod tests {
         // anti-affinity group.
         delete_instance_reservation(&datastore, instance).await;
         datastore
-            .anti_affinity_group_member_add(
+            .anti_affinity_group_member_affinity_group_add(
                 &opctx,
                 &authz_aa_group,
-                external::AntiAffinityGroupMember::AffinityGroup(
-                    affinity_group_id,
-                ),
+                affinity_group_id,
             )
             .await
             .unwrap();
@@ -2420,20 +2816,21 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(members.len(), 1);
-        assert_eq!(
-            external::AntiAffinityGroupMember::AffinityGroup(affinity_group_id),
-            members[0].clone()
-        );
+        assert!(matches!(
+            members[0],
+            external::AntiAffinityGroupMember::AffinityGroup {
+                id,
+                ..
+            } if id == affinity_group_id,
+        ));
 
         // We can delete the member and observe an empty member list -- even
         // though it has an instance which is running!
         datastore
-            .anti_affinity_group_member_delete(
+            .anti_affinity_group_member_affinity_group_delete(
                 &opctx,
                 &authz_aa_group,
-                external::AntiAffinityGroupMember::AffinityGroup(
-                    affinity_group_id,
-                ),
+                affinity_group_id,
             )
             .await
             .unwrap();
@@ -2479,12 +2876,11 @@ mod tests {
             .unwrap();
 
         // A new group should have no members
-        let pagparams_id = DataPageParams {
+        let pagbyid = PaginatedBy::Id(DataPageParams {
             marker: None,
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
-        };
-        let pagbyid = PaginatedBy::Id(pagparams_id);
+        });
         let members = datastore
             .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
             .await
@@ -2500,11 +2896,7 @@ mod tests {
         )
         .await;
         datastore
-            .affinity_group_member_add(
-                &opctx,
-                &authz_group,
-                external::AffinityGroupMember::Instance(instance),
-            )
+            .affinity_group_member_instance_add(&opctx, &authz_group, instance)
             .await
             .unwrap();
 
@@ -2560,11 +2952,11 @@ mod tests {
             .unwrap();
 
         // A new group should have no members
-        let pagparams = DataPageParams {
+        let pagparams = PaginatedBy::Id(DataPageParams {
             marker: None,
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
-        };
+        });
         let members = datastore
             .anti_affinity_group_member_list(
                 &opctx,
@@ -2584,21 +2976,19 @@ mod tests {
         )
         .await;
         datastore
-            .anti_affinity_group_member_add(
+            .anti_affinity_group_member_instance_add(
                 &opctx,
                 &authz_aa_group,
-                external::AntiAffinityGroupMember::Instance(instance),
+                instance,
             )
             .await
             .unwrap();
         // Also, add the affinity member to the anti-affinity group as a member
         datastore
-            .anti_affinity_group_member_add(
+            .anti_affinity_group_member_affinity_group_add(
                 &opctx,
                 &authz_aa_group,
-                external::AntiAffinityGroupMember::AffinityGroup(
-                    AffinityGroupUuid::from_untyped_uuid(affinity_group.id()),
-                ),
+                AffinityGroupUuid::from_untyped_uuid(affinity_group.id()),
             )
             .await
             .unwrap();
@@ -2675,24 +3065,22 @@ mod tests {
             .unwrap();
 
         // Add the affinity group to the anti-affinity group.
-        let member = external::AntiAffinityGroupMember::AffinityGroup(
-            AffinityGroupUuid::from_untyped_uuid(affinity_group.id()),
-        );
+        let member = AffinityGroupUuid::from_untyped_uuid(affinity_group.id());
         datastore
-            .anti_affinity_group_member_add(
+            .anti_affinity_group_member_affinity_group_add(
                 &opctx,
                 &authz_aa_group,
-                member.clone(),
+                member,
             )
             .await
             .unwrap();
 
         // Right now, the affinity group is observable
         datastore
-            .anti_affinity_group_member_view(
+            .anti_affinity_group_member_affinity_group_view(
                 &opctx,
                 &authz_aa_group,
-                member.clone(),
+                member,
             )
             .await
             .expect("Group member should be visible - we just added it");
@@ -2702,10 +3090,10 @@ mod tests {
 
         // The affinity group membership should have been revoked
         let err = datastore
-            .anti_affinity_group_member_view(
+            .anti_affinity_group_member_affinity_group_view(
                 &opctx,
                 &authz_aa_group,
-                member.clone(),
+                member,
             )
             .await
             .expect_err("Group member should no longer exist");
@@ -2751,12 +3139,11 @@ mod tests {
             .unwrap();
 
         // A new group should have no members
-        let pagparams_id = DataPageParams {
+        let pagbyid = PaginatedBy::Id(DataPageParams {
             marker: None,
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
-        };
-        let pagbyid = PaginatedBy::Id(pagparams_id);
+        });
         let members = datastore
             .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
             .await
@@ -2772,11 +3159,7 @@ mod tests {
         )
         .await;
         datastore
-            .affinity_group_member_add(
-                &opctx,
-                &authz_group,
-                external::AffinityGroupMember::Instance(instance),
-            )
+            .affinity_group_member_instance_add(&opctx, &authz_group, instance)
             .await
             .unwrap();
 
@@ -2831,11 +3214,11 @@ mod tests {
             .unwrap();
 
         // A new group should have no members
-        let pagparams = DataPageParams {
+        let pagparams = PaginatedBy::Id(DataPageParams {
             marker: None,
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
-        };
+        });
         let members = datastore
             .anti_affinity_group_member_list(&opctx, &authz_group, &pagparams)
             .await
@@ -2851,10 +3234,10 @@ mod tests {
         )
         .await;
         datastore
-            .anti_affinity_group_member_add(
+            .anti_affinity_group_member_instance_add(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(instance),
+                instance,
             )
             .await
             .unwrap();
@@ -2957,10 +3340,10 @@ mod tests {
             // Expect to see specific errors, depending on whether or not the
             // group/instance exist.
             let err = datastore
-                .affinity_group_member_add(
+                .affinity_group_member_instance_add(
                     &opctx,
                     &authz_group,
-                    external::AffinityGroupMember::Instance(instance),
+                    instance,
                 )
                 .await
                 .expect_err("Should have failed");
@@ -2989,10 +3372,10 @@ mod tests {
 
             // Do the same thing, but for group membership removal.
             let err = datastore
-                .affinity_group_member_delete(
+                .affinity_group_member_instance_delete(
                     &opctx,
                     &authz_group,
-                    external::AffinityGroupMember::Instance(instance),
+                    instance,
                 )
                 .await
                 .expect_err("Should have failed");
@@ -3189,26 +3572,26 @@ mod tests {
             //
             // Expect to see specific errors, depending on whether or not the
             // group/member exist.
-            let member = match arg.member_type {
-                Member::Instance => {
-                    external::AntiAffinityGroupMember::Instance(instance)
-                }
-                Member::AffinityGroup => {
-                    external::AntiAffinityGroupMember::AffinityGroup(
+            let err = match arg.member_type {
+                Member::Instance => datastore
+                    .anti_affinity_group_member_instance_add(
+                        &opctx,
+                        &authz_group,
+                        instance,
+                    )
+                    .await
+                    .expect_err("Should have failed"),
+                Member::AffinityGroup => datastore
+                    .anti_affinity_group_member_affinity_group_add(
+                        &opctx,
+                        &authz_group,
                         AffinityGroupUuid::from_untyped_uuid(
                             affinity_group.id(),
                         ),
                     )
-                }
+                    .await
+                    .expect_err("Should have failed"),
             };
-            let err = datastore
-                .anti_affinity_group_member_add(
-                    &opctx,
-                    &authz_group,
-                    member.clone(),
-                )
-                .await
-                .expect_err("Should have failed");
 
             match (arg.group, arg.member) {
                 (false, _) => {
@@ -3233,10 +3616,27 @@ mod tests {
             }
 
             // Do the same thing, but for group membership removal.
-            let err = datastore
-                .anti_affinity_group_member_delete(&opctx, &authz_group, member)
-                .await
-                .expect_err("Should have failed");
+            let err = match arg.member_type {
+                Member::Instance => datastore
+                    .anti_affinity_group_member_instance_delete(
+                        &opctx,
+                        &authz_group,
+                        instance,
+                    )
+                    .await
+                    .expect_err("Should have failed"),
+                Member::AffinityGroup => datastore
+                    .anti_affinity_group_member_affinity_group_delete(
+                        &opctx,
+                        &authz_group,
+                        AffinityGroupUuid::from_untyped_uuid(
+                            affinity_group.id(),
+                        ),
+                    )
+                    .await
+                    .expect_err("Should have failed"),
+            };
+
             match (arg.group, arg.member) {
                 (false, _) => {
                     assert!(
@@ -3321,21 +3721,13 @@ mod tests {
 
         // Add the instance to the group
         datastore
-            .affinity_group_member_add(
-                &opctx,
-                &authz_group,
-                external::AffinityGroupMember::Instance(instance),
-            )
+            .affinity_group_member_instance_add(&opctx, &authz_group, instance)
             .await
             .unwrap();
 
         // Add the instance to the group again
         let err = datastore
-            .affinity_group_member_add(
-                &opctx,
-                &authz_group,
-                external::AffinityGroupMember::Instance(instance),
-            )
+            .affinity_group_member_instance_add(&opctx, &authz_group, instance)
             .await
             .unwrap_err();
         assert!(
@@ -3353,12 +3745,11 @@ mod tests {
         //
         // Two calls to "affinity_group_member_add" should be the same
         // as a single call.
-        let pagparams_id = DataPageParams {
+        let pagbyid = PaginatedBy::Id(DataPageParams {
             marker: None,
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
-        };
-        let pagbyid = PaginatedBy::Id(pagparams_id);
+        });
         let members = datastore
             .affinity_group_member_list(&opctx, &authz_group, &pagbyid)
             .await
@@ -3367,18 +3758,18 @@ mod tests {
 
         // We should be able to delete the membership idempotently.
         datastore
-            .affinity_group_member_delete(
+            .affinity_group_member_instance_delete(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(instance),
+                instance,
             )
             .await
             .unwrap();
         let err = datastore
-            .affinity_group_member_delete(
+            .affinity_group_member_instance_delete(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(instance),
+                instance,
             )
             .await
             .unwrap_err();
@@ -3440,20 +3831,20 @@ mod tests {
 
         // Add the instance to the group
         datastore
-            .anti_affinity_group_member_add(
+            .anti_affinity_group_member_instance_add(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(instance),
+                instance,
             )
             .await
             .unwrap();
 
         // Add the instance to the group again
         let err = datastore
-            .anti_affinity_group_member_add(
+            .anti_affinity_group_member_instance_add(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(instance),
+                instance,
             )
             .await
             .unwrap_err();
@@ -3470,13 +3861,13 @@ mod tests {
 
         // We should still only observe a single member in the group.
         //
-        // Two calls to "anti_affinity_group_member_add" should be the same
+        // Two calls to "anti_affinity_group_member_instance_add" should be the same
         // as a single call.
-        let pagparams = DataPageParams {
+        let pagparams = PaginatedBy::Id(DataPageParams {
             marker: None,
             limit: NonZeroU32::new(100).unwrap(),
             direction: dropshot::PaginationOrder::Ascending,
-        };
+        });
         let members = datastore
             .anti_affinity_group_member_list(&opctx, &authz_group, &pagparams)
             .await
@@ -3485,18 +3876,18 @@ mod tests {
 
         // We should be able to delete the membership idempotently.
         datastore
-            .anti_affinity_group_member_delete(
+            .anti_affinity_group_member_instance_delete(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(instance),
+                instance,
             )
             .await
             .unwrap();
         let err = datastore
-            .anti_affinity_group_member_delete(
+            .anti_affinity_group_member_instance_delete(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(instance),
+                instance,
             )
             .await
             .unwrap_err();
