@@ -8,8 +8,7 @@ use crate::integration_tests::instances::{
     create_project_and_pool, instance_post, instance_simulate, InstanceOp,
 };
 use chrono::Utc;
-use dropshot::test_util::ClientTestContext;
-use dropshot::{HttpErrorResponseBody, ResultsPage};
+use dropshot::HttpErrorResponseBody;
 use http::{Method, StatusCode};
 use nexus_auth::authn::USER_TEST_UNPRIVILEGED;
 use nexus_db_queries::db::identity::Asset;
@@ -17,7 +16,7 @@ use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pool, create_disk, create_instance, create_project,
-    grant_iam, object_create_error, objects_list_page_authz, DiskTest,
+    grant_iam, object_create_error, DiskTest,
 };
 use nexus_test_utils::wait_for_producer;
 use nexus_test_utils::ControlPlaneTestContext;
@@ -26,53 +25,11 @@ use nexus_types::external_api::shared::ProjectRole;
 use nexus_types::external_api::views::OxqlQueryResult;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
-use oximeter::types::Datum;
 use oximeter::types::FieldValue;
-use oximeter::types::Measurement;
 use oximeter::TimeseriesSchema;
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use uuid::Uuid;
-
-pub async fn query_for_metrics(
-    client: &ClientTestContext,
-    path: &str,
-) -> ResultsPage<Measurement> {
-    let measurements: ResultsPage<Measurement> =
-        objects_list_page_authz(client, path).await;
-    assert!(!measurements.items.is_empty());
-    measurements
-}
-
-pub async fn get_latest_silo_metric(
-    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
-    metric_name: &str,
-    project_id: Option<Uuid>,
-) -> i64 {
-    let client = &cptestctx.external_client;
-    let id_param = match project_id {
-        Some(id) => format!("&project={}", id),
-        None => "".to_string(),
-    };
-    let url = format!(
-        "/v1/metrics/{metric_name}?start_time={:?}&end_time={:?}&order=descending&limit=1{}",
-        cptestctx.start_time,
-        Utc::now(),
-        id_param,
-    );
-    let measurements =
-        objects_list_page_authz::<Measurement>(client, &url).await;
-
-    // prevent more confusing error on next line
-    assert_eq!(measurements.items.len(), 1, "Expected exactly one measurement");
-
-    let item = &measurements.items[0];
-    let datum = match item.datum() {
-        Datum::I64(c) => c,
-        _ => panic!("Unexpected datum type {:?}", item.datum()),
-    };
-    return *datum;
-}
 
 pub async fn assert_system_metrics(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,

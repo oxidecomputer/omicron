@@ -5,7 +5,8 @@
 //! Tests basic disk support in the API
 
 use super::instances::instance_wait_for_state;
-use super::metrics::{get_latest_silo_metric, query_for_metrics};
+use super::metrics_queries::MetricsNotYet;
+use super::metrics_queries::MetricsQuerier;
 use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
@@ -1792,7 +1793,7 @@ const ALL_METRICS: [&'static str; 6] =
 
 #[nexus_test]
 async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
-    let oximeter = &cptestctx.oximeter;
+    let metrics_querier = MetricsQuerier::new(cptestctx);
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
     let project_id = create_project_and_pool(client).await;
@@ -1820,51 +1821,66 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
             .await;
     assert!(measurements.items.is_empty());
 
-    oximeter
-        .try_force_collect()
-        .await
-        .expect("Could not force oximeter collection");
-    assert_eq!(
-        get_latest_silo_metric(
-            cptestctx,
+    metrics_querier
+        .wait_for_latest_silo_metric(
             "virtual_disk_space_provisioned",
             Some(project_id),
+            |measurement| {
+                if measurement == i64::from(disk.size) {
+                    Ok(())
+                } else {
+                    Err(MetricsNotYet::new(format!(
+                        "waiting for virtual_disk_space_provisioned={} \
+                         (currently {measurement})",
+                        disk.size,
+                    )))
+                }
+            },
         )
-        .await,
-        i64::from(disk.size)
-    );
+        .await;
 
     // Create an instance, attach the disk to it.
     create_instance_with_disk(client).await;
     wait_for_producer(&cptestctx.oximeter, disk.id()).await;
-    oximeter
-        .try_force_collect()
-        .await
-        .expect("Could not force oximeter collection");
 
     for metric in &ALL_METRICS {
-        let measurements = query_for_metrics(client, &metric_url(metric)).await;
-
-        assert!(!measurements.items.is_empty());
-        for item in &measurements.items {
-            let cumulative = match item.datum() {
-                Datum::CumulativeI64(c) => c,
-                _ => panic!("Unexpected datum type {:?}", item.datum()),
-            };
-            assert!(cumulative.start_time() <= item.timestamp());
-        }
+        metrics_querier
+            .wait_for_disk_metric(PROJECT_NAME, DISK_NAME, metric, |items| {
+                if items.is_empty() {
+                    return Err(MetricsNotYet::new(format!(
+                        "waiting for at least one item for metric={metric}"
+                    )));
+                }
+                for item in &items {
+                    let cumulative = match item.datum() {
+                        Datum::CumulativeI64(c) => c,
+                        _ => panic!("Unexpected datum type {:?}", item.datum()),
+                    };
+                    assert!(cumulative.start_time() <= item.timestamp());
+                }
+                Ok(())
+            })
+            .await;
     }
 
     // Check the utilization info for the whole project too.
-    assert_eq!(
-        get_latest_silo_metric(
-            cptestctx,
+    metrics_querier
+        .wait_for_latest_silo_metric(
             "virtual_disk_space_provisioned",
             Some(project_id),
+            |measurement| {
+                if measurement == i64::from(disk.size) {
+                    Ok(())
+                } else {
+                    Err(MetricsNotYet::new(format!(
+                        "waiting for virtual_disk_space_provisioned={} \
+                         (currently {measurement})",
+                        disk.size,
+                    )))
+                }
+            },
         )
-        .await,
-        i64::from(disk.size)
-    );
+        .await;
 }
 
 #[nexus_test]
@@ -1876,12 +1892,28 @@ async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
     create_instance_with_disk(client).await;
     wait_for_producer(&cptestctx.oximeter, disk.id()).await;
 
-    let oximeter = &cptestctx.oximeter;
-    oximeter
-        .try_force_collect()
-        .await
-        .expect("Could not force oximeter collection");
+    let metrics_querier = MetricsQuerier::new(cptestctx);
     for metric in &ALL_METRICS {
+        // Wait until we have at least two measurements.
+        metrics_querier
+            .wait_for_disk_metric(
+                PROJECT_NAME,
+                DISK_NAME,
+                metric,
+                |measurements| {
+                    let num_measurements = measurements.len();
+                    if num_measurements >= 2 {
+                        Ok(())
+                    } else {
+                        Err(MetricsNotYet::new(format!(
+                            "waiting for at least 2 measurements \
+                             (currently {num_measurements})"
+                        )))
+                    }
+                },
+            )
+            .await;
+
         let collection_url = format!(
             "/v1/disks/{}/metrics/{}?project={}",
             DISK_NAME, metric, PROJECT_NAME
@@ -1891,12 +1923,6 @@ async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
             cptestctx.start_time,
             Utc::now(),
         );
-
-        objects_list_page_authz::<Measurement>(
-            client,
-            &format!("{collection_url}&{initial_params}"),
-        )
-        .await;
 
         let measurements_paginated: Collection<Measurement> =
             NexusRequest::iter_collection_authn(
