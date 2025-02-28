@@ -191,7 +191,15 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
                 }) => {
                     // We ignore any error here, because the result we
                     // actually want to produce is whether tests passed
-                    let _ = teardown_a4x2(&sh, &env);
+                    //
+                    // But also, only tear down if tests succeeded
+                    if result.is_ok() {
+                        let _ = teardown_a4x2(&sh, &env);
+                    } else {
+                        print_a4x2_access_info(&sh, &env);
+                        println!("errors occurred. we are NOT stopping a4x2, to avoid destroying evidence");
+                        println!("Use `cargo xtask a4x2 deploy stop` to stop a4x2 manually");
+                    }
                 }
 
                 _ => {
