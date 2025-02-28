@@ -48,7 +48,9 @@ impl Client {
             "original_sql" => &original_query,
             "rewritten_sql" => &rewritten,
         );
-        let result = self.execute_with_block(&rewritten).await?;
+        let result = self
+            .execute_with_block(&mut self.claim_connection().await?, &rewritten)
+            .await?;
         let summary = result.query_summary();
         let Some(block) = result.data.as_ref() else {
             return Err(Error::Database(String::from(
