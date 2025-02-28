@@ -1013,7 +1013,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WebhookDelivery"
+                  "$ref": "#/components/schemas/WebhookProbeResult"
                 }
               }
             }
@@ -25135,6 +25135,12 @@
         "description": "A delivery attempt for a webhook event.",
         "type": "object",
         "properties": {
+          "attempt": {
+            "description": "Attempt number, starting at 1. If this is a retry of a previous failed delivery, this value indicates that.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
           "event_class": {
             "description": "The event class.",
             "type": "string"
@@ -25149,12 +25155,6 @@
           },
           "id": {
             "description": "The UUID of this delivery attempt.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "resent_for": {
-            "nullable": true,
-            "description": "The UUID of a previous delivery attempt that this is a repeat of, if this was a resending of a previous delivery. If this is the first time this event has been delivered, this is `null`.",
             "type": "string",
             "format": "uuid"
           },
@@ -25199,6 +25199,7 @@
           }
         },
         "required": [
+          "attempt",
           "event_class",
           "event_id",
           "id",
@@ -25326,6 +25327,30 @@
               "probe"
             ]
           }
+        ]
+      },
+      "WebhookProbeResult": {
+        "description": "Data describing the result of a webhook liveness probe attempt.",
+        "type": "object",
+        "properties": {
+          "probe": {
+            "description": "The outcome of the probe request.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WebhookDelivery"
+              }
+            ]
+          },
+          "resends_started": {
+            "nullable": true,
+            "description": "If the probe request succeeded, and resending failed deliveries on success was requested, the number of new delivery attempts started. Otherwise, if the probe did not succeed, or resending failed deliveries was not requested, this is null.\n\nNote that this may be 0, if there were no events found which had not been delivered successfully to this receiver.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "probe"
         ]
       },
       "WebhookSecretCreate": {

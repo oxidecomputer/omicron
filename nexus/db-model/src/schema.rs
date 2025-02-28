@@ -2255,9 +2255,9 @@ table! {
         attempts -> Int2,
         time_created -> Timestamptz,
         time_completed -> Nullable<Timestamptz>,
+        failed_permanently -> Bool,
         deliverator_id -> Nullable<Uuid>,
         time_delivery_started -> Nullable<Timestamptz>,
-        failed_permanently -> Bool,
     }
 }
 

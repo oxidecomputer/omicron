@@ -79,7 +79,7 @@ async fn webhook_send_probe(
     webhook_id: &WebhookReceiverUuid,
     resend: bool,
     status: http::StatusCode,
-) -> views::WebhookDelivery {
+) -> views::WebhookProbeResult {
     let pathparams = if resend { "?resend=true" } else { "" };
     let path = format!("{WEBHOOKS_BASE_PATH}/{webhook_id}/probe{pathparams}");
     NexusRequest::new(
@@ -133,7 +133,7 @@ fn signature_verifies(
 
             // Strip the expected algorithm part. Note that we only support
             // SHA256 for now. Panic if this is invalid.
-            let hdr = dbg!(hdr)
+            let hdr = hdr
                 .strip_prefix("a=sha256")
                 .expect("all x-oxide-signature headers should be SHA256");
             // Strip the leading `&id=` for the ID part, panicking if this
@@ -698,10 +698,14 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
 
     mock.assert_async().await;
 
-    assert_eq!(probe1.attempt, 1);
-    assert_eq!(probe1.event_class, "probe");
-    assert_eq!(probe1.trigger, views::WebhookDeliveryTrigger::Probe);
-    assert_eq!(probe1.state, shared::WebhookDeliveryState::FailedTimeout);
+    assert_eq!(probe1.probe.attempt, 1);
+    assert_eq!(probe1.probe.event_class, "probe");
+    assert_eq!(probe1.probe.trigger, views::WebhookDeliveryTrigger::Probe);
+    assert_eq!(probe1.probe.state, shared::WebhookDeliveryState::FailedTimeout);
+    assert_eq!(
+        probe1.resends_started, None,
+        "we did not request events be resent"
+    );
 
     // Next, configure the receiver server to return a 5xx error
     mock.delete_async().await;
@@ -733,13 +737,20 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
     dbg!(&probe2);
 
     mock.assert_async().await;
-    assert_eq!(probe2.attempt, 1);
-    assert_eq!(probe2.event_class, "probe");
-    assert_eq!(probe2.trigger, views::WebhookDeliveryTrigger::Probe);
-    assert_eq!(probe2.state, shared::WebhookDeliveryState::FailedHttpError);
+    assert_eq!(probe2.probe.attempt, 1);
+    assert_eq!(probe2.probe.event_class, "probe");
+    assert_eq!(probe2.probe.trigger, views::WebhookDeliveryTrigger::Probe);
+    assert_eq!(
+        probe2.probe.state,
+        shared::WebhookDeliveryState::FailedHttpError
+    );
     assert_ne!(
-        probe2.id, probe1.id,
+        probe2.probe.id, probe1.probe.id,
         "a new delivery ID should be assigned to each probe"
+    );
+    assert_eq!(
+        probe2.resends_started, None,
+        "we did not request events be resent"
     );
 
     mock.delete_async().await;
@@ -771,16 +782,165 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
     .await;
     dbg!(&probe3);
     mock.assert_async().await;
-    assert_eq!(probe3.attempt, 1);
-    assert_eq!(probe3.event_class, "probe");
-    assert_eq!(probe3.trigger, views::WebhookDeliveryTrigger::Probe);
-    assert_eq!(probe3.state, shared::WebhookDeliveryState::Delivered);
+    assert_eq!(probe3.probe.attempt, 1);
+    assert_eq!(probe3.probe.event_class, "probe");
+    assert_eq!(probe3.probe.trigger, views::WebhookDeliveryTrigger::Probe);
+    assert_eq!(probe3.probe.state, shared::WebhookDeliveryState::Delivered);
     assert_ne!(
-        probe3.id, probe1.id,
+        probe3.probe.id, probe1.probe.id,
         "a new delivery ID should be assigned to each probe"
     );
     assert_ne!(
-        probe3.id, probe2.id,
+        probe3.probe.id, probe2.probe.id,
         "a new delivery ID should be assigned to each probe"
     );
+    assert_eq!(
+        probe3.resends_started, None,
+        "we did not request events be resent"
+    );
+}
+
+#[nexus_test]
+async fn test_probe_resends_failed_deliveries(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let nexus = cptestctx.server.server_context().nexus.clone();
+    let internal_client = &cptestctx.internal_client;
+    let server = httpmock::MockServer::start_async().await;
+
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Create a webhook receiver.
+    let webhook =
+        webhook_create(&cptestctx, &my_great_webhook_params(&server)).await;
+    dbg!(&webhook);
+
+    let event1_id = WebhookEventUuid::new_v4();
+    let event2_id = WebhookEventUuid::new_v4();
+    let mock = {
+        let webhook = webhook.clone();
+        server
+            .mock_async(move |when, then| {
+                when.method(POST)
+                    .header("x-oxide-event-class", "test.foo")
+                    // either event
+                    .header_matches(
+                        "x-oxide-event-id",
+                        format!("({event1_id})|({event2_id})"),
+                    )
+                    .and(is_valid_for_webhook(&webhook))
+                    .is_true(signature_verifies(
+                        webhook.secrets[0].id,
+                        MY_COOL_SECRET.as_bytes().to_vec(),
+                    ));
+                then.status(500);
+            })
+            .await
+    };
+
+    // Publish both events
+    dbg!(nexus
+        .webhook_event_publish(
+            &opctx,
+            event1_id,
+            WebhookEventClass::TestFoo,
+            serde_json::json!({"hello": "world"}),
+        )
+        .await
+        .expect("event1 should be published successfully"));
+    dbg!(nexus
+        .webhook_event_publish(
+            &opctx,
+            event2_id,
+            WebhookEventClass::TestFoo,
+            serde_json::json!({"hello": "emeryville"}),
+        )
+        .await
+        .expect("event2 should be published successfully"));
+
+    dbg!(activate_background_task(internal_client, "webhook_dispatcher").await);
+    dbg!(
+        activate_background_task(internal_client, "webhook_deliverator").await
+    );
+    mock.assert_calls_async(2).await;
+
+    // Backoff 1
+    tokio::time::sleep(std::time::Duration::from_secs(11)).await;
+    dbg!(
+        activate_background_task(internal_client, "webhook_deliverator").await
+    );
+    mock.assert_calls_async(4).await;
+
+    // Backoff 2
+    tokio::time::sleep(std::time::Duration::from_secs(22)).await;
+    dbg!(
+        activate_background_task(internal_client, "webhook_deliverator").await
+    );
+    mock.assert_calls_async(6).await;
+
+    mock.delete_async().await;
+
+    // Allow a probe to succeed
+    let probe_mock = {
+        let webhook = webhook.clone();
+        server
+            .mock_async(move |when, then| {
+                let body = serde_json::json!({
+                    "event_class": "probe",
+                    "data": {
+                    }
+                })
+                .to_string();
+                when.method(POST)
+                    .header("x-oxide-event-class", "probe")
+                    .and(is_valid_for_webhook(&webhook))
+                    .is_true(signature_verifies(
+                        webhook.secrets[0].id,
+                        MY_COOL_SECRET.as_bytes().to_vec(),
+                    ))
+                    .json_body_includes(body);
+                then.status(200);
+            })
+            .await
+    };
+
+    // Allow events to succeed.
+    let mock = {
+        let webhook = webhook.clone();
+        server
+            .mock_async(move |when, then| {
+                when.method(POST)
+                    .header("x-oxide-event-class", "test.foo")
+                    // either event
+                    .header_matches(
+                        "x-oxide-event-id",
+                        format!("({event1_id})|({event2_id})"),
+                    )
+                    .and(is_valid_for_webhook(&webhook))
+                    .is_true(signature_verifies(
+                        webhook.secrets[0].id,
+                        MY_COOL_SECRET.as_bytes().to_vec(),
+                    ));
+                then.status(200);
+            })
+            .await
+    };
+
+    // Send a probe with ?resend=true
+    let probe =
+        webhook_send_probe(&cptestctx, &webhook.id, true, http::StatusCode::OK)
+            .await;
+    dbg!(&probe);
+    probe_mock.assert_async().await;
+    probe_mock.delete_async().await;
+    assert_eq!(probe.probe.state, shared::WebhookDeliveryState::Delivered);
+    assert_eq!(probe.resends_started, Some(2));
+
+    // Both events should be resent.
+    dbg!(
+        activate_background_task(internal_client, "webhook_deliverator").await
+    );
+    mock.assert_calls_async(2).await;
 }

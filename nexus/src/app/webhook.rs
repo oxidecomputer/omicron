@@ -20,6 +20,7 @@ use nexus_db_queries::db::model::SqlU8;
 use nexus_db_queries::db::model::WebhookDelivery;
 use nexus_db_queries::db::model::WebhookDeliveryAttempt;
 use nexus_db_queries::db::model::WebhookDeliveryResult;
+use nexus_db_queries::db::model::WebhookDeliveryTrigger;
 use nexus_db_queries::db::model::WebhookEvent;
 use nexus_db_queries::db::model::WebhookEventClass;
 use nexus_db_queries::db::model::WebhookReceiverConfig;
@@ -114,14 +115,16 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         rx: lookup::WebhookReceiver<'_>,
-        _params: params::WebhookProbe,
-    ) -> Result<views::WebhookDelivery, Error> {
+        params: params::WebhookProbe,
+    ) -> Result<views::WebhookProbeResult, Error> {
         let (authz_rx, rx) = rx.fetch_for(authz::Action::ListChildren).await?;
+        let rx_id = authz_rx.id();
+        let datastore = self.datastore();
         let secrets =
-            self.datastore().webhook_rx_secret_list(opctx, &authz_rx).await?;
+            datastore.webhook_rx_secret_list(opctx, &authz_rx).await?;
         let mut client =
             ReceiverClient::new(&self.webhook_delivery_client, secrets, &rx)?;
-        let delivery = WebhookDelivery::new_probe(&authz_rx.id(), &self.id);
+        let delivery = WebhookDelivery::new_probe(&rx_id, &self.id);
 
         const CLASS: WebhookEventClass = WebhookEventClass::Probe;
 
@@ -143,10 +146,70 @@ impl super::Nexus {
                 }
             };
 
-        // TODO(eliza): this is where we would resend all the failed stuff
-        // if requested...
+        let resends_started = if params.resend
+            && attempt.result == WebhookDeliveryResult::Succeeded
+        {
+            slog::debug!(
+                &opctx.log,
+                "webhook liveness probe succeeded, resending failed deliveries...";
+                "rx_id" => %authz_rx.id(),
+                "rx_name" => %rx.name(),
+                "delivery_id" => %delivery.id,
+            );
 
-        Ok(delivery.to_api_delivery(CLASS, Some(&attempt)))
+            let deliveries = datastore
+                .webhook_rx_list_resendable_events(opctx, &rx_id)
+                .await
+                .map_err(|e| {
+                    e.internal_context("error listing events to resend")
+                })?
+                .into_iter()
+                .map(|event| {
+                    WebhookDelivery::new(
+                        &event,
+                        &rx_id,
+                        WebhookDeliveryTrigger::Resend,
+                    )
+                })
+                .collect::<Vec<_>>();
+            slog::trace!(
+                &opctx.log,
+                "found {} failed events to resend", deliveries.len();
+                "rx_id" => %authz_rx.id(),
+                "rx_name" => %rx.name(),
+                "delivery_id" => %delivery.id,
+            );
+            let started = datastore
+                .webhook_delivery_create_batch(&opctx, deliveries)
+                .await
+                .map_err(|e| {
+                    e.internal_context(
+                        "error creating deliveries to resend failed events",
+                    )
+                })?;
+
+            if started > 0 {
+                slog::info!(
+                    &opctx.log,
+                    "webhook liveness probe succeeded, created {started} re-deliveries";
+                    "rx_id" => %authz_rx.id(),
+                    "rx_name" => %rx.name(),
+                    "delivery_id" => %delivery.id,
+                );
+                // If new deliveries were created, activate the webhook
+                // deliverator background task to start actually delivering
+                // them.
+                self.background_tasks.task_webhook_deliverator.activate();
+            }
+            Some(started)
+        } else {
+            None
+        };
+
+        Ok(views::WebhookProbeResult {
+            probe: delivery.to_api_delivery(CLASS, Some(&attempt)),
+            resends_started,
+        })
     }
 
     pub async fn webhook_receiver_secret_add(

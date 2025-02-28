@@ -3558,7 +3558,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::WebhookSelector>,
         query_params: Query<params::WebhookProbe>,
-    ) -> Result<HttpResponseOk<views::WebhookDelivery>, HttpError>;
+    ) -> Result<HttpResponseOk<views::WebhookProbeResult>, HttpError>;
 
     /// List the IDs of secrets for a webhook receiver.
     #[endpoint {

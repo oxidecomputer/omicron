@@ -7426,7 +7426,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::WebhookSelector>,
         query_params: Query<params::WebhookProbe>,
-    ) -> Result<HttpResponseOk<views::WebhookDelivery>, HttpError> {
+    ) -> Result<HttpResponseOk<views::WebhookProbeResult>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -7437,10 +7437,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let webhook_selector = path_params.into_inner();
             let probe_params = query_params.into_inner();
             let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
-            let delivery =
+            let result =
                 nexus.webhook_receiver_probe(&opctx, rx, probe_params).await?;
             // TODO(eliza): send the status code that came back from the probe req...
-            Ok(HttpResponseOk(delivery))
+            Ok(HttpResponseOk(result))
         };
         apictx
             .context

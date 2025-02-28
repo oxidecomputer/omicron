@@ -1090,7 +1090,7 @@ pub struct WebhookSecretId {
 }
 
 /// A delivery attempt for a webhook event.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookDelivery {
     /// The UUID of this delivery attempt.
     pub id: Uuid,
@@ -1157,7 +1157,7 @@ impl fmt::Display for WebhookDeliveryTrigger {
 }
 
 /// The response received from a webhook receiver endpoint.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookDeliveryResponse {
     /// The HTTP status code returned from the webhook endpoint.
     pub status: u16,
@@ -1165,7 +1165,21 @@ pub struct WebhookDeliveryResponse {
     pub duration_ms: usize,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookDeliveryId {
     pub delivery_id: Uuid,
+}
+/// Data describing the result of a webhook liveness probe attempt.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookProbeResult {
+    /// The outcome of the probe request.
+    pub probe: WebhookDelivery,
+    /// If the probe request succeeded, and resending failed deliveries on
+    /// success was requested, the number of new delivery attempts started.
+    /// Otherwise, if the probe did not succeed, or resending failed deliveries
+    /// was not requested, this is null.
+    ///
+    /// Note that this may be 0, if there were no events found which had not
+    /// been delivered successfully to this receiver.
+    pub resends_started: Option<usize>,
 }
