@@ -20,6 +20,7 @@ mod backing_fs;
 mod boot_disk_os_writer;
 pub mod bootstrap;
 pub mod config;
+mod ddm_reconciler;
 pub(crate) mod dump_setup;
 pub(crate) mod hardware_monitor;
 mod http_entrypoints;
