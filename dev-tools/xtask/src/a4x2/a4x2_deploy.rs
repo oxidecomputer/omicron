@@ -4,12 +4,13 @@
 
 //! Subcommand: cargo xtask a4x2-deploy
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
+use fs_err as fs;
+use serde::Deserialize;
 use serde_json::Value;
 use std::env;
-use fs_err as fs;
 use std::{thread, time};
 use xshell::{cmd, Shell};
 
@@ -278,19 +279,30 @@ fn try_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
 
     // Translated from this jq query:
     // .[0].addr_info[] | select(.dynamic == true) | .local
-    let ce_addr_json: Value = serde_json::from_str(&ce_addr_json)?;
-    let customer_edge_addr = &ce_addr_json[0]["addr_info"]
-        .as_array()
-        .unwrap()
+    #[derive(Deserialize)]
+    struct Link {
+        addr_info: Vec<AddrInfo>,
+    }
+    #[derive(Deserialize)]
+    struct AddrInfo {
+        dynamic: Option<bool>,
+        local: String,
+    }
+    let ce_addr_info: Vec<Link> = serde_json::from_str(&ce_addr_json)?;
+    let customer_edge_addr = &ce_addr_info
+        .get(0)
+        .with_context(|| {
+            format!("customer edge router has no adresses: {ce_addr_json}")
+        })?
+        .addr_info
         .iter()
-        .find(|v| v["dynamic"] == Value::Bool(true))
-        .ok_or(anyhow!("failed to find customer edge addr"))?["local"]
-        .as_str()
-        .unwrap();
-
-    // XXX Im told that pinging the gateway from inside the sleds is no longer
-    // necessary so I'm leaving it out for now. We'll see if that's true.
-    // So far it seems to be.
+        .find(|v| matches!(v.dynamic, Some(true)))
+        .with_context(|| {
+            format!(
+                "customer edge router has no dynamic addresses: {ce_addr_json}"
+            )
+        })?
+        .local;
 
     cmd!(
         sh,
