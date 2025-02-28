@@ -1,0 +1,18 @@
+:showtitle:
+:toc: left
+:icons: font
+
+= Benchmarks
+
+This directory contains benchmarks for database queries.
+
+These queries can be run with:
+
+[source,bash]
+----
+cargo bench -p nexus-db-queries
+----
+
+Additionally, the "SHOW_CONTENTION" environment variable can be set to display
+extra data from CockroachDB tables about contention statistics, if they
+are available.

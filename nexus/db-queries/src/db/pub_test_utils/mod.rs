@@ -18,6 +18,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 pub mod crdb;
+pub mod helpers;
 
 enum Populate {
     Nothing,
