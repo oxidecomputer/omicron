@@ -7234,6 +7234,7 @@ dependencies = [
  "sled-agent-client",
  "slog",
  "slog-error-chain",
+ "steno",
  "strum",
  "subprocess",
  "supports-color",
