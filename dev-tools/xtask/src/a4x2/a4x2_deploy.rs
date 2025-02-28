@@ -9,7 +9,6 @@ use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use fs_err as fs;
 use serde::Deserialize;
-use serde_json::Value;
 use std::env;
 use std::{thread, time};
 use xshell::{cmd, Shell};
@@ -333,7 +332,11 @@ fn try_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
     //
     // That 5 seconds is arbitrary, but it's been working well over in
     // rackletteadm, from which this logic is copied.
-    while retries > 0 && cmd!(sh, "curl --silent --fail --show-error --max-time 5 {api_url}").run().is_err() {
+    while retries > 0
+        && cmd!(sh, "curl --silent --fail --show-error --max-time 5 {api_url}")
+            .run()
+            .is_err()
+    {
         retries -= 1;
         thread::sleep(time::Duration::from_secs(25));
 
@@ -363,7 +366,10 @@ fn run_tests(sh: &Shell, env: &Environment, args: &RunTestsArgs) -> Result<()> {
         let mut ssh_args_owned = vec!["-i", "../a4x2-ssh-key"];
         ssh_args_owned.extend_from_slice(&INSECURE_SSH_ARGS);
         let ssh_args = &ssh_args_owned;
-        use super::{LIVE_TEST_BUNDLE_NAME, LIVE_TEST_BUNDLE_DIR, LIVE_TEST_BUNDLE_SCRIPT};
+        use super::{
+            LIVE_TEST_BUNDLE_DIR, LIVE_TEST_BUNDLE_NAME,
+            LIVE_TEST_BUNDLE_SCRIPT,
+        };
 
         cmd!(sh, "scp {ssh_args...} {LIVE_TEST_BUNDLE_NAME} {ssh_host}:/zone/oxz_switch/root/root").run()?;
 
@@ -373,12 +379,15 @@ fn run_tests(sh: &Shell, env: &Environment, args: &RunTestsArgs) -> Result<()> {
         // The weird replace() is for quote-escaping, as we shove this into a
         // single-quote string right below when creating the script to run over
         // ssh.
-        let switch_zone_script = format!(r#"
+        let switch_zone_script = format!(
+            r#"
             set -euxo pipefail
             tar xvzf '{LIVE_TEST_BUNDLE_NAME}'
             cd '{LIVE_TEST_BUNDLE_DIR}'
             ./'{LIVE_TEST_BUNDLE_SCRIPT}'
-        "#).replace("'", "'\"'\"'");
+        "#
+        )
+        .replace("'", "'\"'\"'");
 
         let remote_script =
             format!("zlogin oxz_switch bash -c '{switch_zone_script}'");
@@ -509,7 +518,11 @@ fn get_node_ip(sh: &Shell, env: &Environment, node: &str) -> Result<String> {
 
 /// effectively curl | bash, but reads the full script before running bash
 fn exec_remote_script(sh: &Shell, url: &str) -> Result<()> {
-    let script = cmd!(sh, "curl --silent --fail --show-error --location --retry 10 {url}").read()?;
+    let script = cmd!(
+        sh,
+        "curl --silent --fail --show-error --location --retry 10 {url}"
+    )
+    .read()?;
     cmd!(sh, "bash").stdin(&script).run()?;
     Ok(())
 }
