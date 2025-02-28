@@ -54,7 +54,7 @@ use sled_agent_types::{
         ZoneBundleId, ZoneBundleMetadata,
     },
 };
-use sled_diagnostics::SledDiagnosticsQueryOutput;
+use sled_diagnostics::{SledDiagnosticsLogs, SledDiagnosticsQueryOutput};
 use uuid::Uuid;
 
 // Host OS images are just over 800 MiB currently; set this to 2 GiB to give
@@ -677,6 +677,23 @@ pub trait SledAgentApi {
     async fn support_pfiles_info(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/logs/index",
+    }]
+    async fn support_logs(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledDiagnosticsLogs>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/logs/download/{file}",
+    }]
+    async fn support_logs_download(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<SledDiagnosticsLogsFilePathParam>,
+    ) -> Result<http::Response<Body>, HttpError>;
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -785,6 +802,14 @@ pub enum SupportBundleState {
 pub struct SupportBundleMetadata {
     pub support_bundle_id: SupportBundleUuid,
     pub state: SupportBundleState,
+}
+
+/// Path parameters for sled-diagnostics requests used by support bundles
+/// (sled agent API)
+#[derive(Deserialize, JsonSchema)]
+pub struct SledDiagnosticsLogsFilePathParam {
+    /// The path of the file to be included in the support bundle
+    pub file: String,
 }
 
 /// Path parameters for Disk requests (sled agent API)
