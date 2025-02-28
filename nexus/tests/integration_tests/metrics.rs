@@ -4,6 +4,8 @@
 
 use std::time::Duration;
 
+use super::metrics_queries::MetricsNotYet;
+use super::metrics_queries::MetricsQuerier;
 use crate::integration_tests::instances::{
     create_project_and_pool, instance_post, instance_simulate, InstanceOp,
 };
@@ -869,8 +871,8 @@ async fn test_mgs_metrics(
         cpu_tctl_sensors.insert(sp.serial_number.clone(), cpu_tctl);
     }
 
-    async fn check_all_timeseries_present(
-        cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
+    async fn check_all_timeseries_present<N>(
+        querier: &MetricsQuerier<'_, N>,
         name: &str,
         expected: HashMap<String, usize>,
     ) {
@@ -887,62 +889,26 @@ async fn test_mgs_metrics(
         let query =
             format!("get {metric_name} | filter timestamp > @2000-01-01");
 
+        let name = &metric_name;
+
         // MGS polls SP sensor data once every second. It's possible that, when
         // we triggered Oximeter to collect samples from MGS, it may not have
         // run a poll yet, so retry this a few times to avoid a flaky failure if
         // no simulated SPs have been polled yet.
         //
-        // We really don't need to wait that long to know that the sensor
-        // metrics will never be present. This could probably be shorter
-        // than 30 seconds, but I want to be fairly generous to make sure
-        // there are no flaky failures even when things take way longer than
-        // expected...
-        const MAX_RETRY_DURATION: Duration = Duration::from_secs(30);
-        let result = wait_for_condition(
-            || async {
-                match check_inner(cptestctx, &metric_name, &query, &expected).await {
-                    Ok(_) => Ok(()),
-                    Err(e) => {
-                        eprintln!("{e}; will try again to ensure all samples are collected");
-                        Err(CondCheckError::<()>::NotYet)
-                    }
-                }
-            },
-            &Duration::from_secs(1),
-            &MAX_RETRY_DURATION,
-        )
-        .await;
-        if result.is_err() {
-            panic!(
-                "failed to find expected timeseries when running OxQL query \
-                 {query:?} within {MAX_RETRY_DURATION:?}"
-            )
-        };
-
-        // Note that *some* of these checks panic if they fail, but others call
-        // `anyhow::ensure!`. This is because, if we don't see all the expected
-        // timeseries, it's possible that this is because some sensor polls
-        // haven't completed yet, so we'll retry those checks a few times. On
-        // the other hand, if we see malformed timeseries, or timeseries that we
-        // don't expect to exist, that means something has gone wrong, and we
+        // Note that *some* of these checks panic if they fail, but others
+        // return a `MetricsNotYet`. This is because, if we don't see all the
+        // expected timeseries, it's possible that this is because some sensor
+        // polls haven't completed yet, so we'll retry those checks a few times.
+        // On the other hand, if we see malformed timeseries, or timeseries that
+        // we don't expect to exist, that means something has gone wrong, and we
         // will fail the test immediately.
-        async fn check_inner(
-            cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
-            name: &str,
-            query: &str,
-            expected: &HashMap<String, usize>,
-        ) -> anyhow::Result<()> {
-            cptestctx
-                .oximeter
-                .try_force_collect()
-                .await
-                .expect("Could not force oximeter collection");
-            let table = system_timeseries_query(&cptestctx, &query)
-                .await
+        querier.system_timeseries_query_until(&query, |tables| {
+            let table = tables
                 .into_iter()
                 .find(|t| t.name() == name)
                 .ok_or_else(|| {
-                    anyhow::anyhow!("failed to find table for {query}")
+                    MetricsNotYet::new(format!("failed to find table for {query}"))
                 })?;
 
             let mut found = expected
@@ -951,11 +917,11 @@ async fn test_mgs_metrics(
                 .collect::<HashMap<_, usize>>();
             for timeseries in table.timeseries() {
                 let fields = &timeseries.fields;
-                let n_points = timeseries.points.len();
-                anyhow::ensure!(
-                    n_points > 0,
-                    "{name} timeseries {fields:?} should have points"
-                );
+                if timeseries.points.is_empty() {
+                    return Err(MetricsNotYet::new(format!(
+                        "{name} timeseries {fields:?} should have points"
+                    )));
+                }
                 let serial_str: &str = match timeseries.fields.get("chassis_serial")
             {
                 Some(FieldValue::String(s)) => s.borrow(),
@@ -977,37 +943,40 @@ async fn test_mgs_metrics(
             }
 
             eprintln!("-> {name}: found timeseries: {found:#?}");
-            anyhow::ensure!(
-                &found == expected,
-                "number of {name} timeseries didn't match expected in {table:#?}",
-            );
+            if found != expected {
+                return Err(MetricsNotYet::new(format!(
+                    "number of {name} timeseries didn't match \
+                    expected in {table:#?}",
+                )));
+            }
             eprintln!("-> okay, looks good!");
             Ok(())
-        }
+        }).await;
     }
 
     // Wait until the MGS registers as a producer with Oximeter.
     wait_for_producer(&cptestctx.oximeter, mgs.gateway_id).await;
 
-    check_all_timeseries_present(&cptestctx, "temperature", temp_sensors).await;
-    check_all_timeseries_present(&cptestctx, "voltage", voltage_sensors).await;
-    check_all_timeseries_present(&cptestctx, "current", current_sensors).await;
-    check_all_timeseries_present(&cptestctx, "power", power_sensors).await;
+    let querier = MetricsQuerier::new(&cptestctx);
+    check_all_timeseries_present(&querier, "temperature", temp_sensors).await;
+    check_all_timeseries_present(&querier, "voltage", voltage_sensors).await;
+    check_all_timeseries_present(&querier, "current", current_sensors).await;
+    check_all_timeseries_present(&querier, "power", power_sensors).await;
     check_all_timeseries_present(
-        &cptestctx,
+        &querier,
         "input_voltage",
         input_voltage_sensors,
     )
     .await;
     check_all_timeseries_present(
-        &cptestctx,
+        &querier,
         "input_current",
         input_current_sensors,
     )
     .await;
-    check_all_timeseries_present(&cptestctx, "fan_speed", fan_speed_sensors)
+    check_all_timeseries_present(&querier, "fan_speed", fan_speed_sensors)
         .await;
-    check_all_timeseries_present(&cptestctx, "amd_cpu_tctl", cpu_tctl_sensors)
+    check_all_timeseries_present(&querier, "amd_cpu_tctl", cpu_tctl_sensors)
         .await;
 
     // Because the `ControlPlaneTestContext` isn't managing the MGS we made for
