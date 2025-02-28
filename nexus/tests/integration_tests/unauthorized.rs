@@ -304,7 +304,7 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
             body: serde_json::to_value(&*DEMO_AFFINITY_GROUP_CREATE).unwrap(),
             id_routes: vec!["/v1/affinity-groups/{id}"],
         },
-        // Add a member to the affinity group
+        // Add an instance member to the affinity group
         SetupReq::Post {
             url: &DEMO_AFFINITY_GROUP_INSTANCE_MEMBER_URL,
             body: serde_json::Value::Null,
@@ -317,9 +317,15 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
                 .unwrap(),
             id_routes: vec!["/v1/anti-affinity-groups/{id}"],
         },
-        // Add a member to the anti-affinity group
+        // Add an instance member to the anti-affinity group
         SetupReq::Post {
             url: &DEMO_ANTI_AFFINITY_GROUP_INSTANCE_MEMBER_URL,
+            body: serde_json::Value::Null,
+            id_routes: vec![],
+        },
+        // Add an affinity group member to the affinity group
+        SetupReq::Post {
+            url: &DEMO_ANTI_AFFINITY_GROUP_AFFINITY_GROUP_MEMBER_URL,
             body: serde_json::Value::Null,
             id_routes: vec![],
         },
