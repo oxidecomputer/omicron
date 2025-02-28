@@ -47,6 +47,7 @@ use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
@@ -498,6 +499,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     dataset: OmicronZoneDataset { pool_name },
                 },
             ),
+            image_source: BlueprintZoneImageSource::InstallDataset,
         });
         self.database = Some(database);
     }
@@ -548,6 +550,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     dataset: OmicronZoneDataset { pool_name },
                 },
             ),
+            image_source: BlueprintZoneImageSource::InstallDataset,
         });
     }
 
@@ -763,6 +766,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     transit_ips: vec![],
                 },
             }),
+            image_source: BlueprintZoneImageSource::InstallDataset,
         });
 
         self.nexus_internal = Some(nexus_internal);
@@ -1188,6 +1192,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             zone_type: BlueprintZoneType::CruciblePantry(
                 blueprint_zone_type::CruciblePantry { address },
             ),
+            image_source: BlueprintZoneImageSource::InstallDataset,
         });
     }
 
@@ -1255,6 +1260,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     },
                 },
             ),
+            image_source: BlueprintZoneImageSource::InstallDataset,
         });
 
         self.external_dns = Some(dns);
@@ -1297,6 +1303,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     gz_address_index: 0,
                 },
             ),
+            image_source: BlueprintZoneImageSource::InstallDataset,
         });
 
         self.internal_dns = Some(dns);

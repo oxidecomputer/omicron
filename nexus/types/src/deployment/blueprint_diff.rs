@@ -15,7 +15,8 @@ use super::{
     BlueprintDatasetDisposition, BlueprintDatasetsConfigDiff, BlueprintDiff,
     BlueprintMetadata, BlueprintPhysicalDiskConfig,
     BlueprintPhysicalDiskConfigDiff, BlueprintPhysicalDisksConfigDiff,
-    BlueprintZoneConfigDiff, BlueprintZonesConfigDiff, ClickhouseClusterConfig,
+    BlueprintZoneConfigDiff, BlueprintZoneImageSource,
+    BlueprintZonesConfigDiff, ClickhouseClusterConfig,
     CockroachDbPreserveDowngrade,
 };
 use daft::Diffable;
@@ -686,6 +687,7 @@ impl BpTableData for BpDiffZoneDetails {
                 vec![
                     zone.kind().report_str().to_string(),
                     zone.id().to_string(),
+                    zone.image_source.to_string(),
                     zone.disposition.to_string(),
                     zone.underlay_ip().to_string(),
                 ],
@@ -696,12 +698,13 @@ impl BpTableData for BpDiffZoneDetails {
 
 /// A modified omicron zone
 ///
-/// A zone is considered modified if its `disposition` changes. All
-/// modifications to other fields are considered errors, and will be recorded
-/// as such.
+/// A zone is considered modified if its `disposition` and/or its `image_source`
+/// change. All modifications to other fields are considered errors, and will be
+/// recorded as such.
 #[derive(Debug)]
 pub struct ModifiedZone {
     pub prior_disposition: BlueprintZoneDisposition,
+    pub prior_image_source: BlueprintZoneImageSource,
     pub zone: BlueprintZoneConfig,
 }
 
@@ -751,11 +754,13 @@ impl ModifiedZone {
         if reason.is_empty() {
             Ok(ModifiedZone {
                 prior_disposition: *diff.disposition.before,
+                prior_image_source: diff.image_source.before.clone(),
                 zone: BlueprintZoneConfig {
                     disposition: *diff.disposition.after,
                     id: *diff.id.after,
                     filesystem_pool: diff.filesystem_pool.after.cloned(),
                     zone_type: diff.zone_type.after.clone(),
+                    image_source: diff.image_source.after.clone(),
                 },
             })
         } else {
@@ -808,6 +813,24 @@ impl BpTableData for BpDiffZonesModified {
 
     fn rows(&self, state: BpDiffState) -> impl Iterator<Item = BpTableRow> {
         self.zones.iter().map(move |zone| {
+            let image_source_column =
+                if zone.prior_image_source == zone.zone.image_source {
+                    BpTableColumn::value(zone.zone.image_source.to_string())
+                } else {
+                    BpTableColumn::diff(
+                        zone.prior_image_source.to_string(),
+                        zone.zone.image_source.to_string(),
+                    )
+                };
+            let disposition_column =
+                if zone.prior_disposition == zone.zone.disposition {
+                    BpTableColumn::value(zone.zone.disposition.to_string())
+                } else {
+                    BpTableColumn::diff(
+                        zone.prior_disposition.to_string(),
+                        zone.zone.disposition.to_string(),
+                    )
+                };
             BpTableRow::new(
                 state,
                 vec![
@@ -815,10 +838,8 @@ impl BpTableData for BpDiffZonesModified {
                         zone.zone.kind().report_str().to_string(),
                     ),
                     BpTableColumn::value(zone.zone.id().to_string()),
-                    BpTableColumn::diff(
-                        zone.prior_disposition.to_string(),
-                        zone.zone.disposition.to_string(),
-                    ),
+                    image_source_column,
+                    disposition_column,
                     BpTableColumn::value(zone.zone.underlay_ip().to_string()),
                 ],
             )
