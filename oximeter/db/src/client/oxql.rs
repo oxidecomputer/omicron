@@ -7,6 +7,7 @@
 // Copyright 2024 Oxide Computer Company
 
 use super::query_summary::QuerySummary;
+use super::Handle;
 use crate::client::Client;
 use crate::model::columns;
 use crate::model::from_block::FromBlock as _;
@@ -185,6 +186,7 @@ impl Client {
         let result = self
             .run_oxql_query(
                 &query_log,
+                &mut self.claim_connection().await?,
                 query_id,
                 parsed_query,
                 &mut total_rows_fetched,
@@ -337,9 +339,11 @@ impl Client {
     // concatenate the results; and then apply all the remaining
     // transformations.
     #[async_recursion::async_recursion]
+    #[allow(clippy::too_many_arguments)]
     async fn run_oxql_query(
         &self,
         query_log: &Logger,
+        handle: &mut Handle,
         query_id: Uuid,
         query: oxql::Query,
         total_rows_fetched: &mut u64,
@@ -370,6 +374,7 @@ impl Client {
                 let res = self
                     .run_oxql_query(
                         query_log,
+                        handle,
                         query_id,
                         subq,
                         total_rows_fetched,
@@ -507,7 +512,11 @@ impl Client {
             let all_fields_query =
                 self.all_fields_query(&schema, predicates.as_ref())?;
             let (summary, consistent_keys) = self
-                .select_matching_timeseries_info(&all_fields_query, &schema)
+                .select_matching_timeseries_info(
+                    handle,
+                    &all_fields_query,
+                    &schema,
+                )
                 .await?;
             debug!(
                 query_log,
@@ -551,6 +560,7 @@ impl Client {
         let (summaries, timeseries_by_key) = self
             .select_matching_samples(
                 query_log,
+                handle,
                 &schema,
                 &consistent_key_groups,
                 limit,
@@ -606,6 +616,7 @@ impl Client {
     async fn select_matching_samples(
         &self,
         query_log: &Logger,
+        handle: &mut Handle,
         schema: &TimeseriesSchema,
         consistent_key_groups: &[ConsistentKeyGroup],
         limit: Option<Limit>,
@@ -636,7 +647,8 @@ impl Client {
                 limit,
                 total_rows_fetched,
             )?;
-            let result = self.execute_with_block(&measurements_query).await?;
+            let result =
+                self.execute_with_block(handle, &measurements_query).await?;
             let summary = result.query_summary();
             summaries.push(summary);
             let Some(block) = result.data.as_ref() else {

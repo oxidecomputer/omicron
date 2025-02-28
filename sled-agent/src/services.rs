@@ -77,6 +77,7 @@ use omicron_common::address::LLDP_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::TFPORTD_PORT;
 use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
 use omicron_common::address::{
@@ -96,9 +97,9 @@ use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use once_cell::sync::OnceCell;
 use rand::prelude::SliceRandom;
 use sled_agent_types::{
+    sled::SWITCH_ZONE_BASEBOARD_FILE,
     time_sync::TimeSync,
     zone_bundle::{ZoneBundleCause, ZoneBundleMetadata},
 };
@@ -110,12 +111,13 @@ use sled_storage::config::MountConfig;
 use sled_storage::dataset::{CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 use tokio::sync::{oneshot, MutexGuard};
@@ -137,8 +139,6 @@ const CLICKHOUSE_SERVER_BINARY: &str =
 const CLICKHOUSE_KEEPER_BINARY: &str =
     "/opt/oxide/clickhouse_keeper/clickhouse";
 const CLICKHOUSE_BINARY: &str = "/opt/oxide/clickhouse/clickhouse";
-
-pub const SWITCH_ZONE_BASEBOARD_FILE: &str = "/opt/oxide/baseboard.json";
 
 #[derive(thiserror::Error, Debug, slog_error_chain::SlogInlineError)]
 pub enum Error {
@@ -390,6 +390,63 @@ fn display_zone_init_errors(errors: &[(String, Box<Error>)]) -> String {
         output.push_str(&format!("  - {}: {}\n", zone_name, error));
     }
     output
+}
+
+/// Helper function to add properties to a PropertyGroupBuilder for a sled
+/// agent centered around rack and sled identifiers.
+fn add_sled_ident_properties(
+    config: PropertyGroupBuilder,
+    info: &SledAgentInfo,
+) -> PropertyGroupBuilder {
+    config
+        .add_property("rack_id", "astring", &info.rack_id.to_string())
+        .add_property(
+            "sled_id",
+            "astring",
+            &info.config.sled_identifiers.sled_id.to_string(),
+        )
+        .add_property(
+            "sled_model",
+            "astring",
+            &info.config.sled_identifiers.model.to_string(),
+        )
+        .add_property(
+            "sled_serial",
+            "astring",
+            &info.config.sled_identifiers.serial.to_string(),
+        )
+        .add_property(
+            "sled_revision",
+            "astring",
+            &info.config.sled_identifiers.revision.to_string(),
+        )
+}
+
+/// Helper function to set properties on a SmfHelper for a sled agent centered
+/// around rack and sled identifiers.
+fn setprop_sled_ident_properties(
+    smfh: &SmfHelper,
+    info: &SledAgentInfo,
+) -> Result<(), Error> {
+    smfh.setprop_default_instance("config/rack_id", info.rack_id)?;
+    smfh.setprop_default_instance(
+        "config/sled_id",
+        info.config.sled_identifiers.sled_id,
+    )?;
+    smfh.setprop_default_instance(
+        "config/sled_model",
+        info.config.sled_identifiers.model.to_string(),
+    )?;
+    smfh.setprop_default_instance(
+        "config/sled_revision",
+        info.config.sled_identifiers.revision,
+    )?;
+    smfh.setprop_default_instance(
+        "config/sled_serial",
+        info.config.sled_identifiers.serial.to_string(),
+    )?;
+
+    Ok(())
 }
 
 /// Configuration parameters which modify the [`ServiceManager`]'s behavior.
@@ -675,8 +732,8 @@ pub struct ServiceManagerInner {
     switch_zone_bootstrap_address: Ipv6Addr,
     storage: StorageHandle,
     zone_bundler: ZoneBundler,
-    ledger_directory_override: OnceCell<Utf8PathBuf>,
-    image_directory_override: OnceCell<Utf8PathBuf>,
+    ledger_directory_override: OnceLock<Utf8PathBuf>,
+    image_directory_override: OnceLock<Utf8PathBuf>,
 }
 
 // Late-binding information, only known once the sled agent is up and
@@ -763,8 +820,8 @@ impl ServiceManager {
                     .switch_zone_bootstrap_ip,
                 storage,
                 zone_bundler,
-                ledger_directory_override: OnceCell::new(),
-                image_directory_override: OnceCell::new(),
+                ledger_directory_override: OnceLock::new(),
+                image_directory_override: OnceLock::new(),
             }),
         }
     }
@@ -2684,45 +2741,11 @@ impl ServiceManager {
                                 PropertyGroupBuilder::new("config");
 
                             if let Some(i) = info {
-                                dendrite_config = dendrite_config
-                                    .add_property(
-                                        "rack_id",
-                                        "astring",
-                                        &i.rack_id.to_string(),
-                                    )
-                                    .add_property(
-                                        "sled_id",
-                                        "astring",
-                                        &i.config
-                                            .sled_identifiers
-                                            .sled_id
-                                            .to_string(),
-                                    )
-                                    .add_property(
-                                        "sled_model",
-                                        "astring",
-                                        &i.config
-                                            .sled_identifiers
-                                            .model
-                                            .to_string(),
-                                    )
-                                    .add_property(
-                                        "sled_serial",
-                                        "astring",
-                                        &i.config
-                                            .sled_identifiers
-                                            .serial
-                                            .to_string(),
-                                    )
-                                    .add_property(
-                                        "sled_revision",
-                                        "astring",
-                                        &i.config
-                                            .sled_identifiers
-                                            .revision
-                                            .to_string(),
-                                    );
-                            }
+                                dendrite_config = add_sled_ident_properties(
+                                    dendrite_config,
+                                    i,
+                                )
+                            };
 
                             for address in addresses {
                                 dendrite_config = dendrite_config.add_property(
@@ -2847,18 +2870,34 @@ impl ServiceManager {
                         }
                         SwitchService::Tfport { pkt_source, asic } => {
                             info!(self.inner.log, "Setting up tfport service");
+
                             let mut tfport_config =
-                                PropertyGroupBuilder::new("config")
-                                    .add_property(
-                                        "host",
-                                        "astring",
-                                        &format!("[{}]", Ipv6Addr::LOCALHOST),
-                                    )
-                                    .add_property(
-                                        "port",
-                                        "astring",
-                                        &format!("{}", DENDRITE_PORT),
-                                    );
+                                PropertyGroupBuilder::new("config");
+
+                            tfport_config = tfport_config
+                                .add_property(
+                                    "dpd_host",
+                                    "astring",
+                                    &format!("[{}]", Ipv6Addr::LOCALHOST),
+                                )
+                                .add_property(
+                                    "dpd_port",
+                                    "astring",
+                                    &format!("{}", DENDRITE_PORT),
+                                );
+
+                            if let Some(i) = info {
+                                tfport_config =
+                                    add_sled_ident_properties(tfport_config, i);
+                            }
+
+                            for address in addresses {
+                                tfport_config = tfport_config.add_property(
+                                    "listen_address",
+                                    "astring",
+                                    &format!("[{}]:{}", address, TFPORTD_PORT),
+                                );
+                            }
 
                             let is_gimlet = is_gimlet().map_err(|e| {
                                 Error::Underlay(
@@ -2899,6 +2938,7 @@ impl ServiceManager {
 
                             if is_gimlet
                                 || asic == &DendriteAsic::SoftNpuPropolisDevice
+                                || asic == &DendriteAsic::TofinoAsic
                             {
                                 tfport_config = tfport_config.add_property(
                                     "pkt_source",
@@ -4415,36 +4455,11 @@ impl ServiceManager {
                                 "configuring dendrite service"
                             );
                             if let Some(info) = self.inner.sled_info.get() {
-                                smfh.setprop_default_instance(
-                                    "config/rack_id",
-                                    info.rack_id,
-                                )?;
-                                smfh.setprop_default_instance(
-                                    "config/sled_id",
-                                    info.config.sled_identifiers.sled_id,
-                                )?;
-                                smfh.setprop_default_instance(
-                                    "config/sled_model",
-                                    info.config
-                                        .sled_identifiers
-                                        .model
-                                        .to_string(),
-                                )?;
-                                smfh.setprop_default_instance(
-                                    "config/sled_revision",
-                                    info.config.sled_identifiers.revision,
-                                )?;
-                                smfh.setprop_default_instance(
-                                    "config/sled_serial",
-                                    info.config
-                                        .sled_identifiers
-                                        .serial
-                                        .to_string(),
-                                )?;
+                                setprop_sled_ident_properties(&smfh, info)?;
                             } else {
                                 info!(
                                     self.inner.log,
-                                    "no rack_id/sled_id available yet"
+                                    "no sled info available yet"
                                 );
                             }
                             smfh.delpropvalue_default_instance(
@@ -4518,10 +4533,41 @@ impl ServiceManager {
                             smfh.refresh()?;
                             info!(self.inner.log, "refreshed lldpd service with new configuration")
                         }
-                        SwitchService::Tfport { .. } => {
-                            // Since tfport and dpd communicate using localhost,
-                            // the tfport service shouldn't need to be
-                            // restarted.
+                        SwitchService::Tfport { pkt_source, asic } => {
+                            info!(self.inner.log, "configuring tfport service");
+                            if let Some(info) = self.inner.sled_info.get() {
+                                setprop_sled_ident_properties(&smfh, info)?;
+                            } else {
+                                info!(
+                                    self.inner.log,
+                                    "no sled info available yet"
+                                );
+                            }
+                            smfh.delpropvalue_default_instance(
+                                "config/listen_address",
+                                "*",
+                            )?;
+                            for address in &request.addresses {
+                                smfh.addpropvalue_type_default_instance(
+                                    "config/listen_address",
+                                    &format!("[{}]:{}", address, TFPORTD_PORT),
+                                    "astring",
+                                )?;
+                            }
+
+                            match asic {
+                                DendriteAsic::SoftNpuPropolisDevice
+                                | DendriteAsic::TofinoAsic => {
+                                    smfh.setprop_default_instance(
+                                        "config/pkt_source",
+                                        pkt_source,
+                                    )?;
+                                }
+                                _ => {}
+                            }
+
+                            smfh.refresh()?;
+                            info!(self.inner.log, "refreshed tfport service with new configuration")
                         }
                         SwitchService::Pumpkind { .. } => {
                             // Unless we want to plumb through the "only log
@@ -4894,6 +4940,7 @@ mod illumos_tests {
         zone::MockZones,
     };
 
+    use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use std::os::unix::process::ExitStatusExt;
@@ -5130,6 +5177,7 @@ mod illumos_tests {
                         id,
                         zone_type,
                         filesystem_pool: None,
+                        image_source: OmicronZoneImageSource::InstallDataset,
                     }],
                 },
                 Some(&tmp_dir),
@@ -5156,6 +5204,7 @@ mod illumos_tests {
                     id,
                     zone_type: OmicronZoneType::InternalNtp { address },
                     filesystem_pool: None,
+                    image_source: OmicronZoneImageSource::InstallDataset,
                 }],
             },
             Some(&tmp_dir),
@@ -5738,6 +5787,7 @@ mod illumos_tests {
             id: id1,
             zone_type: OmicronZoneType::InternalNtp { address },
             filesystem_pool: None,
+            image_source: OmicronZoneImageSource::InstallDataset,
         }];
 
         let tmp_dir = String::from(test_config.config_dir.path().as_str());
@@ -5760,6 +5810,7 @@ mod illumos_tests {
             id: id2,
             zone_type: OmicronZoneType::InternalNtp { address },
             filesystem_pool: None,
+            image_source: OmicronZoneImageSource::InstallDataset,
         });
 
         // Now try to apply that list with an older generation number.  This
@@ -5823,6 +5874,7 @@ mod illumos_tests {
 
 #[cfg(test)]
 mod test {
+    use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use omicron_uuid_kinds::ZpoolUuid;
 
     use super::*;
@@ -5869,6 +5921,7 @@ mod test {
                 zone_type: OmicronZoneType::Oximeter {
                     address: "[::1]:0".parse().unwrap(),
                 },
+                image_source: OmicronZoneImageSource::InstallDataset,
             }
         }
 

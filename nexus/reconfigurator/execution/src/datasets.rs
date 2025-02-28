@@ -22,11 +22,14 @@ use std::collections::BTreeMap;
 
 /// Idempotently ensures that the specified datasets are deployed to the
 /// corresponding sleds
-pub(crate) async fn deploy_datasets(
+pub(crate) async fn deploy_datasets<'a, I>(
     opctx: &OpContext,
     sleds_by_id: &BTreeMap<SledUuid, Sled>,
-    sled_configs: &BTreeMap<SledUuid, BlueprintDatasetsConfig>,
-) -> Result<(), Vec<anyhow::Error>> {
+    sled_configs: I,
+) -> Result<(), Vec<anyhow::Error>>
+where
+    I: Iterator<Item = (SledUuid, &'a BlueprintDatasetsConfig)>,
+{
     let errors: Vec<_> = stream::iter(sled_configs)
         .filter_map(|(sled_id, config)| async move {
             let log = opctx.log.new(o!(
@@ -182,11 +185,10 @@ mod tests {
 
         let datasets_config =
             BlueprintDatasetsConfig { generation: Generation::new(), datasets };
-        let sled_configs =
-            BTreeMap::from([(sim_sled_agent.id, datasets_config.clone())]);
+        let sled_configs = [(sim_sled_agent.id, &datasets_config)];
 
         // Give the simulated sled agent a configuration to deploy
-        deploy_datasets(&opctx, &sleds_by_id, &sled_configs)
+        deploy_datasets(&opctx, &sleds_by_id, sled_configs.into_iter())
             .await
             .expect("Deploying datasets should have succeeded");
 

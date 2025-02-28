@@ -18,7 +18,7 @@ target_os=$1
 # NOTE: This version should be in sync with the recommended version in
 # .config/nextest.toml. (Maybe build an automated way to pull the recommended
 # version in the future.)
-NEXTEST_VERSION='0.9.86'
+NEXTEST_VERSION='0.9.91'
 
 cargo --version
 rustc --version
@@ -112,7 +112,17 @@ export RUSTC_BOOTSTRAP=1
 
 # Build all the packages and tests, and keep track of how long each took to build.
 # We report build progress to stderr, and the "--timings=json" output goes to stdout.
-ptime -m cargo build -Z unstable-options --timings=json --workspace --tests --locked --verbose 1> "$OUTPUT_DIR/crate-build-timings.json"
+#
+# The build graph ends up building several bin/test targets that depend on
+# omicron-nexus at the same time, which uses significant memory to compile on
+# illumos. To mitigate this we build everything except omicron-nexus's bin/test
+# targets first, then finish the build after.
+ptime -m cargo build -Z unstable-options --timings=json \
+    --workspace --exclude=omicron-nexus --tests --locked --verbose \
+    1>> "$OUTPUT_DIR/crate-build-timings.json"
+ptime -m cargo build -Z unstable-options --timings=json \
+    --workspace --tests --locked --verbose \
+    1>> "$OUTPUT_DIR/crate-build-timings.json"
 
 #
 # We apply our own timeout to ensure that we get a normal failure on timeout

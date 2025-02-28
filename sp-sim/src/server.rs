@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::config::Config;
+use crate::config::NetworkConfig;
 use crate::Responsiveness;
 use anyhow::bail;
 use anyhow::Context;
@@ -10,11 +11,11 @@ use anyhow::Result;
 use gateway_messages::sp_impl;
 use gateway_messages::sp_impl::Sender;
 use gateway_messages::sp_impl::SpHandler;
+use nix::net::if_::if_nametoindex;
 use slog::debug;
 use slog::error;
 use slog::info;
 use slog::Logger;
-use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::sync::atomic::AtomicBool;
@@ -32,30 +33,51 @@ pub(crate) struct UdpServer {
 
 impl UdpServer {
     pub(crate) async fn new(
-        bind_address: SocketAddrV6,
-        multicast_addr: Option<Ipv6Addr>,
+        network_config: &NetworkConfig,
         log: &Logger,
     ) -> Result<Self> {
-        let sock =
-            Arc::new(UdpSocket::bind(bind_address).await.with_context(
-                || format!("failed to bind to {}", bind_address),
-            )?);
+        let sock = match network_config {
+            // In some environments where sp-sim runs (e.g., some CI runners),
+            // we're not able to join ipv6 multicast groups. In those cases,
+            // we're configured with an address that isn't actually multicast,
+            // so don't try to join the group if we have such an address.
+            NetworkConfig::Simulated { bind_addr } => {
+                UdpSocket::bind(bind_addr).await.with_context(|| {
+                    format!("failed to bind to {}", bind_addr)
+                })?
+            }
 
-        // If we don't have a multicast address, use a non-multicast address;
-        // this avoids some unslightly if/else blocks around log statements
-        // below without affecting logic (as we also have to handle
-        // non-multicast multicast addresses for CI below).
-        let multicast_addr = multicast_addr.unwrap_or(Ipv6Addr::LOCALHOST);
+            NetworkConfig::Real {
+                bind_addr,
+                multicast_addr,
+                multicast_interface,
+            } => {
+                if !multicast_addr.is_multicast() {
+                    bail!("{multicast_addr} is not multicast!");
+                }
 
-        // In some environments where sp-sim runs (e.g., some CI runners), we're
-        // not able to join ipv6 multicast groups. In those cases, we're
-        // configured with a "multicast_addr" that isn't actually multicast, so
-        // don't try to join the group if we have such an address.
-        if multicast_addr.is_multicast() {
-            sock.join_multicast_v6(&multicast_addr, 0).with_context(|| {
-                format!("failed to join multicast group {}", multicast_addr)
-            })?;
-        }
+                let interface_index =
+                    if_nametoindex(multicast_interface.as_str()).with_context(
+                        || format!("if_nametoindex for {multicast_interface}"),
+                    )?;
+
+                let sock =
+                    UdpSocket::bind(bind_addr).await.with_context(|| {
+                        format!("failed to bind to {}", bind_addr)
+                    })?;
+
+                sock.join_multicast_v6(&multicast_addr, interface_index)
+                    .with_context(|| {
+                        format!(
+                            "failed to join multicast group {multicast_addr} \
+                            for interface {multicast_interface} index \
+                            {interface_index}",
+                        )
+                    })?;
+
+                sock
+            }
+        };
 
         let local_addr = sock
             .local_addr()
@@ -64,13 +86,14 @@ impl UdpServer {
                 SocketAddr::V4(addr) => bail!("bound IPv4 address {}", addr),
                 SocketAddr::V6(addr) => Ok(addr),
             })?;
+
         info!(log, "simulated SP UDP socket bound";
             "local_addr" => %local_addr,
-            "multicast_addr" => %multicast_addr,
+            network_config,
         );
 
         Ok(Self {
-            sock,
+            sock: Arc::new(sock),
             local_addr,
             buf: [0; gateway_messages::MAX_SERIALIZED_SIZE],
         })

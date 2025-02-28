@@ -25,7 +25,6 @@ use chrono::{DateTime, Utc};
 use clickhouse_admin_types::{KeeperId, ServerId};
 use ipnetwork::IpNetwork;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintDatasetsConfig;
@@ -39,6 +38,7 @@ use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
+use nexus_types::deployment::{blueprint_zone_type, BlueprintZoneImageSource};
 use nexus_types::deployment::{
     OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
     OmicronZoneExternalSnatIp,
@@ -138,7 +138,7 @@ impl From<BpTarget> for nexus_types::deployment::BlueprintTarget {
     }
 }
 
-/// See [`nexus_types::deployment::Blueprint::sled_state`].
+/// See [`nexus_types::deployment::BlueprintSledConfig::state`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_sled_state)]
 pub struct BpSledState {
@@ -167,30 +167,66 @@ impl_enum_type!(
     Expunged => b"expunged"
 );
 
-/// Converts a [`BlueprintPhysicalDiskDisposition`] to a version that can be inserted
-/// into a database.
-pub fn to_db_bp_physical_disk_disposition(
-    disposition: BlueprintPhysicalDiskDisposition,
-) -> DbBpPhysicalDiskDisposition {
-    match disposition {
-        BlueprintPhysicalDiskDisposition::InService => {
-            DbBpPhysicalDiskDisposition::InService
-        }
-        BlueprintPhysicalDiskDisposition::Expunged => {
-            DbBpPhysicalDiskDisposition::Expunged
+struct DbBpPhysicalDiskDispositionColumns {
+    disposition: DbBpPhysicalDiskDisposition,
+    expunged_as_of_generation: Option<Generation>,
+    expunged_ready_for_cleanup: bool,
+}
+
+impl From<BlueprintPhysicalDiskDisposition>
+    for DbBpPhysicalDiskDispositionColumns
+{
+    fn from(value: BlueprintPhysicalDiskDisposition) -> Self {
+        let (
+            disposition,
+            disposition_expunged_as_of_generation,
+            disposition_expunged_ready_for_cleanup,
+        ) = match value {
+            BlueprintPhysicalDiskDisposition::InService => {
+                (DbBpPhysicalDiskDisposition::InService, None, false)
+            }
+            BlueprintPhysicalDiskDisposition::Expunged {
+                as_of_generation,
+                ready_for_cleanup,
+            } => (
+                DbBpPhysicalDiskDisposition::Expunged,
+                Some(Generation(as_of_generation)),
+                ready_for_cleanup,
+            ),
+        };
+        Self {
+            disposition,
+            expunged_as_of_generation: disposition_expunged_as_of_generation,
+            expunged_ready_for_cleanup: disposition_expunged_ready_for_cleanup,
         }
     }
 }
 
-impl From<DbBpPhysicalDiskDisposition> for BlueprintPhysicalDiskDisposition {
-    fn from(disposition: DbBpPhysicalDiskDisposition) -> Self {
-        match disposition {
-            DbBpPhysicalDiskDisposition::InService => {
-                BlueprintPhysicalDiskDisposition::InService
+impl TryFrom<DbBpPhysicalDiskDispositionColumns>
+    for BlueprintPhysicalDiskDisposition
+{
+    type Error = anyhow::Error;
+
+    fn try_from(
+        value: DbBpPhysicalDiskDispositionColumns,
+    ) -> Result<Self, Self::Error> {
+        match (value.disposition, value.expunged_as_of_generation) {
+            (DbBpPhysicalDiskDisposition::InService, None) => {
+                Ok(Self::InService)
             }
-            DbBpPhysicalDiskDisposition::Expunged => {
-                BlueprintPhysicalDiskDisposition::Expunged
+            (DbBpPhysicalDiskDisposition::Expunged, Some(as_of_generation)) => {
+                Ok(Self::Expunged {
+                    as_of_generation: *as_of_generation,
+                    ready_for_cleanup: value.expunged_ready_for_cleanup,
+                })
             }
+            (DbBpPhysicalDiskDisposition::InService, Some(_))
+            | (DbBpPhysicalDiskDisposition::Expunged, None) => Err(anyhow!(
+                "illegal database state (CHECK constraint broken?!): \
+                 disposition {:?}, disposition_expunged_as_of_generation {:?}",
+                value.disposition,
+                value.expunged_as_of_generation,
+            )),
         }
     }
 }
@@ -232,7 +268,9 @@ pub struct BpOmicronPhysicalDisk {
     pub id: DbTypedUuid<PhysicalDiskKind>,
     pub pool_id: Uuid,
 
-    pub disposition: DbBpPhysicalDiskDisposition,
+    disposition: DbBpPhysicalDiskDisposition,
+    disposition_expunged_as_of_generation: Option<Generation>,
+    disposition_expunged_ready_for_cleanup: bool,
 }
 
 impl BpOmicronPhysicalDisk {
@@ -241,6 +279,11 @@ impl BpOmicronPhysicalDisk {
         sled_id: SledUuid,
         disk_config: &BlueprintPhysicalDiskConfig,
     ) -> Self {
+        let DbBpPhysicalDiskDispositionColumns {
+            disposition,
+            expunged_as_of_generation: disposition_expunged_as_of_generation,
+            expunged_ready_for_cleanup: disposition_expunged_ready_for_cleanup,
+        } = disk_config.disposition.into();
         Self {
             blueprint_id: blueprint_id.into(),
             sled_id: sled_id.into(),
@@ -249,17 +292,27 @@ impl BpOmicronPhysicalDisk {
             model: disk_config.identity.model.clone(),
             id: disk_config.id.into(),
             pool_id: disk_config.pool_id.into_untyped_uuid(),
-            disposition: to_db_bp_physical_disk_disposition(
-                disk_config.disposition,
-            ),
+            disposition,
+            disposition_expunged_as_of_generation,
+            disposition_expunged_ready_for_cleanup,
         }
     }
 }
 
-impl From<BpOmicronPhysicalDisk> for BlueprintPhysicalDiskConfig {
-    fn from(disk: BpOmicronPhysicalDisk) -> Self {
-        Self {
-            disposition: disk.disposition.into(),
+impl TryFrom<BpOmicronPhysicalDisk> for BlueprintPhysicalDiskConfig {
+    type Error = anyhow::Error;
+
+    fn try_from(disk: BpOmicronPhysicalDisk) -> Result<Self, Self::Error> {
+        let disposition_cols = DbBpPhysicalDiskDispositionColumns {
+            disposition: disk.disposition,
+            expunged_as_of_generation: disk
+                .disposition_expunged_as_of_generation,
+            expunged_ready_for_cleanup: disk
+                .disposition_expunged_ready_for_cleanup,
+        };
+
+        Ok(Self {
+            disposition: disposition_cols.try_into()?,
             identity: DiskIdentity {
                 vendor: disk.vendor,
                 serial: disk.serial,
@@ -267,7 +320,7 @@ impl From<BpOmicronPhysicalDisk> for BlueprintPhysicalDiskConfig {
             },
             id: disk.id.into(),
             pool_id: ZpoolUuid::from_untyped_uuid(disk.pool_id),
-        }
+        })
     }
 }
 
@@ -467,6 +520,8 @@ pub struct BpOmicronZone {
     pub snat_last_port: Option<SqlU16>,
 
     disposition: DbBpZoneDisposition,
+    disposition_expunged_as_of_generation: Option<Generation>,
+    disposition_expunged_ready_for_cleanup: bool,
 
     pub external_ip_id: Option<DbTypedUuid<ExternalIpKind>>,
     pub filesystem_pool: Option<DbTypedUuid<ZpoolKind>>,
@@ -483,6 +538,12 @@ impl BpOmicronZone {
             .external_networking()
             .map(|(ip, _)| ip.id().into());
 
+        let DbBpZoneDispositionColumns {
+            disposition,
+            expunged_as_of_generation: disposition_expunged_as_of_generation,
+            expunged_ready_for_cleanup: disposition_expunged_ready_for_cleanup,
+        } = blueprint_zone.disposition.into();
+
         // Create a dummy record to start, then fill in the rest
         let mut bp_omicron_zone = BpOmicronZone {
             // Fill in the known fields that don't require inspecting
@@ -495,7 +556,9 @@ impl BpOmicronZone {
                 .filesystem_pool
                 .as_ref()
                 .map(|pool| pool.id().into()),
-            disposition: to_db_bp_zone_disposition(blueprint_zone.disposition),
+            disposition,
+            disposition_expunged_as_of_generation,
+            disposition_expunged_ready_for_cleanup,
             zone_type: blueprint_zone.zone_type.kind().into(),
 
             // Set the remainder of the fields to a default
@@ -879,13 +942,22 @@ impl BpOmicronZone {
             }
         };
 
+        let disposition_cols = DbBpZoneDispositionColumns {
+            disposition: self.disposition,
+            expunged_as_of_generation: self
+                .disposition_expunged_as_of_generation,
+            expunged_ready_for_cleanup: self
+                .disposition_expunged_ready_for_cleanup,
+        };
+
         Ok(BlueprintZoneConfig {
-            disposition: self.disposition.into(),
+            disposition: disposition_cols.try_into()?,
             id: self.id.into(),
             filesystem_pool: self
                 .filesystem_pool
                 .map(|id| ZpoolName::new_external(id.into())),
             zone_type,
+            image_source: BlueprintZoneImageSource::InstallDataset,
         })
     }
 }
@@ -907,30 +979,63 @@ impl_enum_type!(
 
     // Enum values
     InService => b"in_service"
-    Quiesced => b"quiesced"
     Expunged => b"expunged"
 );
 
-/// Converts a [`BlueprintZoneDisposition`] to a version that can be inserted
-/// into a database.
-pub fn to_db_bp_zone_disposition(
-    disposition: BlueprintZoneDisposition,
-) -> DbBpZoneDisposition {
-    match disposition {
-        BlueprintZoneDisposition::InService => DbBpZoneDisposition::InService,
-        BlueprintZoneDisposition::Quiesced => DbBpZoneDisposition::Quiesced,
-        BlueprintZoneDisposition::Expunged => DbBpZoneDisposition::Expunged,
+struct DbBpZoneDispositionColumns {
+    disposition: DbBpZoneDisposition,
+    expunged_as_of_generation: Option<Generation>,
+    expunged_ready_for_cleanup: bool,
+}
+
+impl From<BlueprintZoneDisposition> for DbBpZoneDispositionColumns {
+    fn from(value: BlueprintZoneDisposition) -> Self {
+        let (
+            disposition,
+            disposition_expunged_as_of_generation,
+            disposition_expunged_ready_for_cleanup,
+        ) = match value {
+            BlueprintZoneDisposition::InService => {
+                (DbBpZoneDisposition::InService, None, false)
+            }
+            BlueprintZoneDisposition::Expunged {
+                as_of_generation,
+                ready_for_cleanup,
+            } => (
+                DbBpZoneDisposition::Expunged,
+                Some(Generation(as_of_generation)),
+                ready_for_cleanup,
+            ),
+        };
+        Self {
+            disposition,
+            expunged_as_of_generation: disposition_expunged_as_of_generation,
+            expunged_ready_for_cleanup: disposition_expunged_ready_for_cleanup,
+        }
     }
 }
 
-impl From<DbBpZoneDisposition> for BlueprintZoneDisposition {
-    fn from(disposition: DbBpZoneDisposition) -> Self {
-        match disposition {
-            DbBpZoneDisposition::InService => {
-                BlueprintZoneDisposition::InService
+impl TryFrom<DbBpZoneDispositionColumns> for BlueprintZoneDisposition {
+    type Error = anyhow::Error;
+
+    fn try_from(
+        value: DbBpZoneDispositionColumns,
+    ) -> Result<Self, Self::Error> {
+        match (value.disposition, value.expunged_as_of_generation) {
+            (DbBpZoneDisposition::InService, None) => Ok(Self::InService),
+            (DbBpZoneDisposition::Expunged, Some(as_of_generation)) => {
+                Ok(Self::Expunged {
+                    as_of_generation: *as_of_generation,
+                    ready_for_cleanup: value.expunged_ready_for_cleanup,
+                })
             }
-            DbBpZoneDisposition::Quiesced => BlueprintZoneDisposition::Quiesced,
-            DbBpZoneDisposition::Expunged => BlueprintZoneDisposition::Expunged,
+            (DbBpZoneDisposition::InService, Some(_))
+            | (DbBpZoneDisposition::Expunged, None) => Err(anyhow!(
+                "illegal database state (CHECK constraint broken?!): \
+                 disposition {:?}, disposition_expunged_as_of_generation {:?}",
+                value.disposition,
+                value.expunged_as_of_generation,
+            )),
         }
     }
 }
@@ -1086,64 +1191,3 @@ impl BpClickhouseServerZoneIdToNodeId {
         })
     }
 }
-
-mod diesel_util {
-    use crate::{
-        schema::bp_omicron_zone::disposition, to_db_bp_zone_disposition,
-        DbBpZoneDisposition,
-    };
-    use diesel::{
-        helper_types::EqAny, prelude::*, query_dsl::methods::FilterDsl,
-    };
-    use nexus_types::deployment::{
-        BlueprintZoneDisposition, BlueprintZoneFilter,
-    };
-
-    /// An extension trait to apply a [`BlueprintZoneFilter`] to a Diesel
-    /// expression.
-    ///
-    /// This is applicable to any Diesel expression which includes the
-    /// `bp_omicron_zone` table.
-    ///
-    /// This needs to live here, rather than in `nexus-db-queries`, because it
-    /// names the `DbBpZoneDisposition` type which is private to this crate.
-    pub trait ApplyBlueprintZoneFilterExt {
-        type Output;
-
-        /// Applies a [`BlueprintZoneFilter`] to a Diesel expression.
-        fn blueprint_zone_filter(
-            self,
-            filter: BlueprintZoneFilter,
-        ) -> Self::Output;
-    }
-
-    impl<E> ApplyBlueprintZoneFilterExt for E
-    where
-        E: FilterDsl<BlueprintZoneFilterQuery>,
-    {
-        type Output = E::Output;
-
-        fn blueprint_zone_filter(
-            self,
-            filter: BlueprintZoneFilter,
-        ) -> Self::Output {
-            // This is only boxed for ease of reference above.
-            let all_matching_dispositions: BoxedIterator<DbBpZoneDisposition> =
-                Box::new(
-                    BlueprintZoneDisposition::all_matching(filter)
-                        .map(to_db_bp_zone_disposition),
-                );
-
-            FilterDsl::filter(
-                self,
-                disposition.eq_any(all_matching_dispositions),
-            )
-        }
-    }
-
-    type BoxedIterator<T> = Box<dyn Iterator<Item = T>>;
-    type BlueprintZoneFilterQuery =
-        EqAny<disposition, BoxedIterator<DbBpZoneDisposition>>;
-}
-
-pub use diesel_util::ApplyBlueprintZoneFilterExt;

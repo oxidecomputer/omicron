@@ -216,41 +216,45 @@ CREATE INDEX IF NOT EXISTS lookup_sled_by_policy_and_state ON omicron.public.sle
     sled_state
 );
 
-CREATE TYPE IF NOT EXISTS omicron.public.sled_resource_kind AS ENUM (
-    -- omicron.public.instance
-    'instance'
-    -- We expect to other resource kinds here in the future; e.g., to track
-    -- resources used by control plane services. For now, we only track
-    -- instances.
-);
-
--- Accounting for programs using resources on a sled
-CREATE TABLE IF NOT EXISTS omicron.public.sled_resource (
-    -- Should match the UUID of the corresponding resource
+-- Accounting for VMMs using resources on a sled
+CREATE TABLE IF NOT EXISTS omicron.public.sled_resource_vmm (
+    -- Should match the UUID of the corresponding VMM
     id UUID PRIMARY KEY,
 
     -- The sled where resources are being consumed
     sled_id UUID NOT NULL,
 
-    -- The maximum number of hardware threads usable by this resource
+    -- The maximum number of hardware threads usable by this VMM
     hardware_threads INT8 NOT NULL,
 
-    -- The maximum amount of RSS RAM provisioned to this resource
+    -- The maximum amount of RSS RAM provisioned to this VMM
     rss_ram INT8 NOT NULL,
 
-    -- The maximum amount of Reservoir RAM provisioned to this resource
+    -- The maximum amount of Reservoir RAM provisioned to this VMM
     reservoir_ram INT8 NOT NULL,
 
-    -- Identifies the type of the resource
-    kind omicron.public.sled_resource_kind NOT NULL
+    -- The UUID of the instance to which this VMM belongs.
+    --
+    -- This should eventually become NOT NULL for all VMMs, but is
+    -- still nullable for backwards compatibility purposes. Specifically,
+    -- the "instance start" saga can create rows in this table before creating
+    -- rows for "omicron.public.vmm", which we would use for back-filling.
+    -- If we tried to backfill + make this column non-nullable while that saga
+    -- was mid-execution, we would still have some rows in this table with nullable
+    -- values that would be more complex to fix.
+    instance_id UUID
 );
 
--- Allow looking up all resources which reside on a sled
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_resource_by_sled ON omicron.public.sled_resource (
+-- Allow looking up all VMM resources which reside on a sled
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_vmm_resource_by_sled ON omicron.public.sled_resource_vmm (
     sled_id,
     id
 );
 
+-- Allow looking up all resources by instance
+CREATE INDEX IF NOT EXISTS lookup_vmm_resource_by_instance ON omicron.public.sled_resource_vmm (
+    instance_id
+);
 
 -- Table of all sled subnets allocated for sleds added to an already initialized
 -- rack. The sleds in this table and their allocated subnets are created before
@@ -1425,11 +1429,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.snapshot (
     size_bytes INT NOT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_snapshot_by_project ON omicron.public.snapshot (
-    project_id,
-    name
-) WHERE
-    time_deleted IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_snapshot_by_project
+    ON omicron.public.snapshot (
+        project_id,
+        name
+    ) WHERE
+        time_deleted IS NULL;
+
+CREATE INDEX IF NOT EXISTS lookup_snapshot_by_destination_volume_id
+    ON omicron.public.snapshot ( destination_volume_id );
+
+CREATE INDEX IF NOT EXISTS lookup_snapshot_by_volume_id
+    ON omicron.public.snapshot ( volume_id );
 
 /*
  * Oximeter collector servers.
@@ -3688,7 +3699,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_clickhouse_keeper_membership (
 
 CREATE TYPE IF NOT EXISTS omicron.public.bp_zone_disposition AS ENUM (
     'in_service',
-    'quiesced',
     'expunged'
 );
 
@@ -3802,7 +3812,20 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_physical_disk  (
 
     disposition omicron.public.bp_physical_disk_disposition NOT NULL,
 
-    PRIMARY KEY (blueprint_id, id)
+     -- Specific properties of the `expunged` disposition
+    disposition_expunged_as_of_generation INT,
+    disposition_expunged_ready_for_cleanup BOOL NOT NULL,
+
+    PRIMARY KEY (blueprint_id, id),
+
+    CONSTRAINT expunged_disposition_properties CHECK (
+      (disposition != 'expunged'
+          AND disposition_expunged_as_of_generation IS NULL
+          AND NOT disposition_expunged_ready_for_cleanup)
+      OR
+      (disposition = 'expunged'
+          AND disposition_expunged_as_of_generation IS NOT NULL)
+    )
 );
 
 -- description of a collection of omicron datasets stored in a blueprint
@@ -3932,9 +3955,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     snat_last_port INT4
         CHECK (snat_last_port IS NULL OR snat_last_port BETWEEN 0 AND 65535),
 
-    -- Zone disposition
-    disposition omicron.public.bp_zone_disposition NOT NULL,
-
     -- For some zones, either primary_service_ip or second_service_ip (but not
     -- both!) is an external IP address. For such zones, this is the ID of that
     -- external IP. In general this is a foreign key into
@@ -3948,7 +3968,23 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     -- Eventually, that nullability should be removed.
     filesystem_pool UUID,
 
-    PRIMARY KEY (blueprint_id, id)
+    -- Zone disposition
+    disposition omicron.public.bp_zone_disposition NOT NULL,
+
+    -- Specific properties of the `expunged` disposition
+    disposition_expunged_as_of_generation INT,
+    disposition_expunged_ready_for_cleanup BOOL NOT NULL,
+
+    PRIMARY KEY (blueprint_id, id),
+
+    CONSTRAINT expunged_disposition_properties CHECK (
+        (disposition != 'expunged'
+            AND disposition_expunged_as_of_generation IS NULL
+            AND NOT disposition_expunged_ready_for_cleanup)
+        OR
+        (disposition = 'expunged'
+            AND disposition_expunged_as_of_generation IS NOT NULL)
+    )
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone_nic (
@@ -4114,6 +4150,94 @@ CREATE INDEX IF NOT EXISTS lookup_usable_rendezvous_debug_dataset
 
 COMMIT;
 BEGIN;
+
+-- Describes what happens when
+-- (for affinity groups) instance cannot be co-located, or
+-- (for anti-affinity groups) instance must be co-located, or
+CREATE TYPE IF NOT EXISTS omicron.public.affinity_policy AS ENUM (
+    -- If the affinity request cannot be satisfied, fail.
+    'fail',
+
+    -- If the affinity request cannot be satisfied, allow it anyway.
+    'allow'
+);
+
+-- Determines what "co-location" means for instances within an affinity
+-- or anti-affinity group.
+CREATE TYPE IF NOT EXISTS omicron.public.failure_domain AS ENUM (
+    -- Instances are co-located if they are on the same sled.
+    'sled'
+);
+
+-- Describes a grouping of related instances that should be co-located.
+CREATE TABLE IF NOT EXISTS omicron.public.affinity_group (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    -- Affinity groups are contained within projects
+    project_id UUID NOT NULL,
+    policy omicron.public.affinity_policy NOT NULL,
+    failure_domain omicron.public.failure_domain NOT NULL
+);
+
+-- Names for affinity groups within a project should be unique
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_affinity_group_by_project ON omicron.public.affinity_group (
+    project_id,
+    name
+) WHERE
+    time_deleted IS NULL;
+
+-- Describes an instance's membership within an affinity group
+CREATE TABLE IF NOT EXISTS omicron.public.affinity_group_instance_membership (
+    group_id UUID NOT NULL,
+    instance_id UUID NOT NULL,
+
+    PRIMARY KEY (group_id, instance_id)
+);
+
+-- We need to look up all memberships of an instance so we can revoke these
+-- memberships efficiently when instances are deleted.
+CREATE INDEX IF NOT EXISTS lookup_affinity_group_instance_membership_by_instance ON omicron.public.affinity_group_instance_membership (
+    instance_id
+);
+
+-- Describes a collection of instances that should not be co-located.
+CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    -- Anti-Affinity groups are contained within projects
+    project_id UUID NOT NULL,
+    policy omicron.public.affinity_policy NOT NULL,
+    failure_domain omicron.public.failure_domain NOT NULL
+);
+
+-- Names for anti-affinity groups within a project should be unique
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_anti_affinity_group_by_project ON omicron.public.anti_affinity_group (
+    project_id,
+    name
+) WHERE
+    time_deleted IS NULL;
+
+-- Describes an instance's membership within an anti-affinity group
+CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group_instance_membership (
+    group_id UUID NOT NULL,
+    instance_id UUID NOT NULL,
+
+    PRIMARY KEY (group_id, instance_id)
+);
+
+-- We need to look up all memberships of an instance so we can revoke these
+-- memberships efficiently when instances are deleted.
+CREATE INDEX IF NOT EXISTS lookup_anti_affinity_group_instance_membership_by_instance ON omicron.public.anti_affinity_group_instance_membership (
+    instance_id
+);
 
 -- Per-VMM state.
 CREATE TABLE IF NOT EXISTS omicron.public.vmm (
@@ -4553,8 +4677,6 @@ CREATE INDEX IF NOT EXISTS lookup_any_disk_by_volume_id ON omicron.public.disk (
     volume_id
 );
 
-CREATE INDEX IF NOT EXISTS lookup_snapshot_by_destination_volume_id ON omicron.public.snapshot ( destination_volume_id );
-
 CREATE TYPE IF NOT EXISTS omicron.public.region_snapshot_replacement_state AS ENUM (
   'requested',
   'allocating',
@@ -4565,14 +4687,19 @@ CREATE TYPE IF NOT EXISTS omicron.public.region_snapshot_replacement_state AS EN
   'completing'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.read_only_target_replacement_type AS ENUM (
+  'region_snapshot',
+  'read_only_region'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.region_snapshot_replacement (
     id UUID PRIMARY KEY,
 
     request_time TIMESTAMPTZ NOT NULL,
 
-    old_dataset_id UUID NOT NULL,
+    old_dataset_id UUID,
     old_region_id UUID NOT NULL,
-    old_snapshot_id UUID NOT NULL,
+    old_snapshot_id UUID,
 
     old_snapshot_volume_id UUID,
 
@@ -4582,10 +4709,23 @@ CREATE TABLE IF NOT EXISTS omicron.public.region_snapshot_replacement (
 
     operating_saga_id UUID,
 
-    new_region_volume_id UUID
+    new_region_volume_id UUID,
+
+    replacement_type omicron.public.read_only_target_replacement_type NOT NULL,
+
+    CONSTRAINT proper_replacement_fields CHECK (
+      (
+       (replacement_type = 'region_snapshot') AND
+       ((old_dataset_id IS NOT NULL) AND (old_snapshot_id IS NOT NULL))
+      ) OR (
+       (replacement_type = 'read_only_region') AND
+       ((old_dataset_id IS NULL) AND (old_snapshot_id IS NULL))
+      )
+    )
 );
 
-CREATE INDEX IF NOT EXISTS lookup_region_snapshot_replacement_by_state on omicron.public.region_snapshot_replacement (replacement_state);
+CREATE INDEX IF NOT EXISTS lookup_region_snapshot_replacement_by_state
+ON omicron.public.region_snapshot_replacement (replacement_state);
 
 CREATE TYPE IF NOT EXISTS omicron.public.region_snapshot_replacement_step_state AS ENUM (
   'requested',
@@ -4831,7 +4971,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '123.0.0', NULL)
+    (TRUE, NOW(), NOW(), '128.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
