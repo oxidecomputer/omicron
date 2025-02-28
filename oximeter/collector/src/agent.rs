@@ -26,6 +26,7 @@ use oximeter_api::ProducerDetails;
 use oximeter_db::Client;
 use oximeter_db::DbWrite;
 use qorb::claim::Handle;
+use qorb::policy::Policy;
 use qorb::pool::Pool;
 use qorb::resolver::BoxedResolver;
 use slog::debug;
@@ -56,11 +57,11 @@ pub struct OximeterAgent {
     log: Logger,
     // Oximeter target used by this agent to produce metrics about itself.
     collection_target: self_stats::OximeterCollector,
-    // Handle to the TX-side of a channel for collecting results from the collection tasks
+    // Handle to the TX-side of a channel for collecting results from the collection tasks.
     result_sender: mpsc::Sender<CollectionTaskOutput>,
     // Handle to each Tokio task collection from a single producer.
     collection_tasks: Arc<Mutex<BTreeMap<Uuid, CollectionTaskHandle>>>,
-    // The interval on which we refresh our list of producers from Nexus
+    // The interval on which we refresh our list of producers from Nexus.
     refresh_interval: Duration,
     // Handle to the task used to periodically refresh the list of producers.
     refresh_task: Arc<StdMutex<Option<tokio::task::JoinHandle<()>>>>,
@@ -70,12 +71,18 @@ pub struct OximeterAgent {
 
 impl OximeterAgent {
     /// Construct a new agent with the given ID and logger.
+    // TODO: Remove this linter exception once we only write to a
+    // single database
+    #[allow(clippy::too_many_arguments)]
     pub async fn with_id(
         id: Uuid,
         address: SocketAddrV6,
         refresh_interval: Duration,
         db_config: DbConfig,
         native_resolver: BoxedResolver,
+        // Temporary resolver to write to a ClickHouse
+        // cluster as well as a single-node installation.
+        cluster_resolver: BoxedResolver,
         log: &Logger,
         replicated: bool,
     ) -> Result<Self, Error> {
@@ -101,7 +108,7 @@ impl OximeterAgent {
         // - The DB doesn't exist at all. This reports a version number of 0. We
         // need to create the DB here, at the latest version. This is used in
         // fresh installations and tests.
-        let client = Client::new_with_pool(native_resolver, &log);
+        let client = Client::new_with_pool(native_resolver, &log, None);
         match client.check_db_is_at_expected_version().await {
             Ok(_) => {}
             Err(oximeter_db::Error::DatabaseVersionMismatch {
@@ -126,11 +133,24 @@ impl OximeterAgent {
             collector_port: address.port(),
         };
 
+        // Temporary additional client that writes to a replicated cluster
+        // This will be removed once we phase out the single node installation.
+        //
+        // We don't need to check whether the DB is at the expected version since
+        // this is already handled by reconfigurator via clickhouse-admin.
+        let claim_policy = Policy {
+            claim_timeout: Duration::from_millis(100),
+            ..Default::default()
+        };
+        let cluster_client =
+            Client::new_with_pool(cluster_resolver, &log, Some(claim_policy));
+
         // Spawn the task for aggregating and inserting all metrics
         tokio::spawn(async move {
             crate::results_sink::database_inserter(
                 insertion_log,
                 client,
+                Some(cluster_client),
                 db_config.batch_size,
                 Duration::from_secs(db_config.batch_interval),
                 result_receiver,
@@ -216,6 +236,7 @@ impl OximeterAgent {
                 results_sink::database_inserter(
                     insertion_log,
                     client,
+                    None,
                     db_config.batch_size,
                     Duration::from_secs(db_config.batch_interval),
                     result_receiver,
@@ -564,7 +585,7 @@ async fn claim_nexus_with_backoff(
             "failed to lookup Nexus IP, will retry";
             "delay" => ?delay,
             // No `InlineErrorChain` here: `error` is a string
-            "error" => error,
+            "error" => %error,
         );
     };
     let do_lookup = || async {

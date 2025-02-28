@@ -41,6 +41,7 @@ use oximeter::schema::TimeseriesKey;
 use oximeter::types::Sample;
 use oximeter::Measurement;
 use oximeter::TimeseriesName;
+use qorb::policy::Policy;
 use qorb::pool::Pool;
 use qorb::resolver::BoxedResolver;
 use qorb::resolvers::single_host::SingleHostResolver;
@@ -91,8 +92,13 @@ pub struct Client {
 }
 
 impl Client {
-    /// Construct a Clickhouse client of the database with a connection pool.
-    pub fn new_with_pool(native_resolver: BoxedResolver, log: &Logger) -> Self {
+    /// Construct a Clickhouse client of the database with a connection pool
+    /// and an optional qorb claim policy.
+    pub fn new_with_pool(
+        native_resolver: BoxedResolver,
+        log: &Logger,
+        claim_policy: Option<Policy>,
+    ) -> Self {
         let id = Uuid::new_v4();
         let log = log.new(slog::o!(
             "component" => "clickhouse-client",
@@ -100,10 +106,11 @@ impl Client {
         ));
         let schema = Mutex::new(BTreeMap::new());
         let request_timeout = DEFAULT_REQUEST_TIMEOUT;
+        let policy = claim_policy.unwrap_or_default();
         let native_pool = match Pool::new(
             native_resolver,
             Arc::new(native::connection::Connector),
-            qorb::policy::Policy::default(),
+            policy,
         ) {
             Ok(pool) => {
                 debug!(log, "registered USDT probes");
@@ -421,7 +428,7 @@ impl Client {
             }
             match name.parse() {
                 Ok(ver) => {
-                    debug!(log, "valid version dir"; "ver" => ver);
+                    debug!(log, "valid version dir"; "ver" => ?ver);
                     assert!(versions.insert(ver), "Versions should be unique");
                 }
                 Err(e) => warn!(
@@ -1169,7 +1176,7 @@ impl Client {
                 self.log,
                 "failed to delete some timeseries";
                 "error" => ?error,
-                "call_count" => count,
+                "call_count" => ?count,
                 "retry_after" => ?delay,
             );
         };

@@ -263,6 +263,14 @@ impl Oximeter {
             debug!(log, "creating ClickHouse client");
             let resolver =
                 make_resolver(config.db.address, ServiceName::ClickhouseNative);
+            let cluster_resolver = Box::new(DnsResolver::new(
+                service::Name(ServiceName::ClickhouseClusterNative.srv_name()),
+                bootstrap_dns.clone(),
+                DnsResolverConfig {
+                    hardcoded_ttl: Some(tokio::time::Duration::MAX),
+                    ..Default::default()
+                },
+            ));
             Ok(Arc::new(
                 OximeterAgent::with_id(
                     args.id,
@@ -270,6 +278,7 @@ impl Oximeter {
                     config.refresh_interval,
                     config.db,
                     resolver,
+                    cluster_resolver,
                     &log,
                     config.db.replicated,
                 )

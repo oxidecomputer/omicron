@@ -113,6 +113,17 @@ builder: "non_trivial"
       }
     }
   ],
+  "_clickhouse-cluster-native._tcp": [
+    {
+      "type": "SRV",
+      "data": {
+        "prio": 0,
+        "weight": 0,
+        "port": 9000,
+        "target": "001de000-c04e-4000-8000-000000000006.host.control-plane.oxide.internal"
+      }
+    }
+  ],
   "_clickhouse-native._tcp": [
     {
       "type": "SRV",
