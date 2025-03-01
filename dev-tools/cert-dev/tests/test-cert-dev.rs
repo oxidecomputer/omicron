@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use anyhow::Context;
 use omicron_test_utils::dev::test_cmds::{
-    assert_exit_code, path_to_executable, run_command, EXIT_SUCCESS,
+    EXIT_SUCCESS, assert_exit_code, path_to_executable, run_command,
 };
 use subprocess::Exec;
 
@@ -44,11 +44,13 @@ fn test_cert_create() {
     let private_key = openssl::pkey::PKey::private_key_from_pem(&key_contents)
         .context("parsing private key")
         .unwrap();
-    assert!(certs_pem
-        .iter()
-        .last()
-        .unwrap()
-        .public_key()
-        .unwrap()
-        .public_eq(&private_key));
+    assert!(
+        certs_pem
+            .iter()
+            .last()
+            .unwrap()
+            .public_key()
+            .unwrap()
+            .public_eq(&private_key)
+    );
 }

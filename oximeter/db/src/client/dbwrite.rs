@@ -6,18 +6,18 @@
 
 // Copyright 2025 Oxide Computer Company
 
+use crate::Error;
 use crate::client::Client;
 use crate::model;
 use crate::model::to_block::ToBlock as _;
 use crate::native::block::Block;
-use crate::Error;
 use camino::Utf8PathBuf;
 use oximeter::Sample;
 use oximeter::TimeseriesSchema;
 use slog::debug;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::btree_map::Entry;
 
 use super::Handle;
 

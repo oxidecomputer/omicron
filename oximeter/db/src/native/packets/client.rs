@@ -8,8 +8,8 @@
 
 use super::server::ProfileInfo;
 use super::server::Progress;
-use crate::native::block::Block;
 use crate::QuerySummary;
+use crate::native::block::Block;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;

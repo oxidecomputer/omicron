@@ -11,10 +11,10 @@ use anyhow::Error;
 use chrono::DateTime;
 use chrono::Utc;
 use num::ToPrimitive;
-use oximeter_types::traits::HistogramSupport;
 use oximeter_types::DatumType;
 use oximeter_types::Measurement;
 use oximeter_types::Quantile;
+use oximeter_types::traits::HistogramSupport;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -418,11 +418,7 @@ impl Points {
         let Some(first_type) = types.next() else {
             unreachable!();
         };
-        if types.all(|ty| ty == first_type) {
-            Some(first_type)
-        } else {
-            None
-        }
+        if types.all(|ty| ty == first_type) { Some(first_type) } else { None }
     }
 
     /// Construct a list of gauge points from a list of gauge measurements.
@@ -1980,10 +1976,10 @@ f64_dist_from!(f64);
 #[cfg(test)]
 mod tests {
     use super::{Distribution, MetricType, Points, Values};
-    use crate::point::{push_concrete_values, DataType, Datum, ValueArray};
+    use crate::point::{DataType, Datum, ValueArray, push_concrete_values};
     use chrono::{DateTime, Utc};
     use oximeter_types::{
-        histogram::Record, types::Cumulative, Measurement, Quantile,
+        Measurement, Quantile, histogram::Record, types::Cumulative,
     };
     use std::time::Duration;
 
@@ -2369,12 +2365,14 @@ mod tests {
             );
         }
         assert!(points.cast(&[]).is_err());
-        assert!(points
-            .cast(&[
-                DataType::IntegerDistribution,
-                DataType::IntegerDistribution
-            ])
-            .is_err());
+        assert!(
+            points
+                .cast(&[
+                    DataType::IntegerDistribution,
+                    DataType::IntegerDistribution
+                ])
+                .is_err()
+        );
     }
 
     #[test]
@@ -2416,9 +2414,14 @@ mod tests {
             );
         }
         assert!(points.cast(&[]).is_err());
-        assert!(points
-            .cast(&[DataType::DoubleDistribution, DataType::DoubleDistribution])
-            .is_err());
+        assert!(
+            points
+                .cast(&[
+                    DataType::DoubleDistribution,
+                    DataType::DoubleDistribution
+                ])
+                .is_err()
+        );
     }
 
     #[test]

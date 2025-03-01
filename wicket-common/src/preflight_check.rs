@@ -25,9 +25,7 @@ pub enum UplinkPreflightTerminalError {
         err: DpdError,
         port_id: PortId,
     },
-    #[error(
-        "failed to remove host OS route {destination} -> {nexthop}: {err}"
-    )]
+    #[error("failed to remove host OS route {destination} -> {nexthop}: {err}")]
     RemoveHostRoute { err: String, destination: IpNet, nexthop: IpAddr },
     #[error("failed to remove uplink SMF property {property:?}: {err}")]
     RemoveSmfProperty { property: String, err: String },

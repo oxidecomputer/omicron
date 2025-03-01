@@ -10,7 +10,7 @@ use bootstore::schemes::v0 as bootstore;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use slog::{warn, Logger};
+use slog::{Logger, warn};
 
 /// Network configuration required to bring up the control plane
 ///
@@ -50,7 +50,7 @@ impl FromStr for EarlyNetworkConfig {
                     generation: cfg.generation,
                     schema_version: cfg.schema_version,
                     body: cfg.body,
-                })
+                });
             }
             Err(e) => format!("unable to parse EarlyNetworkConfig: {e:?}"),
         };

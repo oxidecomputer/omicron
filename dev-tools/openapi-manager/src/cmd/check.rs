@@ -3,14 +3,14 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
+    FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
     apis::ManagedApis,
     environment::{BlessedSource, Environment, GeneratedSource},
     output::{
-        display_load_problems, display_resolution, headers::*, CheckResult,
-        OutputOpts, Styles,
+        CheckResult, OutputOpts, Styles, display_load_problems,
+        display_resolution, headers::*,
     },
     resolved::Resolved,
-    FAILURE_EXIT_CODE, NEEDS_UPDATE_EXIT_CODE,
 };
 use std::process::ExitCode;
 

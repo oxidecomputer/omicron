@@ -92,7 +92,7 @@
 // backwards-compatible way (but obviously one wouldn't get the scaling benefits
 // while continuing to use the old API).
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use camino::Utf8PathBuf;
 use hickory_proto::rr::LowerName;
 use hickory_resolver::Name;
@@ -104,9 +104,9 @@ use serde::{Deserialize, Serialize};
 use sled::transaction::ConflictableTransactionError;
 use slog::{debug, error, info, o, warn};
 use std::str::FromStr;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex;
 

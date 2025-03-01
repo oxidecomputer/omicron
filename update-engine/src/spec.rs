@@ -9,7 +9,7 @@ use std::{fmt, fmt::Write, marker::PhantomData};
 use anyhow::anyhow;
 use indent_write::fmt::IndentWriter;
 use schemars::JsonSchema;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 /// A specification for an [`UpdateEngine`](crate::UpdateEngine).
 ///

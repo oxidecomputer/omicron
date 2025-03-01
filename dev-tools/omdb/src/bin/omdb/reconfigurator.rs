@@ -4,9 +4,9 @@
 
 //! omdb commands that interact with Reconfigurator
 
+use crate::Omdb;
 use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::db::DbUrlOptions;
-use crate::Omdb;
 use anyhow::Context as _;
 use camino::Utf8PathBuf;
 use clap::Args;

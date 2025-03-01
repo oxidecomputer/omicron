@@ -3,9 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::ByteCount;
+use crate::SqlU16;
 use crate::schema::region;
 use crate::typed_uuid::DbTypedUuid;
-use crate::SqlU16;
 use db_macros::Asset;
 use omicron_common::api::external;
 use omicron_uuid_kinds::DatasetKind;

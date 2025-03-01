@@ -2,10 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::help_text;
-use super::push_text_lines;
 use super::ComputedScrollOffset;
 use super::PendingScroll;
+use super::help_text;
+use super::push_text_lines;
+use crate::Action;
+use crate::Cmd;
+use crate::Control;
+use crate::State;
 use crate::keymap::ShowPopupCmd;
 use crate::ui::defaults::style;
 use crate::ui::widgets::BoxConnector;
@@ -13,16 +17,13 @@ use crate::ui::widgets::BoxConnectorKind;
 use crate::ui::widgets::ButtonText;
 use crate::ui::widgets::PopupBuilder;
 use crate::ui::widgets::PopupScrollOffset;
-use crate::Action;
-use crate::Cmd;
-use crate::Control;
-use crate::State;
 use itertools::Itertools;
 use omicron_common::address::IpRange;
 use omicron_common::api::internal::shared::AllowedSourceIps;
 use omicron_common::api::internal::shared::BgpConfig;
 use omicron_common::api::internal::shared::LldpPortConfig;
 use omicron_common::api::internal::shared::RouteConfig;
+use ratatui::Frame;
 use ratatui::layout::Constraint;
 use ratatui::layout::Direction;
 use ratatui::layout::Layout;
@@ -34,7 +35,6 @@ use ratatui::widgets::Block;
 use ratatui::widgets::BorderType;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 use sled_hardware_types::Baseboard;
 use std::borrow::Cow;
 use wicket_common::rack_setup::BgpAuthKeyInfo;

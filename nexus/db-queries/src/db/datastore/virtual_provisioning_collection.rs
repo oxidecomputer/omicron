@@ -7,8 +7,8 @@
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::model::ByteCount;
 use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pool::DbConnection;

@@ -11,13 +11,13 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::identity::Resource;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -33,7 +33,7 @@ impl super::Nexus {
             params::InternetGatewaySelector {
                 gateway: NameOrId::Id(id),
                 vpc: None,
-                project: None
+                project: None,
             } => {
                 let gw = LookupPath::new(opctx, &self.db_datastore)
                     .internet_gateway_id(id);
@@ -42,7 +42,7 @@ impl super::Nexus {
             params::InternetGatewaySelector {
                 gateway: NameOrId::Name(name),
                 vpc: Some(vpc),
-                project
+                project,
             } => {
                 let gw = self
                     .vpc_lookup(opctx, params::VpcSelector { project, vpc })?
@@ -170,7 +170,11 @@ impl super::Nexus {
                 let route = self
                     .internet_gateway_lookup(
                         opctx,
-                        params::InternetGatewaySelector { project, vpc, gateway },
+                        params::InternetGatewaySelector {
+                            project,
+                            vpc,
+                            gateway,
+                        },
                     )?
                     .internet_gateway_ip_pool_name_owned(name.into());
                 Ok(route)
@@ -296,7 +300,11 @@ impl super::Nexus {
                 let route = self
                     .internet_gateway_lookup(
                         opctx,
-                        params::InternetGatewaySelector { project, vpc, gateway },
+                        params::InternetGatewaySelector {
+                            project,
+                            vpc,
+                            gateway,
+                        },
                     )?
                     .internet_gateway_ip_address_name_owned(name.into());
                 Ok(route)

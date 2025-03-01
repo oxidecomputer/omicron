@@ -6,12 +6,12 @@ use daft::BTreeMapDiff;
 use daft::Diffable;
 use derive_where::derive_where;
 use schemars::JsonSchema;
-use serde::de::Error as _;
-use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::btree_map;
+use serde::de::Error as _;
+use serde::de::Visitor;
 use std::collections::BTreeMap;
+use std::collections::btree_map;
 use std::fmt;
 use std::fmt::Debug;
 use std::marker::PhantomData;
@@ -391,8 +391,8 @@ impl<'a, T: IdMappable> OccupiedEntry<'a, T> {
 mod tests {
     use super::*;
     use daft::Diffable;
-    use test_strategy::proptest;
     use test_strategy::Arbitrary;
+    use test_strategy::proptest;
 
     #[derive(
         Debug,

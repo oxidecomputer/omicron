@@ -6,17 +6,17 @@
 
 use crate::integration_tests::instances::instance_wait_for_state;
 use dropshot::test_util::ClientTestContext;
-use http::method::Method;
 use http::StatusCode;
+use http::method::Method;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
+use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::object_create;
-use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views::Snapshot;

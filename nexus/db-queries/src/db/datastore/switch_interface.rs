@@ -9,8 +9,8 @@ use crate::db;
 use crate::db::datastore::address_lot::{
     ReserveBlockError, ReserveBlockTxnError,
 };
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::model::LoopbackAddress;
 use crate::db::pagination::paginated;
 use crate::transaction_retry::OptionalError;

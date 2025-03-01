@@ -19,8 +19,8 @@ use sha3::Sha3_256;
 use sled_agent_types::boot_disk::BootDiskOsWriteProgress;
 use sled_agent_types::boot_disk::BootDiskOsWriteStatus;
 use slog::Logger;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::io;
 use std::io::Read;
 use std::path::Path;
@@ -59,7 +59,9 @@ pub(crate) enum BootDiskOsWriteError {
     TaskPanic,
     #[error("an update is still running ({0})")]
     UpdateRunning(Uuid),
-    #[error("a previous update completed ({0}); clear its status before starting a new update")]
+    #[error(
+        "a previous update completed ({0}); clear its status before starting a new update"
+    )]
     CannotStartWithoutClearingPreviousStatus(Uuid),
     #[error("failed to create temporary file")]
     FailedCreatingTempfile(#[source] io::Error),
@@ -67,7 +69,9 @@ pub(crate) enum BootDiskOsWriteError {
     FailedWritingTempfile(#[source] io::Error),
     #[error("failed downloading image from HTTP client")]
     FailedDownloadingImage(#[source] HttpError),
-    #[error("hash mismatch in image from HTTP client: expected {expected} but got {got}")]
+    #[error(
+        "hash mismatch in image from HTTP client: expected {expected} but got {got}"
+    )]
     UploadedImageHashMismatch { expected: String, got: String },
     #[error("failed to open disk for writing {path}")]
     FailedOpenDiskForWrite {
@@ -75,7 +79,9 @@ pub(crate) enum BootDiskOsWriteError {
         error: io::Error,
         path: Utf8PathBuf,
     },
-    #[error("image size ({image_size}) is not a multiple of disk block size ({disk_block_size})")]
+    #[error(
+        "image size ({image_size}) is not a multiple of disk block size ({disk_block_size})"
+    )]
     ImageSizeNotMultipleOfBlockSize {
         image_size: usize,
         disk_block_size: usize,
@@ -100,7 +106,9 @@ pub(crate) enum BootDiskOsWriteError {
         error: io::Error,
         path: Utf8PathBuf,
     },
-    #[error("hash mismatch after writing disk {path}: expected {expected} but got {got}")]
+    #[error(
+        "hash mismatch after writing disk {path}: expected {expected} but got {got}"
+    )]
     WrittenImageHashMismatch {
         path: Utf8PathBuf,
         expected: String,
@@ -788,12 +796,12 @@ mod tests {
     use rand::RngCore;
     use std::mem;
     use std::pin::Pin;
-    use std::task::ready;
     use std::task::Context;
     use std::task::Poll;
+    use std::task::ready;
     use std::time::Duration;
-    use tokio::sync::mpsc;
     use tokio::sync::Semaphore;
+    use tokio::sync::mpsc;
     use tokio_stream::wrappers::UnboundedReceiverStream;
     use tokio_util::sync::PollSemaphore;
 
@@ -930,10 +938,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn boot_disk_os_writer_delivers_upload_progress_and_rejects_bad_hashes(
-    ) {
-        let logctx =
-            test_setup_log("boot_disk_os_writer_delivers_upload_progress_and_rejects_bad_hashes");
+    async fn boot_disk_os_writer_delivers_upload_progress_and_rejects_bad_hashes()
+     {
+        let logctx = test_setup_log(
+            "boot_disk_os_writer_delivers_upload_progress_and_rejects_bad_hashes",
+        );
 
         let writer = Arc::new(BootDiskOsWriter::new(&logctx.log));
         let boot_disk = M2Slot::A;

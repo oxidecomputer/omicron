@@ -35,7 +35,7 @@ use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::error;
-use slog::{info, warn, Logger};
+use slog::{Logger, info, warn};
 use std::collections::BTreeSet;
 use std::str::FromStr;
 
@@ -986,9 +986,9 @@ pub(crate) enum ZoneExpungeReason {
 pub(crate) mod test {
     use super::*;
     use crate::blueprint_builder::test::verify_blueprint;
-    use crate::example::example;
     use crate::example::ExampleSystemBuilder;
     use crate::example::SimRngState;
+    use crate::example::example;
     use crate::system::SledBuilder;
     use chrono::NaiveDateTime;
     use chrono::TimeZone;
@@ -996,8 +996,6 @@ pub(crate) mod test {
     use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
     use clickhouse_admin_types::KeeperId;
     use expectorate::assert_contents;
-    use nexus_types::deployment::blueprint_zone_type;
-    use nexus_types::deployment::blueprint_zone_type::InternalDns;
     use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::BlueprintDiffSummary;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
@@ -1006,6 +1004,8 @@ pub(crate) mod test {
     use nexus_types::deployment::ClickhouseMode;
     use nexus_types::deployment::ClickhousePolicy;
     use nexus_types::deployment::SledDisk;
+    use nexus_types::deployment::blueprint_zone_type;
+    use nexus_types::deployment::blueprint_zone_type::InternalDns;
     use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
@@ -2941,9 +2941,11 @@ pub(crate) mod test {
 
         // All the zones of the expunged sled should be expunged, and the sled
         // itself should be decommissioned.
-        assert!(blueprint2.sleds[&expunged_sled_id]
-            .zones_config
-            .are_all_zones_expunged());
+        assert!(
+            blueprint2.sleds[&expunged_sled_id]
+                .zones_config
+                .are_all_zones_expunged()
+        );
         assert_eq!(
             blueprint2.sleds[&expunged_sled_id].state,
             SledState::Decommissioned

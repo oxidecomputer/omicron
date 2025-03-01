@@ -17,10 +17,10 @@ pub mod test_cmds;
 
 use anyhow::{Context, Result};
 use camino::Utf8PathBuf;
-pub use dropshot::test_util::LogContext;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingIfExists;
 use dropshot::ConfigLoggingLevel;
+pub use dropshot::test_util::LogContext;
 use omicron_common::disk::DiskIdentity;
 use slog::Logger;
 use std::io::BufReader;
@@ -92,9 +92,11 @@ async fn setup_database(
         StorageSource::DoNotPopulate | StorageSource::PopulateLatest { .. } => {
         }
         StorageSource::CopyFromSeed { input_tar } => {
-            info!(&log,
+            info!(
+                &log,
                 "cockroach: copying from seed tarball ({}) to storage directory ({})",
-                input_tar, starter.store_dir().to_string_lossy(),
+                input_tar,
+                starter.store_dir().to_string_lossy(),
             );
             let reader = std::fs::File::open(input_tar).with_context(|| {
                 format!("cannot open input tar {}", input_tar)

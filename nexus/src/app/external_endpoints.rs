@@ -27,32 +27,32 @@
 //! [`rustls::server::ResolvesServerCert`].  See [`NexusCertResolver`].
 
 use crate::context::ApiContext;
+use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
-use anyhow::Context;
 use nexus_db_model::AuthenticationMode;
 use nexus_db_model::Certificate;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::DnsZone;
 use nexus_db_model::Silo;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::pagination::Paginator;
-use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
-use nexus_types::silo::silo_dns_name;
 use nexus_types::silo::DEFAULT_SILO_ID;
-use omicron_common::api::external::http_pagination::PaginatedBy;
+use nexus_types::silo::silo_dns_name;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::bail_unless;
 use openssl::pkey::PKey;
 use openssl::x509::X509;
 use rustls::sign::CertifiedKey;
 use serde::Serialize;
 use serde_with::SerializeDisplay;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::fmt;
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -784,18 +784,18 @@ fn endpoint_for_authority(
 
 #[cfg(test)]
 mod test {
-    use super::endpoint_for_authority;
     use super::ExternalEndpoints;
     use super::TlsCertificate;
-    use crate::app::external_endpoints::authority_for_request;
+    use super::endpoint_for_authority;
     use crate::app::external_endpoints::ExternalEndpointError;
     use crate::app::external_endpoints::NexusCertResolver;
+    use crate::app::external_endpoints::authority_for_request;
     use chrono::Utc;
-    use dropshot::endpoint;
-    use dropshot::test_util::LogContext;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;
     use dropshot::ConfigLoggingLevel;
+    use dropshot::endpoint;
+    use dropshot::test_util::LogContext;
     use http::uri::Authority;
     use nexus_db_model::Certificate;
     use nexus_db_model::DnsGroup;
@@ -1282,9 +1282,9 @@ mod test {
 
         // At this point we haven't filled in the configuration so any attempt
         // to resolve anything should fail.
-        assert!(cert_resolver
-            .do_resolve(Some("silo1.sys.oxide1.test"))
-            .is_none());
+        assert!(
+            cert_resolver.do_resolve(Some("silo1.sys.oxide1.test")).is_none()
+        );
 
         // Now pass along the configuration and try again.
         watch_tx.send(Some(ee.clone())).unwrap();
@@ -1294,9 +1294,9 @@ mod test {
         let resolved_c2 =
             cert_resolver.do_resolve(Some("silo2.sys.oxide1.test")).unwrap();
         assert_eq!(resolved_c2.cert, c2.certified_key.cert);
-        assert!(cert_resolver
-            .do_resolve(Some("silo3.sys.oxide1.test"))
-            .is_none());
+        assert!(
+            cert_resolver.do_resolve(Some("silo3.sys.oxide1.test")).is_none()
+        );
         // We should get an expired cert if it's the only option.
         let resolved_c4 =
             cert_resolver.do_resolve(Some("silo4.sys.oxide1.test")).unwrap();

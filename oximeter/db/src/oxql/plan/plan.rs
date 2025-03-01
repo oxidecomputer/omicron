@@ -6,11 +6,11 @@
 
 // Copyright 2025 Oxide Computer Company
 
-use crate::oxql::ast::table_ops::align;
+use crate::oxql::ast::Query;
 use crate::oxql::ast::table_ops::BasicTableOp;
 use crate::oxql::ast::table_ops::GroupedTableOp;
 use crate::oxql::ast::table_ops::TableOp;
-use crate::oxql::ast::Query;
+use crate::oxql::ast::table_ops::align;
 use crate::oxql::plan::align::Align;
 use crate::oxql::plan::delta::Delta;
 use crate::oxql::plan::filter::Filter;
@@ -934,8 +934,8 @@ pub(super) mod test_utils {
     static ALL_SCHEMA: OnceCell<BTreeMap<TimeseriesName, TimeseriesSchema>> =
         OnceCell::const_new();
 
-    pub async fn all_schema(
-    ) -> &'static BTreeMap<TimeseriesName, TimeseriesSchema> {
+    pub async fn all_schema()
+    -> &'static BTreeMap<TimeseriesName, TimeseriesSchema> {
         ALL_SCHEMA.get_or_init(load_schema).await
     }
 }
@@ -943,9 +943,9 @@ pub(super) mod test_utils {
 #[cfg(test)]
 mod tests {
     use crate::oxql::ast::grammar::query_parser;
+    use crate::oxql::plan::Plan;
     use crate::oxql::plan::node::Node;
     use crate::oxql::plan::plan::test_utils::all_schema;
-    use crate::oxql::plan::Plan;
     use oxql_types::point::DataType;
     use oxql_types::point::MetricType;
 
@@ -1108,11 +1108,7 @@ mod tests {
                 .field_schema
                 .iter()
                 .find_map(|s| {
-                    if s.name == field {
-                        Some(s.field_type)
-                    } else {
-                        None
-                    }
+                    if s.name == field { Some(s.field_type) } else { None }
                 })
                 .unwrap();
             assert_eq!(
@@ -1249,7 +1245,8 @@ mod tests {
             "Should fail to plan query with an incomparable filter",
         );
         assert!(
-            err.to_string().contains("is not compatible with the expected type"),
+            err.to_string()
+                .contains("is not compatible with the expected type"),
             "Error message should complain that a filter cannot compare \
             a field against an incompatible type, but the error message is: {:#?}",
             err,

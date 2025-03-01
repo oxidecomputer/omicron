@@ -7,12 +7,12 @@
 
 use super::endpoints::*;
 use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
-use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
+use dropshot::test_util::ClientTestContext;
 use headers::authorization::Credentials;
-use http::method::Method;
 use http::StatusCode;
-use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
+use http::method::Method;
+use httptest::{Expectation, ServerBuilder, matchers::*, responders::*};
 use nexus_db_queries::authn::external::spoof;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;

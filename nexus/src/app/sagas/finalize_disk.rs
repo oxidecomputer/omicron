@@ -5,11 +5,11 @@
 //! For disks in state ImportReady, "finalize" them: detach them from their
 //! attached Pantry, and set to Detached.
 
-use super::declare_saga_actions;
 use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
 use super::SagaInitError;
+use super::declare_saga_actions;
 use crate::app::sagas::common_storage::call_pantry_detach_for_disk;
 use crate::app::sagas::snapshot_create;
 use crate::external_api::params;

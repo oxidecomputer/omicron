@@ -351,14 +351,18 @@ impl TriMapEntry for OmicronZoneNicEntry {
 
 #[derive(Debug, Error)]
 pub enum AddNetworkResourceError {
-    #[error("associating Omicron zone {zone_id} with {ip:?} failed due to duplicates")]
+    #[error(
+        "associating Omicron zone {zone_id} with {ip:?} failed due to duplicates"
+    )]
     DuplicateOmicronZoneExternalIp {
         zone_id: OmicronZoneUuid,
         ip: OmicronZoneExternalIp,
         #[source]
         err: anyhow::Error,
     },
-    #[error("associating Omicron zone {zone_id} with {nic:?} failed due to duplicates")]
+    #[error(
+        "associating Omicron zone {zone_id} with {nic:?} failed due to duplicates"
+    )]
     DuplicateOmicronZoneNic {
         zone_id: OmicronZoneUuid,
         nic: OmicronZoneNic,

@@ -7,16 +7,13 @@
 //! Trait for deserializing an array of values from a `Block`.
 
 use super::columns;
+use crate::native::Error;
 use crate::native::block::Block;
 use crate::native::block::DataType;
 use crate::native::block::ValueArray;
-use crate::native::Error;
 use chrono::DateTime;
 use chrono::TimeZone as _;
 use chrono_tz::Tz;
-use oximeter::histogram::Histogram;
-use oximeter::types::Cumulative;
-use oximeter::types::MissingDatum;
 use oximeter::AuthzScope;
 use oximeter::Datum;
 use oximeter::DatumType;
@@ -26,6 +23,9 @@ use oximeter::Quantile;
 use oximeter::TimeseriesDescription;
 use oximeter::TimeseriesSchema;
 use oximeter::Units;
+use oximeter::histogram::Histogram;
+use oximeter::types::Cumulative;
+use oximeter::types::MissingDatum;
 use std::collections::BTreeSet;
 use std::num::NonZeroU8;
 

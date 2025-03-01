@@ -21,7 +21,7 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use rand::distributions::Alphanumeric;
-use rand::{thread_rng, Rng};
+use rand::{Rng, thread_rng};
 use range_requests::PotentialRange;
 use range_requests::SingleRange;
 use sha2::{Digest, Sha256};
@@ -64,10 +64,14 @@ pub enum Error {
     #[error("Dataset not found")]
     DatasetNotFound,
 
-    #[error("Dataset exists, but has an invalid configuration: (wanted {wanted}, saw {actual})")]
+    #[error(
+        "Dataset exists, but has an invalid configuration: (wanted {wanted}, saw {actual})"
+    )]
     DatasetExistsBadConfig { wanted: DatasetUuid, actual: DatasetUuid },
 
-    #[error("Dataset exists, but appears on the wrong zpool (wanted {wanted}, saw {actual})")]
+    #[error(
+        "Dataset exists, but appears on the wrong zpool (wanted {wanted}, saw {actual})"
+    )]
     DatasetExistsOnWrongZpool { wanted: ZpoolUuid, actual: ZpoolUuid },
 
     #[error(transparent)]
@@ -805,7 +809,7 @@ impl<'a> SupportBundleManager<'a> {
                         // The entry exists, but the requested range is invalid --
                         // send it back as an http body.
                         ZipStreamOutput::RangeResponse(response) => {
-                            return Ok(response)
+                            return Ok(response);
                         }
                     };
 
@@ -845,8 +849,8 @@ mod tests {
     use omicron_test_utils::dev::test_setup_log;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use std::collections::BTreeMap;
-    use zip::write::SimpleFileOptions;
     use zip::ZipWriter;
+    use zip::write::SimpleFileOptions;
 
     struct SingleU2StorageHarness {
         storage_test_harness: StorageManagerTestHarness,

@@ -7,7 +7,7 @@
 
 // Copyright 2024 Oxide Computer Company
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use oximeter_types::Quantile;
 use rand_distr::{Distribution, Normal};
 

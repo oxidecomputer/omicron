@@ -11,11 +11,11 @@
 
 use crate::app::background::BackgroundTask;
 use anyhow::Result;
+use crucible_agent_client::Client as CrucibleAgentClient;
 use crucible_agent_client::types::Region;
 use crucible_agent_client::types::RegionId;
-use crucible_agent_client::Client as CrucibleAgentClient;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::LookupRegionPortStatus;

@@ -8,12 +8,12 @@ use std::net::IpAddr;
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::datastore::UpdatePrecondition;
 use crate::db::datastore::address_lot::{
     ReserveBlockError, ReserveBlockTxnError,
 };
-use crate::db::datastore::UpdatePrecondition;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::model::{
     LldpLinkConfig, Name, SwitchInterfaceConfig, SwitchPort,
     SwitchPortAddressConfig, SwitchPortBgpPeerConfig, SwitchPortConfig,
@@ -31,7 +31,7 @@ use diesel::{
 use diesel_dtrace::DTraceConnection;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{
-    BgpConfig, SqlU16, SqlU32, SqlU8, SwitchPortBgpPeerConfigAllowExport,
+    BgpConfig, SqlU8, SqlU16, SqlU32, SwitchPortBgpPeerConfigAllowExport,
     SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity,
 };
 use nexus_types::external_api::params;

@@ -12,13 +12,13 @@ use chrono::Utc;
 use crate::oxql::ast::ident::Ident;
 use anyhow::Error;
 use oximeter::schema::TimeseriesKey;
+use oxql_types::Table;
+use oxql_types::Timeseries;
 use oxql_types::point::DataType;
 use oxql_types::point::MetricType;
 use oxql_types::point::ValueArray;
-use oxql_types::Table;
-use oxql_types::Timeseries;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::fmt;
 
 /// A table operation for grouping data by fields, apply a reducer to the
@@ -404,7 +404,10 @@ impl GroupBy {
                         })
                         .collect();
                     let old = sample_counts_by_group.insert(key, counts);
-                    assert!(old.is_none(), "Should not have counts entry for first timeseries in the group");
+                    assert!(
+                        old.is_none(),
+                        "Should not have counts entry for first timeseries in the group"
+                    );
                     output_table.insert(new_timeseries)?;
                 }
             }
@@ -457,8 +460,8 @@ mod tests {
     use chrono::{DateTime, Utc};
     use oximeter::FieldValue;
     use oxql_types::{
-        point::{DataType, MetricType, ValueArray},
         Table, Timeseries,
+        point::{DataType, MetricType, ValueArray},
     };
     use std::{collections::BTreeMap, time::Duration};
 

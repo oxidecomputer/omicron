@@ -1,11 +1,11 @@
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::{public_error_from_diesel, ErrorHandler};
+use crate::db::error::{ErrorHandler, public_error_from_diesel};
 use async_bb8_diesel::AsyncRunQueryDsl;
-use diesel::prelude::*;
 use diesel::ExpressionMethods;
 use diesel::SelectableHelper;
+use diesel::prelude::*;
 use nexus_db_model::{BootstoreConfig, BootstoreKeys};
 use omicron_common::api::external::{CreateResult, LookupResult};
 

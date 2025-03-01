@@ -18,8 +18,8 @@
 use itertools::{Itertools, Position};
 use ratatui::text::{Line, Span, Text};
 use textwrap::{
-    core::{display_width, Fragment},
-    wrap_algorithms::{wrap_optimal_fit, Penalties},
+    core::{Fragment, display_width},
+    wrap_algorithms::{Penalties, wrap_optimal_fit},
 };
 
 pub struct Options<'a> {

@@ -3,11 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::{Context, Result};
-use dropshot::{test_util::LogContext, ConfigLogging, ConfigLoggingLevel};
+use dropshot::{ConfigLogging, ConfigLoggingLevel, test_util::LogContext};
+use omicron_test_utils::dev::CRDB_SEED_TAR_ENV;
 use omicron_test_utils::dev::seed::{
     ensure_seed_tarball_exists, should_invalidate_seed,
 };
-use omicron_test_utils::dev::CRDB_SEED_TAR_ENV;
 use std::io::Write;
 
 #[tokio::main]

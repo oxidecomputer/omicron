@@ -2,11 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clap::Parser;
-use omicron_common::cmd::{fatal, CmdError};
-use sp_sim::config::Config;
+use omicron_common::cmd::{CmdError, fatal};
 use sp_sim::SimRack;
+use sp_sim::config::Config;
 use std::path::PathBuf;
 use std::time::Duration;
 

@@ -7,10 +7,10 @@
 use anyhow::anyhow;
 use camino::Utf8PathBuf;
 use clap::Parser;
-use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
-use omicron_sled_agent::bootstrap::server as bootstrap_server;
+use omicron_common::cmd::fatal;
 use omicron_sled_agent::bootstrap::RssAccessError;
+use omicron_sled_agent::bootstrap::server as bootstrap_server;
 use omicron_sled_agent::config::Config as SledConfig;
 use sled_agent_types::rack_init::RackInitializeRequest;
 

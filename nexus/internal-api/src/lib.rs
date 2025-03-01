@@ -28,7 +28,7 @@ use nexus_types::{
     },
 };
 use omicron_common::api::{
-    external::{http_pagination::PaginatedById, Instance},
+    external::{Instance, http_pagination::PaginatedById},
     internal::nexus::{
         DiskRuntimeState, DownstairsClientStopRequest, DownstairsClientStopped,
         ProducerEndpoint, ProducerRegistrationResponse, RepairFinishInfo,

@@ -45,7 +45,7 @@
 //! but that may change in the future.
 
 use dropshot::{Body, HttpError};
-use http::{header, Response, StatusCode};
+use http::{Response, StatusCode, header};
 use nexus_db_queries::authn::{Actor, Reason};
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;

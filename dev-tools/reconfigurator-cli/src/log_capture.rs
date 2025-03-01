@@ -7,10 +7,10 @@
 use colored::Color;
 use colored::Colorize;
 use slog::Drain;
+use slog::KV as _;
 use slog::Level;
 use slog::LevelFilter;
 use slog::Logger;
-use slog::KV as _;
 use slog_term::Decorator;
 use slog_term::PlainSyncDecorator;
 use slog_term::Serializer;

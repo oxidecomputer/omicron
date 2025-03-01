@@ -7,8 +7,8 @@
 use crate::apis::ApiIdent;
 use crate::apis::ManagedApi;
 use crate::apis::ManagedApis;
-use crate::compatibility::api_compatible;
 use crate::compatibility::OpenApiCompatibilityError;
+use crate::compatibility::api_compatible;
 use crate::environment::Environment;
 use crate::iter_only::iter_only;
 use crate::output::plural;
@@ -20,11 +20,11 @@ use crate::spec_files_generic::ApiFiles;
 use crate::spec_files_generic::ApiSpecFileName;
 use crate::spec_files_local::LocalApiSpecFile;
 use crate::spec_files_local::LocalFiles;
-use crate::validation::overwrite_file;
-use crate::validation::validate;
 use crate::validation::CheckStale;
 use crate::validation::CheckStatus;
-use anyhow::{anyhow, Context};
+use crate::validation::overwrite_file;
+use crate::validation::validate;
+use anyhow::{Context, anyhow};
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use std::collections::BTreeMap;
@@ -444,7 +444,7 @@ impl Fix<'_> {
                         ()
                     }
                     Err(err) => {
-                        return Err(anyhow!(err).context("removing old link"))
+                        return Err(anyhow!(err).context("removing old link"));
                     }
                 };
                 fs_err::os::unix::fs::symlink(&target, &path)?;

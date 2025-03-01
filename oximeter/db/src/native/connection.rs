@@ -6,13 +6,14 @@
 
 //! A connection and pool for talking to the ClickHouse server.
 
+use super::Error;
 use super::block::Block;
 use super::io::packet::client::Encoder;
 use super::io::packet::server::Decoder;
+use super::packets::client::OXIMETER_HELLO;
 use super::packets::client::Packet as ClientPacket;
 use super::packets::client::Query;
 use super::packets::client::QueryResult;
-use super::packets::client::OXIMETER_HELLO;
 use super::packets::client::VERSION_MAJOR;
 use super::packets::client::VERSION_MINOR;
 use super::packets::client::VERSION_PATCH;
@@ -20,16 +21,15 @@ use super::packets::server::Hello as ServerHello;
 use super::packets::server::Packet as ServerPacket;
 use super::packets::server::Progress;
 use super::packets::server::REVISION;
-use super::Error;
 use crate::native::probes;
 use futures::SinkExt as _;
 use futures::StreamExt as _;
 use qorb::backend;
 use qorb::backend::Error as QorbError;
 use std::net::SocketAddr;
+use tokio::net::TcpStream;
 use tokio::net::tcp::OwnedReadHalf;
 use tokio::net::tcp::OwnedWriteHalf;
-use tokio::net::TcpStream;
 use tokio_util::codec::FramedRead;
 use tokio_util::codec::FramedWrite;
 use uuid::Uuid;
@@ -382,7 +382,7 @@ impl Connection {
                         }
                     }
                     ServerPacket::Exception(exceptions) => {
-                        break Err(Error::Exception { exceptions })
+                        break Err(Error::Exception { exceptions });
                     }
                     ServerPacket::Progress(progress) => {
                         query_result.progress += progress
@@ -415,8 +415,8 @@ mod tests {
     use omicron_test_utils::dev::clickhouse::ClickHouseDeployment;
     use omicron_test_utils::dev::test_setup_log;
     use std::sync::Arc;
-    use tokio::sync::oneshot;
     use tokio::sync::Mutex;
+    use tokio::sync::oneshot;
 
     #[tokio::test]
     async fn test_exchange_hello() {

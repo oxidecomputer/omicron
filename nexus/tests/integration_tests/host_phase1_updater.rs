@@ -14,8 +14,8 @@ use omicron_nexus::app::test_interfaces::{
 use rand::RngCore;
 use sp_sim::SimulatedSp;
 use std::mem;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;

@@ -4,15 +4,16 @@
 
 use camino::Utf8PathBuf;
 use clickhouse_admin_test_utils::{
+    DEFAULT_CLICKHOUSE_ADMIN_BASE_PORTS,
     default_clickhouse_cluster_test_deployment,
-    default_clickhouse_log_ctx_and_path, DEFAULT_CLICKHOUSE_ADMIN_BASE_PORTS,
+    default_clickhouse_log_ctx_and_path,
 };
 use clickhouse_admin_types::{
     ClickhouseHost, ClickhouseKeeperClusterMembership, KeeperId,
     KeeperServerInfo, KeeperServerType, RaftConfig,
 };
 use omicron_clickhouse_admin::ClickhouseCli;
-use slog::{info, o, Drain};
+use slog::{Drain, info, o};
 use slog_term::{FullFormat, PlainDecorator, TestStdoutWriter};
 use std::collections::BTreeSet;
 use std::net::{Ipv6Addr, SocketAddrV6};

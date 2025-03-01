@@ -32,8 +32,8 @@ use crate::common::disk::{Action as DiskAction, DiskStates};
 mod producers {
     use super::*;
     use oximeter::{
-        types::{Cumulative, Sample},
         Metric, Target,
+        types::{Cumulative, Sample},
     };
 
     #[derive(Debug, Clone, Target)]

@@ -66,10 +66,10 @@ impl<T, Predicate> FilterBy<Predicate> for T where
 /// Allows calling ".into_boxed" on an update statement.
 pub trait BoxableUpdateStatement<Table, V>:
     query_methods::BoxedDsl<
-    'static,
-    Pg,
-    Output = BoxedUpdateStatement<'static, Pg, Table, V>,
->
+        'static,
+        Pg,
+        Output = BoxedUpdateStatement<'static, Pg, Table, V>,
+    >
 where
     Table: QuerySource,
 {
@@ -77,10 +77,10 @@ where
 impl<T, Table, V> BoxableUpdateStatement<Table, V> for T
 where
     T: query_methods::BoxedDsl<
-        'static,
-        Pg,
-        Output = BoxedUpdateStatement<'static, Pg, Table, V>,
-    >,
+            'static,
+            Pg,
+            Output = BoxedUpdateStatement<'static, Pg, Table, V>,
+        >,
     Table: QuerySource,
 {
 }

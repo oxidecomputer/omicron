@@ -6,6 +6,7 @@
 
 // Copyright 2024 Oxide Computer Company
 
+use crate::oxql::Error;
 use crate::oxql::ast::cmp::Comparison;
 use crate::oxql::ast::ident::Ident;
 use crate::oxql::ast::literal::Literal;
@@ -13,18 +14,17 @@ use crate::oxql::ast::logical_op::LogicalOp;
 use crate::oxql::ast::table_ops::limit::Limit;
 use crate::oxql::ast::table_ops::limit::LimitKind;
 use crate::oxql::schema::TableSchema;
-use crate::oxql::Error;
 use crate::shells::special_idents;
 use chrono::DateTime;
 use chrono::Utc;
 use oximeter::FieldType;
 use oximeter::FieldValue;
+use oxql_types::Table;
+use oxql_types::Timeseries;
 use oxql_types::point::DataType;
 use oxql_types::point::MetricType;
 use oxql_types::point::Points;
 use oxql_types::point::ValueArray;
-use oxql_types::Table;
-use oxql_types::Timeseries;
 use regex::Regex;
 use std::collections::BTreeSet;
 use std::fmt;
@@ -1288,13 +1288,13 @@ mod tests {
     use crate::oxql::ast::logical_op::LogicalOp;
     use chrono::Utc;
     use oximeter::FieldValue;
+    use oxql_types::Table;
+    use oxql_types::Timeseries;
     use oxql_types::point::DataType;
     use oxql_types::point::MetricType;
     use oxql_types::point::Points;
     use oxql_types::point::ValueArray;
     use oxql_types::point::Values;
-    use oxql_types::Table;
-    use oxql_types::Timeseries;
     use std::time::Duration;
     use uuid::Uuid;
 
@@ -1427,29 +1427,35 @@ mod tests {
             ("!(a == 0)", "!(a == 0)"),
             ("a == 0 || b == 1", "a == 0 || b == 1"),
             ("a == 0 && b == 1", "a == 0 && b == 1"),
-
             // Rewrite of XOR
-            ("a == 0 ^ b == 1", "(a == 0 && !(b == 1)) || (!(a == 0) && (b == 1))"),
-
+            (
+                "a == 0 ^ b == 1",
+                "(a == 0 && !(b == 1)) || (!(a == 0) && (b == 1))",
+            ),
             // Simple applications of distribution rules.
             //
             // Distribute conjunction over disjunction.
-            ("a == 0 && (b == 1 || c == 2)", "(a == 0 && b == 1) || (a == 0 && c == 2)"),
-            ("a == 0 && (b == 1 || c == 2 || d == 3)", "(a == 0 && b == 1) || (a == 0 && c == 2) || (a == 0 && d == 3)"),
-            ("a == 0 && (b == 1 || c == 2 || d == 3 || e == 4)", "(a == 0 && b == 1) || (a == 0 && c == 2) || (a == 0 && d == 3) || (a == 0 && e == 4)"),
+            (
+                "a == 0 && (b == 1 || c == 2)",
+                "(a == 0 && b == 1) || (a == 0 && c == 2)",
+            ),
+            (
+                "a == 0 && (b == 1 || c == 2 || d == 3)",
+                "(a == 0 && b == 1) || (a == 0 && c == 2) || (a == 0 && d == 3)",
+            ),
+            (
+                "a == 0 && (b == 1 || c == 2 || d == 3 || e == 4)",
+                "(a == 0 && b == 1) || (a == 0 && c == 2) || (a == 0 && d == 3) || (a == 0 && e == 4)",
+            ),
         ];
         for (input, expected) in cases.iter() {
             let parsed_input = query_parser::filter_expr(input).unwrap();
             let simplified = parsed_input.simplify_to_dnf().unwrap();
             let parsed_expected = query_parser::filter_expr(expected).unwrap();
             assert_eq!(
-                simplified,
-                parsed_expected,
+                simplified, parsed_expected,
                 "\ninput expression: {}\nparsed to: {}\nsimplifed to: {}\nexpected: {}\n",
-                input,
-                parsed_input,
-                simplified,
-                expected,
+                input, parsed_input, simplified, expected,
             );
         }
     }

@@ -7,7 +7,7 @@
 use camino::Utf8PathBuf;
 use clickhouse_admin_types::OXIMETER_CLUSTER;
 use clickward::{BasePorts, Deployment, DeploymentConfig};
-use dropshot::test_util::{log_prefix_for_test, LogContext};
+use dropshot::test_util::{LogContext, log_prefix_for_test};
 use dropshot::{ConfigLogging, ConfigLoggingLevel};
 
 pub const DEFAULT_CLICKHOUSE_ADMIN_BASE_PORTS: BasePorts = BasePorts {

@@ -5,7 +5,7 @@
 //! Types to export metrics about provisioning information.
 
 use crate::db::model::VirtualProvisioningCollection;
-use oximeter::{types::Sample, MetricsError};
+use oximeter::{MetricsError, types::Sample};
 use std::sync::{Arc, Mutex};
 
 oximeter::use_timeseries!("collection-target.toml");

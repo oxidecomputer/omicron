@@ -7,7 +7,7 @@
 
 use futures::StreamExt;
 use gateway_client::types::SpIgnition;
-use slog::{info, o, warn, Logger};
+use slog::{Logger, info, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddrV6;
 use tokio::sync::{mpsc, oneshot};

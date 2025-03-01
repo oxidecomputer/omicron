@@ -7,7 +7,7 @@
 // - test that an unknown artifact returns 404, not 500
 // - tests around target names and artifact names that contain dangerous paths like `../`
 
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 use camino::Utf8Path;
 use camino_tempfile::{Builder, Utf8TempPath};
 use clap::Parser;
@@ -147,11 +147,10 @@ async fn test_repo_upload() -> Result<()> {
             .collect::<Vec<_>>(),
         ["zone1", "zone2"]
     );
-    assert!(!initial_description
-        .artifacts
-        .iter()
-        .any(|artifact| artifact.id.kind
-            == KnownArtifactKind::ControlPlane.into()));
+    assert!(
+        !initial_description.artifacts.iter().any(|artifact| artifact.id.kind
+            == KnownArtifactKind::ControlPlane.into())
+    );
 
     // The artifact replication background task should have been activated, and
     // we should see a local repo and successful PUTs.

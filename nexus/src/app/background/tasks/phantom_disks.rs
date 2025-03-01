@@ -19,8 +19,8 @@
 //! already in this phantom state.
 
 use crate::app::background::BackgroundTask;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use serde_json::json;

@@ -6,7 +6,7 @@
 
 use gateway_client::types::{SpIdentifier, SpType};
 use omicron_common::api::external::SwitchLocation;
-use slog::{debug, error, Logger};
+use slog::{Logger, debug, error};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -16,8 +16,8 @@ use tokio::{
     sync::{mpsc, watch},
     time::Instant,
 };
-use transceiver_controller::{message::ExtendedStatus, SpRequest};
 use transceiver_controller::{ConfigBuilder, Controller, Error, ModuleId};
+use transceiver_controller::{SpRequest, message::ExtendedStatus};
 use wicket_common::inventory::Transceiver;
 
 /// Type alias for a map of all transceivers on each switch.

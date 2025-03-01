@@ -8,8 +8,8 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
 use crate::db::model;
@@ -19,11 +19,11 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_auth::authn::silos::IdentityProviderType;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use ref_cast::RefCast;
 
 impl DataStore {

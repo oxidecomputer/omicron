@@ -6,14 +6,14 @@
 
 // Copyright 2024 Oxide Computer Company
 
-use crate::histogram::Histogram;
-use crate::types;
-use crate::types::{Measurement, Sample};
 use crate::DatumType;
 use crate::Field;
 use crate::FieldType;
 use crate::FieldValue;
 use crate::MetricsError;
+use crate::histogram::Histogram;
+use crate::types;
+use crate::types::{Measurement, Sample};
 use bytes::Bytes;
 use chrono::DateTime;
 use chrono::Utc;

@@ -1,6 +1,6 @@
 use crate::metrics::MetricsRequestQueue;
 use crate::nexus::NexusClient;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
@@ -18,12 +18,12 @@ use omicron_common::api::internal::shared::{
     NetworkInterface, ResolvedVpcFirewallRule,
 };
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
-use rand::prelude::IteratorRandom;
 use rand::SeedableRng;
+use rand::prelude::IteratorRandom;
 use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::manager::StorageHandle;
 use sled_storage::resources::AllDisks;
-use slog::{error, warn, Logger};
+use slog::{Logger, error, warn};
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -139,11 +139,7 @@ impl ProbeManager {
                     }
                 };
 
-                if !u2_set.contains(probe_pool) {
-                    Some(*id)
-                } else {
-                    None
-                }
+                if !u2_set.contains(probe_pool) { Some(*id) } else { None }
             })
             .collect::<Vec<_>>();
 

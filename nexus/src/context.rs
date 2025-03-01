@@ -5,20 +5,20 @@
 use super::Nexus;
 use crate::saga_interface::SagaContext;
 use async_trait::async_trait;
+use authn::external::HttpAuthnScheme;
 use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::token::HttpAuthnToken;
-use authn::external::HttpAuthnScheme;
 use camino::Utf8PathBuf;
 use chrono::Duration;
 use nexus_config::NexusConfig;
 use nexus_config::SchemeName;
-use nexus_db_queries::authn::external::session_cookie::SessionStore;
 use nexus_db_queries::authn::ConsoleSessionWithSiloId;
+use nexus_db_queries::authn::external::session_cookie::SessionStore;
 use nexus_db_queries::context::{OpContext, OpKind};
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::{authn, authz, db};
-use omicron_common::address::{Ipv6Subnet, AZ_PREFIX};
+use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
 use omicron_uuid_kinds::GenericUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
@@ -176,18 +176,18 @@ impl ServerContext {
             Some(config.pkg.console.static_dir.to_owned())
         } else {
             match env::current_dir() {
-                Ok(root) => {
-                    match Utf8PathBuf::try_from(root) {
-                        Ok(root) => {
-                            Some(root.join(&config.pkg.console.static_dir))
-                        }
-                        Err(err) => {
-                            error!(log, "Failed to convert current directory to UTF-8, \
-                                         setting assets dir to None: {}", err);
-                            None
-                        }
+                Ok(root) => match Utf8PathBuf::try_from(root) {
+                    Ok(root) => Some(root.join(&config.pkg.console.static_dir)),
+                    Err(err) => {
+                        error!(
+                            log,
+                            "Failed to convert current directory to UTF-8, \
+                                         setting assets dir to None: {}",
+                            err
+                        );
+                        None
                     }
-                }
+                },
                 Err(error) => {
                     error!(
                         log,
@@ -203,7 +203,10 @@ impl ServerContext {
         // We don't want to fail outright yet, but we do want to try to make
         // problems slightly easier to debug.
         if static_dir.is_none() {
-            error!(log, "No assets directory configured. All console page and asset requests will 404.");
+            error!(
+                log,
+                "No assets directory configured. All console page and asset requests will 404."
+            );
         }
 
         // TODO: check that asset directory exists, check for particular assets

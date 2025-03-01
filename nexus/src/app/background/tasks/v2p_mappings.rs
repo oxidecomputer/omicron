@@ -1,7 +1,7 @@
 use std::{collections::HashSet, sync::Arc};
 
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use nexus_db_model::Sled;
 use nexus_db_queries::{context::OpContext, db::DataStore};
 use nexus_networking::sled_client_from_address;

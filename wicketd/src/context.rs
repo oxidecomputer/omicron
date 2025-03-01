@@ -4,15 +4,15 @@
 
 //! User provided dropshot server context
 
+use crate::MgsHandle;
 use crate::bootstrap_addrs::BootstrapPeers;
 use crate::preflight_check::PreflightCheckerHandler;
 use crate::rss_config::CurrentRssConfig;
 use crate::transceivers::Handle as TransceiverHandle;
 use crate::update_tracker::UpdateTracker;
-use crate::MgsHandle;
+use anyhow::Result;
 use anyhow::anyhow;
 use anyhow::bail;
-use anyhow::Result;
 use internal_dns_resolver::Resolver;
 use sled_hardware_types::Baseboard;
 use slog::info;

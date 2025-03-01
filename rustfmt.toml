@@ -4,3 +4,4 @@
 max_width = 80
 use_small_heuristics = "max"
 edition = "2021"
+style_edition = "2024"

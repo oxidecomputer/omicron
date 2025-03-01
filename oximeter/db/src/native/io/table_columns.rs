@@ -20,10 +20,12 @@
 //! `details` field.
 
 use super::string;
+use crate::native::Error;
 use crate::native::block::DataType;
 use crate::native::packets::server::ColumnDefaults;
 use crate::native::packets::server::ColumnDescription;
-use crate::native::Error;
+use nom::Err as NomErr;
+use nom::IResult;
 use nom::bytes::streaming::is_not;
 use nom::bytes::streaming::tag;
 use nom::character::streaming::u64 as nom_u64;
@@ -31,8 +33,6 @@ use nom::error::ErrorKind;
 use nom::sequence::delimited;
 use nom::sequence::separated_pair;
 use nom::sequence::terminated;
-use nom::Err as NomErr;
-use nom::IResult;
 
 /// Decode an array of `ColumnDescription`s from a buffer.
 pub fn decode(
@@ -76,7 +76,7 @@ fn column_descriptions(
             return Err(Error::InvalidPacket {
                 kind: "TableColumns",
                 msg: format!("failed to parse header: {e}"),
-            })
+            });
         }
     };
 
@@ -104,7 +104,7 @@ fn column_descriptions(
                 return Err(Error::InvalidPacket {
                     kind: "TableColumns",
                     msg: format!("failed to parse description: {e}"),
-                })
+                });
             }
         };
         out.push(col);
@@ -163,11 +163,11 @@ fn column_description(s: &str) -> IResult<&str, ColumnDescription> {
 
 #[cfg(test)]
 mod tests {
+    use super::NomErr;
     use super::backtick_quoted_column_name;
     use super::column_count;
     use super::column_description;
     use super::column_descriptions;
-    use super::NomErr;
     use crate::native::block::DataType;
 
     #[test]

@@ -13,14 +13,14 @@ use omicron_uuid_kinds::SledUuid;
 
 use crate::{
     deployment::{
-        blueprint_zone_type, Blueprint, BlueprintZoneDisposition,
-        BlueprintZoneType,
+        Blueprint, BlueprintZoneDisposition, BlueprintZoneType,
+        blueprint_zone_type,
     },
     internal_api::params::{DnsConfigZone, DnsRecord},
     silo::{default_silo_name, silo_dns_name},
 };
 
-use super::{blueprint_nexus_external_ips, Overridables, Sled};
+use super::{Overridables, Sled, blueprint_nexus_external_ips};
 
 /// Returns the expected contents of internal DNS based on the given blueprint
 pub fn blueprint_internal_dns_config(

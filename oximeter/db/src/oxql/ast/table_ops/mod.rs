@@ -20,8 +20,8 @@ use self::filter::Filter;
 use self::group_by::GroupBy;
 use self::join::Join;
 use self::limit::Limit;
-use crate::oxql::ast::Query;
 use crate::oxql::Error;
+use crate::oxql::ast::Query;
 use chrono::DateTime;
 use chrono::Utc;
 use oximeter::TimeseriesName;
@@ -122,9 +122,9 @@ impl TableOp {
 #[cfg(test)]
 mod test {
     use super::GroupedTableOp;
+    use crate::oxql::ast::Query;
     use crate::oxql::ast::table_ops::BasicTableOp;
     use crate::oxql::ast::table_ops::TableOp;
-    use crate::oxql::ast::Query;
 
     #[test]
     fn test_grouped_table_op_display() {

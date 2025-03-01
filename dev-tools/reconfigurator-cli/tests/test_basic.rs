@@ -8,20 +8,20 @@ use expectorate::assert_contents;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::SLED_AGENT_UUID;
+use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_common::api::external::Error;
-use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_test_utils::dev::poll::wait_for_condition;
+use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
+use omicron_test_utils::dev::test_cmds::Redactor;
 use omicron_test_utils::dev::test_cmds::assert_exit_code;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
-use omicron_test_utils::dev::test_cmds::Redactor;
-use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::debug;
@@ -32,8 +32,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use subprocess::Exec;
 use subprocess::ExitStatus;
-use swrite::swriteln;
 use swrite::SWrite;
+use swrite::swriteln;
 
 fn path_to_cli() -> PathBuf {
     path_to_executable(env!("CARGO_BIN_EXE_reconfigurator-cli"))

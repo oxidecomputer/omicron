@@ -2,13 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
-use http::method::Method;
+use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
+use http::method::Method;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::resource_helpers::create_affinity_group;
 use nexus_test_utils::resource_helpers::create_anti_affinity_group;
 use nexus_test_utils::resource_helpers::create_default_ip_pool;
@@ -19,7 +20,6 @@ use nexus_test_utils::resource_helpers::create_vpc;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::project_get;
 use nexus_test_utils::resource_helpers::projects_list;
-use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;

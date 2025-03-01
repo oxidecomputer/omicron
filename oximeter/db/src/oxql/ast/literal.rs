@@ -6,8 +6,8 @@
 
 // Copyright 2024 Oxide Computer Company
 
-use crate::oxql::ast::cmp::Comparison;
 use crate::oxql::Error;
+use crate::oxql::ast::cmp::Comparison;
 use anyhow::Context;
 use chrono::DateTime;
 use chrono::Utc;
@@ -325,9 +325,9 @@ impl fmt::Display for Literal {
 
 #[cfg(test)]
 mod tests {
+    use super::Literal;
     use super::duration_consts::*;
     use super::duration_to_db_interval;
-    use super::Literal;
     use crate::oxql::ast::cmp::Comparison;
     use oximeter::FieldValue;
 

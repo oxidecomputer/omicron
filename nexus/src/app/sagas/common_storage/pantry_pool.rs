@@ -4,8 +4,8 @@
 
 //! `qorb` support for Crucible pantry connection pooling.
 
-use anyhow::anyhow;
 use anyhow::Context;
+use anyhow::anyhow;
 use internal_dns_resolver::QorbResolver;
 use internal_dns_types::names::ServiceName;
 use qorb::backend;

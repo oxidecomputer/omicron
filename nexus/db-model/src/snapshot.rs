@@ -2,11 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{impl_enum_type, ByteCount};
-use crate::schema::snapshot;
-use crate::typed_uuid::DbTypedUuid;
+use super::{ByteCount, impl_enum_type};
 use crate::BlockSize;
 use crate::Generation;
+use crate::schema::snapshot;
+use crate::typed_uuid::DbTypedUuid;
 use db_macros::Resource;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;

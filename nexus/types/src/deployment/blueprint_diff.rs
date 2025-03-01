@@ -5,17 +5,17 @@
 //! Types helpful for diffing blueprints.
 
 use super::blueprint_display::{
-    constants::*, linear_table_modified, linear_table_unchanged,
     BpClickhouseServersTableSchema, BpDatasetsTableSchema, BpDiffState,
     BpGeneration, BpOmicronZonesTableSchema, BpPhysicalDisksTableSchema,
     BpTable, BpTableColumn, BpTableData, BpTableRow, KvListWithHeading, KvPair,
+    constants::*, linear_table_modified, linear_table_unchanged,
 };
 use super::{
-    unwrap_or_none, zone_sort_key, BlueprintDatasetConfigDiff,
-    BlueprintDatasetDisposition, BlueprintDiff, BlueprintMetadata,
-    BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskConfigDiff,
-    BlueprintZoneConfigDiff, BlueprintZoneImageSource, ClickhouseClusterConfig,
-    CockroachDbPreserveDowngrade,
+    BlueprintDatasetConfigDiff, BlueprintDatasetDisposition, BlueprintDiff,
+    BlueprintMetadata, BlueprintPhysicalDiskConfig,
+    BlueprintPhysicalDiskConfigDiff, BlueprintZoneConfigDiff,
+    BlueprintZoneImageSource, ClickhouseClusterConfig,
+    CockroachDbPreserveDowngrade, unwrap_or_none, zone_sort_key,
 };
 use daft::Diffable;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -2066,11 +2066,7 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
 }
 
 fn display_none_if_empty(value: &str) -> &str {
-    if value.is_empty() {
-        NONE_PARENS
-    } else {
-        value
-    }
+    if value.is_empty() { NONE_PARENS } else { value }
 }
 
 fn display_optional_preserve_downgrade(

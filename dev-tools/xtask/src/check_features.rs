@@ -4,7 +4,7 @@
 
 //! Subcommand: cargo xtask check-features
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use camino::Utf8PathBuf;
 use clap::Parser;
 use std::{collections::HashSet, process::Command};

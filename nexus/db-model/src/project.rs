@@ -6,12 +6,12 @@ use super::{
     AffinityGroup, AntiAffinityGroup, Disk, Generation, Instance, Name,
     Snapshot, Vpc,
 };
+use crate::Image;
 use crate::collection::DatastoreCollectionConfig;
 use crate::schema::{
     affinity_group, anti_affinity_group, disk, image, instance, project,
     snapshot, vpc,
 };
-use crate::Image;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use nexus_types::external_api::params;

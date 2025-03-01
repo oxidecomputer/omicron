@@ -6,8 +6,8 @@
 
 use async_trait::async_trait;
 use camino::{Utf8Path, Utf8PathBuf};
-use serde::{de::DeserializeOwned, Serialize};
-use slog::{debug, error, info, warn, Logger};
+use serde::{Serialize, de::DeserializeOwned};
+use slog::{Logger, debug, error, info, warn};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -27,7 +27,9 @@ pub enum Error {
     #[error("Not found in storage")]
     NotFound,
 
-    #[error("Failed to write the ledger to storage (tried to access: {failed_paths:?})")]
+    #[error(
+        "Failed to write the ledger to storage (tried to access: {failed_paths:?})"
+    )]
     FailedToWrite { failed_paths: Vec<(Utf8PathBuf, Error)> },
 }
 
@@ -95,11 +97,7 @@ impl<T: Ledgerable> Ledger<T> {
 
         // Return the ledger with the highest generation number.
         let ledger = ledgers.into_iter().reduce(|prior, ledger| {
-            if ledger.is_newer_than(&prior) {
-                ledger
-            } else {
-                prior
-            }
+            if ledger.is_newer_than(&prior) { ledger } else { prior }
         });
         ledger
     }
@@ -215,10 +213,10 @@ pub trait Ledgerable: DeserializeOwned + Serialize + Send + Sync {
 mod test {
     use super::*;
 
-    pub use dropshot::test_util::LogContext;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;
     use dropshot::ConfigLoggingLevel;
+    pub use dropshot::test_util::LogContext;
 
     // Copied from `omicron-test-utils` to avoid a circular dependency where
     // `omicron-common` depends on `omicron-test-utils` which depends on

@@ -7,11 +7,11 @@
 use super::DataStore;
 use super::SQL_BATCH_SIZE;
 use crate::db;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
+use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::pagination::paginated_multicolumn;
-use crate::db::pagination::Paginator;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;

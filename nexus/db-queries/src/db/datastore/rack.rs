@@ -4,18 +4,19 @@
 
 //! [`DataStore`] methods on [`Rack`]s.
 
-use super::dns::DnsVersionUpdateBuilder;
 use super::DataStore;
 use super::SERVICE_IP_POOL_NAME;
+use super::dns::DnsVersionUpdateBuilder;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::TransactionError;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::public_error_from_diesel;
-use crate::db::error::retryable;
 use crate::db::error::ErrorHandler;
 use crate::db::error::MaybeRetryable::*;
+use crate::db::error::public_error_from_diesel;
+use crate::db::error::retryable;
 use crate::db::identity::Asset;
 use crate::db::lookup::LookupPath;
 use crate::db::model::CrucibleDataset;
@@ -25,7 +26,6 @@ use crate::db::model::Rack;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
-use crate::db::TransactionError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -42,13 +42,13 @@ use nexus_db_model::SiloUser;
 use nexus_db_model::SiloUserPasswordHash;
 use nexus_db_model::SledState;
 use nexus_db_model::SledUnderlaySubnetAllocation;
-use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
+use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::params as external_params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IdentityType;
@@ -118,11 +118,7 @@ enum RackInitError {
 // can also label errors as retryable.
 impl From<DieselError> for RackInitError {
     fn from(e: DieselError) -> Self {
-        if retryable(&e) {
-            Self::Retryable(e)
-        } else {
-            Self::Database(e)
-        }
+        if retryable(&e) { Self::Retryable(e) } else { Self::Database(e) }
     }
 }
 
@@ -994,10 +990,10 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::db::datastore::Discoverability;
     use crate::db::datastore::test::{
         sled_baseboard_for_test, sled_system_hardware_for_test,
     };
-    use crate::db::datastore::Discoverability;
     use crate::db::model::ExternalIp;
     use crate::db::model::IpKind;
     use crate::db::model::IpPoolRange;
@@ -1337,11 +1333,13 @@ mod test {
         let sled2 = create_test_sled(&datastore, Uuid::new_v4()).await;
         let sled3 = create_test_sled(&datastore, Uuid::new_v4()).await;
 
-        let service_ip_pool_ranges = vec![IpRange::try_from((
-            Ipv4Addr::new(1, 2, 3, 4),
-            Ipv4Addr::new(1, 2, 3, 6),
-        ))
-        .unwrap()];
+        let service_ip_pool_ranges = vec![
+            IpRange::try_from((
+                Ipv4Addr::new(1, 2, 3, 4),
+                Ipv4Addr::new(1, 2, 3, 6),
+            ))
+            .unwrap(),
+        ];
 
         let mut system = SystemDescription::new();
         system
@@ -1613,9 +1611,11 @@ mod test {
             .iter()
             .find(|e| e.parent_id == Some(ntp2_id.into_untyped_uuid()))
             .unwrap();
-        assert!(!observed_external_ips
-            .iter()
-            .any(|e| e.parent_id == Some(ntp3_id.into_untyped_uuid())));
+        assert!(
+            !observed_external_ips
+                .iter()
+                .any(|e| e.parent_id == Some(ntp3_id.into_untyped_uuid()))
+        );
 
         assert!(dns_external_ip.is_service);
         assert_eq!(dns_external_ip.kind, IpKind::Floating);
@@ -1691,9 +1691,10 @@ mod test {
         // Ask for two Nexus services, with different external IPs.
         let nexus_ip_start = Ipv4Addr::new(1, 2, 3, 4);
         let nexus_ip_end = Ipv4Addr::new(1, 2, 3, 5);
-        let service_ip_pool_ranges =
-            vec![IpRange::try_from((nexus_ip_start, nexus_ip_end))
-                .expect("Cannot create IP Range")];
+        let service_ip_pool_ranges = vec![
+            IpRange::try_from((nexus_ip_start, nexus_ip_end))
+                .expect("Cannot create IP Range"),
+        ];
 
         let mut system = SystemDescription::new();
         system

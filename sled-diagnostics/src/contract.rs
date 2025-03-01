@@ -6,7 +6,7 @@
 
 use fs_err as fs;
 use libc::{c_char, c_int, c_void, pid_t};
-use slog::{warn, Logger};
+use slog::{Logger, warn};
 use thiserror::Error;
 
 use std::{
@@ -58,7 +58,9 @@ pub enum ContractError {
         "Failed to call ct_pr_status_get_members for contract {ctid}: {error}"
     )]
     Members { ctid: i32, error: std::io::Error },
-    #[error("ct_status_read returned successfully but handed back a null ptr for {0}")]
+    #[error(
+        "ct_status_read returned successfully but handed back a null ptr for {0}"
+    )]
     Null(std::path::PathBuf),
     #[error("Failed to call ct_status_read on {path}: {error}")]
     StatusRead { path: std::path::PathBuf, error: std::io::Error },

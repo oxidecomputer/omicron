@@ -13,7 +13,6 @@ use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::RouterRoute;
 use nexus_db_queries::db::model::VpcRouter;
 use nexus_db_queries::db::model::VpcRouterKind;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -24,6 +23,7 @@ use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use oxnet::IpNet;
 use std::net::IpAddr;
 use uuid::Uuid;
@@ -39,7 +39,7 @@ impl super::Nexus {
             params::RouterSelector {
                 router: NameOrId::Id(id),
                 vpc: None,
-                project: None
+                project: None,
             } => {
                 let router = LookupPath::new(opctx, &self.db_datastore)
                     .vpc_router_id(id);
@@ -48,19 +48,18 @@ impl super::Nexus {
             params::RouterSelector {
                 router: NameOrId::Name(name),
                 vpc: Some(vpc),
-                project
+                project,
             } => {
                 let router = self
                     .vpc_lookup(opctx, params::VpcSelector { project, vpc })?
                     .vpc_router_name_owned(name.into());
                 Ok(router)
             }
-            params::RouterSelector {
-                router: NameOrId::Id(_),
-                ..
-            } => Err(Error::invalid_request(
-                "when providing router as an ID vpc and project should not be specified",
-            )),
+            params::RouterSelector { router: NameOrId::Id(_), .. } => {
+                Err(Error::invalid_request(
+                    "when providing router as an ID vpc and project should not be specified",
+                ))
+            }
             _ => Err(Error::invalid_request(
                 "router should either be an ID or vpc should be specified",
             )),
@@ -215,12 +214,11 @@ impl super::Nexus {
                     .router_route_name_owned(name.into());
                 Ok(route)
             }
-            params::RouteSelector {
-                route: NameOrId::Id(_),
-                ..
-            } => Err(Error::invalid_request(
-                "when providing route as an ID router, subnet, vpc, and project should not be specified",
-            )),
+            params::RouteSelector { route: NameOrId::Id(_), .. } => {
+                Err(Error::invalid_request(
+                    "when providing route as an ID router, subnet, vpc, and project should not be specified",
+                ))
+            }
             _ => Err(Error::invalid_request(
                 "route should either be an ID or router should be specified",
             )),
@@ -291,15 +289,17 @@ impl super::Nexus {
         match db_route.kind.0 {
             // Default routes allow a constrained form of modification:
             // only the target may change.
-            RouterRouteKind::Default if
-                    params.identity.name.is_some()
+            RouterRouteKind::Default
+                if params.identity.name.is_some()
                     || params.identity.description.is_some()
-                    || params.destination != db_route.destination.0 => {
+                    || params.destination != db_route.destination.0 =>
+            {
                 return Err(Error::invalid_request(
                     "the destination and metadata of a Default route cannot be changed",
-                ))},
+                ));
+            }
 
-            RouterRouteKind::Custom | RouterRouteKind::Default => {},
+            RouterRouteKind::Custom | RouterRouteKind::Default => {}
 
             _ => {
                 return Err(Error::invalid_request(format!(
@@ -386,26 +386,43 @@ fn validate_user_route_targets(
     route_type: RouterRouteKind,
 ) -> Result<(), Error> {
     match (dest, target) {
-        (RouteDestination::Ip(IpAddr::V4(_)), RouteTarget::Ip(IpAddr::V4(_)))
-        | (RouteDestination::Ip(IpAddr::V6(_)), RouteTarget::Ip(IpAddr::V6(_)))
-        | (RouteDestination::IpNet(IpNet::V4(_)), RouteTarget::Ip(IpAddr::V4(_)))
-        | (RouteDestination::IpNet(IpNet::V6(_)), RouteTarget::Ip(IpAddr::V6(_))) => {},
+        (
+            RouteDestination::Ip(IpAddr::V4(_)),
+            RouteTarget::Ip(IpAddr::V4(_)),
+        )
+        | (
+            RouteDestination::Ip(IpAddr::V6(_)),
+            RouteTarget::Ip(IpAddr::V6(_)),
+        )
+        | (
+            RouteDestination::IpNet(IpNet::V4(_)),
+            RouteTarget::Ip(IpAddr::V4(_)),
+        )
+        | (
+            RouteDestination::IpNet(IpNet::V6(_)),
+            RouteTarget::Ip(IpAddr::V6(_)),
+        ) => {}
 
         (RouteDestination::Ip(_), RouteTarget::Ip(_))
-        | (RouteDestination::IpNet(_), RouteTarget::Ip(_))
-            => return Err(Error::invalid_request(
-                "cannot mix explicit IPv4 and IPv6 addresses between destination and target"
-            )),
+        | (RouteDestination::IpNet(_), RouteTarget::Ip(_)) => {
+            return Err(Error::invalid_request(
+                "cannot mix explicit IPv4 and IPv6 addresses between destination and target",
+            ));
+        }
 
-        (RouteDestination::Vpc(_), _) | (_, RouteTarget::Vpc(_)) => return Err(Error::invalid_request(
-            format!("users cannot specify VPCs as a destination or target in {route_type} routes")
-            )),
+        (RouteDestination::Vpc(_), _) | (_, RouteTarget::Vpc(_)) => {
+            return Err(Error::invalid_request(format!(
+                "users cannot specify VPCs as a destination or target in {route_type} routes"
+            )));
+        }
 
-        (_, RouteTarget::Subnet(_)) => return Err(Error::invalid_request(
-            format!("subnets cannot be used as a target in {route_type} routers")
-            )),
+        (_, RouteTarget::Subnet(_)) => {
+            return Err(Error::invalid_request(format!(
+                "subnets cannot be used as a target in {route_type} routers"
+            )));
+        }
 
-        _ => {},
+        _ => {}
     };
 
     Ok(())

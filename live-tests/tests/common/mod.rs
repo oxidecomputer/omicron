@@ -4,7 +4,7 @@
 
 pub mod reconfigurator;
 
-use anyhow::{anyhow, ensure, Context};
+use anyhow::{Context, anyhow, ensure};
 use dropshot::test_util::LogContext;
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;

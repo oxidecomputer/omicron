@@ -9,10 +9,10 @@ use crate::helpers::sps_to_string;
 use crate::installinator_progress::IprStartReceiver;
 use crate::installinator_progress::IprUpdateTracker;
 use crate::mgs::make_mgs_client;
+use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::ensure;
-use anyhow::Context;
 use base64::Engine;
 use bytes::Bytes;
 use display_error_chain::DisplayErrorChain;
@@ -30,8 +30,8 @@ use gateway_client::types::RotImageError;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpUpdateStatus;
-use gateway_messages::SpComponent;
 use gateway_messages::ROT_PAGE_SIZE;
+use gateway_messages::SpComponent;
 use hubtools::RawHubrisArchive;
 use installinator_common::InstallinatorCompletionMetadata;
 use installinator_common::InstallinatorSpec;
@@ -39,34 +39,34 @@ use installinator_common::WriteOutput;
 use omicron_common::disk::M2Slot;
 use omicron_common::update::ArtifactHash;
 use semver::Version;
+use slog::Logger;
 use slog::error;
 use slog::info;
 use slog::o;
 use slog::warn;
-use slog::Logger;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::btree_map::Entry;
 use std::net::SocketAddrV6;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 use std::time::Instant;
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
+use tokio::sync::Mutex;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
-use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio_util::io::StreamReader;
 use update_common::artifacts::ArtifactIdData;
 use update_common::artifacts::ArtifactsWithPlan;
 use update_common::artifacts::ControlPlaneZonesMode;
 use update_common::artifacts::UpdatePlan;
-use update_engine::events::ProgressUnits;
 use update_engine::AbortHandle;
 use update_engine::StepSpec;
+use update_engine::events::ProgressUnits;
 use uuid::Uuid;
 use wicket_common::inventory::SpComponentCaboose;
 use wicket_common::inventory::SpIdentifier;
@@ -1976,7 +1976,7 @@ impl UpdateContext {
                         error: anyhow!(
                             "unexpected RoT active slot {rot_active_slot}"
                         ),
-                    })
+                    });
                 }
             };
 
@@ -2255,7 +2255,7 @@ impl UpdateContext {
                     // the minimum we will ever return is 3
                     RotState::V2 { .. } => unreachable!(),
                     RotState::V3 { stage0_error, stage0next_error, .. } => {
-                        return Ok((stage0_error, stage0next_error))
+                        return Ok((stage0_error, stage0next_error));
                     }
                     // ugh
                     RotState::CommunicationFailed { message } => {

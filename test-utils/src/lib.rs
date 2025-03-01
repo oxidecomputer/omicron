@@ -8,8 +8,8 @@
 // it's expected that we'll have links to private items in the docs.
 #![allow(rustdoc::private_intra_doc_links)]
 
-use anyhow::anyhow;
 use anyhow::Context;
+use anyhow::anyhow;
 use headers::authorization::Credentials;
 
 pub mod certificates;

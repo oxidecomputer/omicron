@@ -2,10 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use super::ACTION_GENERATE_ID;
 use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
-use super::ACTION_GENERATE_ID;
 use crate::app::sagas::declare_saga_actions;
 use crate::external_api::params;
 use nexus_db_model::InternetGatewayIpPool;

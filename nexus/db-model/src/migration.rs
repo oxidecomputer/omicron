@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::Generation;
-use crate::schema::migration;
 use crate::MigrationState;
+use crate::schema::migration;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::internal::nexus;

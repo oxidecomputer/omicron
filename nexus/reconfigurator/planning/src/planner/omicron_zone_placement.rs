@@ -335,8 +335,8 @@ pub mod test {
     use proptest::collection::btree_map;
     use proptest::sample::size_range;
     use std::collections::BTreeMap;
-    use test_strategy::proptest;
     use test_strategy::Arbitrary;
+    use test_strategy::proptest;
     use uuid::Uuid;
 
     #[derive(Debug, Clone, Arbitrary)]

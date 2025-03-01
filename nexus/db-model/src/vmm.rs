@@ -13,8 +13,8 @@
 //! sled agent or that sled agent will never update (like the sled ID).
 
 use super::{Generation, VmmState};
-use crate::schema::vmm;
 use crate::SqlU16;
+use crate::schema::vmm;
 use chrono::{DateTime, Utc};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::{Deserialize, Serialize};

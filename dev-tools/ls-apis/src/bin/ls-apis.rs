@@ -4,7 +4,7 @@
 
 //! Show information about Progenitor-based APIs
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use omicron_ls_apis::{

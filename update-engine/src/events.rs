@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 use serde_with::rust::deserialize_ignore_any;
 
 use crate::{
-    errors::ConvertGenericError, AsError, ExecutionId, GenericSpec, NestedSpec,
-    StepSpec,
+    AsError, ExecutionId, GenericSpec, NestedSpec, StepSpec,
+    errors::ConvertGenericError,
 };
 
 #[derive_where(Clone, Debug, PartialEq, Eq)]

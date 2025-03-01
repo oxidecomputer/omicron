@@ -5,8 +5,8 @@
 //! Shared state used by API request handlers
 use super::authn;
 use super::authz;
-use crate::authn::external::session_cookie::Session;
 use crate::authn::ConsoleSessionWithSiloId;
+use crate::authn::external::session_cookie::Session;
 use crate::authz::AuthorizedResource;
 use crate::storage::Storage;
 use chrono::{DateTime, Utc};

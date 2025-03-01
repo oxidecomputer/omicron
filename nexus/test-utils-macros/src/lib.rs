@@ -4,7 +4,7 @@ use std::collections::HashSet as Set;
 use syn::parse::{Parse, ParseStream, Result};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
-use syn::{parse_macro_input, ItemFn, Token};
+use syn::{ItemFn, Token, parse_macro_input};
 
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub(crate) enum NexusTestArg {

@@ -841,7 +841,9 @@ mod test {
             "net": "ff12::3456/64"
         });
 
-        assert!(serde_json::from_value::<Ipv6Subnet<64>>(value.clone()).is_ok());
+        assert!(
+            serde_json::from_value::<Ipv6Subnet<64>>(value.clone()).is_ok()
+        );
         assert!(serde_json::from_value::<Ipv6Subnet<56>>(value).is_err());
     }
 }

@@ -9,10 +9,10 @@
 //!
 //! This isn't (supposed to be) a test for the `ls-apis` tool itself.
 
+use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
 use omicron_test_utils::dev::test_cmds::assert_exit_code;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
-use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
 
 /// name of the "ls-apis" executable
 const CMD_LS_APIS: &str = env!("CARGO_BIN_EXE_ls-apis");

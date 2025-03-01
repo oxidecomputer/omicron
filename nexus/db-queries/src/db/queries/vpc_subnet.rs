@@ -5,10 +5,10 @@
 //! Diesel query used for VPC Subnet allocation and insertion
 
 use crate::db;
+use crate::db::DbConnection;
 use crate::db::identity::Resource;
 use crate::db::model::VpcSubnet;
 use crate::db::schema::vpc_subnet::dsl;
-use crate::db::DbConnection;
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::*;

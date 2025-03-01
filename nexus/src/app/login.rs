@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use dropshot::{http_response_found, HttpError, HttpResponseFound};
+use dropshot::{HttpError, HttpResponseFound, http_response_found};
 use nexus_auth::context::OpContext;
 use nexus_db_model::{ConsoleSession, Name};
 use nexus_db_queries::authn::silos::IdentityProviderType;

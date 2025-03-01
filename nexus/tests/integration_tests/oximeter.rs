@@ -7,7 +7,7 @@
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::wait_for_producer;
 use nexus_test_utils_macros::nexus_test;
-use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
+use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use oximeter_db::DbWrite;
 use std::time::Duration;
 use uuid::Uuid;
@@ -198,8 +198,10 @@ async fn test_oximeter_reregistration() {
     ) {
         assert_eq!(timeseries.timeseries_name, new_timeseries.timeseries_name);
         assert_eq!(timeseries.target, new_timeseries.target);
-        assert!(timeseries.measurements.len() <= new_timeseries.measurements.len(),
-            "New timeseries should have at least as many measurements as the original");
+        assert!(
+            timeseries.measurements.len() <= new_timeseries.measurements.len(),
+            "New timeseries should have at least as many measurements as the original"
+        );
         let n_measurements = timeseries.measurements.len();
         assert_eq!(
             timeseries.measurements,

@@ -6,7 +6,6 @@ use crate::blippy::Blippy;
 use crate::blippy::Severity;
 use crate::blippy::SledKind;
 use nexus_sled_agent_shared::inventory::ZoneKind;
-use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetFilter;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
@@ -15,15 +14,16 @@ use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
+use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::btree_map::Entry;
 use std::net::Ipv6Addr;
 
 pub(crate) fn perform_all_blueprint_only_checks(blippy: &mut Blippy<'_>) {
@@ -308,7 +308,7 @@ impl<'a> DatasetsBySledCache<'a> {
         let vacant_entry = match self.by_sled.entry(sled_id) {
             Entry::Vacant(vacant_entry) => vacant_entry,
             Entry::Occupied(occupied_entry) => {
-                return occupied_entry.into_mut()
+                return occupied_entry.into_mut();
             }
         };
 
@@ -563,13 +563,13 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::BlippyReportSortKey;
     use crate::blippy::Kind;
     use crate::blippy::Note;
-    use crate::BlippyReportSortKey;
-    use nexus_reconfigurator_planning::example::example;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
-    use nexus_types::deployment::blueprint_zone_type;
+    use nexus_reconfigurator_planning::example::example;
     use nexus_types::deployment::BlueprintZoneType;
+    use nexus_types::deployment::blueprint_zone_type;
     use omicron_test_utils::dev::test_setup_log;
     use std::mem;
 

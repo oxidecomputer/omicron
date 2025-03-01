@@ -4,9 +4,9 @@
 
 use std::io;
 use std::pin::Pin;
-use std::task::ready;
 use std::task::Context;
 use std::task::Poll;
+use std::task::ready;
 use tokio::io::AsyncWrite;
 
 /// `BlockSizeBufWriter` is analogous to a tokio's `BufWriter`, except it
@@ -233,15 +233,13 @@ mod tests {
         if !inner.write_requests.is_empty() {
             let last = inner.write_requests.len() - 1;
             assert!(
-                inner.write_requests[last]
-                    <= block_size,
+                inner.write_requests[last] <= block_size,
                 "last block size too large (expected at most {block_size}, got {})",
                 inner.write_requests[last],
             );
             for (i, &wr) in inner.write_requests.iter().take(last).enumerate() {
                 assert_eq!(
-                    wr,
-                    block_size,
+                    wr, block_size,
                     "write request {i} had size {wr} (expected block size {block_size})",
                 );
             }

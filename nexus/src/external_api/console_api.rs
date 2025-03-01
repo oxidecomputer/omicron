@@ -472,7 +472,7 @@ fn find_file(
 
 #[cfg(test)]
 mod test {
-    use super::{accept_gz, find_file, RelativeUri};
+    use super::{RelativeUri, accept_gz, find_file};
     use camino::{Utf8Path, Utf8PathBuf};
     use http::StatusCode;
 
@@ -534,12 +534,13 @@ mod test {
         let path_str = "tests/static/assets/a_symlink";
 
         // the file in question does exist and is a symlink
-        assert!(root
-            .join(path_str)
-            .symlink_metadata()
-            .unwrap()
-            .file_type()
-            .is_symlink());
+        assert!(
+            root.join(path_str)
+                .symlink_metadata()
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
 
         // so we 404
         let error = find_file(Utf8Path::new(path_str), &root).unwrap_err();

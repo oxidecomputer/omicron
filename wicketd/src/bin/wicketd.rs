@@ -4,12 +4,12 @@
 
 //! Executable for wicketd: technician port based management service
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use camino::Utf8PathBuf;
 use clap::Parser;
 use omicron_common::{
     address::Ipv6Subnet,
-    cmd::{fatal, CmdError},
+    cmd::{CmdError, fatal},
 };
 use sled_hardware_types::Baseboard;
 use std::net::{Ipv6Addr, SocketAddrV6};

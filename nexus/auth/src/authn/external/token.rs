@@ -11,8 +11,8 @@ use super::SchemeResult;
 use super::SiloUserSilo;
 use crate::authn;
 use async_trait::async_trait;
-use headers::authorization::{Authorization, Bearer};
 use headers::HeaderMapExt;
+use headers::authorization::{Authorization, Bearer};
 
 // This scheme is intended for clients such as the API, CLI, etc.
 //
@@ -96,12 +96,12 @@ pub trait TokenContext {
 
 #[cfg(test)]
 mod test {
-    use super::{parse_token, TOKEN_PREFIX};
+    use super::{TOKEN_PREFIX, parse_token};
     use anyhow::Context;
-    use headers::authorization::Bearer;
-    use headers::authorization::Credentials;
     use headers::Authorization;
     use headers::HeaderMapExt;
+    use headers::authorization::Bearer;
+    use headers::authorization::Credentials;
 
     /// Returns a value of the `Authorization` header for this actor that will be
     /// accepted using this scheme.

@@ -18,16 +18,16 @@
 // vs. there were no disks in it.  This seems likely to be a fair bit more
 // complicated to do safely and generally compared to what we have now.
 
-use super::pool::DbConnection;
 use super::Pool;
+use super::pool::DbConnection;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::{
     self,
-    error::{public_error_from_diesel, ErrorHandler},
+    error::{ErrorHandler, public_error_from_diesel},
 };
 use ::oximeter::types::ProducerRegistry;
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::pg::Pg;
 use diesel::prelude::*;
@@ -39,7 +39,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::backoff::{
-    retry_notify, retry_policy_internal_service, BackoffError,
+    BackoffError, retry_notify, retry_policy_internal_service,
 };
 use omicron_uuid_kinds::{GenericUuid, SledUuid};
 use slog::Logger;
@@ -466,12 +466,12 @@ mod test {
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::queries::vpc_subnet::InsertVpcSubnetQuery;
     use chrono::{Duration, Utc};
-    use futures::stream;
     use futures::StreamExt;
+    use futures::stream;
     use nexus_config::RegionAllocationStrategy;
     use nexus_db_fixed_data::silo::DEFAULT_SILO;
     use nexus_db_model::IpAttachState;
-    use nexus_db_model::{to_db_typed_uuid, Generation};
+    use nexus_db_model::{Generation, to_db_typed_uuid};
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::external_api::params;
@@ -1645,16 +1645,18 @@ mod test {
         let params = create_test_disk_create_params("disk1", alloc_size);
         let volume1_id = VolumeUuid::new_v4();
 
-        assert!(datastore
-            .disk_region_allocate(
-                &opctx,
-                volume1_id,
-                &params.disk_source,
-                params.size,
-                &RegionAllocationStrategy::Random { seed: Some(0) },
-            )
-            .await
-            .is_err());
+        assert!(
+            datastore
+                .disk_region_allocate(
+                    &opctx,
+                    volume1_id,
+                    &params.disk_source,
+                    params.size,
+                    &RegionAllocationStrategy::Random { seed: Some(0) },
+                )
+                .await
+                .is_err()
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2032,10 +2034,12 @@ mod test {
         );
 
         // Deleting a non-existing record fails
-        assert!(datastore
-            .deallocate_external_ip(&opctx, Uuid::nil())
-            .await
-            .is_err());
+        assert!(
+            datastore
+                .deallocate_external_ip(&opctx, Uuid::nil())
+                .await
+                .is_err()
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

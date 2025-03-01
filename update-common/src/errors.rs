@@ -130,9 +130,7 @@ pub enum RepositoryError {
         error: hubtools::CabooseError,
     },
 
-    #[error(
-        "error reading board from hubris caboose of {0:?}: non-utf8 value"
-    )]
+    #[error("error reading board from hubris caboose of {0:?}: non-utf8 value")]
     ReadHubrisCabooseBoardUtf8(ArtifactId),
 
     #[error("error reading name from hubris caboose of {0:?}: non-utf8 value")]

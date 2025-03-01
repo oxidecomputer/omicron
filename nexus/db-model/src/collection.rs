@@ -2,10 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use diesel::pg::Pg;
 use diesel::Column;
 use diesel::ExpressionMethods;
 use diesel::Selectable;
+use diesel::pg::Pg;
 use std::fmt::Debug;
 
 /// Trait to be implemented by any structs representing a collection.

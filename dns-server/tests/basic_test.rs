@@ -5,14 +5,14 @@
 use anyhow::{Context, Result};
 use camino_tempfile::Utf8TempDir;
 use dns_service_client::Client;
-use dropshot::{test_util::LogContext, HandlerTaskMode};
+use dropshot::{HandlerTaskMode, test_util::LogContext};
 use hickory_client::{
     client::{AsyncClient, ClientHandle},
     error::ClientError,
     udp::UdpClientStream,
 };
-use hickory_resolver::error::ResolveErrorKind;
 use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::error::ResolveErrorKind;
 use hickory_resolver::{
     config::{NameServerConfig, Protocol, ResolverConfig, ResolverOpts},
     proto::{

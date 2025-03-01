@@ -6,8 +6,8 @@
 
 //! Database representation of affinity and anti-affinity groups
 
-use super::impl_enum_type;
 use super::Name;
+use super::impl_enum_type;
 use crate::schema::affinity_group;
 use crate::schema::affinity_group_instance_membership;
 use crate::schema::anti_affinity_group;

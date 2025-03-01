@@ -6,10 +6,10 @@
 
 use anyhow::Context;
 use anyhow::Result;
-use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
-use http::method::Method;
+use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
+use http::method::Method;
 use nexus_client::types::LastResult;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;

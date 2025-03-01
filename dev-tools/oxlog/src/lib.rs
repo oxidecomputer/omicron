@@ -25,11 +25,7 @@ fn get_uuid_dir(result: io::Result<Utf8DirEntry>) -> Option<Uuid> {
         return None;
     }
     let file_name = entry.file_name();
-    if let Ok(uuid) = file_name.parse() {
-        Some(uuid)
-    } else {
-        None
-    }
+    if let Ok(uuid) = file_name.parse() { Some(uuid) } else { None }
 }
 
 #[derive(Debug)]
@@ -484,18 +480,24 @@ mod tests {
                 "system-illumos-blah:default.log.0"
             )
         );
-        assert!(oxide_smf_service_name_from_log_file_name(
-            "not-oxide-blah:default.log"
-        )
-        .is_none());
-        assert!(oxide_smf_service_name_from_log_file_name(
-            "not-system-illumos-blah:default.log"
-        )
-        .is_none());
-        assert!(oxide_smf_service_name_from_log_file_name(
-            "system-blah:default.log"
-        )
-        .is_none());
+        assert!(
+            oxide_smf_service_name_from_log_file_name(
+                "not-oxide-blah:default.log"
+            )
+            .is_none()
+        );
+        assert!(
+            oxide_smf_service_name_from_log_file_name(
+                "not-system-illumos-blah:default.log"
+            )
+            .is_none()
+        );
+        assert!(
+            oxide_smf_service_name_from_log_file_name(
+                "system-blah:default.log"
+            )
+            .is_none()
+        );
     }
 
     #[test]

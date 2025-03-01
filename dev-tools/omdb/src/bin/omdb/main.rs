@@ -33,9 +33,9 @@
 //!    find strange things when debugging but we need our tools to tell us as
 //!    much as they can!)
 
+use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::ensure;
-use anyhow::Context;
 use clap::Args;
 use clap::ColorChoice;
 use clap::Parser;

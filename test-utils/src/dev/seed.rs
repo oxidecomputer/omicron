@@ -4,7 +4,7 @@
 
 use std::io::{BufWriter, Write};
 
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 use camino::{Utf8Path, Utf8PathBuf};
 use filetime::FileTime;
 use slog::Logger;

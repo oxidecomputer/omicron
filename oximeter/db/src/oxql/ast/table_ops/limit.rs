@@ -86,8 +86,8 @@ mod tests {
     use chrono::Utc;
     use oximeter::FieldValue;
     use oxql_types::{
-        point::{DataType, MetricType},
         Timeseries,
+        point::{DataType, MetricType},
     };
     use std::{collections::BTreeMap, time::Duration};
 
@@ -220,8 +220,7 @@ mod tests {
         let limit = Limit { kind, count: 100.try_into().unwrap() };
         let limited = limit.apply(&tables).expect("This should be infallible");
         assert_eq!(
-            limited,
-            tables,
+            limited, tables,
             "Limiting tables to more than their length should return the same thing"
         );
     }

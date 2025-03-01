@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{impl_enum_wrapper, Name};
+use super::{Name, impl_enum_wrapper};
 use crate::schema::router_route;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;

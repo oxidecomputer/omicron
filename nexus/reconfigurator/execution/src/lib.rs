@@ -6,15 +6,15 @@
 //!
 //! See `nexus_reconfigurator_planning` crate-level docs for background.
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::execution::*;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::execution::*;
 use nexus_types::external_api::views::SledState;
 use nexus_types::identity::Asset;
 use omicron_uuid_kinds::GenericUuid;
@@ -26,9 +26,9 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use update_engine::merge_anyhow_list;
 use update_engine::StepSuccess;
 use update_engine::StepWarning;
+use update_engine::merge_anyhow_list;
 
 mod clickhouse;
 mod cockroachdb;

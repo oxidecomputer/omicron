@@ -16,10 +16,14 @@ pub(crate) enum ArtifactFetchError {
         error: HttpError,
     },
 
-    #[error("peer {peer} timed out ({timeout:?}) after returning {bytes_fetched} bytes")]
+    #[error(
+        "peer {peer} timed out ({timeout:?}) after returning {bytes_fetched} bytes"
+    )]
     Timeout { peer: SocketAddr, timeout: Duration, bytes_fetched: usize },
 
-    #[error("artifact size in Content-Length header ({artifact_size}) did not match downloaded size ({downloaded_bytes})")]
+    #[error(
+        "artifact size in Content-Length header ({artifact_size}) did not match downloaded size ({downloaded_bytes})"
+    )]
     SizeMismatch { artifact_size: u64, downloaded_bytes: u64 },
 }
 

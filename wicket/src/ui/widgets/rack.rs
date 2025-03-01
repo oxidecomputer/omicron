@@ -413,9 +413,5 @@ type ComponentRectsMap = BTreeMap<ComponentId, Rect>;
 
 /// Ensure that a u16 is an even number by adding 1 if necessary.
 pub fn make_even(val: u16) -> u16 {
-    if val % 2 == 0 {
-        val
-    } else {
-        val + 1
-    }
+    if val % 2 == 0 { val } else { val + 1 }
 }

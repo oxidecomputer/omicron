@@ -2,13 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::integration_tests::instances::InstanceOp;
 use crate::integration_tests::instances::instance_post;
 use crate::integration_tests::instances::instance_simulate;
 use crate::integration_tests::instances::instance_wait_for_state;
-use crate::integration_tests::instances::InstanceOp;
 use dropshot::HttpErrorResponseBody;
-use http::method::Method;
 use http::StatusCode;
+use http::method::Method;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;

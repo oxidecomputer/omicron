@@ -2,16 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use clickhouse_admin_server_client::types::{SystemTable, SystemTimeSeries};
 use ratatui::{
+    Frame,
     layout::{Constraint, Rect},
     style::{Color, Style, Stylize},
     symbols::Marker,
     text::Line,
     widgets::{Axis, Block, Chart, Dataset, GraphType, LegendPosition},
-    Frame,
 };
 use std::fmt::Display;
 
@@ -186,11 +186,7 @@ fn padded_min_value_raw(unit: Unit, min_value_raw: &f64) -> Result<f64> {
         }
         Unit::Gibibyte | Unit::Mebibyte => {
             let bytes = unit.as_bytes_f64()?;
-            if *min_value_raw <= bytes {
-                0.0
-            } else {
-                min_value_raw - bytes
-            }
+            if *min_value_raw <= bytes { 0.0 } else { min_value_raw - bytes }
         }
     };
     Ok(padded_value.floor())
@@ -211,11 +207,7 @@ fn padded_min_value_as_unit(unit: Unit, min_value_raw: &f64) -> Result<f64> {
         }
         Unit::Gibibyte | Unit::Mebibyte => {
             let value_as_unit = min_value_raw / unit.as_bytes_f64()?;
-            if value_as_unit < 1.0 {
-                0.0
-            } else {
-                value_as_unit - 1.0
-            }
+            if value_as_unit < 1.0 { 0.0 } else { value_as_unit - 1.0 }
         }
     };
     Ok(padded_value.floor())
@@ -431,11 +423,13 @@ impl ChartData {
     }
 
     pub fn render_line_chart(&self, frame: &mut Frame, area: Rect) {
-        let datasets = vec![Dataset::default()
-            .marker(Marker::Braille)
-            .style(Style::default().fg(Color::LightGreen))
-            .graph_type(GraphType::Line)
-            .data(&self.data_points.data)];
+        let datasets = vec![
+            Dataset::default()
+                .marker(Marker::Braille)
+                .style(Style::default().fg(Color::LightGreen))
+                .graph_type(GraphType::Line)
+                .data(&self.data_points.data),
+        ];
 
         let chart = Chart::new(datasets)
             .block(
@@ -530,8 +524,8 @@ impl ChartData {
 #[cfg(test)]
 mod tests {
     use crate::{
-        chart::{Unit, YAxisValues},
         ChartData, ChartMetadata, MetricName,
+        chart::{Unit, YAxisValues},
     };
     use chrono::DateTime;
     use clickhouse_admin_server_client::types::SystemTimeSeries;

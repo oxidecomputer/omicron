@@ -5,6 +5,11 @@
 //! Query information about the Dropshot/OpenAPI/Progenitor-based APIs within
 //! the Oxide system
 
+use crate::ClientPackageName;
+use crate::DeploymentUnitName;
+use crate::LoadArgs;
+use crate::ServerComponentName;
+use crate::ServerPackageName;
 use crate::api_metadata::AllApiMetadata;
 use crate::api_metadata::ApiMetadata;
 use crate::api_metadata::Evaluation;
@@ -12,13 +17,8 @@ use crate::api_metadata::VersionedHow;
 use crate::cargo::DepPath;
 use crate::parse_toml_file;
 use crate::workspaces::Workspaces;
-use crate::ClientPackageName;
-use crate::DeploymentUnitName;
-use crate::LoadArgs;
-use crate::ServerComponentName;
-use crate::ServerPackageName;
 use anyhow::Result;
-use anyhow::{anyhow, bail, Context};
+use anyhow::{Context, anyhow, bail};
 use camino::Utf8PathBuf;
 use cargo_metadata::Package;
 use parse_display::{Display, FromStr};
@@ -882,11 +882,12 @@ impl<'a> ServerComponentsTracker<'a> {
             );
         }
 
-        assert!(self
-            .unit_server_components
-            .entry(deployment_unit.clone())
-            .or_default()
-            .insert(server_component.clone()));
+        assert!(
+            self.unit_server_components
+                .entry(deployment_unit.clone())
+                .or_default()
+                .insert(server_component.clone())
+        );
         Ok(())
     }
 }

@@ -32,7 +32,9 @@ pub enum PooledDiskError {
     NotFound { path: Utf8PathBuf, partition: Partition },
     #[error("Zpool UUID required to format this disk")]
     MissingZpoolUuid,
-    #[error("Observed Zpool with unexpected UUID (saw: {observed}, expected: {expected})")]
+    #[error(
+        "Observed Zpool with unexpected UUID (saw: {observed}, expected: {expected})"
+    )]
     UnexpectedUuid { expected: ZpoolUuid, observed: ZpoolUuid },
     #[error("Unexpected disk variant")]
     UnexpectedVariant,

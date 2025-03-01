@@ -2,25 +2,25 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::Responsiveness;
 use crate::config::Config;
 use crate::config::NetworkConfig;
-use crate::Responsiveness;
-use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
+use anyhow::bail;
 use gateway_messages::sp_impl;
 use gateway_messages::sp_impl::Sender;
 use gateway_messages::sp_impl::SpHandler;
 use nix::net::if_::if_nametoindex;
+use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::info;
-use slog::Logger;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use tokio::net::UdpSocket;
 
 /// Thin wrapper pairing a [`UdpSocket`] with a buffer sized for gateway
@@ -181,11 +181,7 @@ where
     let response = sp_impl::handle_message(sender, data, handler, out)
         .map(|n| (&out[..n], addr));
 
-    if should_respond.load(Ordering::SeqCst) {
-        Ok(response)
-    } else {
-        Ok(None)
-    }
+    if should_respond.load(Ordering::SeqCst) { Ok(response) } else { Ok(None) }
 }
 
 pub(crate) trait SimSpHandler: SpHandler {

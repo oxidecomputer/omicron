@@ -13,7 +13,7 @@ use tempfile::TempDir;
 use tokio::{
     fs::File,
     io::{AsyncBufReadExt, BufReader},
-    time::{sleep, Instant},
+    time::{Instant, sleep},
 };
 
 /// Specifies the amount of time we will wait for `mgd` to launch,

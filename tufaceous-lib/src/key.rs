@@ -1,7 +1,7 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use aws_lc_rs::rand::SystemRandom;
 use aws_lc_rs::signature::Ed25519KeyPair;
-use base64::{engine::general_purpose::URL_SAFE, Engine};
+use base64::{Engine, engine::general_purpose::URL_SAFE};
 use std::fmt::Display;
 use std::str::FromStr;
 use tough::async_trait;

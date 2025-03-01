@@ -4,7 +4,7 @@
 
 use std::{
     borrow::Borrow,
-    collections::{hash_map, BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap, hash_map},
     fmt,
     hash::Hash,
 };
@@ -169,7 +169,7 @@ impl<T: TriMapEntry> TriMap<T> {
     /// an explicit check for tests.
     #[cfg(test)]
     fn validate(&self) -> anyhow::Result<()> {
-        use anyhow::{ensure, Context};
+        use anyhow::{Context, ensure};
 
         // Check that all the maps are of the right size.
         ensure!(
@@ -324,7 +324,7 @@ mod tests {
     use super::*;
     use prop::sample::SizeRange;
     use proptest::prelude::*;
-    use test_strategy::{proptest, Arbitrary};
+    use test_strategy::{Arbitrary, proptest};
 
     #[derive(
         Clone, Debug, Eq, PartialEq, Arbitrary, Serialize, Deserialize,
@@ -518,7 +518,9 @@ mod tests {
                 )
             }
             (None, Err(error)) => {
-                panic!("unexpected error: {error}, deserialization should have succeeded")
+                panic!(
+                    "unexpected error: {error}, deserialization should have succeeded"
+                )
             }
             (Some(first_error), Err(error)) => {
                 // first_error is the error from the map, and error is the

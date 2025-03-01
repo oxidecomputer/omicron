@@ -141,13 +141,14 @@ pub static DEMO_SILO_USER_ID_DELETE_URL: LazyLock<String> =
             DEFAULT_SILO.identity().name,
         )
     });
-pub static DEMO_SILO_USER_ID_SET_PASSWORD_URL: LazyLock<String> =
-    LazyLock::new(|| {
+pub static DEMO_SILO_USER_ID_SET_PASSWORD_URL: LazyLock<String> = LazyLock::new(
+    || {
         format!(
-        "/v1/system/identity-providers/local/users/{{id}}/set-password?silo={}",
-        DEFAULT_SILO.identity().name,
-    )
-    });
+            "/v1/system/identity-providers/local/users/{{id}}/set-password?silo={}",
+            DEFAULT_SILO.identity().name,
+        )
+    },
+);
 
 // Project used for testing
 pub static DEMO_PROJECT_NAME: LazyLock<Name> =
@@ -723,10 +724,10 @@ pub const DEMO_SWITCH_PORT_URL: &'static str =
 pub static DEMO_SWITCH_PORT_SETTINGS_APPLY_URL: LazyLock<String> =
     LazyLock::new(|| {
         format!(
-        "/v1/system/hardware/switch-port/qsfp7/settings?rack_id={}&switch_location={}",
-        uuid::Uuid::new_v4(),
-        "switch0",
-    )
+            "/v1/system/hardware/switch-port/qsfp7/settings?rack_id={}&switch_location={}",
+            uuid::Uuid::new_v4(),
+            "switch0",
+        )
     });
 pub static DEMO_SWITCH_PORT_SETTINGS: LazyLock<
     params::SwitchPortApplySettings,

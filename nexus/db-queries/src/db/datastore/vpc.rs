@@ -13,8 +13,8 @@ use crate::db::collection_attach::AttachError;
 use crate::db::collection_attach::DatastoreAttachTarget;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Resource;
 use crate::db::model::ApplySledFilterExt;
 use crate::db::model::IncompleteVpc;
@@ -35,8 +35,8 @@ use crate::db::model::VpcSubnet;
 use crate::db::model::VpcSubnetUpdate;
 use crate::db::model::VpcUpdate;
 use crate::db::model::{Ipv4Net, Ipv6Net};
-use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
+use crate::db::pagination::paginated;
 use crate::db::queries::vpc::InsertVpcQuery;
 use crate::db::queries::vpc::VniSearchIter;
 use crate::db::queries::vpc_subnet::InsertVpcSubnetError;
@@ -47,8 +47,8 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
-use futures::stream::{self, StreamExt};
 use futures::TryStreamExt;
+use futures::stream::{self, StreamExt};
 use ipnetwork::IpNetwork;
 use nexus_auth::authz::ApiResource;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V4;
@@ -63,7 +63,6 @@ use nexus_db_model::InternetGatewayIpPool;
 use nexus_db_model::IpPoolRange;
 use nexus_db_model::NetworkInterfaceKind;
 use nexus_types::deployment::SledFilter;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -78,6 +77,7 @@ use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRouteKind as ExternalRouteKind;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni as ExternalVni;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterTarget;
@@ -1068,7 +1068,7 @@ impl DataStore {
                             return Err(err.bail_retryable_or_else(
                                 e,
                                 SubnetError::SubnetModify,
-                            ))
+                            ));
                         }
                     };
 
@@ -2439,7 +2439,7 @@ impl DataStore {
             Err(e) => {
                 return Err(Error::non_resourcetype_not_found(&format!(
                     "unable to find IGW mappings for sled {sled_id}: {e}"
-                )))
+                )));
             }
         }
 
@@ -2472,7 +2472,7 @@ impl DataStore {
             Err(e) => {
                 return Err(Error::non_resourcetype_not_found(&format!(
                     "unable to find IGW mappings for sled {sled_id}: {e}"
-                )))
+                )));
             }
         }
 
@@ -2998,7 +2998,9 @@ mod tests {
             .project_create_vpc_raw(&opctx, &authz_project, query)
             .await
         else {
-            panic!("Expected Ok(None) when creating a VPC without any available VNIs");
+            panic!(
+                "Expected Ok(None) when creating a VPC without any available VNIs"
+            );
         };
         db.terminate().await;
         logctx.cleanup_successful();

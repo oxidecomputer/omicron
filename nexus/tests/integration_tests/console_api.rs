@@ -4,10 +4,10 @@
 
 use anyhow::Context;
 use camino::Utf8PathBuf;
-use dropshot::test_util::ClientTestContext;
 use dropshot::ResultsPage;
+use dropshot::test_util::ClientTestContext;
 use http::header::HeaderName;
-use http::{header, method::Method, StatusCode};
+use http::{StatusCode, header, method::Method};
 use std::env::current_dir;
 
 use crate::integration_tests::saml::SAML_RESPONSE_IDP_DESCRIPTOR;
@@ -23,7 +23,7 @@ use nexus_test_utils::resource_helpers::{
     create_silo, grant_iam, object_create,
 };
 use nexus_test_utils::{
-    load_test_config, test_setup_with_config, TEST_SUITE_PASSWORD,
+    TEST_SUITE_PASSWORD, load_test_config, test_setup_with_config,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
@@ -33,7 +33,7 @@ use nexus_types::external_api::shared::{SiloIdentityMode, SiloRole};
 use nexus_types::external_api::{shared, views};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_sled_agent::sim;
-use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
+use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;

@@ -9,13 +9,13 @@ use std::{
     net::{IpAddr, SocketAddr},
 };
 
+use omicron_common::NoDebug;
 use omicron_common::api::internal::{
     nexus::{InstanceProperties, SledVmmState, VmmRuntimeState},
     shared::{
         DhcpConfig, NetworkInterface, ResolvedVpcFirewallRule, SourceNatConfig,
     },
 };
-use omicron_common::NoDebug;
 use omicron_uuid_kinds::InstanceUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

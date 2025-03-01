@@ -8,14 +8,14 @@ use crate::updates::ConfigUpdates;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
+use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
 use illumos_utils::dladm::Dladm;
 use illumos_utils::dladm::FindPhysicalLinkError;
 use illumos_utils::dladm::PhysicalLink;
-use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
 use omicron_common::vlan::VlanID;
 use serde::Deserialize;
-use sled_hardware::is_gimlet;
 use sled_hardware::UnparsedDisk;
+use sled_hardware::is_gimlet;
 use sprockets_tls::keys::SprocketsConfig;
 
 #[derive(Clone, Debug, Deserialize)]

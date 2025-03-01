@@ -1,6 +1,6 @@
 //! Sanity-tests for public SSH keys
 
-use http::{method::Method, StatusCode};
+use http::{StatusCode, method::Method};
 
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use nexus_test_utils::resource_helpers::objects_list_page_authz;

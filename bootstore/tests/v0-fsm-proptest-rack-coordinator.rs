@@ -25,8 +25,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 use common::generators::{
-    arb_action, arb_config, arb_initial_member_ids, Action, MAX_ACTIONS,
-    MAX_INITIAL_MEMBERS, MIN_INITIAL_MEMBERS,
+    Action, MAX_ACTIONS, MAX_INITIAL_MEMBERS, MIN_INITIAL_MEMBERS, arb_action,
+    arb_config, arb_initial_member_ids,
 };
 use common::{CommonTestState, TestRequest};
 
@@ -360,9 +360,11 @@ impl TestState {
             {
                 assert!(!test_req.acks.contains(&envelope.to));
             } else {
-                assert!(!self.learn_requests[&request_id]
-                    .acks
-                    .contains(&envelope.to));
+                assert!(
+                    !self.learn_requests[&request_id]
+                        .acks
+                        .contains(&envelope.to)
+                );
             }
         }
     }

@@ -5,8 +5,8 @@
 mod common;
 
 use anyhow::Context;
-use common::reconfigurator::blueprint_edit_current_target;
 use common::LiveTestContext;
+use common::reconfigurator::blueprint_edit_current_target;
 use futures::TryStreamExt;
 use live_tests_macros::live_test;
 use nexus_client::types::Saga;
@@ -17,8 +17,8 @@ use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::SledFilter;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
-use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_test_utils::dev::poll::wait_for_condition;
 use slog::{debug, info};
 use std::net::SocketAddrV6;
 use std::time::Duration;

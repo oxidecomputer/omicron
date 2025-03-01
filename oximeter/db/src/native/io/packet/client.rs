@@ -6,6 +6,7 @@
 
 //! Encode client packets destined for the server.
 
+use crate::native::Error;
 use crate::native::block::Block;
 use crate::native::io;
 use crate::native::packets::client::ClientInfo;
@@ -16,7 +17,6 @@ use crate::native::packets::client::QueryKind;
 use crate::native::packets::client::Settings;
 use crate::native::packets::client::Stage;
 use crate::native::probes;
-use crate::native::Error;
 use bytes::BufMut as _;
 use bytes::BytesMut;
 

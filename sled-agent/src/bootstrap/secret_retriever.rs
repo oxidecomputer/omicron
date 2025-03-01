@@ -171,11 +171,7 @@ impl LrtqOrHardcodedSecretRetrieverInner {
     }
 
     pub fn is_hardcoded(&self) -> bool {
-        if let Self::Hardcoded(_) = self {
-            true
-        } else {
-            false
-        }
+        if let Self::Hardcoded(_) = self { true } else { false }
     }
 }
 

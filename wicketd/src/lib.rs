@@ -16,7 +16,7 @@ mod rss_config;
 mod transceivers;
 mod update_tracker;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use artifacts::{
     WicketdArtifactStore, WicketdInstallinatorApiImpl,
     WicketdInstallinatorContext,
@@ -31,11 +31,11 @@ use internal_dns_resolver::Resolver;
 use mgs::make_mgs_client;
 pub(crate) use mgs::{MgsHandle, MgsManager};
 use nexus_proxy::NexusTcpProxy;
-use omicron_common::address::{Ipv6Subnet, AZ_PREFIX};
 use omicron_common::FileKv;
+use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
 use preflight_check::PreflightCheckerHandler;
 use sled_hardware_types::Baseboard;
-use slog::{debug, error, o, Drain};
+use slog::{Drain, debug, error, o};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use std::{

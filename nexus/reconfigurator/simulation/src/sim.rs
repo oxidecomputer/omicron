@@ -11,7 +11,7 @@ use indexmap::IndexSet;
 use omicron_uuid_kinds::{ReconfiguratorSimKind, ReconfiguratorSimUuid};
 use typed_rng::TypedUuidRng;
 
-use crate::{seed_from_entropy, SimState};
+use crate::{SimState, seed_from_entropy};
 
 /// A store to track reconfigurator states: the main entrypoint for
 /// reconfigurator simulation.

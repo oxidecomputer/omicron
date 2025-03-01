@@ -8,10 +8,10 @@
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::TransactionError;
 use crate::db::datastore::SQL_BATCH_SIZE;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::model::to_db_typed_uuid;
+use crate::db::error::public_error_from_diesel;
 use crate::db::model::ReadOnlyTargetReplacement;
 use crate::db::model::ReadOnlyTargetReplacementType;
 use crate::db::model::RegionSnapshot;
@@ -19,11 +19,11 @@ use crate::db::model::RegionSnapshotReplacement;
 use crate::db::model::RegionSnapshotReplacementState;
 use crate::db::model::RegionSnapshotReplacementStep;
 use crate::db::model::RegionSnapshotReplacementStepState;
-use crate::db::pagination::paginated;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
+use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
-use crate::db::TransactionError;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
@@ -84,7 +84,7 @@ impl DataStore {
             Some(db_snapshot) => db_snapshot,
             None => {
                 return Err(Error::internal_error(
-                    "cannot perform region snapshot replacement without snapshot volume"
+                    "cannot perform region snapshot replacement without snapshot volume",
                 ));
             }
         };
@@ -1717,11 +1717,13 @@ mod test {
             0,
         );
 
-        assert!(datastore
-            .get_requested_region_snapshot_replacement_steps(&opctx)
-            .await
-            .unwrap()
-            .is_empty());
+        assert!(
+            datastore
+                .get_requested_region_snapshot_replacement_steps(&opctx)
+                .await
+                .unwrap()
+                .is_empty()
+        );
 
         // Insert some replacement steps, and make sure counting works
 
@@ -2025,13 +2027,15 @@ mod test {
             .await
             .unwrap();
 
-        assert!(datastore
-            .region_snapshot_replacement_steps_requiring_garbage_collection(
-                &opctx
-            )
-            .await
-            .unwrap()
-            .is_empty());
+        assert!(
+            datastore
+                .region_snapshot_replacement_steps_requiring_garbage_collection(
+                    &opctx
+                )
+                .await
+                .unwrap()
+                .is_empty()
+        );
 
         let step_volume_id = VolumeUuid::new_v4();
 

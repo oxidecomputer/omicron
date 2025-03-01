@@ -10,16 +10,16 @@ use super::Quantile;
 use super::QuantileError;
 use chrono::DateTime;
 use chrono::Utc;
-use num::traits::Bounded;
-use num::traits::FromPrimitive;
-use num::traits::Num;
-use num::traits::ToPrimitive;
-use num::traits::Zero;
 use num::CheckedAdd;
 use num::CheckedMul;
 use num::Float;
 use num::Integer;
 use num::NumCast;
+use num::traits::Bounded;
+use num::traits::FromPrimitive;
+use num::traits::Num;
+use num::traits::ToPrimitive;
+use num::traits::Zero;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -109,9 +109,7 @@ pub enum HistogramError {
     NonmonotonicBins,
 
     /// A non-finite was encountered, either as a bin edge or a sample.
-    #[error(
-        "Bin edges and samples must be finite values, not Infinity or NaN"
-    )]
+    #[error("Bin edges and samples must be finite values, not Infinity or NaN")]
     NonFiniteValue,
 
     /// Error returned when two neighboring bins are not adjoining (there's space between them)
@@ -119,7 +117,9 @@ pub enum HistogramError {
     NonAdjoiningBins { left: String, right: String },
 
     /// Bin and count arrays are of different sizes.
-    #[error("Bin and count arrays must have the same size, found {n_bins} and {n_counts}")]
+    #[error(
+        "Bin and count arrays must have the same size, found {n_bins} and {n_counts}"
+    )]
     ArraySizeMismatch { n_bins: usize, n_counts: usize },
 
     /// Error returned when a quantization error occurs.
@@ -593,14 +593,16 @@ where
                 (Bound::Excluded(end), Bound::Included(start)) => {
                     ensure_finite(*end).and(ensure_finite(*start))?;
                     if end != start {
-                        return Err(
-                            HistogramError::NonAdjoiningBins {
-                                left: format!("{:?}", first),
-                                right: format!("{:?}", second),
-                            });
+                        return Err(HistogramError::NonAdjoiningBins {
+                            left: format!("{:?}", first),
+                            right: format!("{:?}", second),
+                        });
                     }
                 }
-                _ => unreachable!("Bin ranges should always be excluded above and included below: {:#?}", (first, second))
+                _ => unreachable!(
+                    "Bin ranges should always be excluded above and included below: {:#?}",
+                    (first, second)
+                ),
             }
         }
         if let Bound::Excluded(end) = bins_.last().unwrap().range.end_bound() {
@@ -703,10 +705,12 @@ where
                 BinRange::Range { start, .. } => {
                     bins.push(start);
                 }
-                BinRange::RangeFrom { start} => {
+                BinRange::RangeFrom { start } => {
                     bins.push(start);
                 }
-                _ => unreachable!("No bins in a constructed histogram should be of type RangeTo"),
+                _ => unreachable!(
+                    "No bins in a constructed histogram should be of type RangeTo"
+                ),
             }
             counts.push(bin.count);
         }
@@ -1237,11 +1241,7 @@ fn ensure_finite<T>(value: T) -> Result<(), HistogramError>
 where
     T: HistogramSupport,
 {
-    if value.is_finite() {
-        Ok(())
-    } else {
-        Err(HistogramError::NonFiniteValue)
-    }
+    if value.is_finite() { Ok(()) } else { Err(HistogramError::NonFiniteValue) }
 }
 
 #[cfg(test)]
@@ -1501,16 +1501,19 @@ mod tests {
         );
         let hist = Histogram::with_bins(&[(..f64::MAX).into()]).unwrap();
         assert_eq!(
-            hist.n_bins(), 2,
+            hist.n_bins(),
+            2,
             "This histogram should have two bins, since `BinRange`s are always exclusive on the right"
         );
         assert!(Histogram::with_bins(&[(f64::NAN..).into()]).is_err());
         assert!(Histogram::with_bins(&[(..f64::NAN).into()]).is_err());
-        assert!(Histogram::with_bins(&[
-            (0.0..f64::NAN).into(),
-            (f64::NAN..100.0).into()
-        ])
-        .is_err());
+        assert!(
+            Histogram::with_bins(&[
+                (0.0..f64::NAN).into(),
+                (f64::NAN..100.0).into()
+            ])
+            .is_err()
+        );
         assert!(Histogram::new(&[f64::NAN, 0.0]).is_err());
 
         let hist = Histogram::new(&[i64::MIN]).unwrap();

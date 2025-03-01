@@ -7,9 +7,9 @@
 use async_bb8_diesel::AsyncConnection;
 use chrono::Utc;
 use diesel::result::Error as DieselError;
-use oximeter::{types::Sample, MetricsError};
-use rand::{thread_rng, Rng};
-use slog::{info, warn, Logger};
+use oximeter::{MetricsError, types::Sample};
+use rand::{Rng, thread_rng};
+use slog::{Logger, info, warn};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 

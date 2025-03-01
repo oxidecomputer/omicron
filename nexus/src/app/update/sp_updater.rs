@@ -4,13 +4,13 @@
 
 //! Module containing types for updating SPs via MGS.
 
-use super::common_sp_update::deliver_update;
-use super::common_sp_update::SpComponentUpdater;
 use super::MgsClients;
 use super::SpComponentUpdateError;
 use super::UpdateProgress;
-use gateway_client::types::SpType;
+use super::common_sp_update::SpComponentUpdater;
+use super::common_sp_update::deliver_update;
 use gateway_client::SpComponent;
+use gateway_client::types::SpType;
 use slog::Logger;
 use tokio::sync::watch;
 use uuid::Uuid;

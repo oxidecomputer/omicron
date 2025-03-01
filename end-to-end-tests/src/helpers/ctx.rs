@@ -1,14 +1,14 @@
 use crate::helpers::generate_name;
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{Context as _, Result, anyhow};
 use chrono::Utc;
 use hickory_resolver::error::ResolveErrorKind;
-use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
-use oxide_client::types::{Name, ProjectCreate};
+use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use oxide_client::CustomDnsResolver;
+use oxide_client::types::{Name, ProjectCreate};
 use oxide_client::{Client, ClientImagesExt, ClientProjectsExt, ClientVpcsExt};
+use reqwest::Url;
 use reqwest::dns::Resolve;
 use reqwest::header::{HeaderMap, HeaderValue};
-use reqwest::Url;
 use sled_agent_types::rack_init::RackInitializeRequest;
 use std::net::IpAddr;
 use std::net::SocketAddr;

@@ -3,11 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
+use crate::SqlU16;
 use crate::ipv6;
 use crate::schema::upstairs_repair_notification;
 use crate::schema::upstairs_repair_progress;
 use crate::typed_uuid::DbTypedUuid;
-use crate::SqlU16;
 use chrono::{DateTime, Utc};
 use omicron_common::api::internal;
 use omicron_uuid_kinds::DownstairsRegionKind;

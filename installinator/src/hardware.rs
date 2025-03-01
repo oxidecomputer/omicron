@@ -2,18 +2,18 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::anyhow;
-use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
+use anyhow::anyhow;
+use anyhow::ensure;
 use omicron_common::disk::DiskVariant;
 use sled_hardware::HardwareManager;
 use sled_hardware::SledMode;
 use sled_storage::config::MountConfig;
 use sled_storage::disk::Disk;
 use sled_storage::disk::RawDisk;
-use slog::info;
 use slog::Logger;
+use slog::info;
 
 pub struct Hardware {
     m2_disks: Vec<Disk>,

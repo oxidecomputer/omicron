@@ -4,32 +4,32 @@
 
 //! Generate oximeter samples from kernel statistics.
 
-use super::now;
 use super::Timestamp;
-use crate::kstat::hrtime_to_utc;
+use super::now;
 use crate::kstat::Error;
 use crate::kstat::Expiration;
 use crate::kstat::ExpirationReason;
 use crate::kstat::KstatTarget;
+use crate::kstat::hrtime_to_utc;
 use chrono::DateTime;
 use chrono::Utc;
-use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use kstat_rs::Ctl;
 use kstat_rs::Kstat;
-use oximeter::types::Cumulative;
 use oximeter::Metric;
 use oximeter::MetricsError;
 use oximeter::Sample;
+use oximeter::types::Cumulative;
+use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::o;
 use slog::trace;
 use slog::warn;
-use slog::Logger;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::btree_map::Entry;
 use std::fmt;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -39,9 +39,9 @@ use std::task::Poll;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use tokio::time::Sleep;
 use tokio::time::interval;
 use tokio::time::sleep;
-use tokio::time::Sleep;
 
 // The `KstatSampler` generates some statistics about its own operation, mostly
 // for surfacing failures to collect and dropped samples.

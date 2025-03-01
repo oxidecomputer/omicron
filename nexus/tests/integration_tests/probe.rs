@@ -1,9 +1,9 @@
 use dropshot::HttpErrorResponseBody;
 use http::{Method, StatusCode};
 use nexus_test_utils::{
+    SLED_AGENT_UUID,
     http_testing::{AuthnMode, NexusRequest},
     resource_helpers::{create_default_ip_pool, create_project},
-    SLED_AGENT_UUID,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::{params::ProbeCreate, shared::ProbeInfo};

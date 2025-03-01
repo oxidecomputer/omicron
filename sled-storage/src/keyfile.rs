@@ -5,8 +5,8 @@
 //! Key file support for ZFS dataset encryption
 
 use illumos_utils::zfs::Keypath;
-use slog::{error, info, Logger};
-use tokio::fs::{remove_file, File};
+use slog::{Logger, error, info};
+use tokio::fs::{File, remove_file};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt, SeekFrom};
 
 /// A file that wraps a zfs encryption key.

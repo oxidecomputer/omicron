@@ -1,5 +1,5 @@
 use crate::schema::bfd_session;
-use crate::{impl_enum_type, SqlU32};
+use crate::{SqlU32, impl_enum_type};
 use chrono::DateTime;
 use chrono::Utc;
 use ipnetwork::IpNetwork;

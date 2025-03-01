@@ -8,10 +8,10 @@
 //! and are recommended for more complex CTE
 
 use crate::db::pool::DbConnection;
+use diesel::RunQueryDsl;
 use diesel::pg::Pg;
 use diesel::query_builder::{AstPass, Query, QueryFragment, QueryId};
 use diesel::sql_types;
-use diesel::RunQueryDsl;
 use std::cell::Cell;
 use std::marker::PhantomData;
 

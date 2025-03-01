@@ -6,15 +6,15 @@
 
 use std::net::{Ipv6Addr, SocketAddrV6};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
-use omicron_common::{address::WICKETD_PORT, FileKv};
+use omicron_common::{FileKv, address::WICKETD_PORT};
 use slog::Drain;
 
 use crate::{
-    cli::{CommandOutput, ShellApp},
     Runner,
+    cli::{CommandOutput, ShellApp},
 };
 
 pub fn exec() -> Result<()> {

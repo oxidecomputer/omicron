@@ -9,11 +9,11 @@
 use super::defaults::colors::*;
 use super::defaults::dimensions::RectExt;
 use super::defaults::style;
-use super::widgets::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
+use super::widgets::{LOGO_HEIGHT, LOGO_WIDTH, Logo, LogoState};
 use crate::{Cmd, Term};
+use ratatui::Frame;
 use ratatui::style::Style;
 use ratatui::widgets::Block;
-use ratatui::Frame;
 
 const TOTAL_FRAMES: usize = 100;
 

@@ -4,12 +4,12 @@
 
 //! Executable program to run gateway, the management gateway service
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use camino::Utf8PathBuf;
 use clap::Parser;
 use futures::StreamExt;
-use omicron_common::cmd::{fatal, CmdError};
-use omicron_gateway::{start_server, Config, MgsArguments};
+use omicron_common::cmd::{CmdError, fatal};
+use omicron_gateway::{Config, MgsArguments, start_server};
 use signal_hook::consts::signal;
 use signal_hook_tokio::Signals;
 use std::net::SocketAddrV6;

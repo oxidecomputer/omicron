@@ -4,26 +4,26 @@
 
 //! CLI to set up zone configuration
 
-use anyhow::{anyhow, bail, Context};
+use anyhow::{Context, anyhow, bail};
 use clap::builder::{
     NonEmptyStringValueParser, StringValueParser, TypedValueParser,
 };
 use clap::{ArgAction, Args, Parser, Subcommand};
+use illumos_utils::ExecutionError;
 use illumos_utils::addrobj::{AddrObject, IPV6_LINK_LOCAL_ADDROBJ_NAME};
 use illumos_utils::ipadm::Ipadm;
 use illumos_utils::route::{Gateway, Route};
 use illumos_utils::svcadm::Svcadm;
 use illumos_utils::zone::{AddressRequest, Zones};
-use illumos_utils::ExecutionError;
-use omicron_common::backoff::{retry_notify, retry_policy_local, BackoffError};
-use omicron_common::cmd::fatal;
+use omicron_common::backoff::{BackoffError, retry_notify, retry_policy_local};
 use omicron_common::cmd::CmdError;
+use omicron_common::cmd::fatal;
 use oxnet::Ipv6Net;
 use sled_agent_types::sled::SWITCH_ZONE_BASEBOARD_FILE;
 use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
-use slog::{info, Logger};
+use slog::{Logger, info};
 use std::fmt::Write as _;
-use std::fs::{metadata, read_to_string, set_permissions, write, OpenOptions};
+use std::fs::{OpenOptions, metadata, read_to_string, set_permissions, write};
 use std::io::Write as _;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::unix::fs::chown;

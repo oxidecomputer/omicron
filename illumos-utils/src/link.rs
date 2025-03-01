@@ -6,13 +6,13 @@
 
 use crate::destructor::{Deletable, Destructor};
 use crate::dladm::{
-    CreateVnicError, DeleteVnicError, VnicSource, VNIC_PREFIX,
-    VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL,
+    CreateVnicError, DeleteVnicError, VNIC_PREFIX, VNIC_PREFIX_BOOTSTRAP,
+    VNIC_PREFIX_CONTROL, VnicSource,
 };
 use omicron_common::api::external::MacAddr;
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
     Arc,
+    atomic::{AtomicU64, Ordering},
 };
 
 #[cfg(not(any(test, feature = "testing")))]

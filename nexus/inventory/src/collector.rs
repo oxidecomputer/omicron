@@ -4,9 +4,9 @@
 
 //! Collection of inventory from Omicron components
 
+use crate::SledAgentEnumerator;
 use crate::builder::CollectionBuilder;
 use crate::builder::InventoryError;
-use crate::SledAgentEnumerator;
 use anyhow::Context;
 use gateway_client::types::GetCfpaParams;
 use gateway_client::types::RotCfpaSlot;
@@ -15,8 +15,8 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
-use slog::o;
 use slog::Logger;
+use slog::o;
 use slog::{debug, error};
 use std::time::Duration;
 use strum::IntoEnumIterator;

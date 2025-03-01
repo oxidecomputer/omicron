@@ -7,13 +7,13 @@
 
 use crate::apis::ManagedApis;
 use crate::git::GitRevision;
+use crate::output::Styles;
 use crate::output::headers::GENERATING;
 use crate::output::headers::HEADER_WIDTH;
-use crate::output::Styles;
 use crate::spec_files_blessed::BlessedFiles;
 use crate::spec_files_generated::GeneratedFiles;
-use crate::spec_files_local::walk_local_directory;
 use crate::spec_files_local::LocalFiles;
+use crate::spec_files_local::walk_local_directory;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use owo_colors::OwoColorize;

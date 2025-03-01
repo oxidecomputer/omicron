@@ -6,13 +6,13 @@
 
 use crate::authz;
 use crate::context::OpContext;
+use crate::db::DataStore;
 use crate::db::datastore::ValidateTransition;
 use crate::db::lookup::LookupPath;
-use crate::db::DataStore;
-use anyhow::bail;
-use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
+use anyhow::bail;
+use anyhow::ensure;
 use futures::future::try_join_all;
 use nexus_db_model::SledState;
 use nexus_types::external_api::views::SledPolicy;

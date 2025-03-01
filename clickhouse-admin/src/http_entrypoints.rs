@@ -61,7 +61,7 @@ impl ClickhouseAdminServerApi for ClickhouseAdminServerImpl {
                     Some(String::from("ObjectNotFound")),
                     ClientErrorStatusCode::NOT_FOUND,
                     "no generation number found".to_string(),
-                ))
+                ));
             }
         };
         Ok(HttpResponseOk(gen))
@@ -127,7 +127,7 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
                     Some(String::from("ObjectNotFound")),
                     ClientErrorStatusCode::NOT_FOUND,
                     "no generation number found".to_string(),
-                ))
+                ));
             }
         };
         Ok(HttpResponseOk(gen))

@@ -4,6 +4,8 @@
 
 //! Interface for paginating database queries.
 
+use diesel::AppearsOnTable;
+use diesel::Column;
 use diesel::dsl::{Asc, Desc, Gt, Lt};
 use diesel::expression::{AsExpression, Expression};
 use diesel::expression_methods::BoolExpressionMethods;
@@ -13,8 +15,6 @@ use diesel::query_builder::AsQuery;
 use diesel::query_dsl::methods as query_methods;
 use diesel::query_source::QuerySource;
 use diesel::sql_types::{Bool, SqlType};
-use diesel::AppearsOnTable;
-use diesel::Column;
 use diesel::{ExpressionMethods, QueryDsl};
 use omicron_common::api::external::DataPageParams;
 use std::num::NonZeroU32;
@@ -85,76 +85,76 @@ pub fn paginated_multicolumn<T, C1, C2, M1, M2>(
     pagparams: &DataPageParams<'_, (M1, M2)>,
 ) -> <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output
 where
-    // T is a table^H^H^H^H^Hquery source which can create a BoxedQuery.
+// T is a table^H^H^H^H^Hquery source which can create a BoxedQuery.
     T: QuerySource,
     T: AsQuery,
     <T as QuerySource>::DefaultSelection:
         Expression<SqlType = <T as AsQuery>::SqlType>,
     T::Query: query_methods::BoxedDsl<'static, Pg>,
-    // Required for...everything.
+// Required for...everything.
     <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output: QueryDsl,
-    // C1 & C2 are columns which appear in T.
+// C1 & C2 are columns which appear in T.
     C1: 'static + Column + Copy + ExpressionMethods,
     C2: 'static + Column + Copy + ExpressionMethods,
-    // Required to compare the columns with the marker types.
+// Required to compare the columns with the marker types.
     C1::SqlType: SqlType,
     C2::SqlType: SqlType,
     M1: Clone + AsExpression<C1::SqlType>,
     M2: Clone + AsExpression<C2::SqlType>,
-    // Necessary for `query.limit(...)`
+// Necessary for `query.limit(...)`
     <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
         query_methods::LimitDsl<
             Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
         >,
-    // Necessary for "query.order(c1.desc())"
+// Necessary for "query.order(c1.desc())"
     <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
         query_methods::OrderDsl<
             Desc<C1>,
             Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
         >,
-    // Necessary for "query.order(...).then_order_by(c2.desc())"
+// Necessary for "query.order(...).then_order_by(c2.desc())"
     <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
         query_methods::ThenOrderDsl<
             Desc<C2>,
             Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
         >,
-    // Necessary for "query.order(c1.asc())"
+// Necessary for "query.order(c1.asc())"
     <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
         query_methods::OrderDsl<
             Asc<C1>,
             Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
         >,
-    // Necessary for "query.order(...).then_order_by(c2.asc())"
+// Necessary for "query.order(...).then_order_by(c2.asc())"
     <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
         query_methods::ThenOrderDsl<
             Asc<C2>,
             Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
         >,
 
-    // We'd like to be able to call:
-    //
-    //  c1.eq(v1).and(c2.gt(v2))
-    //
-    // This means "c1.eq(v1)" must implement BoolExpressionMethods, and
-    // satisfy the requirements of the ".and" method.
-    //
-    // The LHS (c1.eq(v1)) must be a boolean expression:
+// We'd like to be able to call:
+//
+//  c1.eq(v1).and(c2.gt(v2))
+//
+// This means "c1.eq(v1)" must implement BoolExpressionMethods, and
+// satisfy the requirements of the ".and" method.
+//
+// The LHS (c1.eq(v1)) must be a boolean expression:
     Eq<C1, M1>: Expression<SqlType = Bool>,
-    // The RHS (c2.gt(v2)) must be a boolean expression:
+// The RHS (c2.gt(v2)) must be a boolean expression:
     Gt<C2, M2>: Expression<SqlType = Bool>,
-    // Putting it together, we should be able to filter by LHS.and(RHS):
+// Putting it together, we should be able to filter by LHS.and(RHS):
     <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
         query_methods::FilterDsl<
             And<Eq<C1, M1>, Gt<C2, M2>>,
             Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
         >,
 
-    // We'd also like to be able to call:
-    //
-    //  c1.eq(v1).and(c2.lt(v2))
-    //
-    // We've already defined the bound on the LHS, so we add the equivalent
-    // bounds on the RHS for the "Less than" variant.
+// We'd also like to be able to call:
+//
+//  c1.eq(v1).and(c2.lt(v2))
+//
+// We've already defined the bound on the LHS, so we add the equivalent
+// bounds on the RHS for the "Less than" variant.
     Lt<C2, M2>: Expression<SqlType = Bool>,
     <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
         query_methods::FilterDsl<
@@ -162,13 +162,13 @@ where
             Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
         >,
 
-    // Necessary for "query.or_filter(c1.gt(v1))"
+// Necessary for "query.or_filter(c1.gt(v1))"
     <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
         query_methods::OrFilterDsl<
             Gt<C1, M1>,
             Output = <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output,
         >,
-    // Necessary for "query.or_filter(c1.lt(v1))"
+// Necessary for "query.or_filter(c1.lt(v1))"
     <T::Query as query_methods::BoxedDsl<'static, Pg>>::Output:
         query_methods::OrFilterDsl<
             Lt<C1, M1>,

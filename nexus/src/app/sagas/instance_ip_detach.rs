@@ -3,9 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::instance_common::{
-    instance_ip_add_nat, instance_ip_add_opte, instance_ip_get_instance_state,
+    ModifyStateForExternalIp, VmmAndSledIds, instance_ip_add_nat,
+    instance_ip_add_opte, instance_ip_get_instance_state,
     instance_ip_move_state, instance_ip_remove_nat, instance_ip_remove_opte,
-    ModifyStateForExternalIp, VmmAndSledIds,
 };
 use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas::declare_saga_actions;
@@ -281,6 +281,7 @@ impl NexusSaga for SagaInstanceIpDetach {
 pub(crate) mod test {
     use super::*;
     use crate::{
+        Nexus,
         app::{
             saga::create_saga_dag,
             sagas::{
@@ -288,7 +289,6 @@ pub(crate) mod test {
                 test_helpers,
             },
         },
-        Nexus,
     };
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{
@@ -433,27 +433,31 @@ pub(crate) mod test {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         // No IPs in transitional states w/ current instance.
-        assert!(dsl::external_ip
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::parent_id.eq(instance_id))
-            .filter(dsl::state.ne(IpAttachState::Attached))
-            .select(ExternalIp::as_select())
-            .first_async::<ExternalIp>(&*conn)
-            .await
-            .optional()
-            .unwrap()
-            .is_none());
+        assert!(
+            dsl::external_ip
+                .filter(dsl::time_deleted.is_null())
+                .filter(dsl::parent_id.eq(instance_id))
+                .filter(dsl::state.ne(IpAttachState::Attached))
+                .select(ExternalIp::as_select())
+                .first_async::<ExternalIp>(&*conn)
+                .await
+                .optional()
+                .unwrap()
+                .is_none()
+        );
 
         // No external IPs in detached state.
-        assert!(dsl::external_ip
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::state.eq(IpAttachState::Detached))
-            .select(ExternalIp::as_select())
-            .first_async::<ExternalIp>(&*conn)
-            .await
-            .optional()
-            .unwrap()
-            .is_none());
+        assert!(
+            dsl::external_ip
+                .filter(dsl::time_deleted.is_null())
+                .filter(dsl::state.eq(IpAttachState::Detached))
+                .select(ExternalIp::as_select())
+                .first_async::<ExternalIp>(&*conn)
+                .await
+                .optional()
+                .unwrap()
+                .is_none()
+        );
 
         // Instance still has one Ephemeral IP, and one Floating IP.
         let db_eips = datastore

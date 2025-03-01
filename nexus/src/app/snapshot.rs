@@ -8,13 +8,13 @@ use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::params;
 use nexus_types::external_api::params::DiskSelector;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 
 use super::sagas;
 
@@ -44,16 +44,15 @@ impl super::Nexus {
                     .snapshot_name_owned(name.into());
                 Ok(snapshot)
             }
-            params::SnapshotSelector {
-                snapshot: NameOrId::Id(_),
-                ..
-            } => Err(Error::invalid_request(
-              "when providing snapshot as an ID, project should not \
-              be specified"
-            )),
+            params::SnapshotSelector { snapshot: NameOrId::Id(_), .. } => {
+                Err(Error::invalid_request(
+                    "when providing snapshot as an ID, project should not \
+              be specified",
+                ))
+            }
             _ => Err(Error::invalid_request(
-              "snapshot should either be an ID or project should be specified"
-            ))
+                "snapshot should either be an ID or project should be specified",
+            )),
         }
     }
 

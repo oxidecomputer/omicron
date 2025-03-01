@@ -14,10 +14,10 @@ use omicron_common::disk::{
 };
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use slog::{info, Logger};
+use slog::{Logger, info};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 
 /// A [`key-manager::SecretRetriever`] that only returns hardcoded IKM for

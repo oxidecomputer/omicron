@@ -80,8 +80,8 @@ pub trait DatastoreCollection<ResourceType>:
                 >,
         // Allows using "key" in in ".eq(...)".
         CollectionId<ResourceType, Self>: diesel::expression::AsExpression<
-            SerializedCollectionPrimaryKey<ResourceType, Self>,
-        >,
+                SerializedCollectionPrimaryKey<ResourceType, Self>,
+            >,
         <CollectionPrimaryKey<ResourceType, Self> as Expression>::SqlType:
             SingleValue,
         // Allows calling "is_null()" on the time deleted column.
@@ -410,9 +410,9 @@ mod test {
     use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use chrono::{DateTime, Utc};
     use db_macros::Resource;
+    use diesel::QueryDsl;
     use diesel::expression_methods::ExpressionMethods;
     use diesel::pg::Pg;
-    use diesel::QueryDsl;
     use omicron_test_utils::dev;
 
     table! {

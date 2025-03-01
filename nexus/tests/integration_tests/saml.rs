@@ -17,9 +17,9 @@ use omicron_nexus::TestInterfaces;
 
 use base64::Engine;
 use dropshot::ResultsPage;
-use http::method::Method;
 use http::StatusCode;
-use httptest::{matchers::*, responders::*, Expectation, Server};
+use http::method::Method;
+use httptest::{Expectation, Server, matchers::*, responders::*};
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -146,13 +146,11 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("expected success");
 
-    assert!(result.headers["Location"]
-        .to_str()
-        .unwrap()
-        .to_string()
-        .starts_with(
+    assert!(
+        result.headers["Location"].to_str().unwrap().to_string().starts_with(
             "https://idp.example.org/SAML2/SSO/Redirect?SAMLRequest=",
-        ));
+        )
+    );
 }
 
 // Fail to create a SAML IdP out of an invalid descriptor
@@ -240,8 +238,10 @@ async fn test_create_a_saml_idp_invalid_descriptor_no_redirect_binding(
             .join("\n")
     };
 
-    assert!(!saml_idp_descriptor
-        .contains("urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"));
+    assert!(
+        !saml_idp_descriptor
+            .contains("urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect")
+    );
 
     let server = Server::run();
     server.expect(
@@ -464,13 +464,11 @@ async fn test_create_a_hidden_silo_saml_idp(
     .await
     .expect("expected success");
 
-    assert!(result.headers["Location"]
-        .to_str()
-        .unwrap()
-        .to_string()
-        .starts_with(
+    assert!(
+        result.headers["Location"].to_str().unwrap().to_string().starts_with(
             "https://idp.example.org/SAML2/SSO/Redirect?SAMLRequest=",
-        ));
+        )
+    );
 }
 
 // Can't create a SAML IdP if the metadata URL returns something that's not 200
@@ -1341,11 +1339,13 @@ async fn test_post_saml_response_with_relay_state(
     .await
     .expect("expected success");
 
-    assert!(result_with_relay_state.headers["Location"]
-        .to_str()
-        .unwrap()
-        .to_string()
-        .ends_with("/some/actual/nexus/url"));
+    assert!(
+        result_with_relay_state.headers["Location"]
+            .to_str()
+            .unwrap()
+            .to_string()
+            .ends_with("/some/actual/nexus/url")
+    );
 
     let result_with_invalid_relay_state = NexusRequest::new(
         RequestBuilder::new(

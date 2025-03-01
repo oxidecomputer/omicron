@@ -55,9 +55,9 @@ fn target_impl(tokens: TokenStream) -> syn::Result<TokenStream> {
             vec![]
         } else {
             return Err(Error::new(
-                    item.span(),
-                    "Can only be derived for structs with named fields or unit structs",
-                ));
+                item.span(),
+                "Can only be derived for structs with named fields or unit structs",
+            ));
         };
         return Ok(build_target_trait_impl(&name, &fields[..]));
     }

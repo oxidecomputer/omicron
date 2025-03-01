@@ -9,8 +9,8 @@ use std::net::Ipv6Addr;
 use internal_dns_resolver::Resolver;
 use nexus_db_queries::{context::OpContext, db::DataStore};
 use nexus_types::deployment::{
-    execution::{EventBuffer, Overridables},
     Blueprint,
+    execution::{EventBuffer, Overridables},
 };
 use omicron_uuid_kinds::OmicronZoneUuid;
 use update_engine::TerminalKind;

@@ -8,9 +8,9 @@ use indexmap::IndexSet;
 use omicron_common::api::external::Name;
 
 use crate::{
+    LoadSerializedResultBuilder,
     errors::{DuplicateError, KeyError},
     utils::join_comma_or_none,
-    LoadSerializedResultBuilder,
 };
 
 /// Versioned simulator configuration.

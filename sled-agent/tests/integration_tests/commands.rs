@@ -10,10 +10,10 @@
 
 use camino::Utf8PathBuf;
 use expectorate::assert_contents;
+use omicron_test_utils::dev::test_cmds::EXIT_USAGE;
 use omicron_test_utils::dev::test_cmds::assert_exit_code;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
-use omicron_test_utils::dev::test_cmds::EXIT_USAGE;
 use subprocess::Exec;
 
 /// name of the "sled-agent-sim" executable

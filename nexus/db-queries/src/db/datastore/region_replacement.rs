@@ -7,21 +7,21 @@
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::TransactionError;
 use crate::db::datastore::SQL_BATCH_SIZE;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::model::to_db_typed_uuid;
+use crate::db::error::public_error_from_diesel;
 use crate::db::model::Region;
 use crate::db::model::RegionReplacement;
 use crate::db::model::RegionReplacementState;
 use crate::db::model::RegionReplacementStep;
 use crate::db::model::UpstairsRepairNotification;
 use crate::db::model::UpstairsRepairNotificationType;
-use crate::db::pagination::paginated;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
+use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
-use crate::db::TransactionError;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
@@ -464,10 +464,10 @@ impl DataStore {
                     } else {
                         Err(Error::conflict(format!(
                             "region replacement {} set to {:?} (operating saga id {:?})",
-                                region_replacement_id,
-                                record.replacement_state,
-                                record.operating_saga_id,
-                            )))
+                            region_replacement_id,
+                            record.replacement_state,
+                            record.operating_saga_id,
+                        )))
                     }
                 }
             },
@@ -512,10 +512,10 @@ impl DataStore {
                     } else {
                         Err(Error::conflict(format!(
                             "region replacement {} set to {:?} (operating saga id {:?})",
-                                region_replacement_id,
-                                record.replacement_state,
-                                record.operating_saga_id,
-                            )))
+                            region_replacement_id,
+                            record.replacement_state,
+                            record.operating_saga_id,
+                        )))
                     }
                 }
             },

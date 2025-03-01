@@ -8,9 +8,9 @@ use anyhow::Context;
 use nexus_db_model::SledState;
 use nexus_db_queries::authz::Action;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::TransitionError;
 use nexus_db_queries::db::lookup::LookupPath;
-use nexus_db_queries::db::DataStore;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 
@@ -28,11 +28,7 @@ pub(crate) async fn decommission_sleds(
         }
     }
 
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors)
-    }
+    if errors.is_empty() { Ok(()) } else { Err(errors) }
 }
 
 async fn decommission_one_sled(

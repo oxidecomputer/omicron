@@ -4,14 +4,14 @@
 
 //! An expression wrapper for forcing errors from CTEs.
 
+use diesel::Expression;
+use diesel::SelectableExpression;
 use diesel::expression::ValidGrouping;
 use diesel::pg::Pg;
 use diesel::query_builder::AstPass;
 use diesel::query_builder::QueryFragment;
 use diesel::query_builder::QueryId;
 use diesel::result::Error as DieselError;
-use diesel::Expression;
-use diesel::SelectableExpression;
 
 /// Generates a wrapper around a boolean expression.
 ///

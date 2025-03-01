@@ -7,9 +7,9 @@
 use crate::management_switch::SpIdentifier;
 use dropshot::HttpError;
 use gateway_messages::SpError;
+use gateway_sp_comms::BindError;
 pub use gateway_sp_comms::error::CommunicationError;
 use gateway_sp_comms::error::UpdateError;
-use gateway_sp_comms::BindError;
 use slog_error_chain::InlineErrorChain;
 use slog_error_chain::SlogInlineError;
 use std::time::Duration;

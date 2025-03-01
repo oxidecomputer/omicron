@@ -5,8 +5,8 @@
 //! Background task for keeping track of DNS configuration
 
 use crate::app::background::BackgroundTask;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use internal_dns_types::config::DnsConfigParams;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
@@ -158,8 +158,8 @@ impl BackgroundTask for DnsConfigWatcher {
 #[cfg(test)]
 mod test {
     use super::DnsConfigWatcher;
-    use crate::app::background::init::test::write_test_dns_generation;
     use crate::app::background::BackgroundTask;
+    use crate::app::background::init::test::write_test_dns_generation;
     use assert_matches::assert_matches;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;

@@ -4,8 +4,8 @@
 
 //! Integration tests for operating on Address Lots
 
-use http::method::Method;
 use http::StatusCode;
+use http::method::Method;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;

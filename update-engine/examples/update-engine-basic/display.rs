@@ -6,9 +6,9 @@
 
 use std::{borrow::Cow, time::Duration};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use debug_ignore::DebugIgnore;
-use indexmap::{map::Entry, IndexMap};
+use indexmap::{IndexMap, map::Entry};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use owo_colors::OwoColorize;
 use tokio::{sync::mpsc, task::JoinHandle};
@@ -18,12 +18,12 @@ use update_engine::{
 };
 
 use crate::{
+    DisplayStyle,
     spec::{
         Event, EventBuffer, ExampleComponent, ExampleStepId,
         ExampleStepMetadata, ProgressEvent, ProgressEventKind, StepEventKind,
         StepInfoWithMetadata, StepOutcome,
     },
-    DisplayStyle,
 };
 
 /// An example that displays an event stream on the command line.

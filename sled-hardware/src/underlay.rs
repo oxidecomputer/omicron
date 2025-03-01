@@ -7,12 +7,12 @@
 use crate::is_gimlet;
 use illumos_utils::addrobj;
 use illumos_utils::addrobj::AddrObject;
+use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
 use illumos_utils::dladm::Dladm;
 use illumos_utils::dladm::FindPhysicalLinkError;
 use illumos_utils::dladm::GetLinkpropError;
 use illumos_utils::dladm::PhysicalLink;
 use illumos_utils::dladm::SetLinkpropError;
-use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
 use illumos_utils::zone::Zones;
 
 #[derive(thiserror::Error, Debug)]

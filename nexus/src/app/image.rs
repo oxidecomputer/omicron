@@ -15,7 +15,6 @@ use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -23,6 +22,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::VolumeUuid;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -41,14 +41,18 @@ impl super::Nexus {
                 project: None,
             } => {
                 let (.., db_image) = LookupPath::new(opctx, &self.db_datastore)
-                    .image_id(id).fetch().await?;
+                    .image_id(id)
+                    .fetch()
+                    .await?;
                 let lookup = match db_image.project_id {
-                    Some(_) => ImageLookup::ProjectImage(LookupPath::new(opctx, &self.db_datastore)
-                        .project_image_id(id)),
-                    None => {
-                        ImageLookup::SiloImage(LookupPath::new(opctx, &self.db_datastore)
-                            .silo_image_id(id))
-                    },
+                    Some(_) => ImageLookup::ProjectImage(
+                        LookupPath::new(opctx, &self.db_datastore)
+                            .project_image_id(id),
+                    ),
+                    None => ImageLookup::SiloImage(
+                        LookupPath::new(opctx, &self.db_datastore)
+                            .silo_image_id(id),
+                    ),
                 };
                 Ok(lookup)
             }
@@ -56,24 +60,26 @@ impl super::Nexus {
                 image: NameOrId::Name(name),
                 project: Some(project),
             } => {
-                let image =
-                    self.project_lookup(opctx, params::ProjectSelector { project })?.project_image_name_owned(name.into());
+                let image = self
+                    .project_lookup(opctx, params::ProjectSelector { project })?
+                    .project_image_name_owned(name.into());
                 Ok(ImageLookup::ProjectImage(image))
             }
             params::ImageSelector {
                 image: NameOrId::Name(name),
                 project: None,
             } => {
-                let image = self.current_silo_lookup(opctx)?.silo_image_name_owned(name.into());
+                let image = self
+                    .current_silo_lookup(opctx)?
+                    .silo_image_name_owned(name.into());
                 Ok(ImageLookup::SiloImage(image))
             }
-            params::ImageSelector {
-                image: NameOrId::Id(_),
-                ..
-            } => Err(Error::invalid_request(
-                "when providing image as an ID, project should not be specified",
-            )),
+            params::ImageSelector { image: NameOrId::Id(_), .. } => {
+                Err(Error::invalid_request(
+                    "when providing image as an ID, project should not be specified",
+                ))
             }
+        }
     }
 
     /// Creates an image

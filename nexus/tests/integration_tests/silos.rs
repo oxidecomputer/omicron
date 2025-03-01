@@ -31,7 +31,7 @@ use omicron_common::api::external::{
 };
 use omicron_common::api::external::{ObjectIdentity, UserId};
 use omicron_test_utils::certificates::CertificateChain;
-use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
+use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt::Write;
@@ -39,9 +39,9 @@ use std::str::FromStr;
 
 use base64::Engine;
 use hickory_resolver::error::ResolveErrorKind;
-use http::method::Method;
 use http::StatusCode;
-use httptest::{matchers::*, responders::*, Expectation, Server};
+use http::method::Method;
+use httptest::{Expectation, Server, matchers::*, responders::*};
 use nexus_types::external_api::shared::{FleetRole, SiloRole};
 use std::convert::Infallible;
 use std::net::Ipv4Addr;
@@ -305,16 +305,18 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
             .await
             .unwrap();
 
-    assert!(nexus
-        .datastore()
-        .silo_group_optional_lookup(
-            &authn_opctx,
-            &authz_silo,
-            "administrator".into(),
-        )
-        .await
-        .unwrap()
-        .is_some());
+    assert!(
+        nexus
+            .datastore()
+            .silo_group_optional_lookup(
+                &authn_opctx,
+                &authz_silo,
+                "administrator".into(),
+            )
+            .await
+            .unwrap()
+            .is_some()
+    );
 
     // Test that a user is granted privileges from their group membership
     let admin_group_user = nexus
@@ -631,13 +633,11 @@ async fn test_saml_idp_metadata_data_valid(
     .await
     .expect("expected success");
 
-    assert!(result.headers["Location"]
-        .to_str()
-        .unwrap()
-        .to_string()
-        .starts_with(
+    assert!(
+        result.headers["Location"].to_str().unwrap().to_string().starts_with(
             "https://idp.example.org/SAML2/SSO/Redirect?SAMLRequest=",
-        ));
+        )
+    );
 }
 
 // Fail to create a Silo with a SAML IdP document string that isn't valid
@@ -1429,16 +1429,18 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to make request");
 
     // Expect the group is gone
-    assert!(nexus
-        .datastore()
-        .silo_group_optional_lookup(
-            &opctx_external_authn,
-            &authz_silo,
-            "a-group".into(),
-        )
-        .await
-        .expect("silo_group_optional_lookup")
-        .is_none());
+    assert!(
+        nexus
+            .datastore()
+            .silo_group_optional_lookup(
+                &opctx_external_authn,
+                &authz_silo,
+                "a-group".into(),
+            )
+            .await
+            .expect("silo_group_optional_lookup")
+            .is_none()
+    );
 
     // Expect the group membership is gone
     let memberships = nexus

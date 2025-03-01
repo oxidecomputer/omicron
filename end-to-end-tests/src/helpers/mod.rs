@@ -3,9 +3,9 @@ pub mod ctx;
 pub mod icmp;
 
 use self::ctx::nexus_addr;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use oxide_client::types::Name;
-use rand::{thread_rng, Rng};
+use rand::{Rng, thread_rng};
 use std::env;
 use std::net::{IpAddr, Ipv4Addr};
 

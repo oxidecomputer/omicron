@@ -4,14 +4,14 @@
 
 //! Silo related authentication types and functions
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use base64::Engine;
 use dropshot::HttpError;
 use samael::metadata::ContactPerson;
 use samael::metadata::ContactType;
 use samael::metadata::EntityDescriptor;
-use samael::metadata::NameIdFormat;
 use samael::metadata::HTTP_REDIRECT_BINDING;
+use samael::metadata::NameIdFormat;
 use samael::schema::Response as SAMLResponse;
 use samael::service_provider::ServiceProvider;
 use samael::service_provider::ServiceProviderBuilder;

@@ -12,7 +12,6 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -23,6 +22,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
@@ -53,12 +53,11 @@ impl super::Nexus {
                     .disk_name_owned(name.into());
                 Ok(disk)
             }
-            params::DiskSelector {
-                disk: NameOrId::Id(_),
-                ..
-            } => Err(Error::invalid_request(
-                "when providing disk as an ID project should not be specified",
-            )),
+            params::DiskSelector { disk: NameOrId::Id(_), .. } => {
+                Err(Error::invalid_request(
+                    "when providing disk as an ID project should not be specified",
+                ))
+            }
             _ => Err(Error::invalid_request(
                 "disk should either be UUID or project should be specified",
             )),
@@ -94,13 +93,11 @@ impl super::Nexus {
                 // If the size of the snapshot is greater than the size of the
                 // disk, return an error.
                 if db_snapshot.size.to_bytes() > params.size.to_bytes() {
-                    return Err(Error::invalid_request(
-                        &format!(
-                            "disk size {} must be greater than or equal to snapshot size {}",
-                            params.size.to_bytes(),
-                            db_snapshot.size.to_bytes(),
-                        ),
-                    ));
+                    return Err(Error::invalid_request(&format!(
+                        "disk size {} must be greater than or equal to snapshot size {}",
+                        params.size.to_bytes(),
+                        db_snapshot.size.to_bytes(),
+                    )));
                 }
 
                 db_snapshot.block_size.to_bytes().into()
@@ -124,13 +121,11 @@ impl super::Nexus {
                 // If the size of the image is greater than the size of the
                 // disk, return an error.
                 if db_image.size.to_bytes() > params.size.to_bytes() {
-                    return Err(Error::invalid_request(
-                        &format!(
-                            "disk size {} must be greater than or equal to image size {}",
-                            params.size.to_bytes(),
-                            db_image.size.to_bytes(),
-                        ),
-                    ));
+                    return Err(Error::invalid_request(&format!(
+                        "disk size {} must be greater than or equal to image size {}",
+                        params.size.to_bytes(),
+                        db_image.size.to_bytes(),
+                    )));
                 }
 
                 db_image.block_size.to_bytes().into()

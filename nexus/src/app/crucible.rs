@@ -7,6 +7,7 @@
 use super::*;
 
 use anyhow::anyhow;
+use crucible_agent_client::Client as CrucibleAgentClient;
 use crucible_agent_client::types::CreateRegion;
 use crucible_agent_client::types::GetSnapshotResponse;
 use crucible_agent_client::types::Region;
@@ -14,7 +15,6 @@ use crucible_agent_client::types::RegionId;
 use crucible_agent_client::types::RunningSnapshot;
 use crucible_agent_client::types::Snapshot;
 use crucible_agent_client::types::State as RegionState;
-use crucible_agent_client::Client as CrucibleAgentClient;
 use futures::StreamExt;
 use nexus_db_queries::db;
 use nexus_db_queries::db::identity::Asset;

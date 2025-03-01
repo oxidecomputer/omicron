@@ -11,8 +11,8 @@
 //! place to propagate changes in the IP allowlist for user-facing services.
 
 use crate::app::background::BackgroundTask;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use std::sync::Arc;

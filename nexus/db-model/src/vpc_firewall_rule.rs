@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{impl_enum_wrapper, L4PortRange, SqlU16};
+use super::{L4PortRange, SqlU16, impl_enum_wrapper};
 use crate::schema::vpc_firewall_rule;
 use db_macros::Resource;
 use diesel::backend::Backend;
@@ -166,7 +166,7 @@ impl ToSql<sql_types::Int4, Pg> for VpcFirewallRulePriority {
         out: &mut serialize::Output<'a, '_, Pg>,
     ) -> serialize::Result {
         <SqlU16 as ToSql<sql_types::Int4, Pg>>::to_sql(
-            &SqlU16(self.0 .0),
+            &SqlU16(self.0.0),
             &mut out.reborrow(),
         )
     }

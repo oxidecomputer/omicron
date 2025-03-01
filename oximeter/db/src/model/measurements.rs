@@ -17,12 +17,12 @@ use crate::query::measurement_table_name;
 use chrono::TimeZone as _;
 use chrono_tz::Tz;
 use indexmap::IndexMap;
-use oximeter::histogram::Histogram;
-use oximeter::traits::HistogramSupport;
-use oximeter::types::MissingDatum;
 use oximeter::Datum;
 use oximeter::DatumType;
 use oximeter::Sample;
+use oximeter::histogram::Histogram;
+use oximeter::traits::HistogramSupport;
+use oximeter::types::MissingDatum;
 use strum::IntoEnumIterator as _;
 
 /// Extract the table name and a data block for a sample's measurement.
@@ -46,25 +46,27 @@ pub(crate) fn extract_measurement_as_block_impl(
     measurement: &oximeter::Measurement,
 ) -> (String, Block) {
     // Construct the column arrays for those columns shared by all tables.
-    let mut columns = IndexMap::from([
-        (
-            String::from(columns::TIMESERIES_NAME),
-            Column::from(ValueArray::from(vec![timeseries_name])),
-        ),
-        (
-            String::from(columns::TIMESERIES_KEY),
-            Column::from(ValueArray::from(vec![timeseries_key])),
-        ),
-        (
-            String::from(columns::TIMESTAMP),
-            Column::from(ValueArray::DateTime64 {
-                precision: Precision::MAX,
-                tz: Tz::UTC,
-                values: vec![Tz::UTC
-                    .from_utc_datetime(&measurement.timestamp().naive_utc())],
-            }),
-        ),
-    ]);
+    let mut columns =
+        IndexMap::from([
+            (
+                String::from(columns::TIMESERIES_NAME),
+                Column::from(ValueArray::from(vec![timeseries_name])),
+            ),
+            (
+                String::from(columns::TIMESERIES_KEY),
+                Column::from(ValueArray::from(vec![timeseries_key])),
+            ),
+            (
+                String::from(columns::TIMESTAMP),
+                Column::from(ValueArray::DateTime64 {
+                    precision: Precision::MAX,
+                    tz: Tz::UTC,
+                    values: vec![Tz::UTC.from_utc_datetime(
+                        &measurement.timestamp().naive_utc(),
+                    )],
+                }),
+            ),
+        ]);
 
     // Insert an array of start times if needed.
     if let Some(start_time) = measurement.start_time() {
@@ -73,7 +75,9 @@ pub(crate) fn extract_measurement_as_block_impl(
             Column::from(ValueArray::DateTime64 {
                 precision: Precision::MAX,
                 tz: Tz::UTC,
-                values: vec![Tz::UTC.from_utc_datetime(&start_time.naive_utc())],
+                values: vec![
+                    Tz::UTC.from_utc_datetime(&start_time.naive_utc()),
+                ],
             }),
         );
     }
@@ -497,11 +501,11 @@ mod tests {
     use crate::native::block::ValueArray;
     use bytes::Bytes;
     use indexmap::IndexMap;
+    use oximeter::Datum;
+    use oximeter::Sample;
     use oximeter::histogram::Histogram;
     use oximeter::histogram::Record as _;
     use oximeter::types::Cumulative;
-    use oximeter::Datum;
-    use oximeter::Sample;
 
     #[test]
     fn test_insert_datum_columns_scalar() {
@@ -655,7 +659,9 @@ mod tests {
             .column_values(columns::TIMESTAMP)
             .expect("Should have a `timestamp` column");
         let ValueArray::DateTime64 { values, .. } = col else {
-            panic!("Expected a DateTime64 column for the timestamps, found {col:#?}");
+            panic!(
+                "Expected a DateTime64 column for the timestamps, found {col:#?}"
+            );
         };
         assert_eq!(values, &[sample.measurement.timestamp()]);
 
@@ -720,7 +726,9 @@ mod tests {
             .column_values(columns::START_TIME)
             .expect("Should have a `start_time` column");
         let ValueArray::DateTime64 { values, .. } = col else {
-            panic!("Expected a DateTime64 column for the start_time, found {col:#?}");
+            panic!(
+                "Expected a DateTime64 column for the start_time, found {col:#?}"
+            );
         };
         assert_eq!(values, &[sample.measurement.start_time().unwrap()]);
 
@@ -728,7 +736,9 @@ mod tests {
             .column_values(columns::TIMESTAMP)
             .expect("Should have a `timestamp` column");
         let ValueArray::DateTime64 { values, .. } = col else {
-            panic!("Expected a DateTime64 column for the timestamps, found {col:#?}");
+            panic!(
+                "Expected a DateTime64 column for the timestamps, found {col:#?}"
+            );
         };
         assert_eq!(values, &[sample.measurement.timestamp()]);
 
@@ -736,10 +746,14 @@ mod tests {
             .column_values(columns::DATUM)
             .expect("Should have a `datum` column");
         let ValueArray::Nullable { is_null, values } = col else {
-            panic!("Expected a Nullable(UInt64) column for the datum, found {col:#?}");
+            panic!(
+                "Expected a Nullable(UInt64) column for the datum, found {col:#?}"
+            );
         };
         let ValueArray::UInt64(values) = &**values else {
-            panic!("Expected a Nullable(UInt64) column for the datum, found {values:#?}");
+            panic!(
+                "Expected a Nullable(UInt64) column for the datum, found {values:#?}"
+            );
         };
         assert_eq!(is_null, &[false]);
         assert_eq!(values, &[1]);
@@ -788,7 +802,9 @@ mod tests {
             .column_values(columns::START_TIME)
             .expect("Should have a `start_time` column");
         let ValueArray::DateTime64 { values, .. } = col else {
-            panic!("Expected a DateTime64 column for the start_time, found {col:#?}");
+            panic!(
+                "Expected a DateTime64 column for the start_time, found {col:#?}"
+            );
         };
         assert_eq!(values, &[sample.measurement.start_time().unwrap()]);
 
@@ -796,7 +812,9 @@ mod tests {
             .column_values(columns::TIMESTAMP)
             .expect("Should have a `timestamp` column");
         let ValueArray::DateTime64 { values, .. } = col else {
-            panic!("Expected a DateTime64 column for the timestamps, found {col:#?}");
+            panic!(
+                "Expected a DateTime64 column for the timestamps, found {col:#?}"
+            );
         };
         assert_eq!(values, &[sample.measurement.timestamp()]);
 

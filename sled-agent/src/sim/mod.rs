@@ -21,9 +21,9 @@ mod upstairs;
 pub use crate::updates::ConfigUpdates;
 pub use config::{
     Baseboard, Config, ConfigHardware, ConfigStorage, ConfigZpool, SimMode,
-    ZpoolConfig, TEST_HARDWARE_THREADS, TEST_RESERVOIR_RAM,
+    TEST_HARDWARE_THREADS, TEST_RESERVOIR_RAM, ZpoolConfig,
 };
-pub use server::{run_standalone_server, RssArgs, Server};
+pub use server::{RssArgs, Server, run_standalone_server};
 pub use sled_agent::SledAgent;
 pub use storage::PantryServer;
 pub(crate) use storage::Storage;

@@ -4,17 +4,17 @@
 
 //! Server for sprockets-secured requests over the bootstrap network.
 
-use crate::bootstrap::params::version;
 use crate::bootstrap::params::Request;
 use crate::bootstrap::params::RequestEnvelope;
+use crate::bootstrap::params::version;
 use crate::bootstrap::views::Response;
 use crate::bootstrap::views::ResponseEnvelope;
 use crate::bootstrap::views::SledAgentResponse;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
+use sprockets_tls::Stream;
 use sprockets_tls::keys::SprocketsConfig;
 use sprockets_tls::server::Server;
-use sprockets_tls::Stream;
 use std::io;
 use std::net::SocketAddrV6;
 use tokio::io::AsyncReadExt;

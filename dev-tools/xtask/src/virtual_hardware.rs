@@ -4,7 +4,7 @@
 
 //! Subcommand: cargo xtask virtual-hardware
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Parser, Subcommand};
 use macaddr::MacAddr;
@@ -210,7 +210,9 @@ fn verify_omicron_uninstalled() -> Result<()> {
     let mut cmd = Command::new("svcs");
     cmd.arg("svc:/oxide/sled-agent:default");
     if let Ok(_) = execute(cmd) {
-        bail!("Omicron is still installed, please run `omicron-package uninstall` first");
+        bail!(
+            "Omicron is still installed, please run `omicron-package uninstall` first"
+        );
     }
     Ok(())
 }
@@ -342,7 +344,9 @@ fn ensure_softnpu_zone(npu_zone: &Utf8Path) -> Result<()> {
     let zones = zoneadm_list()?;
     if !zones.iter().any(|z| z == "sidecar_softnpu") {
         if !npu_zone.exists() {
-            bail!("npu binary is not installed. Please re-run ./tools/install_prerequisites.sh");
+            bail!(
+                "npu binary is not installed. Please re-run ./tools/install_prerequisites.sh"
+            );
         }
 
         let mut cmd = Command::new(PFEXEC);

@@ -7,8 +7,8 @@ mod rack_setup;
 mod update;
 
 pub use super::Control;
-use crate::ui::defaults::style;
 use crate::Cmd;
+use crate::ui::defaults::style;
 pub use overview::OverviewPane;
 pub use rack_setup::RackSetupPane;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};

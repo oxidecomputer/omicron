@@ -6,24 +6,24 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::TransactionError;
 use crate::db::datastore::SQL_BATCH_SIZE;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::model::DnsGroup;
 use crate::db::model::DnsName;
 use crate::db::model::DnsVersion;
 use crate::db::model::DnsZone;
 use crate::db::model::Generation;
 use crate::db::model::InitialDnsGroup;
-use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
+use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
-use crate::db::TransactionError;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use nexus_types::internal_api::params::DnsConfigParams;
 use nexus_types::internal_api::params::DnsConfigZone;
 use nexus_types::internal_api::params::DnsRecord;
@@ -34,9 +34,9 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::bail_unless;
 use slog::debug;
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::hash_map::Entry;
 use std::num::NonZeroU32;
 use uuid::Uuid;
 
@@ -745,10 +745,10 @@ impl DataStoreDnsTest for DataStore {
 
 #[cfg(test)]
 mod test {
-    use crate::db::datastore::DnsVersionUpdateBuilder;
-    use crate::db::pub_test_utils::TestDatabase;
     use crate::db::DataStore;
     use crate::db::TransactionError;
+    use crate::db::datastore::DnsVersionUpdateBuilder;
+    use crate::db::pub_test_utils::TestDatabase;
     use assert_matches::assert_matches;
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncRunQueryDsl;
@@ -1360,9 +1360,11 @@ mod test {
                 )
                 .await
                 .unwrap_err();
-            assert!(error
-                .to_string()
-                .contains("duplicate key value violates unique constraint"));
+            assert!(
+                error
+                    .to_string()
+                    .contains("duplicate key value violates unique constraint")
+            );
         }
 
         // There cannot be two DNS version records with the same group and
@@ -1391,9 +1393,11 @@ mod test {
                 )
                 .await
                 .unwrap_err();
-            assert!(error
-                .to_string()
-                .contains("duplicate key value violates unique constraint"));
+            assert!(
+                error
+                    .to_string()
+                    .contains("duplicate key value violates unique constraint")
+            );
         }
 
         // There cannot be two DNS names in the same zone with the same name
@@ -1425,9 +1429,11 @@ mod test {
                 )
                 .await
                 .unwrap_err();
-            assert!(error
-                .to_string()
-                .contains("duplicate key value violates unique constraint"));
+            assert!(
+                error
+                    .to_string()
+                    .contains("duplicate key value violates unique constraint")
+            );
         }
 
         db.terminate().await;
@@ -1956,9 +1962,11 @@ mod test {
             .dns_update_from_version(&opctx, update2.clone(), gen1)
             .await
             .expect_err("update unexpectedly succeeded");
-        assert!(error
-            .to_string()
-            .contains("expected current DNS version to be 1, found 2"));
+        assert!(
+            error
+                .to_string()
+                .contains("expected current DNS version to be 1, found 2")
+        );
 
         // At this point, the database state should reflect the first update but
         // not the second.

@@ -11,7 +11,7 @@ use nexus_client::types::CurrentStatus;
 use nexus_client::types::LastResult;
 use nexus_client::types::LastResultCompleted;
 use nexus_types::internal_api::background::*;
-use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
+use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use std::time::Duration;
 
 /// Return the most recent activate time for a background task, returning None

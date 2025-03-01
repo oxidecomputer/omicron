@@ -12,22 +12,22 @@
 
 use chrono::DateTime;
 use chrono::Utc;
-use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::model::ProducerEndpoint;
-use nexus_db_queries::db::DataStore;
 use omicron_common::api::external::Error as DbError;
 use oximeter_client::Client as OximeterClient;
+use slog::Logger;
 use slog::info;
 use slog::o;
 use slog::warn;
-use slog::Logger;
 use slog_error_chain::InlineErrorChain;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::btree_map::Entry;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
@@ -180,9 +180,9 @@ mod tests {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::ExpressionMethods;
     use diesel::QueryDsl;
+    use httptest::Expectation;
     use httptest::matchers::request;
     use httptest::responders::status_code;
-    use httptest::Expectation;
     use nexus_db_model::OximeterInfo;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_types::internal_api::params;

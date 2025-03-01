@@ -12,8 +12,8 @@
 //! collecting extra metadata like uptime). This module provides conversion
 //! helpers for the parts of those tables that are common between the two.
 
-use crate::{MacAddr, Name, SqlU16, SqlU32, SqlU8};
-use anyhow::{anyhow, bail, ensure, Context};
+use crate::{MacAddr, Name, SqlU8, SqlU16, SqlU32};
+use anyhow::{Context, anyhow, bail, ensure};
 use ipnetwork::IpNetwork;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_types::inventory::NetworkInterface;

@@ -6,8 +6,8 @@
 
 // Copyright 2024 Oxide Computer
 
-use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::Omdb;
+use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use anyhow::Context;
 use clap::Args;
 use internal_dns_types::names::ServiceName;

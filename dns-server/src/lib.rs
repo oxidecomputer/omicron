@@ -46,12 +46,12 @@ pub mod dns_server;
 pub mod http_server;
 pub mod storage;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
+use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::config::NameServerConfig;
 use hickory_resolver::config::Protocol;
 use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::config::ResolverOpts;
-use hickory_resolver::TokioAsyncResolver;
 use internal_dns_types::config::DnsConfigParams;
 use slog::o;
 use std::net::SocketAddr;

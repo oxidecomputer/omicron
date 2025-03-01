@@ -7,9 +7,10 @@
 use crate::db;
 use crate::db::queries::next_item::{DefaultShiftGenerator, NextItem};
 use diesel::{
+    Column, QueryResult,
     pg::Pg,
     query_builder::{AstPass, QueryFragment, QueryId},
-    sql_types, Column, QueryResult,
+    sql_types,
 };
 use uuid::Uuid;
 

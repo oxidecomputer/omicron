@@ -415,23 +415,29 @@ mod tests {
     fn test_priority_dimension() {
         assert!(PriorityOrder::new(&[]).is_err());
         assert!(PriorityOrder::new(&[PriorityDimension::Cause]).is_err());
-        assert!(PriorityOrder::new(&[
-            PriorityDimension::Cause,
-            PriorityDimension::Cause
-        ])
-        .is_err());
-        assert!(PriorityOrder::new(&[
-            PriorityDimension::Cause,
-            PriorityDimension::Cause,
-            PriorityDimension::Time
-        ])
-        .is_err());
+        assert!(
+            PriorityOrder::new(&[
+                PriorityDimension::Cause,
+                PriorityDimension::Cause
+            ])
+            .is_err()
+        );
+        assert!(
+            PriorityOrder::new(&[
+                PriorityDimension::Cause,
+                PriorityDimension::Cause,
+                PriorityDimension::Time
+            ])
+            .is_err()
+        );
 
-        assert!(PriorityOrder::new(&[
-            PriorityDimension::Cause,
-            PriorityDimension::Time
-        ])
-        .is_ok());
+        assert!(
+            PriorityOrder::new(&[
+                PriorityDimension::Cause,
+                PriorityDimension::Time
+            ])
+            .is_ok()
+        );
         assert_eq!(
             PriorityOrder::new(PriorityOrder::default().as_slice()).unwrap(),
             PriorityOrder::default()

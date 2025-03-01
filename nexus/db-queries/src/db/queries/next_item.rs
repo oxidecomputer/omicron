@@ -5,6 +5,7 @@
 //! A generic query for selecting a unique next item from a table.
 
 use crate::db::DbConnection;
+use diesel::RunQueryDsl;
 use diesel::associations::HasTable;
 use diesel::pg::Pg;
 use diesel::prelude::Column;
@@ -16,7 +17,6 @@ use diesel::query_builder::QueryId;
 use diesel::serialize::ToSql;
 use diesel::sql_types;
 use diesel::sql_types::HasSqlType;
-use diesel::RunQueryDsl;
 use std::marker::PhantomData;
 use uuid::Uuid;
 
@@ -186,23 +186,17 @@ impl<Table, Item, ItemColumn, ScopeKey, ScopeColumn, Generator>
 where
     // Table is a database table whose name can be used in a query fragment
     Table: diesel::Table + HasTable<Table = Table> + QueryFragment<Pg> + Copy,
-
     // Item can be converted to the SQL type of the ItemColumn
     Item: ToSql<<ItemColumn as Expression>::SqlType, Pg> + Copy,
-
     // ItemColum is a column in the target table
     ItemColumn: Column<Table = Table> + Copy,
-
     // ScopeKey can be converted to the SQL type of the ScopeColumn
     ScopeKey: ScopeKeyType + ToSql<<ScopeColumn as Expression>::SqlType, Pg>,
-
     // ScopeColumn is a column on the target table
     ScopeColumn: ScopeColumnType + Column<Table = Table>,
-
     // The Postgres backend supports the SQL types of both columns
     Pg: HasSqlType<<ScopeColumn as Expression>::SqlType>
         + HasSqlType<<ItemColumn as Expression>::SqlType>,
-
     // We need an implementation to create the shifts from the base
     Generator: ShiftGenerator<Item>,
 {
@@ -696,19 +690,14 @@ impl<Table, Item, ItemColumn, ScopeKey, ScopeColumn>
 where
     // Table is a database table whose name can be used in a query fragment
     Table: diesel::Table + HasTable<Table = Table> + QueryFragment<Pg> + Copy,
-
     // Item can be converted to the SQL type of the ItemColumn
     Item: ToSql<<ItemColumn as Expression>::SqlType, Pg> + Copy,
-
     // ItemColum is a column in the target table
     ItemColumn: Column<Table = Table> + Copy,
-
     // ScopeKey can be converted to the SQL type of the ScopeColumn
     ScopeKey: ScopeKeyType + ToSql<<ScopeColumn as Expression>::SqlType, Pg>,
-
     // ScopeColumn is a column on the target table
     ScopeColumn: ScopeColumnType + Column<Table = Table>,
-
     // The Postgres backend supports the SQL types of both columns
     Pg: HasSqlType<<ScopeColumn as Expression>::SqlType>
         + HasSqlType<<ItemColumn as Expression>::SqlType>,
@@ -931,13 +920,13 @@ mod tests {
     use async_bb8_diesel::AsyncSimpleConnection;
     use chrono::DateTime;
     use chrono::Utc;
+    use diesel::Column;
+    use diesel::Insertable;
+    use diesel::SelectableHelper;
     use diesel::pg::Pg;
     use diesel::query_builder::AstPass;
     use diesel::query_builder::QueryFragment;
     use diesel::query_builder::QueryId;
-    use diesel::Column;
-    use diesel::Insertable;
-    use diesel::SelectableHelper;
     use omicron_test_utils::dev;
     use uuid::Uuid;
 

@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use slog::{warn, Logger};
+use slog::{Logger, warn};
 use thiserror::Error;
 
 #[derive(Error, Debug)]

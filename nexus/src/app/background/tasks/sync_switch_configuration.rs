@@ -18,16 +18,16 @@ use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{
-    AddressLotBlock, BgpConfig, BootstoreConfig, LoopbackAddress,
-    SwitchLinkSpeed, INFRA_LOT, NETWORK_KEY,
+    AddressLotBlock, BgpConfig, BootstoreConfig, INFRA_LOT, LoopbackAddress,
+    NETWORK_KEY, SwitchLinkSpeed,
 };
 use uuid::Uuid;
 
 use crate::app::background::BackgroundTask;
 use display_error_chain::DisplayErrorChain;
 use dpd_client::types::PortId;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use mg_admin_client::types::{
     AddStaticRoute4Request, ApplyRequest, BgpPeerConfig, CheckerSource,
     DeleteStaticRoute4Request, ImportExportPolicy as MgImportExportPolicy,
@@ -36,13 +36,13 @@ use mg_admin_client::types::{
 };
 use nexus_db_queries::{
     context::OpContext,
-    db::{datastore::SwitchPortSettingsCombinedResult, DataStore},
+    db::{DataStore, datastore::SwitchPortSettingsCombinedResult},
 };
 use nexus_types::identity::Asset;
 use nexus_types::{external_api::params, identity::Resource};
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::{
-    address::{get_sled_address, Ipv6Subnet},
+    address::{Ipv6Subnet, get_sled_address},
     api::{
         external::{DataPageParams, ImportExportPolicy, SwitchLocation},
         internal::shared::ParseSwitchLocationError,
@@ -56,7 +56,7 @@ use sled_agent_client::types::{
     RouteConfig as SledRouteConfig, TxEqConfig, UplinkAddressConfig,
 };
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet},
+    collections::{HashMap, HashSet, hash_map::Entry},
     hash::Hash,
     net::{IpAddr, Ipv4Addr},
     str::FromStr,

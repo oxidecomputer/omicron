@@ -6,10 +6,10 @@
 
 use crate::Sled;
 
-use anyhow::anyhow;
 use anyhow::Context;
-use futures::stream;
+use anyhow::anyhow;
 use futures::StreamExt;
+use futures::stream;
 use nexus_db_queries::context::OpContext;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use omicron_common::disk::DatasetsConfig;
@@ -97,11 +97,7 @@ where
         .collect()
         .await;
 
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors)
-    }
+    if errors.is_empty() { Ok(()) } else { Err(errors) }
 }
 
 #[cfg(test)]
@@ -109,10 +105,10 @@ mod tests {
     use super::*;
     use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::deployment::id_map::IdMap;
     use nexus_types::deployment::BlueprintDatasetConfig;
     use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::BlueprintDatasetsConfig;
+    use nexus_types::deployment::id_map::IdMap;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::CompressionAlgorithm;

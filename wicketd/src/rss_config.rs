@@ -5,10 +5,10 @@
 //! Support for user-provided RSS configuration options.
 
 use crate::bootstrap_addrs::BootstrapPeers;
-use anyhow::anyhow;
-use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
+use anyhow::anyhow;
+use anyhow::bail;
 use bootstrap_agent_client::types::BootstrapAddressDiscovery;
 use bootstrap_agent_client::types::Certificate;
 use bootstrap_agent_client::types::Name;
@@ -27,9 +27,9 @@ use omicron_common::api::external::SwitchLocation;
 use sled_hardware_types::Baseboard;
 use slog::debug;
 use slog::warn;
-use std::collections::btree_map;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::btree_map;
 use std::mem;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
@@ -645,9 +645,9 @@ fn validate_rack_network_config(
                 || addr.addr() > infra_ip_range.last
             {
                 bail!(
-                "`uplink_cidr`'s IP address must be in the range defined by \
+                    "`uplink_cidr`'s IP address must be in the range defined by \
                 `infra_ip_first` and `infra_ip_last`"
-            );
+                );
             }
         }
     }

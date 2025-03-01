@@ -9,7 +9,7 @@ use omicron_common::address::{Ipv6Subnet, SLED_PREFIX};
 use omicron_uuid_kinds::SledUuid;
 
 use crate::deployment::{
-    blueprint_zone_type, Blueprint, BlueprintZoneDisposition, BlueprintZoneType,
+    Blueprint, BlueprintZoneDisposition, BlueprintZoneType, blueprint_zone_type,
 };
 
 /// The minimal information needed to represent a sled in the context of

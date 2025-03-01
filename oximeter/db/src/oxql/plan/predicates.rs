@@ -446,11 +446,11 @@ impl std::ops::Deref for OptionalDisjunctions {
 #[cfg(test)]
 mod tests {
     use crate::oxql::ast::grammar::query_parser;
+    use crate::oxql::plan::Plan;
     use crate::oxql::plan::node::Node;
     use crate::oxql::plan::plan::test_utils::all_schema;
     use crate::oxql::plan::predicates::Predicates;
     use crate::oxql::plan::predicates::SplitPredicates;
-    use crate::oxql::plan::Plan;
 
     #[tokio::test]
     async fn push_single_predicate_through_alignment() {

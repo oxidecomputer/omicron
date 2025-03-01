@@ -6,10 +6,10 @@
 
 // Copyright 2024 Oxide Computer Company
 
-use crate::histogram;
-use crate::traits;
 use crate::Producer;
 use crate::TimeseriesName;
+use crate::histogram;
+use crate::traits;
 use bytes::Bytes;
 use chrono::DateTime;
 use chrono::Utc;
@@ -1094,7 +1094,6 @@ impl ProducerRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::histogram::Histogram;
     use super::Cumulative;
     use super::Datum;
     use super::DatumType;
@@ -1105,6 +1104,7 @@ mod tests {
     use super::Measurement;
     use super::MetricsError;
     use super::Sample;
+    use super::histogram::Histogram;
     use bytes::Bytes;
     use std::collections::BTreeMap;
     use std::net::Ipv4Addr;

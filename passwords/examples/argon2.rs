@@ -10,11 +10,11 @@ use argon2::Argon2;
 use argon2::Params;
 use argon2::Version;
 use clap::Parser;
-use omicron_passwords::Hasher;
-use omicron_passwords::Password;
 use omicron_passwords::ARGON2_COST_M_KIB;
 use omicron_passwords::ARGON2_COST_P;
 use omicron_passwords::ARGON2_COST_T;
+use omicron_passwords::Hasher;
+use omicron_passwords::Password;
 
 /// Quickly check performance of Argon2 hashing with given parameter values
 ///

@@ -42,8 +42,8 @@
 //! you define a single data-insertion step.  We have tests that ensure that
 //! each populator behaves as expected in the above ways.
 
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use omicron_common::api::external::Error;
@@ -349,9 +349,9 @@ const ALL_POPULATORS: [&dyn Populator; 10] = [
 
 #[cfg(test)]
 mod test {
+    use super::ALL_POPULATORS;
     use super::PopulateArgs;
     use super::Populator;
-    use super::ALL_POPULATORS;
     use anyhow::Context;
     use nexus_db_queries::authn;
     use nexus_db_queries::authz;
@@ -455,9 +455,7 @@ mod test {
             Err(error) => panic!(
                 "populator {:?}: expected ServiceUnavailable when the database \
                 was down, but got {:#} ({:?})",
-                p,
-                error,
-                error
+                p, error, error
             ),
         };
         info!(&log, "populator {:?} done", p);

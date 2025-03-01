@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 pub trait InstanceCiData {
     fn generate_cidata(&self, public_keys: &[String])
-        -> Result<Vec<u8>, Error>;
+    -> Result<Vec<u8>, Error>;
 }
 
 impl InstanceCiData for Instance {
@@ -108,11 +108,13 @@ mod tests {
         // somewhat arbitrarily-chosen prime numbers near 1 KiB and 256 bytes
         for md_size in (0..upper).step_by(1019) {
             for ud_size in (0..upper).step_by(269) {
-                assert!(super::build_vfat(
-                    &vec![0x5a; md_size],
-                    &vec![0xa5; ud_size]
-                )
-                .is_ok());
+                assert!(
+                    super::build_vfat(
+                        &vec![0x5a; md_size],
+                        &vec![0xa5; ud_size]
+                    )
+                    .is_ok()
+                );
             }
         }
     }

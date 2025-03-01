@@ -6,9 +6,9 @@
 
 //! HTTP entrypoint functions for the gateway service
 
+use crate::ServerContext;
 use crate::error::SpCommsError;
 use crate::http_err_with_message;
-use crate::ServerContext;
 use base64::Engine;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -25,9 +25,9 @@ use futures::TryFutureExt;
 use gateway_api::*;
 use gateway_messages::RotBootInfo;
 use gateway_messages::SpComponent;
-use gateway_sp_comms::error::CommunicationError;
 use gateway_sp_comms::HostPhase2Provider;
 use gateway_sp_comms::VersionedSpState;
+use gateway_sp_comms::error::CommunicationError;
 use gateway_types::caboose::SpComponentCaboose;
 use gateway_types::component::PowerState;
 use gateway_types::component::SpComponentFirmwareSlot;

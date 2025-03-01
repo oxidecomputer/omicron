@@ -6,7 +6,7 @@
 
 use crate::link::{Link, LinkKind};
 use crate::zone::IPADM;
-use crate::{execute, ExecutionError, PFEXEC};
+use crate::{ExecutionError, PFEXEC, execute};
 use omicron_common::api::external::MacAddr;
 use omicron_common::vlan::VlanID;
 use serde::{Deserialize, Serialize};
@@ -115,7 +115,9 @@ pub struct GetLinkpropError {
 
 /// Errors returned from [`Dladm::set_linkprop`].
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to set link property \"{prop_name}\" to \"{prop_value}\" on vnic {link_name}: {err}")]
+#[error(
+    "Failed to set link property \"{prop_name}\" to \"{prop_value}\" on vnic {link_name}: {err}"
+)]
 pub struct SetLinkpropError {
     link_name: String,
     prop_name: String,

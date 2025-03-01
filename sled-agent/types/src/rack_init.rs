@@ -9,12 +9,12 @@ use std::{
     net::{IpAddr, Ipv6Addr},
 };
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use camino::{Utf8Path, Utf8PathBuf};
 pub use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
 use omicron_common::{
     address::{
-        get_64_subnet, IpRange, Ipv6Subnet, AZ_PREFIX, RACK_PREFIX, SLED_PREFIX,
+        AZ_PREFIX, IpRange, Ipv6Subnet, RACK_PREFIX, SLED_PREFIX, get_64_subnet,
     },
     api::{
         external::AllowedSourceIps,

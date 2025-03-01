@@ -6,7 +6,7 @@
 
 use std::{collections::VecDeque, str::FromStr};
 
-use anyhow::{bail, ensure, Error, Result};
+use anyhow::{Error, Result, bail, ensure};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RemapRules {

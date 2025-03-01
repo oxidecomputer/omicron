@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use camino::Utf8Path;
 use clap::Args;
 use omicron_zone_package::{
@@ -13,10 +13,10 @@ use omicron_zone_package::{
     package::PackageSource,
     target::TargetMap,
 };
-use slog::{debug, Logger};
+use slog::{Logger, debug};
 use std::{collections::BTreeMap, io::Write, str::FromStr, time::Duration};
 
-use crate::target::{target_command_help, KnownTarget};
+use crate::target::{KnownTarget, target_command_help};
 
 #[derive(Debug, Args)]
 pub struct ConfigArgs {

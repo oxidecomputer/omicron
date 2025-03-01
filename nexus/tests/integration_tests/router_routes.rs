@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
+use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use itertools::Itertools;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -80,10 +80,30 @@ async fn get_system_routes(
     let mut subnet_route = None;
     for route in system_router_routes {
         match (&route.kind, &route.destination, &route.target) {
-            (RouterRouteKind::Default, RouteDestination::IpNet(IpNet::V4(_)), RouteTarget::InternetGateway(_)) => {v4_route = Some(route);},
-            (RouterRouteKind::Default, RouteDestination::IpNet(IpNet::V6(_)), RouteTarget::InternetGateway(_)) => {v6_route = Some(route);},
-            (RouterRouteKind::VpcSubnet, RouteDestination::Subnet(n0), RouteTarget::Subnet(n1)) if n0 == n1 && n0.as_str() == "default" => {subnet_route = Some(route);},
-            _ => panic!("unexpected system route {route:?} -- wanted gateway and subnet"),
+            (
+                RouterRouteKind::Default,
+                RouteDestination::IpNet(IpNet::V4(_)),
+                RouteTarget::InternetGateway(_),
+            ) => {
+                v4_route = Some(route);
+            }
+            (
+                RouterRouteKind::Default,
+                RouteDestination::IpNet(IpNet::V6(_)),
+                RouteTarget::InternetGateway(_),
+            ) => {
+                v6_route = Some(route);
+            }
+            (
+                RouterRouteKind::VpcSubnet,
+                RouteDestination::Subnet(n0),
+                RouteTarget::Subnet(n1),
+            ) if n0 == n1 && n0.as_str() == "default" => {
+                subnet_route = Some(route);
+            }
+            _ => panic!(
+                "unexpected system route {route:?} -- wanted gateway and subnet"
+            ),
         }
     }
 

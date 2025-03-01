@@ -59,8 +59,8 @@ impl SharedExtractor for Cookies {
 mod test {
     use super::parse_cookies;
     use http::{
-        header::{ACCEPT, COOKIE},
         HeaderMap,
+        header::{ACCEPT, COOKIE},
     };
 
     #[test]

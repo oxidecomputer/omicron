@@ -8,8 +8,8 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::lookup::LookupPath;
 use crate::db::model::RendezvousDebugDataset;
 use crate::db::model::SupportBundle;
@@ -31,8 +31,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use uuid::Uuid;
 
-const CANNOT_ALLOCATE_ERR_MSG: &'static str =
-"Current policy limits support bundle creation to 'one per external disk', and \
+const CANNOT_ALLOCATE_ERR_MSG: &'static str = "Current policy limits support bundle creation to 'one per external disk', and \
  no disks are available. You must delete old support bundles before new ones \
  can be created";
 
@@ -637,7 +636,9 @@ mod test {
             .await
             .expect_err("Shouldn't provision bundle without datasets");
         let Error::InsufficientCapacity { message } = err else {
-            panic!("Unexpected error: {err:?} - we expected 'InsufficientCapacity'");
+            panic!(
+                "Unexpected error: {err:?} - we expected 'InsufficientCapacity'"
+            );
         };
         assert_eq!(
             CANNOT_ALLOCATE_ERR_MSG,
@@ -1088,10 +1089,12 @@ mod test {
             .await
             .expect("Should be able to get bundle we just failed");
         assert_eq!(SupportBundleState::Failed, observed_bundle.state);
-        assert!(observed_bundle
-            .reason_for_failure
-            .unwrap()
-            .contains(FAILURE_REASON_NO_DATASET));
+        assert!(
+            observed_bundle
+                .reason_for_failure
+                .unwrap()
+                .contains(FAILURE_REASON_NO_DATASET)
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1287,10 +1290,12 @@ mod test {
             .await
             .expect("Should be able to get bundle we just failed");
         assert_eq!(SupportBundleState::Failed, observed_bundle.state);
-        assert!(observed_bundle
-            .reason_for_failure
-            .unwrap()
-            .contains(FAILURE_REASON_NO_DATASET));
+        assert!(
+            observed_bundle
+                .reason_for_failure
+                .unwrap()
+                .contains(FAILURE_REASON_NO_DATASET)
+        );
 
         // Expunge the bundle's Nexus
         let bp3 = {
@@ -1317,10 +1322,12 @@ mod test {
             .await
             .expect("Should be able to get bundle we just failed");
         assert_eq!(SupportBundleState::Failed, observed_bundle.state);
-        assert!(observed_bundle
-            .reason_for_failure
-            .unwrap()
-            .contains(FAILURE_REASON_NO_DATASET));
+        assert!(
+            observed_bundle
+                .reason_for_failure
+                .unwrap()
+                .contains(FAILURE_REASON_NO_DATASET)
+        );
 
         let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         datastore
@@ -1422,10 +1429,12 @@ mod test {
             .await
             .expect("Should be able to get bundle we just failed");
         assert_eq!(SupportBundleState::Failing, observed_bundle.state);
-        assert!(observed_bundle
-            .reason_for_failure
-            .unwrap()
-            .contains(FAILURE_REASON_NO_NEXUS));
+        assert!(
+            observed_bundle
+                .reason_for_failure
+                .unwrap()
+                .contains(FAILURE_REASON_NO_NEXUS)
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

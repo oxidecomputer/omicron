@@ -13,12 +13,12 @@ use super::storage::CrucibleData;
 use super::storage::Storage;
 use crate::artifact_store::ArtifactStore;
 use crate::nexus::NexusClient;
-use crate::sim::simulatable::Simulatable;
 use crate::sim::SimulatedUpstairs;
+use crate::sim::simulatable::Simulatable;
 use crate::support_bundle::storage::SupportBundleQueryType;
 use crate::updates::UpdateManager;
-use anyhow::bail;
 use anyhow::Context;
+use anyhow::bail;
 use bytes::Bytes;
 use dropshot::Body;
 use dropshot::HttpError;
@@ -49,11 +49,11 @@ use omicron_uuid_kinds::{
 };
 use oxnet::Ipv6Net;
 use propolis_client::{
+    Client as PropolisClient,
     types::{
         Board, Chipset, ComponentV0, InstanceInitializationMethod,
         InstanceSpecV0, SerialPort, SerialPortNumber,
     },
-    Client as PropolisClient,
 };
 use range_requests::PotentialRange;
 use sled_agent_api::SupportBundleMetadata;
@@ -370,7 +370,7 @@ impl SledAgent {
         {
             Ok(instance) => instance,
             Err(Error::ObjectNotFound { .. }) => {
-                return Ok(VmmUnregisterResponse { updated_runtime: None })
+                return Ok(VmmUnregisterResponse { updated_runtime: None });
             }
             Err(e) => return Err(e),
         };
@@ -658,7 +658,9 @@ impl SledAgent {
                     false
                 }
             }) {
-                return Err(Error::invalid_request("cannot replace existing ephemeral IP without explicit removal"));
+                return Err(Error::invalid_request(
+                    "cannot replace existing ephemeral IP without explicit removal",
+                ));
             }
         }
 

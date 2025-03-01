@@ -4,7 +4,7 @@
 
 //! Implementation of the "mgs sensors" subcommand
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use clap::Args;
 use gateway_client::types::MeasurementErrorCode;
 use gateway_client::types::MeasurementKind;

@@ -5,7 +5,7 @@
 //! Subcommand: cargo xtask live-tests
 
 use crate::common::run_subcmd;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::Parser;
 use std::process::Command;
 

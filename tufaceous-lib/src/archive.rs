@@ -4,7 +4,7 @@
 
 //! Support for reading and writing zip archives.
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use buf_list::BufList;
 use bytes::Bytes;
 use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
@@ -15,8 +15,8 @@ use std::{
     io::{BufReader, BufWriter, Cursor, Read, Seek},
 };
 use zip::{
-    write::{FileOptions, SimpleFileOptions},
     CompressionMethod, ZipArchive, ZipWriter,
+    write::{FileOptions, SimpleFileOptions},
 };
 
 /// A builder for TUF repo archives.
@@ -223,7 +223,10 @@ impl fmt::Display for InvalidPath<'_> {
                 write!(f, "path is absolute -- expected relative paths")
             }
             InvalidPath::ExactlyBaseDir => {
-                write!(f, "path is exactly `{ZIP_BASE_DIR}` -- expected `{ZIP_BASE_DIR}/<foo>`")
+                write!(
+                    f,
+                    "path is exactly `{ZIP_BASE_DIR}` -- expected `{ZIP_BASE_DIR}/<foo>`"
+                )
             }
             InvalidPath::IncorrectBaseDir => {
                 write!(f, "invalid base directory -- must be `{ZIP_BASE_DIR}`")

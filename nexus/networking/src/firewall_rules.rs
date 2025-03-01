@@ -9,6 +9,7 @@ use ipnetwork::IpNetwork;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::fixed_data::vpc::SERVICES_VPC_ID;
 use nexus_db_queries::db::fixed_data::vpc_firewall_rule::NEXUS_VPC_FW_RULE_NAME;
 use nexus_db_queries::db::identity::Asset;
@@ -16,7 +17,6 @@ use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::Name;
-use nexus_db_queries::db::DataStore;
 use omicron_common::api::external;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::Error;
@@ -24,11 +24,11 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::internal::nexus::HostIdentifier;
 use omicron_common::api::internal::shared::NetworkInterface;
 use oxnet::IpNet;
+use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::info;
 use slog::warn;
-use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 use uuid::Uuid;
@@ -344,7 +344,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
                     are expected to have no built-in rules which filter on \
                     the hosts, so that we can modify the rules to apply the \
                     allowlist without worrying about destroying those built-in \
-                    host filters."
+                    host filters.",
                 ));
             }
 
@@ -426,7 +426,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
                 filter_ports,
                 filter_protocols,
                 action: rule.action.0.into(),
-                priority: rule.priority.0 .0,
+                priority: rule.priority.0.0,
             },
         );
     }

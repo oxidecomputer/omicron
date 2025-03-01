@@ -4,10 +4,10 @@
 
 use camino_tempfile::Utf8TempDir;
 use dns_server::storage::Store;
+use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
 use omicron_test_utils::dev::test_cmds::assert_exit_code;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
-use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
 use omicron_test_utils::dev::test_setup_log;
 use std::net::SocketAddr;
 

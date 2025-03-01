@@ -25,8 +25,8 @@
 //! the next step(s) in the process.
 
 use super::{
-    ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
-    ACTION_GENERATE_ID,
+    ACTION_GENERATE_ID, ActionRegistry, NexusActionContext, NexusSaga,
+    SagaInitError,
 };
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::volume_delete;
@@ -332,10 +332,12 @@ pub(crate) mod test {
         );
 
         // Validate the Volume was deleted
-        assert!(datastore
-            .volume_get(old_snapshot_volume_id)
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            datastore
+                .volume_get(old_snapshot_volume_id)
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 }

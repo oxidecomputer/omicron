@@ -5,16 +5,16 @@
 //! Tests images support in the API
 
 use dropshot::ResultsPage;
-use http::method::Method;
 use http::StatusCode;
+use http::method::Method;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::fixed_data::silo_user::USER_TEST_UNPRIVILEGED;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::grant_iam;
-use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::shared::ProjectRole;
 use nexus_types::external_api::shared::SiloRole;

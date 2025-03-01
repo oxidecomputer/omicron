@@ -6,7 +6,7 @@
 
 use std::{io::IsTerminal, time::Duration};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use buf_list::BufList;
 use bytes::Buf;
 use camino::Utf8PathBuf;
@@ -22,8 +22,8 @@ use spec::{
 };
 use tokio::{io::AsyncWriteExt, sync::mpsc};
 use update_engine::{
-    events::{Event, ProgressUnits},
     StepContext, StepSuccess,
+    events::{Event, ProgressUnits},
 };
 
 mod display;

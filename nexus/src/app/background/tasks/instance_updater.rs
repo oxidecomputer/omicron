@@ -6,15 +6,15 @@
 
 use crate::app::background::BackgroundTask;
 use crate::app::saga::StartSaga;
-use crate::app::sagas::instance_update;
 use crate::app::sagas::NexusSaga;
-use futures::future::BoxFuture;
+use crate::app::sagas::instance_update;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use nexus_db_model::Instance;
 use nexus_db_model::VmmState;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::{authn, authz};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;

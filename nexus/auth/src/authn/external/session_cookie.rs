@@ -192,9 +192,9 @@ fn get_token_from_cookie(
 #[cfg(test)]
 mod test {
     use super::{
-        get_token_from_cookie, session_cookie_header_value, Details,
-        HttpAuthnScheme, HttpAuthnSessionCookie, Reason, SchemeResult, Session,
-        SessionStore,
+        Details, HttpAuthnScheme, HttpAuthnSessionCookie, Reason, SchemeResult,
+        Session, SessionStore, get_token_from_cookie,
+        session_cookie_header_value,
     };
     use async_trait::async_trait;
     use chrono::{DateTime, Duration, Utc};

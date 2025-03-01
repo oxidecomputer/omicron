@@ -4,16 +4,16 @@
 
 //! omdb commands that query a crucible-agent
 
-use anyhow::bail;
 use anyhow::Context;
+use anyhow::bail;
 use clap::Args;
 use clap::Subcommand;
-use crucible_agent_client::types::RegionId;
 use crucible_agent_client::Client;
+use crucible_agent_client::types::RegionId;
 use tabled::Tabled;
 
-use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::Omdb;
+use crate::helpers::CONNECTION_OPTIONS_HEADING;
 
 /// Arguments to the "omdb crucible-agent" subcommand
 #[derive(Debug, Args)]

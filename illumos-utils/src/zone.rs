@@ -8,14 +8,14 @@ use anyhow::anyhow;
 use camino::Utf8Path;
 use ipnetwork::IpNetwork;
 use ipnetwork::IpNetworkError;
-use slog::info;
 use slog::Logger;
+use slog::info;
 use std::net::{IpAddr, Ipv6Addr};
 
 use crate::addrobj::AddrObject;
 use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
 use crate::zpool::PathInPool;
-use crate::{execute, PFEXEC};
+use crate::{PFEXEC, execute};
 use omicron_common::address::SLED_PREFIX;
 use omicron_uuid_kinds::OmicronZoneUuid;
 
@@ -142,7 +142,9 @@ pub struct EnsureAddressError {
 
 /// Errors from [`Zones::ensure_has_global_zone_v6_address`].
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to create address {address} with name {name} in the GZ on {link:?}: {err}. Note to developers: {extra_note}")]
+#[error(
+    "Failed to create address {address} with name {name} in the GZ on {link:?}: {err}. Note to developers: {extra_note}"
+)]
 pub struct EnsureGzAddressError {
     address: IpAddr,
     link: String,

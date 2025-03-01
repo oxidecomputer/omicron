@@ -1,7 +1,7 @@
 use super::MacAddr;
 use crate::{
-    schema::ipv4_nat_changes, schema::ipv4_nat_entry, Ipv4Net, Ipv6Net, SqlU16,
-    Vni,
+    Ipv4Net, Ipv6Net, SqlU16, Vni, schema::ipv4_nat_changes,
+    schema::ipv4_nat_entry,
 };
 use chrono::{DateTime, Utc};
 use nexus_types::internal_api::views::Ipv4NatEntryView;

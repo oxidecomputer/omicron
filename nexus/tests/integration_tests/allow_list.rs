@@ -120,9 +120,9 @@ async fn test_allow_list(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to make PUT request")
         .parsed_body()
         .expect("failed to parse error response");
-    assert!(err
-        .message
-        .contains("would prevent access from the current client"));
+    assert!(
+        err.message.contains("would prevent access from the current client")
+    );
 
     // But we _should_ be able to make this self-defeating request through the
     // techport proxy server.

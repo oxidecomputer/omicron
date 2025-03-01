@@ -22,8 +22,8 @@ use parse_display::Display;
 use schemars::JsonSchema;
 use semver::Version;
 use serde::{
-    de::{self, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
+    de::{self, Visitor},
 };
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;

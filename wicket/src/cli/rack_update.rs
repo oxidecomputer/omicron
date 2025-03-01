@@ -13,19 +13,19 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use camino::Utf8PathBuf;
 use clap::{Args, Subcommand, ValueEnum};
 use slog::Logger;
 use tokio::{sync::watch, task::JoinHandle};
 use update_engine::{
-    display::{GroupDisplay, LineDisplayStyles},
     EventBuffer, NestedError,
+    display::{GroupDisplay, LineDisplayStyles},
 };
 use wicket_common::{
+    WICKETD_TIMEOUT,
     rack_update::ClearUpdateStateResponse,
     update_events::{EventReport, WicketdEngineSpec},
-    WICKETD_TIMEOUT,
 };
 use wicketd_client::types::{
     ClearUpdateStateParams, GetArtifactsAndEventReportsResponse,
@@ -35,8 +35,8 @@ use wicketd_client::types::{
 use crate::{
     cli::GlobalOpts,
     state::{
-        parse_event_report_map, ComponentId, CreateClearUpdateStateOptions,
-        CreateStartUpdateOptions,
+        ComponentId, CreateClearUpdateStateOptions, CreateStartUpdateOptions,
+        parse_event_report_map,
     },
     wicketd::create_wicketd_client,
 };
@@ -597,7 +597,9 @@ impl ComponentIdSelector {
             component_ids.insert(ComponentId::new_psc(*psc)?);
         }
         if component_ids.is_empty() {
-            bail!("at least one component ID must be selected via --sled, --switch or --psc");
+            bail!(
+                "at least one component ID must be selected via --sled, --switch or --psc"
+            );
         }
 
         Ok(component_ids)

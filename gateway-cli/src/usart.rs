@@ -21,10 +21,10 @@ use std::time::Duration;
 use termios::Termios;
 use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
-use tokio_tungstenite::tungstenite::protocol::CloseFrame;
-use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 
 const CTRL_A: u8 = b'\x01';
 const CTRL_X: u8 = b'\x18';

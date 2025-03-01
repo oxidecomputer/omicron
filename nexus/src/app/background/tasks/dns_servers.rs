@@ -5,8 +5,8 @@
 //! Background task for keeping track of DNS servers
 
 use crate::app::background::BackgroundTask;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
 use nexus_db_model::DnsGroup;

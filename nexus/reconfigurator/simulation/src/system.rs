@@ -23,9 +23,9 @@ use omicron_common::{address::IpRange, api::external::Generation};
 use omicron_uuid_kinds::{BlueprintUuid, CollectionUuid, SledUuid};
 
 use crate::{
+    LoadSerializedResultBuilder,
     errors::{DuplicateError, KeyError, NonEmptySystemError},
     utils::join_comma_or_none,
-    LoadSerializedResultBuilder,
 };
 
 /// A versioned, simulated reconfigurator system.

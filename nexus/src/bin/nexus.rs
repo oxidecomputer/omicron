@@ -14,8 +14,8 @@ use anyhow::anyhow;
 use camino::Utf8PathBuf;
 use clap::Parser;
 use nexus_config::NexusConfig;
-use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
+use omicron_common::cmd::fatal;
 use omicron_nexus::run_server;
 
 #[derive(Debug, Parser)]

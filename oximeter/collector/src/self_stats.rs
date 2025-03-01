@@ -7,10 +7,10 @@
 // Copyright 2023 Oxide Computer Company
 
 use crate::ProducerEndpoint;
-use oximeter::types::Cumulative;
-use oximeter::types::ProducerResultsItem;
 use oximeter::MetricsError;
 use oximeter::Sample;
+use oximeter::types::Cumulative;
+use oximeter::types::ProducerResultsItem;
 use reqwest::StatusCode;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
