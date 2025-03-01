@@ -36,6 +36,7 @@ use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
 use omicron_common::policy::NEXUS_REDUNDANCY;
+use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -234,6 +235,12 @@ fn process_entry(
     entry: String,
     logs: &LogCapture,
 ) -> LoopResult {
+    // Strip everything after '#' as a comment.
+    let entry = match entry.split_once('#') {
+        Some((real, _comment)) => real,
+        None => &entry,
+    };
+
     // If no input was provided, take another lap (print the prompt and accept
     // another line).  This gets handled specially because otherwise clap would
     // treat this as a usage error and print a help message, which isn't what we
@@ -456,20 +463,17 @@ enum ImageSourceArgs {
     /// the zone image comes from the `install` dataset
     InstallDataset,
     /// the zone image comes from a specific TUF repo artifact
-    Artifact { version: semver::Version, hash: String },
+    Artifact { version: semver::Version, hash: ArtifactHash },
 }
 
-impl TryFrom<ImageSourceArgs> for BlueprintZoneImageSource {
-    type Error = anyhow::Error;
-
-    fn try_from(value: ImageSourceArgs) -> Result<Self, Self::Error> {
+impl From<ImageSourceArgs> for BlueprintZoneImageSource {
+    fn from(value: ImageSourceArgs) -> Self {
         match value {
             ImageSourceArgs::InstallDataset => {
-                Ok(BlueprintZoneImageSource::InstallDataset)
+                BlueprintZoneImageSource::InstallDataset
             }
             ImageSourceArgs::Artifact { version, hash } => {
-                let hash = hash.parse().context("parsing artifact hash")?;
-                Ok(BlueprintZoneImageSource::Artifact { version, hash })
+                BlueprintZoneImageSource::Artifact { version, hash }
             }
         }
     }
@@ -920,10 +924,10 @@ fn cmd_blueprint_edit(
         }
         BlueprintEditCommands::SetZoneImage { zone_id, image_source } => {
             let sled_id = sled_with_zone(&builder, &zone_id)?;
-            let source = BlueprintZoneImageSource::try_from(image_source)?;
+            let source = BlueprintZoneImageSource::from(image_source);
             let rv = format!(
-                "warn: no validation is done on the requested image source\n\
-                 set sled {sled_id} zone {zone_id} image source to {source}\n",
+                "set sled {sled_id} zone {zone_id} image source to {source}\n\
+                 warn: no validation is done on the requested image source"
             );
             builder
                 .sled_set_zone_source(sled_id, zone_id, source)
