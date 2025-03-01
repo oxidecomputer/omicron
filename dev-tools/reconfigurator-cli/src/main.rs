@@ -28,6 +28,7 @@ use nexus_types::deployment::execution;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
@@ -439,8 +440,39 @@ enum BlueprintEditCommands {
     },
     /// add a CockroachDB instance to a particular sled
     AddCockroach { sled_id: SledUuid },
-    /// expunge a particular zone from a particular sled
+    /// set the image source for a zone
+    SetZoneImage {
+        /// id of zone whose image to set
+        zone_id: OmicronZoneUuid,
+        #[command(subcommand)]
+        image_source: ImageSourceArgs,
+    },
+    /// expunge a zone
     ExpungeZone { zone_id: OmicronZoneUuid },
+}
+
+#[derive(Debug, Subcommand)]
+enum ImageSourceArgs {
+    /// the zone image comes from the `install` dataset
+    InstallDataset,
+    /// the zone image comes from a specific TUF repo artifact
+    Artifact { version: semver::Version, hash: String },
+}
+
+impl TryFrom<ImageSourceArgs> for BlueprintZoneImageSource {
+    type Error = anyhow::Error;
+
+    fn try_from(value: ImageSourceArgs) -> Result<Self, Self::Error> {
+        match value {
+            ImageSourceArgs::InstallDataset => {
+                Ok(BlueprintZoneImageSource::InstallDataset)
+            }
+            ImageSourceArgs::Artifact { version, hash } => {
+                let hash = hash.parse().context("parsing artifact hash")?;
+                Ok(BlueprintZoneImageSource::Artifact { version, hash })
+            }
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -886,20 +918,20 @@ fn cmd_blueprint_edit(
                 .context("failed to add CockroachDB zone")?;
             format!("added CockroachDB zone to sled {}", sled_id)
         }
+        BlueprintEditCommands::SetZoneImage { zone_id, image_source } => {
+            let sled_id = sled_with_zone(&builder, &zone_id)?;
+            let source = BlueprintZoneImageSource::try_from(image_source)?;
+            let rv = format!(
+                "warn: no validation is done on the requested image source\n\
+                 set sled {sled_id} zone {zone_id} image source to {source}\n",
+            );
+            builder
+                .sled_set_zone_source(sled_id, zone_id, source)
+                .context("failed to set image source")?;
+            rv
+        }
         BlueprintEditCommands::ExpungeZone { zone_id } => {
-            let mut parent_sled_id = None;
-            for sled_id in builder.sled_ids_with_zones() {
-                if builder
-                    .current_sled_zones(sled_id, BlueprintZoneDisposition::any)
-                    .any(|z| z.id == zone_id)
-                {
-                    parent_sled_id = Some(sled_id);
-                    break;
-                }
-            }
-            let Some(sled_id) = parent_sled_id else {
-                bail!("could not find parent sled for zone {zone_id}");
-            };
+            let sled_id = sled_with_zone(&builder, &zone_id)?;
             builder
                 .sled_expunge_zone(sled_id, zone_id)
                 .context("failed to expunge zone")?;
@@ -926,6 +958,26 @@ fn cmd_blueprint_edit(
 
     sim.commit_and_bump("reconfigurator-cli blueprint-edit".to_owned(), state);
     Ok(Some(rv))
+}
+
+fn sled_with_zone(
+    builder: &BlueprintBuilder<'_>,
+    zone_id: &OmicronZoneUuid,
+) -> anyhow::Result<SledUuid> {
+    let mut parent_sled_id = None;
+
+    for sled_id in builder.sled_ids_with_zones() {
+        if builder
+            .current_sled_zones(sled_id, BlueprintZoneDisposition::any)
+            .any(|z| z.id == *zone_id)
+        {
+            parent_sled_id = Some(sled_id);
+            break;
+        }
+    }
+
+    parent_sled_id
+        .ok_or_else(|| anyhow!("could not find parent sled for zone {zone_id}"))
 }
 
 fn cmd_blueprint_show(
