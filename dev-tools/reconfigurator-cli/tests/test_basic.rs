@@ -109,6 +109,23 @@ fn test_expunge_newly_added_external_dns() {
     );
 }
 
+// Run tests that exercise the ability to set zone image sources.
+#[test]
+fn test_set_zone_images() {
+    let (exit_status, stdout_text, stderr_text) = run_cli(
+        "tests/input/cmds-set-zone-images.txt",
+        &["--seed", "test_set_zone_images"],
+    );
+    assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
+
+    // The example system uses a fixed seed, which means that UUIDs are
+    // deterministic. Some of the test commands also use those UUIDs, and it's
+    // convenient for everyone if they aren't redacted.
+    let stdout_text = Redactor::default().uuids(false).do_redact(&stdout_text);
+    assert_contents("tests/output/cmd-set-zone-images-stdout", &stdout_text);
+    assert_contents("tests/output/cmd-set-zone-images-stderr", &stderr_text);
+}
+
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
