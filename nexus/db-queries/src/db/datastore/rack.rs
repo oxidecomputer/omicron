@@ -140,14 +140,18 @@ impl From<RackInitError> for Error {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             },
-            RackInitError::PhysicalDiskInsert(err) => err,
-            RackInitError::ZpoolInsert(err) => err,
-            RackInitError::BlueprintInsert(err) => Error::internal_error(
-                &format!("failed to insert Blueprint: {:#}", err),
-            ),
-            RackInitError::BlueprintTargetSet(err) => Error::internal_error(
-                &format!("failed to insert set target Blueprint: {:#}", err),
-            ),
+            RackInitError::PhysicalDiskInsert(err) => {
+                err.internal_context("failed to insert physical disk")
+            }
+            RackInitError::ZpoolInsert(err) => {
+                err.internal_context("failed to insert zpool")
+            }
+            RackInitError::BlueprintInsert(err) => {
+                err.internal_context("failed to insert Blueprint")
+            }
+            RackInitError::BlueprintTargetSet(err) => {
+                err.internal_context("failed to insert set target Blueprint")
+            }
             RackInitError::RackUpdate { err, rack_id } => {
                 public_error_from_diesel(
                     err,
@@ -157,17 +161,16 @@ impl From<RackInitError> for Error {
                     ),
                 )
             }
-            RackInitError::DnsSerialization(err) => Error::internal_error(
-                &format!("failed to serialize initial DNS records: {:#}", err),
-            ),
-            RackInitError::Silo(err) => Error::internal_error(&format!(
-                "failed to create recovery Silo: {:#}",
-                err
-            )),
-            RackInitError::RoleAssignment(err) => Error::internal_error(
-                &format!("failed to assign role to initial user: {:#}", err),
-            ),
-            RackInitError::Retryable(err) => Error::internal_error(&format!(
+            RackInitError::DnsSerialization(err) => {
+                err.internal_context("failed to serialize initial DNS records")
+            }
+            RackInitError::Silo(err) => {
+                err.internal_context("failed to create recovery Silo")
+            }
+            RackInitError::RoleAssignment(err) => {
+                err.internal_context("failed to assign role to initial user")
+            }
+            RackInitError::Retryable(err) => Error::unavail(&format!(
                 "failed operation due to database contention: {:#}",
                 err
             )),
