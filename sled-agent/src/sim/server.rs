@@ -29,6 +29,7 @@ use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_types::deployment::{
     blueprint_zone_type, BlueprintPhysicalDiskConfig,
     BlueprintPhysicalDiskDisposition, BlueprintPhysicalDisksConfig,
+    BlueprintZoneImageSource,
 };
 use nexus_types::deployment::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
@@ -403,6 +404,7 @@ pub async fn run_standalone_server(
         ),
         // Co-locate the filesystem pool with the dataset
         filesystem_pool: Some(pool_name),
+        image_source: BlueprintZoneImageSource::InstallDataset,
     }];
 
     let mut internal_services_ip_pool_ranges = vec![];
@@ -441,6 +443,7 @@ pub async fn run_standalone_server(
                 external_dns_servers: vec![],
             }),
             filesystem_pool: Some(get_random_zpool()),
+            image_source: BlueprintZoneImageSource::InstallDataset,
         });
 
         internal_services_ip_pool_ranges.push(match ip {
@@ -492,6 +495,7 @@ pub async fn run_standalone_server(
             ),
             // Co-locate the filesystem pool with the dataset
             filesystem_pool: Some(pool_name),
+            image_source: BlueprintZoneImageSource::InstallDataset,
         });
 
         internal_services_ip_pool_ranges

@@ -1855,27 +1855,6 @@
         "description": "Describes a complete set of software and configuration for the system",
         "type": "object",
         "properties": {
-          "blueprint_datasets": {
-            "description": "A map of sled id -> datasets in use on each sled",
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/BlueprintDatasetsConfig"
-            }
-          },
-          "blueprint_disks": {
-            "description": "A map of sled id -> disks in use on each sled.",
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/BlueprintPhysicalDisksConfig"
-            }
-          },
-          "blueprint_zones": {
-            "description": "A map of sled id -> zones deployed on each sled, along with the [`BlueprintZoneDisposition`] for each zone.\n\nUnlike `sled_state`, this map may contain entries for sleds that are no longer a part of the control plane cluster (e.g., sleds that have been decommissioned, but still have expunged zones where cleanup has not yet completed).",
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/BlueprintZonesConfig"
-            }
-          },
           "clickhouse_cluster_config": {
             "nullable": true,
             "description": "Allocation of Clickhouse Servers and Keepers for replicated clickhouse setups. This is set to `None` if replicated clickhouse is not in use.",
@@ -1938,11 +1917,11 @@
               }
             ]
           },
-          "sled_state": {
-            "description": "A map of sled id -> desired state of the sled.\n\nA sled is considered part of the control plane cluster iff it has an entry in this map.",
+          "sleds": {
+            "description": "A map of sled id -> desired configuration of the sled.",
             "type": "object",
             "additionalProperties": {
-              "$ref": "#/components/schemas/SledState"
+              "$ref": "#/components/schemas/BlueprintSledConfig"
             }
           },
           "time_created": {
@@ -1952,9 +1931,6 @@
           }
         },
         "required": [
-          "blueprint_datasets",
-          "blueprint_disks",
-          "blueprint_zones",
           "cockroachdb_fingerprint",
           "cockroachdb_setting_preserve_downgrade",
           "comment",
@@ -1962,7 +1938,7 @@
           "external_dns_version",
           "id",
           "internal_dns_version",
-          "sled_state",
+          "sleds",
           "time_created"
         ]
       },
@@ -2233,6 +2209,30 @@
           "generation"
         ]
       },
+      "BlueprintSledConfig": {
+        "description": "Information about the configuration of a sled as recorded in a blueprint.\n\nPart of [`Blueprint`].",
+        "type": "object",
+        "properties": {
+          "datasets_config": {
+            "$ref": "#/components/schemas/BlueprintDatasetsConfig"
+          },
+          "disks_config": {
+            "$ref": "#/components/schemas/BlueprintPhysicalDisksConfig"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SledState"
+          },
+          "zones_config": {
+            "$ref": "#/components/schemas/BlueprintZonesConfig"
+          }
+        },
+        "required": [
+          "datasets_config",
+          "disks_config",
+          "state",
+          "zones_config"
+        ]
+      },
       "BlueprintTarget": {
         "description": "Describes what blueprint, if any, the system is currently working toward",
         "type": "object",
@@ -2301,6 +2301,9 @@
           "id": {
             "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
           },
+          "image_source": {
+            "$ref": "#/components/schemas/BlueprintZoneImageSource"
+          },
           "zone_type": {
             "$ref": "#/components/schemas/BlueprintZoneType"
           }
@@ -2308,6 +2311,7 @@
         "required": [
           "disposition",
           "id",
+          "image_source",
           "zone_type"
         ]
       },
@@ -2356,6 +2360,51 @@
               "as_of_generation",
               "kind",
               "ready_for_cleanup"
+            ]
+          }
+        ]
+      },
+      "BlueprintZoneImageSource": {
+        "description": "Where a blueprint's image source is located.\n\nThis is the blueprint version of [`OmicronZoneImageSource`].",
+        "oneOf": [
+          {
+            "description": "This zone's image source is whatever happens to be on the sled's \"install\" dataset.\n\nThis is whatever was put in place at the factory or by the latest MUPdate. The image used here can vary by sled and even over time (if the sled gets MUPdated again).\n\nHistorically, this was the only source for zone images. In an system with automated control-plane-driven update we expect to only use this variant in emergencies where the system had to be recovered via MUPdate.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "install_dataset"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "This zone's image source is the artifact matching this hash from the TUF artifact store (aka \"TUF repo depot\").\n\nThis originates from TUF repos uploaded to Nexus which are then replicated out to all sleds.",
+            "type": "object",
+            "properties": {
+              "hash": {
+                "type": "string",
+                "format": "hex string (32 bytes)"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "artifact"
+                ]
+              },
+              "version": {
+                "type": "string",
+                "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+              }
+            },
+            "required": [
+              "hash",
+              "type",
+              "version"
             ]
           }
         ]
