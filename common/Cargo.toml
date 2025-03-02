@@ -50,6 +50,7 @@ parse-display.workspace = true
 progenitor-client.workspace = true
 omicron-workspace-hack.workspace = true
 regress.workspace = true
+tufaceous-artifact.workspace = true
 
 [dev-dependencies]
 camino-tempfile.workspace = true

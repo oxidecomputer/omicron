@@ -25,11 +25,10 @@ aws-lc-rs = { version = "1.12.4", features = ["prebuilt-nasm"] }
 base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22.1" }
 base64ct = { version = "1.6.0", default-features = false, features = ["std"] }
-bit-set = { version = "0.5.3", default-features = false, features = ["std"] }
-bit-vec = { version = "0.6.3", default-features = false, features = ["std"] }
 bitflags-dff4ba8e3ae991db = { package = "bitflags", version = "1.3.2" }
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.6.0", default-features = false, features = ["serde"] }
 bstr = { version = "1.10.0" }
+buf-list = { version = "1.0.3", default-features = false, features = ["tokio1"] }
 byteorder = { version = "1.5.0" }
 bytes = { version = "1.10.0", features = ["serde"] }
 chrono = { version = "0.4.40", features = ["serde"] }
@@ -99,7 +98,7 @@ qorb = { version = "0.2.1", features = ["qtop"] }
 quote = { version = "1.0.38" }
 rand = { version = "0.8.5", features = ["small_rng"] }
 regex = { version = "1.11.1" }
-regex-automata = { version = "0.4.8", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
+regex-automata = { version = "0.4.8", default-features = false, features = ["dfa-onepass", "dfa-search", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.5" }
 reqwest = { version = "0.12.12", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 rsa = { version = "0.9.6", features = ["serde", "sha2"] }
@@ -135,7 +134,8 @@ x509-cert = { version = "0.2.5" }
 zerocopy-c38e5c1d305a1b54 = { package = "zerocopy", version = "0.8.10", default-features = false, features = ["derive", "simd"] }
 zerocopy-ca01ad9e24f5d932 = { package = "zerocopy", version = "0.7.35", features = ["derive", "simd"] }
 zeroize = { version = "1.8.1", features = ["std", "zeroize_derive"] }
-zip = { version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
+zip-3b31131e45eafb45 = { package = "zip", version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
+zip-f595c2ba2a3f28df = { package = "zip", version = "2.1.3", default-features = false, features = ["bzip2", "deflate"] }
 
 [build-dependencies]
 ahash = { version = "0.8.11" }
@@ -145,11 +145,10 @@ aws-lc-rs = { version = "1.12.4", features = ["prebuilt-nasm"] }
 base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22.1" }
 base64ct = { version = "1.6.0", default-features = false, features = ["std"] }
-bit-set = { version = "0.5.3", default-features = false, features = ["std"] }
-bit-vec = { version = "0.6.3", default-features = false, features = ["std"] }
 bitflags-dff4ba8e3ae991db = { package = "bitflags", version = "1.3.2" }
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.6.0", default-features = false, features = ["serde"] }
 bstr = { version = "1.10.0" }
+buf-list = { version = "1.0.3", default-features = false, features = ["tokio1"] }
 byteorder = { version = "1.5.0" }
 bytes = { version = "1.10.0", features = ["serde"] }
 cc = { version = "1.2.15", default-features = false, features = ["parallel"] }
@@ -220,7 +219,7 @@ qorb = { version = "0.2.1", features = ["qtop"] }
 quote = { version = "1.0.38" }
 rand = { version = "0.8.5", features = ["small_rng"] }
 regex = { version = "1.11.1" }
-regex-automata = { version = "0.4.8", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
+regex-automata = { version = "0.4.8", default-features = false, features = ["dfa-onepass", "dfa-search", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.5" }
 reqwest = { version = "0.12.12", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 rsa = { version = "0.9.6", features = ["serde", "sha2"] }
@@ -259,7 +258,8 @@ x509-cert = { version = "0.2.5" }
 zerocopy-c38e5c1d305a1b54 = { package = "zerocopy", version = "0.8.10", default-features = false, features = ["derive", "simd"] }
 zerocopy-ca01ad9e24f5d932 = { package = "zerocopy", version = "0.7.35", features = ["derive", "simd"] }
 zeroize = { version = "1.8.1", features = ["std", "zeroize_derive"] }
-zip = { version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
+zip-3b31131e45eafb45 = { package = "zip", version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
+zip-f595c2ba2a3f28df = { package = "zip", version = "2.1.3", default-features = false, features = ["bzip2", "deflate"] }
 
 [target.x86_64-unknown-linux-gnu.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.6.0", default-features = false, features = ["std"] }
