@@ -9,28 +9,10 @@ use dropshot::test_util::ClientTestContext;
 use nexus_client::types::BackgroundTask;
 use nexus_client::types::CurrentStatus;
 use nexus_client::types::LastResult;
-use nexus_client::types::LastResultCompleted;
 use nexus_types::internal_api::background::*;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
+use slog::info;
 use std::time::Duration;
-
-/// Return the most recent activate time for a background task, returning None
-/// if it has never been started or is currently running.
-fn most_recent_activate_time(
-    task: &BackgroundTask,
-) -> Option<chrono::DateTime<chrono::Utc>> {
-    match task.current {
-        CurrentStatus::Idle => match task.last {
-            LastResult::Completed(LastResultCompleted {
-                start_time, ..
-            }) => Some(start_time),
-
-            LastResult::NeverCompleted => None,
-        },
-
-        CurrentStatus::Running(..) => None,
-    }
-}
 
 /// Given the name of a background task, wait for it to complete if it's
 /// running, then return the last polled `BackgroundTask` object. Panics if the
@@ -71,19 +53,40 @@ pub async fn wait_background_task(
 }
 
 /// Given the name of a background task, activate it, then wait for it to
-/// complete. Return the last polled `BackgroundTask` object.
+/// complete. Return the `BackgroundTask` object from this invocation.
 pub async fn activate_background_task(
     internal_client: &ClientTestContext,
     task_name: &str,
 ) -> BackgroundTask {
-    let task = NexusRequest::object_get(
-        internal_client,
-        &format!("/bgtasks/view/{task_name}"),
-    )
-    .execute_and_parse_unwrap::<BackgroundTask>()
-    .await;
+    // If it is running, wait for an existing task to complete - this function
+    // has to wait for _this_ activation to finish.
+    //
+    // If it has never run, this function will return straight away.
+    let previous_task = wait_for_condition(
+        || async {
+            let task = NexusRequest::object_get(
+                internal_client,
+                &format!("/bgtasks/view/{task_name}"),
+            )
+            .execute_and_parse_unwrap::<BackgroundTask>()
+            .await;
 
-    let last_activate = most_recent_activate_time(&task);
+            if matches!(task.current, CurrentStatus::Idle) {
+                return Ok(task);
+            }
+
+            info!(
+                internal_client.client_log,
+                "waiting for {task_name} to go idle",
+            );
+
+            Err(CondCheckError::<()>::NotYet)
+        },
+        &Duration::from_millis(50),
+        &Duration::from_secs(10),
+    )
+    .await
+    .expect("task went to idle");
 
     internal_client
         .make_request(
@@ -98,6 +101,12 @@ pub async fn activate_background_task(
         .unwrap();
 
     // Wait for the task to finish
+    //
+    // Note: if another request to activate this background task occurred
+    // concurrently, this loop will wait for that to complete, not our
+    // activation (which would have been queued). This is ok: this function's
+    // intention is to have an activation of the background task occur _after_
+    // the call, and it doesn't matter which one lands first.
     let last_task_poll = wait_for_condition(
         || async {
             let task = NexusRequest::object_get(
@@ -109,40 +118,40 @@ pub async fn activate_background_task(
 
             // Wait until the task has actually run and then is idle
             if matches!(&task.current, CurrentStatus::Idle) {
-                let current_activate = most_recent_activate_time(&task);
-                match (current_activate, last_activate) {
-                    (None, None) => {
-                        // task is idle but it hasn't started yet, and it was
-                        // never previously activated
+                match (&previous_task.last, &task.last) {
+                    (
+                        LastResult::NeverCompleted,
+                        LastResult::NeverCompleted,
+                    ) => {
+                        // task hasn't started yet
                         Err(CondCheckError::<()>::NotYet)
                     }
 
-                    (Some(_), None) => {
-                        // task was activated for the first time by this
-                        // function call, and it's done now (because the task is
-                        // idle)
+                    // task was activated for the first time by this function
+                    // call (or a concurrent one!), and it's done now (because
+                    // the task is idle)
+                    (LastResult::NeverCompleted, LastResult::Completed(_)) => {
                         Ok(task)
                     }
 
-                    (None, Some(_)) => {
-                        // the task is idle (due to the check above) but
-                        // `most_recent_activate_time` returned None, implying
-                        // that the LastResult is NeverCompleted? the Some in
-                        // the second part of the tuple means this ran before,
-                        // so panic here.
-                        panic!("task is idle, but there's no activate time?!");
+                    // the task first reported that it completed, but now
+                    // reports that it has never completed
+                    (LastResult::Completed(_), LastResult::NeverCompleted) => {
+                        panic!("completed, then never completed?!");
                     }
 
-                    (Some(current_activation), Some(last_activation)) => {
-                        // the task is idle, it started ok, and it was
-                        // previously activated: compare times to make sure we
-                        // didn't observe the same BackgroundTask object
-                        if current_activation > last_activation {
+                    (LastResult::Completed(a), LastResult::Completed(b)) => {
+                        if a.iteration < b.iteration {
                             Ok(task)
-                        } else {
-                            // the task hasn't started yet, we observed the same
-                            // BackgroundTask object
+                        } else if a.iteration == b.iteration {
+                            // task hasn't started yet
                             Err(CondCheckError::<()>::NotYet)
+                        } else {
+                            // a.iteration > b.iteration
+                            panic!(
+                                "last iteration {}, current iteration {}",
+                                a.iteration, b.iteration,
+                            );
                         }
                     }
                 }
