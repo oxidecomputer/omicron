@@ -5625,6 +5625,9 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     // Make sure we get a 404 if we try to access the serial console before creation.
     let instance_serial_url =
         get_instance_url(format!("{}/serial-console", instance_name).as_str());
+    let instance_serial_stream_url = get_instance_url(
+        format!("{}/serial-console/stream", instance_name).as_str(),
+    );
     let error: HttpErrorResponseBody = NexusRequest::expect_failure(
         client,
         StatusCode::NOT_FOUND,
@@ -5720,6 +5723,53 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
+    );
+
+    // As the instance is now stopping, we can't connect to its serial console
+    // anymore. We also can't get its cached data; the (simulated) Propolis is
+    // going away.
+
+    let builder = RequestBuilder::new(
+        client,
+        http::Method::GET,
+        &instance_serial_stream_url,
+    )
+    .expect_status(Some(http::StatusCode::BAD_REQUEST));
+
+    let error = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body::<dropshot::HttpErrorResponseBody>()
+        .unwrap();
+
+    assert_eq!(
+        error.message,
+        "cannot administer instance in state \"stopping\"",
+    );
+
+    // Have to pass some offset for the cached data request otherwise we'll
+    // error out of Nexus early on while validating parameters, before
+    // discovering the serial console is unreachable.
+    let builder = RequestBuilder::new(
+        client,
+        http::Method::GET,
+        &format!("{}&from_start=0", instance_serial_url),
+    )
+    .expect_status(Some(http::StatusCode::BAD_REQUEST));
+
+    let error = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body::<dropshot::HttpErrorResponseBody>()
+        .unwrap();
+
+    assert_eq!(
+        error.message,
+        "cannot administer instance in state \"stopping\"",
     );
 
     let instance = instance_next;
