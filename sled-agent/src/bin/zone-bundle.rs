@@ -4,9 +4,9 @@
 
 //! Small CLI to view and inspect zone bundles from the sled agent.
 
+use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
-use anyhow::Context;
 use bytes::Buf;
 use bytes::BufMut;
 use bytes::BytesMut;
@@ -17,11 +17,11 @@ use clap::Parser;
 use clap::Subcommand;
 use futures::stream::StreamExt;
 use omicron_common::address::SLED_AGENT_PORT;
+use sled_agent_client::Client;
 use sled_agent_client::types::CleanupContextUpdate;
 use sled_agent_client::types::Duration;
 use sled_agent_client::types::PriorityDimension;
 use sled_agent_client::types::PriorityOrder;
-use sled_agent_client::Client;
 use slog::Drain;
 use slog::Level;
 use slog::LevelFilter;
@@ -455,7 +455,9 @@ async fn main() -> anyhow::Result<()> {
                         [PriorityDimension; EXPECTED_DIMENSIONS],
                         _,
                     > = pri.try_into() else {
-                        bail!("must provide {EXPECTED_DIMENSIONS} priority dimensions");
+                        bail!(
+                            "must provide {EXPECTED_DIMENSIONS} priority dimensions"
+                        );
                     };
                     Some(PriorityOrder::from(arr))
                 }

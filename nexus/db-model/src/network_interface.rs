@@ -3,12 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{MacAddr, VpcSubnet};
+use crate::Name;
+use crate::SqlU8;
 use crate::impl_enum_type;
 use crate::schema::instance_network_interface;
 use crate::schema::network_interface;
 use crate::schema::service_network_interface;
-use crate::Name;
-use crate::SqlU8;
 use chrono::DateTime;
 use chrono::Utc;
 use db_macros::Resource;
@@ -178,7 +178,9 @@ impl ServiceNetworkInterface {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("Service NIC {nic_id} has a range of IPs ({ip}); only a single IP is supported")]
+#[error(
+    "Service NIC {nic_id} has a range of IPs ({ip}); only a single IP is supported"
+)]
 pub struct ServiceNicNotSingleIpError {
     pub nic_id: Uuid,
     pub ip: ipnetwork::IpNetwork,

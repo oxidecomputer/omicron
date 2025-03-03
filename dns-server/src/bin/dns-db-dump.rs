@@ -7,7 +7,7 @@
 //! This is a low-level debugging tool, not something we'd expect people to use
 //! regularly.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::Parser;
 
 #[derive(Debug, Parser)]

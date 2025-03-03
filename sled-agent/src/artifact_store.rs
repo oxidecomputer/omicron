@@ -35,7 +35,7 @@ use sled_agent_api::ArtifactPutResponse;
 use sled_storage::dataset::M2_ARTIFACT_DATASET;
 use sled_storage::error::Error as StorageError;
 use sled_storage::manager::StorageHandle;
-use slog::{error, info, Logger};
+use slog::{Logger, error, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
@@ -259,11 +259,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
                 }
             }
         }
-        if any_datasets {
-            Ok(map)
-        } else {
-            Err(Error::NoUpdateDataset)
-        }
+        if any_datasets { Ok(map) } else { Err(Error::NoUpdateDataset) }
     }
 
     /// Common implementation for all artifact write operations that creates
@@ -803,12 +799,9 @@ mod test {
                 .await
                 .unwrap();
             // list lists the file
-            assert!(store
-                .list()
-                .await
-                .unwrap()
-                .into_iter()
-                .eq([(TEST_HASH, 2)]));
+            assert!(
+                store.list().await.unwrap().into_iter().eq([(TEST_HASH, 2)])
+            );
             // get succeeds, file reads back OK
             let mut file = store.get(TEST_HASH).await.unwrap();
             let mut vec = Vec::new();

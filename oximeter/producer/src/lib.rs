@@ -6,7 +6,6 @@
 
 // Copyright 2024 Oxide Computer Company
 
-use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::ConfigDropshot;
 use dropshot::HttpError;
@@ -15,26 +14,27 @@ use dropshot::HttpServer;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::ServerBuilder;
+use dropshot::endpoint;
 use internal_dns_resolver::ResolveError;
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
 use nexus_client::types::ProducerEndpoint as ApiProducerEndpoint;
+use omicron_common::FileKv;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
-use omicron_common::FileKv;
 use oximeter::types::ProducerRegistry;
 use oximeter::types::ProducerResults;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use slog::Drain;
+use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::info;
 use slog::o;
 use slog::warn;
-use slog::Drain;
-use slog::Logger;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -454,7 +454,6 @@ mod tests {
     use super::LogConfig;
     use super::ProducerEndpoint;
     use super::Server;
-    use dropshot::endpoint;
     use dropshot::ApiDescription;
     use dropshot::ConfigDropshot;
     use dropshot::HttpError;
@@ -462,14 +461,15 @@ mod tests {
     use dropshot::HttpServer;
     use dropshot::RequestContext;
     use dropshot::ServerBuilder;
+    use dropshot::endpoint;
     use omicron_common::api::internal::nexus::ProducerKind;
     use omicron_common::api::internal::nexus::ProducerRegistrationResponse;
-    use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
+    use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
     use slog::Drain;
     use slog::Logger;
+    use std::sync::Arc;
     use std::sync::atomic::AtomicU32;
     use std::sync::atomic::Ordering;
-    use std::sync::Arc;
     use std::time::Duration;
     use uuid::Uuid;
 

@@ -4,7 +4,7 @@
 
 //! Subcommand: cargo xtask check-workspace-deps
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use camino::Utf8Path;
 use cargo_toml::{Dependency, Manifest};
 use fs_err as fs;

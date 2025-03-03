@@ -4,7 +4,7 @@
 
 //! Common xtask command helpers
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::process::Command;
 
 /// Runs the given command, printing some basic debug information around it, and

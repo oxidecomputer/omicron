@@ -9,11 +9,11 @@ use std::process::Output;
 use std::process::Stdio;
 use std::time::Instant;
 
-use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
-use slog::debug;
+use anyhow::ensure;
 use slog::Logger;
+use slog::debug;
 
 /// Wrapper for `tokio::process::Command` where the builder methods take/return
 /// `self`, plus a number of convenience methods.

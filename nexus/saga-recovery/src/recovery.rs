@@ -74,16 +74,17 @@ impl RestState {
         let time_observed = Utc::now();
         for saga_id in new_sagas {
             info!(log, "observed saga start"; "saga_id" => %saga_id);
-            assert!(self
-                .sagas_started
-                .insert(
-                    saga_id,
-                    SagaStartInfo {
-                        time_observed,
-                        source: SagaStartSource::StartChannel,
-                    }
-                )
-                .is_none());
+            assert!(
+                self.sagas_started
+                    .insert(
+                        saga_id,
+                        SagaStartInfo {
+                            time_observed,
+                            source: SagaStartSource::StartChannel,
+                        }
+                    )
+                    .is_none()
+            );
         }
         rv
     }
@@ -97,16 +98,17 @@ impl RestState {
         }
 
         for saga_id in execution.sagas_recovered_successfully() {
-            assert!(self
-                .sagas_started
-                .insert(
-                    saga_id,
-                    SagaStartInfo {
-                        time_observed,
-                        source: SagaStartSource::Recovered,
-                    }
-                )
-                .is_none());
+            assert!(
+                self.sagas_started
+                    .insert(
+                        saga_id,
+                        SagaStartInfo {
+                            time_observed,
+                            source: SagaStartSource::Recovered,
+                        }
+                    )
+                    .is_none()
+            );
         }
 
         self.remove_next = plan.sagas_maybe_done().collect();

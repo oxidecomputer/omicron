@@ -6,7 +6,7 @@ use camino::Utf8PathBuf;
 use context::{KeeperServerContext, ServerContext};
 use dropshot::HttpServer;
 use omicron_common::FileKv;
-use slog::{debug, error, Drain};
+use slog::{Drain, debug, error};
 use slog_dtrace::ProbeRegistration;
 use slog_error_chain::SlogInlineError;
 use std::io;

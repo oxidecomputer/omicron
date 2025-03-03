@@ -15,10 +15,10 @@ use std::future::Future;
 use std::time::Duration;
 use std::time::Instant;
 
-pub use ::backoff::future::{retry, retry_notify};
 pub use ::backoff::Error as BackoffError;
+pub use ::backoff::future::{retry, retry_notify};
 pub use ::backoff::{
-    backoff::Backoff, ExponentialBackoff, ExponentialBackoffBuilder, Notify,
+    ExponentialBackoff, ExponentialBackoffBuilder, Notify, backoff::Backoff,
 };
 
 /// A helper function which modifies what information is tracked within the
@@ -79,8 +79,8 @@ pub fn retry_policy_internal_service() -> ::backoff::ExponentialBackoff {
 ///
 /// The most significant difference is the "multiplier" - rather than backoff
 /// roughly doubling, it backs off at a smaller interval.
-pub fn retry_policy_internal_service_aggressive(
-) -> ::backoff::ExponentialBackoff {
+pub fn retry_policy_internal_service_aggressive()
+-> ::backoff::ExponentialBackoff {
     backoff_builder()
         .with_initial_interval(Duration::from_millis(100))
         .with_multiplier(1.2)
