@@ -17,6 +17,8 @@ impl_enum_type!(
         Clone,
         Debug,
         PartialEq,
+        Eq,
+        Hash,
         AsExpression,
         FromSqlRow,
         strum::VariantArray,
