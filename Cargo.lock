@@ -1509,6 +1509,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oximeter-db",
  "oximeter-test-utils",
+ "scopeguard",
  "slog",
  "tokio",
 ]

@@ -177,7 +177,7 @@ pub async fn wait_for_keepers(
             }
         },
         &Duration::from_millis(1),
-        &Duration::from_secs(45),
+        &Duration::from_secs(90),
     )
     .await
     .with_context(|| format!("failed to contact all keepers: {ids:?}"))?;
@@ -199,7 +199,7 @@ pub async fn wait_for_ping(
                 .map_err(|_| poll::CondCheckError::<oximeter_db::Error>::NotYet)
         },
         &Duration::from_millis(100),
-        &Duration::from_secs(45),
+        &Duration::from_secs(90),
     )
     .await
     .context("failed to ping ClickHouse server")?;
