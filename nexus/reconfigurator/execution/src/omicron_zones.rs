@@ -95,11 +95,7 @@ where
         .collect()
         .await;
 
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors)
-    }
+    if errors.is_empty() { Ok(()) } else { Err(errors) }
 }
 
 /// Idempontently perform any cleanup actions necessary for expunged zones.
