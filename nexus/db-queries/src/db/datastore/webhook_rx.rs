@@ -437,7 +437,7 @@ impl DataStore {
         let err = OptionalError::new();
         let status = self
             .transaction_retry_wrapper("webhook_glob_reprocess")
-            .transaction(&*conn, |conn| {
+            .transaction(&conn, |conn| {
                 let glob = glob.clone();
                 let err = err.clone();
                 async move {
