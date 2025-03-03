@@ -9,7 +9,7 @@ use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
 use ipnetwork::IpNetwork;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
-use rand::{rngs::StdRng, SeedableRng};
+use rand::{SeedableRng, rngs::StdRng};
 use serde::Deserialize;
 use serde::Serialize;
 use std::net::Ipv6Addr;

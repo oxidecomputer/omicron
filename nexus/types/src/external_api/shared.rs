@@ -15,10 +15,10 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_uuid_kinds::SupportBundleUuid;
 use parse_display::FromStr;
 use schemars::JsonSchema;
-use serde::de::Error as _;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
+use serde::de::Error as _;
 use strum::EnumIter;
 use uuid::Uuid;
 
@@ -376,8 +376,8 @@ impl JsonSchema for SwitchLinkState {
 
 #[cfg(test)]
 mod test {
-    use super::Policy;
     use super::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE;
+    use super::Policy;
     use serde::Deserialize;
 
     #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]

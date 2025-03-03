@@ -1,6 +1,6 @@
-use crate::schema::sled_instance;
 use crate::Name;
 use crate::VmmState;
+use crate::schema::sled_instance;
 use db_macros::Asset;
 use nexus_types::external_api::views;
 use nexus_types::identity::Asset;

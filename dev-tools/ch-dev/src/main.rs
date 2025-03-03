@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use clap::{Args, Parser, Subcommand};
 use dropshot::test_util::LogContext;
 use futures::StreamExt;

@@ -4,15 +4,15 @@
 
 //! Module containing types for updating RoTs via MGS.
 
-use super::common_sp_update::deliver_update;
-use super::common_sp_update::SpComponentUpdater;
 use super::MgsClients;
 use super::SpComponentUpdateError;
 use super::UpdateProgress;
+use super::common_sp_update::SpComponentUpdater;
+use super::common_sp_update::deliver_update;
+use gateway_client::SpComponent;
 use gateway_client::types::RotSlot;
 use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpType;
-use gateway_client::SpComponent;
 use slog::Logger;
 use tokio::sync::watch;
 use uuid::Uuid;

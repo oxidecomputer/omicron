@@ -137,7 +137,9 @@ impl TestDatabaseBuilder {
                 // This configuration isn't wrong, it's just weird - we need to
                 // build a datastore to load the built-in data, so it's odd to
                 // discard it immediately afterwards.
-                panic!("If you're fully populating a datastore, you probably want a connection to it");
+                panic!(
+                    "If you're fully populating a datastore, you probably want a connection to it"
+                );
             }
         }
     }
@@ -242,7 +244,9 @@ impl TestDatabase {
             TestKind::NoPool
             | TestKind::Pool { .. }
             | TestKind::RawDatastore { .. } => {
-                panic!("Wrong test type; try using `TestDatabase::new_with_datastore`");
+                panic!(
+                    "Wrong test type; try using `TestDatabase::new_with_datastore`"
+                );
             }
             TestKind::Datastore { opctx, .. } => opctx,
         }
@@ -251,7 +255,9 @@ impl TestDatabase {
     pub fn datastore(&self) -> &Arc<DataStore> {
         match &self.kind {
             TestKind::NoPool | TestKind::Pool { .. } => {
-                panic!("Wrong test type; try using `TestDatabase::new_with_datastore`");
+                panic!(
+                    "Wrong test type; try using `TestDatabase::new_with_datastore`"
+                );
             }
             TestKind::RawDatastore { datastore } => datastore,
             TestKind::Datastore { datastore, .. } => datastore,

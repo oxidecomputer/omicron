@@ -18,8 +18,8 @@ mod internal_api;
 mod populate;
 mod saga_interface;
 
-pub use app::test_interfaces::TestInterfaces;
 pub use app::Nexus;
+pub use app::test_interfaces::TestInterfaces;
 use context::ApiContext;
 use context::ServerContext;
 use dropshot::ConfigDropshot;
@@ -27,14 +27,15 @@ use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use nexus_config::NexusConfig;
 use nexus_db_model::RendezvousDebugDataset;
-use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::internal_api::params::{
     PhysicalDiskPutRequest, ZpoolPutRequest,
 };
 use nexus_types::inventory::Collection;
+use omicron_common::FileKv;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{ProducerEndpoint, ProducerKind};
@@ -42,7 +43,6 @@ use omicron_common::api::internal::shared::{
     AllowedSourceIps, ExternalPortDiscovery, RackNetworkConfig, SwitchLocation,
 };
 use omicron_common::disk::DatasetKind;
-use omicron_common::FileKv;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid as _;

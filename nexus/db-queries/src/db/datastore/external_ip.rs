@@ -14,10 +14,10 @@ use crate::db::collection_attach::AttachError;
 use crate::db::collection_attach::DatastoreAttachTarget;
 use crate::db::collection_detach::DatastoreDetachTarget;
 use crate::db::collection_detach::DetachError;
-use crate::db::error::public_error_from_diesel;
-use crate::db::error::retryable;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
+use crate::db::error::public_error_from_diesel;
+use crate::db::error::retryable;
 use crate::db::lookup::LookupPath;
 use crate::db::model::ExternalIp;
 use crate::db::model::FloatingIp;
@@ -25,11 +25,11 @@ use crate::db::model::IncompleteExternalIp;
 use crate::db::model::IpKind;
 use crate::db::model::IpPool;
 use crate::db::model::Name;
-use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
+use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
-use crate::db::queries::external_ip::NextExternalIp;
 use crate::db::queries::external_ip::MAX_EXTERNAL_IPS_PER_INSTANCE;
+use crate::db::queries::external_ip::NextExternalIp;
 use crate::db::queries::external_ip::SAFE_TO_ATTACH_INSTANCE_STATES;
 use crate::db::queries::external_ip::SAFE_TO_ATTACH_INSTANCE_STATES_CREATING;
 use crate::db::update_and_check::UpdateAndCheck;
@@ -43,7 +43,6 @@ use nexus_db_model::IpAttachState;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::identity::Resource;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -53,6 +52,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -925,9 +925,13 @@ impl DataStore {
 
         match result.status {
             // Verify this FIP is not attached to any instances/services.
-            UpdateStatus::NotUpdatedButExists if result.found.parent_id.is_some() => Err(Error::invalid_request(
-                "Floating IP cannot be deleted while attached to an instance",
-            )),
+            UpdateStatus::NotUpdatedButExists
+                if result.found.parent_id.is_some() =>
+            {
+                Err(Error::invalid_request(
+                    "Floating IP cannot be deleted while attached to an instance",
+                ))
+            }
             // Only remaining cause of `NotUpdated` is earlier soft-deletion.
             // Return success in this case to maintain idempotency.
             UpdateStatus::Updated | UpdateStatus::NotUpdatedButExists => Ok(()),
@@ -1053,10 +1057,12 @@ impl DataStore {
         let now = Utc::now();
         let conn = self.pool_connection_authorized(opctx).await?;
         match (ip_kind, expected_state, target_state) {
-            (IpKind::SNat, _, _) => return Err(Error::internal_error(
-                "SNAT should not be removed via `external_ip_complete_op`, \
+            (IpKind::SNat, _, _) => {
+                return Err(Error::internal_error(
+                    "SNAT should not be removed via `external_ip_complete_op`, \
                     use `deallocate_external_ip`",
-            )),
+                ));
+            }
 
             (IpKind::Ephemeral, _, IpAttachState::Detached) => {
                 part_out
@@ -1110,7 +1116,7 @@ impl DataStore {
                             ))
                         }
                         UpdateStatus::NotUpdatedButExists => Ok(0),
-                    })
+                    });
             }
 
             // Unwind from failed detach.

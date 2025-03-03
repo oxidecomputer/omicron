@@ -1,7 +1,7 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
-use crate::{keymap::Cmd, state::ComponentId, State};
+use crate::{State, keymap::Cmd, state::ComponentId};
 use camino::Utf8PathBuf;
 use humantime::format_rfc3339;
 use semver::Version;
@@ -68,11 +68,7 @@ pub enum Event {
 
 impl Event {
     pub fn is_tick(&self) -> bool {
-        if let Event::Tick = self {
-            true
-        } else {
-            false
-        }
+        if let Event::Tick = self { true } else { false }
     }
 }
 

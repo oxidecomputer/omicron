@@ -9,22 +9,22 @@ use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::TransactionError;
 use crate::db::datastore::ValidateTransition;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::model::to_db_sled_policy;
+use crate::db::error::public_error_from_diesel;
 use crate::db::model::AffinityPolicy;
 use crate::db::model::Sled;
 use crate::db::model::SledResourceVmm;
 use crate::db::model::SledState;
 use crate::db::model::SledUpdate;
-use crate::db::pagination::paginated;
+use crate::db::model::to_db_sled_policy;
 use crate::db::pagination::Paginator;
+use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
 use crate::db::queries::sled_reservation::sled_find_targets_query;
 use crate::db::queries::sled_reservation::sled_insert_resource_query;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
-use crate::db::TransactionError;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -1066,18 +1066,18 @@ impl TransitionError {
 pub(in crate::db::datastore) mod test {
     use super::*;
     use crate::db::datastore::test_utils::{
-        sled_set_policy, sled_set_state, Expected, IneligibleSleds,
+        Expected, IneligibleSleds, sled_set_policy, sled_set_state,
     };
     use crate::db::lookup::LookupPath;
-    use crate::db::model::to_db_typed_uuid;
     use crate::db::model::ByteCount;
     use crate::db::model::SqlU32;
+    use crate::db::model::to_db_typed_uuid;
+    use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use crate::db::pub_test_utils::helpers::create_affinity_group;
     use crate::db::pub_test_utils::helpers::create_anti_affinity_group;
     use crate::db::pub_test_utils::helpers::create_project;
     use crate::db::pub_test_utils::helpers::small_resource_request;
-    use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
-    use crate::db::pub_test_utils::TestDatabase;
     use anyhow::{Context, Result};
     use itertools::Itertools;
     use nexus_db_model::Generation;
@@ -1094,7 +1094,7 @@ pub(in crate::db::datastore) mod test {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
-    use predicates::{prelude::*, BoxPredicate};
+    use predicates::{BoxPredicate, prelude::*};
     use std::collections::HashMap;
 
     fn rack_id() -> Uuid {
@@ -2383,12 +2383,14 @@ pub(in crate::db::datastore) mod test {
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
         assert!(possible_sleds.iter().all(|sled| sled.fits));
-        assert!(possible_sleds
-            .iter()
-            .all(|sled| sled.affinity_policy.is_none()));
-        assert!(possible_sleds
-            .iter()
-            .all(|sled| sled.anti_affinity_policy.is_none()));
+        assert!(
+            possible_sleds.iter().all(|sled| sled.affinity_policy.is_none())
+        );
+        assert!(
+            possible_sleds
+                .iter()
+                .all(|sled| sled.anti_affinity_policy.is_none())
+        );
 
         // Concurrently create an instance on sleds[0].
         let groups = [Group {
@@ -2414,9 +2416,11 @@ pub(in crate::db::datastore) mod test {
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
         assert!(possible_sleds.iter().all(|sled| sled.fits));
-        assert!(possible_sleds
-            .iter()
-            .all(|sled| sled.anti_affinity_policy.is_none()));
+        assert!(
+            possible_sleds
+                .iter()
+                .all(|sled| sled.anti_affinity_policy.is_none())
+        );
         let affine_sled = possible_sleds
             .iter()
             .find(|sled| sled.id.into_untyped_uuid() == sleds[0].id())
@@ -2479,12 +2483,14 @@ pub(in crate::db::datastore) mod test {
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
         assert!(possible_sleds.iter().all(|sled| sled.fits));
-        assert!(possible_sleds
-            .iter()
-            .all(|sled| sled.affinity_policy.is_none()));
-        assert!(possible_sleds
-            .iter()
-            .all(|sled| sled.anti_affinity_policy.is_none()));
+        assert!(
+            possible_sleds.iter().all(|sled| sled.affinity_policy.is_none())
+        );
+        assert!(
+            possible_sleds
+                .iter()
+                .all(|sled| sled.anti_affinity_policy.is_none())
+        );
 
         // Concurrently create an instance on sleds[0].
         let groups = [Group {
@@ -2511,9 +2517,9 @@ pub(in crate::db::datastore) mod test {
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
         assert!(possible_sleds.iter().all(|sled| sled.fits));
-        assert!(possible_sleds
-            .iter()
-            .all(|sled| sled.affinity_policy.is_none()));
+        assert!(
+            possible_sleds.iter().all(|sled| sled.affinity_policy.is_none())
+        );
         let anti_affine_sled = possible_sleds
             .iter()
             .find(|sled| sled.id.into_untyped_uuid() == sleds[0].id())
@@ -2574,12 +2580,14 @@ pub(in crate::db::datastore) mod test {
         let possible_sleds = test_instance.find_targets(&datastore).await;
         assert_eq!(possible_sleds.len(), SLED_COUNT);
         assert!(possible_sleds.iter().all(|sled| sled.fits));
-        assert!(possible_sleds
-            .iter()
-            .all(|sled| sled.affinity_policy.is_none()));
-        assert!(possible_sleds
-            .iter()
-            .all(|sled| sled.anti_affinity_policy.is_none()));
+        assert!(
+            possible_sleds.iter().all(|sled| sled.affinity_policy.is_none())
+        );
+        assert!(
+            possible_sleds
+                .iter()
+                .all(|sled| sled.anti_affinity_policy.is_none())
+        );
 
         // Concurrently create large instances on sleds 0, 2, 3.
         let groups = [];
