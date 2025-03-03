@@ -8,7 +8,7 @@ use argon2::Algorithm;
 use argon2::Argon2;
 use argon2::Params;
 use argon2::Version;
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use omicron_passwords::Hasher;
 use omicron_passwords::Password;
 

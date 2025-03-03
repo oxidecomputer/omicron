@@ -16,7 +16,7 @@ use camino::Utf8PathBuf;
 use omicron_common::ledger::{Ledger, Ledgerable};
 use serde::{Deserialize, Serialize};
 use sled_hardware_types::Baseboard;
-use slog::{info, Logger};
+use slog::{Logger, info};
 
 /// A persistent version of `Fsm::State`
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

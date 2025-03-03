@@ -3,13 +3,13 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::{
-    collections::{btree_map::Entry, BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, btree_map::Entry},
     fmt,
     io::{self, Read},
     time::Duration,
 };
 
-use anyhow::{anyhow, ensure, Context, Result};
+use anyhow::{Context, Result, anyhow, ensure};
 use async_trait::async_trait;
 use buf_list::BufList;
 use bytes::Buf;
@@ -25,14 +25,14 @@ use omicron_common::{
     update::{ArtifactHash, ArtifactHashId},
 };
 use sha2::{Digest, Sha256};
-use slog::{info, warn, Logger};
+use slog::{Logger, info, warn};
 use tokio::{
     fs::File,
     io::{AsyncWrite, AsyncWriteExt},
 };
 use tufaceous_lib::ControlPlaneZoneImages;
 use update_engine::{
-    errors::NestedEngineError, events::ProgressUnits, StepSpec,
+    StepSpec, errors::NestedEngineError, events::ProgressUnits,
 };
 
 use crate::{async_temp_file::AsyncNamedTempFile, hardware::Hardware};
@@ -307,7 +307,9 @@ impl<'a> ArtifactWriter<'a> {
                                         DriveWriteProgress::ControlPlaneFailed;
                                 }
                                 WriteComponent::Unknown => {
-                                    unreachable!("we should never generate an unknown component")
+                                    unreachable!(
+                                        "we should never generate an unknown component"
+                                    )
                                 }
                             }
                         }
@@ -924,21 +926,19 @@ mod tests {
         Event, InstallinatorCompletionMetadata, InstallinatorComponent,
         InstallinatorStepId, StepEventKind, StepOutcome,
     };
-    use omicron_common::{
-        api::internal::nexus::KnownArtifactKind, update::ArtifactKind,
-    };
     use omicron_test_utils::dev::test_setup_log;
     use partial_io::{
+        PartialAsyncWrite, PartialOp,
         proptest_types::{
             interrupted_would_block_strategy, partial_op_strategy,
         },
-        PartialAsyncWrite, PartialOp,
     };
     use proptest::prelude::*;
     use test_strategy::proptest;
     use tokio::io::AsyncReadExt;
     use tokio::sync::Mutex;
     use tokio_stream::wrappers::ReceiverStream;
+    use tufaceous_artifact::{ArtifactKind, KnownArtifactKind};
 
     #[proptest(ProptestConfig { cases: 32, ..ProptestConfig::default() })]
     fn proptest_write_artifact(

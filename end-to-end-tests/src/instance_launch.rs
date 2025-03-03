@@ -1,9 +1,9 @@
 #![cfg(test)]
 
 use crate::helpers::{ctx::Context, generate_name};
-use anyhow::{ensure, Context as _, Result};
+use anyhow::{Context as _, Result, ensure};
 use async_trait::async_trait;
-use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
+use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use oxide_client::types::{
     ByteCount, DiskCreate, DiskSource, ExternalIp, ExternalIpCreate,
     InstanceCpuCount, InstanceCreate, InstanceDiskAttachment,
@@ -11,8 +11,8 @@ use oxide_client::types::{
 };
 use oxide_client::{ClientDisksExt, ClientInstancesExt, ClientSessionExt};
 use russh::{ChannelMsg, Disconnect};
-use russh_keys::key::{KeyPair, PublicKey};
 use russh_keys::PublicKeyBase64;
+use russh_keys::key::{KeyPair, PublicKey};
 use std::sync::Arc;
 use std::time::Duration;
 

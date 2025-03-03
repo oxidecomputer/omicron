@@ -5,9 +5,9 @@
 //! Xtask for printing USDT probes.
 
 use crate::load_workspace;
-use tabled::settings::Style;
 use tabled::Table;
 use tabled::Tabled;
+use tabled::settings::Style;
 
 #[derive(Tabled)]
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -43,11 +43,7 @@ pub(crate) fn print_probes(filter: Option<String>) -> anyhow::Result<()> {
             .filter_map(|p| {
                 let path =
                     workspace.target_directory.join(p).join(&bin_target.name);
-                if path.exists() {
-                    Some(path)
-                } else {
-                    None
-                }
+                if path.exists() { Some(path) } else { None }
             })
             .next();
         let Some(path) = maybe_path else {

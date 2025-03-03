@@ -8,13 +8,13 @@ use crate::Sled;
 use internal_dns_types::diff::DnsDiff;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
-use nexus_db_queries::db::DataStore;
+use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::execution::Overridables;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
-use nexus_types::deployment::execution::Overridables;
-use nexus_types::deployment::Blueprint;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsConfigParams;
 use nexus_types::internal_api::params::DnsConfigZone;
@@ -297,23 +297,23 @@ fn dns_compute_update(
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::Sled;
     use crate::test_utils::overridables_for_test;
     use crate::test_utils::realize_blueprint_and_expect;
-    use crate::Sled;
     use internal_dns_resolver::Resolver;
     use internal_dns_types::config::Host;
     use internal_dns_types::config::Zone;
-    use internal_dns_types::names::ServiceName;
     use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
     use internal_dns_types::names::DNS_ZONE;
+    use internal_dns_types::names::ServiceName;
     use nexus_db_model::DnsGroup;
     use nexus_db_model::Silo;
     use nexus_db_queries::authn;
     use nexus_db_queries::authz;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
-    use nexus_inventory::now_db_precision;
     use nexus_inventory::CollectionBuilder;
+    use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_preparation::PlanningInputFromDb;
@@ -322,10 +322,9 @@ mod test {
     use nexus_sled_agent_shared::inventory::OmicronZoneType;
     use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_sled_agent_shared::inventory::ZoneKind;
-    use nexus_test_utils::resource_helpers::create_silo;
     use nexus_test_utils::resource_helpers::DiskTest;
+    use nexus_test_utils::resource_helpers::create_silo;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintDatasetsConfig;
     use nexus_types::deployment::BlueprintPhysicalDisksConfig;
@@ -343,6 +342,7 @@ mod test {
     pub use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     pub use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::deployment::SledFilter;
+    use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
     use nexus_types::external_api::views::SledState;
@@ -352,12 +352,12 @@ mod test {
     use nexus_types::internal_api::params::DnsRecord;
     use nexus_types::internal_api::params::Srv;
     use nexus_types::silo::silo_dns_name;
-    use omicron_common::address::get_sled_address;
-    use omicron_common::address::get_switch_zone_address;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::address::RACK_PREFIX;
     use omicron_common::address::SLED_PREFIX;
+    use omicron_common::address::get_sled_address;
+    use omicron_common::address::get_switch_zone_address;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
@@ -784,9 +784,9 @@ mod test {
         println!("omicron zones by IP: {:#?}", omicron_zones_by_ip);
 
         // Check to see that the out-of-service zone was actually excluded
-        assert!(omicron_zones_by_ip
-            .values()
-            .all(|id| *id != out_of_service_id));
+        assert!(
+            omicron_zones_by_ip.values().all(|id| *id != out_of_service_id)
+        );
 
         // We also want a mapping from underlay IP to the corresponding switch
         // zone.  In this case, the value is the Scrimlet's sled id.

@@ -6,18 +6,16 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::error::ErrorHandler;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::public_error_from_diesel_lookup;
-use crate::db::error::ErrorHandler;
-use crate::db::pagination::{paginated, paginated_multicolumn, Paginator};
+use crate::db::pagination::{Paginator, paginated, paginated_multicolumn};
 use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::AsyncSimpleConnection;
 use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
-use diesel::expression::SelectableHelper;
-use diesel::sql_types::Nullable;
 use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::IntoSql;
@@ -26,9 +24,10 @@ use diesel::NullableExpressionMethods;
 use diesel::OptionalExtension;
 use diesel::QueryDsl;
 use diesel::Table;
-use futures::future::BoxFuture;
+use diesel::expression::SelectableHelper;
+use diesel::sql_types::Nullable;
 use futures::FutureExt;
-use nexus_db_model::to_db_typed_uuid;
+use futures::future::BoxFuture;
 use nexus_db_model::CabooseWhichEnum;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::HwPowerState;
@@ -61,6 +60,7 @@ use nexus_db_model::SqlU16;
 use nexus_db_model::SqlU32;
 use nexus_db_model::SwCaboose;
 use nexus_db_model::SwRotPage;
+use nexus_db_model::to_db_typed_uuid;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
@@ -2445,20 +2445,20 @@ impl DataStoreInventoryTest for DataStore {
 
 #[cfg(test)]
 mod test {
-    use crate::db::datastore::inventory::DataStoreInventoryTest;
+    use crate::db::DataStore;
     use crate::db::datastore::DataStoreConnection;
+    use crate::db::datastore::inventory::DataStoreInventoryTest;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::{QueryBuilder, TrustedStr};
     use crate::db::schema;
-    use crate::db::DataStore;
-    use anyhow::{bail, Context};
+    use anyhow::{Context, bail};
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
     use diesel::QueryDsl;
     use gateway_client::types::SpType;
-    use nexus_inventory::examples::representative;
     use nexus_inventory::examples::Representative;
+    use nexus_inventory::examples::representative;
     use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::CabooseWhich;
@@ -2720,8 +2720,10 @@ mod test {
             .inventory_insert_collection(&opctx, &collection5)
             .await
             .expect_err("unexpectedly succeeded in inserting collection");
-        assert!(format!("{:#}", error)
-            .contains("duplicate key value violates unique constraint"));
+        assert!(
+            format!("{:#}", error)
+                .contains("duplicate key value violates unique constraint")
+        );
 
         // Now that we've inserted a bunch of collections, we can test pruning.
         //

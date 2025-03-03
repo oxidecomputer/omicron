@@ -3,9 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{Generation, Ipv6Net, Name, VpcFirewallRule, VpcSubnet};
+use crate::Vni;
 use crate::collection::DatastoreCollectionConfig;
 use crate::schema::{vpc, vpc_firewall_rule, vpc_subnet};
-use crate::Vni;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use ipnetwork::IpNetwork;

@@ -91,9 +91,9 @@ fn align_input_schema(
 
 #[cfg(test)]
 mod test {
+    use super::TableSchema;
     use super::align;
     use super::align_input_schema;
-    use super::TableSchema;
     use oximeter::FieldType;
     use oxql_types::point::DataType;
     use oxql_types::point::MetricType;

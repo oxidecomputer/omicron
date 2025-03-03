@@ -14,9 +14,9 @@
 
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
-use omicron_ddm_admin_client::types::EnableStatsRequest;
 use omicron_ddm_admin_client::Client;
 use omicron_ddm_admin_client::DdmError;
+use omicron_ddm_admin_client::types::EnableStatsRequest;
 use oxnet::Ipv6Net;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
