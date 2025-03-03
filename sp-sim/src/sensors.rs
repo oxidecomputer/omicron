@@ -3,9 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::config::SpComponentConfig;
-use gateway_messages::measurement::MeasurementError;
-use gateway_messages::measurement::MeasurementKind;
-use gateway_messages::sp_impl::BoundsChecked;
 use gateway_messages::ComponentDetails;
 use gateway_messages::DeviceCapabilities;
 use gateway_messages::Measurement;
@@ -16,6 +13,9 @@ use gateway_messages::SensorRequest;
 use gateway_messages::SensorRequestKind;
 use gateway_messages::SensorResponse;
 use gateway_messages::SpComponent;
+use gateway_messages::measurement::MeasurementError;
+use gateway_messages::measurement::MeasurementKind;
+use gateway_messages::sp_impl::BoundsChecked;
 
 use std::collections::HashMap;
 

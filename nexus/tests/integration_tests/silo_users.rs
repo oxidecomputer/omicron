@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use dropshot::test_util::ClientTestContext;
-use http::{method::Method, StatusCode};
+use http::{StatusCode, method::Method};
 use nexus_db_queries::authn::USER_TEST_UNPRIVILEGED;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;

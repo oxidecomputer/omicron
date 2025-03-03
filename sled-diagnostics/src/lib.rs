@@ -4,7 +4,7 @@
 
 //! Diagnostics for an Oxide sled that exposes common support commands.
 
-use futures::{stream::FuturesUnordered, StreamExt};
+use futures::{StreamExt, stream::FuturesUnordered};
 use slog::Logger;
 
 cfg_if::cfg_if! {
@@ -27,14 +27,14 @@ pub use crate::queries::{
 use queries::*;
 
 /// List all zones on a sled.
-pub async fn zoneadm_info(
-) -> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
+pub async fn zoneadm_info()
+-> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
     execute_command_with_timeout(zoneadm_list(), DEFAULT_TIMEOUT).await
 }
 
 /// Retrieve various `ipadm` command output for the system.
-pub async fn ipadm_info(
-) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+pub async fn ipadm_info()
+-> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
     [ipadm_show_interface(), ipadm_show_addr(), ipadm_show_prop()]
         .into_iter()
         .map(|c| async move {
@@ -46,8 +46,8 @@ pub async fn ipadm_info(
 }
 
 /// Retrieve various `dladm` command output for the system.
-pub async fn dladm_info(
-) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+pub async fn dladm_info()
+-> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
     [
         dladm_show_phys(),
         dladm_show_ether(),

@@ -14,7 +14,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, time::Duration};
 use transceiver_controller::{
-    message::ExtendedStatus, Datapath, Monitors, PowerMode, VendorInfo,
+    Datapath, Monitors, PowerMode, VendorInfo, message::ExtendedStatus,
 };
 
 /// The current state of the v1 Rack as known to wicketd

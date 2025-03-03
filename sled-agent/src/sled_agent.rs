@@ -28,8 +28,8 @@ use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use derive_more::From;
 use dropshot::HttpError;
-use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use illumos_utils::opte::PortManager;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zone::ZONE_PREFIX;
@@ -38,7 +38,7 @@ use nexus_sled_agent_shared::inventory::{
     OmicronZonesConfig, SledRole,
 };
 use omicron_common::address::{
-    get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
+    Ipv6Subnet, SLED_PREFIX, get_sled_address, get_switch_zone_address,
 };
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
@@ -48,7 +48,7 @@ use omicron_common::api::internal::shared::{
     SledIdentifiers, VirtualNetworkInterfaceHost,
 };
 use omicron_common::backoff::{
-    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
+    BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::{
     DatasetsConfig, DatasetsManagementResult, DisksManagementResult,
@@ -70,9 +70,9 @@ use sled_agent_types::zone_bundle::{
     PriorityOrder, StorageLimit, ZoneBundleMetadata,
 };
 use sled_diagnostics::{SledDiagnosticsCmdError, SledDiagnosticsCmdOutput};
-use sled_hardware::{underlay, HardwareManager};
-use sled_hardware_types::underlay::BootstrapInterface;
+use sled_hardware::{HardwareManager, underlay};
 use sled_hardware_types::Baseboard;
+use sled_hardware_types::underlay::BootstrapInterface;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use sprockets_tls::keys::SprocketsConfig;

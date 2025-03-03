@@ -594,10 +594,9 @@ mod test {
         info!(logctx.log, "new instance"; "state" => ?r1);
         assert_eq!(r1.vmm_state.state, VmmState::Starting);
         assert_eq!(r1.vmm_state.gen, Generation::new());
-        assert!(instance
-            .transition(VmmStateRequested::Running)
-            .unwrap()
-            .is_none());
+        assert!(
+            instance.transition(VmmStateRequested::Running).unwrap().is_none()
+        );
         instance.transition_finish();
         let (rprev, rnext) = (r1, instance.object.current());
 
@@ -610,10 +609,9 @@ mod test {
 
         // Now reboot the instance. This is dispatched to Propolis, which will
         // move to the Rebooting state and then back to Running.
-        assert!(instance
-            .transition(VmmStateRequested::Reboot)
-            .unwrap()
-            .is_none());
+        assert!(
+            instance.transition(VmmStateRequested::Reboot).unwrap().is_none()
+        );
         let (rprev, rnext) = (rnext, instance.object.current());
         assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
         assert!(rnext.vmm_state.time_updated > rprev.vmm_state.time_updated);
@@ -693,10 +691,11 @@ mod test {
         let id = uuid::Uuid::new_v4();
         let rprev = r1;
         assert!(!rprev.disk_state.is_attached());
-        assert!(disk
-            .transition(DiskStateRequested::Attached(id))
-            .unwrap()
-            .is_none());
+        assert!(
+            disk.transition(DiskStateRequested::Attached(id))
+                .unwrap()
+                .is_none()
+        );
         let rnext = disk.object.current();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
@@ -720,10 +719,11 @@ mod test {
         let rprev = rnext;
 
         // If we go straight to "Attached" again, there's nothing to do.
-        assert!(disk
-            .transition(DiskStateRequested::Attached(id))
-            .unwrap()
-            .is_none());
+        assert!(
+            disk.transition(DiskStateRequested::Attached(id))
+                .unwrap()
+                .is_none()
+        );
         let rnext = disk.object.current();
         assert_eq!(rnext.gen, rprev.gen);
         let rprev = rnext;

@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use camino::Utf8PathBuf;
 use schemars::{
+    JsonSchema,
     gen::SchemaGenerator,
     schema::{Schema, SchemaObject},
-    JsonSchema,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

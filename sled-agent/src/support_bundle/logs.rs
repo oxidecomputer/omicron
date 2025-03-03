@@ -227,21 +227,27 @@ mod test {
         let path = Utf8PathBuf::from(r"/");
         match validate_log_dir(&valid_dirs, path.clone()) {
             Err(Error::MissingFilename(_)) => (),
-            val => panic!("validating {path} should be Error::MissingFilename but found {val:?}"),
+            val => panic!(
+                "validating {path} should be Error::MissingFilename but found {val:?}"
+            ),
         }
 
         // Invalid log path consisting of just a file name
         let path = Utf8PathBuf::from(r"stderr.log");
         match validate_log_dir(&valid_dirs, path.clone()) {
             Err(Error::InvalidLogDir(_)) => (),
-            val => panic!("validating {path} should be Error::InvalidLogDir but found {val:?}"),
+            val => panic!(
+                "validating {path} should be Error::InvalidLogDir but found {val:?}"
+            ),
         }
 
         // Invalid log path outside of the acceptable directories
         let path = Utf8PathBuf::from(r"/zpool/ext/cockroachdb/stderr.log");
         match validate_log_dir(&valid_dirs, path.clone()) {
             Err(Error::InvalidLogDir(_)) => (),
-            val => panic!("validating {path} should be Error::InvalidLogDir but found {val:?}"),
+            val => panic!(
+                "validating {path} should be Error::InvalidLogDir but found {val:?}"
+            ),
         }
     }
 }

@@ -14,13 +14,13 @@ use crate::db::schema::vpc;
 use crate::db::schema::vpc::dsl;
 use chrono::DateTime;
 use chrono::Utc;
+use diesel::Column;
+use diesel::Insertable;
 use diesel::pg::Pg;
 use diesel::query_builder::AstPass;
 use diesel::query_builder::QueryFragment;
 use diesel::query_builder::QueryId;
 use diesel::sql_types;
-use diesel::Column;
-use diesel::Insertable;
 use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use uuid::Uuid;
@@ -382,11 +382,11 @@ impl std::iter::Iterator for VniSearchIter {
 
 #[cfg(test)]
 mod tests {
-    use super::external;
+    use super::MAX_VNI_SEARCH_RANGE_SIZE;
     use super::Vni;
     use super::VniSearchIter;
     use super::VniShifts;
-    use super::MAX_VNI_SEARCH_RANGE_SIZE;
+    use super::external;
 
     // Ensure that when the search range lies entirely within the range of VNIs,
     // we search from the start VNI through the maximum allowed range size.
@@ -440,11 +440,7 @@ mod tests {
         pub const fn div_ceil(x: u32, y: u32) -> u32 {
             let d = x / y;
             let r = x % y;
-            if r > 0 && y > 0 {
-                d + 1
-            } else {
-                d
-            }
+            if r > 0 && y > 0 { d + 1 } else { d }
         }
         const N_EXPECTED: u32 = div_ceil(
             external::Vni::MAX_VNI - external::Vni::MIN_GUEST_VNI,
