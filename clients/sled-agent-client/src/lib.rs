@@ -77,6 +77,7 @@ progenitor::generate_api!(
         RouterTarget = omicron_common::api::internal::shared::RouterTarget,
         RouterVersion = omicron_common::api::internal::shared::RouterVersion,
         SledRole = nexus_sled_agent_shared::inventory::SledRole,
+        SledDiagnosticsLogs = sled_diagnostics::SledDiagnosticsLogs,
         SourceNatConfig = omicron_common::api::internal::shared::SourceNatConfig,
         SwitchLocation = omicron_common::api::external::SwitchLocation,
         TypedUuidForDatasetKind = omicron_uuid_kinds::DatasetUuid,

@@ -10959,6 +10959,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "sled-diagnostics",
  "slog",
  "uuid",
 ]
@@ -10998,11 +10999,14 @@ dependencies = [
 name = "sled-diagnostics"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "camino",
  "cfg-if",
  "fs-err",
  "futures",
  "libc",
  "omicron-workspace-hack",
+ "oxlog",
  "schemars",
  "serde",
  "slog",
