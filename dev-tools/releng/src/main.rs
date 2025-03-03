@@ -427,18 +427,6 @@ async fn main() -> Result<()> {
             .env_remove("RUSTUP_TOOLCHAIN"),
     );
 
-    // Download the toolchain for phbl before we get to the image build steps.
-    // (This is possibly a micro-optimization.)
-    jobs.push_command(
-        "phbl-toolchain",
-        Command::new(&rustup_cargo)
-            .arg("--version")
-            .current_dir(args.helios_dir.join("projects/phbl"))
-            .env_remove("CARGO")
-            .env_remove("RUSTUP_TOOLCHAIN"),
-    )
-    .after("helios-setup");
-
     let omicron_package = if let Some(path) = &args.omicron_package_bin {
         // omicron-package is provided, so don't build it.
         jobs.push("omicron-package", std::future::ready(Ok(())));
