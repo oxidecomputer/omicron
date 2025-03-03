@@ -680,8 +680,8 @@ output.intermediate_only = true
 service_name = "lldp"
 source.type = "prebuilt"
 source.repo = "lldp"
-source.commit = "ce952e61f444119a2a9fe0d5c5c3db96daf70d96"
-source.sha256 = "0404deaa0c70a34890cb13766925508feb58deefff5eb27376c7f1ea7af45824"
+source.commit = "feb05efdf5ec40277346c5cbe2a4b14a111ac523"
+source.sha256 = "7cd51f2bc7c3bb082955dabf0a6f9ae9785b076561a4647df99c6fc6014c45d6"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -720,8 +720,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "b37a8fdc335592e24d6afe71995637b2ad36eb7d"
-source.sha256 = "022cf1eddf9a8a4042db95ce03d24c3b703f6552bafde0bde3e10d2c138a1e3f"
+source.commit = "a66561e0a063cc30820182008c31f9a64cbd8a6f"
+source.sha256 = "5fe9b52c4cd16f133ddcaabff766d05ae9b6fd707ce4112f3573dbfe8e26b9de"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -747,8 +747,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "b37a8fdc335592e24d6afe71995637b2ad36eb7d"
-source.sha256 = "59bf5dcda77a01d4df0ec839ea48a18acf5e12fcd4bb400d1c23677811a5b352"
+source.commit = "a66561e0a063cc30820182008c31f9a64cbd8a6f"
+source.sha256 = "45e89145e722fecaf07c08f33f31188222678d75a8eeb9eb62f5313205f439da"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -767,8 +767,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "b37a8fdc335592e24d6afe71995637b2ad36eb7d"
-source.sha256 = "2b502172b3877f07026a26054e3a34ac64ba053d6e5861375dcd87dac6ce6c27"
+source.commit = "a66561e0a063cc30820182008c31f9a64cbd8a6f"
+source.sha256 = "71b3be2bea54268c3fe76f96af4e298f72eaeea24c3b75879b0fcb9facc676ee"
 output.type = "zone"
 output.intermediate_only = true
 
