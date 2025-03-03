@@ -5,10 +5,10 @@
 //! Manges deployment of Omicron physical disks to Sled Agents.
 
 use crate::Sled;
-use anyhow::anyhow;
 use anyhow::Context;
-use futures::stream;
+use anyhow::anyhow;
 use futures::StreamExt;
+use futures::stream;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
@@ -99,11 +99,7 @@ where
         .collect()
         .await;
 
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors)
-    }
+    if errors.is_empty() { Ok(()) } else { Err(errors) }
 }
 
 /// Decommissions all disks which are currently expunged.
@@ -139,11 +135,7 @@ pub(crate) async fn decommission_expunged_disks(
         .collect()
         .await;
 
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors)
-    }
+    if errors.is_empty() { Ok(()) } else { Err(errors) }
 }
 
 #[cfg(test)]
@@ -155,10 +147,10 @@ mod test {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::ExpressionMethods;
     use diesel::QueryDsl;
+    use httptest::Expectation;
     use httptest::matchers::{all_of, json_decoded, request};
     use httptest::responders::json_encoded;
     use httptest::responders::status_code;
-    use httptest::Expectation;
     use nexus_db_model::CrucibleDataset;
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
@@ -408,9 +400,11 @@ mod test {
 
         println!("{:?}", errors);
         assert_eq!(errors.len(), 1);
-        assert!(errors[0]
-            .to_string()
-            .starts_with("Failed to put BlueprintPhysicalDisksConfig"));
+        assert!(
+            errors[0]
+                .to_string()
+                .starts_with("Failed to put BlueprintPhysicalDisksConfig")
+        );
         s1.verify_and_clear();
         s2.verify_and_clear();
 

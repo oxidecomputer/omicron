@@ -7,15 +7,15 @@
 //! Note that the bootstrap agent also communicates over Sprockets,
 //! and has a separate interface for establishing the trust quorum.
 
-use super::rack_ops::RssAccess;
 use super::BootstrapError;
 use super::RssAccessError;
+use super::rack_ops::RssAccess;
 use crate::updates::ConfigUpdates;
 use crate::updates::UpdateManager;
 use bootstore::schemes::v0 as bootstore;
-use bootstrap_agent_api::bootstrap_agent_api_mod;
 use bootstrap_agent_api::BootstrapAgentApi;
 use bootstrap_agent_api::Component;
+use bootstrap_agent_api::bootstrap_agent_api_mod;
 use dropshot::{
     ApiDescription, HttpError, HttpResponseOk, HttpResponseUpdatedNoContent,
     RequestContext, TypedBody,

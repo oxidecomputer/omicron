@@ -3,9 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::instance_common::{
+    ExternalIpAttach, ModifyStateForExternalIp, VmmAndSledIds,
     instance_ip_add_nat, instance_ip_add_opte, instance_ip_get_instance_state,
-    instance_ip_move_state, instance_ip_remove_opte, ExternalIpAttach,
-    ModifyStateForExternalIp, VmmAndSledIds,
+    instance_ip_move_state, instance_ip_remove_opte,
 };
 use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas::declare_saga_actions;
@@ -438,12 +438,16 @@ pub(crate) mod test {
         {
             let mut eips = sled_agent.external_ips.lock().unwrap();
             let my_eips = eips.entry(vmm_id).or_default();
-            assert!(my_eips
-                .iter()
-                .any(|v| matches!(v, InstanceExternalIpBody::Floating(_))));
-            assert!(my_eips
-                .iter()
-                .any(|v| matches!(v, InstanceExternalIpBody::Ephemeral(_))));
+            assert!(
+                my_eips
+                    .iter()
+                    .any(|v| matches!(v, InstanceExternalIpBody::Floating(_)))
+            );
+            assert!(
+                my_eips
+                    .iter()
+                    .any(|v| matches!(v, InstanceExternalIpBody::Ephemeral(_)))
+            );
         }
 
         // DB has records for SNAT plus the new IPs.
@@ -469,28 +473,32 @@ pub(crate) mod test {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         // No Floating IPs exist in states other than 'detached'.
-        assert!(dsl::external_ip
-            .filter(dsl::kind.eq(IpKind::Floating))
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::parent_id.eq(instance_id.into_untyped_uuid()))
-            .filter(dsl::state.ne(IpAttachState::Detached))
-            .select(ExternalIp::as_select())
-            .first_async::<ExternalIp>(&*conn)
-            .await
-            .optional()
-            .unwrap()
-            .is_none());
+        assert!(
+            dsl::external_ip
+                .filter(dsl::kind.eq(IpKind::Floating))
+                .filter(dsl::time_deleted.is_null())
+                .filter(dsl::parent_id.eq(instance_id.into_untyped_uuid()))
+                .filter(dsl::state.ne(IpAttachState::Detached))
+                .select(ExternalIp::as_select())
+                .first_async::<ExternalIp>(&*conn)
+                .await
+                .optional()
+                .unwrap()
+                .is_none()
+        );
 
         // All ephemeral IPs are removed.
-        assert!(dsl::external_ip
-            .filter(dsl::kind.eq(IpKind::Ephemeral))
-            .filter(dsl::time_deleted.is_null())
-            .select(ExternalIp::as_select())
-            .first_async::<ExternalIp>(&*conn)
-            .await
-            .optional()
-            .unwrap()
-            .is_none());
+        assert!(
+            dsl::external_ip
+                .filter(dsl::kind.eq(IpKind::Ephemeral))
+                .filter(dsl::time_deleted.is_null())
+                .select(ExternalIp::as_select())
+                .first_async::<ExternalIp>(&*conn)
+                .await
+                .optional()
+                .unwrap()
+                .is_none()
+        );
 
         // No IP bindings remain on sled-agent.
         let VmmAndSledIds { vmm_id, .. } =

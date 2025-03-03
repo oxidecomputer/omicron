@@ -7,16 +7,16 @@
 use super::SpIdentifier;
 use super::SwitchPort;
 use crate::error::StartupError;
-use futures::stream::FuturesUnordered;
 use futures::Stream;
 use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use gateway_messages::SpPort;
 use gateway_sp_comms::SingleSp;
 use serde::Deserialize;
 use serde::Serialize;
+use slog::Logger;
 use slog::debug;
 use slog::info;
-use slog::Logger;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::SocketAddrV6;
@@ -346,7 +346,7 @@ async fn discover_sps(
                             SwitchPort(i),
                             sp.interface().to_string(),
                             sp_port,
-                        )
+                        );
                     }
                     None => {
                         addr_watch.changed().await.unwrap();

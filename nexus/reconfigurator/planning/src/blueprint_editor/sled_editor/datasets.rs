@@ -5,11 +5,11 @@
 use crate::blueprint_builder::EditCounts;
 use crate::planner::SledPlannerRng;
 use illumos_utils::zpool::ZpoolName;
-use nexus_types::deployment::id_map::{self, IdMap};
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintDatasetFilter;
 use nexus_types::deployment::BlueprintDatasetsConfig;
+use nexus_types::deployment::id_map::{self, IdMap};
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::CompressionAlgorithm;
@@ -18,8 +18,8 @@ use omicron_common::disk::DatasetName;
 use omicron_common::disk::GzipLevel;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::net::SocketAddrV6;
 
 #[derive(Debug, thiserror::Error)]
@@ -336,8 +336,8 @@ mod tests {
     use omicron_uuid_kinds::SledUuid;
     use proptest::prelude::*;
     use std::collections::BTreeSet;
-    use test_strategy::proptest;
     use test_strategy::Arbitrary;
+    use test_strategy::proptest;
     use uuid::Uuid;
 
     // Helper functions to "tag" an iterator (i.e., turn it into an iterator of

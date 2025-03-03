@@ -127,9 +127,9 @@ impl super::Nexus {
                     Ok(result) => result.into_inner(),
                     Err(e) => {
                         error!(
-                        self.log,
-                        "failed to get peers for asn {asn} from {switch}: {e}"
-                    );
+                            self.log,
+                            "failed to get peers for asn {asn} from {switch}: {e}"
+                        );
                         continue;
                     }
                 };
@@ -186,9 +186,9 @@ impl super::Nexus {
                     Ok(result) => result.into_inner(),
                     Err(e) => {
                         error!(
-                        self.log,
-                        "failed to get exports for asn {asn} from {switch}: {e}"
-                    );
+                            self.log,
+                            "failed to get exports for asn {asn} from {switch}: {e}"
+                        );
                         continue;
                     }
                 };

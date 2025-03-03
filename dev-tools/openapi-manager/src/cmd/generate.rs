@@ -3,18 +3,18 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
+    FAILURE_EXIT_CODE,
     apis::ManagedApis,
     environment::{BlessedSource, Environment, GeneratedSource},
     output::{
-        display_api_spec_version, display_load_problems, display_resolution,
-        display_resolution_problems,
+        CheckResult, OutputOpts, Styles, display_api_spec_version,
+        display_load_problems, display_resolution, display_resolution_problems,
         headers::{self, *},
-        plural, CheckResult, OutputOpts, Styles,
+        plural,
     },
     resolved::{Problem, Resolved},
-    FAILURE_EXIT_CODE,
 };
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use owo_colors::OwoColorize;
 use std::process::ExitCode;
 

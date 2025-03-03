@@ -12,8 +12,8 @@
 
 use std::net::IpAddr;
 
-use slog::info;
 use slog::Logger;
+use slog::info;
 
 include!(concat!(env!("OUT_DIR"), "/dpd-client.rs"));
 

@@ -5,13 +5,13 @@
 use nexus_config::Database;
 use nexus_config::InternalDns;
 use nexus_test_interface::NexusServer;
-use nexus_test_utils::{load_test_config, ControlPlaneTestContextBuilder};
+use nexus_test_utils::{ControlPlaneTestContextBuilder, load_test_config};
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::internal::shared::SwitchLocation;
 use std::collections::HashMap;
+use tokio::time::Duration;
 use tokio::time::sleep;
 use tokio::time::timeout;
-use tokio::time::Duration;
 
 #[tokio::test]
 async fn test_nexus_boots_before_cockroach() {

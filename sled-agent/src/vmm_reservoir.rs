@@ -7,8 +7,8 @@
 use illumos_utils::vmm_reservoir;
 use omicron_common::api::external::ByteCount;
 use slog::Logger;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use tokio::sync::{broadcast, oneshot};
 
@@ -28,9 +28,7 @@ pub enum Error {
     #[error("VmmReservoirManager has shutdown")]
     Shutdown,
 
-    #[error(
-        "Communication error with VmmReservoirManager: ReplySenderDropped"
-    )]
+    #[error("Communication error with VmmReservoirManager: ReplySenderDropped")]
     ReplySenderDropped,
 }
 

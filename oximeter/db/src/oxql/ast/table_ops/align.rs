@@ -11,14 +11,14 @@ use anyhow::Error;
 use chrono::DateTime;
 use chrono::TimeDelta;
 use chrono::Utc;
+use oxql_types::Alignment;
+use oxql_types::Table;
+use oxql_types::Timeseries;
 use oxql_types::point::DataType;
 use oxql_types::point::MetricType;
 use oxql_types::point::Points;
 use oxql_types::point::ValueArray;
 use oxql_types::point::Values;
-use oxql_types::Alignment;
-use oxql_types::Table;
-use oxql_types::Timeseries;
 use std::fmt;
 use std::time::Duration;
 
@@ -706,18 +706,19 @@ mod tests {
         .is_err());
 
         // Sanity check for way below the threshold.
-        assert!(verify_max_upsampling_ratio(
-            timestamps,
-            &Duration::from_nanos(1),
-        )
-        .is_err());
+        assert!(
+            verify_max_upsampling_ratio(timestamps, &Duration::from_nanos(1),)
+                .is_err()
+        );
 
         // Arrays where we can't compute an interval are fine.
-        assert!(verify_max_upsampling_ratio(
-            &timestamps[..1],
-            &Duration::from_nanos(1),
-        )
-        .is_ok());
+        assert!(
+            verify_max_upsampling_ratio(
+                &timestamps[..1],
+                &Duration::from_nanos(1),
+            )
+            .is_ok()
+        );
         assert!(
             verify_max_upsampling_ratio(&[], &Duration::from_nanos(1),).is_ok()
         );

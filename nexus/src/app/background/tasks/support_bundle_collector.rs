@@ -7,12 +7,12 @@
 use crate::app::background::BackgroundTask;
 use camino::Utf8DirEntry;
 use camino::Utf8Path;
+use camino_tempfile::Utf8TempDir;
 use camino_tempfile::tempdir_in;
 use camino_tempfile::tempfile_in;
-use camino_tempfile::Utf8TempDir;
-use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures::StreamExt;
+use futures::future::BoxFuture;
 use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
 use nexus_db_queries::authz;
@@ -41,8 +41,8 @@ use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
 use tokio::io::SeekFrom;
-use zip::write::FullFileOptions;
 use zip::ZipWriter;
+use zip::write::FullFileOptions;
 
 // We use "/var/tmp" to use Nexus' filesystem for temporary storage,
 // rather than "/tmp", which would keep this collected data in-memory.

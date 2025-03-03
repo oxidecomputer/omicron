@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{path_schema, KeeperId, ServerId, OXIMETER_CLUSTER};
-use anyhow::{bail, Error};
+use crate::{KeeperId, OXIMETER_CLUSTER, ServerId, path_schema};
+use anyhow::{Error, bail};
 use camino::Utf8PathBuf;
 use omicron_common::address::{
     CLICKHOUSE_HTTP_PORT, CLICKHOUSE_INTERSERVER_PORT,

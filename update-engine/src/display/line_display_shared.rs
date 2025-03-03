@@ -15,16 +15,16 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use owo_colors::OwoColorize;
-use swrite::{swrite, SWrite as _};
+use swrite::{SWrite as _, swrite};
 
 use crate::{
+    EventBuffer, ExecutionId, ExecutionTerminalInfo, StepKey, StepSpec,
+    TerminalKind,
     display::ProgressRatioDisplay,
     events::{
         ProgressCounter, ProgressEvent, ProgressEventKind, StepEvent,
         StepEventKind, StepInfo, StepOutcome,
     },
-    EventBuffer, ExecutionId, ExecutionTerminalInfo, StepKey, StepSpec,
-    TerminalKind,
 };
 
 use super::LineDisplayStyles;
