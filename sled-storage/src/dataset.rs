@@ -19,7 +19,7 @@ use omicron_common::disk::{
     CompressionAlgorithm, DatasetName, DiskIdentity, DiskVariant, GzipLevel,
 };
 use rand::distributions::{Alphanumeric, DistString};
-use slog::{debug, info, Logger};
+use slog::{Logger, debug, info};
 use std::process::Stdio;
 use std::str::FromStr;
 use std::sync::OnceLock;
@@ -165,7 +165,9 @@ pub enum DatasetError {
     MissingStorageKeyRequester,
     #[error("Encrypted filesystem '{0}' missing 'oxide:epoch' property")]
     CannotParseEpochProperty(String),
-    #[error("Encrypted dataset '{dataset}' cannot set 'oxide:agent' property: {err}")]
+    #[error(
+        "Encrypted dataset '{dataset}' cannot set 'oxide:agent' property: {err}"
+    )]
     CannotSetAgentProperty {
         dataset: String,
         #[source]

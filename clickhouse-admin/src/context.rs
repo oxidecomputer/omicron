@@ -4,13 +4,13 @@
 
 use crate::{ClickhouseCli, Clickward};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use camino::Utf8PathBuf;
 use clickhouse_admin_types::{
+    CLICKHOUSE_KEEPER_CONFIG_DIR, CLICKHOUSE_KEEPER_CONFIG_FILE,
+    CLICKHOUSE_SERVER_CONFIG_DIR, CLICKHOUSE_SERVER_CONFIG_FILE,
     GenerateConfigResult, KeeperConfigurableSettings,
-    ServerConfigurableSettings, CLICKHOUSE_KEEPER_CONFIG_DIR,
-    CLICKHOUSE_KEEPER_CONFIG_FILE, CLICKHOUSE_SERVER_CONFIG_DIR,
-    CLICKHOUSE_SERVER_CONFIG_FILE,
+    ServerConfigurableSettings,
 };
 use dropshot::{ClientErrorStatusCode, HttpError};
 use flume::{Receiver, Sender, TrySendError};
@@ -342,9 +342,8 @@ fn generate_config_and_enable_svc(
                 ClientErrorStatusCode::CONFLICT,
                 format!(
                     "current generation '{}' is greater than incoming generation '{}'",
-                    current,
-                    incoming_generation,
-                )
+                    current, incoming_generation,
+                ),
             ));
         }
     };
@@ -573,7 +572,7 @@ mod tests {
 
         assert_eq!(
             format!("{}", root_cause),
-           "first line of configuration file 'types/testutils/malformed_3.xml' is malformed: <!-- generation:2 --> -->"
+            "first line of configuration file 'types/testutils/malformed_3.xml' is malformed: <!-- generation:2 --> -->"
         );
     }
 }

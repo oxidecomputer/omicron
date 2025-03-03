@@ -243,10 +243,12 @@ pub(crate) mod test {
         );
 
         // Validate the Volume was deleted
-        assert!(datastore
-            .volume_get(old_snapshot_volume_id)
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            datastore
+                .volume_get(old_snapshot_volume_id)
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 }

@@ -6,7 +6,7 @@
 
 use super::impl_enum_type;
 use crate::SqlU32;
-use crate::{schema::clickhouse_policy, SqlU8};
+use crate::{SqlU8, schema::clickhouse_policy};
 use chrono::{DateTime, Utc};
 use nexus_types::deployment;
 use serde::{Deserialize, Serialize};

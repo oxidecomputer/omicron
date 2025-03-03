@@ -6,7 +6,7 @@ use std::{io, net::SocketAddr};
 
 use chrono::{DateTime, NaiveDateTime, Utc};
 use schemars::JsonSchema;
-use serde::{de, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -432,9 +432,11 @@ No more data reported on target nodes. Please verify cluster health before remov
             is_decommissioning: true,
             membership: NodeMembership::Decommissioned,
             is_draining: false,
-            notes: vec!["No more data reported on target nodes. \
+            notes: vec![
+                "No more data reported on target nodes. \
                 Please verify cluster health before removing the nodes."
-                .to_string()],
+                    .to_string(),
+            ],
         };
 
         let statuses =
