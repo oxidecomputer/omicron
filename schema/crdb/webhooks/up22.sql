@@ -1,3 +1,4 @@
+
 CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery_attempt (
     -- Foreign key into `omicron.public.webhook_delivery`.
     delivery_id UUID NOT NULL,

@@ -5048,12 +5048,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_rx_event_glob (
 );
 
 -- Look up all event class globs for a webhook receiver.
-CREATE INDEX IF NOT EXISTS lookup_event_globs_for_webhook_rx
+CREATE INDEX IF NOT EXISTS lookup_webhook_event_globs_for_rx
 ON omicron.public.webhook_rx_event_glob (
     rx_id
 );
 
-CREATE INDEX IF NOT EXISTS lookup_webhook_globs_by_schema_version
+CREATE INDEX IF NOT EXISTS lookup_webhook_event_globs_by_schema_version
 ON omicron.public.webhook_rx_event_glob (schema_version);
 
 CREATE TABLE IF NOT EXISTS omicron.public.webhook_rx_subscription (
@@ -5079,7 +5079,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_rx_subscription (
 
 -- Look up all webhook receivers subscribed to an event class. This is used by
 -- the dispatcher to determine who is interested in a particular event.
-CREATE INDEX IF NOT EXISTS lookup_webhook_rxs_for_event
+CREATE INDEX IF NOT EXISTS lookup_webhook_rxs_for_event_class
 ON omicron.public.webhook_rx_subscription (
     event_class
 );
@@ -5215,21 +5215,20 @@ WHERE
     trigger = 'event';
 
 -- Index for looking up all webhook messages dispatched to a receiver ID
-CREATE INDEX IF NOT EXISTS lookup_webhook_dispatched_to_rx
+CREATE INDEX IF NOT EXISTS lookup_webhook_delivery_dispatched_to_rx
 ON omicron.public.webhook_delivery (
     rx_id, event_id
 );
 
 -- Index for looking up all delivery attempts for an event
-CREATE INDEX IF NOT EXISTS lookup_deliveries_for_event
+CREATE INDEX IF NOT EXISTS lookup_webhook_deliveries_for_event
 ON omicron.public.webhook_delivery (
     event_id
 );
 
-
 -- Index for looking up all currently in-flight webhook messages, and ordering
 -- them by their creation times.
-CREATE INDEX IF NOT EXISTS webhook_delivery_in_flight
+CREATE INDEX IF NOT EXISTS webhook_deliveries_in_flight
 ON omicron.public.webhook_delivery (
     time_created, id
 ) WHERE
@@ -5294,7 +5293,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery_attempt (
     )
 );
 
-CREATE INDEX IF NOT EXISTS lookup_webhook_delivery_attempt_for_msg
+CREATE INDEX IF NOT EXISTS lookup_attempts_for_webhook_delivery
 ON omicron.public.webhook_delivery_attempt (
     delivery_id
 );

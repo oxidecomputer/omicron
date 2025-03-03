@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS omicron.public.webhook_rx (
+CREATE TABLE IF NOT EXISTS omicron.public.webhook_receiver (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,

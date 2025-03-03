@@ -32,7 +32,7 @@ static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(127, "add-webhooks"),
+        KnownVersion::new(127, "webhooks"),
         KnownVersion::new(126, "affinity"),
         KnownVersion::new(125, "blueprint-disposition-expunged-cleanup"),
         KnownVersion::new(124, "support-read-only-region-replacement"),
