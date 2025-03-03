@@ -6,7 +6,7 @@
 
 use super::external_ips::floating_ip_get;
 use super::external_ips::get_floating_ip_by_id_url;
-use super::metrics::{get_latest_silo_metric, get_latest_system_metric};
+use super::metrics::{assert_silo_metrics, assert_system_metrics};
 
 use http::StatusCode;
 use http::method::Method;
@@ -1597,49 +1597,11 @@ async fn assert_metrics(
     cpus: i64,
     ram: i64,
 ) {
-    cptestctx
-        .oximeter
-        .try_force_collect()
-        .await
-        .expect("Could not force oximeter collection");
-
-    for id in &[None, Some(project_id)] {
-        assert_eq!(
-            get_latest_silo_metric(
-                cptestctx,
-                "virtual_disk_space_provisioned",
-                *id,
-            )
-            .await,
-            disk
-        );
-        assert_eq!(
-            get_latest_silo_metric(cptestctx, "cpus_provisioned", *id).await,
-            cpus
-        );
-        assert_eq!(
-            get_latest_silo_metric(cptestctx, "ram_provisioned", *id).await,
-            ram
-        );
+    for id in [None, Some(project_id)] {
+        assert_silo_metrics(cptestctx, id, disk, cpus, ram).await;
     }
-    for id in &[None, Some(DEFAULT_SILO_ID)] {
-        assert_eq!(
-            get_latest_system_metric(
-                cptestctx,
-                "virtual_disk_space_provisioned",
-                *id
-            )
-            .await,
-            disk
-        );
-        assert_eq!(
-            get_latest_system_metric(cptestctx, "cpus_provisioned", *id).await,
-            cpus
-        );
-        assert_eq!(
-            get_latest_system_metric(cptestctx, "ram_provisioned", *id).await,
-            ram
-        );
+    for id in [None, Some(DEFAULT_SILO_ID)] {
+        assert_system_metrics(cptestctx, id, disk, cpus, ram).await;
     }
 }
 
