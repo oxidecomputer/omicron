@@ -102,7 +102,7 @@ regex-automata = { version = "0.4.8", default-features = false, features = ["dfa
 regex-syntax = { version = "0.8.5" }
 reqwest = { version = "0.12.12", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 rsa = { version = "0.9.6", features = ["serde", "sha2"] }
-rustls = { version = "0.23.19", features = ["ring"] }
+rustls = { version = "0.23.23", features = ["ring"] }
 rustls-webpki = { version = "0.102.8", default-features = false, features = ["aws_lc_rs", "ring", "std"] }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "uuid1"] }
 scopeguard = { version = "1.2.0" }
@@ -223,7 +223,7 @@ regex-automata = { version = "0.4.8", default-features = false, features = ["dfa
 regex-syntax = { version = "0.8.5" }
 reqwest = { version = "0.12.12", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 rsa = { version = "0.9.6", features = ["serde", "sha2"] }
-rustls = { version = "0.23.19", features = ["ring"] }
+rustls = { version = "0.23.23", features = ["ring"] }
 rustls-webpki = { version = "0.102.8", default-features = false, features = ["aws_lc_rs", "ring", "std"] }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "uuid1"] }
 scopeguard = { version = "1.2.0" }
