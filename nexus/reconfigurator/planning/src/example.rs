@@ -457,10 +457,8 @@ impl ExampleSystemBuilder {
         }
 
         let blueprint = builder.build();
-        for sled_id in blueprint.sleds() {
-            let Some(zones) = blueprint.blueprint_zones.get(&sled_id) else {
-                continue;
-            };
+        for sled_cfg in blueprint.sleds.values() {
+            let zones = &sled_cfg.zones_config;
             for zone in zones.zones.iter() {
                 let service_id = zone.id;
                 if let Some((external_ip, nic)) =
@@ -486,11 +484,14 @@ impl ExampleSystemBuilder {
             }
         }
 
-        for (sled_id, zones) in &blueprint.blueprint_zones {
+        for (sled_id, sled_cfg) in &blueprint.sleds {
             system
                 .sled_set_omicron_zones(
                     *sled_id,
-                    zones.clone().into_running_omicron_zones_config(),
+                    sled_cfg
+                        .zones_config
+                        .clone()
+                        .into_running_omicron_zones_config(),
                 )
                 .unwrap();
         }
@@ -500,10 +501,10 @@ impl ExampleSystemBuilder {
         //
         // Go back and add them so that the blueprint is consistent with
         // inventory.
-        for (sled_id, datasets) in &blueprint.blueprint_datasets {
+        for (sled_id, sled_cfg) in &blueprint.sleds {
             let sled = system.get_sled_mut(*sled_id).unwrap();
 
-            for dataset_config in datasets.datasets.iter() {
+            for dataset_config in sled_cfg.datasets_config.datasets.iter() {
                 let config = dataset_config.clone().try_into().unwrap();
                 sled.add_synthetic_dataset(config);
             }

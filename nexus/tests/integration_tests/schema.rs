@@ -10,13 +10,13 @@ use nexus_config::SchemaConfig;
 use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
 use nexus_db_model::SCHEMA_VERSION as LATEST_SCHEMA_VERSION;
 use nexus_db_model::{AllSchemaVersions, SchemaVersion};
-use nexus_db_queries::db::pub_test_utils::TestDatabase;
 use nexus_db_queries::db::DISALLOW_FULL_TABLE_SCAN_SQL;
-use nexus_test_utils::sql::process_rows;
+use nexus_db_queries::db::pub_test_utils::TestDatabase;
 use nexus_test_utils::sql::ColumnValue;
 use nexus_test_utils::sql::Row;
 use nexus_test_utils::sql::SqlEnum;
-use nexus_test_utils::{load_test_config, ControlPlaneTestContextBuilder};
+use nexus_test_utils::sql::process_rows;
+use nexus_test_utils::{ControlPlaneTestContextBuilder, load_test_config};
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_test_utils::dev::db::{Client, CockroachInstance};
 use pretty_assertions::{assert_eq, assert_ne};
@@ -26,8 +26,8 @@ use slog::Logger;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::sync::Mutex;
-use tokio::time::timeout;
 use tokio::time::Duration;
+use tokio::time::timeout;
 use uuid::Uuid;
 
 const SCHEMA_DIR: &'static str =
@@ -1353,8 +1353,8 @@ fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
 
         {
             use async_bb8_diesel::AsyncRunQueryDsl;
-            use nexus_db_model::schema::instance::dsl;
             use nexus_db_model::Instance;
+            use nexus_db_model::schema::instance::dsl;
             use nexus_types::external_api::params;
             use omicron_common::api::external::IdentityMetadataCreateParams;
             use omicron_uuid_kinds::InstanceUuid;

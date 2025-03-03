@@ -50,6 +50,7 @@ nexus-types.workspace = true
 omicron-passwords.workspace = true
 sled-agent-client.workspace = true
 omicron-workspace-hack.workspace = true
+tufaceous-artifact.workspace = true
 
 [dev-dependencies]
 camino-tempfile.workspace = true

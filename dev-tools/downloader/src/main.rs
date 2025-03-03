@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use clap::Parser;
-use xtask_downloader::{run_cmd, DownloadArgs};
+use xtask_downloader::{DownloadArgs, run_cmd};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

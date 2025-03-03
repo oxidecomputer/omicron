@@ -6,7 +6,7 @@
 
 use std::env::VarError;
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use wicket_common::rack_update::{UpdateSimulatedResult, UpdateTestError};
 
 pub(crate) fn get_update_test_error(

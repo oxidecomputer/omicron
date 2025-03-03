@@ -9,7 +9,7 @@ use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::test_setup_log;
 use oximeter_db::{Client, DbWrite, OxqlResult, Sample, TestDbWrite};
 use oximeter_test_utils::wait_for_keepers;
-use slog::{info, Logger};
+use slog::{Logger, info};
 use std::collections::BTreeSet;
 use std::default::Default;
 use std::time::Duration;

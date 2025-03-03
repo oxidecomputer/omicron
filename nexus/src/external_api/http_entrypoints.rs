@@ -31,12 +31,12 @@ use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use dropshot::WhichPage;
-use dropshot::{http_response_found, http_response_see_other};
 use dropshot::{ApiDescription, StreamingBody};
 use dropshot::{HttpResponseAccepted, HttpResponseFound, HttpResponseSeeOther};
 use dropshot::{HttpResponseCreated, HttpResponseHeaders};
 use dropshot::{WebsocketChannelResult, WebsocketConnection};
-use http::{header, Response, StatusCode};
+use dropshot::{http_response_found, http_response_see_other};
+use http::{Response, StatusCode, header};
 use ipnetwork::IpNetwork;
 use nexus_db_queries::authn::external::session_cookie::{self, SessionStore};
 use nexus_db_queries::authz;
@@ -53,19 +53,6 @@ use nexus_types::{
         shared::{BfdStatus, ProbeInfo},
     },
 };
-use omicron_common::api::external::http_pagination::data_page_params_for;
-use omicron_common::api::external::http_pagination::marker_for_id;
-use omicron_common::api::external::http_pagination::marker_for_name;
-use omicron_common::api::external::http_pagination::marker_for_name_or_id;
-use omicron_common::api::external::http_pagination::name_or_id_pagination;
-use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::external::http_pagination::PaginatedById;
-use omicron_common::api::external::http_pagination::PaginatedByName;
-use omicron_common::api::external::http_pagination::PaginatedByNameOrId;
-use omicron_common::api::external::http_pagination::ScanById;
-use omicron_common::api::external::http_pagination::ScanByName;
-use omicron_common::api::external::http_pagination::ScanByNameOrId;
-use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::AddressLot;
 use omicron_common::api::external::AddressLotBlock;
 use omicron_common::api::external::AddressLotCreateResponse;
@@ -98,14 +85,27 @@ use omicron_common::api::external::TufRepoGetResponse;
 use omicron_common::api::external::TufRepoInsertResponse;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
+use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::external::http_pagination::PaginatedById;
+use omicron_common::api::external::http_pagination::PaginatedByName;
+use omicron_common::api::external::http_pagination::PaginatedByNameOrId;
+use omicron_common::api::external::http_pagination::ScanById;
+use omicron_common::api::external::http_pagination::ScanByName;
+use omicron_common::api::external::http_pagination::ScanByNameOrId;
+use omicron_common::api::external::http_pagination::ScanParams;
+use omicron_common::api::external::http_pagination::data_page_params_for;
+use omicron_common::api::external::http_pagination::marker_for_id;
+use omicron_common::api::external::http_pagination::marker_for_name;
+use omicron_common::api::external::http_pagination::marker_for_name_or_id;
+use omicron_common::api::external::http_pagination::name_or_id_pagination;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
+use propolis_client::support::WebSocketStream;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::{
     CloseFrame, Role as WebSocketRole,
 };
-use propolis_client::support::WebSocketStream;
 use range_requests::RequestContextEx;
 use ref_cast::RefCast;
 
@@ -7663,7 +7663,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                             "error": "invalid_request",
                             "error_description": error,
                         }),
-                    )
+                    );
                 }
             };
 

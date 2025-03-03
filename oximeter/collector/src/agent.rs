@@ -6,20 +6,20 @@
 
 // Copyright 2024 Oxide Computer Company
 
+use crate::DbConfig;
+use crate::Error;
+use crate::ProducerEndpoint;
 use crate::collection_task::CollectionTaskHandle;
 use crate::collection_task::CollectionTaskOutput;
 use crate::collection_task::ForcedCollectionError;
 use crate::results_sink;
 use crate::self_stats;
-use crate::DbConfig;
-use crate::Error;
-use crate::ProducerEndpoint;
 use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
 use futures::TryStreamExt;
-use nexus_client::types::IdSortMode;
 use nexus_client::Client as NexusClient;
+use nexus_client::types::IdSortMode;
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
 use oximeter_api::ProducerDetails;
@@ -28,24 +28,24 @@ use oximeter_db::DbWrite;
 use qorb::claim::Handle;
 use qorb::pool::Pool;
 use qorb::resolver::BoxedResolver;
+use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::info;
 use slog::o;
 use slog::trace;
 use slog::warn;
-use slog::Logger;
 use slog_error_chain::InlineErrorChain;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::net::SocketAddrV6;
 use std::ops::Bound;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
-use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::sync::MutexGuard;
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 /// The internal agent the oximeter server uses to collect metrics from producers.
@@ -101,7 +101,7 @@ impl OximeterAgent {
         // - The DB doesn't exist at all. This reports a version number of 0. We
         // need to create the DB here, at the latest version. This is used in
         // fresh installations and tests.
-        let client = Client::new_with_pool(native_resolver, &log);
+        let client = Client::new_with_resolver(native_resolver, &log);
         match client.check_db_is_at_expected_version().await {
             Ok(_) => {}
             Err(oximeter_db::Error::DatabaseVersionMismatch {
@@ -599,9 +599,9 @@ mod tests {
     use std::net::Ipv6Addr;
     use std::net::SocketAddr;
     use std::net::SocketAddrV6;
+    use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
-    use std::sync::Arc;
     use std::time::Duration;
     use tokio::time::Instant;
     use uuid::Uuid;

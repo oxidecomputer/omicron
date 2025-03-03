@@ -8,8 +8,8 @@ use anyhow::anyhow;
 use camino::Utf8PathBuf;
 use clap::Parser;
 use omicron_clickhouse_admin::Config;
-use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
+use omicron_common::cmd::fatal;
 use std::net::{SocketAddr, SocketAddrV6};
 
 #[derive(Debug, Parser)]

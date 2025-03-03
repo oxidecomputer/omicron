@@ -4,8 +4,8 @@
 
 //! Tests Affinity (and Anti-Affinity) Groups
 
-use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
+use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;

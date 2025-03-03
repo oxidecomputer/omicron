@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use omicron_common::api::internal::shared::SwitchLocation;
-use slog::o;
 use slog::Logger;
+use slog::o;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::sync::Mutex;

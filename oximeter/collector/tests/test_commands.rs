@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use expectorate::assert_contents;
 use omicron_test_utils::dev::test_cmds::{
-    assert_exit_code, path_to_executable, run_command, EXIT_USAGE,
+    EXIT_USAGE, assert_exit_code, path_to_executable, run_command,
 };
 use subprocess::Exec;
 

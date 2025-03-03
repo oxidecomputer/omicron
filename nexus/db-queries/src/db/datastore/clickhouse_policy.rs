@@ -8,21 +8,21 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use diesel::dsl::sql_query;
-use diesel::expression::SelectableHelper;
-use diesel::sql_types;
 use diesel::ExpressionMethods;
 use diesel::OptionalExtension;
 use diesel::QueryDsl;
+use diesel::dsl::sql_query;
+use diesel::expression::SelectableHelper;
+use diesel::sql_types;
 use nexus_db_model::ClickhouseModeEnum;
 use nexus_db_model::ClickhousePolicy as DbClickhousePolicy;
 use nexus_db_model::DbClickhouseMode;
-use nexus_db_model::SqlU32;
 use nexus_db_model::SqlU8;
+use nexus_db_model::SqlU32;
 use nexus_types::deployment::ClickhousePolicy;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -189,11 +189,13 @@ mod tests {
 
         // Listing an empty table should return an empty vec
 
-        assert!(datastore
-            .clickhouse_policy_list(opctx, &DataPageParams::max_page())
-            .await
-            .unwrap()
-            .is_empty());
+        assert!(
+            datastore
+                .clickhouse_policy_list(opctx, &DataPageParams::max_page())
+                .await
+                .unwrap()
+                .is_empty()
+        );
 
         // Fail to insert a policy with version 0
         let mut policy = ClickhousePolicy {
@@ -202,60 +204,74 @@ mod tests {
             time_created: now_db_precision(),
         };
 
-        assert!(datastore
-            .clickhouse_policy_insert_latest_version(opctx, &policy)
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("policy version must be greater than 0"));
+        assert!(
+            datastore
+                .clickhouse_policy_insert_latest_version(opctx, &policy)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("policy version must be greater than 0")
+        );
 
         // Inserting version 2 before version 1 should not work
         policy.version = 2;
-        assert!(datastore
-            .clickhouse_policy_insert_latest_version(opctx, &policy)
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("policy version 2 is not the most recent"));
+        assert!(
+            datastore
+                .clickhouse_policy_insert_latest_version(opctx, &policy)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("policy version 2 is not the most recent")
+        );
 
         // Inserting version 1 should work
         policy.version = 1;
-        assert!(datastore
-            .clickhouse_policy_insert_latest_version(opctx, &policy)
-            .await
-            .is_ok());
+        assert!(
+            datastore
+                .clickhouse_policy_insert_latest_version(opctx, &policy)
+                .await
+                .is_ok()
+        );
 
         // Inserting version 2 should work
         policy.version = 2;
-        assert!(datastore
-            .clickhouse_policy_insert_latest_version(opctx, &policy)
-            .await
-            .is_ok());
+        assert!(
+            datastore
+                .clickhouse_policy_insert_latest_version(opctx, &policy)
+                .await
+                .is_ok()
+        );
 
         // Inserting version 4 should not work, since the prior version is 2
         policy.version = 4;
-        assert!(datastore
-            .clickhouse_policy_insert_latest_version(opctx, &policy)
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("policy version 4 is not the most recent"));
+        assert!(
+            datastore
+                .clickhouse_policy_insert_latest_version(opctx, &policy)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("policy version 4 is not the most recent")
+        );
 
         // Inserting version 3 should work
         policy.version = 3;
-        assert!(datastore
-            .clickhouse_policy_insert_latest_version(opctx, &policy)
-            .await
-            .is_ok());
+        assert!(
+            datastore
+                .clickhouse_policy_insert_latest_version(opctx, &policy)
+                .await
+                .is_ok()
+        );
 
         // Inserting version 4 should work
         policy.version = 4;
         policy.mode =
             ClickhouseMode::Both { target_servers: 3, target_keepers: 5 };
-        assert!(datastore
-            .clickhouse_policy_insert_latest_version(opctx, &policy)
-            .await
-            .is_ok());
+        assert!(
+            datastore
+                .clickhouse_policy_insert_latest_version(opctx, &policy)
+                .await
+                .is_ok()
+        );
 
         let history = datastore
             .clickhouse_policy_list(opctx, &DataPageParams::max_page())

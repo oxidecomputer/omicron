@@ -95,9 +95,9 @@ mod test {
         let error = "postgresql://example.com?sslmode=not-a-real-ssl-mode"
             .parse::<PostgresConfigWithUrl>()
             .unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("invalid value for option `sslmode`"));
+        assert!(
+            error.to_string().contains("invalid value for option `sslmode`")
+        );
     }
 
     #[test]

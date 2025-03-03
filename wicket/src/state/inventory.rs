@@ -4,15 +4,14 @@
 
 //! Information about all top-level Oxide components (sleds, switches, PSCs)
 
-use anyhow::{bail, Context as _, Result};
-use omicron_common::api::{
-    external::SwitchLocation, internal::nexus::KnownArtifactKind,
-};
+use anyhow::{Context as _, Result, bail};
+use omicron_common::api::external::SwitchLocation;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::iter::Iterator;
 use std::sync::LazyLock;
+use tufaceous_artifact::KnownArtifactKind;
 use wicket_common::inventory::{
     RackV1Inventory, RotInventory, RotSlot, SpComponentCaboose,
     SpComponentInfo, SpIgnition, SpState, SpType, Transceiver,

@@ -12,8 +12,8 @@ use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::datastore::InstanceAndActiveVmm;
 use crate::db::datastore::OpContext;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Resource;
 use crate::db::model::AffinityGroup;
 use crate::db::model::AffinityGroupInstanceMembership;
@@ -35,7 +35,6 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api::external;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -44,6 +43,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::AffinityGroupUuid;
 use omicron_uuid_kinds::AntiAffinityGroupUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -1392,9 +1392,9 @@ mod tests {
     use super::*;
 
     use crate::db::lookup::LookupPath;
+    use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::create_project;
     use crate::db::pub_test_utils::helpers::create_stopped_instance_record;
-    use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::Resources;
     use nexus_db_model::SledResourceVmm;
     use nexus_types::external_api::params;
@@ -3025,11 +3025,12 @@ mod tests {
     //
     // Basically, do not keep around a reference to a dead affinity group.
     #[tokio::test]
-    async fn affinity_group_delete_group_deletes_membership_in_anti_affinity_groups(
-    ) {
+    async fn affinity_group_delete_group_deletes_membership_in_anti_affinity_groups()
+     {
         // Setup
-        let logctx =
-            dev::test_setup_log("affinity_group_delete_group_deletes_membership_in_anti_affinity_groups");
+        let logctx = dev::test_setup_log(
+            "affinity_group_delete_group_deletes_membership_in_anti_affinity_groups",
+        );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 

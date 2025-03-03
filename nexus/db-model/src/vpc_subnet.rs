@@ -4,10 +4,10 @@
 
 use super::Generation;
 use super::{Ipv4Net, Ipv6Net, Name};
+use crate::NetworkInterface;
 use crate::collection::DatastoreCollectionConfig;
 use crate::schema::network_interface;
 use crate::schema::vpc_subnet;
-use crate::NetworkInterface;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;

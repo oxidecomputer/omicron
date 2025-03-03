@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use dropshot::{test_util::ClientTestContext, ResultsPage};
+use dropshot::{ResultsPage, test_util::ClientTestContext};
 use http::{Method, StatusCode};
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_utils::{

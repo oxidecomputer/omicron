@@ -13,8 +13,8 @@ use crate::db::collection_attach::AttachError;
 use crate::db::collection_attach::DatastoreAttachTarget;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Resource;
 use crate::db::model::ApplySledFilterExt;
 use crate::db::model::IncompleteVpc;
@@ -35,8 +35,8 @@ use crate::db::model::VpcSubnet;
 use crate::db::model::VpcSubnetUpdate;
 use crate::db::model::VpcUpdate;
 use crate::db::model::{Ipv4Net, Ipv6Net};
-use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
+use crate::db::pagination::paginated;
 use crate::db::queries::vpc::InsertVpcQuery;
 use crate::db::queries::vpc::VniSearchIter;
 use crate::db::queries::vpc_subnet::InsertVpcSubnetError;
@@ -47,8 +47,8 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
-use futures::stream::{self, StreamExt};
 use futures::TryStreamExt;
+use futures::stream::{self, StreamExt};
 use ipnetwork::IpNetwork;
 use nexus_auth::authz::ApiResource;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V4;
@@ -63,7 +63,6 @@ use nexus_db_model::InternetGatewayIpPool;
 use nexus_db_model::IpPoolRange;
 use nexus_db_model::NetworkInterfaceKind;
 use nexus_types::deployment::SledFilter;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -78,6 +77,7 @@ use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRouteKind as ExternalRouteKind;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni as ExternalVni;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterTarget;
@@ -1068,7 +1068,7 @@ impl DataStore {
                             return Err(err.bail_retryable_or_else(
                                 e,
                                 SubnetError::SubnetModify,
-                            ))
+                            ));
                         }
                     };
 
@@ -2439,7 +2439,7 @@ impl DataStore {
             Err(e) => {
                 return Err(Error::non_resourcetype_not_found(&format!(
                     "unable to find IGW mappings for sled {sled_id}: {e}"
-                )))
+                )));
             }
         }
 
@@ -2472,7 +2472,7 @@ impl DataStore {
             Err(e) => {
                 return Err(Error::non_resourcetype_not_found(&format!(
                     "unable to find IGW mappings for sled {sled_id}: {e}"
-                )))
+                )));
             }
         }
 
@@ -2869,8 +2869,8 @@ mod tests {
     use super::*;
     use crate::db::datastore::test_utils::IneligibleSleds;
     use crate::db::model::Project;
-    use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use crate::db::queries::vpc::MAX_VNI_SEARCH_RANGE_SIZE;
     use nexus_db_fixed_data::silo::DEFAULT_SILO;
     use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
@@ -2996,7 +2996,9 @@ mod tests {
             .project_create_vpc_raw(&opctx, &authz_project, query)
             .await
         else {
-            panic!("Expected Ok(None) when creating a VPC without any available VNIs");
+            panic!(
+                "Expected Ok(None) when creating a VPC without any available VNIs"
+            );
         };
         db.terminate().await;
         logctx.cleanup_successful();
@@ -3251,7 +3253,7 @@ mod tests {
             .service_create_network_interface_raw(
                 &opctx,
                 db_nic_from_zone(
-                    bp1.blueprint_zones[&sled_ids[2]].zones.first().unwrap(),
+                    bp1.sleds[&sled_ids[2]].zones_config.zones.first().unwrap(),
                 ),
             )
             .await
@@ -3265,10 +3267,11 @@ mod tests {
             let mut bp2 = bp1.clone();
             bp2.id = BlueprintUuid::new_v4();
             bp2.parent_blueprint_id = Some(bp1.id);
-            let sled2_zones = bp2
-                .blueprint_zones
+            let sled2_zones = &mut bp2
+                .sleds
                 .get_mut(&sled_ids[2])
-                .expect("zones for third sled");
+                .expect("config for third sled")
+                .zones_config;
             sled2_zones.zones.clear();
             sled2_zones.generation = sled2_zones.generation.next();
             bp2
@@ -3283,7 +3286,8 @@ mod tests {
         datastore
             .service_delete_network_interface(
                 &opctx,
-                bp1.blueprint_zones[&sled_ids[2]]
+                bp1.sleds[&sled_ids[2]]
+                    .zones_config
                     .zones
                     .first()
                     .unwrap()
@@ -3318,7 +3322,7 @@ mod tests {
                 .service_create_network_interface_raw(
                     &opctx,
                     db_nic_from_zone(
-                        bp3.blueprint_zones[&sled_id].zones.first().unwrap(),
+                        bp3.sleds[&sled_id].zones_config.zones.first().unwrap(),
                     ),
                 )
                 .await
@@ -3368,10 +3372,11 @@ mod tests {
             bp4.parent_blueprint_id = Some(bp3.id);
 
             // Sled index 3's zone is expunged (should be excluded).
-            let sled3 = bp4
-                .blueprint_zones
+            let sled3 = &mut bp4
+                .sleds
                 .get_mut(&sled_ids[3])
-                .expect("zones for sled");
+                .expect("config for sled")
+                .zones_config;
             sled3.zones.iter_mut().next().unwrap().disposition =
                 BlueprintZoneDisposition::Expunged {
                     as_of_generation: Generation::new(),
