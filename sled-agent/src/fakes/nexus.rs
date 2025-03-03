@@ -7,16 +7,15 @@
 //! This must be an exact subset of the Nexus internal interface
 //! to operate correctly.
 
-use dropshot::Body;
 use dropshot::{
-    ApiDescription, FreeformBody, HttpError, HttpResponseOk,
-    HttpResponseUpdatedNoContent, Path, RequestContext, TypedBody, endpoint,
+    ApiDescription, HttpError, HttpResponseOk, HttpResponseUpdatedNoContent,
+    Path, RequestContext, TypedBody, endpoint,
 };
 use internal_dns_types::config::DnsConfigBuilder;
 use internal_dns_types::names::ServiceName;
 use nexus_client::types::SledAgentInfo;
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::nexus::{SledVmmState, UpdateArtifactId};
+use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::{OmicronZoneUuid, PropolisUuid, SledUuid};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -28,13 +27,6 @@ use sled_agent_api::VmmPathParam;
 /// - Not all methods should be called by all tests. By default,
 /// each method, representing an endpoint, should return an error.
 pub trait FakeNexusServer: Send + Sync {
-    fn cpapi_artifact_download(
-        &self,
-        _artifact_id: UpdateArtifactId,
-    ) -> Result<Vec<u8>, Error> {
-        Err(Error::internal_error("Not implemented"))
-    }
-
     fn sled_agent_get(
         &self,
         _sled_id: SledUuid,
@@ -64,22 +56,6 @@ pub trait FakeNexusServer: Send + Sync {
 /// If you're writing a test, this is a type you should create when calling
 /// [`start_test_server`].
 pub type ServerContext = Box<dyn FakeNexusServer>;
-
-#[endpoint {
-    method = GET,
-    path = "/artifacts/{kind}/{name}/{version}",
-}]
-async fn cpapi_artifact_download(
-    request_context: RequestContext<ServerContext>,
-    path_params: Path<UpdateArtifactId>,
-) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
-    let context = request_context.context();
-
-    Ok(HttpResponseOk(
-        Body::from(context.cpapi_artifact_download(path_params.into_inner())?)
-            .into(),
-    ))
-}
 
 /// Path parameters for Sled Agent requests (internal API)
 #[derive(Deserialize, JsonSchema)]
@@ -139,7 +115,6 @@ async fn cpapi_instances_put(
 
 fn api() -> ApiDescription<ServerContext> {
     let mut api = ApiDescription::new();
-    api.register(cpapi_artifact_download).unwrap();
     api.register(sled_agent_get).unwrap();
     api.register(sled_agent_put).unwrap();
     api.register(cpapi_instances_put).unwrap();

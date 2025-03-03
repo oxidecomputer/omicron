@@ -11,7 +11,6 @@ use futures::Stream;
 use futures::StreamExt;
 use omicron_common::update::ArtifactHash;
 use omicron_common::update::ArtifactHashId;
-use omicron_common::update::ArtifactKind;
 use sha2::Digest;
 use sha2::Sha256;
 use slog::Logger;
@@ -22,6 +21,7 @@ use std::sync::Arc;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWriteExt;
 use tokio_util::io::ReaderStream;
+use tufaceous_artifact::ArtifactKind;
 
 /// Handle to the data of an extracted artifact.
 ///

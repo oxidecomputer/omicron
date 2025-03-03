@@ -926,9 +926,6 @@ mod tests {
         Event, InstallinatorCompletionMetadata, InstallinatorComponent,
         InstallinatorStepId, StepEventKind, StepOutcome,
     };
-    use omicron_common::{
-        api::internal::nexus::KnownArtifactKind, update::ArtifactKind,
-    };
     use omicron_test_utils::dev::test_setup_log;
     use partial_io::{
         PartialAsyncWrite, PartialOp,
@@ -941,6 +938,7 @@ mod tests {
     use tokio::io::AsyncReadExt;
     use tokio::sync::Mutex;
     use tokio_stream::wrappers::ReceiverStream;
+    use tufaceous_artifact::{ArtifactKind, KnownArtifactKind};
 
     #[proptest(ProptestConfig { cases: 32, ..ProptestConfig::default() })]
     fn proptest_write_artifact(

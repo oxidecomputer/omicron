@@ -19,7 +19,6 @@ use crate::ui::widgets::{
 use crate::ui::wrap::wrap_text;
 use crate::{Action, Cmd, State};
 use indexmap::IndexMap;
-use omicron_common::api::internal::nexus::KnownArtifactKind;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span, Text};
@@ -28,6 +27,7 @@ use ratatui::widgets::{
     Row, Table,
 };
 use slog::{Logger, info, o};
+use tufaceous_artifact::KnownArtifactKind;
 use tui_tree_widget::{Tree, TreeItem, TreeState};
 use update_engine::display::ProgressRatioDisplay;
 use update_engine::{

@@ -560,10 +560,10 @@ mod tests {
         InstallinatorProgressMetadata, InstallinatorStepId, StepContext,
         StepEvent, StepEventKind, StepOutcome, StepSuccess, UpdateEngine,
     };
-    use omicron_common::api::internal::nexus::KnownArtifactKind;
     use omicron_test_utils::dev::test_setup_log;
     use test_strategy::proptest;
     use tokio_stream::wrappers::ReceiverStream;
+    use tufaceous_artifact::KnownArtifactKind;
 
     // The #[proptest] macro doesn't currently with with #[tokio::test] sadly.
     #[proptest]

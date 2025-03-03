@@ -7,11 +7,11 @@
 use camino::Utf8PathBuf;
 use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
-use omicron_common::api::internal::nexus::KnownArtifactKind;
-use omicron_common::update::{ArtifactHashId, ArtifactId, ArtifactKind};
+use omicron_common::update::{ArtifactHashId, ArtifactId};
 use semver::Version;
 use slog::error;
 use thiserror::Error;
+use tufaceous_artifact::{ArtifactKind, KnownArtifactKind};
 
 #[derive(Debug, Error)]
 pub enum RepositoryError {
