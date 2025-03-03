@@ -13,7 +13,8 @@ use dropshot::{
     TypedBody,
 };
 use nexus_sled_agent_shared::inventory::{
-    Inventory, OmicronZonesConfig, SledRole,
+    Inventory, OmicronSledConfig, OmicronSledConfigResult, OmicronZonesConfig,
+    SledRole,
 };
 use omicron_common::{
     api::internal::{
@@ -263,6 +264,15 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePathParam>,
     ) -> Result<HttpResponseDeleted, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/omicron-config",
+    }]
+    async fn omicron_config_put(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<OmicronSledConfig>,
+    ) -> Result<HttpResponseOk<OmicronSledConfigResult>, HttpError>;
 
     #[endpoint {
         method = PUT,

@@ -33,8 +33,7 @@ use illumos_utils::opte::PortManager;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zone::ZONE_PREFIX;
 use nexus_sled_agent_shared::inventory::{
-    Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
-    OmicronZonesConfig, SledRole,
+    Inventory, InventoryDataset, InventoryDisk, InventoryZpool, OmicronSledConfig, OmicronSledConfigResult, OmicronZonesConfig, SledRole
 };
 use omicron_common::address::{
     Ipv6Subnet, SLED_PREFIX, get_sled_address, get_switch_zone_address,
@@ -946,6 +945,13 @@ impl SledAgent {
         info!(self.log, "physical disks ensure: Updated instances");
 
         Ok(disk_result)
+    }
+
+    pub async fn set_omicron_config(
+        &self,
+        _requested_config: OmicronSledConfig,
+    ) -> Result<OmicronSledConfigResult, Error> {
+        todo!()
     }
 
     /// Ensures that the specific set of Omicron zones are running as configured

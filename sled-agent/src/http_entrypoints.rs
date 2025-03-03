@@ -18,7 +18,8 @@ use dropshot::{
     Query, RequestContext, StreamingBody, TypedBody,
 };
 use nexus_sled_agent_shared::inventory::{
-    Inventory, OmicronZonesConfig, SledRole,
+    Inventory, OmicronSledConfig, OmicronSledConfigResult, OmicronZonesConfig,
+    SledRole,
 };
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
@@ -448,6 +449,18 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
         let sa = rqctx.context();
         sa.zones_list().await.map(HttpResponseOk).map_err(HttpError::from)
+    }
+
+    async fn omicron_config_put(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<OmicronSledConfig>,
+    ) -> Result<HttpResponseOk<OmicronSledConfigResult>, HttpError> {
+        let sa = rqctx.context();
+        let body_args = body.into_inner();
+        sa.set_omicron_config(body_args)
+            .await
+            .map(HttpResponseOk)
+            .map_err(HttpError::from)
     }
 
     async fn omicron_zones_put(

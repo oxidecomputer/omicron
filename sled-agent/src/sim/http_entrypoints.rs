@@ -23,6 +23,8 @@ use dropshot::RequestContext;
 use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use dropshot::endpoint;
+use nexus_sled_agent_shared::inventory::OmicronSledConfig;
+use nexus_sled_agent_shared::inventory::OmicronSledConfigResult;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::{Inventory, OmicronZonesConfig};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
@@ -353,6 +355,16 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseOk<OmicronPhysicalDisksConfig>, HttpError> {
         let sa = rqctx.context();
         Ok(HttpResponseOk(sa.omicron_physical_disks_list()?))
+    }
+
+    async fn omicron_config_put(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<OmicronSledConfig>,
+    ) -> Result<HttpResponseOk<OmicronSledConfigResult>, HttpError> {
+        let sa = rqctx.context();
+        let body_args = body.into_inner();
+        let result = sa.set_omicron_config(body_args)?;
+        Ok(HttpResponseOk(result))
     }
 
     async fn omicron_zones_put(
