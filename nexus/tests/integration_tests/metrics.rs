@@ -5,28 +5,28 @@
 use super::metrics_querier::MetricsNotYet;
 use super::metrics_querier::MetricsQuerier;
 use crate::integration_tests::instances::{
-    create_project_and_pool, instance_post, instance_simulate, InstanceOp,
+    InstanceOp, create_project_and_pool, instance_post, instance_simulate,
 };
 use chrono::Utc;
 use dropshot::HttpErrorResponseBody;
 use http::{Method, StatusCode};
 use nexus_auth::authn::USER_TEST_UNPRIVILEGED;
 use nexus_db_queries::db::identity::Asset;
+use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_disk, create_instance, create_project,
-    grant_iam, object_create_error, DiskTest,
+    DiskTest, create_default_ip_pool, create_disk, create_instance,
+    create_project, grant_iam, object_create_error,
 };
 use nexus_test_utils::wait_for_producer;
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::shared::ProjectRole;
 use nexus_types::external_api::views::OxqlQueryResult;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
-use oximeter::types::FieldValue;
 use oximeter::TimeseriesSchema;
+use oximeter::types::FieldValue;
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -745,7 +745,9 @@ async fn test_mgs_metrics(
                 .into_iter()
                 .find(|t| t.name() == name)
                 .ok_or_else(|| {
-                    MetricsNotYet::new(format!("failed to find table for {query}"))
+                    MetricsNotYet::new(format!(
+                        "failed to find table for {query}",
+                    ))
                 })?;
 
             let mut found = expected
@@ -759,22 +761,26 @@ async fn test_mgs_metrics(
                         "{name} timeseries {fields:?} should have points"
                     )));
                 }
-                let serial_str: &str = match timeseries.fields.get("chassis_serial")
-            {
-                Some(FieldValue::String(s)) => s.borrow(),
-                Some(x) => panic!(
-                    "{name} `chassis_serial` field should be a string, but got: {x:?}"
-                ),
-                None => {
-                    panic!("{name} timeseries should have a `chassis_serial` field")
-                }
-            };
+                let serial_str: &str = match timeseries
+                    .fields
+                    .get("chassis_serial")
+                {
+                    Some(FieldValue::String(s)) => s.borrow(),
+                    Some(x) => panic!(
+                        "{name} `chassis_serial` field should be a string, \
+                         but got: {x:?}"
+                    ),
+                    None => {
+                        panic!("{name} timeseries should have a \
+                               `chassis_serial` field")
+                    }
+                };
                 if let Some(count) = found.get_mut(serial_str) {
                     *count += 1;
                 } else {
                     panic!(
                         "{name} timeseries had an unexpected chassis serial \
-                        number {serial_str:?} (not in the config file)",
+                         number {serial_str:?} (not in the config file)",
                     );
                 }
             }

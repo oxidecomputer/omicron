@@ -8,8 +8,8 @@
 use crate::app::background::BackgroundTask;
 use chrono::TimeDelta;
 use chrono::Utc;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use serde_json::json;
@@ -111,9 +111,9 @@ mod tests {
     use chrono::DateTime;
     use chrono::Utc;
     use diesel::ExpressionMethods;
+    use httptest::Expectation;
     use httptest::matchers::request;
     use httptest::responders::status_code;
-    use httptest::Expectation;
     use nexus_db_model::OximeterInfo;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;

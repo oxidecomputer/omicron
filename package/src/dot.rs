@@ -5,10 +5,10 @@ use omicron_zone_package::config::Config;
 use omicron_zone_package::package::PackageOutput;
 use omicron_zone_package::package::PackageSource;
 use omicron_zone_package::target::TargetMap;
+use petgraph::Graph;
 use petgraph::dot::Dot;
 use petgraph::graph::EdgeReference;
 use petgraph::graph::NodeIndex;
-use petgraph::Graph;
 use std::collections::BTreeMap;
 
 /// A node in our visual representation of the package manifest

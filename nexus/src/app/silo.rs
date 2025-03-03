@@ -19,10 +19,10 @@ use nexus_db_queries::{authn, authz};
 use nexus_types::deployment::execution::blueprint_nexus_external_ips;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::silo::silo_dns_name;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{CreateResult, LookupType};
 use omicron_common::api::external::{DataPageParams, ResourceType};
 use omicron_common::api::external::{DeleteResult, NameOrId};
@@ -666,7 +666,6 @@ impl super::Nexus {
                 saml_identity_provider: NameOrId::Id(id),
                 silo: None,
             } => {
-
                 let saml_provider = LookupPath::new(opctx, &self.db_datastore)
                     .saml_identity_provider_id(id);
                 Ok(saml_provider)
@@ -683,8 +682,12 @@ impl super::Nexus {
             params::SamlIdentityProviderSelector {
                 saml_identity_provider: NameOrId::Id(_),
                 silo: _,
-            } => Err(Error::invalid_request("when providing provider as an ID, silo should not be specified")),
-            _ => Err(Error::invalid_request("provider should either be a UUID or silo should be specified"))
+            } => Err(Error::invalid_request(
+                "when providing provider as an ID, silo should not be specified",
+            )),
+            _ => Err(Error::invalid_request(
+                "provider should either be a UUID or silo should be specified",
+            )),
         }
     }
 

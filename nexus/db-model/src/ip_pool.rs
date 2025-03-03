@@ -4,12 +4,12 @@
 
 //! Model types for IP Pools and the CIDR blocks therein.
 
+use crate::Name;
 use crate::collection::DatastoreCollectionConfig;
 use crate::impl_enum_type;
 use crate::schema::ip_pool;
 use crate::schema::ip_pool_range;
 use crate::schema::ip_pool_resource;
-use crate::Name;
 use chrono::DateTime;
 use chrono::Utc;
 use db_macros::Resource;

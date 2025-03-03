@@ -6,8 +6,8 @@
 
 // Copyright 2024 Oxide Computer Company
 
-use crate::self_stats;
 use crate::Error;
+use crate::self_stats;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
@@ -16,21 +16,21 @@ use oximeter::types::ProducerResultsItem;
 use oximeter_api::FailedCollection;
 use oximeter_api::ProducerDetails;
 use oximeter_api::SuccessfulCollection;
+use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::o;
 use slog::trace;
 use slog::warn;
-use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
-use tokio::time::interval;
 use tokio::time::Instant;
 use tokio::time::Interval;
+use tokio::time::interval;
 
 /// Error returned when a forced collection fails.
 #[derive(Clone, Copy, Debug)]

@@ -4,7 +4,7 @@
 
 //! developer REPL for driving blueprint planning
 
-use anyhow::{anyhow, bail, Context};
+use anyhow::{Context, anyhow, bail};
 use camino::Utf8PathBuf;
 use clap::CommandFactory;
 use clap::FromArgMatches;
@@ -24,13 +24,13 @@ use nexus_reconfigurator_planning::system::{SledBuilder, SystemDescription};
 use nexus_reconfigurator_simulation::SimState;
 use nexus_reconfigurator_simulation::SimStateBuilder;
 use nexus_reconfigurator_simulation::Simulator;
-use nexus_types::deployment::execution;
-use nexus_types::deployment::execution::blueprint_external_dns_config;
-use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::execution;
+use nexus_types::deployment::execution::blueprint_external_dns_config;
+use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
@@ -48,7 +48,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::io::BufRead;
 use std::io::IsTerminal;
-use swrite::{swriteln, SWrite};
+use swrite::{SWrite, swriteln};
 use tabled::Tabled;
 
 mod log_capture;

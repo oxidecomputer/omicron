@@ -17,11 +17,11 @@ use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_with::serde_as;
 use serde_with::DeserializeFromStr;
 use serde_with::DisplayFromStr;
 use serde_with::DurationSeconds;
 use serde_with::SerializeDisplay;
+use serde_with::serde_as;
 use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
@@ -331,8 +331,7 @@ impl Tunables {
                 tunable: String::from("max_vpc_ipv4_subnet_prefix"),
                 message: format!(
                     "IPv4 subnet prefix must be in the range [0, {}], found: {}",
-                    absolute_max,
-                    prefix,
+                    absolute_max, prefix,
                 ),
             })
         }
@@ -822,7 +821,7 @@ mod test {
     use super::*;
 
     use omicron_common::address::{
-        Ipv6Subnet, CLICKHOUSE_TCP_PORT, RACK_PREFIX,
+        CLICKHOUSE_TCP_PORT, Ipv6Subnet, RACK_PREFIX,
     };
     use omicron_common::api::internal::shared::SwitchLocation;
 

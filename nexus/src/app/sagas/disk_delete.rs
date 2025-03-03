@@ -5,9 +5,9 @@
 use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
+use crate::app::sagas::SagaInitError;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::volume_delete;
-use crate::app::sagas::SagaInitError;
 use nexus_db_queries::authn;
 use nexus_db_queries::db;
 use omicron_common::api::external::DiskState;
@@ -188,8 +188,8 @@ pub(crate) mod test {
     use nexus_db_model::Disk;
     use nexus_db_queries::authn::saga::Serialized;
     use nexus_db_queries::context::OpContext;
-    use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::DiskTest;
+    use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::params;
     use omicron_common::api::external::Name;

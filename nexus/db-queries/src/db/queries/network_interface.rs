@@ -5,7 +5,7 @@
 //! Queries for inserting and deleting network interfaces.
 
 use crate::db;
-use crate::db::error::{public_error_from_diesel, retryable, ErrorHandler};
+use crate::db::error::{ErrorHandler, public_error_from_diesel, retryable};
 use crate::db::model::IncompleteNetworkInterface;
 use crate::db::pool::DbConnection;
 use crate::db::queries::next_item::DefaultShiftGenerator;
@@ -14,6 +14,9 @@ use crate::db::schema::network_interface::dsl;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
+use diesel::Insertable;
+use diesel::QueryResult;
+use diesel::RunQueryDsl;
 use diesel::pg::Pg;
 use diesel::prelude::Column;
 use diesel::query_builder::QueryFragment;
@@ -21,13 +24,10 @@ use diesel::query_builder::QueryId;
 use diesel::query_builder::{AstPass, Query};
 use diesel::result::Error as DieselError;
 use diesel::sql_types::{self, Nullable};
-use diesel::Insertable;
-use diesel::QueryResult;
-use diesel::RunQueryDsl;
 use ipnetwork::IpNetwork;
 use ipnetwork::Ipv4Network;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
-use nexus_db_model::{NetworkInterfaceKind, MAX_NICS_PER_INSTANCE};
+use nexus_db_model::{MAX_NICS_PER_INSTANCE, NetworkInterfaceKind};
 use nexus_db_model::{NetworkInterfaceKindEnum, SqlU8};
 use omicron_common::api::external;
 use omicron_common::api::external::MacAddr;
@@ -75,8 +75,7 @@ const INSTANCE_BAD_STATE_SENTINEL: &'static str = "bad-state";
 // Error message generated when we're attempting to operate on an instance,
 // either inserting or deleting an interface, and that instance exists but is
 // in a state we can't work on.
-const INSTANCE_BAD_STATE_ERROR_MESSAGE: &'static str =
-    "could not parse \"bad-state\" as type uuid: uuid: incorrect UUID length: bad-state";
+const INSTANCE_BAD_STATE_ERROR_MESSAGE: &'static str = "could not parse \"bad-state\" as type uuid: uuid: incorrect UUID length: bad-state";
 
 // Uncastable sentinel used to detect when an instance doesn't exist
 const NO_INSTANCE_SENTINEL: &'static str = "no-instance";
@@ -85,8 +84,7 @@ const NO_INSTANCE_SENTINEL: &'static str = "no-instance";
 // either inserting or deleting an interface, and that instance does not exist
 // at all or has been destroyed. These are the same thing from the point of view
 // of the client's API call.
-const NO_INSTANCE_ERROR_MESSAGE: &'static str =
-    "could not parse \"no-instance\" as type uuid: uuid: incorrect UUID length: no-instance";
+const NO_INSTANCE_ERROR_MESSAGE: &'static str = "could not parse \"no-instance\" as type uuid: uuid: incorrect UUID length: no-instance";
 
 /// Errors related to inserting or attaching a NetworkInterface
 #[derive(Debug)]
@@ -152,16 +150,23 @@ impl InsertError {
     /// Convert this error into an external one.
     pub fn into_external(self) -> external::Error {
         match self {
-            InsertError::InterfaceAlreadyExists(name, NetworkInterfaceKind::Instance) => {
-                external::Error::ObjectAlreadyExists {
-                    type_name: external::ResourceType::InstanceNetworkInterface,
-                    object_name: name,
-                }
-            }
-            InsertError::InterfaceAlreadyExists(_name, NetworkInterfaceKind::Service) => {
+            InsertError::InterfaceAlreadyExists(
+                name,
+                NetworkInterfaceKind::Instance,
+            ) => external::Error::ObjectAlreadyExists {
+                type_name: external::ResourceType::InstanceNetworkInterface,
+                object_name: name,
+            },
+            InsertError::InterfaceAlreadyExists(
+                _name,
+                NetworkInterfaceKind::Service,
+            ) => {
                 unimplemented!("service network interface")
             }
-            InsertError::InterfaceAlreadyExists(_name, NetworkInterfaceKind::Probe) => {
+            InsertError::InterfaceAlreadyExists(
+                _name,
+                NetworkInterfaceKind::Probe,
+            ) => {
                 unimplemented!("probe network interface")
             }
             InsertError::NoAvailableIpAddresses => {
@@ -205,16 +210,19 @@ impl InsertError {
             }
             InsertError::NonUniqueVpcSubnets => {
                 external::Error::invalid_request(
-                    "Each interface must be in a distinct VPC Subnet"
+                    "Each interface must be in a distinct VPC Subnet",
                 )
             }
             InsertError::InstanceMustBeStopped(_) => {
                 external::Error::invalid_request(
-                    "Instance must be stopped to attach a new network interface"
+                    "Instance must be stopped to attach a new network interface",
                 )
             }
             InsertError::InstanceNotFound(id) => {
-                external::Error::not_found_by_id(external::ResourceType::Instance, &id)
+                external::Error::not_found_by_id(
+                    external::ResourceType::Instance,
+                    &id,
+                )
             }
             InsertError::Retryable(err) => {
                 public_error_from_diesel(err, ErrorHandler::Server)
@@ -1748,8 +1756,7 @@ fn decode_delete_network_interface_database_error(
 
     // Error message generated when we're attempting to delete a primary
     // interface, and that instance also has one or more secondary interfaces
-    const HAS_SECONDARIES_ERROR_MESSAGE: &'static str =
-        "could not parse \"secondaries\" as type uuid: uuid: \
+    const HAS_SECONDARIES_ERROR_MESSAGE: &'static str = "could not parse \"secondaries\" as type uuid: uuid: \
         incorrect UUID length: secondaries";
 
     match err {
@@ -1790,11 +1797,11 @@ fn decode_delete_network_interface_database_error(
 
 #[cfg(test)]
 mod tests {
-    use super::first_available_address;
     use super::DeleteError;
     use super::InsertError;
     use super::MAX_NICS_PER_INSTANCE;
     use super::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+    use super::first_available_address;
     use crate::authz;
     use crate::context::OpContext;
     use crate::db::datastore::DataStore;
@@ -2713,7 +2720,10 @@ mod tests {
                 )
                 .await;
             assert!(
-                matches!(result, Err(InsertError::ResourceSpansMultipleVpcs(_))),
+                matches!(
+                    result,
+                    Err(InsertError::ResourceSpansMultipleVpcs(_))
+                ),
                 "Attaching an interface to a resource which already has one in a different VPC should fail"
             );
         }

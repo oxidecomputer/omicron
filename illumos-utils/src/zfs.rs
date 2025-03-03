@@ -4,10 +4,10 @@
 
 //! Utilities for poking at ZFS.
 
-use crate::{execute, PFEXEC};
+use crate::{PFEXEC, execute};
+use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
-use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
 use itertools::Itertools;
 use omicron_common::api::external::ByteCount;
@@ -121,7 +121,9 @@ pub struct GetValueError {
 pub struct ListSnapshotsError(#[from] crate::ExecutionError);
 
 #[derive(Debug, thiserror::Error)]
-#[error("Failed to create snapshot '{snap_name}' from filesystem '{filesystem}': {err}")]
+#[error(
+    "Failed to create snapshot '{snap_name}' from filesystem '{filesystem}': {err}"
+)]
 pub struct CreateSnapshotError {
     filesystem: String,
     snap_name: String,
@@ -964,8 +966,7 @@ mod test {
 
     #[test]
     fn parse_dataset_props_with_optionals() {
-        let input =
-            "dataset_name\toxide:uuid\td4e1e554-7b98-4413-809e-4a42561c3d0c\tlocal\n\
+        let input = "dataset_name\toxide:uuid\td4e1e554-7b98-4413-809e-4a42561c3d0c\tlocal\n\
              dataset_name\tavailable\t1234\t-\n\
              dataset_name\tused\t5678\t-\n\
              dataset_name\tquota\t111\t-\n\
@@ -1085,8 +1086,7 @@ mod test {
 
     #[test]
     fn parse_dataset_uuid_ignored_if_inherited() {
-        let input =
-            "dataset_name\toxide:uuid\tb8698ede-60c2-4e16-b792-d28c165cfd12\tinherited from parent\n\
+        let input = "dataset_name\toxide:uuid\tb8698ede-60c2-4e16-b792-d28c165cfd12\tinherited from parent\n\
              dataset_name\tavailable\t1234\t-\n\
              dataset_name\tused\t5678\t-\n\
              dataset_name\tcompression\toff\t-";

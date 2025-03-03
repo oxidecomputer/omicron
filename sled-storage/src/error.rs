@@ -57,7 +57,9 @@ pub enum Error {
         err: uuid::Error,
     },
 
-    #[error("Dataset {name} exists with a different uuid (has {old}, requested {new})")]
+    #[error(
+        "Dataset {name} exists with a different uuid (has {old}, requested {new})"
+    )]
     UuidMismatch { name: String, old: Uuid, new: Uuid },
 
     #[error("Error parsing pool {name}'s size: {err}")]
@@ -77,10 +79,14 @@ pub enum Error {
     #[error("Not ready to manage U.2s (key manager is not ready)")]
     KeyManagerNotReady,
 
-    #[error("Physical disk configuration changed for the same generation number: {generation}")]
+    #[error(
+        "Physical disk configuration changed for the same generation number: {generation}"
+    )]
     PhysicalDiskConfigurationChanged { generation: Generation },
 
-    #[error("Physical disk configuration out-of-date (asked for {requested}, but latest is {current})")]
+    #[error(
+        "Physical disk configuration out-of-date (asked for {requested}, but latest is {current})"
+    )]
     PhysicalDiskConfigurationOutdated {
         requested: Generation,
         current: Generation,
@@ -89,10 +95,14 @@ pub enum Error {
     #[error("Invalid configuration (UUID mismatch in arguments)")]
     ConfigUuidMismatch,
 
-    #[error("Dataset configuration out-of-date (asked for {requested}, but latest is {current})")]
+    #[error(
+        "Dataset configuration out-of-date (asked for {requested}, but latest is {current})"
+    )]
     DatasetConfigurationOutdated { requested: Generation, current: Generation },
 
-    #[error("Dataset configuration changed for the same generation number: {generation}")]
+    #[error(
+        "Dataset configuration changed for the same generation number: {generation}"
+    )]
     DatasetConfigurationChanged { generation: Generation },
 
     #[error("Failed to update ledger in internal storage")]

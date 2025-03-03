@@ -8,8 +8,8 @@
 //! TODO-coverage add test for racks, sleds
 
 use dropshot::HttpErrorResponseBody;
-use http::method::Method;
 use http::StatusCode;
+use http::method::Method;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views::{self, Project};
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -50,7 +50,6 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
             expected_error: "Not Found",
             body: None,
         },
-
         // Error case: a possible value that does not exist inside a collection
         // that does exist) from an authorized user results in a 404.
         TestCase {

@@ -7,16 +7,16 @@
 
 use chrono::Utc;
 use dropshot::HttpErrorResponseBody;
+use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views::OxqlQueryResult;
 use omicron_test_utils::dev::poll;
-use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_test_utils::dev::poll::wait_for_condition;
 use oximeter::Datum;
 use oximeter::Measurement;
 use oximeter::TimeseriesSchema;
@@ -339,7 +339,8 @@ impl<'a, N> MetricsQuerier<'a, N> {
             Err(poll::Error::TimedOut(duration)) => {
                 panic!(
                     "Timed out after {duration:?} waiting for timeseries query \
-                    success, endpoint: '{endpoint}', query: '{query}'");
+                    success, endpoint: '{endpoint}', query: '{query}'"
+                );
             }
             Err(poll::Error::PermanentError(_)) => unreachable!(
                 "wait_for_condition closure never returns permanent errors"

@@ -8,8 +8,8 @@
 
 use anyhow::Context;
 use anyhow::Error;
-use oxql_types::point::MetricType;
 use oxql_types::Table;
+use oxql_types::point::MetricType;
 
 /// An AST node for a natural inner join.
 #[derive(Clone, Copy, Debug, PartialEq)]
