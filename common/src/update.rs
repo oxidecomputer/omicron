@@ -6,9 +6,9 @@ use std::{fmt, str::FromStr};
 
 use hex::FromHexError;
 use schemars::{
+    JsonSchema,
     gen::SchemaGenerator,
     schema::{Schema, SchemaObject},
-    JsonSchema,
 };
 use semver::Version;
 use serde::{Deserialize, Serialize};

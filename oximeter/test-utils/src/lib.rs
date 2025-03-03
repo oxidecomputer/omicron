@@ -26,7 +26,7 @@ use oximeter_types::types::{
     Cumulative, Datum, DatumType, FieldType, FieldValue, Measurement, Sample,
 };
 use oximeter_types::{Metric, Target};
-use slog::{debug, info, Logger};
+use slog::{Logger, debug, info};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -211,11 +211,11 @@ pub async fn wait_for_ping(
 mod tests {
     use chrono::Utc;
     use oximeter_types::{
-        schema::{
-            default_schema_version, AuthzScope, FieldSchema, FieldSource,
-            TimeseriesSchema, Units,
-        },
         TimeseriesName,
+        schema::{
+            AuthzScope, FieldSchema, FieldSource, TimeseriesSchema, Units,
+            default_schema_version,
+        },
     };
 
     use super::*;

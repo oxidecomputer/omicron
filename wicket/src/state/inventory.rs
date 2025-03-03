@@ -4,7 +4,7 @@
 
 //! Information about all top-level Oxide components (sleds, switches, PSCs)
 
-use anyhow::{bail, Context as _, Result};
+use anyhow::{Context as _, Result, bail};
 use omicron_common::api::external::SwitchLocation;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

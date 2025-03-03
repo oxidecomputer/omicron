@@ -5,10 +5,10 @@
 //! Tests that subnet allocation will successfully allocate the entire space of a
 //! subnet and error appropriately when the space is exhausted.
 
-use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
-use http::method::Method;
+use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
+use http::method::Method;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -186,8 +186,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
         .zip(subnet.addr_iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES))
     {
         assert_eq!(
-            iface.ip,
-            addr,
+            iface.ip, addr,
             "Nexus should provide auto-assigned IP addresses in order within an IP subnet"
         );
     }

@@ -8,8 +8,8 @@
 //! to operate correctly.
 
 use dropshot::{
-    endpoint, ApiDescription, HttpError, HttpResponseOk,
-    HttpResponseUpdatedNoContent, Path, RequestContext, TypedBody,
+    ApiDescription, HttpError, HttpResponseOk, HttpResponseUpdatedNoContent,
+    Path, RequestContext, TypedBody, endpoint,
 };
 use internal_dns_types::config::DnsConfigBuilder;
 use internal_dns_types::names::ServiceName;

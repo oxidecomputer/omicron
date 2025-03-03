@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use http::method::Method;
 use http::StatusCode;
+use http::method::Method;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use nexus_test_utils::resource_helpers::{
     create_project, create_vpc, object_get, object_put, object_put_error,
@@ -319,7 +319,10 @@ async fn test_firewall_rules_same_name(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
     assert_eq!(error.error_code, Some("InvalidValue".to_string()));
-    assert_eq!(error.message, "unsupported value for \"rules\": Rule names must be unique. Duplicates: [\"dupe\"]");
+    assert_eq!(
+        error.message,
+        "unsupported value for \"rules\": Rule names must be unique. Duplicates: [\"dupe\"]"
+    );
 }
 
 #[nexus_test]

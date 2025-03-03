@@ -6,21 +6,21 @@
 
 // Copyright 2024 Oxide Computer Company
 
+use crate::Alignment;
 use crate::point::DataType;
 use crate::point::MetricType;
 use crate::point::Points;
 use crate::point::ValueArray;
 use crate::point::Values;
-use crate::Alignment;
 use anyhow::Error;
 use highway::HighwayHasher;
-use oximeter_types::schema::TimeseriesKey;
 use oximeter_types::FieldValue;
+use oximeter_types::schema::TimeseriesKey;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::hash::Hash;
 use std::hash::Hasher;
 

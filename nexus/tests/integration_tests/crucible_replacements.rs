@@ -15,9 +15,9 @@ use nexus_db_model::RegionReplacementState;
 use nexus_db_model::RegionSnapshotReplacementState;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::region_snapshot_replacement::*;
 use nexus_db_queries::db::lookup::LookupPath;
-use nexus_db_queries::db::DataStore;
 use nexus_test_utils::background::*;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -35,11 +35,11 @@ use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::*;
 use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
+use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::VolumeUuid;
-use slog::info;
 use slog::Logger;
+use slog::info;
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -1649,7 +1649,10 @@ mod region_snapshot_replacement {
                 InsertStepResult::Inserted { .. } => {}
 
                 _ => {
-                    assert!(false, "bad result from create_region_snapshot_replacement_step");
+                    assert!(
+                        false,
+                        "bad result from create_region_snapshot_replacement_step"
+                    );
                 }
             }
         }
@@ -1664,12 +1667,13 @@ mod region_snapshot_replacement {
                 .await
                 .unwrap();
 
-            assert!(self
-                .datastore
-                .read_only_target_addr(&region_snapshot_replace_request)
-                .await
-                .unwrap()
-                .is_none());
+            assert!(
+                self.datastore
+                    .read_only_target_addr(&region_snapshot_replace_request)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
         }
 
         pub async fn remove_disk_from_snapshot_rop(&self) {
@@ -2045,16 +2049,20 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
     wait_for_all_replacements(&datastore, &internal_client).await;
 
     // Validate all regions are on non-expunged physical disks
-    assert!(datastore
-        .find_read_write_regions_on_expunged_physical_disks(&opctx)
-        .await
-        .unwrap()
-        .is_empty());
-    assert!(datastore
-        .find_read_only_regions_on_expunged_physical_disks(&opctx)
-        .await
-        .unwrap()
-        .is_empty());
+    assert!(
+        datastore
+            .find_read_write_regions_on_expunged_physical_disks(&opctx)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        datastore
+            .find_read_only_regions_on_expunged_physical_disks(&opctx)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 /// Tests that multiple replacements can occur until completion
@@ -2164,16 +2172,20 @@ async fn test_region_replacement_triple_sanity(
     assert!(snapshot_allocated_regions.iter().all(|(_, r)| r.read_only()));
 
     // Validate all regions are on non-expunged physical disks
-    assert!(datastore
-        .find_read_write_regions_on_expunged_physical_disks(&opctx)
-        .await
-        .unwrap()
-        .is_empty());
-    assert!(datastore
-        .find_read_only_regions_on_expunged_physical_disks(&opctx)
-        .await
-        .unwrap()
-        .is_empty());
+    assert!(
+        datastore
+            .find_read_write_regions_on_expunged_physical_disks(&opctx)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        datastore
+            .find_read_only_regions_on_expunged_physical_disks(&opctx)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 /// Tests that multiple replacements can occur until completion, after expunging
@@ -2323,16 +2335,20 @@ async fn test_region_replacement_triple_sanity_2(
     assert!(snapshot_allocated_regions.iter().all(|(_, r)| r.read_only()));
 
     // Validate all regions are on non-expunged physical disks
-    assert!(datastore
-        .find_read_write_regions_on_expunged_physical_disks(&opctx)
-        .await
-        .unwrap()
-        .is_empty());
-    assert!(datastore
-        .find_read_only_regions_on_expunged_physical_disks(&opctx)
-        .await
-        .unwrap()
-        .is_empty());
+    assert!(
+        datastore
+            .find_read_write_regions_on_expunged_physical_disks(&opctx)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        datastore
+            .find_read_only_regions_on_expunged_physical_disks(&opctx)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 /// Tests that replacement can occur until completion twice - meaning region
@@ -2556,14 +2572,18 @@ async fn test_read_only_replacement_sanity(
     wait_for_all_replacements(&datastore, &internal_client).await;
 
     // Validate all regions are on non-expunged physical disks
-    assert!(datastore
-        .find_read_write_regions_on_expunged_physical_disks(&opctx)
-        .await
-        .unwrap()
-        .is_empty());
-    assert!(datastore
-        .find_read_only_regions_on_expunged_physical_disks(&opctx)
-        .await
-        .unwrap()
-        .is_empty());
+    assert!(
+        datastore
+            .find_read_write_regions_on_expunged_physical_disks(&opctx)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        datastore
+            .find_read_only_regions_on_expunged_physical_disks(&opctx)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }

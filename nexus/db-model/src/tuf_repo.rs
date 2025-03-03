@@ -5,9 +5,9 @@
 use std::str::FromStr;
 
 use crate::{
+    SemverVersion,
     schema::{tuf_artifact, tuf_repo, tuf_repo_artifact},
     typed_uuid::DbTypedUuid,
-    SemverVersion,
 };
 use chrono::{DateTime, Utc};
 use diesel::{deserialize::FromSql, serialize::ToSql, sql_types::Text};

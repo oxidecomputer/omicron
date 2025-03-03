@@ -6,7 +6,7 @@
 
 use crate::addrobj::{IPV6_LINK_LOCAL_ADDROBJ_NAME, IPV6_STATIC_ADDROBJ_NAME};
 use crate::zone::IPADM;
-use crate::{execute, ExecutionError, PFEXEC};
+use crate::{ExecutionError, PFEXEC, execute};
 use oxnet::IpNet;
 use std::net::{IpAddr, Ipv6Addr};
 

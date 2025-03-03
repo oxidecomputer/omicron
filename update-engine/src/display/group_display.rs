@@ -8,18 +8,18 @@ use std::{borrow::Borrow, collections::BTreeMap, fmt, time::Duration};
 
 use libsw::TokioSw;
 use owo_colors::OwoColorize;
-use swrite::{swrite, SWrite};
+use swrite::{SWrite, swrite};
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    display::ProgressRatioDisplay, errors::UnknownReportKey,
-    events::EventReport, EventBuffer, ExecutionStatus, ExecutionTerminalInfo,
-    StepSpec, TerminalKind,
+    EventBuffer, ExecutionStatus, ExecutionTerminalInfo, StepSpec,
+    TerminalKind, display::ProgressRatioDisplay, errors::UnknownReportKey,
+    events::EventReport,
 };
 
 use super::{
+    HEADER_WIDTH, LineDisplayShared, LineDisplayStyles,
     line_display_shared::{LineDisplayFormatter, LineDisplayOutput},
-    LineDisplayShared, LineDisplayStyles, HEADER_WIDTH,
 };
 
 /// A displayer that simultaneously manages and shows line-based output for
@@ -428,7 +428,9 @@ impl<S: StepSpec> SingleState<S> {
                         // non-empty event report has been received, the
                         // event buffer never goes back to the NotStarted
                         // state.
-                        unreachable!("illegal state transition from Running to NotStarted")
+                        unreachable!(
+                            "illegal state transition from Running to NotStarted"
+                        )
                     }
                     ApplyReportResult::Running(root_total_elapsed) => {
                         (SingleStateTag::Running, Some(root_total_elapsed))
@@ -624,7 +626,7 @@ mod tests {
 
     use super::*;
 
-    use crate::test_utils::{generate_test_events, GenerateTestEventsKind};
+    use crate::test_utils::{GenerateTestEventsKind, generate_test_events};
 
     #[tokio::test]
     async fn test_stats() {

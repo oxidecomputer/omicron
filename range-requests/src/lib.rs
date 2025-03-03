@@ -6,8 +6,8 @@ use dropshot::Body;
 use futures::TryStreamExt;
 use http::HeaderValue;
 use hyper::{
-    header::{ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE},
     Response, StatusCode,
+    header::{ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE},
 };
 
 const ACCEPT_RANGES_BYTES: http::HeaderValue =
@@ -458,10 +458,12 @@ mod test {
 
     // Validates the data matches an incrementing Vec of u8 values
     async fn expect_data(
-        body: &mut (dyn http_body::Body<
+        body: &mut (
+                 dyn http_body::Body<
             Data = Bytes,
             Error = Box<dyn std::error::Error + Send + Sync>,
-        > + Unpin),
+        > + Unpin
+             ),
         start: u8,
         length: u8,
     ) {

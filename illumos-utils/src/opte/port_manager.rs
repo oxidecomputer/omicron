@@ -5,13 +5,13 @@
 //! Manager for all OPTE ports on a Helios system
 
 use crate::dladm::OPTE_LINK_PREFIX;
-use crate::opte::opte_firewall_rules;
-use crate::opte::port::PortData;
 use crate::opte::Error;
 use crate::opte::Gateway;
 use crate::opte::Handle;
 use crate::opte::Port;
 use crate::opte::Vni;
+use crate::opte::opte_firewall_rules;
+use crate::opte::port::PortData;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 use omicron_common::api::external;
@@ -46,20 +46,20 @@ use oxide_vpc::api::VpcCfg;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
+use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::info;
-use slog::Logger;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use uuid::Uuid;
 
 /// Stored routes (and usage count) for a given VPC/subnet.
