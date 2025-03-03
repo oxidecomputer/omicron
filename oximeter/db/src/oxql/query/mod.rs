@@ -8,21 +8,21 @@
 
 use std::collections::BTreeSet;
 
+use super::ast::SplitQuery;
 use super::ast::ident::Ident;
 use super::ast::logical_op::LogicalOp;
+use super::ast::table_ops::BasicTableOp;
+use super::ast::table_ops::TableOp;
 use super::ast::table_ops::filter::CompoundFilter;
 use super::ast::table_ops::filter::FilterExpr;
 use super::ast::table_ops::group_by::GroupBy;
 use super::ast::table_ops::limit::Limit;
-use super::ast::table_ops::BasicTableOp;
-use super::ast::table_ops::TableOp;
-use super::ast::SplitQuery;
+use crate::TimeseriesName;
+use crate::oxql::Error;
+use crate::oxql::ast::Query as QueryNode;
 use crate::oxql::ast::grammar;
 use crate::oxql::ast::table_ops::filter::Filter;
-use crate::oxql::ast::Query as QueryNode;
 use crate::oxql::fmt_parse_error;
-use crate::oxql::Error;
-use crate::TimeseriesName;
 use chrono::DateTime;
 use chrono::Utc;
 
@@ -407,18 +407,18 @@ mod tests {
     use super::Filter;
     use super::Ident;
     use super::Query;
+    use crate::oxql::ast::SplitQuery;
     use crate::oxql::ast::cmp::Comparison;
     use crate::oxql::ast::literal::Literal;
     use crate::oxql::ast::logical_op::LogicalOp;
+    use crate::oxql::ast::table_ops::BasicTableOp;
+    use crate::oxql::ast::table_ops::TableOp;
     use crate::oxql::ast::table_ops::filter::CompoundFilter;
     use crate::oxql::ast::table_ops::filter::FilterExpr;
     use crate::oxql::ast::table_ops::filter::SimpleFilter;
     use crate::oxql::ast::table_ops::join::Join;
     use crate::oxql::ast::table_ops::limit::Limit;
     use crate::oxql::ast::table_ops::limit::LimitKind;
-    use crate::oxql::ast::table_ops::BasicTableOp;
-    use crate::oxql::ast::table_ops::TableOp;
-    use crate::oxql::ast::SplitQuery;
     use crate::oxql::query::restrict_filter_idents;
     use chrono::NaiveDateTime;
     use chrono::Utc;
@@ -754,7 +754,8 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 inner,
-                expected_predicate.merge(&expected_inner_predicate, LogicalOp::And),
+                expected_predicate
+                    .merge(&expected_inner_predicate, LogicalOp::And),
                 "Predicates passed into an inner subquery should be preserved, \
                 and merged with any subquery predicates",
             );
@@ -816,8 +817,7 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(
-            q.end_time,
-            then,
+            q.end_time, then,
             "Query with a compound less-than-or-equal filter and a timestamp should \
             set the query end time"
         );
@@ -831,8 +831,7 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(
-            q.end_time,
-            then,
+            q.end_time, then,
             "Query with two less-than timestamp filters should use the later timestamp"
         );
 
@@ -947,8 +946,8 @@ mod tests {
     }
 
     #[test]
-    fn test_coalesce_limits_do_not_rearrange_around_incompatible_timestamp_filters(
-    ) {
+    fn test_coalesce_limits_do_not_rearrange_around_incompatible_timestamp_filters()
+     {
         let qs = [
             "get a:b | filter timestamp < @now() | last 10",
             "get a:b | filter timestamp > @now() | first 10",

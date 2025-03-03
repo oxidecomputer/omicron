@@ -7,7 +7,7 @@
 
 use crate::apis::{ApiIdent, ManagedApi, ManagedApis};
 use crate::environment::ErrorAccumulator;
-use anyhow::{anyhow, bail, Context};
+use anyhow::{Context, anyhow, bail};
 use camino::{Utf8Path, Utf8PathBuf};
 use debug_ignore::DebugIgnore;
 use openapiv3::OpenAPI;

@@ -15,7 +15,9 @@ pub enum SwapDeviceError {
     #[error("Error listing swap devices: {0}")]
     ListDevices(String),
 
-    #[error("Error adding swap device: {msg} (path=\"{path}\", start={start}, length={length})")]
+    #[error(
+        "Error adding swap device: {msg} (path=\"{path}\", start={start}, length={length})"
+    )]
     AddDevice { msg: String, path: String, start: u64, length: u64 },
 
     #[error("{msg}: {error}")]
@@ -122,7 +124,7 @@ fn zvol_exists(name: &str) -> Result<bool, SwapDeviceError> {
                 error: format!(
                     "found dataset \"{}\" for swap device, but it is not a volume",
                     name
-                     ),
+                ),
             });
         } else {
             return Ok(true);
@@ -225,9 +227,11 @@ fn create_encrypted_swap_zvol(
         use std::io::Write;
         let res = stdin.write_all(&secret);
         if res.is_err() {
-            error!(child_log,
+            error!(
+                child_log,
                 "could not write key to stdin of `zfs create` for swap zvol: {:?}",
-                res);
+                res
+            );
         }
         secret.zeroize();
     });

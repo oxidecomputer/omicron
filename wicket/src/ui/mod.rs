@@ -12,7 +12,7 @@ mod wrap;
 
 use crate::{Action, Cmd, State, Term};
 use ratatui::widgets::ListState;
-use slog::{o, Logger};
+use slog::{Logger, o};
 
 use main::MainScreen;
 use splash::SplashScreen;

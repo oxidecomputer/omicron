@@ -92,7 +92,7 @@
 use dropshot::{HttpError, HttpResponseOk, RequestContext};
 use internal_dns_types::config::{DnsConfig, DnsConfigParams};
 use openapi_manager_types::{
-    api_versions, SupportedVersion, SupportedVersions,
+    SupportedVersion, SupportedVersions, api_versions,
 };
 
 api_versions!([

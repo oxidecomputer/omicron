@@ -13,8 +13,8 @@ use camino::Utf8Path;
 use illumos_utils::zpool::ZpoolName;
 use omicron_common::disk::{DiskIdentity, DiskVariant};
 use omicron_uuid_kinds::ZpoolUuid;
-use slog::info;
 use slog::Logger;
+use slog::info;
 
 #[cfg(test)]
 use illumos_utils::zpool::MockZpool as Zpool;
@@ -41,8 +41,8 @@ static PREFERRED_NVME_DEVICE_SETTINGS: OnceLock<
     HashMap<&'static str, NvmeDeviceSettings>,
 > = OnceLock::new();
 
-fn preferred_nvme_device_settings(
-) -> &'static HashMap<&'static str, NvmeDeviceSettings> {
+fn preferred_nvme_device_settings()
+-> &'static HashMap<&'static str, NvmeDeviceSettings> {
     PREFERRED_NVME_DEVICE_SETTINGS.get_or_init(|| {
         HashMap::from([
             (
@@ -248,8 +248,8 @@ fn ensure_size_and_formatting(
     log: &Logger,
     identity: &DiskIdentity,
 ) -> Result<(), NvmeFormattingError> {
-    use libnvme::namespace::NamespaceDiscoveryLevel;
     use libnvme::Nvme;
+    use libnvme::namespace::NamespaceDiscoveryLevel;
 
     let mut controller_found = false;
 
@@ -451,17 +451,19 @@ mod test {
         let devfs_path = Utf8PathBuf::from("/devfs/path");
         const DEV_PATH: &'static str = "/dev/path";
 
-        assert!(internal_ensure_partition_layout::<LabelNotFoundGPT>(
-            &log,
-            &DiskPaths {
-                devfs_path,
-                dev_path: Some(Utf8PathBuf::from(DEV_PATH))
-            },
-            DiskVariant::M2,
-            &mock_disk_identity(),
-            None,
-        )
-        .is_err());
+        assert!(
+            internal_ensure_partition_layout::<LabelNotFoundGPT>(
+                &log,
+                &DiskPaths {
+                    devfs_path,
+                    dev_path: Some(Utf8PathBuf::from(DEV_PATH))
+                },
+                DiskVariant::M2,
+                &mock_disk_identity(),
+                None,
+            )
+            .is_err()
+        );
 
         logctx.cleanup_successful();
     }

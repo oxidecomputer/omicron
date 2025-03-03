@@ -4,15 +4,15 @@
 
 //! HTTP entrypoint functions for wicketd
 
-use crate::helpers::sps_to_string;
+use crate::SmfConfigValues;
 use crate::helpers::SpIdentifierDisplay;
+use crate::helpers::sps_to_string;
 use crate::mgs::GetInventoryError as GetMgsInventoryError;
 use crate::mgs::GetInventoryResponse as GetMgsInventoryResponse;
 use crate::mgs::MgsHandle;
 use crate::mgs::ShutdownInProgress;
 use crate::transceivers::GetTransceiversResponse;
 use crate::transceivers::Handle as TransceiverHandle;
-use crate::SmfConfigValues;
 use bootstrap_agent_client::types::RackOperationStatus;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -30,6 +30,7 @@ use sled_hardware_types::Baseboard;
 use slog::o;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use wicket_common::WICKETD_TIMEOUT;
 use wicket_common::inventory::MgsV1InventorySnapshot;
 use wicket_common::inventory::RackV1Inventory;
 use wicket_common::inventory::SpIdentifier;
@@ -40,7 +41,6 @@ use wicket_common::rack_setup::PutRssUserConfigInsensitive;
 use wicket_common::rack_update::AbortUpdateOptions;
 use wicket_common::rack_update::ClearUpdateStateResponse;
 use wicket_common::update_events::EventReport;
-use wicket_common::WICKETD_TIMEOUT;
 use wicketd_api::*;
 
 use crate::ServerContext;
@@ -387,7 +387,7 @@ impl WicketdApi for WicketdApiImpl {
                 return Err(HttpError::for_unavail(
                     None,
                     "Server is shutting down".into(),
-                ))
+                ));
             }
         };
 
@@ -932,7 +932,7 @@ async fn mgs_inventory_or_unavail(
             return Err(HttpError::for_unavail(
                 None,
                 "Rack inventory not yet available".into(),
-            ))
+            ));
         }
         Err(ShutdownInProgress) => {
             return Err(HttpError::for_unavail(

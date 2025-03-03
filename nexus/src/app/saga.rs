@@ -48,14 +48,14 @@
 //! * Tests can use any of the lower-level pieces to examine intermediate state
 //!   or inject errors.
 
-use super::sagas::NexusSaga;
 use super::sagas::ACTION_REGISTRY;
-use crate::saga_interface::SagaContext;
+use super::sagas::NexusSaga;
 use crate::Nexus;
+use crate::saga_interface::SagaContext;
 use anyhow::Context;
-use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures::StreamExt;
+use futures::future::BoxFuture;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_types::internal_api::views::DemoSaga;

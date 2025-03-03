@@ -583,13 +583,13 @@ pub fn now_db_precision() -> DateTime<Utc> {
 
 #[cfg(test)]
 mod test {
-    use super::now_db_precision;
     use super::CollectionBuilder;
+    use super::now_db_precision;
+    use crate::examples::Representative;
     use crate::examples::representative;
     use crate::examples::sp_state;
-    use crate::examples::Representative;
-    use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
     use base64::Engine;
+    use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
     use gateway_client::types::PowerState;
     use gateway_client::types::RotSlot;
     use gateway_client::types::RotState;
@@ -651,7 +651,12 @@ mod test {
             switch,
             psc,
             sled_agents:
-                [sled_agent_id_basic, sled_agent_id_extra, sled_agent_id_pc, sled_agent_id_unknown],
+                [
+                    sled_agent_id_basic,
+                    sled_agent_id_extra,
+                    sled_agent_id_pc,
+                    sled_agent_id_unknown,
+                ],
         } = representative();
         let collection = builder.build();
         let time_after = now_db_precision();
@@ -808,18 +813,24 @@ mod test {
         assert_eq!(rot.transient_boot_preference, Some(RotSlot::B));
 
         // sled 2 did not have any RoT pages reported
-        assert!(collection
-            .rot_page_for(RotPageWhich::Cmpa, &sled2_bb)
-            .is_none());
-        assert!(collection
-            .rot_page_for(RotPageWhich::CfpaActive, &sled2_bb)
-            .is_none());
-        assert!(collection
-            .rot_page_for(RotPageWhich::CfpaInactive, &sled2_bb)
-            .is_none());
-        assert!(collection
-            .rot_page_for(RotPageWhich::CfpaScratch, &sled2_bb)
-            .is_none());
+        assert!(
+            collection.rot_page_for(RotPageWhich::Cmpa, &sled2_bb).is_none()
+        );
+        assert!(
+            collection
+                .rot_page_for(RotPageWhich::CfpaActive, &sled2_bb)
+                .is_none()
+        );
+        assert!(
+            collection
+                .rot_page_for(RotPageWhich::CfpaInactive, &sled2_bb)
+                .is_none()
+        );
+        assert!(
+            collection
+                .rot_page_for(RotPageWhich::CfpaScratch, &sled2_bb)
+                .is_none()
+        );
 
         // switch
         let sp = collection.sps.get(&switch).unwrap();
@@ -932,12 +943,12 @@ mod test {
         assert_eq!(sp.baseboard_revision, 1);
         assert_eq!(sp.hubris_archive, "hubris5");
         assert_eq!(sp.power_state, PowerState::A2);
-        assert!(collection
-            .caboose_for(CabooseWhich::SpSlot0, &sled3_bb)
-            .is_none());
-        assert!(collection
-            .caboose_for(CabooseWhich::SpSlot1, &sled3_bb)
-            .is_none());
+        assert!(
+            collection.caboose_for(CabooseWhich::SpSlot0, &sled3_bb).is_none()
+        );
+        assert!(
+            collection.caboose_for(CabooseWhich::SpSlot1, &sled3_bb).is_none()
+        );
         assert!(!collection.rots.contains_key(&sled3_bb));
 
         // There shouldn't be any other RoTs.
@@ -982,12 +993,14 @@ mod test {
         let sled4_agent = &collection.sled_agents[&sled_agent_id_extra];
         let sled4_bb = sled4_agent.baseboard_id.as_ref().unwrap();
         assert_eq!(sled4_bb.serial_number, "s4");
-        assert!(collection.sled_agents[&sled_agent_id_pc]
-            .baseboard_id
-            .is_none());
-        assert!(collection.sled_agents[&sled_agent_id_unknown]
-            .baseboard_id
-            .is_none());
+        assert!(
+            collection.sled_agents[&sled_agent_id_pc].baseboard_id.is_none()
+        );
+        assert!(
+            collection.sled_agents[&sled_agent_id_unknown]
+                .baseboard_id
+                .is_none()
+        );
     }
 
     // Exercises all the failure cases that shouldn't happen in real systems.
@@ -1095,8 +1108,10 @@ mod test {
             sign: None,
             epoch: None,
         };
-        assert!(!builder
-            .found_caboose_already(&bogus_baseboard, CabooseWhich::SpSlot0));
+        assert!(
+            !builder
+                .found_caboose_already(&bogus_baseboard, CabooseWhich::SpSlot0)
+        );
         let error = builder
             .found_caboose(
                 &bogus_baseboard,
@@ -1112,8 +1127,10 @@ mod test {
             (Caboose { board: \"board1\", git_commit: \"git_commit1\", \
             name: \"name1\", version: \"version1\" })"
         );
-        assert!(!builder
-            .found_caboose_already(&bogus_baseboard, CabooseWhich::SpSlot0));
+        assert!(
+            !builder
+                .found_caboose_already(&bogus_baseboard, CabooseWhich::SpSlot0)
+        );
 
         // report RoT caboose for an unknown baseboard
         let error2 = builder
@@ -1175,8 +1192,10 @@ mod test {
         // report RoT page for an unknown baseboard
         let rot_page1 = RotPage { data_base64: "page1".to_string() };
         let rot_page2 = RotPage { data_base64: "page2".to_string() };
-        assert!(!builder
-            .found_rot_page_already(&bogus_baseboard, RotPageWhich::Cmpa));
+        assert!(
+            !builder
+                .found_rot_page_already(&bogus_baseboard, RotPageWhich::Cmpa)
+        );
         let error = builder
             .found_rot_page(
                 &bogus_baseboard,
@@ -1191,8 +1210,10 @@ mod test {
             BaseboardId { part_number: \"p1\", serial_number: \"bogus\" } \
             (RotPage { data_base64: \"page1\" })"
         );
-        assert!(!builder
-            .found_rot_page_already(&bogus_baseboard, RotPageWhich::Cmpa));
+        assert!(
+            !builder
+                .found_rot_page_already(&bogus_baseboard, RotPageWhich::Cmpa)
+        );
 
         // report the same rot page twice with the same contents
         builder
@@ -1246,16 +1267,16 @@ mod test {
             collection.caboose_for(CabooseWhich::SpSlot0, &sled1_bb).unwrap();
         assert_eq!(caboose.caboose.board, "board2");
         assert!(collection.cabooses.contains(&caboose.caboose));
-        assert!(collection
-            .caboose_for(CabooseWhich::SpSlot1, &sled1_bb)
-            .is_none());
+        assert!(
+            collection.caboose_for(CabooseWhich::SpSlot1, &sled1_bb).is_none()
+        );
         let _ = collection.rots.get(&sled1_bb).unwrap();
-        assert!(collection
-            .caboose_for(CabooseWhich::RotSlotA, &sled1_bb)
-            .is_none());
-        assert!(collection
-            .caboose_for(CabooseWhich::RotSlotB, &sled1_bb)
-            .is_none());
+        assert!(
+            collection.caboose_for(CabooseWhich::RotSlotA, &sled1_bb).is_none()
+        );
+        assert!(
+            collection.caboose_for(CabooseWhich::RotSlotB, &sled1_bb).is_none()
+        );
         let rot_page =
             collection.rot_page_for(RotPageWhich::Cmpa, &sled1_bb).unwrap();
         assert!(collection.rot_pages.contains(&rot_page.page));
@@ -1269,15 +1290,21 @@ mod test {
         // data.
         assert_eq!(rot_page.page.data_base64, rot_page2.data_base64);
 
-        assert!(collection
-            .rot_page_for(RotPageWhich::CfpaActive, &sled1_bb)
-            .is_none());
-        assert!(collection
-            .rot_page_for(RotPageWhich::CfpaInactive, &sled1_bb)
-            .is_none());
-        assert!(collection
-            .rot_page_for(RotPageWhich::CfpaScratch, &sled1_bb)
-            .is_none());
+        assert!(
+            collection
+                .rot_page_for(RotPageWhich::CfpaActive, &sled1_bb)
+                .is_none()
+        );
+        assert!(
+            collection
+                .rot_page_for(RotPageWhich::CfpaInactive, &sled1_bb)
+                .is_none()
+        );
+        assert!(
+            collection
+                .rot_page_for(RotPageWhich::CfpaScratch, &sled1_bb)
+                .is_none()
+        );
 
         // We should see an error.
         assert_eq!(
