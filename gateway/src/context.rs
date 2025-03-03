@@ -6,7 +6,7 @@ use crate::error::StartupError;
 use crate::management_switch::ManagementSwitch;
 use crate::management_switch::SwitchConfig;
 use gateway_sp_comms::InMemoryHostPhase2Provider;
-use slog::{info, Logger};
+use slog::{Logger, info};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use uuid::Uuid;

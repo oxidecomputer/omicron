@@ -6,15 +6,15 @@
 //!
 //! See `nexus_reconfigurator_planning` crate-level docs for background.
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::execution::*;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::execution::*;
 use nexus_types::external_api::views::SledState;
 use nexus_types::identity::Asset;
 use omicron_uuid_kinds::GenericUuid;
@@ -26,9 +26,9 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use update_engine::merge_anyhow_list;
 use update_engine::StepSuccess;
 use update_engine::StepWarning;
+use update_engine::merge_anyhow_list;
 
 mod clickhouse;
 mod cockroachdb;
@@ -336,7 +336,10 @@ fn register_deploy_disks_step<'a>(
                 let res = omicron_physical_disks::deploy_disks(
                     &opctx,
                     &sleds_by_id,
-                    &blueprint.blueprint_disks,
+                    blueprint
+                        .sleds
+                        .iter()
+                        .map(|(sled_id, sled)| (*sled_id, &sled.disks_config)),
                 )
                 .await
                 .map_err(merge_anyhow_list);
@@ -361,7 +364,9 @@ fn register_deploy_datasets_step<'a>(
                 let res = datasets::deploy_datasets(
                     &opctx,
                     &sleds_by_id,
-                    &blueprint.blueprint_datasets,
+                    blueprint.sleds.iter().map(|(sled_id, sled)| {
+                        (*sled_id, &sled.datasets_config)
+                    }),
                 )
                 .await
                 .map_err(merge_anyhow_list);
@@ -386,7 +391,10 @@ fn register_deploy_zones_step<'a>(
                 let done = omicron_zones::deploy_zones(
                     &opctx,
                     &sleds_by_id,
-                    &blueprint.blueprint_zones,
+                    blueprint
+                        .sleds
+                        .iter()
+                        .map(|(sled_id, sled)| (*sled_id, &sled.zones_config)),
                 )
                 .await
                 .map_err(merge_anyhow_list)?;
@@ -512,10 +520,10 @@ fn register_decommission_sleds_step<'a>(
                     &opctx,
                     datastore,
                     blueprint
-                        .sled_state
+                        .sleds
                         .iter()
-                        .filter(|&(_, &state)| {
-                            state == SledState::Decommissioned
+                        .filter(|(_, sled)| {
+                            sled.state == SledState::Decommissioned
                         })
                         .map(|(&sled_id, _)| sled_id),
                 )
@@ -568,7 +576,8 @@ fn register_deploy_clickhouse_cluster_nodes_step<'a>(
                 {
                     let res = clickhouse::deploy_nodes(
                         &opctx,
-                        &blueprint.blueprint_zones,
+                        blueprint
+                            .all_omicron_zones(BlueprintZoneDisposition::any),
                         &clickhouse_cluster_config,
                     )
                     .await
@@ -594,7 +603,11 @@ fn register_deploy_clickhouse_single_node_step<'a>(
             move |_cx| async move {
                 let res = clickhouse::deploy_single_node(
                     &opctx,
-                    &blueprint.blueprint_zones,
+                    blueprint
+                        .all_omicron_zones(
+                            BlueprintZoneDisposition::is_in_service,
+                        )
+                        .filter(|(_, z)| z.zone_type.is_clickhouse()),
                 )
                 .await;
                 result_to_step_result(res)

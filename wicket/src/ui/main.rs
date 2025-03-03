@@ -9,12 +9,12 @@ use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
 use crate::ui::widgets::Fade;
 use crate::{Action, Cmd, State, Term};
+use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph};
-use ratatui::Frame;
-use slog::{o, Logger};
+use slog::{Logger, o};
 use wicketd_client::types::GetLocationResponse;
 
 /// The [`MainScreen`] is the primary UI element of the terminal, covers the

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{impl_enum_type, DatabaseString};
+use super::{DatabaseString, impl_enum_type};
 use crate::schema::role_assignment;
 use anyhow::anyhow;
 use nexus_types::external_api::shared;

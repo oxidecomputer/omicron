@@ -8,11 +8,11 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::TransactionError;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::model::to_db_typed_uuid;
+use crate::db::error::public_error_from_diesel;
 use crate::db::model::ApplySledFilterExt;
 use crate::db::model::InvPhysicalDisk;
 use crate::db::model::PhysicalDisk;
@@ -21,8 +21,8 @@ use crate::db::model::PhysicalDiskPolicy;
 use crate::db::model::PhysicalDiskState;
 use crate::db::model::Sled;
 use crate::db::model::Zpool;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
-use crate::db::TransactionError;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -335,8 +335,8 @@ mod test {
     use super::*;
     use crate::db::lookup::LookupPath;
     use crate::db::model::{PhysicalDiskKind, Sled};
-    use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use dropshot::PaginationOrder;
     use nexus_sled_agent_shared::inventory::{
         Baseboard, Inventory, InventoryDisk, OmicronZonesConfig, SledRole,

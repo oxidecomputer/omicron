@@ -6,8 +6,8 @@
 
 use anyhow::Context;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::model::RendezvousDebugDataset;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::model::RendezvousDebugDataset;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::internal_api::background::DebugDatasetsRendezvousStats;
@@ -136,9 +136,9 @@ pub(crate) async fn reconcile_debug_datasets(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::usize_to_id;
     use crate::tests::ArbitraryDisposition;
     use crate::tests::DatasetPrep;
+    use crate::tests::usize_to_id;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;

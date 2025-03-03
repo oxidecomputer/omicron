@@ -77,7 +77,7 @@ use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
 };
 use crate::rack_setup::plan::sled::Plan as SledPlan;
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use chrono::Utc;
@@ -85,15 +85,16 @@ use dns_service_client::DnsError;
 use internal_dns_resolver::Resolver as DnsResolver;
 use internal_dns_types::names::ServiceName;
 use nexus_client::{
-    types as NexusTypes, Client as NexusClient, Error as NexusError,
+    Client as NexusClient, Error as NexusError, types as NexusTypes,
 };
 use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
+use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::{
-    blueprint_zone_type, id_map::IdMap, Blueprint, BlueprintDatasetConfig,
-    BlueprintDatasetDisposition, BlueprintDatasetsConfig, BlueprintZoneType,
-    BlueprintZonesConfig, CockroachDbPreserveDowngrade,
+    Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
+    BlueprintDatasetsConfig, BlueprintZoneType, BlueprintZonesConfig,
+    CockroachDbPreserveDowngrade, blueprint_zone_type, id_map::IdMap,
 };
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::get_sled_address;
@@ -101,7 +102,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::LldpAdminStatus;
 use omicron_common::backoff::{
-    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
+    BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::{
     DatasetKind, DatasetsConfig, OmicronPhysicalDisksConfig,
@@ -114,7 +115,7 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
-    types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
+    Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
@@ -129,7 +130,7 @@ use sled_hardware_types::underlay::BootstrapInterface;
 use sled_storage::dataset::CONFIG_DATASET;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
-use std::collections::{btree_map, BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, btree_map};
 use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::net::SocketAddrV6;
@@ -833,9 +834,9 @@ impl ServiceInner {
         // field -- the coupling of datasets with addresses is linked
         // to usage by specific zones.
         for dataset in blueprint
-            .blueprint_datasets
+            .sleds
             .values()
-            .flat_map(|config| config.datasets.iter())
+            .flat_map(|config| config.datasets_config.datasets.iter())
             .filter(|dataset| dataset.kind == DatasetKind::Crucible)
         {
             let address = match dataset.address {
@@ -1517,12 +1518,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
     sled_configs_by_id: &BTreeMap<SledUuid, SledConfig>,
     internal_dns_version: Generation,
 ) -> anyhow::Result<Blueprint> {
-    let blueprint_disks: BTreeMap<_, _> = sled_configs_by_id
-        .iter()
-        .map(|(sled_id, sled_config)| (*sled_id, sled_config.disks.clone()))
-        .collect();
-
-    let mut blueprint_datasets = BTreeMap::new();
+    let mut blueprint_sleds = BTreeMap::new();
     for (sled_id, sled_config) in sled_configs_by_id {
         let mut datasets = IdMap::new();
         for d in sled_config.datasets.datasets.values() {
@@ -1563,43 +1559,36 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
             });
         }
 
-        blueprint_datasets.insert(
+        blueprint_sleds.insert(
             *sled_id,
-            BlueprintDatasetsConfig {
-                generation: sled_config.datasets.generation,
-                datasets,
+            BlueprintSledConfig {
+                state: SledState::Active,
+                disks_config: sled_config.disks.clone(),
+                datasets_config: BlueprintDatasetsConfig {
+                    generation: sled_config.datasets.generation,
+                    datasets,
+                },
+                // This is a bit of a hack. We only construct a blueprint after
+                // completing RSS, so we need to know the final generation value
+                // sent to all sleds. Arguably, we should record this in the
+                // serialized RSS plan; however, we have already deployed
+                // systems that did not. We know that every such system used
+                // `V5_EVERYTHING` as the final generation count, so we can just
+                // use that value here. If we ever change this, in particular in
+                // a way where newly-deployed systems will have a different
+                // value, we will need to revisit storing this in the serialized
+                // RSS plan.
+                zones_config: BlueprintZonesConfig {
+                    generation: DeployStepVersion::V5_EVERYTHING,
+                    zones: sled_config.zones.iter().cloned().collect(),
+                },
             },
         );
     }
 
-    let mut blueprint_zones = BTreeMap::new();
-    let mut sled_state = BTreeMap::new();
-    for (sled_id, sled_config) in sled_configs_by_id {
-        let zones_config = BlueprintZonesConfig {
-            // This is a bit of a hack. We only construct a blueprint after
-            // completing RSS, so we need to know the final generation value
-            // sent to all sleds. Arguably, we should record this in the
-            // serialized RSS plan; however, we have already deployed
-            // systems that did not. We know that every such system used
-            // `V5_EVERYTHING` as the final generation count, so we can just
-            // use that value here. If we ever change this, in particular in
-            // a way where newly-deployed systems will have a different
-            // value, we will need to revisit storing this in the serialized
-            // RSS plan.
-            generation: DeployStepVersion::V5_EVERYTHING,
-            zones: sled_config.zones.iter().cloned().collect(),
-        };
-
-        blueprint_zones.insert(*sled_id, zones_config);
-        sled_state.insert(*sled_id, SledState::Active);
-    }
-
     Ok(Blueprint {
         id: BlueprintUuid::new_v4(),
-        blueprint_zones,
-        blueprint_disks,
-        blueprint_datasets,
-        sled_state,
+        sleds: blueprint_sleds,
         parent_blueprint_id: None,
         internal_dns_version,
         // We don't configure external DNS during RSS, so set it to an initial
@@ -1722,7 +1711,7 @@ mod test {
         OmicronZonesConfig, SledRole,
     };
     use omicron_common::{
-        address::{get_sled_address, Ipv6Subnet, SLED_PREFIX},
+        address::{Ipv6Subnet, SLED_PREFIX, get_sled_address},
         api::external::{ByteCount, Generation},
         disk::{DiskIdentity, DiskVariant},
     };

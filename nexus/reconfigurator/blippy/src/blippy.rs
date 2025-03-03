@@ -88,23 +88,6 @@ impl Kind {
     }
 }
 
-/// Various ways the multiple maps in a blueprint can be inconsistent.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum MultimapInconsistency {
-    /// A sled is present in `blueprint_zones` but not `sled_state`.
-    PresentInZonesNotState,
-    /// A sled is present in `blueprint_zones` but not `blueprint_disks`.
-    PresentInZonesNotDisks,
-    /// A sled is present in `blueprint_zones` but not `blueprint_datasets`.
-    PresentInZonesNotDatasets,
-    /// A sled is present in `sled_state` but not `blueprint_zones`.
-    PresentInStateNotZones,
-    /// A sled is present in `blueprint_disks` but not `blueprint_zones`.
-    PresentInDisksNotZones,
-    /// A sled is present in `blueprint_datasets` but not `blueprint_zones`.
-    PresentInDatasetsNotZones,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SledKind {
     /// Two running zones have the same underlay IP address.
@@ -181,14 +164,6 @@ pub enum SledKind {
         durable_zpool: ZpoolName,
         transient_zpool: ZpoolName,
     },
-    /// A sled is missing entries in `Blueprint::blueprint_datasets`.
-    ///
-    /// `why` indicates why we expected this sled to have an entry.
-    SledMissingDatasets { why: &'static str },
-    /// A sled is missing entries in `Blueprint::blueprint_disks`.
-    ///
-    /// `why` indicates why we expected this sled to have an entry.
-    SledMissingDisks { why: &'static str },
     /// A dataset is present but not referenced by any in-service zone or disk.
     OrphanedDataset { dataset: BlueprintDatasetConfig },
     /// A dataset claims to be on a zpool that does not exist.
@@ -204,8 +179,6 @@ pub enum SledKind {
         dataset: BlueprintDatasetConfig,
         address: SocketAddrV6,
     },
-    /// The multiple maps of the blueprint have inconsistent contents.
-    MultimapInconsistency(MultimapInconsistency),
 }
 
 impl fmt::Display for SledKind {
@@ -365,12 +338,6 @@ impl fmt::Display for SledKind {
                     zone.id,
                 )
             }
-            SledKind::SledMissingDatasets { why } => {
-                write!(f, "missing entry in blueprint_datasets ({why})")
-            }
-            SledKind::SledMissingDisks { why } => {
-                write!(f, "missing entry in blueprint_disks ({why})")
-            }
             SledKind::OrphanedDataset { dataset } => {
                 let parent = match dataset.kind {
                     DatasetKind::Cockroach
@@ -414,33 +381,6 @@ impl fmt::Display for SledKind {
                     "non-Crucible dataset ({:?} {}) has an address: {} \
                      (only Crucible datasets should have addresses)",
                     dataset.kind, dataset.id, address,
-                )
-            }
-            SledKind::MultimapInconsistency(map_kind) => {
-                let (present, missing) = match map_kind {
-                    MultimapInconsistency::PresentInZonesNotState => {
-                        ("blueprint_zones", "sled_state")
-                    }
-                    MultimapInconsistency::PresentInZonesNotDisks => {
-                        ("blueprint_zones", "blueprint_disks")
-                    }
-                    MultimapInconsistency::PresentInZonesNotDatasets => {
-                        ("blueprint_zones", "blueprint_datasets")
-                    }
-                    MultimapInconsistency::PresentInStateNotZones => {
-                        ("sled_state", "blueprint_zones")
-                    }
-                    MultimapInconsistency::PresentInDisksNotZones => {
-                        ("blueprint_disks", "blueprint_zones")
-                    }
-                    MultimapInconsistency::PresentInDatasetsNotZones => {
-                        ("blueprint_datasets", "blueprint_zones")
-                    }
-                };
-                write!(
-                    f,
-                    "blueprint map inconsistency: \
-                     sled is present in {present} but missing from {missing}"
                 )
             }
         }

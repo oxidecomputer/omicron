@@ -13,7 +13,6 @@ use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use omicron_common::api::external;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -22,6 +21,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::AffinityGroupUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -35,15 +35,15 @@ impl super::Nexus {
         match affinity_group_selector {
             params::AffinityGroupSelector {
                 affinity_group: NameOrId::Id(id),
-                project: None
+                project: None,
             } => {
-                let affinity_group =
-                    LookupPath::new(opctx, &self.db_datastore).affinity_group_id(id);
+                let affinity_group = LookupPath::new(opctx, &self.db_datastore)
+                    .affinity_group_id(id);
                 Ok(affinity_group)
             }
             params::AffinityGroupSelector {
                 affinity_group: NameOrId::Name(name),
-                project: Some(project)
+                project: Some(project),
             } => {
                 let affinity_group = self
                     .project_lookup(opctx, params::ProjectSelector { project })?
@@ -53,16 +53,12 @@ impl super::Nexus {
             params::AffinityGroupSelector {
                 affinity_group: NameOrId::Id(_),
                 ..
-            } => {
-                Err(Error::invalid_request(
-                    "when providing affinity_group as an ID, project should not be specified",
-                ))
-            }
-            _ => {
-                Err(Error::invalid_request(
-                    "affinity_group should either be UUID or project should be specified",
-                ))
-            }
+            } => Err(Error::invalid_request(
+                "when providing affinity_group as an ID, project should not be specified",
+            )),
+            _ => Err(Error::invalid_request(
+                "affinity_group should either be UUID or project should be specified",
+            )),
         }
     }
 
@@ -74,15 +70,16 @@ impl super::Nexus {
         match anti_affinity_group_selector {
             params::AntiAffinityGroupSelector {
                 anti_affinity_group: NameOrId::Id(id),
-                project: None
+                project: None,
             } => {
                 let anti_affinity_group =
-                    LookupPath::new(opctx, &self.db_datastore).anti_affinity_group_id(id);
+                    LookupPath::new(opctx, &self.db_datastore)
+                        .anti_affinity_group_id(id);
                 Ok(anti_affinity_group)
             }
             params::AntiAffinityGroupSelector {
                 anti_affinity_group: NameOrId::Name(name),
-                project: Some(project)
+                project: Some(project),
             } => {
                 let anti_affinity_group = self
                     .project_lookup(opctx, params::ProjectSelector { project })?
@@ -92,16 +89,12 @@ impl super::Nexus {
             params::AntiAffinityGroupSelector {
                 anti_affinity_group: NameOrId::Id(_),
                 ..
-            } => {
-                Err(Error::invalid_request(
-                    "when providing anti_affinity_group as an ID, project should not be specified",
-                ))
-            }
-            _ => {
-                Err(Error::invalid_request(
-                    "anti_affinity_group should either be UUID or project should be specified",
-                ))
-            }
+            } => Err(Error::invalid_request(
+                "when providing anti_affinity_group as an ID, project should not be specified",
+            )),
+            _ => Err(Error::invalid_request(
+                "anti_affinity_group should either be UUID or project should be specified",
+            )),
         }
     }
 

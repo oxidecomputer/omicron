@@ -7,14 +7,14 @@
 //! This is a separate binary because it requires many dependencies that other
 //! parts of `cargo xtask` do not.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
 use clap::ValueEnum;
 use flate2::bufread::GzDecoder;
 use futures::StreamExt;
 use sha2::Digest;
-use slog::{info, o, warn, Drain, Logger};
+use slog::{Drain, Logger, info, o, warn};
 use std::collections::{BTreeSet, HashMap};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
@@ -586,7 +586,9 @@ impl Downloader<'_> {
         };
 
         let tarball_filename = "cockroach.tgz";
-        let tarball_url = format!("{BUILDOMAT_URL}/oxidecomputer/cockroach/{build}/{commit}/{tarball_filename}");
+        let tarball_url = format!(
+            "{BUILDOMAT_URL}/oxidecomputer/cockroach/{build}/{commit}/{tarball_filename}"
+        );
         let tarball_path = download_dir.join(tarball_filename);
 
         tokio::fs::create_dir_all(&download_dir).await?;

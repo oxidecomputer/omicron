@@ -29,8 +29,8 @@ use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use parse_display::Display;
 use parse_display::FromStr;
-use rand::thread_rng;
 use rand::Rng;
+use rand::thread_rng;
 use schemars::JsonSchema;
 use semver::Version;
 use serde::Deserialize;
@@ -3711,18 +3711,15 @@ mod test {
         assert!(!"fd00::/40".parse::<Ipv6Net>().unwrap().is_vpc_prefix());
 
         let vpc_prefix = "fd00::/48".parse::<Ipv6Net>().unwrap();
-        assert!("fd00::/64"
-            .parse::<Ipv6Net>()
-            .unwrap()
-            .is_vpc_subnet(&vpc_prefix));
-        assert!(!"fd10::/64"
-            .parse::<Ipv6Net>()
-            .unwrap()
-            .is_vpc_subnet(&vpc_prefix));
-        assert!(!"fd00::/63"
-            .parse::<Ipv6Net>()
-            .unwrap()
-            .is_vpc_subnet(&vpc_prefix));
+        assert!(
+            "fd00::/64".parse::<Ipv6Net>().unwrap().is_vpc_subnet(&vpc_prefix)
+        );
+        assert!(
+            !"fd10::/64".parse::<Ipv6Net>().unwrap().is_vpc_subnet(&vpc_prefix)
+        );
+        assert!(
+            !"fd00::/63".parse::<Ipv6Net>().unwrap().is_vpc_subnet(&vpc_prefix)
+        );
     }
 
     #[test]

@@ -6,7 +6,7 @@
 //!
 //! For details, see schema/crdb/README.adoc in the root of this repository.
 
-use anyhow::{bail, ensure, Context};
+use anyhow::{Context, bail, ensure};
 use camino::Utf8Path;
 use semver::Version;
 use std::{collections::BTreeMap, sync::LazyLock};

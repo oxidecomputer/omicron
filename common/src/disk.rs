@@ -502,7 +502,9 @@ pub enum DiskManagementError {
     #[error("Expected zpool UUID of {expected}, but saw {observed}")]
     ZpoolUuidMismatch { expected: ZpoolUuid, observed: ZpoolUuid },
 
-    #[error("Failed to access keys necessary to unlock storage. This error may be transient.")]
+    #[error(
+        "Failed to access keys necessary to unlock storage. This error may be transient."
+    )]
     KeyManager(String),
 
     #[error("Other error starting disk management: {0}")]
