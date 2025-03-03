@@ -9,13 +9,17 @@ use crate::app::background::BackgroundTask;
 use futures::future::BoxFuture;
 use nexus_db_model::WebhookDelivery;
 use nexus_db_model::WebhookDeliveryTrigger;
+use nexus_db_model::SCHEMA_VERSION;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
+use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::{
-    WebhookDispatched, WebhookDispatcherStatus,
+    WebhookDispatched, WebhookDispatcherStatus, WebhookGlobStatus,
 };
 use omicron_common::api::external::Error;
+use omicron_uuid_kinds::GenericUuid;
 use std::sync::Arc;
 
 pub struct WebhookDispatcher {
@@ -30,6 +34,8 @@ impl BackgroundTask for WebhookDispatcher {
     ) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async move {
             let mut status = WebhookDispatcherStatus {
+                globs_reprocessed: Default::default(),
+                glob_version: SCHEMA_VERSION,
                 dispatched: Vec::new(),
                 errors: Vec::new(),
                 no_receivers: Vec::new(),
@@ -98,6 +104,72 @@ impl WebhookDispatcher {
         opctx: &OpContext,
         status: &mut WebhookDispatcherStatus,
     ) -> Result<(), Error> {
+        // Before dispatching any events, ensure that all webhook globs are up
+        // to date with the current schema version.
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let mut globs_reprocessed = 0;
+        let mut globs_failed = 0;
+        let mut globs_already_reprocessed = 0;
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .datastore
+                .webhook_glob_list_outdated(opctx, &p.current_pagparams())
+                .await
+                .map_err(|e| {
+                    e.internal_context("failed to list outdated webhook globs")
+                })?;
+            paginator = p.found_batch(&batch, &|glob| {
+                (glob.rx_id.into_untyped_uuid(), glob.glob.glob.clone())
+            });
+            for glob in batch {
+                let result = self
+                    .datastore
+                    .webhook_glob_reprocess(opctx, &glob)
+                    .await
+                    .map_err(|e| {
+                        globs_failed += 1;
+                        slog::warn!(
+                            &opctx.log,
+                            "failed to reprocess webhook glob";
+                            "rx_id" => ?glob.rx_id,
+                            "glob" => ?glob.glob.glob,
+                            "glob_version" => %glob.schema_version.0,
+                            "error" => %e,
+                        );
+                        e.to_string()
+                    })
+                    .inspect(|status| match status {
+                        WebhookGlobStatus::Reprocessed { .. } => {
+                            globs_reprocessed += 1
+                        }
+                        WebhookGlobStatus::AlreadyReprocessed => {
+                            globs_already_reprocessed += 1
+                        }
+                    });
+                let rx_statuses = status
+                    .globs_reprocessed
+                    .entry(glob.rx_id.into())
+                    .or_default();
+                rx_statuses.insert(glob.glob.glob, result);
+            }
+        }
+        if globs_failed > 0 {
+            slog::warn!(
+                &opctx.log,
+                "webhook glob reprocessing completed with failures";
+                "globs_failed" => ?globs_failed,
+                "globs_reprocessed" => ?globs_reprocessed,
+                "globs_already_reprocessed" => ?globs_already_reprocessed,
+            );
+        } else if globs_reprocessed > 0 {
+            slog::info!(
+                &opctx.log,
+                "webhook glob reprocessed";
+                "globs_reprocessed" => ?globs_reprocessed,
+                "globs_already_reprocessed" => ?globs_already_reprocessed,
+            );
+        }
+
         // Select the next event that has yet to be dispatched in order of
         // creation, until there are none left in need of dispatching.
         while let Some(event) =

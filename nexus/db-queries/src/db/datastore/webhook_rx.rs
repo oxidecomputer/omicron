@@ -12,6 +12,7 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::datastore::RunnableQuery;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::model::DbSemverVersion;
 use crate::db::model::Generation;
 use crate::db::model::WebhookEventClass;
 use crate::db::model::WebhookGlob;
@@ -22,7 +23,9 @@ use crate::db::model::WebhookRxEventGlob;
 use crate::db::model::WebhookRxSubscription;
 use crate::db::model::WebhookSecret;
 use crate::db::model::WebhookSubscriptionKind;
+use crate::db::model::SCHEMA_VERSION;
 use crate::db::pagination::paginated;
+use crate::db::pagination::paginated_multicolumn;
 use crate::db::pool::DbConnection;
 use crate::db::schema::webhook_receiver::dsl as rx_dsl;
 use crate::db::schema::webhook_rx_event_glob::dsl as glob_dsl;
@@ -33,6 +36,7 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_types::external_api::params;
+use nexus_types::internal_api::background::WebhookGlobStatus;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -377,9 +381,8 @@ impl DataStore {
     pub async fn webhook_glob_list_outdated(
         &self,
         opctx: &OpContext,
+        pagparams: &DataPageParams<'_, (Uuid, String)>,
     ) -> ListResultVec<WebhookRxEventGlob> {
-        use crate::db::model::{DbSemverVersion, SCHEMA_VERSION};
-
         let (current_version, target_version) =
             self.database_schema_version().await.map_err(|e| {
                 e.internal_context("couldn't load db schema version")
@@ -403,15 +406,134 @@ impl DataStore {
             });
         }
 
-        glob_dsl::webhook_rx_event_glob
-            .filter(
-                glob_dsl::schema_version
-                    .ne(DbSemverVersion::from(SCHEMA_VERSION)),
-            )
-            .select(WebhookRxEventGlob::as_select())
-            .load_async(&*self.pool_connection_authorized(&opctx).await?)
+        paginated_multicolumn(
+            glob_dsl::webhook_rx_event_glob,
+            (glob_dsl::rx_id, glob_dsl::glob),
+            pagparams,
+        )
+        .filter(
+            glob_dsl::schema_version.ne(DbSemverVersion::from(SCHEMA_VERSION)),
+        )
+        .select(WebhookRxEventGlob::as_select())
+        .load_async(&*self.pool_connection_authorized(&opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn webhook_glob_reprocess(
+        &self,
+        opctx: &OpContext,
+        glob: &WebhookRxEventGlob,
+    ) -> Result<WebhookGlobStatus, Error> {
+        slog::trace!(
+            opctx.log,
+            "reprocessing outdated webhook glob";
+            "rx_id" => ?glob.rx_id,
+            "glob" => ?glob.glob.glob,
+            "prior_version" => %glob.schema_version.0,
+            "current_version" => %SCHEMA_VERSION,
+        );
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+        let status = self
+            .transaction_retry_wrapper("webhook_glob_reprocess")
+            .transaction(&*conn, |conn| {
+                let glob = glob.clone();
+                let err = err.clone();
+                async move {
+                    let deleted = diesel::delete(
+                        subscription_dsl::webhook_rx_subscription,
+                    )
+                    .filter(subscription_dsl::glob.eq(glob.glob.glob.clone()))
+                    .filter(subscription_dsl::rx_id.eq(glob.rx_id))
+                    .execute_async(&conn)
+                    .await?;
+                    let created = self
+                        .glob_generate_exact_subs(opctx, &glob, &conn)
+                        .await
+                        .map_err(|e| match e {
+                            TransactionError::CustomError(e) => {
+                                err.bail(Err(e))
+                            }
+                            TransactionError::Database(e) => e,
+                        })?;
+                    let did_update =
+                        diesel::update(glob_dsl::webhook_rx_event_glob)
+                            .filter(
+                                glob_dsl::rx_id
+                                    .eq(glob.rx_id.into_untyped_uuid()),
+                            )
+                            .filter(glob_dsl::glob.eq(glob.glob.glob.clone()))
+                            .filter(
+                                glob_dsl::schema_version
+                                    .eq(glob.schema_version.clone()),
+                            )
+                            .set(
+                                glob_dsl::schema_version
+                                    .eq(DbSemverVersion::from(SCHEMA_VERSION)),
+                            )
+                            .execute_async(&conn)
+                            .await;
+                    match did_update {
+                        // Either the glob has been reprocessed by someone else, or
+                        // it has been deleted.
+                        Err(diesel::result::Error::NotFound) | Ok(0) => {
+                            return Err(err.bail(Ok(
+                                WebhookGlobStatus::AlreadyReprocessed,
+                            )));
+                        }
+                        Err(e) => return Err(e),
+                        Ok(updated) => {
+                            debug_assert_eq!(updated, 1);
+                        }
+                    }
+
+                    Ok(WebhookGlobStatus::Reprocessed {
+                        created,
+                        deleted,
+                        prev_version: glob.schema_version.clone().into(),
+                    })
+                }
+            })
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .or_else(|e| {
+                if let Some(err) = err.take() {
+                    err
+                } else {
+                    Err(public_error_from_diesel(e, ErrorHandler::Server))
+                }
+            })?;
+
+        match status {
+            WebhookGlobStatus::Reprocessed {
+                created,
+                deleted,
+                ref prev_version,
+            } => {
+                slog::debug!(
+                    opctx.log,
+                    "reprocessed outdated webhook glob";
+                    "rx_id" => ?glob.rx_id,
+                    "glob" => ?glob.glob.glob,
+                    "prev_version" => %prev_version,
+                    "current_version" => %SCHEMA_VERSION,
+                    "subscriptions_created" => ?created,
+                    "subscriptions_deleted" => ?deleted,
+                );
+            }
+            WebhookGlobStatus::AlreadyReprocessed => {
+                slog::trace!(
+                    opctx.log,
+                    "outdated webhook glob was either already reprocessed or deleted";
+                    "rx_id" => ?glob.rx_id,
+                    "glob" => ?glob.glob.glob,
+                    "prev_version" => %glob.schema_version.0,
+                    "current_version" => %SCHEMA_VERSION,
+                );
+            }
+        }
+
+        Ok(status)
     }
 
     //
