@@ -602,12 +602,7 @@ fn register_deploy_clickhouse_single_node_step<'a>(
         .register();
 }
 
-#[derive(Debug)]
-struct ReassignSagaOutput {
-    needs_saga_recovery: bool,
-    error: Option<anyhow::Error>,
-}
-
+// Returns a boolean indicating whether saga recovery is needed.
 fn register_reassign_sagas_step<'a>(
     registrar: &ComponentRegistrar<'_, 'a>,
     opctx: &'a OpContext,
