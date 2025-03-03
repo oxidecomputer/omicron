@@ -4,7 +4,7 @@
 
 //! Benchmarks test setup/teardown.
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use dropshot::test_util::LogContext;
 use nexus_db_queries::db::pub_test_utils::TestDatabase;
 use omicron_test_utils::dev;

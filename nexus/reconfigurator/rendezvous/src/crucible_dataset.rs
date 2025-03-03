@@ -4,11 +4,11 @@
 
 //! Recording Crucible datasets in their rendezvous table
 
-use anyhow::anyhow;
 use anyhow::Context;
+use anyhow::anyhow;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::model::CrucibleDataset;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::model::CrucibleDataset;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::identity::Asset;
@@ -123,9 +123,9 @@ pub(crate) async fn record_new_crucible_datasets(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::usize_to_id;
     use crate::tests::ArbitraryDisposition;
     use crate::tests::DatasetPrep;
+    use crate::tests::usize_to_id;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
     use nexus_db_model::Generation;

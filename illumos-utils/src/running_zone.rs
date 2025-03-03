@@ -20,7 +20,7 @@ use ipnetwork::IpNetwork;
 use omicron_common::backoff;
 use omicron_uuid_kinds::OmicronZoneUuid;
 pub use oxlog::is_oxide_smf_log_file;
-use slog::{error, info, o, warn, Logger};
+use slog::{Logger, error, info, o, warn};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 #[cfg(target_os = "illumos")]
@@ -71,7 +71,9 @@ pub enum BootError {
 /// Errors returned from [`RunningZone::ensure_address`].
 #[derive(thiserror::Error, Debug)]
 pub enum EnsureAddressError {
-    #[error("Failed ensuring address {request:?} in {zone}: could not construct addrobj name: {err}")]
+    #[error(
+        "Failed ensuring address {request:?} in {zone}: could not construct addrobj name: {err}"
+    )]
     AddrObject {
         request: AddressRequest,
         zone: String,
@@ -128,7 +130,7 @@ pub fn ensure_contract_reaper(log: &Logger) {
 mod zenter {
     use libc::ctid_t;
     use libc::zoneid_t;
-    use slog::{debug, error, Logger};
+    use slog::{Logger, debug, error};
     use std::ffi::c_int;
     use std::ffi::c_uint;
     use std::ffi::c_void;
@@ -1261,11 +1263,7 @@ impl<'a> ZoneBuilder<'a> {
             .iter()
             .find_map(|image_path| {
                 let path = image_path.join(&image);
-                if path.exists() {
-                    Some(path)
-                } else {
-                    None
-                }
+                if path.exists() { Some(path) } else { None }
             })
             .ok_or_else(|| InstallZoneError::ImageNotFound {
                 image: image.to_string(),

@@ -6,10 +6,10 @@
 
 use crate::Sled;
 
-use anyhow::anyhow;
 use anyhow::Context;
-use futures::stream;
+use anyhow::anyhow;
 use futures::StreamExt;
+use futures::stream;
 use nexus_db_queries::context::OpContext;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use omicron_common::disk::DatasetsConfig;
@@ -22,11 +22,14 @@ use std::collections::BTreeMap;
 
 /// Idempotently ensures that the specified datasets are deployed to the
 /// corresponding sleds
-pub(crate) async fn deploy_datasets(
+pub(crate) async fn deploy_datasets<'a, I>(
     opctx: &OpContext,
     sleds_by_id: &BTreeMap<SledUuid, Sled>,
-    sled_configs: &BTreeMap<SledUuid, BlueprintDatasetsConfig>,
-) -> Result<(), Vec<anyhow::Error>> {
+    sled_configs: I,
+) -> Result<(), Vec<anyhow::Error>>
+where
+    I: Iterator<Item = (SledUuid, &'a BlueprintDatasetsConfig)>,
+{
     let errors: Vec<_> = stream::iter(sled_configs)
         .filter_map(|(sled_id, config)| async move {
             let log = opctx.log.new(o!(
@@ -94,11 +97,7 @@ pub(crate) async fn deploy_datasets(
         .collect()
         .await;
 
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors)
-    }
+    if errors.is_empty() { Ok(()) } else { Err(errors) }
 }
 
 #[cfg(test)]
@@ -106,10 +105,10 @@ mod tests {
     use super::*;
     use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::deployment::id_map::IdMap;
     use nexus_types::deployment::BlueprintDatasetConfig;
     use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::BlueprintDatasetsConfig;
+    use nexus_types::deployment::id_map::IdMap;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::CompressionAlgorithm;
@@ -182,11 +181,10 @@ mod tests {
 
         let datasets_config =
             BlueprintDatasetsConfig { generation: Generation::new(), datasets };
-        let sled_configs =
-            BTreeMap::from([(sim_sled_agent.id, datasets_config.clone())]);
+        let sled_configs = [(sim_sled_agent.id, &datasets_config)];
 
         // Give the simulated sled agent a configuration to deploy
-        deploy_datasets(&opctx, &sleds_by_id, &sled_configs)
+        deploy_datasets(&opctx, &sleds_by_id, sled_configs.into_iter())
             .await
             .expect("Deploying datasets should have succeeded");
 

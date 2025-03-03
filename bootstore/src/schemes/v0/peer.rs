@@ -5,9 +5,9 @@
 //! The entrypoint of the v0 scheme for use by bootstrap agent
 
 use super::peer_networking::{
-    spawn_accepted_connection_management_task, spawn_connection_initiator_task,
     AcceptedConnHandle, ConnToMainMsg, ConnToMainMsgInner, MainToConnMsg, Msg,
-    PeerConnHandle,
+    PeerConnHandle, spawn_accepted_connection_management_task,
+    spawn_connection_initiator_task,
 };
 use super::storage::{NetworkConfig, PersistentFsmState};
 use super::{ApiError, ApiOutput, Fsm, FsmConfig, RackUuid};
@@ -15,14 +15,14 @@ use crate::trust_quorum::RackSecret;
 use camino::Utf8PathBuf;
 use derive_more::From;
 use sled_hardware_types::Baseboard;
-use slog::{error, info, o, warn, Logger};
+use slog::{Logger, error, info, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{SocketAddr, SocketAddrV6};
 use std::time::Duration;
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::{interval, Instant, MissedTickBehavior};
+use tokio::time::{Instant, MissedTickBehavior, interval};
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -1172,12 +1172,12 @@ mod tests {
                         learn_timeout: Duration::from_secs(5),
                         rack_init_timeout: Duration::from_secs(10),
                         rack_secret_request_timeout: Duration::from_secs(1),
-                        fsm_state_ledger_paths: vec![tempdir
-                            .path()
-                            .join(&fsm_file)],
-                        network_config_ledger_paths: vec![tempdir
-                            .path()
-                            .join(&network_file)],
+                        fsm_state_ledger_paths: vec![
+                            tempdir.path().join(&fsm_file),
+                        ],
+                        network_config_ledger_paths: vec![
+                            tempdir.path().join(&network_file),
+                        ],
                     };
 
                     TestNode::new(config, log.clone())
@@ -1240,14 +1240,12 @@ mod tests {
                 learn_timeout: Duration::from_secs(5),
                 rack_init_timeout: Duration::from_secs(10),
                 rack_secret_request_timeout: Duration::from_secs(1),
-                fsm_state_ledger_paths: vec![self
-                    .tempdir
-                    .path()
-                    .join(&fsm_file)],
-                network_config_ledger_paths: vec![self
-                    .tempdir
-                    .path()
-                    .join(&network_file)],
+                fsm_state_ledger_paths: vec![
+                    self.tempdir.path().join(&fsm_file),
+                ],
+                network_config_ledger_paths: vec![
+                    self.tempdir.path().join(&network_file),
+                ],
             };
 
             self.learner = Some(TestNode::new(config, self.log.clone()));

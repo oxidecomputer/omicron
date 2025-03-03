@@ -6,15 +6,15 @@
 
 // Copyright 2023 Oxide Computer Company
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use clap::Parser;
-use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
-use oximeter_collector::standalone_nexus_api;
+use omicron_common::cmd::fatal;
 use oximeter_collector::Config;
 use oximeter_collector::Oximeter;
 use oximeter_collector::OximeterArguments;
 use oximeter_collector::StandaloneNexus;
+use oximeter_collector::standalone_nexus_api;
 use slog::Level;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;

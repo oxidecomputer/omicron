@@ -5,7 +5,7 @@
 //! Benchmarks creating sled reservations
 
 use criterion::black_box;
-use criterion::{criterion_group, criterion_main, Criterion, SamplingMode};
+use criterion::{Criterion, SamplingMode, criterion_group, criterion_main};
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -20,10 +20,10 @@ use tokio::sync::Barrier;
 
 mod harness;
 
+use harness::TestHarness;
 use harness::db_utils::create_reservation;
 use harness::db_utils::delete_reservation;
 use harness::db_utils::max_resource_request_count;
-use harness::TestHarness;
 use nexus_db_queries::db::pub_test_utils::helpers::create_affinity_group;
 use nexus_db_queries::db::pub_test_utils::helpers::create_affinity_group_member;
 use nexus_db_queries::db::pub_test_utils::helpers::create_anti_affinity_group;

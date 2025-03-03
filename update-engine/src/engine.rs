@@ -27,14 +27,14 @@ use tokio::{
 use uuid::Uuid;
 
 use crate::{
+    AsError, CompletionContext, MetadataContext, NestedSpec, StepContext,
+    StepContextPayload, StepHandle, StepSpec,
     errors::ExecutionError,
     events::{
         Event, ProgressEvent, ProgressEventKind, StepComponentSummary,
         StepEvent, StepEventKind, StepInfo, StepInfoWithMetadata, StepOutcome,
         StepProgress,
     },
-    AsError, CompletionContext, MetadataContext, NestedSpec, StepContext,
-    StepContextPayload, StepHandle, StepSpec,
 };
 
 /// Makes an MPSC channel suitable for the update engine.
@@ -43,8 +43,8 @@ use crate::{
 /// [`tokio::sync::mpsc::channel`] that creates a channel of the appropriate
 /// size, and may aid in type inference.
 #[inline]
-pub fn channel<S: StepSpec>(
-) -> (mpsc::Sender<Event<S>>, mpsc::Receiver<Event<S>>) {
+pub fn channel<S: StepSpec>()
+-> (mpsc::Sender<Event<S>>, mpsc::Receiver<Event<S>>) {
     // This is a large enough channel to handle incoming messages without
     // stalling.
     const CHANNEL_SIZE: usize = 256;

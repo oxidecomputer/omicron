@@ -5,7 +5,7 @@
 //! Functions for querying the timeseries database.
 // Copyright 2024 Oxide Computer Company
 
-use crate::{Error, FieldSchema, FieldSource, TimeseriesSchema, DATABASE_NAME};
+use crate::{DATABASE_NAME, Error, FieldSchema, FieldSource, TimeseriesSchema};
 use chrono::{DateTime, Utc};
 use dropshot::PaginationOrder;
 use oximeter::schema::TimeseriesKey;
@@ -1230,7 +1230,8 @@ mod tests {
                 "filter0.timeseries_name = filter1.timeseries_name AND ",
                 "filter0.timeseries_key = filter1.timeseries_key) ",
                 "ORDER BY (filter0.timeseries_name, filter0.timeseries_key)",
-            ));
+            )
+        );
         let keys = &[0, 1];
         assert_eq!(
             query.measurement_query(keys).trim(),

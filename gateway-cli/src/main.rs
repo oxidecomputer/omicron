@@ -4,12 +4,13 @@
 
 // Copyright 2023 Oxide Computer Company
 
-use anyhow::anyhow;
-use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
+use anyhow::anyhow;
+use anyhow::bail;
 use clap::Parser;
 use clap::Subcommand;
+use gateway_client::Client;
 use gateway_client::types::HostStartupOptions;
 use gateway_client::types::IgnitionCommand;
 use gateway_client::types::InstallinatorImageId;
@@ -18,20 +19,19 @@ use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpUpdateStatus;
 use gateway_client::types::UpdateAbortBody;
-use gateway_client::Client;
 use omicron_common::update::ArtifactHash;
 use serde::Serialize;
-use slog::o;
 use slog::Drain;
 use slog::Level;
 use slog::Logger;
+use slog::o;
 use std::fs;
 use std::io;
 use std::net::SocketAddrV6;
 use std::path::PathBuf;
 use std::time::Duration;
-use tokio_tungstenite::tungstenite::protocol::Role;
 use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::protocol::Role;
 use uuid::Uuid;
 
 mod picocom_map;

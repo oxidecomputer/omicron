@@ -27,14 +27,14 @@
 
 // Copyright 2023 Oxide Computer Company
 
-use crate::query::field_table_name;
-use crate::query::measurement_table_name;
 use crate::DatumType;
 use crate::Error as OxdbError;
 use crate::FieldType;
 use crate::QuerySummary;
 use crate::TimeseriesName;
 use crate::TimeseriesSchema;
+use crate::query::field_table_name;
+use crate::query::measurement_table_name;
 use indexmap::IndexSet;
 use oximeter::MetricsError;
 use sqlparser::ast::BinaryOperator;
@@ -856,8 +856,8 @@ impl RestrictedQuery {
             }
             _ => {
                 return unsupported!(
-                "Query must select from concrete tables or subqueries on them"
-            )
+                    "Query must select from concrete tables or subqueries on them"
+                );
             }
         }
     }

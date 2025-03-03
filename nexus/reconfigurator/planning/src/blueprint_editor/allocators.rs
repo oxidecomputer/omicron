@@ -7,9 +7,9 @@
 use std::net::IpAddr;
 
 use super::SledEditor;
-use nexus_types::deployment::blueprint_zone_type::InternalDns;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::blueprint_zone_type::InternalDns;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::IpRange;
 use omicron_common::address::ReservedRackSubnet;

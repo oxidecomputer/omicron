@@ -13,11 +13,11 @@ use super::SchemeResult;
 use super::SiloUserSilo;
 use crate::authn;
 use crate::authn::Actor;
-use anyhow::anyhow;
 use anyhow::Context;
+use anyhow::anyhow;
 use async_trait::async_trait;
-use headers::authorization::{Authorization, Bearer};
 use headers::HeaderMapExt;
+use headers::authorization::{Authorization, Bearer};
 use slog::debug;
 use uuid::Uuid;
 
@@ -189,10 +189,10 @@ mod test {
     use super::make_header_value;
     use super::make_header_value_raw;
     use super::make_header_value_str;
-    use headers::authorization::Bearer;
-    use headers::authorization::Credentials;
     use headers::Authorization;
     use headers::HeaderMapExt;
+    use headers::authorization::Bearer;
+    use headers::authorization::Credentials;
     use uuid::Uuid;
 
     #[test]

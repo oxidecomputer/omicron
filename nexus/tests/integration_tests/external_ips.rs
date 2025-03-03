@@ -10,8 +10,8 @@ use std::net::Ipv4Addr;
 use crate::integration_tests::instances::fetch_instance_external_ips;
 use crate::integration_tests::instances::instance_simulate;
 use crate::integration_tests::instances::instance_wait_for_state;
-use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
+use dropshot::test_util::ClientTestContext;
 use http::Method;
 use http::StatusCode;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
@@ -73,7 +73,9 @@ pub fn instance_ephemeral_ip_url(
     instance_name: &str,
     project_name: &str,
 ) -> String {
-    format!("/v1/instances/{instance_name}/external-ips/ephemeral?project={project_name}")
+    format!(
+        "/v1/instances/{instance_name}/external-ips/ephemeral?project={project_name}"
+    )
 }
 
 pub fn attach_floating_ip_url(
@@ -815,10 +817,12 @@ async fn test_external_ip_live_attach_detach(
 
         assert_eq!(eip_list.len(), 2);
         assert!(eip_list.contains(&eph_resp));
-        assert!(eip_list
-            .iter()
-            .any(|v| matches!(v, views::ExternalIp::Floating(..))
-                && v.ip() == fip_resp.ip));
+        assert!(
+            eip_list
+                .iter()
+                .any(|v| matches!(v, views::ExternalIp::Floating(..))
+                    && v.ip() == fip_resp.ip)
+        );
         assert_eq!(fip.ip, fip_resp.ip);
 
         // Check for idempotency: repeat requests should return same values.

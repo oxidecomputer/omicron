@@ -5,7 +5,7 @@
 //! Utilities for manipulating SMF services.
 
 use crate::zone::SVCADM;
-use crate::{execute, ExecutionError, PFEXEC};
+use crate::{ExecutionError, PFEXEC, execute};
 
 /// Wraps commands for interacting with svcadm.
 pub struct Svcadm {}

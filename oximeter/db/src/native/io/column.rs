@@ -6,11 +6,11 @@
 
 //! Encode / decode a column.
 
+use crate::native::Error;
 use crate::native::block::Column;
 use crate::native::block::DataType;
 use crate::native::block::ValueArray;
 use crate::native::io;
-use crate::native::Error;
 use bytes::Buf as _;
 use bytes::BufMut as _;
 use bytes::BytesMut;
@@ -105,9 +105,7 @@ macro_rules! copyin_pod_values_raw {
 }
 
 macro_rules! copyin_pod_as_values {
-    ($data_type:ty, $src:expr, $n_rows:expr) => {{
-        ValueArray::from(copyin_pod_values_raw!($data_type, $src, $n_rows))
-    }};
+    ($data_type:ty, $src:expr, $n_rows:expr) => {{ ValueArray::from(copyin_pod_values_raw!($data_type, $src, $n_rows)) }};
 }
 
 /// Decode an array of values in a column.
@@ -756,8 +754,7 @@ mod tests {
                 });
             assert_eq!(name, "foo");
             assert_eq!(
-                col,
-                decoded,
+                col, decoded,
                 "Failed encode/decode round-trip for column with type '{typ:?}'"
             );
         }

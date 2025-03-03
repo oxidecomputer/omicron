@@ -44,8 +44,8 @@
 //! collect" saga for the next step in the process.
 
 use super::{
-    ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
-    ACTION_GENERATE_ID,
+    ACTION_GENERATE_ID, ActionRegistry, NexusActionContext, NexusSaga,
+    SagaInitError,
 };
 use crate::app::db::datastore::ExistingTarget;
 use crate::app::db::datastore::ReplacementTarget;

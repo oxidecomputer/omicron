@@ -12,11 +12,11 @@ use super::CompoundFilter;
 use super::Filter;
 use super::FilterExpr;
 use super::SimpleFilter;
+use crate::oxql::Error;
 use crate::oxql::ast::cmp::Comparison;
 use crate::oxql::ast::literal::Literal;
 use crate::oxql::ast::logical_op::LogicalOp;
 use crate::oxql::schema::TableSchema;
-use crate::oxql::Error;
 use crate::shells::special_idents;
 
 /// A trait for visiting a tree of filter nodes.

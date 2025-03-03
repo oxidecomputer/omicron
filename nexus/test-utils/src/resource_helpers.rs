@@ -2,15 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::http_testing::RequestBuilder;
 use crate::ControlPlaneTestContext;
+use crate::http_testing::RequestBuilder;
 
 use super::http_testing::AuthnMode;
 use super::http_testing::NexusRequest;
 use crucible_agent_client::types::State as RegionState;
-use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
+use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_interface::NexusServer;
@@ -59,8 +59,8 @@ use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim::SledAgent;
-use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -1232,8 +1232,8 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     }
 
     pub async fn add_blueprint_disks(&mut self, blueprint: &Blueprint) {
-        for (sled_id, disks_config) in blueprint.blueprint_disks.iter() {
-            for disk in &disks_config.disks {
+        for (sled_id, sled_config) in blueprint.sleds.iter() {
+            for disk in &sled_config.disks_config.disks {
                 self.add_zpool_with_dataset_ext(
                     *sled_id,
                     disk.id,

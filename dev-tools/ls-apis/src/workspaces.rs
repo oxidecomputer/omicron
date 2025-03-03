@@ -4,10 +4,10 @@
 
 //! Combines information about multiple `Workspace`s
 
+use crate::ClientPackageName;
 use crate::api_metadata::AllApiMetadata;
 use crate::cargo::Workspace;
-use crate::ClientPackageName;
-use anyhow::{anyhow, ensure, Context, Result};
+use anyhow::{Context, Result, anyhow, ensure};
 use camino::Utf8Path;
 use cargo_metadata::CargoOpt;
 use cargo_metadata::Package;

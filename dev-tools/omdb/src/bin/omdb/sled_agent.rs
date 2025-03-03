@@ -4,10 +4,10 @@
 
 //! omdb commands that query or update specific Sleds
 
-use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::Omdb;
-use anyhow::bail;
+use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use anyhow::Context;
+use anyhow::bail;
 use clap::Args;
 use clap::Subcommand;
 

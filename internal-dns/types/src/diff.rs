@@ -40,7 +40,9 @@ impl<'a> DnsDiff<'a> {
         ensure!(
             left_zone.zone_name == right_zone.zone_name,
             "cannot compare DNS configuration from zones with different names: \
-            {:?} vs. {:?}", left_zone.zone_name, right_zone.zone_name,
+            {:?} vs. {:?}",
+            left_zone.zone_name,
+            right_zone.zone_name,
         );
 
         let all_names =
@@ -82,11 +84,7 @@ impl<'a> DnsDiff<'a> {
     /// absent in the `left` one (i.e., added between `left` and `right`)
     pub fn names_added(&self) -> impl Iterator<Item = (&str, &[DnsRecord])> {
         self.iter_names().filter_map(|nd| {
-            if let NameDiff::Added(k, v) = nd {
-                Some((k, v))
-            } else {
-                None
-            }
+            if let NameDiff::Added(k, v) = nd { Some((k, v)) } else { None }
         })
     }
 
@@ -94,11 +92,7 @@ impl<'a> DnsDiff<'a> {
     /// absent in the `right` one (i.e., removed between `left` and `right`)
     pub fn names_removed(&self) -> impl Iterator<Item = (&str, &[DnsRecord])> {
         self.iter_names().filter_map(|nd| {
-            if let NameDiff::Removed(k, v) = nd {
-                Some((k, v))
-            } else {
-                None
-            }
+            if let NameDiff::Removed(k, v) = nd { Some((k, v)) } else { None }
         })
     }
 
@@ -121,11 +115,7 @@ impl<'a> DnsDiff<'a> {
         &self,
     ) -> impl Iterator<Item = (&str, &[DnsRecord])> {
         self.iter_names().filter_map(|nd| {
-            if let NameDiff::Unchanged(k, v) = nd {
-                Some((k, v))
-            } else {
-                None
-            }
+            if let NameDiff::Unchanged(k, v) = nd { Some((k, v)) } else { None }
         })
     }
 
