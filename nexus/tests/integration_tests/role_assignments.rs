@@ -5,9 +5,9 @@
 //! Basic test for role assignments
 
 use dropshot::test_util::ClientTestContext;
-use futures::future::BoxFuture;
 use futures::Future;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use http::Method;
 use http::StatusCode;
 use nexus_db_queries::authn::USER_TEST_UNPRIVILEGED;

@@ -23,8 +23,8 @@ use std::net::SocketAddrV6;
 
 mod pantry_pool;
 
-pub(crate) use pantry_pool::make_pantry_connection_pool;
 pub(crate) use pantry_pool::PooledPantryClient;
+pub(crate) use pantry_pool::make_pantry_connection_pool;
 
 // Common Pantry operations
 

@@ -6,14 +6,14 @@
 
 use super::DataStore;
 use crate::db;
+use crate::db::DbConnection;
 use crate::db::datastore::OpContext;
-use crate::db::datastore::RunnableQuery;
 use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
+use crate::db::datastore::RunnableQuery;
 use crate::db::datastore::SQL_BATCH_SIZE;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Asset;
-use crate::db::model::to_db_typed_uuid;
 use crate::db::model::CrucibleDataset;
 use crate::db::model::Disk;
 use crate::db::model::DownstairsClientStopRequestNotification;
@@ -28,16 +28,16 @@ use crate::db::model::Volume;
 use crate::db::model::VolumeResourceUsage;
 use crate::db::model::VolumeResourceUsageRecord;
 use crate::db::model::VolumeResourceUsageType;
-use crate::db::pagination::paginated;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
-use crate::db::DbConnection;
+use crate::db::pagination::paginated;
 use crate::transaction_retry::OptionalError;
 use anyhow::anyhow;
 use anyhow::bail;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
-use diesel::prelude::*;
 use diesel::OptionalExtension;
+use diesel::prelude::*;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -666,12 +666,12 @@ impl DataStore {
                             return Err(
                                 VolumeGetError::CheckoutConditionFailed(
                                     format!(
-                                    "InstanceStart {}: instance {} propolis \
+                                        "InstanceStart {}: instance {} propolis \
                                     id {} mismatch",
-                                    vmm_id,
-                                    instance.id(),
-                                    propolis_id,
-                                ),
+                                        vmm_id,
+                                        instance.id(),
+                                        propolis_id,
+                                    ),
                                 ),
                             );
                         }
@@ -4067,8 +4067,8 @@ impl DataStore {
 mod tests {
     use super::*;
 
-    use crate::db::datastore::test::TestDatasets;
     use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
+    use crate::db::datastore::test::TestDatasets;
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_config::RegionAllocationStrategy;
     use nexus_db_model::SqlU16;
@@ -5101,11 +5101,13 @@ mod tests {
             )),
         };
 
-        assert!(read_only_target_in_vcr(
-            &vcr,
-            &"[fd00:1122:3344:104::1]:400".parse().unwrap(),
-        )
-        .unwrap());
+        assert!(
+            read_only_target_in_vcr(
+                &vcr,
+                &"[fd00:1122:3344:104::1]:400".parse().unwrap(),
+            )
+            .unwrap()
+        );
 
         // read_only_target_in_vcr should _not_ find read-write targets
 
@@ -5137,11 +5139,13 @@ mod tests {
             read_only_parent: None,
         };
 
-        assert!(!read_only_target_in_vcr(
-            &vcr,
-            &"[fd00:1122:3344:104::1]:400".parse().unwrap(),
-        )
-        .unwrap());
+        assert!(
+            !read_only_target_in_vcr(
+                &vcr,
+                &"[fd00:1122:3344:104::1]:400".parse().unwrap(),
+            )
+            .unwrap()
+        );
 
         // read_only_target_in_vcr should bail on incorrect VCRs (currently it
         // only detects a read/write region under a read-only parent)

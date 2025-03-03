@@ -725,8 +725,10 @@ mod tests {
 
         assert!(query_parser::duration_literal_impl("-1m").is_err());
         let too_big: i64 = i64::from(u32::MAX) + 1;
-        assert!(query_parser::duration_literal_impl(&format!("{too_big}s"))
-            .is_err());
+        assert!(
+            query_parser::duration_literal_impl(&format!("{too_big}s"))
+                .is_err()
+        );
     }
 
     #[test]
@@ -740,14 +742,16 @@ mod tests {
             ID
         );
 
-        assert!(query_parser::uuid_literal_impl(
-            &as_string[1..as_string.len() - 2]
-        )
-        .is_err());
-        assert!(query_parser::uuid_literal_impl(
-            &without_dashes[1..without_dashes.len() - 2]
-        )
-        .is_err());
+        assert!(
+            query_parser::uuid_literal_impl(&as_string[1..as_string.len() - 2])
+                .is_err()
+        );
+        assert!(
+            query_parser::uuid_literal_impl(
+                &without_dashes[1..without_dashes.len() - 2]
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -784,10 +788,14 @@ mod tests {
         );
 
         // Out of range in either direction
-        assert!(query_parser::integer_literal_impl("0xFFFFFFFFFFFFFFFFFFFF")
-            .is_err());
-        assert!(query_parser::integer_literal_impl("-0xFFFFFFFFFFFFFFFFFFFF")
-            .is_err());
+        assert!(
+            query_parser::integer_literal_impl("0xFFFFFFFFFFFFFFFFFFFF")
+                .is_err()
+        );
+        assert!(
+            query_parser::integer_literal_impl("-0xFFFFFFFFFFFFFFFFFFFF")
+                .is_err()
+        );
 
         assert!(query_parser::integer_literal_impl("-0x1.0").is_err());
         assert!(query_parser::integer_literal_impl("-0x1.").is_err());
@@ -884,8 +892,10 @@ mod tests {
                 expected
             );
         }
-        assert!(query_parser::string_literal_impl(r#"' cannot have ' in it'"#)
-            .is_err());
+        assert!(
+            query_parser::string_literal_impl(r#"' cannot have ' in it'"#)
+                .is_err()
+        );
     }
 
     #[test]
@@ -907,8 +917,10 @@ mod tests {
             );
         }
 
-        assert!(query_parser::string_literal_impl(r#"" cannot have " in it""#)
-            .is_err());
+        assert!(
+            query_parser::string_literal_impl(r#"" cannot have " in it""#)
+                .is_err()
+        );
     }
 
     #[test]
@@ -1266,17 +1278,23 @@ mod tests {
 
     #[test]
     fn test_query_starts_with_get() {
-        assert!(query_parser::query("{ get a:b }")
+        assert!(
+            query_parser::query("{ get a:b }")
+                .unwrap()
+                .all_gets_at_query_start()
+        );
+        assert!(
+            query_parser::query("{ get a:b; get a:b } | join")
+                .unwrap()
+                .all_gets_at_query_start()
+        );
+        assert!(
+            query_parser::query(
+                "{ { get a:b ; get a:b } | join; get c:d } | join"
+            )
             .unwrap()
-            .all_gets_at_query_start());
-        assert!(query_parser::query("{ get a:b; get a:b } | join")
-            .unwrap()
-            .all_gets_at_query_start());
-        assert!(query_parser::query(
-            "{ { get a:b ; get a:b } | join; get c:d } | join"
-        )
-        .unwrap()
-        .all_gets_at_query_start());
+            .all_gets_at_query_start()
+        );
 
         assert!(query_parser::query("{ get a:b; filter foo == 0 }").is_err());
         assert!(query_parser::query("{ get a:b; filter foo == 0 }").is_err());
@@ -1386,11 +1404,10 @@ mod tests {
             Limit { kind: LimitKind::Last, count: 100.try_into().unwrap() },
         );
 
-        assert!(query_parser::limit(&format!(
-            "first {}",
-            usize::MAX as i128 + 1
-        ))
-        .is_err());
+        assert!(
+            query_parser::limit(&format!("first {}", usize::MAX as i128 + 1))
+                .is_err()
+        );
         assert!(query_parser::limit("first 0").is_err());
         assert!(query_parser::limit("first -1").is_err());
         assert!(query_parser::limit("first \"foo\"").is_err());

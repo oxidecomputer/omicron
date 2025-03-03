@@ -6,12 +6,12 @@
 
 //! Tools for working with schema for fields and timeseries.
 
+use crate::Metric;
+use crate::Target;
 use crate::types::DatumType;
 use crate::types::FieldType;
 use crate::types::MetricsError;
 use crate::types::Sample;
-use crate::Metric;
-use crate::Target;
 use chrono::DateTime;
 use chrono::Utc;
 use parse_display::Display;

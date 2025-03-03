@@ -81,9 +81,9 @@ pub mod test {
     use super::*;
     use crate::blueprint_builder::test::verify_blueprint;
     use crate::example::ExampleSystemBuilder;
-    use nexus_types::deployment::blueprint_zone_type::InternalDns;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneType;
+    use nexus_types::deployment::blueprint_zone_type::InternalDns;
     use omicron_common::disk::DatasetKind;
     use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
     use omicron_test_utils::dev::test_setup_log;

@@ -4,7 +4,7 @@
 
 use crate::{
     apis::ManagedApis,
-    output::{display_api_spec, display_error, plural, OutputOpts, Styles},
+    output::{OutputOpts, Styles, display_api_spec, display_error, plural},
 };
 use indent_write::io::IndentWriter;
 use openapiv3::OpenAPI;

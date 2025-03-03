@@ -36,6 +36,5 @@ pub mod vpc_subnet;
 /// the same pooled connection after this SQL gets run.
 ///
 /// **BE VERY CAREFUL WHEN USING THIS.**
-pub const ALLOW_FULL_TABLE_SCAN_SQL: &str =
-    "set local disallow_full_table_scans = off; \
+pub const ALLOW_FULL_TABLE_SCAN_SQL: &str = "set local disallow_full_table_scans = off; \
      set local large_full_scan_rows = 1000;";

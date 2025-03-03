@@ -8,7 +8,6 @@
 // Copyright 2024 Oxide Computer Company
 
 use crate::Error;
-use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::ConfigDropshot;
 use dropshot::HttpError;
@@ -18,18 +17,19 @@ use dropshot::HttpServer;
 use dropshot::RequestContext;
 use dropshot::ServerBuilder;
 use dropshot::TypedBody;
+use dropshot::endpoint;
 use nexus_types::internal_api::params::OximeterInfo;
+use omicron_common::FileKv;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerRegistrationResponse;
-use omicron_common::FileKv;
 use rand::seq::IteratorRandom;
+use slog::Drain;
+use slog::Level;
+use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::info;
 use slog::o;
-use slog::Drain;
-use slog::Level;
-use slog::Logger;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;

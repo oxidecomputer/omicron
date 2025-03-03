@@ -8,17 +8,18 @@ use super::external_ips::floating_ip_get;
 use super::external_ips::get_floating_ip_by_id_url;
 use super::metrics::{get_latest_silo_metric, get_latest_system_metric};
 
-use http::method::Method;
 use http::StatusCode;
+use http::method::Method;
 use itertools::Itertools;
 use nexus_auth::authz::Action;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::lookup::LookupPath;
-use nexus_db_queries::db::DataStore;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::resource_helpers::assert_ip_pool_utilization;
 use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_disk;
@@ -36,7 +37,6 @@ use nexus_test_utils::resource_helpers::object_get;
 use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils::resource_helpers::object_put_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
-use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::wait_for_producer;
 use nexus_types::external_api::params::SshKeyCreate;
 use nexus_types::external_api::shared::IpKind;
@@ -65,11 +65,11 @@ use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterId;
 use omicron_common::api::internal::shared::RouterKind;
+use omicron_nexus::Nexus;
+use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::app::MAX_MEMORY_BYTES_PER_INSTANCE;
 use omicron_nexus::app::MAX_VCPU_PER_INSTANCE;
 use omicron_nexus::app::MIN_MEMORY_BYTES_PER_INSTANCE;
-use omicron_nexus::Nexus;
-use omicron_nexus::TestInterfaces as _;
 use omicron_sled_agent::sim::SledAgent;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::PropolisUuid;
@@ -2020,9 +2020,11 @@ async fn test_instances_invalid_creation_returns_bad_request(
         )
         .await
         .unwrap_err();
-    assert!(error
-        .message
-        .starts_with("unable to parse JSON body: EOF while parsing an object"));
+    assert!(
+        error.message.starts_with(
+            "unable to parse JSON body: EOF while parsing an object"
+        )
+    );
 
     let request_body = r##"
         {
@@ -2152,7 +2154,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
     };
     let interface_params =
         params::InstanceNetworkInterfaceAttachment::Create(vec![
-            if0_params.clone()
+            if0_params.clone(),
         ]);
 
     // Create the parameters for the instance itself, and create it.
@@ -2231,7 +2233,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
     };
     let interface_params =
         params::InstanceNetworkInterfaceAttachment::Create(vec![
-            if0_params.clone()
+            if0_params.clone(),
         ]);
     let instance_params = params::InstanceCreate {
         network_interfaces: interface_params,
@@ -2273,7 +2275,7 @@ async fn test_instance_with_single_explicit_ip_address(
     };
     let interface_params =
         params::InstanceNetworkInterfaceAttachment::Create(vec![
-            if0_params.clone()
+            if0_params.clone(),
         ]);
 
     // Create the parameters for the instance itself, and create it.
@@ -3612,10 +3614,9 @@ async fn test_instance_create_attach_disks_undo(
     // set `faulted_disk` to the faulted state
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
-    assert!(nexus
-        .set_disk_as_faulted(&faulted_disk.identity.id)
-        .await
-        .unwrap());
+    assert!(
+        nexus.set_disk_as_faulted(&faulted_disk.identity.id).await.unwrap()
+    );
 
     // Assert regular and faulted disks were created
     let disks: Vec<Disk> =

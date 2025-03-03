@@ -135,7 +135,6 @@ pub trait DatastoreAttachTarget<ResourceType>:
         // Treat the collection and resource as boxed tables.
         CollectionTable<ResourceType, Self>: BoxableTable,
         ResourceTable<ResourceType, Self>: BoxableTable,
-
         // Allows treating "collection_exists_query" as a boxed "dyn QueryFragment<Pg>".
         QueryFromClause<CollectionTable<ResourceType, Self>>:
             QueryFragment<Pg> + Send,
@@ -154,7 +153,6 @@ pub trait DatastoreAttachTarget<ResourceType>:
             + FilterBy<Eq<Self::ResourceCollectionIdColumn, Self::Id>>
             + FilterBy<IsNull<Self::ResourceCollectionIdColumn>>
             + FilterBy<IsNull<Self::ResourceTimeDeletedColumn>>,
-
         // Allows calling "update.into_boxed()"
         UpdateStatement<
             ResourceTable<ResourceType, Self>,
@@ -166,7 +164,6 @@ pub trait DatastoreAttachTarget<ResourceType>:
         // boxed update statement.
         BoxedUpdateStatement<'static, Pg, ResourceTable<ResourceType, Self>, V>:
             FilterBy<Eq<ResourcePrimaryKey<ResourceType, Self>, Self::Id>>,
-
         // Allows using "id" in expressions (e.g. ".eq(...)") with...
         Self::Id: AsExpression<
                 // ... The Collection table's PK
@@ -181,7 +178,6 @@ pub trait DatastoreAttachTarget<ResourceType>:
         ExprSqlType<CollectionPrimaryKey<ResourceType, Self>>: SingleValue,
         ExprSqlType<ResourcePrimaryKey<ResourceType, Self>>: SingleValue,
         ExprSqlType<Self::ResourceCollectionIdColumn>: SingleValue,
-
         // Necessary to actually select the resource in the output type.
         ResourceType: Selectable<Pg>,
     {
@@ -354,10 +350,10 @@ where
     where
         // We require this bound to ensure that "Self" is runnable as query.
         Self: query_methods::LoadQuery<
-            'static,
-            DbConnection,
-            RawOutput<ResourceType, C>,
-        >,
+                'static,
+                DbConnection,
+                RawOutput<ResourceType, C>,
+            >,
     {
         self.get_result_async::<RawOutput<ResourceType, C>>(conn)
             .await
@@ -582,10 +578,10 @@ mod test {
     use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use chrono::Utc;
     use db_macros::Resource;
-    use diesel::expression_methods::ExpressionMethods;
-    use diesel::pg::Pg;
     use diesel::QueryDsl;
     use diesel::SelectableHelper;
+    use diesel::expression_methods::ExpressionMethods;
+    use diesel::pg::Pg;
     use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
     use omicron_test_utils::dev;
     use uuid::Uuid;
@@ -1386,10 +1382,9 @@ mod test {
             get_resource(resource_id1, &conn).await.collection_id.unwrap(),
             collection_id
         );
-        assert!(get_resource(resource_id2, &conn)
-            .await
-            .collection_id
-            .is_none());
+        assert!(
+            get_resource(resource_id2, &conn).await.collection_id.is_none()
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

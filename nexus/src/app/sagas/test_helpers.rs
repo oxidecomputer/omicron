@@ -5,8 +5,8 @@
 //! Helper functions for writing saga undo tests and working with instances in
 //! saga tests.
 
-use super::{instance_common::VmmAndSledIds, instance_start, NexusSaga};
-use crate::{app::saga::create_saga_dag, Nexus};
+use super::{NexusSaga, instance_common::VmmAndSledIds, instance_start};
+use crate::{Nexus, app::saga::create_saga_dag};
 use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
 use diesel::{
     BoolExpressionMethods, ExpressionMethods, QueryDsl, SelectableHelper,
@@ -17,9 +17,9 @@ use nexus_db_queries::{
     authz,
     context::OpContext,
     db::{
+        DataStore,
         datastore::{InstanceAndActiveVmm, InstanceGestalt},
         lookup::LookupPath,
-        DataStore,
     },
 };
 use nexus_types::identity::Resource;
@@ -28,7 +28,7 @@ use omicron_common::api::external::NameOrId;
 use omicron_test_utils::dev::poll;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use sled_agent_client::TestInterfaces as _;
-use slog::{info, warn, Logger};
+use slog::{Logger, info, warn};
 use std::{num::NonZeroU32, sync::Arc, time::Duration};
 use steno::SagaDag;
 

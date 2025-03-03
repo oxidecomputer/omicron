@@ -7,15 +7,15 @@ use crate::{DendriteAsic, HardwareUpdate, SledMode, UnparsedDisk};
 use camino::Utf8PathBuf;
 use gethostname::gethostname;
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
-use libnvme::{controller::Controller, Nvme};
+use libnvme::{Nvme, controller::Controller};
 use omicron_common::disk::{DiskIdentity, DiskVariant};
 use sled_hardware_types::Baseboard;
+use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::info;
 use slog::o;
 use slog::warn;
-use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -26,7 +26,7 @@ mod gpt;
 mod partitions;
 mod sysconf;
 
-pub use partitions::{ensure_partition_layout, NvmeFormattingError};
+pub use partitions::{NvmeFormattingError, ensure_partition_layout};
 
 #[derive(thiserror::Error, Debug)]
 enum Error {
@@ -568,7 +568,7 @@ fn poll_blkdev_node(
             return Err(Error::NvmeControllerLocked);
         }
         libnvme::controller::TryLockResult::Err(err) => {
-            return Err(Error::from(err))
+            return Err(Error::from(err));
         }
     };
     let firmware_log_page = controller_lock.get_firmware_log_page()?;
@@ -763,10 +763,13 @@ impl HardwareManager {
             // Allow non-gimlet devices to proceed with a "null" view of
             // hardware, otherwise they won't be able to start.
             Err(Error::NotAGimlet(root)) => {
-                warn!(log, "Device is not a Gimlet ({root}), proceeding with null hardware view");
+                warn!(
+                    log,
+                    "Device is not a Gimlet ({root}), proceeding with null hardware view"
+                );
             }
             Err(err) => {
-                return Err(format!("Failed to poll device tree: {err}"))
+                return Err(format!("Failed to poll device tree: {err}"));
             }
         };
 

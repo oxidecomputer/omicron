@@ -16,7 +16,7 @@ use crate::{
     ui::defaults::style,
 };
 
-use super::{ComponentId, ParsableComponentId, ALL_COMPONENT_IDS};
+use super::{ALL_COMPONENT_IDS, ComponentId, ParsableComponentId};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use slog::Logger;

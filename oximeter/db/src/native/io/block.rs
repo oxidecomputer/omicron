@@ -6,10 +6,10 @@
 
 //! Encoding and decoding data blocks.
 
+use crate::native::Error;
 use crate::native::block::Block;
 use crate::native::block::BlockInfo;
 use crate::native::io;
-use crate::native::Error;
 use bytes::Buf as _;
 use bytes::BufMut as _;
 use bytes::BytesMut;
