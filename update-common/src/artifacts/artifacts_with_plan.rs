@@ -244,7 +244,7 @@ impl ArtifactsWithPlan {
                 })?;
 
             builder
-                .add_artifact(artifact.clone().into_id(), artifact_hash, stream)
+                .add_artifact(artifact.clone().into(), artifact_hash, stream)
                 .await?;
         }
 
@@ -361,11 +361,9 @@ mod tests {
     use camino::Utf8Path;
     use camino_tempfile::Utf8TempDir;
     use clap::Parser;
-    use omicron_common::{
-        api::internal::nexus::KnownArtifactKind, update::ArtifactKind,
-    };
     use omicron_test_utils::dev::test_setup_log;
     use std::{collections::BTreeSet, time::Duration};
+    use tufaceous_artifact::{ArtifactKind, KnownArtifactKind};
 
     /// Test that `ArtifactsWithPlan` can extract the fake repository generated
     /// by tufaceous.
@@ -552,7 +550,7 @@ mod tests {
         let args = tufaceous::Args::try_parse_from([
             "tufaceous",
             "assemble",
-            "../tufaceous/manifests/fake.toml",
+            "manifests/fake.toml",
             archive_path.as_str(),
         ])
         .context("error parsing args")?;
