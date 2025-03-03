@@ -8,16 +8,15 @@
 
 use super::columns;
 use super::from_block::FromBlock;
+use crate::Metric;
+use crate::Target;
+use crate::native::Error;
 use crate::native::block::Block;
 use crate::native::block::Column;
 use crate::native::block::DataType;
 use crate::native::block::ValueArray;
-use crate::native::Error;
 use crate::query::field_table_name;
-use crate::Metric;
-use crate::Target;
 use indexmap::IndexMap;
-use oximeter::schema::TimeseriesKey;
 use oximeter::Field;
 use oximeter::FieldSchema;
 use oximeter::FieldSource;
@@ -25,6 +24,7 @@ use oximeter::FieldType;
 use oximeter::FieldValue;
 use oximeter::Sample;
 use oximeter::TimeseriesSchema;
+use oximeter::schema::TimeseriesKey;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::IpAddr;

@@ -6,7 +6,7 @@
 
 use std::fmt;
 
-use swrite::{swrite, SWrite};
+use swrite::{SWrite, swrite};
 
 pub(crate) fn join_comma_or_none<I, T: fmt::Display>(iter: I) -> String
 where

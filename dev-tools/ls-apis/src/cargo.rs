@@ -6,7 +6,7 @@
 
 use crate::ClientPackageName;
 use anyhow::bail;
-use anyhow::{anyhow, ensure, Context, Result};
+use anyhow::{Context, Result, anyhow, ensure};
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use cargo_metadata::{CargoOpt, Package};
@@ -311,11 +311,7 @@ impl Workspace {
         pkgname: &'a str,
     ) -> impl Iterator<Item = &'a PackageId> + 'a {
         self.packages_by_id.iter().filter_map(move |(pkgid, pkg)| {
-            if pkg.name == pkgname {
-                Some(pkgid)
-            } else {
-                None
-            }
+            if pkg.name == pkgname { Some(pkgid) } else { None }
         })
     }
 

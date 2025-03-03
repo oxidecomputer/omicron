@@ -6,11 +6,11 @@
 use anyhow::Result;
 use clap::Parser;
 use dhcproto::{
+    Encoder,
     v4::{
         self, Decodable, Decoder, DhcpOptions, Encodable, Message, Opcode,
         OptionCode,
     },
-    Encoder,
 };
 use end_to_end_tests::helpers::cli::oxide_cli_style;
 use macaddr::MacAddr6;

@@ -13,7 +13,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use async_trait::async_trait;
 use bytes::Bytes;
 use installinator_client::{ClientError, ResponseValue};
@@ -554,7 +554,7 @@ mod tests {
     };
 
     use bytes::Buf;
-    use futures::{future, StreamExt};
+    use futures::{StreamExt, future};
     use installinator_common::{
         InstallinatorCompletionMetadata, InstallinatorComponent,
         InstallinatorProgressMetadata, InstallinatorStepId, StepContext,
@@ -671,10 +671,14 @@ mod tests {
                 }
                 (Err(_), Err(_)) => {}
                 (Err(_), Ok(fetched_artifact)) => {
-                    panic!("expected failure to fetch but found success: {fetched_artifact:?}");
+                    panic!(
+                        "expected failure to fetch but found success: {fetched_artifact:?}"
+                    );
                 }
                 (Ok((attempt, addr)), Err(err)) => {
-                    panic!("expected success at attempt `{attempt}` from `{addr}`, but found failure: {err}");
+                    panic!(
+                        "expected success at attempt `{attempt}` from `{addr}`, but found failure: {err}"
+                    );
                 }
             }
 
@@ -754,7 +758,9 @@ mod tests {
                                 );
                             }
                             other => {
-                                panic!("expected download metadata, found {other:?}");
+                                panic!(
+                                    "expected download metadata, found {other:?}"
+                                );
                             }
                         };
                     }

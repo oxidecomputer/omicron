@@ -12,11 +12,11 @@ use hubtools::{CabooseBuilder, HubrisArchiveBuilder};
 use omicron_nexus::app::test_interfaces::{
     MgsClients, RotUpdater, UpdateProgress,
 };
-use sp_sim::SimulatedSp;
 use sp_sim::SIM_ROT_BOARD;
+use sp_sim::SimulatedSp;
 use std::mem;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;

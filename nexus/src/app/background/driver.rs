@@ -11,10 +11,10 @@ use super::BackgroundTask;
 use super::TaskName;
 use assert_matches::assert_matches;
 use chrono::Utc;
-use futures::future::BoxFuture;
-use futures::stream::FuturesUnordered;
 use futures::FutureExt;
 use futures::StreamExt;
+use futures::future::BoxFuture;
+use futures::stream::FuturesUnordered;
 use nexus_db_queries::context::OpContext;
 use nexus_types::internal_api::views::ActivationReason;
 use nexus_types::internal_api::views::CurrentStatus;
@@ -23,13 +23,13 @@ use nexus_types::internal_api::views::LastResult;
 use nexus_types::internal_api::views::LastResultCompleted;
 use nexus_types::internal_api::views::TaskStatus;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
-use tokio::sync::watch;
 use tokio::sync::Notify;
+use tokio::sync::watch;
 use tokio::time::MissedTickBehavior;
 
 /// Drives the execution of background tasks
@@ -438,12 +438,12 @@ impl<T: Send + Sync> GenericWatcher for watch::Receiver<T> {
 mod test {
     use super::BackgroundTask;
     use super::Driver;
-    use crate::app::background::driver::TaskDefinition;
     use crate::app::background::Activator;
+    use crate::app::background::driver::TaskDefinition;
     use assert_matches::assert_matches;
     use chrono::Utc;
-    use futures::future::BoxFuture;
     use futures::FutureExt;
+    use futures::future::BoxFuture;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::internal_api::views::ActivationReason;

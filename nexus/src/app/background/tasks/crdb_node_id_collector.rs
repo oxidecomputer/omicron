@@ -24,19 +24,19 @@
 //! whether a zone without a known node ID ever existed.
 
 use crate::app::background::BackgroundTask;
-use anyhow::ensure;
 use anyhow::Context;
-use futures::future::BoxFuture;
-use futures::stream;
+use anyhow::ensure;
 use futures::FutureExt;
 use futures::StreamExt;
+use futures::future::BoxFuture;
+use futures::stream;
 use nexus_auth::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::address::COCKROACH_ADMIN_PORT;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
@@ -232,10 +232,10 @@ impl BackgroundTask for CockroachNodeIdCollector {
 mod tests {
     use super::*;
     use chrono::Utc;
+    use httptest::Expectation;
     use httptest::matchers::any;
     use httptest::responders::json_encoded;
     use httptest::responders::status_code;
-    use httptest::Expectation;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;

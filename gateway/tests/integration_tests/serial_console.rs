@@ -11,9 +11,9 @@ use gateway_test_utils::current_simulator_state;
 use gateway_test_utils::setup;
 use gateway_test_utils::sim_sp_serial_console;
 use gateway_types::component::SpType;
-use http::uri::Scheme;
 use http::StatusCode;
 use http::Uri;
+use http::uri::Scheme;
 use tokio_tungstenite::tungstenite;
 use tokio_tungstenite::tungstenite::protocol::Message;
 
