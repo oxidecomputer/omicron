@@ -14,6 +14,7 @@ use crate::db::collection_detach_many::DetachManyError;
 use crate::db::collection_detach_many::DetachManyFromCollectionStatement;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::column_walker::AllColumnsOf;
 use crate::db::error::ErrorHandler;
 use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Resource;
@@ -29,21 +30,24 @@ use crate::db::model::InstanceState;
 use crate::db::model::InstanceUpdate;
 use crate::db::model::Migration;
 use crate::db::model::MigrationState;
-use crate::db::model::Name;
 use crate::db::model::Project;
 use crate::db::model::Sled;
 use crate::db::model::Vmm;
 use crate::db::model::VmmState;
+use crate::db::pagination::RawPaginator;
 use crate::db::pagination::paginated;
-use crate::db::pagination::paginated_multicolumn;
 use crate::db::pool::DbConnection;
+use crate::db::raw_query_builder::TrustedStr;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateAndQueryResult;
 use crate::db::update_and_check::UpdateStatus;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
+use diesel::helper_types::AsSelect;
+use diesel::pg::Pg;
 use diesel::prelude::*;
+use itertools::Itertools;
 use nexus_db_model::Disk;
 use nexus_types::internal_api::background::ReincarnationReason;
 use omicron_common::api;
@@ -64,7 +68,6 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
-use ref_cast::RefCast;
 use uuid::Uuid;
 
 /// Wraps a record of an `Instance` along with its active `Vmm`, if it has one.
@@ -405,33 +408,35 @@ impl DataStore {
 
         use db::schema::instance::dsl;
         use db::schema::vmm::dsl as vmm_dsl;
-        Ok(match pagparams {
-            PaginatedBy::Id(pagparams) => {
-                paginated(dsl::instance, dsl::id, &pagparams)
-            }
-            PaginatedBy::Name(pagparams) => paginated(
-                dsl::instance,
-                dsl::name,
-                &pagparams.map_name(|n| Name::ref_cast(n)),
-            ),
-        }
-        .filter(dsl::project_id.eq(authz_project.id()))
-        .filter(dsl::time_deleted.is_null())
-        .left_join(
-            vmm_dsl::vmm.on(vmm_dsl::id
-                .nullable()
-                .eq(dsl::active_propolis_id)
-                .and(vmm_dsl::time_deleted.is_null())),
-        )
-        .select((Instance::as_select(), Option::<Vmm>::as_select()))
-        .load_async::<(Instance, Option<Vmm>)>(
-            &*self.pool_connection_authorized(opctx).await?,
-        )
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-        .into_iter()
-        .map(|(instance, vmm)| InstanceAndActiveVmm { instance, vmm })
-        .collect())
+
+        let mut paginator = RawPaginator::new();
+        paginator
+            .source()
+            .sql("SELECT ")
+            .sql(AllColumnsOf::<dsl::instance>::with_prefix("instance"))
+            .sql(",")
+            .sql(AllColumnsOf::<vmm_dsl::vmm>::with_prefix_and_alias("vmm"))
+            .sql(
+                " FROM instance
+                LEFT JOIN vmm ON
+                    vmm.id = instance.active_propolis_id AND
+                    vmm.time_deleted IS NULL
+                WHERE
+                    instance.project_id = ",
+            )
+            .param()
+            .bind::<diesel::sql_types::Uuid, _>(authz_project.id());
+        Ok(paginator
+            .paginate_by_id_or_name(pagparams)
+            .query::<(AsSelect<Instance, Pg>, AsSelect<Option<Vmm>, Pg>)>()
+            .load_async::<(Instance, Option<Vmm>)>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+            .into_iter()
+            .map(|(instance, vmm)| InstanceAndActiveVmm { instance, vmm })
+            .collect())
     }
 
     /// List all instances with active VMMs in the provided [`VmmState`] which
@@ -974,60 +979,58 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        // We're going to build the query in stages.
-        //
-        // First, select all non-deleted sled records, and join the `sled` table
-        // with the `vmm` table on the VMM's `sled_id`, filtering out VMMs which
-        // are not actually incarnated on a sled.
-        let query = sled_dsl::sled
-            .inner_join(vmm_dsl::vmm.on(vmm_dsl::sled_id.eq(sled_dsl::id)));
-        // Next, paginate the results, ordering by the sled ID first, so that we
-        // list all VMMs on a sled before moving on to the next one, and then by
-        // the VMM ID.
-        //
-        // Note that we must add the `paginated_multicolumn` wrapper
-        // at this point in query construction, because here, the selection
-        // contains both `sled_dsl::id` and `vmm_dsl::id` columns, but it does
-        // *not* have anything that makes it no longer implement
-        // `diesel::QuerySource`, which the `paginated_multicolumn` function
-        // requires. This ordering doesn't actually matter when it comes to the
-        // generated SQL, which should be equivalent no matter how we construct
-        // the query, but it *does* matter for satisfying Diesel's trait
-        // constraints.
-        let query = paginated_multicolumn(
-            query,
-            (sled_dsl::id, vmm_dsl::id),
-            pagparams,
-        );
-
-        let query = query
-            // Filter out sled and VMM records which have been deleted.
-            .filter(sled_dsl::time_deleted.is_null())
-            .filter(vmm_dsl::time_deleted.is_null())
+        let mut paginator = RawPaginator::new();
+        paginator
+            .source()
+            .sql("SELECT ")
+            .sql(AllColumnsOf::<sled_dsl::sled>::with_prefix_and_alias("sled"))
+            .sql(",")
+            .sql(AllColumnsOf::<instance_dsl::instance>::with_prefix(
+                "instance",
+            ))
+            .sql(",")
+            .sql(AllColumnsOf::<vmm_dsl::vmm>::with_prefix_and_alias("vmm"))
+            .sql(",")
+            .sql(AllColumnsOf::<project_dsl::project>::with_prefix("project"))
+            // Select all non-deleted sled records, and join the `sled` table
+            // with the `instance`, `vmm`, and `project` tables, filtering out
+            // VMMs which are not actually incarnated on a sled.
+            .sql(
+                " FROM sled
+                INNER JOIN vmm ON vmm.sled_id = sled.id
+                INNER JOIN instance ON instance.id = vmm.instance_id
+                INNER JOIN project ON project.id = instance.project_id
+                WHERE
+                    sled.time_deleted IS NULL AND
+                    vmm.time_deleted IS NULL AND
+                    vmm.state != ANY(",
+            )
             // Ignore VMMs which are in states that are not known to exist on a
             // sled. Since this query drives instance-watcher health checking,
             // it is not necessary to perform health checks for VMMs that don't
             // actually exist in real life.
-            .filter(vmm_dsl::state.ne_all(VmmState::NONEXISTENT_STATES));
-        // Now, join with the `instance` table on the instance's VMM ID.
-        let query = query.inner_join(
-            instance_dsl::instance
-                .on(instance_dsl::id.eq(vmm_dsl::instance_id)),
-        );
-        // Finally, join with the `project` table on the instance's project ID,
-        // to return the project that each instance belongs to.
-        let query = query.inner_join(
-            project_dsl::project
-                .on(project_dsl::id.eq(instance_dsl::project_id)),
-        );
-
-        let result = query
-            .select((
-                Sled::as_select(),
-                Instance::as_select(),
-                Vmm::as_select(),
-                Project::as_select(),
+            .sql(TrustedStr::i_take_responsibility_for_validating_this_string(
+                // "NONEXISTENT_STATES" is const; there is no user-input here
+                VmmState::NONEXISTENT_STATES
+                    .iter()
+                    .map(|s| format!("\'{s}\'"))
+                    .join(","),
             ))
+            .sql(") ");
+
+        // Paginate the results, ordering by the sled ID first, so that we
+        // list all VMMs on a sled before moving on to the next one, and then by
+        // the VMM ID.
+        let paginator = paginator.with_parameters(pagparams);
+        use diesel::sql_types::Uuid as SqlUuid;
+        let result = paginator
+            .paginate_by_columns::<SqlUuid, SqlUuid>("sled_id", "vmm_id")
+            .query::<(
+                AsSelect<Sled, Pg>,
+                AsSelect<Instance, Pg>,
+                AsSelect<Vmm, Pg>,
+                AsSelect<Project, Pg>,
+            )>()
             .load_async::<(Sled, Instance, Vmm, Project)>(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;

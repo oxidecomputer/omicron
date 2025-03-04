@@ -28,6 +28,7 @@ impl<T> ColumnWalker<T> {
 
 macro_rules! impl_column_walker {
     ( $len:literal $($column:ident)+ ) => (
+        /// Returns all columns with the "<prefix>." string prepended.
         #[allow(dead_code)]
         impl<$($column: Column),+> ColumnWalker<($($column,)+)> {
             pub fn with_prefix(prefix: &'static str) -> TrustedStr {
@@ -38,6 +39,44 @@ macro_rules! impl_column_walker {
                 // hopefully known at compile-time, and not leaked).
                 TrustedStr::i_take_responsibility_for_validating_this_string(
                     [$([prefix, $column::NAME].join("."),)+].join(", ")
+                )
+            }
+        }
+
+        /// Identical to [Self::with_prefix], but also aliases each column.
+        ///
+        /// The aliased name is "prefix_<column name>".
+        #[allow(dead_code)]
+        impl<$($column: Column),+> ColumnWalker<($($column,)+)> {
+            pub fn with_prefix_and_alias(prefix: &'static str) -> TrustedStr {
+                // This string is derived from:
+                // - The "table" type, with associated columns, which
+                // are not controlled by an arbitrary user, and
+                // - The "prefix" type, which is a "&'static str" (AKA,
+                // hopefully known at compile-time, and not leaked).
+                TrustedStr::i_take_responsibility_for_validating_this_string(
+                    [
+                        $(
+                            format!(
+                                "{prefix}.{column} as {prefix}_{column}",
+                                prefix = prefix, column = $column::NAME
+                            ),
+                        )+
+                    ].join(", ")
+                )
+            }
+        }
+
+
+        /// Returns all columns without any suffix.
+        #[allow(dead_code)]
+        impl<$($column: Column),+> ColumnWalker<($($column,)+)> {
+            pub fn as_str() -> TrustedStr {
+                // This string is derived from:
+                // - The "table" type, with associated columns, which
+                // are not controlled by an arbitrary user, and
+                TrustedStr::i_take_responsibility_for_validating_this_string(
+                    [$($column::NAME,)+].join(", ")
                 )
             }
         }

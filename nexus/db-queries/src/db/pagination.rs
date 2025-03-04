@@ -4,6 +4,8 @@
 
 //! Interface for paginating database queries.
 
+use crate::db::raw_query_builder::QueryBuilder;
+
 use diesel::AppearsOnTable;
 use diesel::Column;
 use diesel::dsl::{Asc, Desc, Gt, Lt};
@@ -17,6 +19,8 @@ use diesel::query_source::QuerySource;
 use diesel::sql_types::{Bool, SqlType};
 use diesel::{ExpressionMethods, QueryDsl};
 use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::http_pagination::PaginatedBy;
+use ref_cast::RefCast;
 use std::num::NonZeroU32;
 
 // Shorthand alias for "the SQL type of the whole table".
@@ -196,6 +200,172 @@ where
             }
             query.order(c1.desc()).then_order_by(c2.desc())
         }
+    }
+}
+
+pub struct RawPaginator {
+    query: QueryBuilder,
+}
+
+impl RawPaginator {
+    /// Creates a new query which paginates over some columns
+    pub fn new() -> Self {
+        let mut query = QueryBuilder::new();
+        query.sql("SELECT * FROM ( ");
+        Self { query }
+    }
+
+    /// Returns a query builder for the pagination source
+    ///
+    /// The caller should use this builder to construct a SELECT query with the
+    /// columns they'd like to paginate over.
+    ///
+    /// It is valid to paginate over one or many tables here - however,
+    /// the column names must match the argument provided by the
+    /// [RawPaginatorWithParams::paginate_by_column] method.
+    pub fn source(&mut self) -> &mut QueryBuilder {
+        &mut self.query
+    }
+
+    /// Finishes construction of the [Self::source] query
+    ///
+    /// Begins construction of the portion of the query which paginates over
+    /// those results.
+    pub fn with_parameters<'a, M>(
+        mut self,
+        params: &'a DataPageParams<'a, M>,
+    ) -> RawPaginatorWithParams<'a, M> {
+        self.query.sql(") ");
+        RawPaginatorWithParams { query: self.query, params }
+    }
+
+    /// A shorthand helper to paginate by UUID or Name.
+    ///
+    /// To call this function, columns with the name "id" or "name"
+    /// must be part of the SELECT query created from [Self::source].
+    ///
+    /// It's possible to achieve this same functionality manually for any
+    /// marker type using [Self::with_parameters] and
+    /// [RawPaginatorWithParams::paginate_by_column].
+    pub fn paginate_by_id_or_name(
+        self,
+        pagparams: &PaginatedBy<'_>,
+    ) -> QueryBuilder {
+        match pagparams {
+            PaginatedBy::Id(p) => {
+                self.with_parameters(p)
+                    .paginate_by_column::<diesel::sql_types::Uuid>("id")
+            }
+            PaginatedBy::Name(p) => {
+                let params =
+                    p.map_name(|n| crate::db::model::Name::ref_cast(n));
+                self.with_parameters(&params)
+                    .paginate_by_column::<diesel::sql_types::Text>("name")
+            }
+        }
+    }
+}
+
+pub struct RawPaginatorWithParams<'a, M> {
+    query: QueryBuilder,
+    params: &'a DataPageParams<'a, M>,
+}
+
+impl<M> RawPaginatorWithParams<'_, M> {
+    pub fn paginate_by_column<BindSt>(
+        mut self,
+        key_column: &'static str,
+    ) -> QueryBuilder
+    where
+        Pg: diesel::sql_types::HasSqlType<BindSt>,
+        M: diesel::serialize::ToSql<BindSt, Pg> + Send + Clone + 'static,
+        BindSt: Send + 'static,
+    {
+        if let Some(marker) = self.params.marker {
+            let compare_op = match self.params.direction {
+                dropshot::PaginationOrder::Ascending => " > ",
+                dropshot::PaginationOrder::Descending => " < ",
+            };
+
+            self.query
+                .sql("WHERE ")
+                .sql(key_column)
+                .sql(compare_op)
+                .param()
+                .bind::<BindSt, _>((*marker).clone());
+        }
+        let order = match self.params.direction {
+            dropshot::PaginationOrder::Ascending => " ASC ",
+            dropshot::PaginationOrder::Descending => " DESC ",
+        };
+        self.query
+            .sql(" ORDER BY ")
+            .sql(key_column)
+            .sql(order)
+            .sql("LIMIT ")
+            .param()
+            .bind::<diesel::sql_types::BigInt, _>(i64::from(
+                self.params.limit.get(),
+            ));
+        self.query
+    }
+}
+
+impl<M1, M2> RawPaginatorWithParams<'_, (M1, M2)> {
+    pub fn paginate_by_columns<BindSt1, BindSt2>(
+        mut self,
+        key_column1: &'static str,
+        key_column2: &'static str,
+    ) -> QueryBuilder
+    where
+        Pg: diesel::sql_types::HasSqlType<BindSt1>,
+        Pg: diesel::sql_types::HasSqlType<BindSt2>,
+        M1: diesel::serialize::ToSql<BindSt1, Pg> + Send + Clone + 'static,
+        M2: diesel::serialize::ToSql<BindSt2, Pg> + Send + Clone + 'static,
+        BindSt1: Send + 'static,
+        BindSt2: Send + 'static,
+    {
+        if let Some((marker1, marker2)) = self.params.marker {
+            let compare_op = match self.params.direction {
+                dropshot::PaginationOrder::Ascending => " > ",
+                dropshot::PaginationOrder::Descending => " < ",
+            };
+
+            self.query
+                .sql("WHERE (")
+                .sql(key_column1)
+                .sql(" = ")
+                .param()
+                .bind::<BindSt1, _>((*marker1).clone())
+                .sql(" AND ")
+                .sql(key_column2)
+                .sql(compare_op)
+                .param()
+                .bind::<BindSt2, _>((*marker2).clone())
+                .sql(") OR (")
+                .sql(key_column1)
+                .sql(compare_op)
+                .param()
+                .bind::<BindSt1, _>((*marker1).clone())
+                .sql(")");
+        }
+        let order = match self.params.direction {
+            dropshot::PaginationOrder::Ascending => " ASC ",
+            dropshot::PaginationOrder::Descending => " DESC ",
+        };
+        self.query
+            .sql(" ORDER BY ")
+            .sql(key_column1)
+            .sql(order)
+            .sql(", ")
+            .sql(key_column2)
+            .sql(order)
+            .sql("LIMIT ")
+            .param()
+            .bind::<diesel::sql_types::BigInt, _>(i64::from(
+                self.params.limit.get(),
+            ));
+        self.query
     }
 }
 

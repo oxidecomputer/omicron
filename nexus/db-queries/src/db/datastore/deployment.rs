@@ -3081,8 +3081,9 @@ mod tests {
         // target changes.
         //
         // More on this in the block comment below.
-        let _external_ips = QueryBuilder::new()
-            .sql("SELECT id FROM omicron.public.external_ip WHERE time_deleted IS NULL")
+        let mut query = QueryBuilder::new();
+        query.sql("SELECT id FROM omicron.public.external_ip WHERE time_deleted IS NULL");
+        let _external_ips = query
             .query::<diesel::sql_types::Uuid>()
             .load_async::<uuid::Uuid>(&*conn)
             .await
