@@ -28,7 +28,10 @@ impl<T> ColumnWalker<T> {
 
 macro_rules! impl_column_walker {
     ( $len:literal $($column:ident)+ ) => (
-        /// Returns all columns with the "<prefix>." string prepended.
+        /// Returns all columns with the "(prefix)." string prepended.
+        ///
+        /// For example, with the columns "id, name" and the prefix "foo:
+        /// The output string would be: "foo.id, foo.name"
         #[allow(dead_code)]
         impl<$($column: Column),+> ColumnWalker<($($column,)+)> {
             pub fn with_prefix(prefix: &'static str) -> TrustedStr {
@@ -45,7 +48,10 @@ macro_rules! impl_column_walker {
 
         /// Identical to [Self::with_prefix], but also aliases each column.
         ///
-        /// The aliased name is "prefix_<column name>".
+        /// The aliased name is "(prefix)_(column name)".
+        ///
+        /// For example, with the columns "id, name" and the prefix "foo:
+        /// The output string would be: "foo.id as foo_id, foo.name as foo_name"
         #[allow(dead_code)]
         impl<$($column: Column),+> ColumnWalker<($($column,)+)> {
             pub fn with_prefix_and_alias(prefix: &'static str) -> TrustedStr {
@@ -66,7 +72,6 @@ macro_rules! impl_column_walker {
                 )
             }
         }
-
 
         /// Returns all columns without any suffix.
         #[allow(dead_code)]
