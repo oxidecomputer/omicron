@@ -3,9 +3,10 @@
 
 = TUF Artifact Replication (a.k.a. TUF Repo Depot)
 
-Our release artifact is a TUF repo consisting of all of the artifacts
-the product requires to run. For the update system to work, it needs
-access to those artifacts. There are some constraining factors:
+The final output of our release process is a TUF repo consisting of all
+of the artifacts the product requires to run. For the update system to
+work, it needs access to those artifacts. There are some constraining
+factors:
 
 * Nexus is the only way into the system for these artifacts (either
   through direct upload from an operator, or a download initiated by
@@ -26,9 +27,9 @@ every Sled Agent stores a copy of every artifact on each of its M.2
 devices. This is storage inefficient but means that a Sled Agent can
 directly use those resources to create zones from updated images,
 install an updated OS, or manage the installation of updates on other
-components, without Nexus having to ensure that it tells a sled to
-have an artifact _before_ telling it to use it. A Nexus background task
-periodically ensures that all sleds have all artifacts.
+components, without Nexus having to ensure that it distributed an
+artifact to a sled _before_ telling it to use it. A Nexus background
+task periodically ensures that all sleds have all artifacts.
 
 == Sled Agent implementation
 
@@ -88,7 +89,7 @@ reliable persistent workflow:
 2. Call `artifact_config_put` on all sleds. Stop if any sled rejects the
    configuration (our information is already out of date).
 3. Call `artifact_list` on all sleds. Stop if any sled informs us of a
-   different generation number.
+   newer generation number.
 4. Delete any local copies of repositories where all artifacts are
    sufficiently replicated across sleds. ("Sufficiently replicated"
    currently means that at least 3 sleds each have at least one copy.)

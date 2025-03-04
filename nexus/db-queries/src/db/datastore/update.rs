@@ -362,7 +362,7 @@ async fn increment_generation(
 ) -> Result<(), DieselError> {
     use db::schema::tuf_generation::dsl;
 
-    // We use `get_result_async` instead of `exeucte_async` to check that we
+    // We use `get_result_async` instead of `execute_async` to check that we
     // updated a single row; since we have it we may as well log it too.
     let generation: i64 =
         diesel::update(dsl::tuf_generation.filter(dsl::singleton.eq(true)))
