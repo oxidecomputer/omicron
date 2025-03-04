@@ -11,10 +11,8 @@ use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::execution::*;
-use nexus_types::external_api::views::SledState;
 use nexus_types::identity::Asset;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -496,19 +494,10 @@ fn register_decommission_sleds_step<'a>(
             ExecutionStepId::Cleanup,
             "Decommission sleds",
             move |_cx| async move {
-                let res = sled_state::decommission_sleds(
-                    opctx,
-                    datastore,
-                    blueprint
-                        .sleds
-                        .iter()
-                        .filter(|(_, sled)| {
-                            sled.state == SledState::Decommissioned
-                        })
-                        .map(|(&sled_id, _)| sled_id),
-                )
-                .await
-                .map_err(merge_anyhow_list);
+                let res =
+                    sled_state::decommission_sleds(opctx, datastore, blueprint)
+                        .await
+                        .map_err(merge_anyhow_list);
                 Ok(map_err_to_step_warning(res))
             },
         )
