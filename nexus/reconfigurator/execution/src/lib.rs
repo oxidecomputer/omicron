@@ -266,7 +266,7 @@ fn register_support_bundle_failure_step<'a>(
 ) {
     registrar
         .new_step(
-            ExecutionStepId::Ensure,
+            ExecutionStepId::Cleanup,
             "Mark support bundles as failed if they rely on \
              an expunged disk or sled",
             move |_cx| async move {
@@ -472,7 +472,7 @@ fn register_cleanup_expunged_zones_step<'a>(
 ) {
     registrar
         .new_step(
-            ExecutionStepId::Remove,
+            ExecutionStepId::Cleanup,
             "Cleanup expunged zones",
             move |_cx| async move {
                 let res = omicron_zones::clean_up_expunged_zones(
@@ -499,7 +499,7 @@ fn register_decommission_sleds_step<'a>(
 ) {
     registrar
         .new_step(
-            ExecutionStepId::Remove,
+            ExecutionStepId::Cleanup,
             "Decommission sleds",
             move |_cx| async move {
                 let res = sled_state::decommission_sleds(
@@ -529,7 +529,7 @@ fn register_decommission_disks_step<'a>(
 ) {
     registrar
         .new_step(
-            ExecutionStepId::Remove,
+            ExecutionStepId::Cleanup,
             "Decommission expunged disks",
             move |_cx| async move {
                 let res = omicron_physical_disks::decommission_expunged_disks(
@@ -612,7 +612,7 @@ fn register_reassign_sagas_step<'a>(
 ) -> StepHandle<bool> {
     registrar
         .new_step(
-            ExecutionStepId::Ensure,
+            ExecutionStepId::Cleanup,
             "Reassign sagas",
             move |_cx| async move {
                 // For any expunged Nexus zones, re-assign in-progress sagas to
