@@ -6,6 +6,7 @@ use super::{impl_enum_type, Generation};
 use crate::schema::target_release;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
+use nexus_types::external_api::views;
 use omicron_uuid_kinds::TufRepoKind;
 
 impl_enum_type!(
@@ -60,6 +61,17 @@ impl TargetRelease {
             time_requested: Utc::now(),
             release_source: TargetReleaseSource::SystemVersion,
             tuf_repo_id: Some(tuf_repo_id),
+        }
+    }
+
+    pub fn into_external(
+        &self,
+        release_source: views::TargetReleaseSource,
+    ) -> views::TargetRelease {
+        views::TargetRelease {
+            generation: (&self.generation.0).into(),
+            time_requested: self.time_requested,
+            release_source,
         }
     }
 }

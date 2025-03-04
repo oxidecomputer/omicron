@@ -77,38 +77,35 @@ impl DataStore {
             .authorize(authz::Action::Read, &authz::TARGET_RELEASE_CONFIG)
             .await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        Ok(views::TargetRelease {
-            generation: (&target_release.generation.0).into(),
-            time_requested: target_release.time_requested,
-            release_source: match target_release.release_source {
-                TargetReleaseSource::Unspecified => {
-                    views::TargetReleaseSource::Unspecified
+        let release_source = match target_release.release_source {
+            TargetReleaseSource::Unspecified => {
+                views::TargetReleaseSource::Unspecified
+            }
+            TargetReleaseSource::SystemVersion => {
+                use crate::db::schema::tuf_repo;
+                if let Some(tuf_repo_id) = target_release.tuf_repo_id {
+                    views::TargetReleaseSource::SystemVersion(
+                        tuf_repo::table
+                            .select(tuf_repo::system_version)
+                            .filter(tuf_repo::id.eq(tuf_repo_id))
+                            .first_async::<SemverVersion>(&*conn)
+                            .await
+                            .map_err(|e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Server,
+                                )
+                            })?
+                            .into(),
+                    )
+                } else {
+                    return Err(Error::invalid_request(
+                        "missing TUF repo ID for specified system version",
+                    ));
                 }
-                TargetReleaseSource::SystemVersion => {
-                    use crate::db::schema::tuf_repo;
-                    if let Some(tuf_repo_id) = target_release.tuf_repo_id {
-                        views::TargetReleaseSource::SystemVersion(
-                            tuf_repo::table
-                                .select(tuf_repo::system_version)
-                                .filter(tuf_repo::id.eq(tuf_repo_id))
-                                .first_async::<SemverVersion>(&*conn)
-                                .await
-                                .map_err(|e| {
-                                    public_error_from_diesel(
-                                        e,
-                                        ErrorHandler::Server,
-                                    )
-                                })?
-                                .into(),
-                        )
-                    } else {
-                        return Err(Error::invalid_request(
-                            "missing TUF repo ID for specified system version",
-                        ));
-                    }
-                }
-            },
-        })
+            }
+        };
+        Ok(target_release.into_external(release_source))
     }
 }
 
