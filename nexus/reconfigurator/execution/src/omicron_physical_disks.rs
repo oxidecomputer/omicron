@@ -40,6 +40,14 @@ where
             let db_sled = match sleds_by_id.get(&sled_id) {
                 Some(sled) => sled,
                 None => {
+                    if config.are_all_disks_expunged() {
+                        info!(
+                            log,
+                            "Skipping disk deployment to expunged sled";
+                            "sled_id" => %sled_id
+                        );
+                        return None;
+                    }
                     let err = anyhow!("sled not found in db list: {}", sled_id);
                     warn!(log, "{err:#}");
                     return Some(err);
