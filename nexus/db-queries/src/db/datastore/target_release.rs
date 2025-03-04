@@ -9,7 +9,6 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::error::{public_error_from_diesel, ErrorHandler};
 use crate::db::model::{SemverVersion, TargetRelease, TargetReleaseSource};
-use crate::db::schema::target_release;
 use crate::db::schema::target_release::dsl;
 use async_bb8_diesel::AsyncRunQueryDsl as _;
 use diesel::insert_into;
@@ -28,20 +27,22 @@ impl DataStore {
             .authorize(authz::Action::Read, &authz::TARGET_RELEASE_CONFIG)
             .await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-
-        // Fetch the row in the `target_release` table with the largest
-        // generation number. The subquery accesses the same table, so we
-        // have to make an alias to not confuse diesel.
-        let target_release_2 =
-            diesel::alias!(target_release as target_release_2);
-        dsl::target_release
-            .filter(dsl::generation.nullable().eq_any(target_release_2.select(
-                diesel::dsl::max(target_release_2.field(dsl::generation)),
-            )))
+        let current = dsl::target_release
             .select(TargetRelease::as_select())
+            .order_by(dsl::generation.desc())
             .first_async(&*conn)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        // We expect there to always be a current target release,
+        // since the database migration `create-target-release/up3.sql`
+        // adds an initial row.
+        let current = current.ok_or_else(|| Error::InternalError {
+            internal_message: "no target release".to_string(),
+        })?;
+
+        Ok(current)
     }
 
     /// Insert a new target release row and return it. It will only become
@@ -56,17 +57,10 @@ impl DataStore {
             .authorize(authz::Action::Modify, &authz::TARGET_RELEASE_CONFIG)
             .await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.transaction_retry_wrapper("set_target_release")
-            .transaction(&conn, |conn| {
-                let target_release = target_release.clone();
-                async move {
-                    insert_into(dsl::target_release)
-                        .values(target_release)
-                        .returning(TargetRelease::as_returning())
-                        .get_result_async(&conn)
-                        .await
-                }
-            })
+        insert_into(dsl::target_release)
+            .values(target_release)
+            .returning(TargetRelease::as_returning())
+            .get_result_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
