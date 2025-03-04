@@ -38,9 +38,8 @@ impl DataStore {
         // We expect there to always be a current target release,
         // since the database migration `create-target-release/up3.sql`
         // adds an initial row.
-        let current = current.ok_or_else(|| Error::InternalError {
-            internal_message: "no target release".to_string(),
-        })?;
+        let current = current
+            .ok_or_else(|| Error::internal_error("no target release"))?;
 
         Ok(current)
     }
@@ -99,7 +98,7 @@ impl DataStore {
                             .into(),
                     )
                 } else {
-                    return Err(Error::invalid_request(
+                    return Err(Error::internal_error(
                         "missing TUF repo ID for specified system version",
                     ));
                 }
