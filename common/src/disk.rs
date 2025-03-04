@@ -493,7 +493,9 @@ impl DisksManagementResult {
     }
 }
 
-#[derive(Clone, Debug, thiserror::Error, JsonSchema, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, thiserror::Error, JsonSchema, Serialize, Deserialize,
+)]
 #[serde(rename_all = "snake_case", tag = "type", content = "value")]
 pub enum DiskManagementError {
     #[error("Disk requested by control plane, but not found on device")]
