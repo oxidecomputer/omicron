@@ -4,6 +4,7 @@
 
 //! Webhooks
 
+use dropshot::test_util::ClientTestContext;
 use hmac::{Hmac, Mac};
 use httpmock::prelude::*;
 use nexus_db_model::WebhookEventClass;
@@ -16,6 +17,8 @@ use nexus_test_utils::resource_helpers;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::{params, shared, views};
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::NameOrId;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::WebhookEventUuid;
 use omicron_uuid_kinds::WebhookReceiverUuid;
 use sha2::Sha256;
@@ -37,6 +40,32 @@ async fn webhook_create(
         params,
     )
     .await
+}
+
+fn get_webhooks_url(name_or_id: impl Into<NameOrId>) -> String {
+    let name_or_id = name_or_id.into();
+    format!("{WEBHOOKS_BASE_PATH}/{name_or_id}")
+}
+
+async fn webhook_get(
+    client: &ClientTestContext,
+    webhook_url: &str,
+) -> views::Webhook {
+    webhook_get_as(client, webhook_url, AuthnMode::PrivilegedUser).await
+}
+
+async fn webhook_get_as(
+    client: &ClientTestContext,
+    webhook_url: &str,
+    authn_as: AuthnMode,
+) -> views::Webhook {
+    NexusRequest::object_get(client, &webhook_url)
+        .authn_as(authn_as)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap()
 }
 
 fn my_great_webhook_params(
@@ -157,6 +186,28 @@ fn signature_verifies(
         mac.update(req.body().as_ref());
         mac.verify_slice(&sig_bytes).is_ok()
     }
+}
+
+#[nexus_test]
+async fn test_webhook_get(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    let server = httpmock::MockServer::start_async().await;
+
+    // Create a webhook receiver.
+    let created_webhook =
+        webhook_create(&cptestctx, &my_great_webhook_params(&server)).await;
+    dbg!(&created_webhook);
+
+    // Fetch the receiver by name.
+    let by_id_url = get_webhooks_url(created_webhook.identity.id);
+    let webhook_view = webhook_get(client, &by_id_url).await;
+    assert_eq!(created_webhook, webhook_view);
+
+    // Fetch the receiver by name.
+    let by_name_url = get_webhooks_url(created_webhook.identity.name.clone());
+    let webhook_view = webhook_get(client, &by_name_url).await;
+    assert_eq!(created_webhook, webhook_view);
 }
 
 #[nexus_test]
