@@ -341,38 +341,6 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      },
-      "put": {
-        "summary": "Configures datasets to be used on this sled",
-        "operationId": "datasets_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DatasetsConfig"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DatasetsManagementResult"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
       }
     },
     "/disks/{disk_id}": {
@@ -565,63 +533,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "put": {
-        "operationId": "omicron_physical_disks_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OmicronPhysicalDisksConfig"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DisksManagementResult"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/omicron-zones": {
-      "put": {
-        "operationId": "omicron_zones_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OmicronZonesConfig"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -3074,21 +2985,6 @@
           "generation"
         ]
       },
-      "DatasetsManagementResult": {
-        "description": "The result from attempting to manage datasets.",
-        "type": "object",
-        "properties": {
-          "status": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DatasetManagementStatus"
-            }
-          }
-        },
-        "required": [
-          "status"
-        ]
-      },
       "DhcpConfig": {
         "description": "DHCP configuration for a port\n\nNot present here: Hostname (DHCPv4 option 12; used in DHCPv6 option 39); we use `InstanceRuntimeState::hostname` for this value.",
         "type": "object",
@@ -3579,21 +3475,6 @@
         "enum": [
           "U2",
           "M2"
-        ]
-      },
-      "DisksManagementResult": {
-        "description": "The result from attempting to manage underlying disks.\n\nThis is more complex than a simple \"Error\" type because it's possible for some disks to be initialized correctly, while others can fail.\n\nThis structure provides a mechanism for callers to learn about partial failures, and handle them appropriately on a per-disk basis.",
-        "type": "object",
-        "properties": {
-          "status": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DiskManagementStatus"
-            }
-          }
-        },
-        "required": [
-          "status"
         ]
       },
       "Duration": {
