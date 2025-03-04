@@ -216,7 +216,7 @@ pub async fn realize_blueprint_with_overrides(
 // Convert a `Result<(), anyhow::Error>` into a `StepResult` containing either a
 // `StepSuccess` or `StepWarning`.
 //
-// Most steps use this to avoid stoping execution at the errored step, which
+// Most steps use this to avoid stopping execution at the errored step, which
 // would prevent other independent steps after the errored step from executing.
 fn map_err_to_step_warning(
     res: Result<(), anyhow::Error>,
