@@ -3,6 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Webhooks
+//!
+//! # Webhooks: Theory and Practice
+//!
+//! For a discussion of     
 
 use crate::app::external_dns;
 use anyhow::Context;

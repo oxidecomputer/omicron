@@ -294,11 +294,11 @@ impl WebhookDispatcher {
 #[cfg(test)]
 mod test {
     use super::*;
-    use nexus_db_queries::db;
-    // use nexus_test_utils::resource_helpers;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::prelude::*;
+    use nexus_db_queries::db;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::shared::WebhookDeliveryState;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::SemverVersion;
     use omicron_uuid_kinds::WebhookEventUuid;
@@ -394,10 +394,11 @@ mod test {
         // to publishing a webhook event) because `webhook_event_publish` also
         // activates the dispatcher task, and for this test, we would like to be
         // responsible for activating it.
+        let event_id = WebhookEventUuid::new_v4();
         datastore
             .webhook_event_create(
                 &opctx,
-                WebhookEventUuid::new_v4(),
+                event_id,
                 db::model::WebhookEventClass::TestQuuxBar,
                 serde_json::json!({"msg": "help im trapped in a webhook event factory"}),
             )
@@ -412,6 +413,7 @@ mod test {
             errors: Vec::new(),
             no_receivers: Vec::new(),
         };
+
         let mut task = WebhookDispatcher::new(
             datastore.clone(),
             nexus.background_tasks.task_webhook_deliverator.clone(),
@@ -449,6 +451,56 @@ mod test {
             subscriptions.contains(&db::model::WebhookEventClass::TestQuuxBar),
             "subscription to test.quux.bar should exist; subscriptions: \
              {subscriptions:?}",
+        );
+        let rx_reprocessed_globs = status.globs_reprocessed.get(&rx_id).expect(
+            "expected there to be an entry in status.globs_reprocessed \
+                 for our glob",
+        );
+        let reprocessed_entry = dbg!(rx_reprocessed_globs).get(GLOB_PATTERN);
+        assert!(
+            matches!(
+                reprocessed_entry,
+                Some(Ok(WebhookGlobStatus::Reprocessed { .. }))
+            ),
+            "glob status should be 'reprocessed'"
+        );
+
+        // There should now be a delivery entry for the event we published.
+        //
+        // Use `webhook_rx_delivery_list_attempts` rather than
+        // `webhook_rx_delivery_list_ready`, even though it's a bit more
+        // complex due to requiring pagination. This is because the
+        // webhook_deliverator background task may have activated and might
+        // attempt to deliver the event, making it no longer show up in the
+        // "ready" query.
+        let mut paginator = Paginator::new(db::datastore::SQL_BATCH_SIZE);
+        let mut deliveries = Vec::new();
+        while let Some(p) = paginator.next() {
+            let batch = datastore
+                .webhook_rx_delivery_list_attempts(
+                    &opctx,
+                    &rx_id,
+                    &[WebhookDeliveryTrigger::Event],
+                    WebhookDeliveryState::ALL.iter().copied(),
+                    &p.current_pagparams(),
+                )
+                .await
+                .unwrap();
+            paginator = p.found_batch(&batch, &|(delivery, attempt, _)| {
+                let id = delivery.id.into_untyped_uuid();
+                let attempt = attempt
+                    .as_ref()
+                    .map(|attempt| attempt.attempt)
+                    .unwrap_or_else(|| 0.into());
+                (id, attempt)
+            });
+            deliveries.extend(batch);
+        }
+        let event =
+            deliveries.iter().find(|(d, _, _)| d.event_id == event_id.into());
+        assert!(
+            dbg!(event).is_some(),
+            "delivery entry for dispatched event must exist"
         );
     }
 }

@@ -512,7 +512,17 @@ impl RelayState {
 }
 
 /// The state of a webhook delivery attempt.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    strum::VariantArray,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum WebhookDeliveryState {
     /// The webhook event has not yet been delivered.
@@ -527,4 +537,8 @@ pub enum WebhookDeliveryState {
     /// A connection to the receiver endpoint was successfully established, but
     /// no response was received within the delivery timeout.
     FailedTimeout,
+}
+
+impl WebhookDeliveryState {
+    pub const ALL: &[Self] = <Self as strum::VariantArray>::VARIANTS;
 }
