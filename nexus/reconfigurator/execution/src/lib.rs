@@ -476,12 +476,7 @@ fn register_cleanup_expunged_zones_step<'a>(
             "Cleanup expunged zones",
             move |_cx| async move {
                 let res = omicron_zones::clean_up_expunged_zones(
-                    &opctx,
-                    datastore,
-                    resolver,
-                    blueprint.all_omicron_zones(
-                        BlueprintZoneDisposition::is_ready_for_cleanup,
-                    ),
+                    &opctx, datastore, resolver, blueprint,
                 )
                 .await
                 .map_err(merge_anyhow_list);
