@@ -3,9 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
+use crate::Region;
 use crate::schema::region_replacement;
 use crate::typed_uuid::DbTypedUuid;
-use crate::Region;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_uuid_kinds::VolumeKind;

@@ -7,16 +7,16 @@
 
 // Copyright 2024 Oxide Computer Company
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use chrono::{DateTime, Utc};
 use clap::{Args, Parser};
 use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use oximeter::{
-    types::{Cumulative, Sample},
     Metric, Target,
+    types::{Cumulative, Sample},
 };
-use oximeter_db::{make_client, query, Client, DbWrite};
-use slog::{debug, info, o, Drain, Level, Logger};
+use oximeter_db::{Client, DbWrite, make_client, query};
+use slog::{Drain, Level, Logger, debug, info, o};
 use std::net::IpAddr;
 use uuid::Uuid;
 

@@ -54,11 +54,7 @@ pub async fn current_simulator_state(simrack: &SimRack) -> Vec<SpInfo> {
         // setup.
         slot = all_sps.last().map_or(0, |prev_info| {
             // if the type changed, reset to slot 0; otherwise increment
-            if prev_info.ignition.id.typ != typ {
-                0
-            } else {
-                slot + 1
-            }
+            if prev_info.ignition.id.typ != typ { 0 } else { slot + 1 }
         });
 
         let sp: &dyn SimulatedSp = match typ {

@@ -4,9 +4,9 @@
 
 //! omdb commands that interact with Reconfigurator
 
+use crate::Omdb;
 use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::db::DbUrlOptions;
-use crate::Omdb;
 use anyhow::Context as _;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use camino::Utf8PathBuf;
@@ -18,9 +18,9 @@ use diesel::SelectableHelper;
 use nexus_db_model::BpTarget;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
-use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::UnstableReconfiguratorState;

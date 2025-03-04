@@ -13,8 +13,8 @@ use crate::schema::{
     switch_port_settings_port_config, switch_port_settings_route_config,
     tx_eq_config,
 };
-use crate::{impl_enum_type, SqlU32};
-use crate::{SqlU16, SqlU8};
+use crate::{SqlU8, SqlU16};
+use crate::{SqlU32, impl_enum_type};
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use diesel::AsChangeset;

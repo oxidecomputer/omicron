@@ -9,7 +9,6 @@ use crate::planner::SledPlannerRng;
 use illumos_utils::zpool::ZpoolName;
 use itertools::Either;
 use nexus_sled_agent_shared::inventory::ZoneKind;
-use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetFilter;
 use nexus_types::deployment::BlueprintDatasetsConfig;
@@ -21,6 +20,7 @@ use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
+use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Dataset;
 use nexus_types::inventory::Zpool;
@@ -32,9 +32,9 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use slog::Logger;
 use slog::info;
 use slog::warn;
-use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -354,7 +354,6 @@ impl SledEditor {
     /// Sets the image source for a zone.
     ///
     /// Currently only used by test code.
-    #[cfg_attr(not(test), expect(dead_code))]
     pub fn set_zone_image_source(
         &mut self,
         zone_id: &OmicronZoneUuid,
