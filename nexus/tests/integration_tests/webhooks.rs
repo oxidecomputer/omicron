@@ -100,7 +100,7 @@ fn is_valid_for_webhook(
     webhook: &views::Webhook,
 ) -> impl FnOnce(httpmock::When) -> httpmock::When {
     let path = webhook.endpoint.path().to_string();
-    let id = webhook.id.to_string();
+    let id = webhook.identity.id.to_string();
     move |when| {
         when.path(path)
             .header("x-oxide-webhook-id", id)
@@ -257,6 +257,7 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
     dbg!(&webhook);
+    let rx_id = WebhookReceiverUuid::from_untyped_uuid(webhook.identity.id);
 
     let secret1_id = webhook.secrets[0].id;
 
@@ -264,7 +265,7 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
     let secret2_id = dbg!(
         secret_add(
             &cptestctx,
-            webhook.id,
+            rx_id,
             &params::WebhookSecretCreate { secret: SECRET2.to_string() },
         )
         .await
@@ -275,7 +276,7 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
     let secret3_id = dbg!(
         secret_add(
             &cptestctx,
-            webhook.id,
+            rx_id,
             &params::WebhookSecretCreate { secret: SECRET3.to_string() },
         )
         .await
@@ -652,6 +653,7 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
     let webhook =
         webhook_create(&cptestctx, &my_great_webhook_params(&server)).await;
     dbg!(&webhook);
+    let rx_id = WebhookReceiverUuid::from_untyped_uuid(webhook.identity.id);
 
     let body = serde_json::json!({
         "event_class": "probe",
@@ -687,13 +689,9 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
     };
 
     // Send a probe. The probe should fail due to a timeout.
-    let probe1 = webhook_send_probe(
-        &cptestctx,
-        &webhook.id,
-        false,
-        http::StatusCode::OK,
-    )
-    .await;
+    let probe1 =
+        webhook_send_probe(&cptestctx, &rx_id, false, http::StatusCode::OK)
+            .await;
     dbg!(&probe1);
 
     mock.assert_async().await;
@@ -727,13 +725,9 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
             .await
     };
 
-    let probe2 = webhook_send_probe(
-        &cptestctx,
-        &webhook.id,
-        false,
-        http::StatusCode::OK,
-    )
-    .await;
+    let probe2 =
+        webhook_send_probe(&cptestctx, &rx_id, false, http::StatusCode::OK)
+            .await;
     dbg!(&probe2);
 
     mock.assert_async().await;
@@ -773,13 +767,9 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
             .await
     };
 
-    let probe3 = webhook_send_probe(
-        &cptestctx,
-        &webhook.id,
-        false,
-        http::StatusCode::OK,
-    )
-    .await;
+    let probe3 =
+        webhook_send_probe(&cptestctx, &rx_id, false, http::StatusCode::OK)
+            .await;
     dbg!(&probe3);
     mock.assert_async().await;
     assert_eq!(probe3.probe.attempt, 1);
@@ -929,8 +919,9 @@ async fn test_probe_resends_failed_deliveries(
     };
 
     // Send a probe with ?resend=true
+    let rx_id = WebhookReceiverUuid::from_untyped_uuid(webhook.identity.id);
     let probe =
-        webhook_send_probe(&cptestctx, &webhook.id, true, http::StatusCode::OK)
+        webhook_send_probe(&cptestctx, &rx_id, true, http::StatusCode::OK)
             .await;
     dbg!(&probe);
     probe_mock.assert_async().await;

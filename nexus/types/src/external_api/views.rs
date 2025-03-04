@@ -1061,13 +1061,13 @@ pub struct EventClass {
 }
 
 /// The configuration for a webhook.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq,
+)]
 pub struct Webhook {
-    /// The UUID of this webhook receiver.
-    pub id: WebhookReceiverUuid,
-    /// The identifier assigned to this webhook receiver upon creation.
-    pub name: String,
-    pub description: String,
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
     /// The URL that webhook notification requests are sent to.
     pub endpoint: Url,
     // A list containing the IDs of the secret keys used to sign payloads sent
@@ -1084,7 +1084,7 @@ pub struct WebhookSecrets {
 }
 
 /// The public ID of a secret key assigned to a webhook.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct WebhookSecretId {
     pub id: Uuid,
 }

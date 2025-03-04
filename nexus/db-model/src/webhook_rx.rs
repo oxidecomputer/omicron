@@ -15,6 +15,7 @@ use crate::WebhookEventClass;
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
 use nexus_types::external_api::views;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{
     GenericUuid, WebhookReceiverKind, WebhookReceiverUuid, WebhookSecretUuid,
@@ -47,17 +48,17 @@ impl TryFrom<WebhookReceiverConfig> for views::Webhook {
             .into_iter()
             .map(WebhookSubscriptionKind::into_event_class_string)
             .collect();
-        let WebhookReceiver { identity, endpoint, rcgen: _ } = rx;
-        let WebhookReceiverIdentity { id, name, description, .. } = identity;
-        let endpoint = endpoint.parse().map_err(|e| Error::InternalError {
-            // This is an internal error, as we should not have ever allowed
-            // an invalid URL to be inserted into the database...
-            internal_message: format!("invalid webhook URL {endpoint:?}: {e}",),
-        })?;
+        let endpoint =
+            rx.endpoint.parse().map_err(|e| Error::InternalError {
+                // This is an internal error, as we should not have ever allowed
+                // an invalid URL to be inserted into the database...
+                internal_message: format!(
+                    "invalid webhook URL {:?}: {e}",
+                    rx.endpoint,
+                ),
+            })?;
         Ok(views::Webhook {
-            id: id.into(),
-            name: name.to_string(),
-            description,
+            identity: rx.identity(),
             endpoint,
             secrets,
             events,
