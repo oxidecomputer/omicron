@@ -353,15 +353,10 @@ fn register_deploy_datasets_step<'a>(
             "Deploy datasets",
             move |cx| async move {
                 let sleds_by_id = sleds.into_value(cx.token()).await;
-                let res = datasets::deploy_datasets(
-                    opctx,
-                    &sleds_by_id,
-                    blueprint.sleds.iter().map(|(sled_id, sled)| {
-                        (*sled_id, &sled.datasets_config)
-                    }),
-                )
-                .await
-                .map_err(merge_anyhow_list);
+                let res =
+                    datasets::deploy_datasets(opctx, &sleds_by_id, blueprint)
+                        .await
+                        .map_err(merge_anyhow_list);
                 Ok(map_err_to_step_warning(res))
             },
         )
