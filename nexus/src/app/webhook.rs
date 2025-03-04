@@ -243,20 +243,6 @@ impl super::Nexus {
 pub(super) fn delivery_client(
     external_dns: &Arc<external_dns::Resolver>,
 ) -> Result<reqwest::Client, reqwest::Error> {
-    /// A wrapper around [`external_dns::Resolver`] which rejects IP addresses that
-    /// are underlay network IPs.
-    struct WebhookDnsResolver {
-        external_dns: Arc<external_dns::Resolver>,
-    }
-
-    impl reqwest::dns::Resolve for WebhookDnsResolver {
-        fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
-            // TODO(eliza): this is where we have to actually return an error if the
-            // DNS name resolves to an underlay IP! Figure that out!
-            self.external_dns.resolve(name)
-        }
-    }
-
     reqwest::Client::builder()
         // Per [RFD 538 § 4.3.1][1], webhook delivery does *not* follow
         // redirects.
@@ -274,10 +260,7 @@ pub(super) fn delivery_client(
         //
         // [1]: https://rfd.shared.oxide.computer/rfd/538#delivery-failure
         .timeout(Duration::from_secs(30))
-        // my god...it's full of Arcs...
-        .dns_resolver(Arc::new(WebhookDnsResolver {
-            external_dns: external_dns.clone(),
-        }))
+        .dns_resolver(external_dns.clone())
         .build()
 }
 
