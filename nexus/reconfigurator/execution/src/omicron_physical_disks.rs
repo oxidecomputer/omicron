@@ -11,6 +11,8 @@ use futures::StreamExt;
 use futures::stream;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -104,6 +106,23 @@ where
 
 /// Decommissions all disks which are currently expunged.
 pub(crate) async fn decommission_expunged_disks(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    blueprint: &Blueprint,
+) -> Result<(), Vec<anyhow::Error>> {
+    decommission_expunged_disks_impl(
+        opctx,
+        datastore,
+        blueprint
+            .all_omicron_disks(
+                BlueprintPhysicalDiskDisposition::is_ready_for_cleanup,
+            )
+            .map(|(sled_id, config)| (sled_id, config.id)),
+    )
+    .await
+}
+
+async fn decommission_expunged_disks_impl(
     opctx: &OpContext,
     datastore: &DataStore,
     expunged_disks: impl Iterator<Item = (SledUuid, PhysicalDiskUuid)>,
@@ -642,7 +661,7 @@ mod test {
         assert_eq!(d.disk_state, PhysicalDiskState::Active);
         assert_eq!(d.disk_policy, PhysicalDiskPolicy::InService);
 
-        super::decommission_expunged_disks(
+        super::decommission_expunged_disks_impl(
             &opctx,
             &datastore,
             [(sled_id, disk_to_decommission)].into_iter(),
