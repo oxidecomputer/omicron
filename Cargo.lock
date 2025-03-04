@@ -9668,6 +9668,7 @@ dependencies = [
  "omicron-workspace-hack",
  "pq-sys",
  "reedline",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "slog",
