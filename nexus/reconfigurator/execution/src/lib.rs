@@ -526,12 +526,11 @@ fn register_decommission_disks_step<'a>(
             ExecutionStepId::Cleanup,
             "Decommission expunged disks",
             move |_cx| async move {
-                let res =
-                    omicron_physical_disks::decommission_expunged_disks(
-                        opctx, datastore, blueprint,
-                    )
-                    .await
-                    .map_err(merge_anyhow_list);
+                let res = omicron_physical_disks::decommission_expunged_disks(
+                    opctx, datastore, blueprint,
+                )
+                .await
+                .map_err(merge_anyhow_list);
                 Ok(map_err_to_step_warning(res))
             },
         )
@@ -553,8 +552,7 @@ fn register_deploy_clickhouse_cluster_nodes_step<'a>(
                 {
                     let res = clickhouse::deploy_nodes(
                         opctx,
-                        blueprint
-                            .all_omicron_zones(BlueprintZoneDisposition::any),
+                        blueprint,
                         &clickhouse_cluster_config,
                     )
                     .await
@@ -578,15 +576,8 @@ fn register_deploy_clickhouse_single_node_step<'a>(
             ExecutionStepId::Ensure,
             "Deploy single-node clickhouse cluster",
             move |_cx| async move {
-                let res = clickhouse::deploy_single_node(
-                    opctx,
-                    blueprint
-                        .all_omicron_zones(
-                            BlueprintZoneDisposition::is_in_service,
-                        )
-                        .filter(|(_, z)| z.zone_type.is_clickhouse()),
-                )
-                .await;
+                let res =
+                    clickhouse::deploy_single_node(opctx, blueprint).await;
                 Ok(map_err_to_step_warning(res))
             },
         )
