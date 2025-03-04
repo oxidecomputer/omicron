@@ -422,6 +422,7 @@ impl DataStore {
                     vmm.id = instance.active_propolis_id AND
                     vmm.time_deleted IS NULL
                 WHERE
+                    instance.time_deleted IS NULL AND
                     instance.project_id = ",
             )
             .param()
