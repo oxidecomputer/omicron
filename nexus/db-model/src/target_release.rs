@@ -42,28 +42,24 @@ pub struct TargetRelease {
 }
 
 impl TargetRelease {
-    pub fn new(
-        generation: Generation,
-        release_source: TargetReleaseSource,
-        tuf_repo_id: Option<DbTypedUuid<TufRepoKind>>,
-    ) -> Self {
+    pub fn new_unspecified(prev: &TargetRelease) -> Self {
         Self {
-            generation,
+            generation: Generation(prev.generation.next()),
             time_requested: Utc::now(),
-            release_source,
-            tuf_repo_id,
+            release_source: TargetReleaseSource::Unspecified,
+            tuf_repo_id: None,
         }
     }
 
-    pub fn new_from_prev(
-        prev: TargetRelease,
-        release_source: TargetReleaseSource,
-        tuf_repo_id: Option<DbTypedUuid<TufRepoKind>>,
+    pub fn new_system_version(
+        prev: &TargetRelease,
+        tuf_repo_id: DbTypedUuid<TufRepoKind>,
     ) -> Self {
-        Self::new(
-            Generation(prev.generation.next()),
-            release_source,
-            tuf_repo_id,
-        )
+        Self {
+            generation: Generation(prev.generation.next()),
+            time_requested: Utc::now(),
+            release_source: TargetReleaseSource::SystemVersion,
+            tuf_repo_id: Some(tuf_repo_id),
+        }
     }
 }

@@ -153,11 +153,8 @@ mod test {
         // We should be able to set a new generation just like the first,
         // with some (very small) fuzz allowed in the timestamp reported
         // by the database.
-        let initial_target_release = TargetRelease::new_from_prev(
-            target_release,
-            TargetReleaseSource::Unspecified,
-            None,
-        );
+        let initial_target_release =
+            TargetRelease::new_unspecified(&target_release);
         let target_release = datastore
             .target_release_insert(opctx, initial_target_release.clone())
             .await
@@ -174,33 +171,16 @@ mod test {
         );
         assert!(target_release.tuf_repo_id.is_none());
 
-        // Trying to reuse a generation should fail.
-        assert!(datastore
-            .target_release_insert(
-                opctx,
-                TargetRelease::new(
-                    target_release.generation,
-                    TargetReleaseSource::Unspecified,
-                    None,
-                )
-            )
-            .await
-            .is_err());
-
-        // But the next generation should be fine, even with the same source.
+        // Inserting a new "unspecified" target should be fine.
         let target_release = datastore
             .target_release_insert(
                 opctx,
-                TargetRelease::new_from_prev(
-                    target_release,
-                    TargetReleaseSource::Unspecified,
-                    None,
-                ),
+                TargetRelease::new_unspecified(&target_release),
             )
             .await
             .unwrap();
 
-        // Finally, use a new generation number and a TUF repo source.
+        // Now add a new TUF repo and use it as the source.
         let version = SemverVersion::new(0, 0, 1);
         let hash = ArtifactHash(
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -240,11 +220,7 @@ mod test {
         let target_release = datastore
             .target_release_insert(
                 opctx,
-                TargetRelease::new_from_prev(
-                    target_release,
-                    TargetReleaseSource::SystemVersion,
-                    Some(tuf_repo_id),
-                ),
+                TargetRelease::new_system_version(&target_release, tuf_repo_id),
             )
             .await
             .unwrap();

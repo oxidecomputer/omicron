@@ -6451,10 +6451,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let current_target_release =
                 nexus.datastore().target_release_get_current(&opctx).await?;
             let next_target_release =
-                nexus_db_model::TargetRelease::new_from_prev(
-                    current_target_release,
-                    nexus_db_model::TargetReleaseSource::SystemVersion,
-                    Some(tuf_repo_id),
+                nexus_db_model::TargetRelease::new_system_version(
+                    &current_target_release,
+                    tuf_repo_id,
                 );
             let target_release = nexus
                 .datastore()
