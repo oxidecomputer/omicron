@@ -8,6 +8,8 @@ use camino_tempfile::Utf8TempDir;
 use chrono::Utc;
 use clap::Parser as _;
 use dropshot::test_util::LogContext;
+use http::method::Method;
+use http::StatusCode;
 use nexus_config::UpdatesConfig;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::{NexusRequest, RequestBuilder};
@@ -52,10 +54,10 @@ async fn get_set_target_release() -> anyhow::Result<()> {
 
     // Attempting to set an invalid system version should fail.
     let system_version = Version::new(0, 0, 0);
-    NexusRequest::objects_post(
+    NexusRequest::object_put(
         client,
         "/v1/system/update/target-release",
-        &SetTargetReleaseParams { system_version },
+        Some(&SetTargetReleaseParams { system_version }),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -102,10 +104,16 @@ async fn get_set_target_release() -> anyhow::Result<()> {
         .system_version
     );
 
-    let target_release: TargetRelease = NexusRequest::objects_post(
-        client,
-        "/v1/system/update/target-release",
-        &SetTargetReleaseParams { system_version: system_version.clone() },
+    let target_release: TargetRelease = NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::PUT,
+            "/v1/system/update/target-release",
+        )
+        .body(Some(&SetTargetReleaseParams {
+            system_version: system_version.clone(),
+        }))
+        .expect_status(Some(StatusCode::CREATED)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()

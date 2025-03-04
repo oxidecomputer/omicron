@@ -2910,7 +2910,7 @@ pub trait NexusExternalApi {
     /// a goal state for the rack's software, and attempt to asynchronously
     /// update to that release.
     #[endpoint {
-        method = POST,
+        method = PUT,
         path = "/v1/system/update/target-release",
         tags = ["system/update"],
         unpublished = true,
