@@ -26,7 +26,6 @@ use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetDisposition;
-use nexus_types::deployment::BlueprintDatasetFilter;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
@@ -889,16 +888,13 @@ impl<'a> BlueprintBuilder<'a> {
                 }
             }
         }
-        for dataset in editor.datasets(BlueprintDatasetFilter::All) {
-            match dataset.disposition {
-                BlueprintDatasetDisposition::Expunged => (),
-                BlueprintDatasetDisposition::InService => {
-                    return Err(Error::Planner(anyhow!(
-                        "expunged all disks but a dataset \
-                         is still in service: {dataset:?}"
-                    )));
-                }
-            }
+        if let Some(dataset) =
+            editor.datasets(BlueprintDatasetDisposition::is_in_service).next()
+        {
+            return Err(Error::Planner(anyhow!(
+                "expunged all disks but a dataset \
+                 is still in service: {dataset:?}"
+            )));
         }
         for zone_id in zones_ready_for_cleanup {
             editor
