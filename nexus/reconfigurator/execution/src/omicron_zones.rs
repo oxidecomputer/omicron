@@ -17,7 +17,9 @@ use internal_dns_types::names::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::CollectorReassignment;
+use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneConfig;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_common::address::COCKROACH_ADMIN_PORT;
@@ -103,16 +105,26 @@ pub(crate) async fn clean_up_expunged_zones<R: CleanupResolver>(
     opctx: &OpContext,
     datastore: &DataStore,
     resolver: &R,
-    expunged_zones: impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)>,
+    blueprint: &Blueprint,
 ) -> Result<(), Vec<anyhow::Error>> {
-    let errors: Vec<anyhow::Error> = stream::iter(expunged_zones)
-        .filter_map(|(sled_id, config)| async move {
-            // We expect to only be called with expunged zones that are ready
-            // for cleanup; skip any with a different disposition.
-            if !config.disposition.is_ready_for_cleanup() {
-                return None;
-            }
+    clean_up_expunged_zones_impl(
+        opctx,
+        datastore,
+        resolver,
+        blueprint
+            .all_omicron_zones(BlueprintZoneDisposition::is_ready_for_cleanup),
+    )
+    .await
+}
 
+async fn clean_up_expunged_zones_impl<R: CleanupResolver>(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    resolver: &R,
+    zones_to_clean_up: impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)>,
+) -> Result<(), Vec<anyhow::Error>> {
+    let errors: Vec<anyhow::Error> = stream::iter(zones_to_clean_up)
+        .filter_map(|(sled_id, config)| async move {
             let log = opctx.log.new(slog::o!(
                 "sled_id" => sled_id.to_string(),
                 "zone_id" => config.id.to_string(),
@@ -346,7 +358,6 @@ mod test {
         OmicronZoneDataset, OmicronZonesConfig, SledRole,
     };
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::{
         Blueprint, BlueprintDatasetsConfig, BlueprintPhysicalDisksConfig,
         BlueprintSledConfig, BlueprintTarget, BlueprintZoneImageSource,
@@ -710,7 +721,7 @@ mod test {
         // otherwise succeed, without attempting to contact our mock admin
         // server. (We don't have a good way to confirm the warning was logged,
         // so we'll just check for an Ok return and no contact to mock_admin.)
-        clean_up_expunged_zones(
+        clean_up_expunged_zones_impl(
             &opctx,
             datastore,
             &fake_resolver,
@@ -756,7 +767,7 @@ mod test {
                 );
             };
         add_decommission_expecation(&mut mock_admin);
-        clean_up_expunged_zones(
+        clean_up_expunged_zones_impl(
             &opctx,
             datastore,
             &fake_resolver,
@@ -787,7 +798,7 @@ mod test {
         add_decommission_failure_expecation(&mut mock_bad2);
         let mut fake_resolver =
             FixedResolver(vec![mock_bad1.addr(), mock_bad2.addr()]);
-        let mut err = clean_up_expunged_zones(
+        let mut err = clean_up_expunged_zones_impl(
             &opctx,
             datastore,
             &fake_resolver,
@@ -815,7 +826,7 @@ mod test {
         add_decommission_failure_expecation(&mut mock_bad2);
         add_decommission_expecation(&mut mock_admin);
         fake_resolver.0.push(mock_admin.addr());
-        clean_up_expunged_zones(
+        clean_up_expunged_zones_impl(
             &opctx,
             datastore,
             &fake_resolver,
