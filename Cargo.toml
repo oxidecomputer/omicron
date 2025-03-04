@@ -265,7 +265,7 @@ default-members = [
     "workspace-hack",
     "zone-setup",
 ]
-resolver = "2"
+resolver = "3"
 
 #
 # Tree-wide lint configuration.
