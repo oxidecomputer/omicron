@@ -28,7 +28,6 @@ use update_engine::merge_anyhow_list;
 
 mod clickhouse;
 mod cockroachdb;
-mod datasets;
 mod dns;
 mod omicron_physical_disks;
 mod omicron_sled_config;
