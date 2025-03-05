@@ -102,7 +102,10 @@ use blueprint_display::{
 };
 use id_map::{IdMap, IdMappable};
 
+use crate::inventory::BaseboardId;
 pub use blueprint_diff::BlueprintDiffSummary;
+use gateway_client::types::SpType;
+use omicron_common::update::ArtifactHashId;
 
 /// Describes a complete set of software and configuration for the system
 // Blueprints are a fundamental part of how the system modifies itself.  Each
@@ -151,6 +154,9 @@ pub struct Blueprint {
 
     /// A map of sled id -> desired configuration of the sled.
     pub sleds: BTreeMap<SledUuid, BlueprintSledConfig>,
+
+    /// List of pending MGS-mediated updates
+    pub pending_mgs_updates: BTreeMap<BaseboardId, PendingMgsUpdate>,
 
     /// which blueprint this blueprint is based on
     pub parent_blueprint_id: Option<BlueprintUuid>,
@@ -472,6 +478,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
         let Blueprint {
             id,
             sleds,
+            pending_mgs_updates: _, // XXX-dap
             parent_blueprint_id,
             // These two cockroachdb_* fields are handled by
             // `make_cockroachdb_table()`, called below.
@@ -896,6 +903,21 @@ impl fmt::Display for BlueprintZoneImageSource {
             }
         }
     }
+}
+
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+pub struct PendingMgsUpdate {
+    /// id of the baseboard that we're going to update
+    baseboard_id: BaseboardId,
+    /// what type of baseboard this is
+    sp_type: SpType,
+    /// last known MGS slot (cubby number) of the baseboard
+    slot_id: u16,
+    /// which artifact to apply to this device
+    /// (implies which component is being updated)
+    artifact_hash_id: ArtifactHashId,
 }
 
 /// Filters that apply to blueprint datasets.

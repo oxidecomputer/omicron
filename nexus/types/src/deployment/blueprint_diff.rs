@@ -58,6 +58,7 @@ impl<'a> BlueprintDiffSummary<'a> {
         let BlueprintDiff {
             // Fields in which changes are meaningful.
             sleds,
+            pending_mgs_updates: _, // XXX-dap
             clickhouse_cluster_config,
             // Metadata fields for which changes don't reflect semantic
             // changes from one blueprint to the next.

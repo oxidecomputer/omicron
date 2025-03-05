@@ -4,6 +4,7 @@
 
 use std::{fmt, str::FromStr};
 
+use daft::Diffable;
 use hex::FromHexError;
 use schemars::{
     JsonSchema,
@@ -64,6 +65,7 @@ impl From<Artifact> for ArtifactId {
 /// by name and version. This type indicates that.
 #[derive(
     Debug,
+    Diffable,
     Clone,
     PartialEq,
     Eq,
@@ -86,6 +88,7 @@ pub struct ArtifactHashId {
 #[derive(
     Copy,
     Clone,
+    Diffable,
     Eq,
     PartialEq,
     Ord,
@@ -95,6 +98,7 @@ pub struct ArtifactHashId {
     Deserialize,
     JsonSchema,
 )]
+#[daft(leaf)] // XXX-dap
 #[serde(transparent)]
 #[cfg_attr(feature = "testing", derive(test_strategy::Arbitrary))]
 pub struct ArtifactHash(

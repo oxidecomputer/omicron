@@ -1589,6 +1589,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
     Ok(Blueprint {
         id: BlueprintUuid::new_v4(),
         sleds: blueprint_sleds,
+        pending_mgs_updates: BTreeMap::new(),
         parent_blueprint_id: None,
         internal_dns_version,
         // We don't configure external DNS during RSS, so set it to an initial

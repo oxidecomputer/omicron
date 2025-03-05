@@ -3466,6 +3466,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "daft",
  "gateway-messages",
  "omicron-workspace-hack",
  "progenitor 0.9.1",
@@ -12548,8 +12549,8 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#d2387032714f66e31b7e255d89f9bf6eb9b3a010"
 dependencies = [
+ "daft",
  "parse-display",
  "proptest",
  "schemars",
