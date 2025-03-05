@@ -28,7 +28,8 @@ use uuid::Uuid;
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
-const WEBHOOKS_BASE_PATH: &str = "/experimental/v1/webhooks";
+const RECEIVERS_BASE_PATH: &str = "/experimental/v1/webhooks/receivers";
+const SECRETS_BASE_PATH: &str = "/experimental/v1/webhooks/secrets";
 
 async fn webhook_create(
     ctx: &ControlPlaneTestContext,
@@ -36,7 +37,7 @@ async fn webhook_create(
 ) -> views::Webhook {
     resource_helpers::object_create::<params::WebhookCreate, views::Webhook>(
         &ctx.external_client,
-        WEBHOOKS_BASE_PATH,
+        RECEIVERS_BASE_PATH,
         params,
     )
     .await
@@ -44,7 +45,7 @@ async fn webhook_create(
 
 fn get_webhooks_url(name_or_id: impl Into<NameOrId>) -> String {
     let name_or_id = name_or_id.into();
-    format!("{WEBHOOKS_BASE_PATH}/{name_or_id}")
+    format!("{RECEIVERS_BASE_PATH}/{name_or_id}")
 }
 
 async fn webhook_get(
@@ -97,7 +98,7 @@ async fn secret_add(
         views::WebhookSecretId,
     >(
         &ctx.external_client,
-        &format!("{WEBHOOKS_BASE_PATH}/{webhook_id}/secrets"),
+        &format!("{SECRETS_BASE_PATH}/?receiver={webhook_id}"),
         params,
     )
     .await
@@ -110,7 +111,7 @@ async fn webhook_send_probe(
     status: http::StatusCode,
 ) -> views::WebhookProbeResult {
     let pathparams = if resend { "?resend=true" } else { "" };
-    let path = format!("{WEBHOOKS_BASE_PATH}/{webhook_id}/probe{pathparams}");
+    let path = format!("{RECEIVERS_BASE_PATH}/{webhook_id}/probe{pathparams}");
     NexusRequest::new(
         RequestBuilder::new(&ctx.external_client, http::Method::POST, &path)
             .expect_status(Some(status)),
