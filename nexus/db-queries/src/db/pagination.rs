@@ -218,7 +218,9 @@ impl RawPaginator {
     /// Returns a query builder for the pagination source
     ///
     /// The caller should use this builder to construct a SELECT query with the
-    /// columns they'd like to paginate over.
+    /// columns they'd like to paginate over. Note that this source query
+    /// will be evaluated as a subquery, so the pagination logic below
+    /// can add its own WHERE clause.
     ///
     /// It is valid to paginate over one or many tables here - however,
     /// the column names must match the argument provided by the

@@ -35,7 +35,6 @@ use crate::db::model::Sled;
 use crate::db::model::Vmm;
 use crate::db::model::VmmState;
 use crate::db::pagination::RawPaginator;
-use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
 use crate::db::raw_query_builder::TrustedStr;
 use crate::db::update_and_check::UpdateAndCheck;
@@ -530,42 +529,72 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Instance> {
         use db::schema::instance::dsl;
-        use db::schema::vmm::dsl as vmm_dsl;
 
-        let q = paginated(dsl::instance, dsl::id, &pagparams)
-            // Select only those instances which may be reincarnated.
-            .filter(InstanceAutoRestart::filter_reincarnatable());
+        let mut paginator = RawPaginator::new();
+        let source = paginator.source();
+        source.sql("SELECT ").sql(
+            AllColumnsOf::<dsl::instance>::with_prefix_and_alias("instance"),
+        );
+
+        // Select only those instances which may be reincarnated.
+        let reincarnatable_where_clause = const_format::concatcp!("
+            (
+                instance.auto_restart_policy = 'best_effort' OR
+                instance.auto_restart_policy IS NULL
+            ) AND
+            (
+                instance.time_last_auto_restarted IS NULL OR
+                (
+                    instance.auto_restart_cooldown IS NOT NULL AND
+                    instance.time_last_auto_restarted < NOW() - instance.auto_restart_cooldown
+                ) OR
+                (
+                    instance.auto_restart_cooldown IS NULL AND
+                    instance.time_last_auto_restarted < NOW() - \'",
+            InstanceAutoRestart::DEFAULT_COOLDOWN.num_milliseconds(),
+            "MS\'::INTERVAL
+                )
+            ) AND
+            instance.time_deleted IS NULL AND
+            instance.updater_id IS NULL
+        ");
 
         match reason {
             ReincarnationReason::Failed => {
                 // The instance must be in the Failed state.
-                q.filter(dsl::state.eq(InstanceState::Failed))
-                    .filter(dsl::active_propolis_id.is_null())
-                    .select(Instance::as_select())
-                    .load_async::<Instance>(
-                        &*self.pool_connection_authorized(opctx).await?,
+                source
+                    .sql(
+                        " FROM instance
+                    WHERE
+                        instance.state = 'failed' AND
+                        instance.active_propolis_id IS NULL AND ",
                     )
-                    .await
+                    .sql(reincarnatable_where_clause);
             }
             ReincarnationReason::SagaUnwound => {
-                // The instance must have an active VMM.
-                q.filter(dsl::state.eq(InstanceState::Vmm))
-                    .inner_join(
-                        vmm_dsl::vmm
-                            .on(dsl::active_propolis_id
-                                .eq(vmm_dsl::id.nullable())),
+                // The instance must have an active VMM, which must be in the
+                // `SagaUnwound` state.
+                source
+                    .sql(
+                        " FROM instance
+                    INNER JOIN vmm ON active_propolis_id = vmm.id
+                    WHERE
+                        instance.state = 'vmm' AND
+                        vmm.state = 'saga_unwound' AND ",
                     )
-                    // The instance's active VMM must be in the `SagaUnwound`
-                    // state.
-                    .filter(vmm_dsl::state.eq(VmmState::SagaUnwound))
-                    .select(Instance::as_select())
-                    .load_async::<Instance>(
-                        &*self.pool_connection_authorized(opctx).await?,
-                    )
-                    .await
+                    .sql(reincarnatable_where_clause);
             }
         }
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+
+        paginator
+            .with_parameters(pagparams)
+            .paginate_by_column::<diesel::sql_types::Uuid>("instance_id")
+            .query::<AsSelect<Instance, Pg>>()
+            .load_async::<Instance>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Fetches information about an Instance that the caller has previously
