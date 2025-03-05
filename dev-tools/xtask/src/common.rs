@@ -5,7 +5,7 @@
 //! Common xtask command helpers
 
 use anyhow::{Context, Result, bail};
-use std::process::Command;
+use std::{process::Command, sync::LazyLock};
 
 /// Runs the given command, printing some basic debug information around it, and
 /// failing with an error message if the command does not exit successfully
@@ -32,3 +32,49 @@ pub fn run_subcmd(mut command: Command) -> Result<()> {
 
     Ok(())
 }
+
+/// Creates and prepares a `std::process::Command` for the `cargo` executable.
+pub(crate) fn cargo_command() -> Command {
+    let cargo =
+        std::env::var("CARGO").unwrap_or_else(|_| String::from("cargo"));
+    let mut command = Command::new(&cargo);
+
+    for (key, _) in std::env::vars_os() {
+        let Some(key) = key.to_str() else { continue };
+        if SANITIZED_ENV_VARS.matches(key) {
+            command.env_remove(key);
+        }
+    }
+
+    command
+}
+
+#[derive(Debug)]
+struct SanitizedEnvVars {
+    // At the moment we only ban some prefixes, but we may also want to ban env
+    // vars by exact name in the future.
+    prefixes: Vec<&'static str>,
+}
+
+impl SanitizedEnvVars {
+    fn new() -> Self {
+        // Remove many of the environment variables set in
+        // https://doc.rust-lang.org/cargo/reference/environment-variables.html#environment-variables-cargo-sets-for-build-scripts.
+        // This is done to avoid recompilation with crates like ring between
+        // `cargo clippy` and `cargo xtask clippy`. (This is really a bug in
+        // Cargo, link to the bug pending it being filed upstream.)
+        //
+        // The current list is informed by looking at ring's build script, so
+        // it's not guaranteed to be exhaustive and it may need to grow over
+        // time.
+        let prefixes = vec!["CARGO_PKG_", "CARGO_MANIFEST_", "CARGO_CFG_"];
+        Self { prefixes }
+    }
+
+    fn matches(&self, key: &str) -> bool {
+        self.prefixes.iter().any(|prefix| key.starts_with(prefix))
+    }
+}
+
+static SANITIZED_ENV_VARS: LazyLock<SanitizedEnvVars> =
+    LazyLock::new(SanitizedEnvVars::new);
