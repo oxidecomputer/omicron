@@ -7,11 +7,9 @@ edition = "2021"
 workspace = true
 
 [dependencies]
-# XXX-dap check these
 futures.workspace = true
 gateway-client.workspace = true
 reqwest.workspace = true
-slog-error-chain.workspace = true
 slog.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

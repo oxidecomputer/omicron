@@ -6052,7 +6052,6 @@ dependencies = [
  "rand 0.8.5",
  "reqwest",
  "slog",
- "slog-error-chain",
  "sp-sim",
  "thiserror 1.0.69",
  "tokio",
