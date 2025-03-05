@@ -101,12 +101,6 @@ pub(crate) async fn call_pantry_attach_for_disk(
             )))
         })?;
 
-    info!(
-        log,
-        "sending attach for disk {disk_id} volume {} to {pantry_address}",
-        disk.volume_id(),
-    );
-
     call_pantry_attach_for_volume(
         log,
         nexus,
@@ -125,6 +119,8 @@ pub(crate) async fn call_pantry_attach_for_volume(
     pantry_address: SocketAddrV6,
 ) -> Result<(), ActionError> {
     let endpoint = format!("http://{}", pantry_address);
+
+    info!(log, "sending attach request for {attach_id} to {pantry_address}");
 
     let client = crucible_pantry_client::Client::new(&endpoint);
 
