@@ -52,6 +52,7 @@ serde_json.workspace = true
 sled-agent-client.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
+steno.workspace = true
 strum.workspace = true
 supports-color.workspace = true
 tabled.workspace = true
