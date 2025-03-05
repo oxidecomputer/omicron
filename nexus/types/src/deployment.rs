@@ -478,7 +478,9 @@ impl fmt::Display for BlueprintDisplay<'_> {
         let Blueprint {
             id,
             sleds,
-            pending_mgs_updates: _, // XXX-dap
+            // TODO Will need to print these when we can actually create
+            // blueprints with pending MGS updates.
+            pending_mgs_updates: _,
             parent_blueprint_id,
             // These two cockroachdb_* fields are handled by
             // `make_cockroachdb_table()`, called below.

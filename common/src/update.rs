@@ -98,7 +98,7 @@ pub struct ArtifactHashId {
     Deserialize,
     JsonSchema,
 )]
-#[daft(leaf)] // XXX-dap
+#[daft(leaf)]
 #[serde(transparent)]
 #[cfg_attr(feature = "testing", derive(test_strategy::Arbitrary))]
 pub struct ArtifactHash(
