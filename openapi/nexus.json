@@ -624,525 +624,6 @@
         }
       }
     },
-    "/experimental/v1/webhooks/deliveries": {
-      "get": {
-        "tags": [
-          "system/webhooks"
-        ],
-        "summary": "List delivery attempts to a webhook receiver.",
-        "operationId": "webhook_delivery_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "receiver",
-            "description": "The name or ID of the webhook receiver.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WebhookDeliveryResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": {
-          "required": []
-        }
-      }
-    },
-    "/experimental/v1/webhooks/deliveries/{event_id}/resend": {
-      "post": {
-        "tags": [
-          "system/webhooks"
-        ],
-        "summary": "Request re-delivery of a webhook event.",
-        "operationId": "webhook_delivery_resend",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "event_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "in": "query",
-            "name": "receiver",
-            "description": "The name or ID of the webhook receiver.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WebhookDeliveryId"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/experimental/v1/webhooks/event-classes": {
-      "get": {
-        "tags": [
-          "system/webhooks"
-        ],
-        "summary": "List webhook event classes",
-        "operationId": "webhook_event_class_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "filter",
-            "description": "An optional glob pattern for filtering event class names.",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EventClassResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": {
-          "required": []
-        }
-      }
-    },
-    "/experimental/v1/webhooks/event-classes/{name}": {
-      "get": {
-        "tags": [
-          "system/webhooks"
-        ],
-        "summary": "Fetch details on an event class by name.",
-        "operationId": "webhook_event_class_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "description": "The name of the event class.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EventClass"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/experimental/v1/webhooks/receivers": {
-      "post": {
-        "tags": [
-          "system/webhooks"
-        ],
-        "summary": "Create a new webhook receiver.",
-        "operationId": "webhook_create",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/WebhookCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Webhook"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/experimental/v1/webhooks/receivers/{receiver}": {
-      "get": {
-        "tags": [
-          "system/webhooks"
-        ],
-        "summary": "Get the configuration for a webhook receiver.",
-        "operationId": "webhook_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "receiver",
-            "description": "The name or ID of the webhook receiver.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Webhook"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "system/webhooks"
-        ],
-        "summary": "Update the configuration of an existing webhook receiver.",
-        "operationId": "webhook_update",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "receiver",
-            "description": "The name or ID of the webhook receiver.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/WebhookUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "system/webhooks"
-        ],
-        "summary": "Delete a webhook receiver.",
-        "operationId": "webhook_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "receiver",
-            "description": "The name or ID of the webhook receiver.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/experimental/v1/webhooks/receivers/{receiver}/probe": {
-      "post": {
-        "tags": [
-          "system/webhooks"
-        ],
-        "summary": "Send a liveness probe request to a webhook receiver.",
-        "operationId": "webhook_probe",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "receiver",
-            "description": "The name or ID of the webhook receiver.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "resend",
-            "description": "If true, resend all events that have not been delivered successfully if the probe request succeeds.",
-            "schema": {
-              "type": "boolean"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WebhookProbeResult"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/experimental/v1/webhooks/secrets": {
-      "get": {
-        "tags": [
-          "system/webhooks"
-        ],
-        "summary": "List the IDs of secrets for a webhook receiver.",
-        "operationId": "webhook_secrets_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "receiver",
-            "description": "The name or ID of the webhook receiver.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WebhookSecrets"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "system/webhooks"
-        ],
-        "summary": "Add a secret to a webhook receiver.",
-        "operationId": "webhook_secrets_add",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "receiver",
-            "description": "The name or ID of the webhook receiver.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/WebhookSecretCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WebhookSecretId"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/experimental/v1/webhooks/secrets/{secret_id}": {
-      "delete": {
-        "tags": [
-          "system/webhooks"
-        ],
-        "summary": "Delete a secret associated with a webhook receiver by ID.",
-        "operationId": "webhook_secrets_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "secret_id",
-            "description": "ID of the secret.",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/login/{silo_name}/saml/{provider_name}": {
       "post": {
         "tags": [
@@ -12369,6 +11850,525 @@
             "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/webhooks/deliveries": {
+      "get": {
+        "tags": [
+          "system/webhooks"
+        ],
+        "summary": "List delivery attempts to a webhook receiver.",
+        "operationId": "webhook_delivery_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookDeliveryResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/webhooks/deliveries/{event_id}/resend": {
+      "post": {
+        "tags": [
+          "system/webhooks"
+        ],
+        "summary": "Request re-delivery of a webhook event.",
+        "operationId": "webhook_delivery_resend",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookDeliveryId"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/webhooks/event-classes": {
+      "get": {
+        "tags": [
+          "system/webhooks"
+        ],
+        "summary": "List webhook event classes",
+        "operationId": "webhook_event_class_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "filter",
+            "description": "An optional glob pattern for filtering event class names.",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventClassResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/webhooks/event-classes/{name}": {
+      "get": {
+        "tags": [
+          "system/webhooks"
+        ],
+        "summary": "Fetch details on an event class by name.",
+        "operationId": "webhook_event_class_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "description": "The name of the event class.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventClass"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/webhooks/receivers": {
+      "post": {
+        "tags": [
+          "system/webhooks"
+        ],
+        "summary": "Create a new webhook receiver.",
+        "operationId": "webhook_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Webhook"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/webhooks/receivers/{receiver}": {
+      "get": {
+        "tags": [
+          "system/webhooks"
+        ],
+        "summary": "Get the configuration for a webhook receiver.",
+        "operationId": "webhook_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Webhook"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "system/webhooks"
+        ],
+        "summary": "Update the configuration of an existing webhook receiver.",
+        "operationId": "webhook_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/webhooks"
+        ],
+        "summary": "Delete a webhook receiver.",
+        "operationId": "webhook_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/webhooks/receivers/{receiver}/probe": {
+      "post": {
+        "tags": [
+          "system/webhooks"
+        ],
+        "summary": "Send a liveness probe request to a webhook receiver.",
+        "operationId": "webhook_probe",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "resend",
+            "description": "If true, resend all events that have not been delivered successfully if the probe request succeeds.",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookProbeResult"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/webhooks/secrets": {
+      "get": {
+        "tags": [
+          "system/webhooks"
+        ],
+        "summary": "List the IDs of secrets for a webhook receiver.",
+        "operationId": "webhook_secrets_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSecrets"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "system/webhooks"
+        ],
+        "summary": "Add a secret to a webhook receiver.",
+        "operationId": "webhook_secrets_add",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookSecretCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSecretId"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/webhooks/secrets/{secret_id}": {
+      "delete": {
+        "tags": [
+          "system/webhooks"
+        ],
+        "summary": "Delete a secret associated with a webhook receiver by ID.",
+        "operationId": "webhook_secrets_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "secret_id",
+            "description": "ID of the secret.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],

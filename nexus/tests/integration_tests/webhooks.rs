@@ -28,8 +28,8 @@ use uuid::Uuid;
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
-const RECEIVERS_BASE_PATH: &str = "/experimental/v1/webhooks/receivers";
-const SECRETS_BASE_PATH: &str = "/experimental/v1/webhooks/secrets";
+const RECEIVERS_BASE_PATH: &str = "/v1/webhooks/receivers";
+const SECRETS_BASE_PATH: &str = "/v1/webhooks/secrets";
 
 async fn webhook_create(
     ctx: &ControlPlaneTestContext,

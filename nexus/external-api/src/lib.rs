@@ -3474,12 +3474,12 @@ pub trait NexusExternalApi {
         params: TypedBody<params::DeviceAccessTokenRequest>,
     ) -> Result<Response<Body>, HttpError>;
 
-    // Webhooks (experimental)
+    // Webhooks
 
     /// List webhook event classes
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/webhooks/event-classes",
+        path = "/v1/webhooks/event-classes",
         tags = ["system/webhooks"],
     }]
     async fn webhook_event_class_list(
@@ -3492,7 +3492,7 @@ pub trait NexusExternalApi {
     /// Fetch details on an event class by name.
     #[endpoint {
         method = GET,
-        path ="/experimental/v1/webhooks/event-classes/{name}",
+        path ="/v1/webhooks/event-classes/{name}",
         tags = ["system/webhooks"],
     }]
     async fn webhook_event_class_view(
@@ -3503,7 +3503,7 @@ pub trait NexusExternalApi {
     /// Get the configuration for a webhook receiver.
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/webhooks/receivers/{receiver}",
+        path = "/v1/webhooks/receivers/{receiver}",
         tags = ["system/webhooks"],
     }]
     async fn webhook_view(
@@ -3514,7 +3514,7 @@ pub trait NexusExternalApi {
     /// Create a new webhook receiver.
     #[endpoint {
         method = POST,
-        path = "/experimental/v1/webhooks/receivers",
+        path = "/v1/webhooks/receivers",
         tags = ["system/webhooks"],
     }]
     async fn webhook_create(
@@ -3525,7 +3525,7 @@ pub trait NexusExternalApi {
     /// Update the configuration of an existing webhook receiver.
     #[endpoint {
         method = PUT,
-        path = "/experimental/v1/webhooks/receivers/{receiver}",
+        path = "/v1/webhooks/receivers/{receiver}",
         tags = ["system/webhooks"],
     }]
     async fn webhook_update(
@@ -3537,7 +3537,7 @@ pub trait NexusExternalApi {
     /// Delete a webhook receiver.
     #[endpoint {
         method = DELETE,
-        path = "/experimental/v1/webhooks/receivers/{receiver}",
+        path = "/v1/webhooks/receivers/{receiver}",
         tags = ["system/webhooks"],
     }]
     async fn webhook_delete(
@@ -3551,7 +3551,7 @@ pub trait NexusExternalApi {
     // status code from the webhook endpoint...
     #[endpoint {
         method = POST,
-        path = "/experimental/v1/webhooks/receivers/{receiver}/probe",
+        path = "/v1/webhooks/receivers/{receiver}/probe",
         tags = ["system/webhooks"],
     }]
     async fn webhook_probe(
@@ -3563,7 +3563,7 @@ pub trait NexusExternalApi {
     /// List the IDs of secrets for a webhook receiver.
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/webhooks/secrets",
+        path = "/v1/webhooks/secrets",
         tags = ["system/webhooks"],
     }]
     async fn webhook_secrets_list(
@@ -3574,7 +3574,7 @@ pub trait NexusExternalApi {
     /// Add a secret to a webhook receiver.
     #[endpoint {
         method = POST,
-        path = "/experimental/v1/webhooks/secrets",
+        path = "/v1/webhooks/secrets",
         tags = ["system/webhooks"],
     }]
     async fn webhook_secrets_add(
@@ -3586,7 +3586,7 @@ pub trait NexusExternalApi {
     /// Delete a secret associated with a webhook receiver by ID.
     #[endpoint {
         method = DELETE,
-        path = "/experimental/v1/webhooks/secrets/{secret_id}",
+        path = "/v1/webhooks/secrets/{secret_id}",
         tags = ["system/webhooks"],
     }]
     async fn webhook_secrets_delete(
@@ -3597,7 +3597,7 @@ pub trait NexusExternalApi {
     /// List delivery attempts to a webhook receiver.
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/webhooks/deliveries",
+        path = "/v1/webhooks/deliveries",
         tags = ["system/webhooks"],
     }]
     async fn webhook_delivery_list(
@@ -3609,7 +3609,7 @@ pub trait NexusExternalApi {
     /// Request re-delivery of a webhook event.
     #[endpoint {
         method = POST,
-        path = "/experimental/v1/webhooks/deliveries/{event_id}/resend",
+        path = "/v1/webhooks/deliveries/{event_id}/resend",
         tags = ["system/webhooks"],
     }]
     async fn webhook_delivery_resend(
