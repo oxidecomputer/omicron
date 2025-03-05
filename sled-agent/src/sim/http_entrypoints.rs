@@ -186,7 +186,7 @@ impl SledAgentApi for SledAgentSimImpl {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<ArtifactConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        rqctx.context().artifact_store().put_config(body.into_inner())?;
+        rqctx.context().artifact_store().put_config(body.into_inner()).await?;
         Ok(HttpResponseUpdatedNoContent())
     }
 

@@ -32,8 +32,10 @@ use dropshot::{
 use futures::{Stream, TryStreamExt};
 use omicron_common::address::REPO_DEPOT_PORT;
 use omicron_common::api::external::Generation;
+use omicron_common::ledger::{Ledger, Ledgerable};
 use omicron_common::update::ArtifactHash;
 use repo_depot_api::*;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sled_agent_api::{
     ArtifactConfig, ArtifactListResponse, ArtifactPutResponse,
@@ -45,8 +47,12 @@ use slog::{Logger, error, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
-use tokio::sync::watch;
+use tokio::sync::{Mutex, watch};
 
+// These paths are defined under the artifact storage dataset. They
+// cannot conflict with any artifact paths because all artifact paths are
+// hexadecimal-encoded SHA-256 checksums.
+const LEDGER_PATH: &str = "ledger.json";
 const TEMP_SUBDIR: &str = "tmp";
 
 /// Content-addressable local storage for software artifacts.
@@ -69,7 +75,6 @@ const TEMP_SUBDIR: &str = "tmp";
 /// - for PUT, we try to write to all datasets, logging errors as we go; if we
 ///   successfully write the artifact to at least one, we return OK.
 /// - for GET, we look in each dataset until we find it.
-#[derive(Clone)]
 pub(crate) struct ArtifactStore<T: DatasetsManager> {
     log: Logger,
     reqwest_client: reqwest::Client,
@@ -78,6 +83,8 @@ pub(crate) struct ArtifactStore<T: DatasetsManager> {
     // value takes a write lock, and borrowing the value takes a read lock until
     // the guard is dropped.
     config: watch::Sender<Option<ArtifactConfig>>,
+    // This mutex must only be unlocked in `put_config`.
+    ledger: Mutex<Ledger<LedgerFormat>>,
     storage: T,
 
     /// Used for synchronization in unit tests.
@@ -86,57 +93,23 @@ pub(crate) struct ArtifactStore<T: DatasetsManager> {
 }
 
 impl<T: DatasetsManager> ArtifactStore<T> {
-    pub(crate) fn new(log: &Logger, storage: T) -> ArtifactStore<T> {
+    pub(crate) async fn new(
+        log: &Logger,
+        storage: T,
+    ) -> Result<ArtifactStore<T>, StartError> {
         let log = log.new(slog::o!("component" => "ArtifactStore"));
-        let (tx, rx) = watch::channel(None);
 
-        #[cfg(test)]
-        let (done_signal, delete_done) = watch::channel(0u32.into());
-        tokio::task::spawn(delete_reconciler(
-            log.clone(),
-            storage.clone(),
-            rx,
-            #[cfg(test)]
-            done_signal,
-        ));
-        ArtifactStore {
-            log,
-            reqwest_client: reqwest::ClientBuilder::new()
-                .connect_timeout(Duration::from_secs(15))
-                .read_timeout(Duration::from_secs(15))
-                .build()
-                .unwrap(),
-            config: tx,
-            storage,
-
-            #[cfg(test)]
-            delete_done,
-        }
-    }
-}
-
-impl ArtifactStore<StorageHandle> {
-    pub(crate) async fn start(
-        self,
-        sled_address: SocketAddrV6,
-        dropshot_config: &ConfigDropshot,
-    ) -> Result<dropshot::HttpServer<ArtifactStore<StorageHandle>>, StartError>
-    {
-        // In the real sled agent, the update datasets are durable and may
-        // retain temporary files leaked during a crash. Upon startup, we
-        // attempt to remove the subdirectory we store temporary files in,
-        // logging an error if that fails.
-        //
-        // (This function is part of `start` instead of `new` out of
-        // convenience: this function already needs to be async and fallible,
-        // but `new` doesn't; and all the sled agent implementations that don't
-        // call this function also don't need to run cleanup.)
-        for mountpoint in self
-            .storage
+        let mut ledger_paths = Vec::new();
+        for mountpoint in storage
             .artifact_storage_paths()
             .await
             .map_err(StartError::DatasetConfig)?
         {
+            ledger_paths.push(mountpoint.join(LEDGER_PATH));
+
+            // Attempt to remove any in-progress artifacts stored in the
+            // dataset's temporary directory, possibly left behind from a
+            // crashed sled agent.
             let path = mountpoint.join(TEMP_SUBDIR);
             if let Err(err) = tokio::fs::remove_dir_all(&path).await {
                 if err.kind() != ErrorKind::NotFound {
@@ -148,7 +121,7 @@ impl ArtifactStore<StorageHandle> {
                     // Sled Agent because of a problem with a single FRU seems
                     // inappropriate.)
                     error!(
-                        &self.log,
+                        &log,
                         "Failed to remove stale temporary artifacts";
                         "error" => &err,
                         "path" => path.as_str(),
@@ -157,6 +130,52 @@ impl ArtifactStore<StorageHandle> {
             }
         }
 
+        let ledger = match Ledger::new(&log, ledger_paths.clone()).await {
+            Some(ledger) => ledger,
+            None => Ledger::new_with(
+                &log,
+                ledger_paths,
+                // Use generation 0 to reflect that we found no generation
+                // number on disk. Any generation Nexus tells us about will
+                // be higher.
+                LedgerFormat { generation: const { Generation::from_u32(0) } },
+            ),
+        };
+        let (tx, rx) = watch::channel(None);
+        #[cfg(test)]
+        let (done_signal, delete_done) = watch::channel(0u32.into());
+        tokio::task::spawn(delete_reconciler(
+            log.clone(),
+            storage.clone(),
+            rx,
+            #[cfg(test)]
+            done_signal,
+        ));
+
+        Ok(ArtifactStore {
+            log,
+            reqwest_client: reqwest::ClientBuilder::new()
+                .connect_timeout(Duration::from_secs(15))
+                .read_timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
+            config: tx,
+            ledger: Mutex::new(ledger),
+            storage,
+
+            #[cfg(test)]
+            delete_done,
+        })
+    }
+}
+
+impl ArtifactStore<StorageHandle> {
+    pub(crate) async fn start(
+        self,
+        sled_address: SocketAddrV6,
+        dropshot_config: &ConfigDropshot,
+    ) -> Result<dropshot::HttpServer<ArtifactStore<StorageHandle>>, StartError>
+    {
         let mut depot_address = sled_address;
         depot_address.set_port(REPO_DEPOT_PORT);
 
@@ -213,37 +232,53 @@ impl<T: DatasetsManager> ArtifactStore<T> {
     ///
     /// Rejects the configuration with an error if the configuration was
     /// modified without increasing the generation number.
-    pub(crate) fn put_config(
+    pub(crate) async fn put_config(
         &self,
         new_config: ArtifactConfig,
     ) -> Result<(), Error> {
-        let mut result = Ok(());
-        let result_ref = &mut result;
+        // A lock on the ledger Mutex is held until the end of this function.
+        // Only one request to put a new configuration is processed at a time.
+        let mut ledger = self.ledger.lock().await;
+        let ledger_generation = ledger.data().generation;
         // This closure runs during a write lock on `self.config`. This is the
-        // only write lock taken in this implementation.
+        // only write lock taken in this implementation. At this point we're
+        // holding two locks, but the `self.config` write lock is released
+        // before we attempt to do any I/O to the ledgers.
+        let mut new_generation = Ok(None);
+        let new_generation_ref = &mut new_generation;
         self.config.send_if_modified(move |old_config| {
-            match old_config.as_mut() {
-                Some(old_config) => {
-                    if new_config == *old_config {
-                        false
-                    } else if new_config.generation > old_config.generation {
-                        *old_config = new_config;
-                        true
-                    } else {
-                        *result_ref = Err(Error::GenerationConfig {
-                            attempted_generation: new_config.generation,
-                            current_generation: old_config.generation,
-                        });
-                        false
-                    }
-                }
-                None => {
+            let mut changed = false;
+            if Some(&new_config) != old_config.as_ref() {
+                let current_generation = match old_config.as_ref() {
+                    Some(config) => ledger_generation.max(config.generation),
+                    None => ledger_generation,
+                };
+                if new_config.generation > current_generation {
+                    *new_generation_ref = Ok(Some(new_config.generation));
                     *old_config = Some(new_config);
-                    true
+                    changed = true;
+                } else {
+                    *new_generation_ref = Err(Error::GenerationConfig {
+                        attempted_generation: new_config.generation,
+                        current_generation,
+                    });
                 }
             }
+            changed
         });
-        result
+        // If the closure set a new generation number, attempt to write it to
+        // the ledger.
+        if let Some(new_generation) = new_generation? {
+            ledger.data_mut().generation = new_generation;
+            if let Err(err) = ledger.commit().await {
+                error!(
+                    &self.log,
+                    "Failed to write new generation to any ledger";
+                    "err" => InlineErrorChain::new(&err),
+                );
+            }
+        }
+        Ok(())
     }
 
     /// Open an artifact file by hash.
@@ -871,6 +906,30 @@ impl From<Error> for HttpError {
     }
 }
 
+/// The format for the `ledger.json` file in the artifact dataset.
+///
+/// We store only the generation number. This prevents us from using possibly
+/// out-of-date information on which artifacts to delete in the delete
+/// reconciler; no actions will take place until Nexus explicitly tells us what
+/// the current state of the world is.
+///
+/// We must store the most recent generation number to disk to prevent the case
+/// where we start and a Nexus instance with out-of-date information tells us
+/// about a configuration.
+#[derive(Debug, Deserialize, Serialize)]
+struct LedgerFormat {
+    generation: Generation,
+}
+
+impl Ledgerable for LedgerFormat {
+    fn is_newer_than(&self, other: &LedgerFormat) -> bool {
+        self.generation > other.generation
+    }
+
+    // No need to do this, the generation number is provided externally.
+    fn generation_bump(&mut self) {}
+}
+
 #[cfg(test)]
 mod test {
     use std::collections::BTreeSet;
@@ -951,7 +1010,7 @@ mod test {
     async fn generations() {
         macro_rules! assert_generation_err {
             ($f:expr, $attempted:expr, $current:expr) => {{
-                let err = $f.unwrap_err();
+                let err = $f.await.unwrap_err();
                 match err {
                     Error::GenerationConfig {
                         attempted_generation,
@@ -973,7 +1032,7 @@ mod test {
 
         let log = test_setup_log("generations");
         let backend = TestBackend::new(2);
-        let store = ArtifactStore::new(&log.log, backend);
+        let store = ArtifactStore::new(&log.log, backend).await.unwrap();
 
         // get_config returns None
         assert!(store.get_config().is_none());
@@ -982,12 +1041,12 @@ mod test {
             generation: 1u32.into(),
             artifacts: BTreeSet::new(),
         };
-        store.put_config(config.clone()).unwrap();
+        store.put_config(config.clone()).await.unwrap();
         assert_eq!(store.get_config().unwrap(), config);
 
         // putting an unmodified config from the same generation succeeds (puts
         // are idempotent)
-        store.put_config(config.clone()).unwrap();
+        store.put_config(config.clone()).await.unwrap();
         assert_eq!(store.get_config().unwrap(), config);
         // putting an unmodified config from an older generation fails
         config.generation = 0u32.into();
@@ -998,7 +1057,7 @@ mod test {
         );
         // putting an unmodified config from a newer generation succeeds
         config.generation = 2u32.into();
-        store.put_config(config.clone()).unwrap();
+        store.put_config(config.clone()).await.unwrap();
 
         // putting a modified config from the same generation fails
         config = store.get_config().unwrap();
@@ -1017,7 +1076,7 @@ mod test {
         );
         // putting a modified config from a newer generation succeeds
         config.generation = store.get_config().unwrap().generation.next();
-        store.put_config(config.clone()).unwrap();
+        store.put_config(config.clone()).await.unwrap();
 
         log.cleanup_successful();
     }
@@ -1026,7 +1085,7 @@ mod test {
     async fn list_get_put() {
         let log = test_setup_log("list_get_put");
         let backend = TestBackend::new(2);
-        let mut store = ArtifactStore::new(&log.log, backend);
+        let mut store = ArtifactStore::new(&log.log, backend).await.unwrap();
 
         // get fails, because it doesn't exist yet
         assert!(matches!(
@@ -1046,7 +1105,7 @@ mod test {
             artifacts: BTreeSet::new(),
         };
         config.artifacts.insert(TEST_HASH);
-        store.put_config(config.clone()).unwrap();
+        store.put_config(config.clone()).await.unwrap();
 
         // list succeeds with an empty result
         let response = store.list().await.unwrap();
@@ -1120,7 +1179,7 @@ mod test {
         // put a new config that says we don't want the artifact anymore.
         config.generation = config.generation.next();
         config.artifacts.remove(&TEST_HASH);
-        store.put_config(config.clone()).unwrap();
+        store.put_config(config.clone()).await.unwrap();
         // list succeeds with an empty result, regardless of whether deletion
         // has actually occurred yet
         assert!(store.list().await.unwrap().list.is_empty());
@@ -1148,13 +1207,13 @@ mod test {
 
         let log = test_setup_log("no_dataset");
         let backend = TestBackend::new(0);
-        let store = ArtifactStore::new(&log.log, backend);
+        let store = ArtifactStore::new(&log.log, backend).await.unwrap();
         let mut config = ArtifactConfig {
             generation: 1u32.into(),
             artifacts: BTreeSet::new(),
         };
         config.artifacts.insert(TEST_HASH);
-        store.put_config(config).unwrap();
+        store.put_config(config).await.unwrap();
 
         assert!(matches!(
             store.writer(TEST_HASH, 1u32.into()).await,
@@ -1177,13 +1236,13 @@ mod test {
 
         let log = test_setup_log("wrong_hash");
         let backend = TestBackend::new(2);
-        let store = ArtifactStore::new(&log.log, backend);
+        let store = ArtifactStore::new(&log.log, backend).await.unwrap();
         let mut config = ArtifactConfig {
             generation: 1u32.into(),
             artifacts: BTreeSet::new(),
         };
         config.artifacts.insert(TEST_HASH);
-        store.put_config(config).unwrap();
+        store.put_config(config).await.unwrap();
         let err = store
             .writer(TEST_HASH, 1u32.into())
             .await
