@@ -6,6 +6,7 @@
 
 // Copyright 2024 Oxide Computer Company
 
+use crate::agent::WrapperTx;
 use crate::Error;
 use crate::self_stats;
 use chrono::DateTime;
@@ -307,6 +308,7 @@ async fn collection_loop(
 }
 
 /// Type of each output sent from a collection task to the results sink.
+#[derive(Debug, Clone)]
 pub(crate) struct CollectionTaskOutput {
     pub(crate) was_forced_collection: bool,
     pub(crate) results: ProducerResults,
@@ -334,7 +336,8 @@ impl CollectionTaskHandle {
         log: &Logger,
         collector: self_stats::OximeterCollector,
         producer: ProducerEndpoint,
-        outbox: mpsc::Sender<CollectionTaskOutput>,
+        // outbox: mpsc::Sender<CollectionTaskOutput>,
+        outbox: WrapperTx,
     ) -> Self {
         let (task, task_tx) =
             CollectionTask::new(log, collector, producer, outbox).await;
@@ -480,7 +483,8 @@ struct CollectionTask {
     result_rx: mpsc::Receiver<CollectionResponse>,
 
     // Outbox for forwarding the results to the sink.
-    outbox: mpsc::Sender<CollectionTaskOutput>,
+    //outbox: mpsc::Sender<CollectionTaskOutput>,
+    outbox: WrapperTx,
 
     // Timer for making collections periodically.
     collection_timer: Interval,
@@ -499,7 +503,7 @@ impl CollectionTask {
         log: &Logger,
         collector: self_stats::OximeterCollector,
         producer: ProducerEndpoint,
-        outbox: mpsc::Sender<CollectionTaskOutput>,
+        outbox: WrapperTx,
     ) -> (Self, mpsc::Sender<CollectionMessage>) {
         // Create our own logger.
         let log = log.new(o!(
@@ -590,6 +594,7 @@ impl CollectionTask {
                         self.log,
                         "reporting oximeter self-collection statistics"
                     );
+                    // TODO-K: This is where the wrapper send is
                     self.outbox.send(CollectionTaskOutput {
                         was_forced_collection: false,
                         results: self.stats.sample(),
@@ -784,6 +789,8 @@ impl CollectionTask {
                     n_samples,
                 };
                 self.details.on_success(success);
+                // TODO-K: After john's PR is merged, the additional message won't be needed
+                // it will be able to be "clone"
                 if self
                     .outbox
                     .send(CollectionTaskOutput {

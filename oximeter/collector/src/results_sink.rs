@@ -32,7 +32,9 @@ use tokio::time::interval;
 pub async fn database_inserter(
     log: Logger,
     client: Client,
-    cluster_client: Option<Client>,
+    // TODO: Should we have an enum that says whether it's a cluster or
+    // single node for the logs?
+    // cluster_client: Option<Client>,
     batch_size: usize,
     batch_interval: Duration,
     mut rx: mpsc::Receiver<CollectionTaskOutput>,
@@ -98,51 +100,51 @@ pub async fn database_inserter(
                 }
             }
 
-            // Our internal testing rack will be running a ClickHouse cluster
-            // alongside a single-node installation for a while. We want to handle
-            // the case of these two installations running alongside each other, and
-            // oximeter writing to both of them. On our production racks ClickHouse
-            // will only be run on single-node modality, so we want to ignore all
-            // cases where the `ClickhouseClusterNative` service is not available.
-            //
-            // Even though we set a `claim_timeout` of 100ms on the Qorb pool
-            // policy, we need to ping to verify connectivity before proceeding.
-            // Qorb by design keeps the claim in a queue if it fails to claim
-            // a request. This is because backend may gain slots or come online
-            // later.
-            //
-            // In this case, we do not want to wait because this functionality
-            // clogs up oximeter when there is only a single-node installation
-            // available.
-            if let Some(cluster_client) = &cluster_client {
-                match cluster_client.ping().await {
-                    Ok(()) => {
-                        debug!(
-                            log,
-                            "inserting {} samples into cluster database",
-                            batch.len();
-                        );
-                        match cluster_client.insert_samples(&batch).await {
-                            Ok(()) => trace!(
-                                log,
-                                "successfully inserted samples into cluster";
-                            ),
-                            Err(e) => {
-                                warn!(
-                                    log,
-                                    "failed to insert some results into metric cluster DB";
-                                    InlineErrorChain::new(&e)
-                                );
-                            }
-                        }
-                    }
-                    Err(e) => info!(
-                        log,
-                        "ClickHouse cluster native connection unavailable";
-                        InlineErrorChain::new(&e)
-                    ),
-                }
-            }
+            //        // Our internal testing rack will be running a ClickHouse cluster
+            //        // alongside a single-node installation for a while. We want to handle
+            //        // the case of these two installations running alongside each other, and
+            //        // oximeter writing to both of them. On our production racks ClickHouse
+            //        // will only be run on single-node modality, so we want to ignore all
+            //        // cases where the `ClickhouseClusterNative` service is not available.
+            //        //
+            //        // Even though we set a `claim_timeout` of 100ms on the Qorb pool
+            //        // policy, we need to ping to verify connectivity before proceeding.
+            //        // Qorb by design keeps the claim in a queue if it fails to claim
+            //        // a request. This is because backend may gain slots or come online
+            //        // later.
+            //        //
+            //        // In this case, we do not want to wait because this functionality
+            //        // clogs up oximeter when there is only a single-node installation
+            //        // available.
+            //        if let Some(cluster_client) = &cluster_client {
+            //            match cluster_client.ping().await {
+            //                Ok(()) => {
+            //                    debug!(
+            //                        log,
+            //                        "inserting {} samples into cluster database",
+            //                        batch.len();
+            //                    );
+            //                    match cluster_client.insert_samples(&batch).await {
+            //                        Ok(()) => trace!(
+            //                            log,
+            //                            "successfully inserted samples into cluster";
+            //                        ),
+            //                        Err(e) => {
+            //                            warn!(
+            //                                log,
+            //                                "failed to insert some results into metric cluster DB";
+            //                                InlineErrorChain::new(&e)
+            //                            );
+            //                        }
+            //                    }
+            //                }
+            //                Err(e) => info!(
+            //                    log,
+            //                    "ClickHouse cluster native connection unavailable";
+            //                    InlineErrorChain::new(&e)
+            //                ),
+            //            }
+            //        }
 
             // TODO-correctness The `insert_samples` call above may fail. The method itself needs
             // better handling of partially-inserted results in that case, but we may need to retry

@@ -58,7 +58,8 @@ pub struct OximeterAgent {
     // Oximeter target used by this agent to produce metrics about itself.
     collection_target: self_stats::OximeterCollector,
     // Handle to the TX-side of a channel for collecting results from the collection tasks.
-    result_sender: mpsc::Sender<CollectionTaskOutput>,
+    // result_sender: mpsc::Sender<CollectionTaskOutput>,
+    result_sender: WrapperTx,
     // Handle to each Tokio task collection from a single producer.
     collection_tasks: Arc<Mutex<BTreeMap<Uuid, CollectionTaskHandle>>>,
     // The interval on which we refresh our list of producers from Nexus.
@@ -86,13 +87,17 @@ impl OximeterAgent {
         log: &Logger,
         replicated: bool,
     ) -> Result<Self, Error> {
-        let (result_sender, result_receiver) = mpsc::channel(8);
+        // TODO-K: remove this?
+     //   let (result_sender, result_receiver) = mpsc::channel(8);
+        let (wrapper_result_sender, single_rx, cluster_rx) =
+            wrapper_new_channel();
         let log = log.new(o!(
             "component" => "oximeter-agent",
             "collector_id" => id.to_string(),
             "collector_ip" => address.ip().to_string(),
         ));
         let insertion_log = log.new(o!("component" => "results-sink"));
+        let instertion_log_cluster = insertion_log.clone();
 
         // Determine the version of the database.
         //
@@ -133,6 +138,19 @@ impl OximeterAgent {
             collector_port: address.port(),
         };
 
+        // Spawn the task for aggregating and inserting all metrics
+        tokio::spawn(async move {
+            crate::results_sink::database_inserter(
+                insertion_log,
+                client,
+                // Some(cluster_client),
+                db_config.batch_size,
+                Duration::from_secs(db_config.batch_interval),
+                single_rx,
+            )
+            .await
+        });
+
         // Temporary additional client that writes to a replicated cluster
         // This will be removed once we phase out the single node installation.
         //
@@ -145,15 +163,16 @@ impl OximeterAgent {
         let cluster_client =
             Client::new_with_pool_policy(cluster_resolver, claim_policy, &log);
 
-        // Spawn the task for aggregating and inserting all metrics
+        // Spawn the task for aggregating and inserting all metrics to a
+        // replicated cluster ClickHouse installation
         tokio::spawn(async move {
-            crate::results_sink::database_inserter(
-                insertion_log,
-                client,
-                Some(cluster_client),
+            results_sink::database_inserter(
+                instertion_log_cluster,
+                cluster_client,
+                // None,
                 db_config.batch_size,
                 Duration::from_secs(db_config.batch_interval),
-                result_receiver,
+                cluster_rx, //result_receiver,
             )
             .await
         });
@@ -162,7 +181,9 @@ impl OximeterAgent {
             id,
             log,
             collection_target,
-            result_sender,
+            //result_sender,
+            // TODO-K: is this what we intend to use as a sender?
+            result_sender: wrapper_result_sender,
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
             refresh_interval,
             refresh_task: Arc::new(StdMutex::new(None)),
@@ -203,12 +224,18 @@ impl OximeterAgent {
         db_config: Option<DbConfig>,
         log: &Logger,
     ) -> Result<Self, Error> {
-        let (result_sender, result_receiver) = mpsc::channel(8);
+        // TODO-K: Verify this actually works on the standalone
+      //  let (result_sender, result_receiver) = mpsc::channel(8);
         let log = log.new(o!(
             "component" => "oximeter-standalone",
             "collector_id" => id.to_string(),
             "collector_ip" => address.ip().to_string(),
         ));
+
+        // TODO-K: Maybe there's a prettier way to do this?
+        // TODO-K: We don't really need the cluster here
+        let (wrapper_result_sender, single_rx, _cluster_rx) =
+            wrapper_new_channel();
 
         // If we have configuration for ClickHouse, we'll spawn the results
         // sink task as usual. If not, we'll spawn a dummy task that simply
@@ -236,15 +263,17 @@ impl OximeterAgent {
                 results_sink::database_inserter(
                     insertion_log,
                     client,
-                    None,
+                    // None,
                     db_config.batch_size,
                     Duration::from_secs(db_config.batch_interval),
-                    result_receiver,
+                    single_rx,
                 )
                 .await
             });
+
+            // TODO-K: spawn second task here too? 
         } else {
-            tokio::spawn(results_sink::logger(insertion_log, result_receiver));
+            tokio::spawn(results_sink::logger(insertion_log, single_rx));
         }
 
         // Set up tracking of statistics about ourselves.
@@ -263,7 +292,8 @@ impl OximeterAgent {
             id,
             log,
             collection_target,
-            result_sender,
+            // TODO-K: Make a wrapper-tx here
+            result_sender: wrapper_result_sender,
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
             refresh_interval,
             refresh_task: Arc::new(StdMutex::new(None)),
@@ -452,6 +482,47 @@ impl OximeterAgent {
             self.register_producer_locked(&mut tasks, info).await;
         }
         n_pruned
+    }
+}
+
+// TODO: Have this take a `self` from a type instead of returning tuple?
+pub fn wrapper_new_channel(// TODO-K: change the string to the real type
+) -> (
+    WrapperTx,
+    mpsc::Receiver<CollectionTaskOutput>,
+    mpsc::Receiver<CollectionTaskOutput>,
+) {
+    // TODO-K: I'm using a buffer of 8 since that's what was being used before
+    let (single_tx, single_rx) = mpsc::channel(8);
+    let (cluster_tx, cluster_rx) = mpsc::channel(8);
+
+    (WrapperTx { single_tx, cluster_tx }, single_rx, cluster_rx)
+}
+
+#[derive(Debug, Clone)]
+pub struct WrapperTx {
+    // TODO-K: Change the string to the real type we'll be passing
+    single_tx: mpsc::Sender<CollectionTaskOutput>,
+    cluster_tx: mpsc::Sender<CollectionTaskOutput>,
+}
+
+impl WrapperTx {
+    // TODO-K: change msg type to what it needs to be
+    // TODO-K: Use the correct error
+    // TODO-K: Remove msg_tmp once we can clone CollectionTaskOutput
+    pub async fn send(
+        &self,
+        msg: CollectionTaskOutput,
+    ) -> anyhow::Result<()> {
+        let (_result_single, _result_cluster) = futures::future::join(
+            self.single_tx.send(msg.clone()),
+            self.cluster_tx.send(msg),
+        )
+        .await;
+
+        // TODO-K: What do we want for errors? bail out only if cluster exits? or not at all?
+
+        Ok(())
     }
 }
 
