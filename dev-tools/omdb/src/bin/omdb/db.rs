@@ -504,6 +504,9 @@ enum SagaCommands {
 
     /// Show multiple saga executions along a timeline
     Interleave(SagaInterleaveArgs),
+
+    /// Inject an error so that when the saga is next run, it will unwind
+    Fault(SagaFaultArgs),
 }
 
 #[derive(Debug, Args)]
@@ -530,6 +533,11 @@ struct SagaOverlappingArgs {
 #[derive(Debug, Args)]
 struct SagaInterleaveArgs {
     saga_id: Vec<Uuid>,
+}
+
+#[derive(Debug, Args)]
+struct SagaFaultArgs {
+    saga_id: Uuid,
 }
 
 #[derive(Debug, Args)]
@@ -728,6 +736,15 @@ impl DbArgs {
                     &datastore,
                     &self.fetch_opts,
                     saga_interleave_args,
+                )
+                .await
+            }
+            DbCommands::Sagas(SagaArgs {
+                command: SagaCommands::Fault(saga_fault_args),
+            }) => {
+                cmd_db_sagas_fault(
+                    &datastore,
+                    saga_fault_args,
                 )
                 .await
             }
@@ -3340,6 +3357,49 @@ async fn cmd_db_sagas_list_interleave(
             print!("{:>width$} |", col);
         }
         println!();
+    }
+
+    Ok(())
+}
+
+async fn cmd_db_sagas_fault(
+    datastore: &DataStore,
+    args: &SagaFaultArgs,
+) -> Result<(), anyhow::Error> {
+    let conn = datastore.pool_connection_for_tests().await?;
+
+    // Find the most recent node
+    let most_recent_node: SagaNodeEvent = {
+        use db::schema::saga_node_event::dsl;
+
+        dsl::saga_node_event
+            .filter(dsl::saga_id.eq(args.saga_id))
+            .order(dsl::event_time.desc())
+            .limit(1)
+            .first_async(&*conn)
+            .await?
+    };
+
+    print_saga_nodes(None, vec![most_recent_node.clone()]);
+
+    // Inject a fault for that node
+    let fault = SagaNodeEvent {
+        saga_id: most_recent_node.saga_id,
+        node_id: most_recent_node.node_id,
+        event_type: String::from("failed"), // steno::SagaNodeEventType::Failed.label().to_string(),
+        //data: Some(steno::ActionError::action_failed(String::from("error injected with omdb"))), // XXX
+        data: Some(String::from(r#"{"ActionFailed": {"source_error": {"InternalError": {"internal_message": "error injected with omdb"}}}}"#).into()),
+        event_time: chrono::Utc::now(),
+        creator: most_recent_node.creator, // XXX magic omdb sec id?
+    };
+
+    {
+        use db::schema::saga_node_event::dsl;
+
+        diesel::insert_into(dsl::saga_node_event)
+            .values(fault.clone())
+            .execute_async(&*conn)
+            .await?;
     }
 
     Ok(())
