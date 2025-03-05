@@ -6,12 +6,12 @@
 
 //! Decode packets from the ClickHouse server.
 
+use crate::native::Error;
 use crate::native::io;
 use crate::native::packets::server::Hello;
 use crate::native::packets::server::Packet;
 use crate::native::packets::server::PasswordComplexityRule;
 use crate::native::probes;
-use crate::native::Error;
 use bytes::Buf as _;
 use bytes::BytesMut;
 

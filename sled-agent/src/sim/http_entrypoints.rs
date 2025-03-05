@@ -7,7 +7,6 @@
 use super::collection::PokeMode;
 use crate::support_bundle::storage::SupportBundleQueryType;
 use camino::Utf8PathBuf;
-use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::ErrorStatusCode;
 use dropshot::FreeformBody;
@@ -23,6 +22,7 @@ use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::StreamingBody;
 use dropshot::TypedBody;
+use dropshot::endpoint;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::{Inventory, OmicronZonesConfig};
 use omicron_common::api::internal::nexus::DiskRuntimeState;

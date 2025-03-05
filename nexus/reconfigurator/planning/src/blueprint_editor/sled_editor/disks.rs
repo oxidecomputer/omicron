@@ -9,8 +9,8 @@ use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DisksEditError {

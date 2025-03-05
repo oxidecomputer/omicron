@@ -5,9 +5,9 @@
 //! Support for preflight checks via wicketd.
 
 use crate::wicketd::create_wicketd_client;
-use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
+use anyhow::bail;
 use clap::Subcommand;
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
@@ -22,8 +22,8 @@ use wicket_common::preflight_check::StepEventKind;
 use wicket_common::preflight_check::StepInfo;
 use wicket_common::preflight_check::StepInfoWithMetadata;
 use wicket_common::preflight_check::StepOutcome;
-use wicketd_client::types::PreflightUplinkCheckOptions;
 use wicketd_client::Client;
+use wicketd_client::types::PreflightUplinkCheckOptions;
 
 const WICKETD_TIMEOUT: Duration = Duration::from_secs(5);
 

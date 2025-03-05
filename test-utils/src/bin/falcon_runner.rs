@@ -8,7 +8,7 @@
 mod illumos {
     pub use anyhow::anyhow;
     pub use camino_tempfile::tempdir;
-    pub use libfalcon::{unit::gb, Runner};
+    pub use libfalcon::{Runner, unit::gb};
     pub use omicron_test_utils::dev::test_setup_log;
     pub use slog::info;
     pub use std::env;

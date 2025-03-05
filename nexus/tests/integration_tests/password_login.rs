@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use dropshot::test_util::ClientTestContext;
-use http::{header, method::Method, StatusCode};
+use http::{StatusCode, header, method::Method};
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::{create_local_user, create_silo};

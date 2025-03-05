@@ -17,3 +17,4 @@ tokio.workspace = true
 omicron-workspace-hack.workspace = true
 oximeter-db.workspace = true
 oximeter-test-utils.workspace = true
+scopeguard.workspace = true

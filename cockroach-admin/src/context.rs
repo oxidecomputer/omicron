@@ -5,8 +5,8 @@
 use std::net::SocketAddr;
 
 use crate::CockroachCli;
-use anyhow::bail;
 use anyhow::Context;
+use anyhow::bail;
 use dropshot::HttpError;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::Logger;

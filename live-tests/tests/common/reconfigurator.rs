@@ -4,7 +4,7 @@
 
 //! Helpers common to Reconfigurator tests
 
-use anyhow::{ensure, Context};
+use anyhow::{Context, ensure};
 use nexus_client::types::BlueprintTargetSet;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_types::deployment::{Blueprint, PlanningInput};

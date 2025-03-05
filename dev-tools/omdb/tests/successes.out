@@ -1364,9 +1364,9 @@ parent:    <none>
 
 
     omicron zones at generation 2:
-    -----------------------------------------------
-    zone type   zone id   disposition   underlay IP
-    -----------------------------------------------
+    --------------------------------------------------------------
+    zone type   zone id   image source   disposition   underlay IP
+    --------------------------------------------------------------
 
 
 
@@ -1401,15 +1401,15 @@ parent:    <none>
 
 
     omicron zones at generation 2:
-    ---------------------------------------------------------------------------------------
-    zone type         zone id                                disposition   underlay IP     
-    ---------------------------------------------------------------------------------------
-    clickhouse        ..........<REDACTED_UUID>...........   in service    ::1             
-    cockroach_db      ..........<REDACTED_UUID>...........   in service    ::1             
-    crucible_pantry   ..........<REDACTED_UUID>...........   in service    ::1             
-    external_dns      ..........<REDACTED_UUID>...........   in service    ::1             
-    internal_dns      ..........<REDACTED_UUID>...........   in service    ::1             
-    nexus             ..........<REDACTED_UUID>...........   in service    ::ffff:127.0.0.1
+    ---------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition   underlay IP     
+    ---------------------------------------------------------------------------------------------------------
+    clickhouse        ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    cockroach_db      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    crucible_pantry   ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    external_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    internal_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    nexus             ..........<REDACTED_UUID>...........   install dataset   in service    ::ffff:127.0.0.1
 
 
  COCKROACHDB SETTINGS:
@@ -1460,9 +1460,9 @@ parent:    <none>
 
 
     omicron zones at generation 2:
-    -----------------------------------------------
-    zone type   zone id   disposition   underlay IP
-    -----------------------------------------------
+    --------------------------------------------------------------
+    zone type   zone id   image source   disposition   underlay IP
+    --------------------------------------------------------------
 
 
 
@@ -1497,15 +1497,15 @@ parent:    <none>
 
 
     omicron zones at generation 2:
-    ---------------------------------------------------------------------------------------
-    zone type         zone id                                disposition   underlay IP     
-    ---------------------------------------------------------------------------------------
-    clickhouse        ..........<REDACTED_UUID>...........   in service    ::1             
-    cockroach_db      ..........<REDACTED_UUID>...........   in service    ::1             
-    crucible_pantry   ..........<REDACTED_UUID>...........   in service    ::1             
-    external_dns      ..........<REDACTED_UUID>...........   in service    ::1             
-    internal_dns      ..........<REDACTED_UUID>...........   in service    ::1             
-    nexus             ..........<REDACTED_UUID>...........   in service    ::ffff:127.0.0.1
+    ---------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition   underlay IP     
+    ---------------------------------------------------------------------------------------------------------
+    clickhouse        ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    cockroach_db      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    crucible_pantry   ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    external_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    internal_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    nexus             ..........<REDACTED_UUID>...........   install dataset   in service    ::ffff:127.0.0.1
 
 
  COCKROACHDB SETTINGS:
@@ -1582,15 +1582,15 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
 
 
     omicron zones at generation 2:
-    ---------------------------------------------------------------------------------------
-    zone type         zone id                                disposition   underlay IP     
-    ---------------------------------------------------------------------------------------
-    clickhouse        ..........<REDACTED_UUID>...........   in service    ::1             
-    cockroach_db      ..........<REDACTED_UUID>...........   in service    ::1             
-    crucible_pantry   ..........<REDACTED_UUID>...........   in service    ::1             
-    external_dns      ..........<REDACTED_UUID>...........   in service    ::1             
-    internal_dns      ..........<REDACTED_UUID>...........   in service    ::1             
-    nexus             ..........<REDACTED_UUID>...........   in service    ::ffff:127.0.0.1
+    ---------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source      disposition   underlay IP     
+    ---------------------------------------------------------------------------------------------------------
+    clickhouse        ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    cockroach_db      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    crucible_pantry   ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    external_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    internal_dns      ..........<REDACTED_UUID>...........   install dataset   in service    ::1             
+    nexus             ..........<REDACTED_UUID>...........   install dataset   in service    ::ffff:127.0.0.1
 
 
  COCKROACHDB SETTINGS:

@@ -60,7 +60,7 @@
 //!
 //! This module provides types used to assemble that configuration.
 
-use crate::names::{ServiceName, BOUNDARY_NTP_DNS_NAME, DNS_ZONE};
+use crate::names::{BOUNDARY_NTP_DNS_NAME, DNS_ZONE, ServiceName};
 use anyhow::{anyhow, ensure};
 use core::fmt;
 use omicron_common::address::{CLICKHOUSE_ADMIN_PORT, CLICKHOUSE_TCP_PORT};
@@ -399,55 +399,90 @@ impl DnsConfigBuilder {
         self.service_backend_zone(ServiceName::Mgd, &zone, mgd_port)
     }
 
-    /// Higher-level shorthand for adding a ClickHouse zone with several
-    /// services.
+    /// Higher-level shorthand for adding a ClickHouse single node zone with
+    /// several services.
     ///
-    /// ClickHouse servers expose several interfaces on the network. We use both
-    /// a simple HTTP interface as well as a lower-level protocol over TCP,
-    /// called the "Native protocol". This method inserts a zone and the related
-    /// records for both of these services.
+    /// The ClickHouse single node server exposes several interfaces on the
+    /// network. We use both a simple HTTP interface as well as a lower-level
+    /// protocol over TCP, called the "Native protocol". This method inserts a
+    /// zone and the related records for both of these services.
     ///
     /// `http_service` is the `ServiceName` for the HTTP service that belongs in
     /// this zone, and `http_port` is the associated port for that service. The
     /// native service is added automatically, using its default port.
     ///
-    /// For `ClickhouseServer` zones we also need to add a
-    /// `ClickhouseAdminServer` service.
+    /// We also add a `ClickhouseAdminSingleServer` service.
     ///
     /// # Errors
     ///
-    /// This fails if the provided `http_service` is not for a ClickHouse
-    /// replica server. It also fails if the given zone has already been added
+    /// This fails if the provided `http_service` is not for a ClickHouse single
+    /// node server. It also fails if the given zone has already been added
     /// to the configuration.
-    pub fn host_zone_clickhouse(
+    pub fn host_zone_clickhouse_single_node(
         &mut self,
         zone_id: OmicronZoneUuid,
         http_service: ServiceName,
         http_address: SocketAddrV6,
     ) -> anyhow::Result<()> {
         anyhow::ensure!(
-            http_service == ServiceName::Clickhouse
-                || http_service == ServiceName::ClickhouseServer,
-            "This method is only valid for ClickHouse replica servers, \
+            http_service == ServiceName::Clickhouse,
+            "This method is only valid for the ClickHouse single node server, \
             but we were provided the service '{http_service:?}'",
         );
         let zone = self.host_zone(zone_id, *http_address.ip())?;
         self.service_backend_zone(http_service, &zone, http_address.port())?;
+
         self.service_backend_zone(
             ServiceName::ClickhouseNative,
             &zone,
             CLICKHOUSE_TCP_PORT,
         )?;
+        self.service_backend_zone(
+            ServiceName::ClickhouseAdminSingleServer,
+            &zone,
+            CLICKHOUSE_ADMIN_PORT,
+        )
+    }
 
-        if http_service == ServiceName::ClickhouseServer {
-            self.service_backend_zone(
-                ServiceName::ClickhouseAdminServer,
-                &zone,
-                CLICKHOUSE_ADMIN_PORT,
-            )?;
-        }
-
-        Ok(())
+    /// Higher-level shorthand for adding a ClickHouse cluster zone with several
+    /// services.
+    ///
+    /// ClickHouse servers expose several interfaces on the network. We use both
+    /// a simple HTTP interface as well as a lower-level protocol over TCP,
+    /// called the "Native protocol". This method inserts a zone and the related
+    /// records for both of these services.
+    /// (TODO-<https://github.com/oxidecomputer/omicron/issues/7419:> Add Native protocol
+    /// interface)
+    ///
+    /// `http_service` is the `ServiceName` for the HTTP service that belongs in
+    /// this zone, and `http_port` is the associated port for that service. The
+    /// native service is added automatically, using its default port.
+    ///
+    /// We also add a `ClickhouseAdminServer` service.
+    ///
+    /// # Errors
+    ///
+    /// This fails if the provided `http_service` is not for a ClickHouse cluster
+    /// replica server. It also fails if the given zone has already been added
+    /// to the configuration.
+    pub fn host_zone_clickhouse_cluster(
+        &mut self,
+        zone_id: OmicronZoneUuid,
+        http_service: ServiceName,
+        http_address: SocketAddrV6,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            http_service == ServiceName::ClickhouseServer,
+            "This method is only valid for ClickHouse cluster replica servers, \
+            but we were provided the service '{http_service:?}'",
+        );
+        let zone = self.host_zone(zone_id, *http_address.ip())?;
+        self.service_backend_zone(http_service, &zone, http_address.port())?;
+        self.service_backend_zone(
+            ServiceName::ClickhouseAdminServer,
+            &zone,
+            CLICKHOUSE_ADMIN_PORT,
+        )
     }
 
     /// Higher-level shorthand for adding a ClickhouseKeeper zone with several
@@ -687,7 +722,9 @@ mod test {
     use crate::{config::Zone, names::DNS_ZONE};
     use omicron_common::api::external::Generation;
     use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
-    use std::{collections::BTreeMap, io::Write, net::Ipv6Addr};
+    use std::{
+        collections::BTreeMap, io::Write, net::Ipv6Addr, net::SocketAddrV6,
+    };
 
     #[test]
     fn display_srv_service() {
@@ -701,8 +738,16 @@ mod test {
             "_clickhouse-admin-server._tcp",
         );
         assert_eq!(
+            ServiceName::ClickhouseAdminSingleServer.dns_name(),
+            "_clickhouse-admin-single-server._tcp",
+        );
+        assert_eq!(
             ServiceName::ClickhouseKeeper.dns_name(),
             "_clickhouse-keeper._tcp",
+        );
+        assert_eq!(
+            ServiceName::ClickhouseNative.dns_name(),
+            "_clickhouse-native._tcp",
         );
         assert_eq!(
             ServiceName::ClickhouseServer.dns_name(),
@@ -756,12 +801,19 @@ mod test {
     const ZONE2_UUID: &'static str = "001de000-c04e-4000-8000-000000000002";
     const ZONE3_UUID: &'static str = "001de000-c04e-4000-8000-000000000003";
     const ZONE4_UUID: &'static str = "001de000-c04e-4000-8000-000000000004";
+    const ZONE_CLICKHOUSE_UUID: &'static str =
+        "001de000-c04e-4000-8000-000000000005";
+    const ZONE_CLICKHOUSE_SERVER_UUID: &'static str =
+        "001de000-c04e-4000-8000-000000000006";
     const SLED1_IP: Ipv6Addr = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1);
     const SLED2_IP: Ipv6Addr = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 2);
     const ZONE1_IP: Ipv6Addr = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 1, 1);
     const ZONE2_IP: Ipv6Addr = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 1, 2);
     const ZONE3_IP: Ipv6Addr = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 1, 3);
     const ZONE4_IP: Ipv6Addr = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 1, 4);
+    const ZONE_CLICKHOUSE_IP: Ipv6Addr = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 1, 5);
+    const ZONE_CLICKHOUSE_SERVER_IP: Ipv6Addr =
+        Ipv6Addr::new(0, 0, 0, 0, 0, 0, 1, 6);
 
     #[test]
     fn test_builder_output() {
@@ -773,6 +825,10 @@ mod test {
         let zone2_uuid: OmicronZoneUuid = ZONE2_UUID.parse().unwrap();
         let zone3_uuid: OmicronZoneUuid = ZONE3_UUID.parse().unwrap();
         let zone4_uuid: OmicronZoneUuid = ZONE4_UUID.parse().unwrap();
+        let zone_clickhouse_uuid: OmicronZoneUuid =
+            ZONE_CLICKHOUSE_UUID.parse().unwrap();
+        let zone_clickhouse_server_uuid: OmicronZoneUuid =
+            ZONE_CLICKHOUSE_SERVER_UUID.parse().unwrap();
 
         let builder_empty = DnsConfigBuilder::new();
 
@@ -817,6 +873,20 @@ mod test {
             // populate the special `BOUNDARY_NTP_DNS_NAME`.
             b.service_backend_zone(ServiceName::BoundaryNtp, &zone2, 127)
                 .unwrap();
+
+            // Add clickhouse and clickhouse server zones, which have serveral services each
+            b.host_zone_clickhouse_single_node(
+                zone_clickhouse_uuid,
+                ServiceName::Clickhouse,
+                SocketAddrV6::new(ZONE_CLICKHOUSE_IP, 0, 0, 0),
+            )
+            .unwrap();
+            b.host_zone_clickhouse_cluster(
+                zone_clickhouse_server_uuid,
+                ServiceName::ClickhouseServer,
+                SocketAddrV6::new(ZONE_CLICKHOUSE_SERVER_IP, 0, 0, 0),
+            )
+            .unwrap();
 
             // A sharded service
             b.service_backend_sled(

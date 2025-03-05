@@ -8,20 +8,20 @@ use expectorate::assert_contents;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::SLED_AGENT_UUID;
+use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_common::api::external::Error;
-use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_test_utils::dev::poll::wait_for_condition;
+use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
+use omicron_test_utils::dev::test_cmds::Redactor;
 use omicron_test_utils::dev::test_cmds::assert_exit_code;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
-use omicron_test_utils::dev::test_cmds::Redactor;
-use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::debug;
@@ -32,8 +32,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use subprocess::Exec;
 use subprocess::ExitStatus;
-use swrite::swriteln;
 use swrite::SWrite;
+use swrite::swriteln;
 
 fn path_to_cli() -> PathBuf {
     path_to_executable(env!("CARGO_BIN_EXE_reconfigurator-cli"))
@@ -107,6 +107,23 @@ fn test_expunge_newly_added_external_dns() {
         "tests/output/cmd-expunge-newly-added-stderr",
         &stderr_text,
     );
+}
+
+// Run tests that exercise the ability to set zone image sources.
+#[test]
+fn test_set_zone_images() {
+    let (exit_status, stdout_text, stderr_text) = run_cli(
+        "tests/input/cmds-set-zone-images.txt",
+        &["--seed", "test_set_zone_images"],
+    );
+    assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
+
+    // The example system uses a fixed seed, which means that UUIDs are
+    // deterministic. Some of the test commands also use those UUIDs, and it's
+    // convenient for everyone if they aren't redacted.
+    let stdout_text = Redactor::default().uuids(false).do_redact(&stdout_text);
+    assert_contents("tests/output/cmd-set-zone-images-stdout", &stdout_text);
+    assert_contents("tests/output/cmd-set-zone-images-stderr", &stderr_text);
 }
 
 type ControlPlaneTestContext =

@@ -3,13 +3,13 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use futures::Future;
-use slog::warn;
 use slog::Logger;
+use slog::warn;
 
 use crate::api::external::Error;
+use crate::backoff::BackoffError;
 use crate::backoff::retry_notify;
 use crate::backoff::retry_policy_internal_service;
-use crate::backoff::BackoffError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProgenitorOperationRetryError<E> {

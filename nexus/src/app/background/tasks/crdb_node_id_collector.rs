@@ -24,19 +24,19 @@
 //! whether a zone without a known node ID ever existed.
 
 use crate::app::background::BackgroundTask;
-use anyhow::ensure;
 use anyhow::Context;
-use futures::future::BoxFuture;
-use futures::stream;
+use anyhow::ensure;
 use futures::FutureExt;
 use futures::StreamExt;
+use futures::future::BoxFuture;
+use futures::stream;
 use nexus_auth::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::address::COCKROACH_ADMIN_PORT;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
@@ -232,15 +232,16 @@ impl BackgroundTask for CockroachNodeIdCollector {
 mod tests {
     use super::*;
     use chrono::Utc;
+    use httptest::Expectation;
     use httptest::matchers::any;
     use httptest::responders::json_encoded;
     use httptest::responders::status_code;
-    use httptest::Expectation;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneImageSource;
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
@@ -262,10 +263,11 @@ mod tests {
             iter::once(sled_id),
             "test",
         );
-        let bp_zones = blueprint
-            .blueprint_zones
+        let bp_zones = &mut blueprint
+            .sleds
             .get_mut(&sled_id)
-            .expect("found entry for test sled");
+            .expect("found entry for test sled")
+            .zones_config;
 
         let zpool_id = ZpoolUuid::new_v4();
         let make_crdb_zone_config =
@@ -283,6 +285,7 @@ mod tests {
                         },
                     },
                 ),
+                image_source: BlueprintZoneImageSource::InstallDataset,
             };
 
         // Add three CRDB zones with known addresses; the first and third are
@@ -323,6 +326,7 @@ mod tests {
                     address: "[::1]:0".parse().unwrap(),
                 },
             ),
+            image_source: BlueprintZoneImageSource::InstallDataset,
         });
 
         // We expect to see CRDB zones 1 and 3 with their IPs but the ports

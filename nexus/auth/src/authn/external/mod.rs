@@ -80,7 +80,7 @@ where
                 // NOT that they simply didn't try), should we try the others
                 // instead of returning the failure here?
                 SchemeResult::Failed(reason) => {
-                    return Err(authn::Error { reason, schemes_tried })
+                    return Err(authn::Error { reason, schemes_tried });
                 }
                 SchemeResult::Authenticated(details) => {
                     return match ctx.silo_authn_policy_for(&details.actor).await
@@ -147,9 +147,9 @@ mod test {
     use super::*;
     use anyhow::anyhow;
     use omicron_common::api::external::Error;
+    use std::sync::Arc;
     use std::sync::atomic::AtomicU8;
     use std::sync::atomic::Ordering;
-    use std::sync::Arc;
 
     // We don't need much from the testing "context" object.  But it's handy to
     // be able to inject different values for `silo_authn_policy_for()`.

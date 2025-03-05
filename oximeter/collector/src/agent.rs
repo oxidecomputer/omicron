@@ -6,20 +6,20 @@
 
 // Copyright 2024 Oxide Computer Company
 
+use crate::DbConfig;
+use crate::Error;
+use crate::ProducerEndpoint;
 use crate::collection_task::CollectionTaskHandle;
 use crate::collection_task::CollectionTaskOutput;
 use crate::collection_task::ForcedCollectionError;
 use crate::results_sink;
 use crate::self_stats;
-use crate::DbConfig;
-use crate::Error;
-use crate::ProducerEndpoint;
 use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
 use futures::TryStreamExt;
-use nexus_client::types::IdSortMode;
 use nexus_client::Client as NexusClient;
+use nexus_client::types::IdSortMode;
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
 use oximeter_api::ProducerDetails;
@@ -28,24 +28,24 @@ use oximeter_db::DbWrite;
 use qorb::claim::Handle;
 use qorb::pool::Pool;
 use qorb::resolver::BoxedResolver;
+use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::info;
 use slog::o;
 use slog::trace;
 use slog::warn;
-use slog::Logger;
 use slog_error_chain::InlineErrorChain;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::net::SocketAddrV6;
 use std::ops::Bound;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::time::Duration;
-use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tokio::sync::MutexGuard;
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 /// The internal agent the oximeter server uses to collect metrics from producers.
@@ -101,7 +101,7 @@ impl OximeterAgent {
         // - The DB doesn't exist at all. This reports a version number of 0. We
         // need to create the DB here, at the latest version. This is used in
         // fresh installations and tests.
-        let client = Client::new_with_pool(native_resolver, &log);
+        let client = Client::new_with_resolver(native_resolver, &log);
         match client.check_db_is_at_expected_version().await {
             Ok(_) => {}
             Err(oximeter_db::Error::DatabaseVersionMismatch {
@@ -324,48 +324,27 @@ impl OximeterAgent {
         }
     }
 
-    /// Forces a collection from all producers.
-    ///
-    /// Returns once all those values have been inserted into ClickHouse,
-    /// or an error occurs trying to perform the collection.
+    /// Enqueue requests to forces collection from all producers.
     ///
     /// NOTE: This collection is best effort, as the name implies. It's possible
-    /// that we lose track of requests internally, in cases where there are
-    /// many concurrent calls. Callers should strive to avoid this, since it
-    /// rarely makes sense to do that.
+    /// that we successfully enqueue requests for some producers and not all, in
+    /// cases where there are many concurrent calls. This method _does not_ wait
+    /// for the requested collections to be performed; it is "fire and forget".
+    /// avoid this, since it rarely makes sense to do that.
     pub async fn try_force_collection(
         &self,
     ) -> Result<(), ForcedCollectionError> {
-        let mut collection_oneshots = vec![];
+        let mut res = Ok(());
         let collection_tasks = self.collection_tasks.lock().await;
         for (_id, task) in collection_tasks.iter() {
-            // Scrape from each producer, into oximeter...
-            let rx = task.collect();
-            // ... and keep track of the token that indicates once the metric
-            // has made it into ClickHouse.
-            collection_oneshots.push(rx);
-        }
-        drop(collection_tasks);
-
-        // Only return once all producers finish processing the token we
-        // provided.
-        //
-        // NOTE: This can either mean that the collection completed
-        // successfully, or an error occurred in the collection pathway.
-        //
-        // We use `join_all` to ensure that all futures are run, rather than
-        // bailing on the first error. We extract the first error we received,
-        // or map an actual `RecvError` to `Closed`, since it does really mean
-        // the other side hung up without sending.
-        let results = futures::future::join_all(collection_oneshots).await;
-        for result in results.into_iter() {
-            match result {
-                Ok(Ok(_)) => {}
-                Ok(Err(e)) => return Err(e),
-                Err(_) => return Err(ForcedCollectionError::Closed),
+            // Try to trigger a collection on each task; if any fails, we'll
+            // take that error as our overall return value. (If multiple fail,
+            // we'll return the error of the last one that failed.)
+            if let Err(err) = task.try_force_collect() {
+                res = Err(err);
             }
         }
-        Ok(())
+        res
     }
 
     /// List existing producers.
@@ -599,9 +578,9 @@ mod tests {
     use std::net::Ipv6Addr;
     use std::net::SocketAddr;
     use std::net::SocketAddrV6;
+    use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
-    use std::sync::Arc;
     use std::time::Duration;
     use tokio::time::Instant;
     use uuid::Uuid;
@@ -906,7 +885,12 @@ mod tests {
             task ({count}) differs from the number reported by the always-ded \
             producer server itself ({server_count})"
         );
-        assert_eq!(stats.failed_collections.len(), 1);
+        assert_eq!(
+            stats.failed_collections.len(),
+            1,
+            "unexpected failed_collections content: {:?}",
+            stats.failed_collections,
+        );
         logctx.cleanup_successful();
     }
 

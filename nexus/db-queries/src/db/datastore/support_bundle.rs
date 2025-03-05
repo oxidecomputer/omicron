@@ -8,8 +8,8 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::lookup::LookupPath;
 use crate::db::model::RendezvousDebugDataset;
 use crate::db::model::SupportBundle;
@@ -20,6 +20,7 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use futures::FutureExt;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -31,8 +32,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use uuid::Uuid;
 
-const CANNOT_ALLOCATE_ERR_MSG: &'static str =
-"Current policy limits support bundle creation to 'one per external disk', and \
+const CANNOT_ALLOCATE_ERR_MSG: &'static str = "Current policy limits support bundle creation to 'one per external disk', and \
  no disks are available. You must delete old support bundles before new ones \
  can be created";
 
@@ -216,16 +216,12 @@ impl DataStore {
     ) -> Result<SupportBundleExpungementReport, Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        // For this blueprint: The set of all expunged Nexus zones
+        // For this blueprint: The set of all expunged Nexus zones that are
+        // ready for cleanup
         let invalid_nexus_zones = blueprint
-            .all_omicron_zones(
-                nexus_types::deployment::BlueprintZoneDisposition::is_expunged,
-            )
+            .all_omicron_zones(BlueprintZoneDisposition::is_ready_for_cleanup)
             .filter_map(|(_sled, zone)| {
-                if matches!(
-                    zone.zone_type,
-                    nexus_types::deployment::BlueprintZoneType::Nexus(_)
-                ) {
+                if zone.zone_type.is_nexus() {
                     Some(zone.id.into_untyped_uuid())
                 } else {
                     None
@@ -485,7 +481,6 @@ mod test {
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::BlueprintDatasetFilter;
-    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneType;
     use omicron_common::api::external::LookupType;
     use omicron_common::api::internal::shared::DatasetKind::Debug as DebugDatasetKind;
@@ -534,8 +529,9 @@ mod test {
 
         fn new_from_blueprint(blueprint: &Blueprint) -> Vec<Self> {
             let mut sleds = vec![];
-            for (sled, datasets) in &blueprint.blueprint_datasets {
-                let pools = datasets
+            for (sled, config) in &blueprint.sleds {
+                let pools = config
+                    .datasets_config
                     .datasets
                     .iter()
                     .filter_map(|dataset| {
@@ -636,7 +632,9 @@ mod test {
             .await
             .expect_err("Shouldn't provision bundle without datasets");
         let Error::InsufficientCapacity { message } = err else {
-            panic!("Unexpected error: {err:?} - we expected 'InsufficientCapacity'");
+            panic!(
+                "Unexpected error: {err:?} - we expected 'InsufficientCapacity'"
+            );
         };
         assert_eq!(
             CANNOT_ALLOCATE_ERR_MSG,
@@ -931,11 +929,11 @@ mod test {
     fn get_in_service_nexuses_from_blueprint(
         bp: &Blueprint,
     ) -> Vec<OmicronZoneUuid> {
-        bp.blueprint_zones
+        bp.sleds
             .values()
-            .flat_map(|zones_config| {
+            .flat_map(|sled_config| {
                 let mut nexus_zones = vec![];
-                for zone in &zones_config.zones {
+                for zone in &sled_config.zones_config.zones {
                     if matches!(zone.zone_type, BlueprintZoneType::Nexus(_))
                         && zone.disposition.is_in_service()
                     {
@@ -951,11 +949,11 @@ mod test {
         bp: &Blueprint,
         filter: BlueprintDatasetFilter,
     ) -> Vec<DatasetUuid> {
-        bp.blueprint_datasets
+        bp.sleds
             .values()
-            .flat_map(|datasets_config| {
+            .flat_map(|sled_config| {
                 let mut debug_datasets = vec![];
-                for dataset in datasets_config.datasets.iter() {
+                for dataset in sled_config.datasets_config.datasets.iter() {
                     if matches!(dataset.kind, DebugDatasetKind)
                         && dataset.disposition.matches(filter)
                     {
@@ -968,8 +966,8 @@ mod test {
     }
 
     fn expunge_dataset_for_bundle(bp: &mut Blueprint, bundle: &SupportBundle) {
-        for datasets in bp.blueprint_datasets.values_mut() {
-            for mut dataset in datasets.datasets.iter_mut() {
+        for sled in bp.sleds.values_mut() {
+            for mut dataset in sled.datasets_config.datasets.iter_mut() {
                 if dataset.id == bundle.dataset_id.into() {
                     dataset.disposition = BlueprintDatasetDisposition::Expunged;
                 }
@@ -978,12 +976,12 @@ mod test {
     }
 
     fn expunge_nexus_for_bundle(bp: &mut Blueprint, bundle: &SupportBundle) {
-        for zones in bp.blueprint_zones.values_mut() {
-            for mut zone in &mut zones.zones {
+        for sled in bp.sleds.values_mut() {
+            for mut zone in &mut sled.zones_config.zones {
                 if zone.id == bundle.assigned_nexus.unwrap().into() {
                     zone.disposition = BlueprintZoneDisposition::Expunged {
                         as_of_generation: *Generation::new(),
-                        ready_for_cleanup: false,
+                        ready_for_cleanup: true,
                     };
                 }
             }
@@ -1087,10 +1085,12 @@ mod test {
             .await
             .expect("Should be able to get bundle we just failed");
         assert_eq!(SupportBundleState::Failed, observed_bundle.state);
-        assert!(observed_bundle
-            .reason_for_failure
-            .unwrap()
-            .contains(FAILURE_REASON_NO_DATASET));
+        assert!(
+            observed_bundle
+                .reason_for_failure
+                .unwrap()
+                .contains(FAILURE_REASON_NO_DATASET)
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1286,10 +1286,12 @@ mod test {
             .await
             .expect("Should be able to get bundle we just failed");
         assert_eq!(SupportBundleState::Failed, observed_bundle.state);
-        assert!(observed_bundle
-            .reason_for_failure
-            .unwrap()
-            .contains(FAILURE_REASON_NO_DATASET));
+        assert!(
+            observed_bundle
+                .reason_for_failure
+                .unwrap()
+                .contains(FAILURE_REASON_NO_DATASET)
+        );
 
         // Expunge the bundle's Nexus
         let bp3 = {
@@ -1316,10 +1318,12 @@ mod test {
             .await
             .expect("Should be able to get bundle we just failed");
         assert_eq!(SupportBundleState::Failed, observed_bundle.state);
-        assert!(observed_bundle
-            .reason_for_failure
-            .unwrap()
-            .contains(FAILURE_REASON_NO_DATASET));
+        assert!(
+            observed_bundle
+                .reason_for_failure
+                .unwrap()
+                .contains(FAILURE_REASON_NO_DATASET)
+        );
 
         let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
         datastore
@@ -1421,10 +1425,12 @@ mod test {
             .await
             .expect("Should be able to get bundle we just failed");
         assert_eq!(SupportBundleState::Failing, observed_bundle.state);
-        assert!(observed_bundle
-            .reason_for_failure
-            .unwrap()
-            .contains(FAILURE_REASON_NO_NEXUS));
+        assert!(
+            observed_bundle
+                .reason_for_failure
+                .unwrap()
+                .contains(FAILURE_REASON_NO_NEXUS)
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

@@ -16,9 +16,9 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
+use omicron_test_utils::dev::test_cmds::Redactor;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
-use omicron_test_utils::dev::test_cmds::Redactor;
 use slog_error_chain::InlineErrorChain;
 use std::fmt::Write;
 use std::net::IpAddr;
@@ -277,11 +277,13 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         });
     // Did we find at least one sled in the planning input, and at least one
     // collection?
-    assert!(parsed
-        .planning_input
-        .all_sled_ids(SledFilter::Commissioned)
-        .next()
-        .is_some());
+    assert!(
+        parsed
+            .planning_input
+            .all_sled_ids(SledFilter::Commissioned)
+            .next()
+            .is_some()
+    );
     assert!(!parsed.collections.is_empty());
 
     let ox_invocation = &["oximeter", "list-producers"];

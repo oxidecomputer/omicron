@@ -35,7 +35,7 @@ use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::error;
-use slog::{info, warn, Logger};
+use slog::{Logger, info, warn};
 use std::collections::BTreeSet;
 use std::str::FromStr;
 
@@ -172,11 +172,12 @@ impl<'a> Planner<'a> {
                 (SledPolicy::Expunged, SledState::Active) => (),
             }
 
-            // Check that the sled isn't already decommissioned in the parent blueprint, if it exists.
-            if let Some(sled_state) =
-                self.blueprint.parent_blueprint().sled_state.get(&sled_id)
+            // Check that the sled isn't already decommissioned in the parent
+            // blueprint, if it exists.
+            if let Some(parent_sled_cfg) =
+                self.blueprint.parent_blueprint().sleds.get(&sled_id)
             {
-                if *sled_state == SledState::Decommissioned {
+                if parent_sled_cfg.state == SledState::Decommissioned {
                     continue;
                 }
             }
@@ -985,9 +986,9 @@ pub(crate) enum ZoneExpungeReason {
 pub(crate) mod test {
     use super::*;
     use crate::blueprint_builder::test::verify_blueprint;
-    use crate::example::example;
     use crate::example::ExampleSystemBuilder;
     use crate::example::SimRngState;
+    use crate::example::example;
     use crate::system::SledBuilder;
     use chrono::NaiveDateTime;
     use chrono::TimeZone;
@@ -995,8 +996,6 @@ pub(crate) mod test {
     use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
     use clickhouse_admin_types::KeeperId;
     use expectorate::assert_contents;
-    use nexus_types::deployment::blueprint_zone_type;
-    use nexus_types::deployment::blueprint_zone_type::InternalDns;
     use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::BlueprintDiffSummary;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
@@ -1005,6 +1004,8 @@ pub(crate) mod test {
     use nexus_types::deployment::ClickhouseMode;
     use nexus_types::deployment::ClickhousePolicy;
     use nexus_types::deployment::SledDisk;
+    use nexus_types::deployment::blueprint_zone_type;
+    use nexus_types::deployment::blueprint_zone_type::InternalDns;
     use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
@@ -1044,14 +1045,14 @@ pub(crate) mod test {
         .expect("created planner");
         let child_blueprint = planner.plan().expect("planning succeeded");
         verify_blueprint(&child_blueprint);
-        let diff = child_blueprint.diff_since_blueprint(&blueprint);
+        let summary = child_blueprint.diff_since_blueprint(&blueprint);
         eprintln!(
             "diff between blueprints (expected no changes):\n{}",
-            diff.display()
+            summary.display()
         );
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 0);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
+        assert_eq!(summary.diff.sleds.modified().count(), 0);
     }
 
     /// Runs through a basic sequence of blueprints for adding a sled
@@ -1088,10 +1089,10 @@ pub(crate) mod test {
 
         let summary = blueprint2.diff_since_blueprint(&blueprint1);
         println!("1 -> 2 (expected no changes):\n{}", summary.display());
-        assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 0);
-        assert_eq!(summary.sleds_unchanged.len(), 3);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
+        assert_eq!(summary.diff.sleds.modified().count(), 0);
+        assert_eq!(summary.diff.sleds.unchanged().count(), 3);
         assert_eq!(summary.total_zones_added(), 0);
         assert_eq!(summary.total_zones_removed(), 0);
         assert_eq!(summary.total_zones_modified(), 0);
@@ -1133,24 +1134,23 @@ pub(crate) mod test {
             &summary.display().to_string(),
         );
 
-        assert_eq!(summary.sleds_added.len(), 1);
+        assert_eq!(summary.diff.sleds.added.len(), 1);
         assert_eq!(summary.total_disks_added(), 10);
         assert_eq!(summary.total_datasets_added(), 21);
-        let sled_id = *summary.sleds_added.first().unwrap();
-        let sled_zones =
-            summary.diff.blueprint_zones.added.get(&sled_id).unwrap();
+        let (&sled_id, sled_added) =
+            summary.diff.sleds.added.first_key_value().unwrap();
         // We have defined elsewhere that the first generation contains no
         // zones.  So the first one with zones must be newer.  See
         // OmicronZonesConfig::INITIAL_GENERATION.
-        assert!(sled_zones.generation > Generation::new());
-        assert_eq!(sled_id, new_sled_id);
-        assert_eq!(sled_zones.zones.len(), 1);
+        assert!(sled_added.zones_config.generation > Generation::new());
+        assert_eq!(*sled_id, new_sled_id);
+        assert_eq!(sled_added.zones_config.zones.len(), 1);
         assert!(matches!(
-            sled_zones.zones.first().unwrap().kind(),
+            sled_added.zones_config.zones.first().unwrap().kind(),
             ZoneKind::InternalNtp
         ));
-        assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
+        assert_eq!(summary.diff.sleds.modified().count(), 0);
         verify_blueprint(&blueprint3);
 
         // Check that with no change in inventory, the planner makes no changes.
@@ -1169,9 +1169,9 @@ pub(crate) mod test {
         .expect("failed to plan");
         let summary = blueprint4.diff_since_blueprint(&blueprint3);
         println!("3 -> 4 (expected no changes):\n{}", summary.display());
-        assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 0);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
+        assert_eq!(summary.diff.sleds.modified().count(), 0);
         verify_blueprint(&blueprint4);
 
         // Now update the inventory to have the requested NTP zone.
@@ -1183,9 +1183,10 @@ pub(crate) mod test {
             .sled_set_omicron_zones(
                 new_sled_id,
                 blueprint4
-                    .blueprint_zones
+                    .sleds
                     .get(&new_sled_id)
                     .expect("blueprint should contain zones for new sled")
+                    .zones_config
                     .clone()
                     .into_running_omicron_zones_config(),
             )
@@ -1212,13 +1213,19 @@ pub(crate) mod test {
             "tests/output/planner_basic_add_sled_3_5.txt",
             &summary.display().to_string(),
         );
-        assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 1);
-        let sled_id = summary.sleds_modified.first().unwrap();
+        assert_eq!(summary.diff.sleds.added.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
+        assert_eq!(summary.diff.sleds.modified().count(), 1);
+        let sled_id = summary.diff.sleds.modified_keys().next().unwrap();
         assert_eq!(*sled_id, new_sled_id);
         // No removed or modified zones on this sled
-        let zones_cfg_diff = summary.zones_on_modified_sled(sled_id).unwrap();
+        let zones_cfg_diff = &summary
+            .diff
+            .sleds
+            .get_modified(sled_id)
+            .unwrap()
+            .diff_pair()
+            .zones_config;
         assert!(zones_cfg_diff.zones.removed.is_empty());
         assert_eq!(zones_cfg_diff.zones.modified().count(), 0);
         // 10 crucible zones addeed
@@ -1267,12 +1274,13 @@ pub(crate) mod test {
 
         // This blueprint should only have 1 Nexus instance on the one sled we
         // kept.
-        assert_eq!(blueprint1.blueprint_zones.len(), 1);
+        assert_eq!(blueprint1.sleds.len(), 1);
         assert_eq!(
             blueprint1
-                .blueprint_zones
+                .sleds
                 .get(&sled_id)
                 .expect("missing kept sled")
+                .zones_config
                 .zones
                 .iter()
                 .filter(|z| z.zone_type.is_nexus())
@@ -1307,24 +1315,27 @@ pub(crate) mod test {
             "1 -> 2 (added additional Nexus zones):\n{}",
             summary.display()
         );
-        assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 1);
-        let changed_sled_id = summary.sleds_modified.first().unwrap();
+        assert_eq!(summary.diff.sleds.added.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
+        assert_eq!(summary.diff.sleds.modified().count(), 1);
+        let (changed_sled_id, changed_sled) =
+            summary.diff.sleds.modified().next().unwrap();
 
         assert_eq!(*changed_sled_id, sled_id);
         assert_eq!(
-            summary
-                .datasets_on_modified_sled(&sled_id)
-                .unwrap()
-                .datasets
-                .added
-                .len(),
+            changed_sled.diff_pair().datasets_config.datasets.added.len(),
             4
         );
 
-        let zones_added =
-            &summary.zones_on_modified_sled(&sled_id).unwrap().zones.added;
+        let zones_added = &summary
+            .diff
+            .sleds
+            .get_modified(&sled_id)
+            .unwrap()
+            .diff_pair()
+            .zones_config
+            .zones
+            .added;
         assert_eq!(zones_added.len(), input.target_nexus_zone_count() - 1);
         for (_, zone) in zones_added {
             if zone.kind() != ZoneKind::Nexus {
@@ -1356,10 +1367,11 @@ pub(crate) mod test {
         let (collection, input, blueprint1) = example(&logctx.log, TEST_NAME);
 
         // This blueprint should only have 3 Nexus zones: one on each sled.
-        assert_eq!(blueprint1.blueprint_zones.len(), 3);
-        for sled_config in blueprint1.blueprint_zones.values() {
+        assert_eq!(blueprint1.sleds.len(), 3);
+        for sled_config in blueprint1.sleds.values() {
             assert_eq!(
                 sled_config
+                    .zones_config
                     .zones
                     .iter()
                     .filter(|z| z.zone_type.is_nexus())
@@ -1389,24 +1401,19 @@ pub(crate) mod test {
             "1 -> 2 (added additional Nexus zones):\n{}",
             summary.display()
         );
-        assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 3);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
+        assert_eq!(summary.diff.sleds.modified().count(), 3);
 
         // All 3 sleds should get additional Nexus zones. We expect a total of
         // 11 new Nexus zones, which should be spread evenly across the three
         // sleds (two should get 4 and one should get 3).
         let mut total_new_nexus_zones = 0;
-        for sled_id in &summary.sleds_modified {
-            assert!(!summary
-                .diff
-                .blueprint_zones
-                .removed
-                .contains_key(sled_id));
-            let zones_cfg_diff =
-                summary.zones_on_modified_sled(sled_id).unwrap();
-            assert_eq!(zones_cfg_diff.zones.modified().count(), 0);
-            let zones_added = &zones_cfg_diff.zones.added;
+        for (sled_id, modified_sled) in summary.diff.sleds.modified() {
+            let zones_diff = &modified_sled.diff_pair().zones_config.zones;
+            assert!(zones_diff.removed.is_empty());
+            assert_eq!(zones_diff.modified().count(), 0);
+            let zones_added = &zones_diff.added;
             match zones_added.len() {
                 n @ (3 | 4) => {
                     total_new_nexus_zones += n;
@@ -1449,10 +1456,11 @@ pub(crate) mod test {
 
         // This blueprint should have exactly 3 internal DNS zones: one on each
         // sled.
-        assert_eq!(blueprint1.blueprint_zones.len(), 3);
-        for sled_config in blueprint1.blueprint_zones.values() {
+        assert_eq!(blueprint1.sleds.len(), 3);
+        for sled_config in blueprint1.sleds.values() {
             assert_eq!(
                 sled_config
+                    .zones_config
                     .zones
                     .iter()
                     .filter(|z| z.zone_type.is_internal_dns())
@@ -1488,13 +1496,11 @@ pub(crate) mod test {
 
         // Remove two of the internal DNS zones; the planner should put new
         // zones back in their places.
-        for (_sled_id, zones) in blueprint1.blueprint_zones.iter_mut().take(2) {
-            zones.zones.retain(|z| !z.zone_type.is_internal_dns());
+        for (_sled_id, sled) in blueprint1.sleds.iter_mut().take(2) {
+            sled.zones_config.zones.retain(|z| !z.zone_type.is_internal_dns());
         }
-        for (_, dataset_config) in
-            blueprint1.blueprint_datasets.iter_mut().take(2)
-        {
-            dataset_config.datasets.retain(|dataset| {
+        for (_, sled_config) in blueprint1.sleds.iter_mut().take(2) {
+            sled_config.datasets_config.datasets.retain(|dataset| {
                 // This is gross; once zone configs know explicit dataset IDs,
                 // we should retain by ID instead.
                 match &dataset.kind {
@@ -1524,15 +1530,14 @@ pub(crate) mod test {
             "1 -> 2 (added additional internal DNS zones):\n{}",
             summary.display()
         );
-        assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 2);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
+        assert_eq!(summary.diff.sleds.modified().count(), 2);
 
         // 2 sleds should each get 1 additional internal DNS zone.
         let mut total_new_zones = 0;
-        for sled_id in &summary.sleds_modified {
-            let zones_diff =
-                &summary.zones_on_modified_sled(&sled_id).unwrap().zones;
+        for (sled_id, modified_sled) in summary.diff.sleds.modified() {
+            let zones_diff = &modified_sled.diff_pair().zones_config.zones;
             assert!(zones_diff.removed.is_empty());
             assert_eq!(zones_diff.modified().count(), 0);
             let zones_added = &zones_diff.added;
@@ -1603,7 +1608,8 @@ pub(crate) mod test {
         println!("1 -> 2 (expunged sled):\n{}", diff.display());
 
         // The expunged sled should have an expunged Nexus zone.
-        let zone = blueprint2.blueprint_zones[&sled_id]
+        let zone = blueprint2.sleds[&sled_id]
+            .zones_config
             .zones
             .iter()
             .find(|zone| matches!(zone.zone_type, BlueprintZoneType::Nexus(_)))
@@ -1611,7 +1617,8 @@ pub(crate) mod test {
         assert_eq!(
             zone.disposition,
             BlueprintZoneDisposition::Expunged {
-                as_of_generation: blueprint2.blueprint_zones[&sled_id]
+                as_of_generation: blueprint2.sleds[&sled_id]
+                    .zones_config
                     .generation,
                 ready_for_cleanup: true,
             }
@@ -1646,9 +1653,9 @@ pub(crate) mod test {
         // Planning succeeded, but let's prove that we reused the IP address!
         let expunged_ip = zone.zone_type.external_networking().unwrap().0.ip();
         let new_zone = blueprint3
-            .blueprint_zones
+            .sleds
             .values()
-            .flat_map(|c| c.zones.iter())
+            .flat_map(|c| c.zones_config.zones.iter())
             .find(|zone| {
                 zone.disposition == BlueprintZoneDisposition::InService
                     && zone
@@ -1802,14 +1809,15 @@ pub(crate) mod test {
         let diff = blueprint3.diff_since_blueprint(&blueprint2);
         println!("2 -> 3 (expunged sled):\n{}", diff.display());
         assert_eq!(
-            blueprint3.blueprint_zones[&sled_id]
+            blueprint3.sleds[&sled_id]
+                .zones_config
                 .zones
                 .iter()
                 .filter(|zone| {
                     zone.disposition
                         == BlueprintZoneDisposition::Expunged {
-                            as_of_generation: blueprint3.blueprint_zones
-                                [&sled_id]
+                            as_of_generation: blueprint3.sleds[&sled_id]
+                                .zones_config
                                 .generation,
                             ready_for_cleanup: true,
                         }
@@ -1923,7 +1931,7 @@ pub(crate) mod test {
             "1 -> 2 (some new disks, one expunged):\n{}",
             summary.display()
         );
-        assert_eq!(summary.sleds_modified.len(), 1);
+        assert_eq!(summary.diff.sleds.modified().count(), 1);
 
         // We should be adding a Crucible zone for each new in-service disk.
         assert_eq!(summary.total_zones_added(), NEW_IN_SERVICE_DISKS);
@@ -1969,9 +1977,10 @@ pub(crate) mod test {
 
         // Manually update the blueprint to report an abnormal "Debug dataset"
         {
-            let (_sled_id, datasets_config) =
-                blueprint1.blueprint_datasets.iter_mut().next().unwrap();
-            let mut dataset_config = datasets_config
+            let (_sled_id, sled_config) =
+                blueprint1.sleds.iter_mut().next().unwrap();
+            let mut dataset_config = sled_config
+                .datasets_config
                 .datasets
                 .iter_mut()
                 .find(|config| {
@@ -2011,9 +2020,9 @@ pub(crate) mod test {
             &summary.display().to_string(),
         );
 
-        assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 1);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
+        assert_eq!(summary.diff.sleds.modified().count(), 1);
 
         assert_eq!(summary.total_zones_added(), 0);
         assert_eq!(summary.total_zones_removed(), 0);
@@ -2041,9 +2050,12 @@ pub(crate) mod test {
 
         // The initial collection configuration has generation 1 for disks
         // The initial blueprint configuration has generation 2 for disks
-        let (sled_id, disks_config) =
-            blueprint1.blueprint_disks.first_key_value().unwrap();
-        assert_eq!(disks_config.generation, Generation::from_u32(2));
+        let (sled_id, sled_config) =
+            blueprint1.sleds.first_key_value().unwrap();
+        assert_eq!(
+            sled_config.disks_config.generation,
+            Generation::from_u32(2)
+        );
         assert_eq!(
             collection
                 .sled_agents
@@ -2054,7 +2066,7 @@ pub(crate) mod test {
         );
 
         // All disks should have an `InService` disposition and `Active` state
-        for disk in &disks_config.disks {
+        for disk in &sled_config.disks_config.disks {
             assert_eq!(
                 disk.disposition,
                 BlueprintPhysicalDiskDisposition::InService
@@ -2097,8 +2109,8 @@ pub(crate) mod test {
         let diff = blueprint2.diff_since_blueprint(&blueprint1);
         println!("1 -> 2 (expunge a disk):\n{}", diff.display());
 
-        let (_, disks_config) =
-            blueprint2.blueprint_disks.first_key_value().unwrap();
+        let disks_config =
+            &blueprint2.sleds.first_key_value().unwrap().1.disks_config;
 
         // The disks generation goes from 2 -> 3
         assert_eq!(disks_config.generation, Generation::from_u32(3));
@@ -2154,8 +2166,8 @@ pub(crate) mod test {
         let diff = blueprint3.diff_since_blueprint(&blueprint2);
         println!("2 -> 3 (decommission a disk):\n{}", diff.display());
 
-        let (_, disks_config) =
-            blueprint3.blueprint_disks.first_key_value().unwrap();
+        let disks_config =
+            &blueprint3.sleds.first_key_value().unwrap().1.disks_config;
 
         // The disks generation does not change, as decommissioning doesn't bump
         // the generation.
@@ -2214,8 +2226,8 @@ pub(crate) mod test {
             diff.display()
         );
 
-        let (_, disks_config) =
-            blueprint4.blueprint_disks.first_key_value().unwrap();
+        let disks_config =
+            &blueprint4.sleds.first_key_value().unwrap().1.disks_config;
 
         // The disks generation goes from 3 -> 4
         assert_eq!(disks_config.generation, Generation::from_u32(4));
@@ -2265,8 +2277,8 @@ pub(crate) mod test {
         // If we don't do this, we might select a physical disk supporting
         // multiple zones of distinct types.
         let mut zpool_by_zone_usage = HashMap::new();
-        for zones in blueprint1.blueprint_zones.values() {
-            for zone in &zones.zones {
+        for sled in blueprint1.sleds.values() {
+            for zone in &sled.zones_config.zones {
                 let pool = zone.filesystem_pool.as_ref().unwrap();
                 zpool_by_zone_usage
                     .entry(pool.id())
@@ -2301,9 +2313,9 @@ pub(crate) mod test {
 
         let summary = blueprint2.diff_since_blueprint(&blueprint1);
         println!("1 -> 2 (expunge a disk):\n{}", summary.display());
-        assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 1);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
+        assert_eq!(summary.diff.sleds.modified().count(), 1);
 
         // We should be removing a single zone, associated with the Crucible
         // using that device.
@@ -2330,10 +2342,11 @@ pub(crate) mod test {
             DatasetKind::TransientZoneRoot,
             test_transient_zone_kind.clone(),
         ]);
-        for (_, sled_with_modified_datasets) in &summary.modified_datasets_diff
-        {
+        let mut modified_zone_configs = Vec::new();
+        for modified_sled in summary.diff.sleds.modified_values_diff() {
+            modified_zone_configs.push(modified_sled.zones_config);
             for modified in
-                sled_with_modified_datasets.datasets.modified_values_diff()
+                modified_sled.datasets_config.datasets.modified_values_diff()
             {
                 assert_eq!(
                     *modified.disposition.before,
@@ -2355,20 +2368,26 @@ pub(crate) mod test {
         }
         assert!(expected_kinds.is_empty());
 
-        let (_zone_id, modified_zones) =
-            summary.modified_zones_diff.iter().next().unwrap();
-        assert_eq!(modified_zones.zones.modified().count(), 1);
-        let (_, modified_zone) =
-            &modified_zones.zones.modified_diff().next().unwrap();
+        assert_eq!(modified_zone_configs.len(), 1);
+        let modified_zone_config = modified_zone_configs.pop().unwrap();
+        assert!(modified_zone_config.zones.added.is_empty());
+        assert!(modified_zone_config.zones.removed.is_empty());
+        let mut modified_zones = modified_zone_config
+            .zones
+            .modified_values_diff()
+            .collect::<Vec<_>>();
+        assert_eq!(modified_zones.len(), 1);
+        let modified_zone = modified_zones.pop().unwrap();
         assert!(
-            matches!(modified_zone.zone_type.before.kind(), ZoneKind::Crucible),
-            "Expected the modified zone to be a Crucible zone, but it was: {:?}",
+            modified_zone.zone_type.before.is_crucible(),
+            "Expected the modified zone to be a Crucible zone, \
+             but it was: {:?}",
             modified_zone.zone_type.before.kind()
         );
         assert_eq!(
             *modified_zone.disposition.after,
             BlueprintZoneDisposition::Expunged {
-                as_of_generation: *modified_zones.generation.after,
+                as_of_generation: modified_zone_config.generation.before.next(),
                 ready_for_cleanup: false,
             },
             "Should have expunged this zone"
@@ -2406,10 +2425,10 @@ pub(crate) mod test {
 
         // Find whatever pool NTP was using
         let pool_to_expunge = blueprint1
-            .blueprint_zones
+            .sleds
             .iter()
-            .find_map(|(_, zones_config)| {
-                for zone_config in &zones_config.zones {
+            .find_map(|(_, sled_config)| {
+                for zone_config in &sled_config.zones_config.zones {
                     if zone_config.zone_type.is_ntp() {
                         return zone_config.filesystem_pool.clone();
                     }
@@ -2474,21 +2493,23 @@ pub(crate) mod test {
 
         let summary = blueprint2.diff_since_blueprint(&blueprint1);
         println!("1 -> 2 (expunge a disk):\n{}", summary.display());
-        assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 1);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
+        assert_eq!(summary.diff.sleds.modified().count(), 1);
 
         // No zones should have been removed from the blueprint entirely.
         assert_eq!(summary.total_zones_removed(), 0);
 
         // We should have expunged all the zones on this pool.
         let mut zones_expunged = BTreeSet::new();
-        for zones in summary.diff.blueprint_zones.modified_values_diff() {
-            for (_, z) in zones.zones.modified() {
+        for sled in summary.diff.sleds.modified_values_diff() {
+            let expected_generation =
+                sled.zones_config.generation.diff_pair().before.next();
+            for (_, z) in sled.zones_config.zones.modified() {
                 assert_eq!(
                     z.after.disposition,
                     BlueprintZoneDisposition::Expunged {
-                        as_of_generation: *zones.generation.diff_pair().after,
+                        as_of_generation: expected_generation,
                         ready_for_cleanup: false,
                     },
                     "Should have expunged this zone"
@@ -2506,8 +2527,8 @@ pub(crate) mod test {
         assert_eq!(zone_kinds_on_pool.remove(&ZoneKind::Crucible), Some(1));
         assert_eq!(zone_kinds_on_pool.remove(&ZoneKind::InternalDns), Some(1));
         let mut zone_kinds_added = BTreeMap::new();
-        for zones in summary.diff.blueprint_zones.modified_values_diff() {
-            for (_, z) in zones.zones.added {
+        for sled in summary.diff.sleds.modified_values_diff() {
+            for z in sled.zones_config.zones.added.values() {
                 *zone_kinds_added.entry(z.zone_type.kind()).or_default() +=
                     1_usize;
             }
@@ -2546,10 +2567,11 @@ pub(crate) mod test {
         let input = example.input;
 
         // This blueprint should only have 5 Nexus zones: one on each sled.
-        assert_eq!(blueprint1.blueprint_zones.len(), 5);
-        for sled_config in blueprint1.blueprint_zones.values() {
+        assert_eq!(blueprint1.sleds.len(), 5);
+        for sled_config in blueprint1.sleds.values() {
             assert_eq!(
                 sled_config
+                    .zones_config
                     .zones
                     .iter()
                     .filter(|z| z.zone_type.is_nexus())
@@ -2594,8 +2616,12 @@ pub(crate) mod test {
             // expunged, so lie and pretend like that already happened
             // (otherwise the planner will rightfully fail to generate a new
             // blueprint, because we're feeding it invalid inputs).
-            for mut zone in
-                &mut blueprint1.blueprint_zones.get_mut(&sled_id).unwrap().zones
+            for mut zone in &mut blueprint1
+                .sleds
+                .get_mut(&sled_id)
+                .unwrap()
+                .zones_config
+                .zones
             {
                 zone.disposition = BlueprintZoneDisposition::Expunged {
                     as_of_generation: Generation::new(),
@@ -2607,11 +2633,11 @@ pub(crate) mod test {
             // state via blueprints. If the database says the sled is
             // decommissioned but the parent blueprint says it's still active,
             // that's an invalid state that the planner will reject.
-            *blueprint1
-                .sled_state
+            blueprint1
+                .sleds
                 .get_mut(&sled_id)
-                .expect("found state in parent blueprint") =
-                SledState::Decommissioned;
+                .expect("found state in parent blueprint")
+                .state = SledState::Decommissioned;
 
             sled_id
         };
@@ -2674,10 +2700,10 @@ pub(crate) mod test {
         // cleanup, and we aren't performing garbage collection on zones or
         // sleds at the moment.
 
-        assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 4);
-        assert_eq!(summary.sleds_unchanged.len(), 1);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
+        assert_eq!(summary.diff.sleds.modified().count(), 3);
+        assert_eq!(summary.diff.sleds.unchanged().count(), 2);
 
         assert_all_zones_expunged(&summary, expunged_sled_id, "expunged sled");
 
@@ -2685,18 +2711,23 @@ pub(crate) mod test {
         // should get additional Nexus zones. We expect a total of 6 new Nexus
         // zones, which should be split evenly between the two sleds, while the
         // non-provisionable sled should be unchanged.
-        let mut remaining_modified_sleds = summary.sleds_modified.clone();
-        remaining_modified_sleds.remove(&expunged_sled_id);
-        remaining_modified_sleds.remove(&decommissioned_sled_id);
+        let remaining_modified_sleds = summary
+            .diff
+            .sleds
+            .modified()
+            .filter_map(|(&sled_id, sled)| {
+                (sled_id != expunged_sled_id).then_some((sled_id, sled))
+            })
+            .collect::<BTreeMap<_, _>>();
 
         assert_eq!(remaining_modified_sleds.len(), 2);
         let mut total_new_nexus_zones = 0;
-        for sled_id in remaining_modified_sleds {
+        for (sled_id, modified_sled) in remaining_modified_sleds {
             assert!(sled_id != nonprovisionable_sled_id);
             assert!(sled_id != expunged_sled_id);
             assert!(sled_id != decommissioned_sled_id);
             let zones_on_modified_sled =
-                &summary.zones_on_modified_sled(&sled_id).unwrap().zones;
+                &modified_sled.diff_pair().zones_config.zones;
             assert!(zones_on_modified_sled.removed.is_empty());
             let zones = &zones_on_modified_sled.added;
             for (_, zone) in zones {
@@ -2739,9 +2770,10 @@ pub(crate) mod test {
 
         // Leave the non-provisionable sled's generation alone.
         let zones = &mut blueprint2a
-            .blueprint_zones
+            .sleds
             .get_mut(&nonprovisionable_sled_id)
             .unwrap()
+            .zones_config
             .zones;
 
         zones.retain(|zone| {
@@ -2785,13 +2817,15 @@ pub(crate) mod test {
             }
         });
 
-        let expunged_zones =
-            blueprint2a.blueprint_zones.get_mut(&expunged_sled_id).unwrap();
+        let expunged_zones = &mut blueprint2a
+            .sleds
+            .get_mut(&expunged_sled_id)
+            .unwrap()
+            .zones_config;
         expunged_zones.zones.clear();
         expunged_zones.generation = expunged_zones.generation.next();
 
-        blueprint2a.blueprint_zones.remove(&decommissioned_sled_id);
-        blueprint2a.sled_state.remove(&decommissioned_sled_id);
+        blueprint2a.sleds.remove(&decommissioned_sled_id);
 
         blueprint2a.external_dns_version =
             blueprint2a.external_dns_version.next();
@@ -2815,12 +2849,7 @@ pub(crate) mod test {
         desc: &str,
     ) {
         assert!(
-            summary
-                .diff
-                .blueprint_zones
-                .added
-                .get(&expunged_sled_id)
-                .map_or(true, |zones| zones.zones.is_empty()),
+            summary.added_zones(&expunged_sled_id).is_none(),
             "for {desc}, no zones should have been added to blueprint"
         );
 
@@ -2830,19 +2859,19 @@ pub(crate) mod test {
         // process that isn't currently defined.
 
         assert!(
-            summary
-                .diff
-                .blueprint_zones
-                .removed
-                .get(&expunged_sled_id)
-                .map_or(true, |zones| zones.zones.is_empty()),
+            summary.removed_zones(&expunged_sled_id).is_none(),
             "for {desc}, no zones should have been removed from blueprint"
         );
 
         // Run through all the common zones and ensure that all of them
         // have been marked expunged.
-        let modified_zones =
-            summary.zones_on_modified_sled(&expunged_sled_id).unwrap();
+        let modified_zones = &summary
+            .diff
+            .sleds
+            .get_modified(&expunged_sled_id)
+            .unwrap()
+            .diff_pair()
+            .zones_config;
         assert_eq!(
             modified_zones.generation.before.next(),
             *modified_zones.generation.after,
@@ -2912,10 +2941,13 @@ pub(crate) mod test {
 
         // All the zones of the expunged sled should be expunged, and the sled
         // itself should be decommissioned.
-        assert!(blueprint2.blueprint_zones[&expunged_sled_id]
-            .are_all_zones_expunged());
+        assert!(
+            blueprint2.sleds[&expunged_sled_id]
+                .zones_config
+                .are_all_zones_expunged()
+        );
         assert_eq!(
-            blueprint2.sled_state[&expunged_sled_id],
+            blueprint2.sleds[&expunged_sled_id].state,
             SledState::Decommissioned
         );
 
@@ -2950,11 +2982,11 @@ pub(crate) mod test {
             "2 -> 3 (decommissioned {expunged_sled_id}):\n{}",
             summary.display()
         );
-        assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 0);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
+        assert_eq!(summary.diff.sleds.modified().count(), 0);
         assert_eq!(
-            summary.sleds_unchanged.len(),
+            summary.diff.sleds.unchanged().count(),
             ExampleSystemBuilder::DEFAULT_N_SLEDS
         );
 
@@ -2972,8 +3004,8 @@ pub(crate) mod test {
         // table are kept forever -- but we need to test it.)
         //
         // Eventually, once zone and sled garbage collection is implemented,
-        // we'll expect that the blueprint's sleds_removed will become
-        // non-zero. At some point we may also want to remove entries from the
+        // we'll expect that the diff's `sleds.removed` will become
+        // non-empty. At some point we may also want to remove entries from the
         // sled table, but that's a future concern that would come after
         // blueprint cleanup is implemented.
         let mut builder = input.into_builder();
@@ -2997,11 +3029,11 @@ pub(crate) mod test {
             "3 -> 4 (removed from input {expunged_sled_id}):\n{}",
             summary.display()
         );
-        assert_eq!(summary.sleds_added.len(), 0);
-        assert_eq!(summary.sleds_removed.len(), 0);
-        assert_eq!(summary.sleds_modified.len(), 0);
+        assert_eq!(summary.diff.sleds.added.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
+        assert_eq!(summary.diff.sleds.modified().count(), 0);
         assert_eq!(
-            summary.sleds_unchanged.len(),
+            summary.diff.sleds.unchanged().count(),
             ExampleSystemBuilder::DEFAULT_N_SLEDS
         );
 
@@ -4014,10 +4046,11 @@ pub(crate) mod test {
 
         // Find a Nexus zone we'll use for our test.
         let (sled_id, nexus_config) = blueprint1
-            .blueprint_zones
+            .sleds
             .iter()
-            .find_map(|(sled_id, zones_config)| {
-                let nexus = zones_config
+            .find_map(|(sled_id, sled_config)| {
+                let nexus = sled_config
+                    .zones_config
                     .zones
                     .iter()
                     .find(|z| z.zone_type.is_nexus())?;
@@ -4061,7 +4094,7 @@ pub(crate) mod test {
 
         // Helper to extract the Nexus zone's disposition in a blueprint.
         let get_nexus_disposition = |bp: &Blueprint| {
-            bp.blueprint_zones.get(&sled_id).unwrap().zones.iter().find_map(
+            bp.sleds.get(&sled_id).unwrap().zones_config.zones.iter().find_map(
                 |z| {
                     if z.id == nexus_config.id {
                         Some(z.disposition)
@@ -4074,9 +4107,15 @@ pub(crate) mod test {
 
         // This sled's zone config generation should have been bumped...
         let bp2_generation =
-            blueprint2.blueprint_zones.get(&sled_id).unwrap().generation;
+            blueprint2.sleds.get(&sled_id).unwrap().zones_config.generation;
         assert_eq!(
-            blueprint1.blueprint_zones.get(&sled_id).unwrap().generation.next(),
+            blueprint1
+                .sleds
+                .get(&sled_id)
+                .unwrap()
+                .zones_config
+                .generation
+                .next(),
             bp2_generation
         );
         // ... and the Nexus should should have the disposition we expect.
@@ -4172,7 +4211,7 @@ pub(crate) mod test {
         // ready_for_cleanup changes should not bump the config generation,
         // since it doesn't affect what's sent to sled-agent.
         assert_eq!(
-            blueprint3.blueprint_zones.get(&sled_id).unwrap().generation,
+            blueprint3.sleds.get(&sled_id).unwrap().zones_config.generation,
             bp2_generation
         );
 
@@ -4199,10 +4238,11 @@ pub(crate) mod test {
 
         // Find a internal DNS zone we'll use for our test.
         let (sled_id, internal_dns_config) = blueprint1
-            .blueprint_zones
+            .sleds
             .iter()
-            .find_map(|(sled_id, zones_config)| {
-                let config = zones_config
+            .find_map(|(sled_id, sled_config)| {
+                let config = sled_config
+                    .zones_config
                     .zones
                     .iter()
                     .find(|z| z.zone_type.is_internal_dns())?;
@@ -4246,7 +4286,7 @@ pub(crate) mod test {
 
         // Helper to extract the DNS zone's disposition in a blueprint.
         let get_dns_disposition = |bp: &Blueprint| {
-            bp.blueprint_zones.get(&sled_id).unwrap().zones.iter().find_map(
+            bp.sleds.get(&sled_id).unwrap().zones_config.zones.iter().find_map(
                 |z| {
                     if z.id == internal_dns_config.id {
                         Some(z.disposition)
@@ -4259,9 +4299,15 @@ pub(crate) mod test {
 
         // This sled's zone config generation should have been bumped...
         let bp2_generation =
-            blueprint2.blueprint_zones.get(&sled_id).unwrap().generation;
+            blueprint2.sleds.get(&sled_id).unwrap().zones_config.generation;
         assert_eq!(
-            blueprint1.blueprint_zones.get(&sled_id).unwrap().generation.next(),
+            blueprint1
+                .sleds
+                .get(&sled_id)
+                .unwrap()
+                .zones_config
+                .generation
+                .next(),
             bp2_generation
         );
         // ... and the DNS zone should should have the disposition we expect.
@@ -4323,9 +4369,9 @@ pub(crate) mod test {
         eprintln!("{}", summary.display());
 
         let mut added_count = 0;
-        for zones in summary.diff.blueprint_zones.modified_values_diff() {
-            added_count += zones.zones.added.len();
-            for (_, z) in zones.zones.added {
+        for sled_cfg in summary.diff.sleds.modified_values_diff() {
+            added_count += sled_cfg.zones_config.zones.added.len();
+            for z in sled_cfg.zones_config.zones.added.values() {
                 match &z.zone_type {
                     BlueprintZoneType::InternalDns(internal_dns) => {
                         let BlueprintZoneType::InternalDns(InternalDns {

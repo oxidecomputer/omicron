@@ -5,18 +5,19 @@
 //! Manages deployment of Omicron zones to Sled Agents
 
 use crate::Sled;
+use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
-use anyhow::Context;
 use cockroach_admin_client::types::NodeDecommission;
 use cockroach_admin_client::types::NodeId;
-use futures::stream;
 use futures::StreamExt;
+use futures::stream;
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::datastore::CollectorReassignment;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::CollectorReassignment;
+use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
@@ -25,29 +26,27 @@ use omicron_common::address::COCKROACH_ADMIN_PORT;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
+use slog::Logger;
 use slog::info;
 use slog::warn;
-use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 
-/// Typestate indicating that the deploy disks step was performed.
-#[derive(Debug)]
-#[must_use = "token indicating completion of deploy_zones"]
-pub(crate) struct DeployZonesDone(());
-
 /// Idempotently ensure that the specified Omicron zones are deployed to the
 /// corresponding sleds
-pub(crate) async fn deploy_zones(
+pub(crate) async fn deploy_zones<'a, I>(
     opctx: &OpContext,
     sleds_by_id: &BTreeMap<SledUuid, Sled>,
-    zones: &BTreeMap<SledUuid, BlueprintZonesConfig>,
-) -> Result<DeployZonesDone, Vec<anyhow::Error>> {
+    zones: I,
+) -> Result<(), Vec<anyhow::Error>>
+where
+    I: Iterator<Item = (SledUuid, &'a BlueprintZonesConfig)>,
+{
     let errors: Vec<_> = stream::iter(zones)
         .filter_map(|(sled_id, config)| async move {
-            let db_sled = match sleds_by_id.get(sled_id) {
+            let db_sled = match sleds_by_id.get(&sled_id) {
                 Some(sled) => sled,
                 None => {
                     if config.are_all_zones_expunged() {
@@ -98,11 +97,7 @@ pub(crate) async fn deploy_zones(
         .collect()
         .await;
 
-    if errors.is_empty() {
-        Ok(DeployZonesDone(()))
-    } else {
-        Err(errors)
-    }
+    if errors.is_empty() { Ok(()) } else { Err(errors) }
 }
 
 /// Idempontently perform any cleanup actions necessary for expunged zones.
@@ -110,24 +105,26 @@ pub(crate) async fn clean_up_expunged_zones<R: CleanupResolver>(
     opctx: &OpContext,
     datastore: &DataStore,
     resolver: &R,
-    expunged_zones: impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)>,
-    _deploy_zones_done: &DeployZonesDone,
+    blueprint: &Blueprint,
 ) -> Result<(), Vec<anyhow::Error>> {
-    let errors: Vec<anyhow::Error> = stream::iter(expunged_zones)
-        .filter_map(|(sled_id, config)| async move {
-            // We expect to only be called with expunged zones; skip any with a
-            // different disposition.
-            //
-            // TODO We should be looking at `ready_for_cleanup` here! But
-            // currently the planner never sets it to true, so we're dependent
-            // on `DeployZonesDone` instead.
-            if !matches!(
-                config.disposition,
-                BlueprintZoneDisposition::Expunged { .. }
-            ) {
-                return None;
-            }
+    clean_up_expunged_zones_impl(
+        opctx,
+        datastore,
+        resolver,
+        blueprint
+            .all_omicron_zones(BlueprintZoneDisposition::is_ready_for_cleanup),
+    )
+    .await
+}
 
+async fn clean_up_expunged_zones_impl<R: CleanupResolver>(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    resolver: &R,
+    zones_to_clean_up: impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)>,
+) -> Result<(), Vec<anyhow::Error>> {
+    let errors: Vec<anyhow::Error> = stream::iter(zones_to_clean_up)
+        .filter_map(|(sled_id, config)| async move {
             let log = opctx.log.new(slog::o!(
                 "sled_id" => sled_id.to_string(),
                 "zone_id" => config.id.to_string(),
@@ -186,11 +183,7 @@ pub(crate) async fn clean_up_expunged_zones<R: CleanupResolver>(
         .collect()
         .await;
 
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors)
-    }
+    if errors.is_empty() { Ok(()) } else { Err(errors) }
 }
 
 async fn oximeter_cleanup(
@@ -358,17 +351,19 @@ mod test {
     use super::*;
     use crate::Sled;
     use cockroach_admin_client::types::NodeMembership;
+    use httptest::Expectation;
     use httptest::matchers::{all_of, json_decoded, request};
     use httptest::responders::{json_encoded, status_code};
-    use httptest::Expectation;
     use nexus_sled_agent_shared::inventory::{
         OmicronZoneDataset, OmicronZonesConfig, SledRole,
     };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
-        blueprint_zone_type, Blueprint, BlueprintTarget,
-        CockroachDbPreserveDowngrade,
+        Blueprint, BlueprintDatasetsConfig, BlueprintPhysicalDisksConfig,
+        BlueprintSledConfig, BlueprintTarget, BlueprintZoneImageSource,
+        CockroachDbPreserveDowngrade, blueprint_zone_type,
     };
+    use nexus_types::external_api::views::SledState;
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::BlueprintUuid;
@@ -394,10 +389,22 @@ mod test {
             },
             Blueprint {
                 id,
-                blueprint_zones,
-                blueprint_disks: BTreeMap::new(),
-                blueprint_datasets: BTreeMap::new(),
-                sled_state: BTreeMap::new(),
+                sleds: blueprint_zones
+                    .into_iter()
+                    .map(|(sled_id, zones_config)| {
+                        (
+                            sled_id,
+                            BlueprintSledConfig {
+                                state: SledState::Active,
+                                zones_config,
+                                disks_config:
+                                    BlueprintPhysicalDisksConfig::default(),
+                                datasets_config:
+                                    BlueprintDatasetsConfig::default(),
+                            },
+                        )
+                    })
+                    .collect(),
                 cockroachdb_setting_preserve_downgrade:
                     CockroachDbPreserveDowngrade::DoNotModify,
                 parent_blueprint_id: None,
@@ -442,9 +449,16 @@ mod test {
         // Get a success result back when the blueprint has an empty set of
         // zones.
         let (_, blueprint) = create_blueprint(BTreeMap::new());
-        _ = deploy_zones(&opctx, &sleds_by_id, &blueprint.blueprint_zones)
-            .await
-            .expect("failed to deploy no zones");
+        _ = deploy_zones(
+            &opctx,
+            &sleds_by_id,
+            blueprint
+                .sleds
+                .iter()
+                .map(|(sled_id, config)| (*sled_id, &config.zones_config)),
+        )
+        .await
+        .expect("failed to deploy no zones");
 
         // Zones are updated in a particular order, but each request contains
         // the full set of zones that must be running.
@@ -467,6 +481,7 @@ mod test {
                             http_address: "[::1]:0".parse().unwrap(),
                         },
                     ),
+                    image_source: BlueprintZoneImageSource::InstallDataset,
                 }]
                 .into_iter()
                 .collect(),
@@ -500,9 +515,16 @@ mod test {
         }
 
         // Execute it.
-        _ = deploy_zones(&opctx, &sleds_by_id, &blueprint.blueprint_zones)
-            .await
-            .expect("failed to deploy initial zones");
+        _ = deploy_zones(
+            &opctx,
+            &sleds_by_id,
+            blueprint
+                .sleds
+                .iter()
+                .map(|(sled_id, config)| (*sled_id, &config.zones_config)),
+        )
+        .await
+        .expect("failed to deploy initial zones");
 
         s1.verify_and_clear();
         s2.verify_and_clear();
@@ -517,9 +539,16 @@ mod test {
                 .respond_with(status_code(204)),
             );
         }
-        _ = deploy_zones(&opctx, &sleds_by_id, &blueprint.blueprint_zones)
-            .await
-            .expect("failed to deploy same zones");
+        _ = deploy_zones(
+            &opctx,
+            &sleds_by_id,
+            blueprint
+                .sleds
+                .iter()
+                .map(|(sled_id, config)| (*sled_id, &config.zones_config)),
+        )
+        .await
+        .expect("failed to deploy same zones");
         s1.verify_and_clear();
         s2.verify_and_clear();
 
@@ -540,16 +569,24 @@ mod test {
             .respond_with(status_code(500)),
         );
 
-        let errors =
-            deploy_zones(&opctx, &sleds_by_id, &blueprint.blueprint_zones)
-                .await
-                .expect_err("unexpectedly succeeded in deploying zones");
+        let errors = deploy_zones(
+            &opctx,
+            &sleds_by_id,
+            blueprint
+                .sleds
+                .iter()
+                .map(|(sled_id, config)| (*sled_id, &config.zones_config)),
+        )
+        .await
+        .expect_err("unexpectedly succeeded in deploying zones");
 
         println!("{:?}", errors);
         assert_eq!(errors.len(), 1);
-        assert!(errors[0]
-            .to_string()
-            .starts_with("Failed to put OmicronZonesConfig"));
+        assert!(
+            errors[0]
+                .to_string()
+                .starts_with("Failed to put OmicronZonesConfig")
+        );
         s1.verify_and_clear();
         s2.verify_and_clear();
 
@@ -569,6 +606,7 @@ mod test {
                         address: "[::1]:0".parse().unwrap(),
                     },
                 ),
+                image_source: BlueprintZoneImageSource::InstallDataset,
             });
         }
 
@@ -616,9 +654,16 @@ mod test {
         }
 
         // Activate the task
-        _ = deploy_zones(&opctx, &sleds_by_id, &blueprint.blueprint_zones)
-            .await
-            .expect("failed to deploy last round of zones");
+        _ = deploy_zones(
+            &opctx,
+            &sleds_by_id,
+            blueprint
+                .sleds
+                .iter()
+                .map(|(sled_id, config)| (*sled_id, &config.zones_config)),
+        )
+        .await
+        .expect("failed to deploy last round of zones");
         s1.verify_and_clear();
         s2.verify_and_clear();
     }
@@ -640,7 +685,7 @@ mod test {
         let crdb_zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::Expunged {
                 as_of_generation: Generation::new(),
-                ready_for_cleanup: false,
+                ready_for_cleanup: true,
             },
             id: OmicronZoneUuid::new_v4(),
             filesystem_pool: Some(ZpoolName::new_external(ZpoolUuid::new_v4())),
@@ -654,6 +699,7 @@ mod test {
                     },
                 },
             ),
+            image_source: BlueprintZoneImageSource::InstallDataset,
         };
 
         // Start a mock cockroach-admin server.
@@ -670,21 +716,16 @@ mod test {
         }
         let fake_resolver = FixedResolver(vec![mock_admin.addr()]);
 
-        // This is a unit test, so pretend we already successfully called
-        // deploy_zones.
-        let deploy_zones_done = DeployZonesDone(());
-
         // We haven't yet inserted a mapping from zone ID to cockroach node ID
         // in the db, so trying to clean up the zone should log a warning but
         // otherwise succeed, without attempting to contact our mock admin
         // server. (We don't have a good way to confirm the warning was logged,
         // so we'll just check for an Ok return and no contact to mock_admin.)
-        clean_up_expunged_zones(
+        clean_up_expunged_zones_impl(
             &opctx,
             datastore,
             &fake_resolver,
             iter::once((any_sled_id, &crdb_zone)),
-            &deploy_zones_done,
         )
         .await
         .expect("unknown node ID: no cleanup");
@@ -726,12 +767,11 @@ mod test {
                 );
             };
         add_decommission_expecation(&mut mock_admin);
-        clean_up_expunged_zones(
+        clean_up_expunged_zones_impl(
             &opctx,
             datastore,
             &fake_resolver,
             iter::once((any_sled_id, &crdb_zone)),
-            &deploy_zones_done,
         )
         .await
         .expect("decommissioned test node");
@@ -758,12 +798,11 @@ mod test {
         add_decommission_failure_expecation(&mut mock_bad2);
         let mut fake_resolver =
             FixedResolver(vec![mock_bad1.addr(), mock_bad2.addr()]);
-        let mut err = clean_up_expunged_zones(
+        let mut err = clean_up_expunged_zones_impl(
             &opctx,
             datastore,
             &fake_resolver,
             iter::once((any_sled_id, &crdb_zone)),
-            &deploy_zones_done,
         )
         .await
         .expect_err("no successful response should result in failure");
@@ -787,12 +826,11 @@ mod test {
         add_decommission_failure_expecation(&mut mock_bad2);
         add_decommission_expecation(&mut mock_admin);
         fake_resolver.0.push(mock_admin.addr());
-        clean_up_expunged_zones(
+        clean_up_expunged_zones_impl(
             &opctx,
             datastore,
             &fake_resolver,
             iter::once((any_sled_id, &crdb_zone)),
-            &deploy_zones_done,
         )
         .await
         .expect("decommissioned test node");

@@ -51,9 +51,9 @@ use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::WhichPage;
 use schemars::JsonSchema;
-use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::fmt::Debug;
 use std::num::NonZeroU32;
 use uuid::Uuid;
@@ -284,9 +284,8 @@ fn default_id_sort_mode() -> IdSortMode {
     IdSortMode::IdAscending
 }
 
-impl<
-        T: Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize,
-    > ScanParams for ScanById<T>
+impl<T: Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize>
+    ScanParams for ScanById<T>
 {
     type MarkerValue = Uuid;
     fn direction(&self) -> PaginationOrder {
@@ -311,6 +310,19 @@ pub type PaginatedByNameOrId<Selector = ()> = PaginationParams<
 /// Page selector for pagination by name or id
 pub type PageSelectorByNameOrId<Selector = ()> =
     PageSelector<ScanByNameOrId<Selector>, NameOrId>;
+
+pub fn id_pagination<'a, Selector>(
+    pag_params: &'a DataPageParams<Uuid>,
+    scan_params: &'a ScanById<Selector>,
+) -> Result<PaginatedBy<'a>, HttpError>
+where
+    Selector:
+        Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize,
+{
+    match scan_params.sort_by {
+        IdSortMode::IdAscending => Ok(PaginatedBy::Id(pag_params.clone())),
+    }
+}
 
 pub fn name_or_id_pagination<'a, Selector>(
     pag_params: &'a DataPageParams<NameOrId>,
@@ -368,9 +380,8 @@ pub enum PaginatedBy<'a> {
     Name(DataPageParams<'a, Name>),
 }
 
-impl<
-        T: Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize,
-    > ScanParams for ScanByNameOrId<T>
+impl<T: Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize>
+    ScanParams for ScanByNameOrId<T>
 {
     type MarkerValue = NameOrId;
 
@@ -412,11 +423,6 @@ impl<
 
 #[cfg(test)]
 mod test {
-    use super::data_page_params_with_limit;
-    use super::marker_for_id;
-    use super::marker_for_name;
-    use super::marker_for_name_or_id;
-    use super::page_selector_for;
     use super::IdSortMode;
     use super::Name;
     use super::NameOrId;
@@ -434,9 +440,14 @@ mod test {
     use super::ScanByName;
     use super::ScanByNameOrId;
     use super::ScanParams;
-    use crate::api::external::http_pagination::name_or_id_pagination;
+    use super::data_page_params_with_limit;
+    use super::marker_for_id;
+    use super::marker_for_name;
+    use super::marker_for_name_or_id;
+    use super::page_selector_for;
     use crate::api::external::IdentityMetadata;
     use crate::api::external::ObjectIdentity;
+    use crate::api::external::http_pagination::name_or_id_pagination;
     use chrono::Utc;
     use dropshot::PaginationOrder;
     use dropshot::PaginationParams;

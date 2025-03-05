@@ -13,14 +13,14 @@ use omicron_uuid_kinds::SledUuid;
 
 use crate::{
     deployment::{
-        blueprint_zone_type, Blueprint, BlueprintZoneDisposition,
-        BlueprintZoneType,
+        Blueprint, BlueprintZoneDisposition, BlueprintZoneType,
+        blueprint_zone_type,
     },
     internal_api::params::{DnsConfigZone, DnsRecord},
     silo::{default_silo_name, silo_dns_name},
 };
 
-use super::{blueprint_nexus_external_ips, Overridables, Sled};
+use super::{Overridables, Sled, blueprint_nexus_external_ips};
 
 /// Returns the expected contents of internal DNS based on the given blueprint
 pub fn blueprint_internal_dns_config(
@@ -48,25 +48,28 @@ pub fn blueprint_internal_dns_config(
             ) => (ServiceName::InternalNtp, address),
             BlueprintZoneType::Clickhouse(
                 blueprint_zone_type::Clickhouse { address, .. },
-            )
-            | BlueprintZoneType::ClickhouseServer(
+            ) => {
+                // Add the HTTP and native TCP interfaces for ClickHouse data
+                // replicas. This adds the zone itself, so we need to continue
+                // back up to the loop over all the Omicron zones, rather than
+                // falling through to call `host_zone_with_one_backend()`.
+                dns_builder.host_zone_clickhouse_single_node(
+                    zone.id,
+                    ServiceName::Clickhouse,
+                    *address,
+                )?;
+                continue 'all_zones;
+            }
+            BlueprintZoneType::ClickhouseServer(
                 blueprint_zone_type::ClickhouseServer { address, .. },
             ) => {
                 // Add the HTTP and native TCP interfaces for ClickHouse data
                 // replicas. This adds the zone itself, so we need to continue
                 // back up to the loop over all the Omicron zones, rather than
                 // falling through to call `host_zone_with_one_backend()`.
-                let http_service = if matches!(
-                    &zone.zone_type,
-                    BlueprintZoneType::Clickhouse(_)
-                ) {
-                    ServiceName::Clickhouse
-                } else {
-                    ServiceName::ClickhouseServer
-                };
-                dns_builder.host_zone_clickhouse(
+                dns_builder.host_zone_clickhouse_cluster(
                     zone.id,
-                    http_service,
+                    ServiceName::ClickhouseServer,
                     *address,
                 )?;
                 continue 'all_zones;

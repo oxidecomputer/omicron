@@ -7,7 +7,7 @@
 // - test that an unknown artifact returns 404, not 500
 // - tests around target names and artifact names that contain dangerous paths like `../`
 
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 use camino::Utf8Path;
 use camino_tempfile::{Builder, Utf8TempPath};
 use clap::Parser;
@@ -22,7 +22,6 @@ use nexus_test_utils::{load_test_config, test_setup, test_setup_with_config};
 use omicron_common::api::external::{
     TufRepoGetResponse, TufRepoInsertResponse, TufRepoInsertStatus,
 };
-use omicron_common::api::internal::nexus::KnownArtifactKind;
 use omicron_sled_agent::sim;
 use pretty_assertions::assert_eq;
 use semver::Version;
@@ -30,6 +29,7 @@ use serde::Deserialize;
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::io::Write;
+use tufaceous_artifact::KnownArtifactKind;
 use tufaceous_lib::assemble::{DeserializedManifest, ManifestTweak};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -157,11 +157,9 @@ async fn test_repo_upload() -> Result<()> {
             .collect::<Vec<_>>(),
         ["zone1", "zone2"]
     );
-    assert!(!initial_description
-        .artifacts
-        .iter()
-        .any(|artifact| artifact.id.kind
-            == KnownArtifactKind::ControlPlane.into()));
+    assert!(!initial_description.artifacts.iter().any(|artifact| {
+        artifact.id.kind == KnownArtifactKind::ControlPlane.into()
+    }));
     // The generation number should now be 2.
     assert_eq!(
         datastore.update_tuf_generation_get(&opctx).await.unwrap(),

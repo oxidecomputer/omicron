@@ -23,9 +23,9 @@ use oximeter_types::TimeseriesName;
 use oximeter_types::TimeseriesSchema;
 use oximeter_types::Units;
 use serde::Deserialize;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::btree_map::Entry;
 use std::num::NonZeroU8;
 
 mod limits {
@@ -450,9 +450,9 @@ impl TimeseriesDefinition {
                             {
                                 return Err(MetricsError::SchemaDefinition(
                                     format!(
-                                    "Timeseries '{}' version {} is duplicated",
-                                    old.timeseries_name, old.version,
-                                ),
+                                        "Timeseries '{}' version {} is duplicated",
+                                        old.timeseries_name, old.version,
+                                    ),
                                 ));
                             }
                         }
@@ -837,13 +837,15 @@ mod tests {
         let name = String::from("bar");
         let target_fields = std::iter::once(name.clone()).collect();
         let metric_fields = std::iter::once(name).collect();
-        assert!(construct_field_schema(
+        assert!(
+            construct_field_schema(
                 &all,
                 "target",
                 &target_fields,
                 "metric",
                 &metric_fields,
-            ).is_err(),
+            )
+            .is_err(),
             "Should return an error when the target and metric share a field name"
         );
     }
@@ -912,12 +914,14 @@ mod tests {
         );
         for name in ["project_id", "id"] {
             assert!(
-                validate_field_name(name,
-                        &FieldMetadata {
-                            type_: FieldType::Uuid,
-                            description: String::new()
-                        }
-                ).is_ok(),
+                validate_field_name(
+                    name,
+                    &FieldMetadata {
+                        type_: FieldType::Uuid,
+                        description: String::new()
+                    }
+                )
+                .is_ok(),
                 "A Uuid field should be required to end in '_id' or exactly 'id'",
             );
         }
@@ -1055,7 +1059,9 @@ mod tests {
         "#;
         let res = load_schema(contents);
         let Err(MetricsError::SchemaDefinition(msg)) = &res else {
-            panic!("Should fail when metrics are not added in, but found: {res:#?}");
+            panic!(
+                "Should fail when metrics are not added in, but found: {res:#?}"
+            );
         };
         assert!(
             msg.contains("must be added in at its first"),
@@ -1274,8 +1280,8 @@ mod tests {
     }
 
     #[test]
-    fn load_schema_fills_in_implied_metric_versions_when_last_version_is_removed(
-    ) {
+    fn load_schema_fills_in_implied_metric_versions_when_last_version_is_removed()
+     {
         let contents = r#"
         format_version = 1
 

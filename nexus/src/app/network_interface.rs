@@ -8,11 +8,11 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
-
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use oxnet::IpNet;
 use uuid::Uuid;
 
 use nexus_db_queries::authz;
@@ -29,7 +29,7 @@ impl super::Nexus {
             params::InstanceNetworkInterfaceSelector {
                 network_interface: NameOrId::Id(id),
                 instance: None,
-                project: None
+                project: None,
             } => {
                 let network_interface =
                     LookupPath::new(opctx, &self.db_datastore)
@@ -39,26 +39,25 @@ impl super::Nexus {
             params::InstanceNetworkInterfaceSelector {
                 network_interface: NameOrId::Name(name),
                 instance: Some(instance),
-                project
+                project,
             } => {
                 let network_interface = self
-                    .instance_lookup(opctx, params::InstanceSelector { project, instance })?
+                    .instance_lookup(
+                        opctx,
+                        params::InstanceSelector { project, instance },
+                    )?
                     .instance_network_interface_name_owned(name.into());
                 Ok(network_interface)
             }
             params::InstanceNetworkInterfaceSelector {
-              network_interface: NameOrId::Id(_),
-              ..
-            } => {
-              Err(Error::invalid_request(
-                "when providing network_interface as an id instance and project should not be specified"
-              ))
-            }
-            _ => {
-              Err(Error::invalid_request(
-                "network_interface should either be a UUID or instance should be specified"
-              ))
-            }
+                network_interface: NameOrId::Id(_),
+                ..
+            } => Err(Error::invalid_request(
+                "when providing network_interface as an id instance and project should not be specified",
+            )),
+            _ => Err(Error::invalid_request(
+                "network_interface should either be a UUID or instance should be specified",
+            )),
         }
     }
 
@@ -148,6 +147,7 @@ impl super::Nexus {
     ) -> UpdateResult<db::model::InstanceNetworkInterface> {
         let (.., authz_instance, authz_interface) =
             network_interface_lookup.lookup_for(authz::Action::Modify).await?;
+        validate_transit_ips(updates.transit_ips.as_slice())?;
         self.db_datastore
             .instance_update_network_interface(
                 opctx,
@@ -212,4 +212,46 @@ impl super::Nexus {
             Err(authz_interface.not_found())
         }
     }
+}
+
+fn validate_transit_ips(ips: &[IpNet]) -> Result<(), Error> {
+    for (i, ip) in ips.iter().enumerate() {
+        let (count, ty) = if ip.is_host_net() {
+            ("", "address")
+        } else {
+            (" block", "network")
+        };
+
+        if !ip.is_network_address() {
+            return Err(Error::invalid_request(format!(
+                "transit IP{count} {ip} has a non-zero host identifier"
+            )));
+        }
+
+        if ip.is_multicast() {
+            return Err(Error::invalid_request(format!(
+                "transit IP{count} {ip} is a multicast {ty}"
+            )));
+        }
+
+        if ip.is_loopback() {
+            return Err(Error::invalid_request(format!(
+                "transit IP{count} {ip} is a loopback {ty}"
+            )));
+        }
+
+        // Checking for overlapping CIDRs using all prior ips is O(n^2). This
+        // is an infrequent check, and we can bound n if desired.
+        // The fastest way to catch overlaps would be to make use of a trie for
+        // representing past `IpNet`s per address family.
+        let overlap = &ips[..i].iter().find(|el| ip.overlaps(el));
+
+        if let Some(past) = overlap {
+            return Err(Error::invalid_request(format!(
+                "transit IP{count} {ip} overlaps with {past}"
+            )));
+        }
+    }
+
+    Ok(())
 }

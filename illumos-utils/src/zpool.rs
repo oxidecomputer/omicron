@@ -4,7 +4,7 @@
 
 //! Utilities for managing Zpools.
 
-use crate::{execute, ExecutionError, PFEXEC};
+use crate::{ExecutionError, PFEXEC, execute};
 use camino::{Utf8Path, Utf8PathBuf};
 use std::str::FromStr;
 

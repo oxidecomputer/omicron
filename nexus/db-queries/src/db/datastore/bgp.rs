@@ -5,7 +5,7 @@
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::{public_error_from_diesel, ErrorHandler};
+use crate::db::error::{ErrorHandler, public_error_from_diesel};
 use crate::db::model::{BgpAnnounceSet, BgpAnnouncement, BgpConfig, Name};
 use crate::db::pagination::paginated;
 use crate::transaction_retry::OptionalError;

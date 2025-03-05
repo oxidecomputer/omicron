@@ -4,7 +4,7 @@
 
 //! Developer tool for operating on Nexus databases.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use futures::stream::StreamExt;
