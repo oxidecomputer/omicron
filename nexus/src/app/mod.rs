@@ -1053,8 +1053,8 @@ impl Nexus {
         })
     }
 
-    /// A [`service`] with [`address`] is considered gone if it is not present
-    /// in a DNS lookup of all addresses for that service.
+    /// A `service` with `address` is considered gone if it is not present in a
+    /// DNS lookup of all addresses for that service.
     async fn is_internal_service_gone(
         &self,
         service: ServiceName,
