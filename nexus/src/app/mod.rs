@@ -1052,6 +1052,22 @@ impl Nexus {
             ))
         })
     }
+
+    /// A [`service`] with [`address`] is considered gone if it is not present
+    /// in a DNS lookup of all addresses for that service.
+    async fn is_internal_service_gone(
+        &self,
+        service: ServiceName,
+        address: SocketAddrV6,
+    ) -> Result<bool, Error> {
+        match self.resolver().lookup_all_socket_v6(service).await {
+            Ok(entries) => Ok(!entries.contains(&address)),
+
+            Err(err) => {
+                return Err(Error::internal_error(&format!("{err}")));
+            }
+        }
+    }
 }
 
 /// For unimplemented endpoints, indicates whether the resource identified
