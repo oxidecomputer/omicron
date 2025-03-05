@@ -265,7 +265,7 @@ default-members = [
     "workspace-hack",
     "zone-setup",
 ]
-resolver = "2"
+resolver = "3"
 
 #
 # Tree-wide lint configuration.
@@ -328,7 +328,7 @@ bytes = "1.10.0"
 camino = { version = "1.1", features = ["serde1"] }
 camino-tempfile = "1.1.1"
 cancel-safe-futures = "0.1.5"
-cargo_metadata = "0.19.1"
+cargo_metadata = "0.19.2"
 chacha20poly1305 = "0.10.1"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
@@ -539,7 +539,7 @@ partial-io = { version = "0.5.4", features = ["proptest1", "tokio1"] }
 parse-size = "1.1.0"
 paste = "1.0.15"
 percent-encoding = "2.3.1"
-peg = "0.8.4"
+peg = "0.8.5"
 pem = "3.0"
 # petname's default features pull in clap for CLI parsing, which we don't need.
 # Note that if you depend on petname, you must also set default-features =
@@ -592,6 +592,7 @@ rustls-pemfile = "2.2.0"
 rustyline = "14.0.0"
 samael = { version = "0.0.18", features = ["xmlsec"] }
 schemars = "0.8.22"
+scopeguard = "1.2.0"
 secrecy = "0.8.0"
 semver = { version = "1.0.25", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }

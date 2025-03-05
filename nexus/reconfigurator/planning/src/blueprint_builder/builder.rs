@@ -1752,6 +1752,25 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(final_counts.difference_since(initial_counts))
     }
 
+    pub fn sled_set_zone_source(
+        &mut self,
+        sled_id: SledUuid,
+        zone_id: OmicronZoneUuid,
+        source: BlueprintZoneImageSource,
+    ) -> Result<SledEditCounts, Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to change image of zone on unknown sled {sled_id}"
+            ))
+        })?;
+        let initial_counts = editor.edit_counts();
+        editor
+            .set_zone_image_source(&zone_id, source)
+            .map_err(|err| Error::SledEditError { sled_id, err })?;
+        let final_counts = editor.edit_counts();
+        Ok(final_counts.difference_since(initial_counts))
+    }
+
     fn sled_add_zone(
         &mut self,
         sled_id: SledUuid,

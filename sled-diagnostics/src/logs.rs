@@ -12,7 +12,7 @@ use thiserror::Error;
 pub type Zone = String;
 pub type Service = BTreeMap<String, Vec<Utf8PathBuf>>;
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize, Default, JsonSchema)]
 pub struct SledDiagnosticsLogs {
     #[schemars(schema_with = "path_schema")]
     logs: BTreeMap<Zone, Service>,

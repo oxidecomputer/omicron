@@ -671,7 +671,7 @@ impl BundleCollection<'_> {
                     .flat_map(|(zone, services)| {
                         services.iter().flat_map(|(service, logs)| {
                             logs.iter().map(|log| {
-                                save_log_file_or_error(
+                                save_log_file(
                                     &sled_client,
                                     log,
                                     &sled_path,
@@ -803,26 +803,33 @@ async fn sha2_hash(file: &mut tokio::fs::File) -> anyhow::Result<ArtifactHash> {
 }
 
 /// For a given zone and service, save it's log into a support bundle path.
-async fn save_log_file_or_error(
+async fn save_log_file(
     client: &sled_agent_client::Client,
     log: &Utf8Path,
     path: &Utf8Path,
     zone: &str,
     service: &str,
 ) -> anyhow::Result<()> {
+    // Grab the stream of log file contents
     let byte_stream =
         client.support_logs_download(log.as_str()).await?.into_inner();
+
+    // Create the output directory and output file on disk
     let output_file = log
         .file_name()
         .ok_or(anyhow::anyhow!("Could not determine filename for {log}"))?;
     let output_dir = path.join(format!("{zone}/{service}"));
-    tokio::fs::create_dir_all(&output_dir).await?;
+    tokio::fs::create_dir_all(&output_dir)
+        .await
+        .with_context(|| format!("failed to create output dir {output_dir}"))?;
     let output = output_dir.join(output_file);
-
     let mut file = tokio::fs::File::create(&output)
         .await
         .with_context(|| format!("failed to create {output}"))?;
-    // XXX is there a better way to do this?
+
+    // Stream the log file contents into the support bundle log file on disk
+    //
+    // TODO MTZ: is there a better way to do this?
     // tokio::io::copy wants std::io::Error rather than reqwest::Error
     let stream = byte_stream
         .into_inner()

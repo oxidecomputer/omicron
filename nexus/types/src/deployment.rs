@@ -617,9 +617,7 @@ impl BlueprintZonesConfig {
     /// Returns true if all zones in the blueprint have a disposition of
     /// `Expunged`, false otherwise.
     pub fn are_all_zones_expunged(&self) -> bool {
-        self.zones.iter().all(|c| {
-            matches!(c.disposition, BlueprintZoneDisposition::Expunged { .. })
-        })
+        self.zones.iter().all(|c| c.disposition.is_expunged())
     }
 }
 
@@ -811,6 +809,12 @@ impl BlueprintZoneDisposition {
                 ready_for_cleanup, ..
             } => !ready_for_cleanup,
         }
+    }
+
+    /// Returns true if `self` indicates the zone is expunged and ready for
+    /// cleanup.
+    pub fn is_ready_for_cleanup(self) -> bool {
+        matches!(self, Self::Expunged { ready_for_cleanup: true, .. })
     }
 }
 
@@ -1064,6 +1068,12 @@ impl BlueprintPhysicalDisksConfig {
                 .collect(),
         }
     }
+
+    /// Returns true if all disks in the blueprint have a disposition of
+    /// `Expunged`, false otherwise.
+    pub fn are_all_disks_expunged(&self) -> bool {
+        self.disks.iter().all(|c| c.disposition.is_expunged())
+    }
 }
 
 impl IdMappable for BlueprintPhysicalDiskConfig {
@@ -1135,6 +1145,12 @@ impl BlueprintDatasetsConfig {
                 .collect(),
         }
     }
+
+    /// Returns true if all datasets in the blueprint have a disposition of
+    /// `Expunged`, false otherwise.
+    pub fn are_all_datasets_expunged(&self) -> bool {
+        self.datasets.iter().all(|c| c.disposition.is_expunged())
+    }
 }
 
 impl IdMappable for BlueprintDatasetConfig {
@@ -1186,6 +1202,12 @@ impl BlueprintDatasetDisposition {
                 BlueprintDatasetFilter::InService => false,
             },
         }
+    }
+
+    /// Returns true if `self` is `BlueprintDatasetDisposition::Expunged`,
+    /// regardless of any details contained within that variant.
+    pub fn is_expunged(self) -> bool {
+        matches!(self, Self::Expunged)
     }
 }
 

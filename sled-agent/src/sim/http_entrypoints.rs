@@ -746,7 +746,8 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn support_logs(
         _request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledDiagnosticsLogs>, HttpError> {
-        method_unimplemented()
+        // We return an empty file index for support bundle lifecycle testing
+        Ok(HttpResponseOk(Default::default()))
     }
 
     async fn support_logs_download(

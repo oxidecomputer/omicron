@@ -16,6 +16,7 @@ use clickhouse_admin_test_utils::{
 use clickward::KeeperId;
 use oximeter_db::Client;
 use oximeter_test_utils::{wait_for_keepers, wait_for_ping};
+use scopeguard::ScopeGuard;
 use std::time::Duration;
 
 #[tokio::main]
@@ -44,6 +45,23 @@ async fn main() -> Result<()> {
     deployment
         .generate_config(num_keepers, num_replicas)
         .context("failed to generate config")?;
+
+    // Put `deployment` into a scope guard that tears it down if we fail or
+    // panic below. We'll defuse it on success.
+    let deployment = scopeguard::guard(deployment, |deployment| {
+        slog::info!(
+            logctx.log,
+            "Stopping test clickhouse nodes due to failure",
+        );
+        if let Err(err) = deployment.teardown() {
+            slog::error!(
+                logctx.log,
+                "Failed to tear down clickhouse nodes";
+                "err" => #%err,
+            );
+        }
+    });
+
     deployment.deploy().context("failed to deploy")?;
 
     let client1 = Client::new_with_request_timeout(
@@ -57,24 +75,33 @@ async fn main() -> Result<()> {
         request_timeout,
     );
 
-    wait_for_ping(&logctx.log, &client1).await.context(format!(
-        "client 1 timeout with deployment configuration: {:#?}",
-        deployment
-    ))?;
-    wait_for_ping(&logctx.log, &client2).await.context(format!(
-        "client 2 timeout with deployment configuration: {:#?}",
-        deployment
-    ))?;
+    wait_for_ping(&logctx.log, &client1).await.with_context(|| {
+        format!(
+            "client 1 timeout with deployment configuration: {:#?}",
+            deployment
+        )
+    })?;
+    wait_for_ping(&logctx.log, &client2).await.with_context(|| {
+        format!(
+            "client 2 timeout with deployment configuration: {:#?}",
+            deployment
+        )
+    })?;
     wait_for_keepers(
         &logctx.log,
         &deployment,
         (1..=num_keepers).map(KeeperId).collect(),
     )
     .await
-    .context(format!(
-        "keeper servers failure with deployment configuration: {:#?}",
-        deployment
-    ))?;
+    .with_context(|| {
+        format!(
+            "keeper servers failure with deployment configuration: {:#?}",
+            deployment
+        )
+    })?;
+
+    // Deployment complete: defuse the scopeguard to avoid tearing it down.
+    _ = ScopeGuard::into_inner(deployment);
 
     Ok(())
 }
