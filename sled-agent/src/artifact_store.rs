@@ -244,8 +244,8 @@ impl<T: DatasetsManager> ArtifactStore<T> {
         // only write lock taken in this implementation. At this point we're
         // holding two locks, but the `self.config` write lock is released
         // before we attempt to do any I/O to the ledgers.
-        let mut new_generation = Ok(None);
-        let new_generation_ref = &mut new_generation;
+        let mut result = Ok(None);
+        let result_ref = &mut result;
         self.config.send_if_modified(move |old_config| {
             let mut changed = false;
             if Some(&new_config) != old_config.as_ref() {
@@ -254,11 +254,11 @@ impl<T: DatasetsManager> ArtifactStore<T> {
                     None => ledger_generation,
                 };
                 if new_config.generation > current_generation {
-                    *new_generation_ref = Ok(Some(new_config.generation));
+                    *result_ref = Ok(Some(new_config.generation));
                     *old_config = Some(new_config);
                     changed = true;
                 } else {
-                    *new_generation_ref = Err(Error::GenerationConfig {
+                    *result_ref = Err(Error::GenerationConfig {
                         attempted_generation: new_config.generation,
                         current_generation,
                     });
@@ -268,8 +268,8 @@ impl<T: DatasetsManager> ArtifactStore<T> {
         });
         // If the closure set a new generation number, attempt to write it to
         // the ledger.
-        if let Some(new_generation) = new_generation? {
-            ledger.data_mut().generation = new_generation;
+        if let Some(generation) = result? {
+            *ledger.data_mut() = LedgerFormat { generation };
             if let Err(err) = ledger.commit().await {
                 error!(
                     &self.log,
