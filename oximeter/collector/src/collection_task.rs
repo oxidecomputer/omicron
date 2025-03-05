@@ -32,17 +32,6 @@ use tokio::time::Instant;
 use tokio::time::Interval;
 use tokio::time::interval;
 
-/// A token used to force a collection.
-///
-/// If the collection is successfully completed, `Ok(())` will be sent back on the
-/// contained oneshot channel. Note that that "successful" means the actual
-/// request completed, _not_ that results were successfully collected. I.e., it
-/// means "this attempt is done".
-///
-/// If the collection could not be queued because there are too many outstanding
-/// force collection attempts, an `Err(ForcedCollectionQueueFull)` is returned.
-type CollectionToken = oneshot::Sender<Result<(), ForcedCollectionError>>;
-
 /// Error returned when a forced collection fails.
 #[derive(Clone, Copy, Debug)]
 pub enum ForcedCollectionError {
@@ -71,10 +60,7 @@ const N_QUEUED_RESULTS: usize = 1;
 #[derive(Debug)]
 enum CollectionMessage {
     // Explicit request that the task collect data from its producer
-    //
-    // Also sends a oneshot that is signalled once the task scrapes
-    // data from the Producer, and places it in the Clickhouse server.
-    Collect(CollectionToken),
+    ForceCollect,
     // Request that the task update its interval and the socket address on which it collects data
     // from its producer.
     Update(ProducerEndpoint),
@@ -176,22 +162,20 @@ impl CollectionStartTimes {
 
 /// Details about a forced collection.
 struct ForcedCollectionRequest {
-    /// The collection token we signal when the collection is completed.
-    token: CollectionToken,
     /// Start time for this collection.
     start: CollectionStartTimes,
 }
 
 impl ForcedCollectionRequest {
-    fn new(token: CollectionToken) -> Self {
-        Self { token, start: CollectionStartTimes::new() }
+    fn new() -> Self {
+        Self { start: CollectionStartTimes::new() }
     }
 }
 
 /// Details about a completed collection.
 struct CollectionResponse {
-    /// Token for a forced collection request.
-    token: Option<CollectionToken>,
+    /// Was the collection the result of a force collect attempt?
+    was_forced_collection: bool,
     /// The actual result of the collection.
     result: CollectionResult,
     /// Time when the collection started.
@@ -220,16 +204,16 @@ async fn collection_loop(
         // Wait for notification that we have a collection to perform, from
         // either the forced- or timer-collection queue.
         trace!(log, "top of inner collection loop, waiting for next request");
-        let (maybe_token, start_time) = tokio::select! {
+        let (was_forced_collection, start_time) = tokio::select! {
             maybe_request = forced_collection_rx.recv() => {
-                let Some(ForcedCollectionRequest { token, start }) = maybe_request else {
+                let Some(ForcedCollectionRequest { start }) = maybe_request else {
                     debug!(
                         log,
                         "forced collection request queue closed, exiting"
                     );
                     return;
                 };
-                (Some(token), start)
+                (true, start)
             }
             maybe_request = timer_collection_rx.recv() => {
                 let Some(start) = maybe_request else {
@@ -239,7 +223,7 @@ async fn collection_loop(
                     );
                     return;
                 };
-                (None, start)
+                (false, start)
             }
         };
 
@@ -294,21 +278,15 @@ async fn collection_loop(
                 }
 
                 collection_result = &mut collection_fut => {
-                    // NOTE: This break here is intentional. We cannot just call
-                    // `result_tx.send()` in this loop, because that moves out
-                    // of `maybe_token`, which isn't Copy. Break the loop, and
-                    // then send it after we know we've completed the
-                    // collection.
                     break 'collection collection_result;
                 }
             }
         };
 
         // Now that the collection has completed, send on the results, along
-        // with the timing information and any collection token we may have
-        // gotten with the request.
+        // with the timing information we got with the request.
         let response = CollectionResponse {
-            token: maybe_token,
+            was_forced_collection,
             result,
             started_at,
             time_queued,
@@ -329,7 +307,10 @@ async fn collection_loop(
 }
 
 /// Type of each output sent from a collection task to the results sink.
-pub type CollectionTaskOutput = (Option<CollectionToken>, ProducerResults);
+pub(crate) struct CollectionTaskOutput {
+    pub(crate) was_forced_collection: bool,
+    pub(crate) results: ProducerResults,
+}
 
 /// Handle to the task which collects metric data from a single producer.
 #[derive(Debug)]
@@ -448,34 +429,21 @@ impl CollectionTaskHandle {
         })
     }
 
-    /// Explicitly request that the task collect from its producer now.
+    /// Explicitly request that the task collect from its producer.
     ///
-    /// Note that this doesn't block, instead returning a oneshot that will
-    /// resolve when the collection completes.
-    pub fn collect(
+    /// Note that this doesn't block. If it's able to notify the collection task
+    /// of the request, it returns `Ok(())`; this _does not_ mean the collection
+    /// has been performed, only that a request to perform a collection has been
+    /// enqueued.
+    pub(crate) fn try_force_collect(
         &self,
-    ) -> oneshot::Receiver<Result<(), ForcedCollectionError>> {
-        let (tx, rx) = oneshot::channel();
-        match self.task_tx.try_send(CollectionMessage::Collect(tx)) {
-            Ok(_) => rx,
-            Err(err) => {
-                let (err, msg) = match err {
-                    TrySendError::Full(msg) => {
-                        (ForcedCollectionError::QueueFull, msg)
-                    }
-                    TrySendError::Closed(msg) => {
-                        (ForcedCollectionError::Closed, msg)
-                    }
-                };
-                let CollectionMessage::Collect(tx) = msg else {
-                    unreachable!();
-                };
-                // Safety: In this case, we own both sides of the channel and we
-                // know nothing has been sent on it. This can't fail.
-                tx.send(Err(err)).unwrap();
-                rx
+    ) -> Result<(), ForcedCollectionError> {
+        self.task_tx.try_send(CollectionMessage::ForceCollect).map_err(|err| {
+            match err {
+                TrySendError::Full(_) => ForcedCollectionError::QueueFull,
+                TrySendError::Closed(_) => ForcedCollectionError::Closed,
             }
-        }
+        })
     }
 }
 
@@ -622,7 +590,10 @@ impl CollectionTask {
                         self.log,
                         "reporting oximeter self-collection statistics"
                     );
-                    self.outbox.send((None, self.stats.sample())).await.unwrap();
+                    self.outbox.send(CollectionTaskOutput {
+                        was_forced_collection: false,
+                        results: self.stats.sample(),
+                    }).await.unwrap();
                 }
                 _ = self.collection_timer.tick() => {
                     self.handle_collection_timer_tick().await?;
@@ -645,12 +616,12 @@ impl CollectionTask {
                 debug!(self.log, "collection task received shutdown request");
                 return TaskAction::Break(());
             }
-            CollectionMessage::Collect(token) => {
+            CollectionMessage::ForceCollect => {
                 debug!(
                     self.log,
                     "collection task received explicit request to collect"
                 );
-                let request = ForcedCollectionRequest::new(token);
+                let request = ForcedCollectionRequest::new();
                 match self.forced_collection_tx.try_send(request) {
                     Ok(_) => {
                         trace!(
@@ -660,21 +631,16 @@ impl CollectionTask {
                     }
                     Err(e) => match e {
                         TrySendError::Closed(ForcedCollectionRequest {
-                            token,
                             ..
                         }) => {
                             debug!(
                                 self.log,
                                 "collection task forced collection \
-                                queue is closed. Attempting to \
-                                notify caller and exiting.",
+                                queue is closed. Exiting.",
                             );
-                            let _ =
-                                token.send(Err(ForcedCollectionError::Closed));
                             return TaskAction::Break(());
                         }
                         TrySendError::Full(ForcedCollectionRequest {
-                            token,
                             start,
                         }) => {
                             error!(
@@ -683,20 +649,9 @@ impl CollectionTask {
                                 queue is full! This should never \
                                 happen, and probably indicates \
                                 a bug in your test code, such as \
-                                calling `force_collection()` many \
+                                calling `try_force_collect()` many \
                                 times"
                             );
-                            if token
-                                .send(Err(ForcedCollectionError::QueueFull))
-                                .is_err()
-                            {
-                                warn!(
-                                    self.log,
-                                    "failed to notify caller of \
-                                    force_collection(), oneshot is \
-                                    closed"
-                                );
-                            }
                             let failure = FailedCollection {
                                 started_at: start.started_at,
                                 time_queued: Duration::ZERO,
@@ -804,7 +759,7 @@ impl CollectionTask {
         response: CollectionResponse,
     ) -> TaskAction {
         let CollectionResponse {
-            token,
+            was_forced_collection,
             result,
             started_at,
             time_queued,
@@ -829,7 +784,15 @@ impl CollectionTask {
                     n_samples,
                 };
                 self.details.on_success(success);
-                if self.outbox.send((token, results)).await.is_err() {
+                if self
+                    .outbox
+                    .send(CollectionTaskOutput {
+                        was_forced_collection,
+                        results,
+                    })
+                    .await
+                    .is_err()
+                {
                     error!(
                         self.log,
                         "failed to send results to outbox, channel is \

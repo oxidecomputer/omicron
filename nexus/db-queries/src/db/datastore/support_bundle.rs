@@ -20,6 +20,7 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use futures::FutureExt;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -215,16 +216,12 @@ impl DataStore {
     ) -> Result<SupportBundleExpungementReport, Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        // For this blueprint: The set of all expunged Nexus zones
+        // For this blueprint: The set of all expunged Nexus zones that are
+        // ready for cleanup
         let invalid_nexus_zones = blueprint
-            .all_omicron_zones(
-                nexus_types::deployment::BlueprintZoneDisposition::is_expunged,
-            )
+            .all_omicron_zones(BlueprintZoneDisposition::is_ready_for_cleanup)
             .filter_map(|(_sled, zone)| {
-                if matches!(
-                    zone.zone_type,
-                    nexus_types::deployment::BlueprintZoneType::Nexus(_)
-                ) {
+                if zone.zone_type.is_nexus() {
                     Some(zone.id.into_untyped_uuid())
                 } else {
                     None
@@ -484,7 +481,6 @@ mod test {
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::BlueprintDatasetFilter;
-    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneType;
     use omicron_common::api::external::LookupType;
     use omicron_common::api::internal::shared::DatasetKind::Debug as DebugDatasetKind;
@@ -985,7 +981,7 @@ mod test {
                 if zone.id == bundle.assigned_nexus.unwrap().into() {
                     zone.disposition = BlueprintZoneDisposition::Expunged {
                         as_of_generation: *Generation::new(),
-                        ready_for_cleanup: false,
+                        ready_for_cleanup: true,
                     };
                 }
             }

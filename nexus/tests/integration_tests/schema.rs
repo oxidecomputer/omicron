@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use camino::Utf8PathBuf;
-use chrono::{DateTime, Utc};
 use dropshot::test_util::LogContext;
 use futures::future::BoxFuture;
 use nexus_config::NexusConfig;
@@ -13,6 +12,10 @@ use nexus_db_model::SCHEMA_VERSION as LATEST_SCHEMA_VERSION;
 use nexus_db_model::{AllSchemaVersions, SchemaVersion};
 use nexus_db_queries::db::DISALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::pub_test_utils::TestDatabase;
+use nexus_test_utils::sql::ColumnValue;
+use nexus_test_utils::sql::Row;
+use nexus_test_utils::sql::SqlEnum;
+use nexus_test_utils::sql::process_rows;
 use nexus_test_utils::{ControlPlaneTestContextBuilder, load_test_config};
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_test_utils::dev::db::{Client, CockroachInstance};
@@ -181,218 +184,6 @@ async fn query_crdb_schema_version(crdb: &CockroachInstance) -> String {
     version
 }
 
-#[derive(PartialEq, Clone, Debug)]
-struct SqlEnum {
-    name: String,
-    variant: String,
-}
-
-impl From<(&str, &str)> for SqlEnum {
-    fn from((name, variant): (&str, &str)) -> Self {
-        Self { name: name.to_string(), variant: variant.to_string() }
-    }
-}
-
-// A newtype wrapper around a string, which allows us to more liberally
-// interpret SQL types.
-//
-// Note that for the purposes of schema comparisons, we don't care about parsing
-// the contents of the database, merely the schema and equality of contained
-// data.
-#[derive(PartialEq, Clone, Debug)]
-enum AnySqlType {
-    Bool(bool),
-    DateTime,
-    Enum(SqlEnum),
-    Float4(f32),
-    Int8(i64),
-    Json(serde_json::value::Value),
-    String(String),
-    TextArray(Vec<String>),
-    Uuid(Uuid),
-    Inet(IpAddr),
-    // TODO: This isn't exhaustive, feel free to add more.
-    //
-    // These should only be necessary for rows where the database schema changes also choose to
-    // populate data.
-}
-
-impl From<bool> for AnySqlType {
-    fn from(b: bool) -> Self {
-        Self::Bool(b)
-    }
-}
-
-impl From<SqlEnum> for AnySqlType {
-    fn from(value: SqlEnum) -> Self {
-        Self::Enum(value)
-    }
-}
-
-impl From<f32> for AnySqlType {
-    fn from(value: f32) -> Self {
-        Self::Float4(value)
-    }
-}
-
-impl From<i64> for AnySqlType {
-    fn from(value: i64) -> Self {
-        Self::Int8(value)
-    }
-}
-
-impl From<String> for AnySqlType {
-    fn from(value: String) -> Self {
-        Self::String(value)
-    }
-}
-
-impl From<Uuid> for AnySqlType {
-    fn from(value: Uuid) -> Self {
-        Self::Uuid(value)
-    }
-}
-
-impl From<IpAddr> for AnySqlType {
-    fn from(value: IpAddr) -> Self {
-        Self::Inet(value)
-    }
-}
-
-impl AnySqlType {
-    fn as_str(&self) -> &str {
-        match self {
-            AnySqlType::String(s) => s,
-            _ => panic!("Not a string type"),
-        }
-    }
-}
-
-impl<'a> tokio_postgres::types::FromSql<'a> for AnySqlType {
-    fn from_sql(
-        ty: &tokio_postgres::types::Type,
-        raw: &'a [u8],
-    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {
-        if String::accepts(ty) {
-            return Ok(AnySqlType::String(String::from_sql(ty, raw)?));
-        }
-        if DateTime::<Utc>::accepts(ty) {
-            // We intentionally drop the time here -- we only care that there
-            // is some value present.
-            let _ = DateTime::<Utc>::from_sql(ty, raw)?;
-            return Ok(AnySqlType::DateTime);
-        }
-        if bool::accepts(ty) {
-            return Ok(AnySqlType::Bool(bool::from_sql(ty, raw)?));
-        }
-        if Uuid::accepts(ty) {
-            return Ok(AnySqlType::Uuid(Uuid::from_sql(ty, raw)?));
-        }
-        if i64::accepts(ty) {
-            return Ok(AnySqlType::Int8(i64::from_sql(ty, raw)?));
-        }
-        if f32::accepts(ty) {
-            return Ok(AnySqlType::Float4(f32::from_sql(ty, raw)?));
-        }
-        if serde_json::value::Value::accepts(ty) {
-            return Ok(AnySqlType::Json(serde_json::value::Value::from_sql(
-                ty, raw,
-            )?));
-        }
-        if Vec::<String>::accepts(ty) {
-            return Ok(AnySqlType::TextArray(Vec::<String>::from_sql(
-                ty, raw,
-            )?));
-        }
-        if IpAddr::accepts(ty) {
-            return Ok(AnySqlType::Inet(IpAddr::from_sql(ty, raw)?));
-        }
-
-        use tokio_postgres::types::Kind;
-        match ty.kind() {
-            Kind::Enum(_) => {
-                Ok(AnySqlType::Enum(SqlEnum {
-                    name: ty.name().to_string(),
-                    variant: std::str::from_utf8(raw)?.to_string(),
-                }))
-            },
-            _ => {
-                Err(anyhow::anyhow!(
-                    "Cannot parse type {ty:?}. \
-                    If you're trying to use this type in a table which is populated \
-                    during a schema migration, consider adding it to `AnySqlType`."
-                    ).into())
-            }
-        }
-    }
-
-    fn accepts(_ty: &tokio_postgres::types::Type) -> bool {
-        true
-    }
-}
-
-// It's a little redunant to include the column name alongside each value,
-// but it results in a prettier diff.
-#[derive(PartialEq, Debug)]
-struct ColumnValue {
-    column: String,
-    value: Option<AnySqlType>,
-}
-
-impl ColumnValue {
-    fn new<V: Into<AnySqlType>>(column: &str, value: V) -> Self {
-        Self { column: String::from(column), value: Some(value.into()) }
-    }
-
-    fn null(column: &str) -> Self {
-        Self { column: String::from(column), value: None }
-    }
-
-    fn expect(&self, column: &str) -> Option<&AnySqlType> {
-        assert_eq!(self.column, column);
-        self.value.as_ref()
-    }
-}
-
-// A generic representation of a row of SQL data
-#[derive(PartialEq, Debug)]
-struct Row {
-    values: Vec<ColumnValue>,
-}
-
-impl Row {
-    fn new() -> Self {
-        Self { values: vec![] }
-    }
-}
-
-enum ColumnSelector<'a> {
-    ByName(&'a [&'static str]),
-    Star,
-}
-
-impl<'a> From<&'a [&'static str]> for ColumnSelector<'a> {
-    fn from(columns: &'a [&'static str]) -> Self {
-        Self::ByName(columns)
-    }
-}
-
-fn process_rows(rows: &Vec<tokio_postgres::Row>) -> Vec<Row> {
-    let mut result = vec![];
-    for row in rows {
-        let mut row_result = Row::new();
-        for i in 0..row.len() {
-            let column_name = row.columns()[i].name();
-            row_result.values.push(ColumnValue {
-                column: column_name.to_string(),
-                value: row.get(i),
-            });
-        }
-        result.push(row_result);
-    }
-    result
-}
-
 async fn crdb_show_constraints(
     crdb: &CockroachInstance,
     table: &str,
@@ -407,6 +198,17 @@ async fn crdb_show_constraints(
     client.cleanup().await.expect("cleaning up after wipe");
 
     process_rows(&rows)
+}
+
+enum ColumnSelector<'a> {
+    ByName(&'a [&'static str]),
+    Star,
+}
+
+impl<'a> From<&'a [&'static str]> for ColumnSelector<'a> {
+    fn from(columns: &'a [&'static str]) -> Self {
+        Self::ByName(columns)
+    }
 }
 
 async fn crdb_select(

@@ -354,7 +354,6 @@ impl SledEditor {
     /// Sets the image source for a zone.
     ///
     /// Currently only used by test code.
-    #[cfg_attr(not(test), expect(dead_code))]
     pub fn set_zone_image_source(
         &mut self,
         zone_id: &OmicronZoneUuid,
