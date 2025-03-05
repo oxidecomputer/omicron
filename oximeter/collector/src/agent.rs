@@ -57,8 +57,8 @@ pub struct OximeterAgent {
     log: Logger,
     // Oximeter target used by this agent to produce metrics about itself.
     collection_target: self_stats::OximeterCollector,
-    // Handle to the TX-side of a channel for collecting results from the collection tasks.
-    // result_sender: mpsc::Sender<CollectionTaskOutput>,
+    // Wrapper of the two handles to the TX-side of the single-node and cluster
+    // channels for collecting results from the collection tasks.
     result_sender: WrapperTx,
     // Handle to each Tokio task collection from a single producer.
     collection_tasks: Arc<Mutex<BTreeMap<Uuid, CollectionTaskHandle>>>,
@@ -81,16 +81,14 @@ impl OximeterAgent {
         refresh_interval: Duration,
         db_config: DbConfig,
         native_resolver: BoxedResolver,
-        // Temporary resolver to write to a ClickHouse
+        // Temporary resolver to write to a replicated ClickHouse
         // cluster as well as a single-node installation.
         cluster_resolver: BoxedResolver,
         log: &Logger,
         replicated: bool,
     ) -> Result<Self, Error> {
-        // TODO-K: remove this?
-     //   let (result_sender, result_receiver) = mpsc::channel(8);
         let (wrapper_result_sender, single_rx, cluster_rx) =
-            wrapper_new_channel();
+            collection_task_channel_wrapper();
         let log = log.new(o!(
             "component" => "oximeter-agent",
             "collector_id" => id.to_string(),
@@ -151,15 +149,29 @@ impl OximeterAgent {
             .await
         });
 
+        // Our internal testing rack will be running a ClickHouse cluster
+        // alongside a single-node installation for a while. We want to handle
+        // the case of these two installations running alongside each other, and
+        // oximeter writing to both of them. On our production racks ClickHouse
+        // will only be run on single-node modality, so we'll ignore all cases where
+        // the `ClickhouseClusterNative` service is not available.
+        // This will be done by spawning a second task for DB inserts to a replicated
+        // ClickHouse cluster. If oximeter cannot connect to the database, it will
+        // simply log a warning and move on.
+
         // Temporary additional client that writes to a replicated cluster
         // This will be removed once we phase out the single node installation.
         //
         // We don't need to check whether the DB is at the expected version since
         // this is already handled by reconfigurator via clickhouse-admin.
+        //
+        // We have a short claim timeout so oximeter can move on quickly if the cluster
+        // does not exist.
         let claim_policy = Policy {
             claim_timeout: Duration::from_millis(100),
             ..Default::default()
         };
+
         let cluster_client =
             Client::new_with_pool_policy(cluster_resolver, claim_policy, &log);
 
@@ -169,10 +181,9 @@ impl OximeterAgent {
             results_sink::database_inserter(
                 instertion_log_cluster,
                 cluster_client,
-                // None,
                 db_config.batch_size,
                 Duration::from_secs(db_config.batch_interval),
-                cluster_rx, //result_receiver,
+                cluster_rx,
             )
             .await
         });
@@ -181,8 +192,6 @@ impl OximeterAgent {
             id,
             log,
             collection_target,
-            //result_sender,
-            // TODO-K: is this what we intend to use as a sender?
             result_sender: wrapper_result_sender,
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
             refresh_interval,
@@ -234,8 +243,8 @@ impl OximeterAgent {
 
         // TODO-K: Maybe there's a prettier way to do this?
         // TODO-K: We don't really need the cluster here
-        let (wrapper_result_sender, single_rx, _cluster_rx) =
-            wrapper_new_channel();
+        let (result_sender, single_rx, _cluster_rx) =
+            collection_task_channel_wrapper();
 
         // If we have configuration for ClickHouse, we'll spawn the results
         // sink task as usual. If not, we'll spawn a dummy task that simply
@@ -292,8 +301,7 @@ impl OximeterAgent {
             id,
             log,
             collection_target,
-            // TODO-K: Make a wrapper-tx here
-            result_sender: wrapper_result_sender,
+            result_sender,
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
             refresh_interval,
             refresh_task: Arc::new(StdMutex::new(None)),
@@ -485,14 +493,13 @@ impl OximeterAgent {
     }
 }
 
-// TODO: Have this take a `self` from a type instead of returning tuple?
-pub fn wrapper_new_channel(// TODO-K: change the string to the real type
+// TODO-K: Have this take a `self` from a type instead of returning tuple?
+pub fn collection_task_channel_wrapper(
 ) -> (
     WrapperTx,
     mpsc::Receiver<CollectionTaskOutput>,
     mpsc::Receiver<CollectionTaskOutput>,
 ) {
-    // TODO-K: I'm using a buffer of 8 since that's what was being used before
     let (single_tx, single_rx) = mpsc::channel(8);
     let (cluster_tx, cluster_rx) = mpsc::channel(8);
 
@@ -501,27 +508,34 @@ pub fn wrapper_new_channel(// TODO-K: change the string to the real type
 
 #[derive(Debug, Clone)]
 pub struct WrapperTx {
-    // TODO-K: Change the string to the real type we'll be passing
     single_tx: mpsc::Sender<CollectionTaskOutput>,
     cluster_tx: mpsc::Sender<CollectionTaskOutput>,
 }
 
 impl WrapperTx {
-    // TODO-K: change msg type to what it needs to be
-    // TODO-K: Use the correct error
-    // TODO-K: Remove msg_tmp once we can clone CollectionTaskOutput
     pub async fn send(
         &self,
         msg: CollectionTaskOutput,
+        log: &Logger,
     ) -> anyhow::Result<()> {
-        let (_result_single, _result_cluster) = futures::future::join(
+        let (result_single, result_cluster) = futures::future::join(
             self.single_tx.send(msg.clone()),
             self.cluster_tx.send(msg),
         )
         .await;
 
-        // TODO-K: What do we want for errors? bail out only if cluster exits? or not at all?
-
+        if let Err(e) = result_single {
+            error!(
+                log,
+                "failed to send value from the collection task to channel for single node: {e:?}"
+            );
+        };
+        if let Err(e) = result_cluster {
+            error!(
+                log,
+                "failed to send value from the collection task to channel for cluster: {e:?}"
+            );
+        };
         Ok(())
     }
 }

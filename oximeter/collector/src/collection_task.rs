@@ -594,11 +594,10 @@ impl CollectionTask {
                         self.log,
                         "reporting oximeter self-collection statistics"
                     );
-                    // TODO-K: This is where the wrapper send is
                     self.outbox.send(CollectionTaskOutput {
                         was_forced_collection: false,
                         results: self.stats.sample(),
-                    }).await.unwrap();
+                    }, &self.log).await.unwrap();
                 }
                 _ = self.collection_timer.tick() => {
                     self.handle_collection_timer_tick().await?;
@@ -789,14 +788,12 @@ impl CollectionTask {
                     n_samples,
                 };
                 self.details.on_success(success);
-                // TODO-K: After john's PR is merged, the additional message won't be needed
-                // it will be able to be "clone"
                 if self
                     .outbox
                     .send(CollectionTaskOutput {
                         was_forced_collection,
                         results,
-                    })
+                    }, &self.log)
                     .await
                     .is_err()
                 {
