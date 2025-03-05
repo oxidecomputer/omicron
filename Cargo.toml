@@ -79,6 +79,7 @@ members = [
     "nexus/inventory",
     "nexus/macros-common",
     "nexus/metrics-producer-gc",
+    "nexus/mgs-updates",
     "nexus/networking",
     "nexus/reconfigurator/blippy",
     "nexus/reconfigurator/execution",
@@ -214,6 +215,7 @@ default-members = [
     "nexus/inventory",
     "nexus/macros-common",
     "nexus/metrics-producer-gc",
+    "nexus/mgs-updates",
     "nexus/networking",
     "nexus/reconfigurator/blippy",
     "nexus/reconfigurator/execution",
@@ -473,6 +475,7 @@ nexus-inventory = { path = "nexus/inventory" }
 nexus-internal-api = { path = "nexus/internal-api" }
 nexus-macros-common = { path = "nexus/macros-common" }
 nexus-metrics-producer-gc = { path = "nexus/metrics-producer-gc" }
+nexus-mgs-updates = { path = "nexus/mgs-updates" }
 nexus-networking = { path = "nexus/networking" }
 nexus-reconfigurator-blippy = { path = "nexus/reconfigurator/blippy" }
 nexus-reconfigurator-execution = { path = "nexus/reconfigurator/execution" }
