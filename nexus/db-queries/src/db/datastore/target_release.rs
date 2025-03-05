@@ -83,8 +83,8 @@ impl DataStore {
             TargetReleaseSource::SystemVersion => {
                 use crate::db::schema::tuf_repo;
                 if let Some(tuf_repo_id) = target_release.tuf_repo_id {
-                    views::TargetReleaseSource::SystemVersion(
-                        tuf_repo::table
+                    views::TargetReleaseSource::SystemVersion {
+                        version: tuf_repo::table
                             .select(tuf_repo::system_version)
                             .filter(tuf_repo::id.eq(tuf_repo_id))
                             .first_async::<SemverVersion>(&*conn)
@@ -96,7 +96,7 @@ impl DataStore {
                                 )
                             })?
                             .into(),
-                    )
+                    }
                 } else {
                     return Err(Error::internal_error(
                         "missing TUF repo ID for specified system version",

@@ -3089,10 +3089,10 @@ pub enum BfdMode {
 /// A description of an uploaded TUF repository.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct TufRepoDescription {
-    // Information about the repository.
+    /// Information about the repository.
     pub repo: TufRepoMeta,
 
-    // Information about the artifacts present in the repository.
+    /// Information about the artifacts present in the repository.
     pub artifacts: Vec<TufArtifactMeta>,
 }
 
@@ -3105,7 +3105,7 @@ impl TufRepoDescription {
 
 /// Metadata about a TUF repository.
 ///
-/// Found within a [`TufRepoDescription`].
+/// Found within a `TufRepoDescription`.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct TufRepoMeta {
     /// The hash of the repository.
@@ -3134,7 +3134,7 @@ pub struct TufRepoMeta {
 
 /// Metadata about an individual TUF artifact.
 ///
-/// Found within a [`TufRepoDescription`].
+/// Found within a `TufRepoDescription`.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct TufArtifactMeta {
     /// The artifact ID.
@@ -3160,7 +3160,7 @@ pub struct TufRepoInsertResponse {
 
 /// Status of a TUF repo import.
 ///
-/// Part of [`TufRepoInsertResponse`].
+/// Part of `TufRepoInsertResponse`.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
 )]

@@ -2238,7 +2238,7 @@ pub struct UpdatesGetRepositoryParams {
     pub system_version: Version,
 }
 
-/// Parameters for POST requests to `/v1/system/update/target-release`.
+/// Parameters for PUT requests to `/v1/system/update/target-release`.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct SetTargetReleaseParams {
     /// Version of the system software to make the target release.

@@ -127,7 +127,7 @@ async fn get_set_target_release() -> anyhow::Result<()> {
     assert!(target_release.time_requested <= after);
     assert_eq!(
         target_release.release_source,
-        TargetReleaseSource::SystemVersion(system_version),
+        TargetReleaseSource::SystemVersion { version: system_version },
     );
 
     ctx.teardown().await;

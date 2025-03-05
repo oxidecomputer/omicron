@@ -2897,8 +2897,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/system/update/target-release",
-        tags = ["system/update"],
-        unpublished = true,
+        tags = ["hidden"], // "system/update"
     }]
     async fn target_release_get(
         rqctx: RequestContext<Self::Context>,
@@ -2912,8 +2911,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = PUT,
         path = "/v1/system/update/target-release",
-        tags = ["system/update"],
-        unpublished = true,
+        tags = ["hidden"], // "system/update"
     }]
     async fn target_release_set(
         rqctx: RequestContext<Self::Context>,
