@@ -2392,7 +2392,7 @@ pub struct EventClassSelector {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookSelector {
     /// The name or ID of the webhook receiver.
-    pub webhook: NameOrId,
+    pub receiver: NameOrId,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -2436,18 +2436,12 @@ pub struct WebhookSecretCreate {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookSecretSelector {
-    /// Selects the webhook receiver
-    #[serde(flatten)]
-    pub webhook: WebhookSelector,
     /// ID of the secret.
     pub secret_id: Uuid,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct WebhookDeliveryPath {
-    /// Selects the webhook receiver
-    #[serde(flatten)]
-    pub webhook: WebhookSelector,
     pub event_id: Uuid,
 }
 

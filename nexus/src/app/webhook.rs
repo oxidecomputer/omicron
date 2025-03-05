@@ -52,7 +52,7 @@ impl super::Nexus {
         opctx: &'a OpContext,
         webhook_selector: params::WebhookSelector,
     ) -> LookupResult<lookup::WebhookReceiver<'a>> {
-        match webhook_selector.webhook {
+        match webhook_selector.receiver {
             NameOrId::Id(id) => {
                 let webhook = LookupPath::new(opctx, &self.db_datastore)
                     .webhook_receiver_id(

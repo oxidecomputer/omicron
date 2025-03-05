@@ -624,7 +624,122 @@
         }
       }
     },
-    "/experimental/v1/webhook-events/classes": {
+    "/experimental/v1/webhooks/deliveries": {
+      "get": {
+        "tags": [
+          "system/webhooks"
+        ],
+        "summary": "List delivery attempts to a webhook receiver.",
+        "operationId": "webhook_delivery_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookDeliveryResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/experimental/v1/webhooks/deliveries/{event_id}/resend": {
+      "post": {
+        "tags": [
+          "system/webhooks"
+        ],
+        "summary": "Request re-delivery of a webhook event.",
+        "operationId": "webhook_delivery_resend",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "receiver",
+            "description": "The name or ID of the webhook receiver.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookDeliveryId"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/experimental/v1/webhooks/event-classes": {
       "get": {
         "tags": [
           "system/webhooks"
@@ -685,7 +800,7 @@
         }
       }
     },
-    "/experimental/v1/webhook-events/classes/{name}": {
+    "/experimental/v1/webhooks/event-classes/{name}": {
       "get": {
         "tags": [
           "system/webhooks"
@@ -723,7 +838,7 @@
         }
       }
     },
-    "/experimental/v1/webhooks": {
+    "/experimental/v1/webhooks/receivers": {
       "post": {
         "tags": [
           "system/webhooks"
@@ -760,7 +875,7 @@
         }
       }
     },
-    "/experimental/v1/webhooks/{webhook}": {
+    "/experimental/v1/webhooks/receivers/{receiver}": {
       "get": {
         "tags": [
           "system/webhooks"
@@ -770,7 +885,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "webhook",
+            "name": "receiver",
             "description": "The name or ID of the webhook receiver.",
             "required": true,
             "schema": {
@@ -806,7 +921,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "webhook",
+            "name": "receiver",
             "description": "The name or ID of the webhook receiver.",
             "required": true,
             "schema": {
@@ -845,7 +960,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "webhook",
+            "name": "receiver",
             "description": "The name or ID of the webhook receiver.",
             "required": true,
             "schema": {
@@ -866,122 +981,7 @@
         }
       }
     },
-    "/experimental/v1/webhooks/{webhook}/deliveries": {
-      "get": {
-        "tags": [
-          "system/webhooks"
-        ],
-        "summary": "List delivery attempts to a webhook receiver.",
-        "operationId": "webhook_delivery_list",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "webhook",
-            "description": "The name or ID of the webhook receiver.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WebhookDeliveryResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": {
-          "required": []
-        }
-      }
-    },
-    "/experimental/v1/webhooks/{webhook}/deliveries/{event_id}/resend": {
-      "post": {
-        "tags": [
-          "system/webhooks"
-        ],
-        "summary": "Request re-delivery of a webhook event.",
-        "operationId": "webhook_delivery_resend",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "event_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "in": "path",
-            "name": "webhook",
-            "description": "The name or ID of the webhook receiver.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WebhookDeliveryId"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/experimental/v1/webhooks/{webhook}/probe": {
+    "/experimental/v1/webhooks/receivers/{receiver}/probe": {
       "post": {
         "tags": [
           "system/webhooks"
@@ -991,7 +991,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "webhook",
+            "name": "receiver",
             "description": "The name or ID of the webhook receiver.",
             "required": true,
             "schema": {
@@ -1027,7 +1027,7 @@
         }
       }
     },
-    "/experimental/v1/webhooks/{webhook}/secrets": {
+    "/experimental/v1/webhooks/secrets": {
       "get": {
         "tags": [
           "system/webhooks"
@@ -1036,8 +1036,8 @@
         "operationId": "webhook_secrets_list",
         "parameters": [
           {
-            "in": "path",
-            "name": "webhook",
+            "in": "query",
+            "name": "receiver",
             "description": "The name or ID of the webhook receiver.",
             "required": true,
             "schema": {
@@ -1072,8 +1072,8 @@
         "operationId": "webhook_secrets_add",
         "parameters": [
           {
-            "in": "path",
-            "name": "webhook",
+            "in": "query",
+            "name": "receiver",
             "description": "The name or ID of the webhook receiver.",
             "required": true,
             "schema": {
@@ -1111,7 +1111,7 @@
         }
       }
     },
-    "/experimental/v1/webhooks/{webhook}/secrets/{secret_id}": {
+    "/experimental/v1/webhooks/secrets/{secret_id}": {
       "delete": {
         "tags": [
           "system/webhooks"
@@ -1127,15 +1127,6 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            }
-          },
-          {
-            "in": "path",
-            "name": "webhook",
-            "description": "The name or ID of the webhook receiver.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
             }
           }
         ],
@@ -25051,6 +25042,7 @@
         "type": "object",
         "properties": {
           "description": {
+            "description": "human-readable free-form text about a resource",
             "type": "string"
           },
           "endpoint": {
@@ -25066,22 +25058,33 @@
             }
           },
           "id": {
-            "description": "The UUID of this webhook receiver.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForWebhookReceiverKind"
-              }
-            ]
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
           },
           "name": {
-            "description": "The identifier assigned to this webhook receiver upon creation.",
-            "type": "string"
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
           },
           "secrets": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/WebhookSecretId"
             }
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
@@ -25090,7 +25093,9 @@
           "events",
           "id",
           "name",
-          "secrets"
+          "secrets",
+          "time_created",
+          "time_modified"
         ]
       },
       "WebhookCreate": {

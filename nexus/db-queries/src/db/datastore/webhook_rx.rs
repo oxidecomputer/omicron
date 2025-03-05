@@ -45,7 +45,8 @@ use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
-use omicron_uuid_kinds::{GenericUuid, WebhookReceiverUuid};
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::WebhookReceiverUuid;
 use uuid::Uuid;
 
 impl DataStore {
@@ -680,6 +681,27 @@ impl DataStore {
             },
         )?;
         Ok(secret)
+    }
+
+    pub async fn webhook_rx_secret_delete(
+        &self,
+        opctx: &OpContext,
+        authz_rx: &authz::WebhookReceiver,
+        authz_secret: &authz::WebhookSecret,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_secret).await?;
+        diesel::delete(secret_dsl::webhook_secret)
+            .filter(secret_dsl::id.eq(authz_secret.id().into_untyped_uuid()))
+            .filter(secret_dsl::rx_id.eq(authz_rx.id().into_untyped_uuid()))
+            .execute_async(&*self.pool_connection_authorized(&opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_secret),
+                )
+            })?;
+        Ok(())
     }
 
     async fn add_secret_on_conn(

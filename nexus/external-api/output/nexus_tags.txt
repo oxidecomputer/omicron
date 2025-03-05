@@ -266,18 +266,18 @@ ping                                     GET      /v1/ping
 
 API operations found with tag "system/webhooks"
 OPERATION ID                             METHOD   URL PATH
-webhook_create                           POST     /experimental/v1/webhooks
-webhook_delete                           DELETE   /experimental/v1/webhooks/{webhook}
-webhook_delivery_list                    GET      /experimental/v1/webhooks/{webhook}/deliveries
-webhook_delivery_resend                  POST     /experimental/v1/webhooks/{webhook}/deliveries/{event_id}/resend
-webhook_event_class_list                 GET      /experimental/v1/webhook-events/classes
-webhook_event_class_view                 GET      /experimental/v1/webhook-events/classes/{name}
-webhook_probe                            POST     /experimental/v1/webhooks/{webhook}/probe
-webhook_secrets_add                      POST     /experimental/v1/webhooks/{webhook}/secrets
-webhook_secrets_delete                   DELETE   /experimental/v1/webhooks/{webhook}/secrets/{secret_id}
-webhook_secrets_list                     GET      /experimental/v1/webhooks/{webhook}/secrets
-webhook_update                           PUT      /experimental/v1/webhooks/{webhook}
-webhook_view                             GET      /experimental/v1/webhooks/{webhook}
+webhook_create                           POST     /experimental/v1/webhooks/receivers
+webhook_delete                           DELETE   /experimental/v1/webhooks/receivers/{receiver}
+webhook_delivery_list                    GET      /experimental/v1/webhooks/deliveries
+webhook_delivery_resend                  POST     /experimental/v1/webhooks/deliveries/{event_id}/resend
+webhook_event_class_list                 GET      /experimental/v1/webhooks/event-classes
+webhook_event_class_view                 GET      /experimental/v1/webhooks/event-classes/{name}
+webhook_probe                            POST     /experimental/v1/webhooks/receivers/{receiver}/probe
+webhook_secrets_add                      POST     /experimental/v1/webhooks/secrets
+webhook_secrets_delete                   DELETE   /experimental/v1/webhooks/secrets/{secret_id}
+webhook_secrets_list                     GET      /experimental/v1/webhooks/secrets
+webhook_update                           PUT      /experimental/v1/webhooks/receivers/{receiver}
+webhook_view                             GET      /experimental/v1/webhooks/receivers/{receiver}
 
 API operations found with tag "vpcs"
 OPERATION ID                             METHOD   URL PATH

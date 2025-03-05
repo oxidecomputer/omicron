@@ -27,6 +27,7 @@ use omicron_uuid_kinds::TufArtifactKind;
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::WebhookReceiverUuid;
+use omicron_uuid_kinds::WebhookSecretUuid;
 use uuid::Uuid;
 
 /// Look up an API resource in the database
@@ -578,6 +579,17 @@ impl<'a> LookupPath<'a> {
     {
         WebhookReceiver::OwnedName(Root { lookup_root: self }, name)
     }
+
+    /// Select a resource of type [`WebhookSecret`], identified by its UUID.
+    pub fn webhook_secret_id<'b>(
+        self,
+        id: WebhookSecretUuid,
+    ) -> WebhookSecret<'b>
+    where
+        'a: 'b,
+    {
+        WebhookSecret::PrimaryKey(Root { lookup_root: self }, id)
+    }
 }
 
 /// Represents the head of the selection path for a resource
@@ -956,7 +968,7 @@ lookup_resource! {
     name = "WebhookSecret",
     ancestors = ["WebhookReceiver"],
     lookup_by_name = false,
-    soft_deletes = true,
+    soft_deletes = false,
     primary_key_columns = [
         { column_name = "id", uuid_kind = WebhookSecretKind }
     ]

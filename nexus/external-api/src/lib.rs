@@ -3479,7 +3479,7 @@ pub trait NexusExternalApi {
     /// List webhook event classes
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/webhook-events/classes",
+        path = "/experimental/v1/webhooks/event-classes",
         tags = ["system/webhooks"],
     }]
     async fn webhook_event_class_list(
@@ -3492,7 +3492,7 @@ pub trait NexusExternalApi {
     /// Fetch details on an event class by name.
     #[endpoint {
         method = GET,
-        path ="/experimental/v1/webhook-events/classes/{name}",
+        path ="/experimental/v1/webhooks/event-classes/{name}",
         tags = ["system/webhooks"],
     }]
     async fn webhook_event_class_view(
@@ -3503,7 +3503,7 @@ pub trait NexusExternalApi {
     /// Get the configuration for a webhook receiver.
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/webhooks/{webhook}",
+        path = "/experimental/v1/webhooks/receivers/{receiver}",
         tags = ["system/webhooks"],
     }]
     async fn webhook_view(
@@ -3514,7 +3514,7 @@ pub trait NexusExternalApi {
     /// Create a new webhook receiver.
     #[endpoint {
         method = POST,
-        path = "/experimental/v1/webhooks",
+        path = "/experimental/v1/webhooks/receivers",
         tags = ["system/webhooks"],
     }]
     async fn webhook_create(
@@ -3525,7 +3525,7 @@ pub trait NexusExternalApi {
     /// Update the configuration of an existing webhook receiver.
     #[endpoint {
         method = PUT,
-        path = "/experimental/v1/webhooks/{webhook}",
+        path = "/experimental/v1/webhooks/receivers/{receiver}",
         tags = ["system/webhooks"],
     }]
     async fn webhook_update(
@@ -3537,7 +3537,7 @@ pub trait NexusExternalApi {
     /// Delete a webhook receiver.
     #[endpoint {
         method = DELETE,
-        path = "/experimental/v1/webhooks/{webhook}",
+        path = "/experimental/v1/webhooks/receivers/{receiver}",
         tags = ["system/webhooks"],
     }]
     async fn webhook_delete(
@@ -3551,7 +3551,7 @@ pub trait NexusExternalApi {
     // status code from the webhook endpoint...
     #[endpoint {
         method = POST,
-        path = "/experimental/v1/webhooks/{webhook}/probe",
+        path = "/experimental/v1/webhooks/receivers/{receiver}/probe",
         tags = ["system/webhooks"],
     }]
     async fn webhook_probe(
@@ -3563,30 +3563,30 @@ pub trait NexusExternalApi {
     /// List the IDs of secrets for a webhook receiver.
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/webhooks/{webhook}/secrets",
+        path = "/experimental/v1/webhooks/secrets",
         tags = ["system/webhooks"],
     }]
     async fn webhook_secrets_list(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookSelector>,
+        query_params: Query<params::WebhookSelector>,
     ) -> Result<HttpResponseOk<views::WebhookSecrets>, HttpError>;
 
     /// Add a secret to a webhook receiver.
     #[endpoint {
         method = POST,
-        path = "/experimental/v1/webhooks/{webhook}/secrets",
+        path = "/experimental/v1/webhooks/secrets",
         tags = ["system/webhooks"],
     }]
     async fn webhook_secrets_add(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookSelector>,
+        query_params: Query<params::WebhookSelector>,
         params: TypedBody<params::WebhookSecretCreate>,
     ) -> Result<HttpResponseCreated<views::WebhookSecretId>, HttpError>;
 
     /// Delete a secret associated with a webhook receiver by ID.
     #[endpoint {
         method = DELETE,
-        path = "/experimental/v1/webhooks/{webhook}/secrets/{secret_id}",
+        path = "/experimental/v1/webhooks/secrets/{secret_id}",
         tags = ["system/webhooks"],
     }]
     async fn webhook_secrets_delete(
@@ -3597,24 +3597,25 @@ pub trait NexusExternalApi {
     /// List delivery attempts to a webhook receiver.
     #[endpoint {
         method = GET,
-        path = "/experimental/v1/webhooks/{webhook}/deliveries",
+        path = "/experimental/v1/webhooks/deliveries",
         tags = ["system/webhooks"],
     }]
     async fn webhook_delivery_list(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookSelector>,
-        query_params: Query<PaginatedById>,
+        receiver: Query<params::WebhookSelector>,
+        pagination: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<views::WebhookDelivery>>, HttpError>;
 
     /// Request re-delivery of a webhook event.
     #[endpoint {
         method = POST,
-        path = "/experimental/v1/webhooks/{webhook}/deliveries/{event_id}/resend",
+        path = "/experimental/v1/webhooks/deliveries/{event_id}/resend",
         tags = ["system/webhooks"],
     }]
     async fn webhook_delivery_resend(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::WebhookDeliveryPath>,
+        receiver: Query<params::WebhookSelector>,
     ) -> Result<HttpResponseCreated<views::WebhookDeliveryId>, HttpError>;
 }
 
