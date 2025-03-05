@@ -7401,7 +7401,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn webhook_delete(
         rqctx: RequestContext<Self::Context>,
-        _path_params: Path<params::WebhookSelector>,
+        path_params: Path<params::WebhookSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -7410,10 +7410,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
-            Err(nexus
-                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
-                .await
-                .into())
+            let webhook_selector = path_params.into_inner();
+            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let (authz_rx,) = rx.lookup_for(authz::Action::Delete).await?;
+            nexus.datastore().webhook_rx_delete(&opctx, &authz_rx).await?;
+
+            Ok(HttpResponseDeleted())
         };
         apictx
             .context

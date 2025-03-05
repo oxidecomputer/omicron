@@ -51,4 +51,5 @@ representing the potential outcomes of a webhook delivery attempt.
 which records each individual delivery attempt for a webhook delivery in the
 `webhook_delivery` table.
 *** `up23.sql` creates an index `lookup_attempts_for_webhook_delivery` on
-`omicron.public.webhook_delivery_attempt`, for looking up the attempts for a given delivery ID.
+`webhook_delivery_attempt`, for looking up the attempts for a given delivery ID.
+*** `up24.sql` creates an index `lookup_webhook_delivery_attempts_to_rx` on the `webhook_delivery_attempt` table, for looking up delivery attempts to a given receiver ID. This is primarily used for deleting delivery attempts when a receiver is deleted.

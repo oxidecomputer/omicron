@@ -4,6 +4,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery_attempt (
     delivery_id UUID NOT NULL,
     -- attempt number.
     attempt INT2 NOT NULL,
+    
+    -- UUID of the webhook receiver (foreign key into
+    -- `omicron.public.webhook_rx`)
+    rx_id UUID NOT NULL,
+
     result omicron.public.webhook_delivery_result NOT NULL,
     -- A status code > 599 would be Very Surprising, so rather than using an
     -- INT4 to store a full unsigned 16-bit number in the database, we'll use a

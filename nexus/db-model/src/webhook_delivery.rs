@@ -183,6 +183,10 @@ pub struct WebhookDeliveryAttempt {
     /// Attempt number (retry count).
     pub attempt: SqlU8,
 
+    /// ID of the receiver to which this event is dispatched (foreign key into
+    /// `webhook_rx`).
+    pub rx_id: DbTypedUuid<WebhookReceiverKind>,
+
     pub result: WebhookDeliveryResult,
 
     pub response_status: Option<i16>,

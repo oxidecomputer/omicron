@@ -507,6 +507,7 @@ impl<'a> ReceiverClient<'a> {
 
         Ok(WebhookDeliveryAttempt {
             delivery_id: delivery.id,
+            rx_id: delivery.rx_id,
             attempt: SqlU8::new(delivery.attempts.0 + 1),
             result: delivery_result,
             response_status: status.map(|s| s.as_u16() as i16),

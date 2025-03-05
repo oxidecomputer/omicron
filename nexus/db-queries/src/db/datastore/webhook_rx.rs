@@ -27,6 +27,8 @@ use crate::db::model::SCHEMA_VERSION;
 use crate::db::pagination::paginated;
 use crate::db::pagination::paginated_multicolumn;
 use crate::db::pool::DbConnection;
+use crate::db::schema::webhook_delivery::dsl as delivery_dsl;
+use crate::db::schema::webhook_delivery_attempt::dsl as delivery_attempt_dsl;
 use crate::db::schema::webhook_receiver::dsl as rx_dsl;
 use crate::db::schema::webhook_rx_event_glob::dsl as glob_dsl;
 use crate::db::schema::webhook_rx_subscription::dsl as subscription_dsl;
@@ -39,6 +41,7 @@ use nexus_types::external_api::params;
 use nexus_types::internal_api::background::WebhookGlobStatus;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
@@ -147,6 +150,96 @@ impl DataStore {
         let secrets =
             self.webhook_rx_secret_list_on_conn(authz_rx, &conn).await?;
         Ok((subscriptions, secrets))
+    }
+
+    pub async fn webhook_rx_delete(
+        &self,
+        opctx: &OpContext,
+        authz_rx: &authz::WebhookReceiver,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_rx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let rx_id = authz_rx.id().into_untyped_uuid();
+        // First, mark the webhook receiver record as deleted.
+        diesel::update(rx_dsl::webhook_receiver)
+            .filter(rx_dsl::id.eq(rx_id))
+            .filter(rx_dsl::time_deleted.is_null())
+            .set((
+                rx_dsl::time_deleted.eq(chrono::Utc::now()),
+                rx_dsl::rcgen.eq(rx_dsl::rcgen + 1),
+            ))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to mark receiver as deleted")
+            })?;
+
+        // Now, delete the webhook's secrets.
+        let secrets_deleted = diesel::delete(secret_dsl::webhook_secret)
+            .filter(secret_dsl::rx_id.eq(rx_id))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to delete secrets")
+            })?;
+
+        // Delete subscriptions and globs.
+        let exact_subscriptions_deleted =
+            diesel::delete(subscription_dsl::webhook_rx_subscription)
+                .filter(subscription_dsl::rx_id.eq(rx_id))
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to delete exact subscriptions",
+                        )
+                })?;
+
+        let globs_deleted = diesel::delete(glob_dsl::webhook_rx_event_glob)
+            .filter(glob_dsl::rx_id.eq(rx_id))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to delete globs")
+            })?;
+
+        let deliveries_deleted = diesel::delete(delivery_dsl::webhook_delivery)
+            .filter(delivery_dsl::rx_id.eq(rx_id))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to delete delivery records")
+            })?;
+
+        let delivery_attempts_deleted =
+            diesel::delete(delivery_attempt_dsl::webhook_delivery_attempt)
+                .filter(delivery_attempt_dsl::rx_id.eq(rx_id))
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to delete delivery attempt records",
+                        )
+                })?;
+
+        slog::debug!(
+            &opctx.log,
+            "deleted webhook receiver";
+            "rx_id" => %rx_id,
+            "secrets_deleted" => ?secrets_deleted,
+            "exact_subscriptions_deleted" => ?exact_subscriptions_deleted,
+            "globs_deleted" => ?globs_deleted,
+            "deliveries_deleted" => ?deliveries_deleted,
+            "delivery_attempts_deleted" => ?delivery_attempts_deleted,
+        );
+
+        Ok(())
     }
 
     //
