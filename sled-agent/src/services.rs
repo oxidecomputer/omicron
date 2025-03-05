@@ -287,10 +287,7 @@ pub enum Error {
         "Requested zone generation ({requested}) \
         is older than current ({current})"
     )]
-    RequestedZoneConfigOutdated {
-        requested: Generation,
-        current: Generation,
-    },
+    RequestedZoneConfigOutdated { requested: Generation, current: Generation },
 
     #[error("Requested generation {0} with different zones than before")]
     RequestedConfigConflicts(Generation),

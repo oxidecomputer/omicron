@@ -958,12 +958,33 @@ impl SledAgent {
         &self,
         config: OmicronSledConfig,
     ) -> Result<OmicronSledConfigResult, Error> {
-        let DisksManagementResult { status: disks } =
+        let disks =
             self.omicron_physical_disks_ensure(config.disks_config).await?;
-        let DatasetsManagementResult { status: datasets } =
-            self.datasets_ensure(config.datasets_config).await?;
+
+        // If we only had partial success deploying disks, don't proceed.
+        if disks.has_error() {
+            return Ok(OmicronSledConfigResult {
+                disks: disks.status,
+                datasets: Vec::new(),
+            });
+        }
+
+        let datasets = self.datasets_ensure(config.datasets_config).await?;
+
+        // If we only had partial success deploying datasets, don't proceed.
+        if datasets.has_error() {
+            return Ok(OmicronSledConfigResult {
+                disks: disks.status,
+                datasets: datasets.status,
+            });
+        }
+
         self.omicron_zones_ensure(config.zones_config).await?;
-        Ok(OmicronSledConfigResult { disks, datasets })
+
+        Ok(OmicronSledConfigResult {
+            disks: disks.status,
+            datasets: datasets.status,
+        })
     }
 
     /// Ensures that the specific set of Omicron zones are running as configured
