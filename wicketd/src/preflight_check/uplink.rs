@@ -3,6 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use display_error_chain::DisplayErrorChain;
+use dpd_client::Client as DpdClient;
+use dpd_client::ClientState as DpdClientState;
 use dpd_client::types::LinkCreate;
 use dpd_client::types::LinkId;
 use dpd_client::types::LinkSettings;
@@ -11,25 +13,23 @@ use dpd_client::types::PortFec as DpdPortFec;
 use dpd_client::types::PortId;
 use dpd_client::types::PortSettings;
 use dpd_client::types::PortSpeed as DpdPortSpeed;
-use dpd_client::Client as DpdClient;
-use dpd_client::ClientState as DpdClientState;
 use either::Either;
+use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::config::NameServerConfigGroup;
 use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::config::ResolverOpts;
 use hickory_resolver::error::ResolveErrorKind;
-use hickory_resolver::TokioAsyncResolver;
-use illumos_utils::zone::SVCCFG;
 use illumos_utils::PFEXEC;
+use illumos_utils::zone::SVCCFG;
+use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::api::internal::shared::PortFec as OmicronPortFec;
 use omicron_common::api::internal::shared::PortSpeed as OmicronPortSpeed;
 use omicron_common::api::internal::shared::SwitchLocation;
-use omicron_common::OMICRON_DPD_TAG;
 use oxnet::IpNet;
+use slog::Logger;
 use slog::error;
 use slog::o;
-use slog::Logger;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -249,6 +249,9 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                                 }))
                                 .into();
                             }
+                            LinkState::ConfigError(e) => {
+                                format!("link config error: {e:?}")
+                            }
                             state @ (LinkState::Down
                             | LinkState::Unknown
                             | LinkState::Faulted(_)) => {
@@ -294,7 +297,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                             Err(L2Failure::L1(failure)),
                             "link not up due to earlier failure",
                         )
-                        .into()
+                        .into();
                     }
                 };
 

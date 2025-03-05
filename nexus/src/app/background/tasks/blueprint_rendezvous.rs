@@ -6,8 +6,8 @@
 //! Reconfigurator rendezvous tables
 
 use crate::app::background::BackgroundTask;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_rendezvous::reconcile_blueprint_rendezvous_tables;

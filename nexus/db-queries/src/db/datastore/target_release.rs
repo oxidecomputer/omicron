@@ -7,7 +7,7 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::error::{public_error_from_diesel, ErrorHandler};
+use crate::db::error::{ErrorHandler, public_error_from_diesel};
 use crate::db::model::{SemverVersion, TargetRelease, TargetReleaseSource};
 use crate::db::schema::target_release::dsl;
 use async_bb8_diesel::AsyncRunQueryDsl as _;
@@ -117,8 +117,9 @@ mod test {
     };
     use crate::db::pub_test_utils::TestDatabase;
     use chrono::{TimeDelta, Utc};
-    use omicron_common::update::{ArtifactId, ArtifactKind};
+    use omicron_common::update::ArtifactId;
     use omicron_test_utils::dev;
+    use tufaceous_artifact::ArtifactKind;
 
     #[tokio::test]
     async fn target_release_datastore() {

@@ -10,9 +10,9 @@ use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::inventory::SourceNatConfig;
-use omicron_common::address::IpRange;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::DNS_OPTE_IPV6_SUBNET;
+use omicron_common::address::IpRange;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::address::NEXUS_OPTE_IPV6_SUBNET;
 use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
@@ -21,10 +21,10 @@ use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::internal::shared::SourceNatConfigError;
 use oxnet::IpNet;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
+use std::collections::btree_map::Entry;
 use std::hash::Hash;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
@@ -676,11 +676,12 @@ pub mod test {
     use super::*;
     use illumos_utils::zpool::ZpoolName;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-    use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
+    use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::inventory::NetworkInterface;
     use nexus_types::inventory::NetworkInterfaceKind;
     use omicron_common::api::external::Generation;
@@ -917,6 +918,7 @@ pub mod test {
                         },
                     },
                 ),
+                image_source: BlueprintZoneImageSource::InstallDataset,
             }
         };
 

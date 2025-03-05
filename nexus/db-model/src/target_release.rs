@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{impl_enum_type, Generation};
+use super::{Generation, impl_enum_type};
 use crate::schema::target_release;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};

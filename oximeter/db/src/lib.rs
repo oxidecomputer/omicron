@@ -4,22 +4,22 @@
 
 //! Tools for interacting with the control plane telemetry database.
 
-// Copyright 2024 Oxide Computer Company
+// Copyright 2025 Oxide Computer Company
 
 use crate::query::StringFieldSelector;
 use anyhow::Context as _;
 use chrono::DateTime;
 use chrono::Utc;
-pub use oximeter::schema::FieldSchema;
-pub use oximeter::schema::FieldSource;
-use oximeter::schema::TimeseriesKey;
-pub use oximeter::schema::TimeseriesName;
-pub use oximeter::schema::TimeseriesSchema;
 pub use oximeter::DatumType;
 pub use oximeter::Field;
 pub use oximeter::FieldType;
 pub use oximeter::Measurement;
 pub use oximeter::Sample;
+pub use oximeter::schema::FieldSchema;
+pub use oximeter::schema::FieldSource;
+use oximeter::schema::TimeseriesKey;
+pub use oximeter::schema::TimeseriesName;
+pub use oximeter::schema::TimeseriesSchema;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -47,12 +47,12 @@ pub mod shells;
 #[cfg(any(feature = "sql", test))]
 pub mod sql;
 
-#[cfg(any(feature = "oxql", test))]
-pub use client::oxql::OxqlResult;
-pub use client::query_summary::QuerySummary;
 pub use client::Client;
 pub use client::DbWrite;
 pub use client::TestDbWrite;
+#[cfg(any(feature = "oxql", test))]
+pub use client::oxql::OxqlResult;
+pub use client::query_summary::QuerySummary;
 pub use model::OXIMETER_VERSION;
 
 #[derive(Debug, Error)]
@@ -87,13 +87,19 @@ pub enum Error {
     #[error("Timeseries not found for: {0}")]
     TimeseriesNotFound(String),
 
-    #[error("The field comparison operation '{op}' is not valid for field '{field_name}' with type {field_type}")]
+    #[error(
+        "The field comparison operation '{op}' is not valid for field '{field_name}' with type {field_type}"
+    )]
     InvalidSelectionOp { op: String, field_name: String, field_type: FieldType },
 
-    #[error("Timeseries '{timeseries_name}' does not contain a field with name '{field_name}'")]
+    #[error(
+        "Timeseries '{timeseries_name}' does not contain a field with name '{field_name}'"
+    )]
     NoSuchField { timeseries_name: String, field_name: String },
 
-    #[error("Field '{field_name}' requires a value of type {expected_type}, found {found_type}")]
+    #[error(
+        "Field '{field_name}' requires a value of type {expected_type}, found {found_type}"
+    )]
     IncorrectFieldType {
         field_name: String,
         expected_type: FieldType,
@@ -108,7 +114,9 @@ pub enum Error {
     )]
     InvalidFieldSelectorString { selector: String },
 
-    #[error("Invalid value for field '{field_name}' with type {field_type}: '{value}'")]
+    #[error(
+        "Invalid value for field '{field_name}' with type {field_type}: '{value}'"
+    )]
     InvalidFieldValue {
         field_name: String,
         field_type: FieldType,
@@ -180,6 +188,9 @@ impl From<crate::oxql::Error> for Error {
         Error::Oxql(e)
     }
 }
+
+/// Alias for a connection to the database claimed from a `qorb` pool.
+pub(crate) type Handle = qorb::claim::Handle<crate::native::Connection>;
 
 /// The target identifies the resource or component about which metric data is produced.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -28,17 +28,17 @@
 
 use std::sync::LazyLock;
 
+use super::Action;
 use super::actor::AnyActor;
 use super::context::AuthorizedResource;
 use super::oso_generic::Init;
-use super::roles::{load_roles_for_resource_tree, RoleSet};
-use super::Action;
-use super::{actor::AuthenticatedActor, Authz};
+use super::roles::{RoleSet, load_roles_for_resource_tree};
+use super::{Authz, actor::AuthenticatedActor};
 use crate::authn;
 use crate::context::OpContext;
 use authz_macros::authz_resource;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use nexus_db_fixed_data::FLEET_ID;
 use nexus_types::external_api::shared::{FleetRole, ProjectRole, SiloRole};
 use omicron_common::api::external::{Error, LookupType, ResourceType};

@@ -8,8 +8,8 @@ use camino_tempfile::Utf8TempDir;
 use chrono::Utc;
 use clap::Parser as _;
 use dropshot::test_util::LogContext;
-use http::method::Method;
 use http::StatusCode;
+use http::method::Method;
 use nexus_config::UpdatesConfig;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::{NexusRequest, RequestBuilder};
@@ -74,7 +74,7 @@ async fn get_set_target_release() -> anyhow::Result<()> {
     tufaceous::Args::try_parse_from([
         "tufaceous",
         "assemble",
-        "../tufaceous/manifests/fake.toml",
+        "../update-common/manifests/fake.toml",
         path.as_str(),
     ])
     .expect("can't parse tufaceous args")

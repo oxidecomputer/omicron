@@ -5,12 +5,14 @@
 //! Manges deployment of Omicron physical disks to Sled Agents.
 
 use crate::Sled;
-use anyhow::anyhow;
 use anyhow::Context;
-use futures::stream;
+use anyhow::anyhow;
 use futures::StreamExt;
+use futures::stream;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -22,11 +24,14 @@ use std::collections::BTreeMap;
 
 /// Idempotently ensure that the specified Omicron disks are deployed to the
 /// corresponding sleds
-pub(crate) async fn deploy_disks(
+pub(crate) async fn deploy_disks<'a, I>(
     opctx: &OpContext,
     sleds_by_id: &BTreeMap<SledUuid, Sled>,
-    sled_configs: &BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
-) -> Result<(), Vec<anyhow::Error>> {
+    sled_configs: I,
+) -> Result<(), Vec<anyhow::Error>>
+where
+    I: Iterator<Item = (SledUuid, &'a BlueprintPhysicalDisksConfig)>,
+{
     let errors: Vec<_> = stream::iter(sled_configs)
         .filter_map(|(sled_id, config)| async move {
             let log = opctx.log.new(o!(
@@ -37,6 +42,14 @@ pub(crate) async fn deploy_disks(
             let db_sled = match sleds_by_id.get(&sled_id) {
                 Some(sled) => sled,
                 None => {
+                    if config.are_all_disks_expunged() {
+                        info!(
+                            log,
+                            "Skipping disk deployment to expunged sled";
+                            "sled_id" => %sled_id
+                        );
+                        return None;
+                    }
                     let err = anyhow!("sled not found in db list: {}", sled_id);
                     warn!(log, "{err:#}");
                     return Some(err);
@@ -96,15 +109,28 @@ pub(crate) async fn deploy_disks(
         .collect()
         .await;
 
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors)
-    }
+    if errors.is_empty() { Ok(()) } else { Err(errors) }
 }
 
 /// Decommissions all disks which are currently expunged.
 pub(crate) async fn decommission_expunged_disks(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    blueprint: &Blueprint,
+) -> Result<(), Vec<anyhow::Error>> {
+    decommission_expunged_disks_impl(
+        opctx,
+        datastore,
+        blueprint
+            .all_omicron_disks(
+                BlueprintPhysicalDiskDisposition::is_ready_for_cleanup,
+            )
+            .map(|(sled_id, config)| (sled_id, config.id)),
+    )
+    .await
+}
+
+async fn decommission_expunged_disks_impl(
     opctx: &OpContext,
     datastore: &DataStore,
     expunged_disks: impl Iterator<Item = (SledUuid, PhysicalDiskUuid)>,
@@ -136,11 +162,7 @@ pub(crate) async fn decommission_expunged_disks(
         .collect()
         .await;
 
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors)
-    }
+    if errors.is_empty() { Ok(()) } else { Err(errors) }
 }
 
 #[cfg(test)]
@@ -152,10 +174,10 @@ mod test {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::ExpressionMethods;
     use diesel::QueryDsl;
+    use httptest::Expectation;
     use httptest::matchers::{all_of, json_decoded, request};
     use httptest::responders::json_encoded;
     use httptest::responders::status_code;
-    use httptest::Expectation;
     use nexus_db_model::CrucibleDataset;
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
@@ -168,11 +190,15 @@ mod test {
     use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::deployment::BlueprintDatasetsConfig;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
+    use nexus_types::deployment::BlueprintSledConfig;
+    use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::{
         Blueprint, BlueprintPhysicalDiskConfig, BlueprintPhysicalDisksConfig,
         BlueprintTarget, CockroachDbPreserveDowngrade, DiskFilter,
     };
+    use nexus_types::external_api::views::SledState;
     use nexus_types::identity::Asset;
     use omicron_common::api::external::DataPageParams;
     use omicron_common::api::external::Generation;
@@ -208,10 +234,21 @@ mod test {
             },
             Blueprint {
                 id,
-                blueprint_zones: BTreeMap::new(),
-                blueprint_disks,
-                blueprint_datasets: BTreeMap::new(),
-                sled_state: BTreeMap::new(),
+                sleds: blueprint_disks
+                    .into_iter()
+                    .map(|(sled_id, disks_config)| {
+                        (
+                            sled_id,
+                            BlueprintSledConfig {
+                                state: SledState::Active,
+                                disks_config,
+                                zones_config: BlueprintZonesConfig::default(),
+                                datasets_config:
+                                    BlueprintDatasetsConfig::default(),
+                            },
+                        )
+                    })
+                    .collect(),
                 cockroachdb_setting_preserve_downgrade:
                     CockroachDbPreserveDowngrade::DoNotModify,
                 parent_blueprint_id: None,
@@ -256,9 +293,16 @@ mod test {
         // Get a success result back when the blueprint has an empty set of
         // disks.
         let (_, blueprint) = create_blueprint(BTreeMap::new());
-        deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
-            .await
-            .expect("failed to deploy no disks");
+        deploy_disks(
+            &opctx,
+            &sleds_by_id,
+            blueprint
+                .sleds
+                .iter()
+                .map(|(sled_id, config)| (*sled_id, &config.disks_config)),
+        )
+        .await
+        .expect("failed to deploy no disks");
 
         // Disks are updated in a particular order, but each request contains
         // the full set of disks that must be running.
@@ -312,9 +356,16 @@ mod test {
         }
 
         // Execute it.
-        deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
-            .await
-            .expect("failed to deploy initial disks");
+        deploy_disks(
+            &opctx,
+            &sleds_by_id,
+            blueprint
+                .sleds
+                .iter()
+                .map(|(sled_id, config)| (*sled_id, &config.disks_config)),
+        )
+        .await
+        .expect("failed to deploy initial disks");
 
         s1.verify_and_clear();
         s2.verify_and_clear();
@@ -331,9 +382,16 @@ mod test {
                 )),
             );
         }
-        deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
-            .await
-            .expect("failed to deploy same disks");
+        deploy_disks(
+            &opctx,
+            &sleds_by_id,
+            blueprint
+                .sleds
+                .iter()
+                .map(|(sled_id, config)| (*sled_id, &config.disks_config)),
+        )
+        .await
+        .expect("failed to deploy same disks");
         s1.verify_and_clear();
         s2.verify_and_clear();
 
@@ -356,16 +414,24 @@ mod test {
             .respond_with(status_code(500)),
         );
 
-        let errors =
-            deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
-                .await
-                .expect_err("unexpectedly succeeded in deploying disks");
+        let errors = deploy_disks(
+            &opctx,
+            &sleds_by_id,
+            blueprint
+                .sleds
+                .iter()
+                .map(|(sled_id, config)| (*sled_id, &config.disks_config)),
+        )
+        .await
+        .expect_err("unexpectedly succeeded in deploying disks");
 
         println!("{:?}", errors);
         assert_eq!(errors.len(), 1);
-        assert!(errors[0]
-            .to_string()
-            .starts_with("Failed to put BlueprintPhysicalDisksConfig"));
+        assert!(
+            errors[0]
+                .to_string()
+                .starts_with("Failed to put BlueprintPhysicalDisksConfig")
+        );
         s1.verify_and_clear();
         s2.verify_and_clear();
 
@@ -400,10 +466,16 @@ mod test {
             })),
         );
 
-        let errors =
-            deploy_disks(&opctx, &sleds_by_id, &blueprint.blueprint_disks)
-                .await
-                .expect_err("unexpectedly succeeded in deploying disks");
+        let errors = deploy_disks(
+            &opctx,
+            &sleds_by_id,
+            blueprint
+                .sleds
+                .iter()
+                .map(|(sled_id, config)| (*sled_id, &config.disks_config)),
+        )
+        .await
+        .expect_err("unexpectedly succeeded in deploying disks");
 
         println!("{:?}", errors);
         assert_eq!(errors.len(), 1);
@@ -597,7 +669,7 @@ mod test {
         assert_eq!(d.disk_state, PhysicalDiskState::Active);
         assert_eq!(d.disk_policy, PhysicalDiskPolicy::InService);
 
-        super::decommission_expunged_disks(
+        super::decommission_expunged_disks_impl(
             &opctx,
             &datastore,
             [(sled_id, disk_to_decommission)].into_iter(),

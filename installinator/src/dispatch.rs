@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use buf_list::{BufList, Cursor};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
@@ -14,12 +14,10 @@ use installinator_common::{
     StepWarning, UpdateEngine,
 };
 use omicron_common::FileKv;
-use omicron_common::{
-    api::internal::nexus::KnownArtifactKind,
-    update::{ArtifactHash, ArtifactHashId, ArtifactKind},
-};
+use omicron_common::update::{ArtifactHash, ArtifactHashId};
 use sha2::{Digest, Sha256};
-use slog::{error, warn, Drain};
+use slog::{Drain, error, warn};
+use tufaceous_artifact::{ArtifactKind, KnownArtifactKind};
 use tufaceous_lib::ControlPlaneZoneImages;
 use update_engine::StepResult;
 

@@ -28,8 +28,8 @@ use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use parse_display::Display;
 use parse_display::FromStr;
-use rand::thread_rng;
 use rand::Rng;
+use rand::thread_rng;
 use schemars::JsonSchema;
 use semver::Version;
 use serde::Deserialize;
@@ -1291,7 +1291,9 @@ pub enum InstanceAutoRestartPolicy {
 /// Affinity policy used to describe "what to do when a request cannot be satisfied"
 ///
 /// Used for both Affinity and Anti-Affinity Groups
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, Deserialize, Hash, Eq, Serialize, PartialEq, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum AffinityPolicy {
     /// If the affinity request cannot be satisfied, allow it anyway.
@@ -3702,18 +3704,15 @@ mod test {
         assert!(!"fd00::/40".parse::<Ipv6Net>().unwrap().is_vpc_prefix());
 
         let vpc_prefix = "fd00::/48".parse::<Ipv6Net>().unwrap();
-        assert!("fd00::/64"
-            .parse::<Ipv6Net>()
-            .unwrap()
-            .is_vpc_subnet(&vpc_prefix));
-        assert!(!"fd10::/64"
-            .parse::<Ipv6Net>()
-            .unwrap()
-            .is_vpc_subnet(&vpc_prefix));
-        assert!(!"fd00::/63"
-            .parse::<Ipv6Net>()
-            .unwrap()
-            .is_vpc_subnet(&vpc_prefix));
+        assert!(
+            "fd00::/64".parse::<Ipv6Net>().unwrap().is_vpc_subnet(&vpc_prefix)
+        );
+        assert!(
+            !"fd10::/64".parse::<Ipv6Net>().unwrap().is_vpc_subnet(&vpc_prefix)
+        );
+        assert!(
+            !"fd00::/63".parse::<Ipv6Net>().unwrap().is_vpc_subnet(&vpc_prefix)
+        );
     }
 
     #[test]

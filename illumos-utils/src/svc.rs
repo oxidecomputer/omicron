@@ -12,7 +12,7 @@ use omicron_common::backoff;
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 mod inner {
     use super::*;
-    use slog::{warn, Logger};
+    use slog::{Logger, warn};
 
     // TODO(https://www.illumos.org/issues/13837): This is a hack;
     // remove me when when fixed. Ideally, the ".synchronous()" argument
@@ -53,11 +53,7 @@ mod inner {
             || async {
                 let mut p = smf::Properties::new();
                 let properties = {
-                    if let Some(zone) = zone {
-                        p.zone(zone)
-                    } else {
-                        &mut p
-                    }
+                    if let Some(zone) = zone { p.zone(zone) } else { &mut p }
                 };
                 if let Ok(value) = properties.lookup().run(&name, &fmri) {
                     if value.value()
@@ -81,7 +77,10 @@ mod inner {
                                     .output()
                                     .await
                             {
-                                warn!(log, "clearing service maintenance failed: {out}");
+                                warn!(
+                                    log,
+                                    "clearing service maintenance failed: {out}"
+                                );
                             };
                         }
                     }

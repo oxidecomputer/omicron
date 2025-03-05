@@ -33,8 +33,8 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::error;
 use std::fmt;
 use strum::IntoEnumIterator;
@@ -969,7 +969,9 @@ pub struct SledDetails {
 pub enum PlanningInputBuildError {
     #[error("duplicate sled ID: {0}")]
     DuplicateSledId(SledUuid),
-    #[error("Omicron zone {zone_id} has a range of IPs ({ip:?}), only a single IP is supported")]
+    #[error(
+        "Omicron zone {zone_id} has a range of IPs ({ip:?}), only a single IP is supported"
+    )]
     NotSingleIp { zone_id: OmicronZoneUuid, ip: IpNetwork },
     #[error(transparent)]
     AddNetworkResource(#[from] AddNetworkResourceError),

@@ -4,25 +4,25 @@
 
 //! [`DataStore`] methods related to [`Silo`]s.
 
-use super::dns::DnsVersionUpdateBuilder;
 use super::DataStore;
 use super::SQL_BATCH_SIZE;
+use super::dns::DnsVersionUpdateBuilder;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::datastore::RunnableQuery;
-use crate::db::error::public_error_from_diesel;
-use crate::db::error::retryable;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
+use crate::db::error::public_error_from_diesel;
+use crate::db::error::retryable;
 use crate::db::identity::Resource;
 use crate::db::model::CollectionTypeProvisioned;
 use crate::db::model::IpPoolResourceType;
 use crate::db::model::Name;
 use crate::db::model::Silo;
 use crate::db::model::VirtualProvisioningCollection;
-use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
+use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -34,7 +34,6 @@ use nexus_db_model::SiloQuotas;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::SiloRole;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -42,6 +41,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use ref_cast::RefCast;
 use uuid::Uuid;
 

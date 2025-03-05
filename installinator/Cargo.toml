@@ -36,6 +36,7 @@ sled-storage.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-envlogger.workspace = true
+slog-error-chain.workspace = true
 slog-term.workspace = true
 smf.workspace = true
 thiserror.workspace = true
@@ -44,6 +45,7 @@ tufaceous-lib.workspace = true
 update-engine.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
+tufaceous-artifact.workspace = true
 
 [dev-dependencies]
 omicron-test-utils.workspace = true

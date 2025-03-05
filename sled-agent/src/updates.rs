@@ -6,8 +6,8 @@
 
 use bootstrap_agent_api::Component;
 use camino::{Utf8Path, Utf8PathBuf};
-use omicron_brand_metadata::Metadata;
 use serde::{Deserialize, Serialize};
+use tufaceous_brand_metadata::Metadata;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

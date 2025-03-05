@@ -18,16 +18,16 @@
 // vs. there were no disks in it.  This seems likely to be a fair bit more
 // complicated to do safely and generally compared to what we have now.
 
-use super::pool::DbConnection;
 use super::Pool;
+use super::pool::DbConnection;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::{
     self,
-    error::{public_error_from_diesel, ErrorHandler},
+    error::{ErrorHandler, public_error_from_diesel},
 };
 use ::oximeter::types::ProducerRegistry;
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::pg::Pg;
 use diesel::prelude::*;
@@ -39,7 +39,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::backoff::{
-    retry_notify, retry_policy_internal_service, BackoffError,
+    BackoffError, retry_notify, retry_policy_internal_service,
 };
 use omicron_uuid_kinds::{GenericUuid, SledUuid};
 use slog::Logger;
@@ -461,18 +461,18 @@ mod test {
     use crate::db::model::{
         BlockSize, ConsoleSession, CrucibleDataset, ExternalIp, PhysicalDisk,
         PhysicalDiskKind, PhysicalDiskPolicy, PhysicalDiskState, Project, Rack,
-        Region, SiloUser, SledBaseboard, SledSystemHardware, SledUpdate,
-        SshKey, Zpool,
+        Region, SiloUser, SshKey, Zpool,
     };
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use crate::db::queries::vpc_subnet::InsertVpcSubnetQuery;
     use chrono::{Duration, Utc};
-    use futures::stream;
     use futures::StreamExt;
+    use futures::stream;
     use nexus_config::RegionAllocationStrategy;
     use nexus_db_fixed_data::silo::DEFAULT_SILO;
     use nexus_db_model::IpAttachState;
-    use nexus_db_model::{to_db_typed_uuid, Generation};
+    use nexus_db_model::to_db_typed_uuid;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::external_api::params;
@@ -494,27 +494,6 @@ mod test {
     use std::sync::Arc;
     use strum::EnumCount;
     use uuid::Uuid;
-
-    // Creates a "fake" Sled Baseboard.
-    pub fn sled_baseboard_for_test() -> SledBaseboard {
-        SledBaseboard {
-            serial_number: Uuid::new_v4().to_string(),
-            part_number: String::from("test-part"),
-            revision: 1,
-        }
-    }
-
-    // Creates "fake" sled hardware accounting
-    pub fn sled_system_hardware_for_test() -> SledSystemHardware {
-        SledSystemHardware {
-            is_scrimlet: false,
-            usable_hardware_threads: 4,
-            usable_physical_ram: crate::db::model::ByteCount::try_from(1 << 40)
-                .unwrap(),
-            reservoir_size: crate::db::model::ByteCount::try_from(1 << 39)
-                .unwrap(),
-        }
-    }
 
     /// Inserts a blueprint in the DB and forcibly makes it the target
     ///
@@ -717,25 +696,8 @@ mod test {
 
     // Creates a test sled, returns its UUID.
     async fn create_test_sled(datastore: &DataStore) -> SledUuid {
-        let bogus_addr = SocketAddrV6::new(
-            Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
-            8080,
-            0,
-            0,
-        );
-        let bogus_repo_depot_port = 8081;
-        let rack_id = Uuid::new_v4();
         let sled_id = SledUuid::new_v4();
-
-        let sled_update = SledUpdate::new(
-            sled_id.into_untyped_uuid(),
-            bogus_addr,
-            bogus_repo_depot_port,
-            sled_baseboard_for_test(),
-            sled_system_hardware_for_test(),
-            rack_id,
-            Generation::new(),
-        );
+        let sled_update = SledUpdateBuilder::new().sled_id(sled_id).build();
         datastore.sled_upsert(sled_update).await.unwrap();
         sled_id
     }
@@ -1646,16 +1608,18 @@ mod test {
         let params = create_test_disk_create_params("disk1", alloc_size);
         let volume1_id = VolumeUuid::new_v4();
 
-        assert!(datastore
-            .disk_region_allocate(
-                &opctx,
-                volume1_id,
-                &params.disk_source,
-                params.size,
-                &RegionAllocationStrategy::Random { seed: Some(0) },
-            )
-            .await
-            .is_err());
+        assert!(
+            datastore
+                .disk_region_allocate(
+                    &opctx,
+                    volume1_id,
+                    &params.disk_source,
+                    params.size,
+                    &RegionAllocationStrategy::Random { seed: Some(0) },
+                )
+                .await
+                .is_err()
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1717,32 +1681,25 @@ mod test {
         let rack_id = Uuid::new_v4();
         let addr1 = "[fd00:1de::1]:12345".parse().unwrap();
         let sled1_id = "0de4b299-e0b4-46f0-d528-85de81a7095f".parse().unwrap();
-        let sled1 = db::model::SledUpdate::new(
-            sled1_id,
-            addr1,
-            REPO_DEPOT_PORT,
-            sled_baseboard_for_test(),
-            sled_system_hardware_for_test(),
-            rack_id,
-            Generation::new(),
-        );
+
+        let sled1 = SledUpdateBuilder::new()
+            .sled_id(sled1_id)
+            .addr(addr1)
+            .repo_depot_port(REPO_DEPOT_PORT)
+            .rack_id(rack_id)
+            .build();
         datastore.sled_upsert(sled1).await.unwrap();
 
         let addr2 = "[fd00:1df::1]:12345".parse().unwrap();
         let sled2_id = "66285c18-0c79-43e0-e54f-95271f271314".parse().unwrap();
-        let sled2 = db::model::SledUpdate::new(
-            sled2_id,
-            addr2,
-            REPO_DEPOT_PORT,
-            sled_baseboard_for_test(),
-            sled_system_hardware_for_test(),
-            rack_id,
-            Generation::new(),
-        );
+        let sled2 = SledUpdateBuilder::new()
+            .sled_id(sled2_id)
+            .addr(addr2)
+            .repo_depot_port(REPO_DEPOT_PORT)
+            .rack_id(rack_id)
+            .build();
         datastore.sled_upsert(sled2).await.unwrap();
 
-        let sled1_id = SledUuid::from_untyped_uuid(sled1_id);
-        let sled2_id = SledUuid::from_untyped_uuid(sled2_id);
         let ip = datastore.next_ipv6_address(&opctx, sled1_id).await.unwrap();
         let expected_ip = Ipv6Addr::new(0xfd00, 0x1de, 0, 0, 0, 0, 1, 0);
         assert_eq!(ip, expected_ip);
@@ -2033,10 +1990,12 @@ mod test {
         );
 
         // Deleting a non-existing record fails
-        assert!(datastore
-            .deallocate_external_ip(&opctx, Uuid::nil())
-            .await
-            .is_err());
+        assert!(
+            datastore
+                .deallocate_external_ip(&opctx, Uuid::nil())
+                .await
+                .is_err()
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();

@@ -12,8 +12,8 @@ use gateway_client::types::SpType;
 use internal_dns_types::names::DNS_ZONE;
 use ipnetwork::{IpNetwork, Ipv6Network};
 use nexus_db_model::DnsGroup;
-use nexus_db_model::InitialDnsGroup;
 use nexus_db_model::INFRA_LOT;
+use nexus_db_model::InitialDnsGroup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -21,11 +21,11 @@ use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::datastore::RackInit;
 use nexus_db_queries::db::datastore::SledUnderlayAllocationResult;
 use nexus_db_queries::db::lookup::LookupPath;
-use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::params::Address;
 use nexus_types::external_api::params::AddressConfig;
 use nexus_types::external_api::params::AddressLotBlockCreate;
@@ -49,7 +49,7 @@ use nexus_types::external_api::shared::UninitializedSled;
 use nexus_types::external_api::views;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::silo::silo_dns_name;
-use omicron_common::address::{get_64_subnet, Ipv6Subnet, RACK_PREFIX};
+use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, get_64_subnet};
 use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::BgpPeer;
 use omicron_common::api::external::DataPageParams;
@@ -165,7 +165,9 @@ impl super::Nexus {
                 CertificateCreate {
                     identity: IdentityMetadataCreateParams {
                         name: Name::try_from(format!("default-{i}")).unwrap(),
-                        description: format!("x.509 certificate #{i} initialized at rack install"),
+                        description: format!(
+                            "x.509 certificate #{i} initialized at rack install"
+                        ),
                     },
                     cert: c.cert,
                     key: c.key,
@@ -699,7 +701,7 @@ impl super::Nexus {
                 )
                 .await?;
         } // TODO - https://github.com/oxidecomputer/omicron/issues/3277
-          // record port speed
+        // record port speed
 
         self.db_datastore
             .rack_set_initialized(
@@ -958,12 +960,12 @@ pub fn rack_subnet(
         Some(IpNetwork::V4(_)) => {
             return Err(Error::InternalError {
                 internal_message: "rack subnet not IPv6".into(),
-            })
+            });
         }
         None => {
             return Err(Error::InternalError {
                 internal_message: "rack subnet not set".into(),
-            })
+            });
         }
     }
 }

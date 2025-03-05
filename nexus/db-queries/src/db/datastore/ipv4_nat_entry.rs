@@ -1,8 +1,8 @@
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::model::{Ipv4NatEntry, Ipv4NatValues};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::{DateTime, Utc};
@@ -886,9 +886,11 @@ mod test {
 
         while !changes.is_empty() {
             // check ordering
-            assert!(changes
-                .windows(2)
-                .all(|entries| entries[0].gen < entries[1].gen));
+            assert!(
+                changes
+                    .windows(2)
+                    .all(|entries| entries[0].gen < entries[1].gen)
+            );
 
             // check deleted status and version numbers
             changes.iter().for_each(|change| match change.deleted {
