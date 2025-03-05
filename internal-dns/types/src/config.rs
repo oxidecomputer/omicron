@@ -60,7 +60,7 @@
 //!
 //! This module provides types used to assemble that configuration.
 
-use crate::names::{ServiceName, BOUNDARY_NTP_DNS_NAME, DNS_ZONE};
+use crate::names::{BOUNDARY_NTP_DNS_NAME, DNS_ZONE, ServiceName};
 use anyhow::{anyhow, ensure};
 use core::fmt;
 use omicron_common::address::{CLICKHOUSE_ADMIN_PORT, CLICKHOUSE_TCP_PORT};
@@ -472,7 +472,7 @@ impl DnsConfigBuilder {
         http_address: SocketAddrV6,
     ) -> anyhow::Result<()> {
         anyhow::ensure!(
-           http_service == ServiceName::ClickhouseServer,
+            http_service == ServiceName::ClickhouseServer,
             "This method is only valid for ClickHouse cluster replica servers, \
             but we were provided the service '{http_service:?}'",
         );

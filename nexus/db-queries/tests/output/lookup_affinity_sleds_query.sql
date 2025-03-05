@@ -25,6 +25,4 @@ SELECT
   DISTINCT policy, sled_id
 FROM
   other_instances_by_policy
-  JOIN sled_resource ON
-      sled_resource.instance_id = other_instances_by_policy.instance_id
-      AND sled_resource.kind = 'instance'
+  JOIN sled_resource_vmm ON sled_resource_vmm.instance_id = other_instances_by_policy.instance_id

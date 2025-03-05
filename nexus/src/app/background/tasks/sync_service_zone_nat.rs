@@ -10,14 +10,14 @@ use crate::app::map_switch_zone_addrs;
 use super::networking::build_dpd_clients;
 use crate::app::background::BackgroundTask;
 use anyhow::Context;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
 use nexus_db_model::Ipv4NatValues;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::lookup::LookupPath;
 use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };

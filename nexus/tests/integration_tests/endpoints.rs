@@ -24,8 +24,10 @@ use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use omicron_common::api::external::AddressLotKind;
+use omicron_common::api::external::AffinityPolicy;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::FailureDomain;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::InstanceCpuCount;
@@ -139,13 +141,14 @@ pub static DEMO_SILO_USER_ID_DELETE_URL: LazyLock<String> =
             DEFAULT_SILO.identity().name,
         )
     });
-pub static DEMO_SILO_USER_ID_SET_PASSWORD_URL: LazyLock<String> =
-    LazyLock::new(|| {
+pub static DEMO_SILO_USER_ID_SET_PASSWORD_URL: LazyLock<String> = LazyLock::new(
+    || {
         format!(
-        "/v1/system/identity-providers/local/users/{{id}}/set-password?silo={}",
-        DEFAULT_SILO.identity().name,
-    )
-    });
+            "/v1/system/identity-providers/local/users/{{id}}/set-password?silo={}",
+            DEFAULT_SILO.identity().name,
+        )
+    },
+);
 
 // Project used for testing
 pub static DEMO_PROJECT_NAME: LazyLock<Name> =
@@ -160,6 +163,14 @@ pub static DEMO_PROJECT_URL_IMAGES: LazyLock<String> =
     LazyLock::new(|| format!("/v1/images?project={}", *DEMO_PROJECT_NAME));
 pub static DEMO_PROJECT_URL_INSTANCES: LazyLock<String> =
     LazyLock::new(|| format!("/v1/instances?project={}", *DEMO_PROJECT_NAME));
+pub static DEMO_PROJECT_URL_AFFINITY_GROUPS: LazyLock<String> =
+    LazyLock::new(|| {
+        format!("/v1/affinity-groups?project={}", *DEMO_PROJECT_NAME)
+    });
+pub static DEMO_PROJECT_URL_ANTI_AFFINITY_GROUPS: LazyLock<String> =
+    LazyLock::new(|| {
+        format!("/v1/anti-affinity-groups?project={}", *DEMO_PROJECT_NAME)
+    });
 pub static DEMO_PROJECT_URL_SNAPSHOTS: LazyLock<String> =
     LazyLock::new(|| format!("/v1/snapshots?project={}", *DEMO_PROJECT_NAME));
 pub static DEMO_PROJECT_URL_VPCS: LazyLock<String> =
@@ -434,9 +445,102 @@ pub static DEMO_IMPORT_DISK_FINALIZE_URL: LazyLock<String> =
         )
     });
 
+// Affinity/Anti- group used for testing
+
+pub static DEMO_AFFINITY_GROUP_NAME: LazyLock<Name> =
+    LazyLock::new(|| "demo-affinity-group".parse().unwrap());
+pub static DEMO_AFFINITY_GROUP_URL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "/v1/affinity-groups/{}?{}",
+        *DEMO_AFFINITY_GROUP_NAME, *DEMO_PROJECT_SELECTOR
+    )
+});
+pub static DEMO_AFFINITY_GROUP_MEMBERS_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/affinity-groups/{}/members?{}",
+            *DEMO_AFFINITY_GROUP_NAME, *DEMO_PROJECT_SELECTOR
+        )
+    });
+pub static DEMO_AFFINITY_GROUP_INSTANCE_MEMBER_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/affinity-groups/{}/members/instance/{}?{}",
+            *DEMO_AFFINITY_GROUP_NAME,
+            *DEMO_STOPPED_INSTANCE_NAME,
+            *DEMO_PROJECT_SELECTOR
+        )
+    });
+pub static DEMO_AFFINITY_GROUP_CREATE: LazyLock<params::AffinityGroupCreate> =
+    LazyLock::new(|| params::AffinityGroupCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DEMO_AFFINITY_GROUP_NAME.clone(),
+            description: String::from(""),
+        },
+        policy: AffinityPolicy::Allow,
+        failure_domain: FailureDomain::Sled,
+    });
+pub static DEMO_AFFINITY_GROUP_UPDATE: LazyLock<params::AffinityGroupUpdate> =
+    LazyLock::new(|| params::AffinityGroupUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: None,
+            description: Some(String::from("an updated description")),
+        },
+    });
+
+pub static DEMO_ANTI_AFFINITY_GROUP_NAME: LazyLock<Name> =
+    LazyLock::new(|| "demo-anti-affinity-group".parse().unwrap());
+pub static DEMO_ANTI_AFFINITY_GROUPS_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!("/v1/anti-affinity-groups?{}", *DEMO_PROJECT_SELECTOR)
+    });
+pub static DEMO_ANTI_AFFINITY_GROUP_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/anti-affinity-groups/{}?{}",
+            *DEMO_ANTI_AFFINITY_GROUP_NAME, *DEMO_PROJECT_SELECTOR
+        )
+    });
+pub static DEMO_ANTI_AFFINITY_GROUP_MEMBERS_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/anti-affinity-groups/{}/members?{}",
+            *DEMO_ANTI_AFFINITY_GROUP_NAME, *DEMO_PROJECT_SELECTOR
+        )
+    });
+pub static DEMO_ANTI_AFFINITY_GROUP_INSTANCE_MEMBER_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/anti-affinity-groups/{}/members/instance/{}?{}",
+            *DEMO_ANTI_AFFINITY_GROUP_NAME,
+            *DEMO_STOPPED_INSTANCE_NAME,
+            *DEMO_PROJECT_SELECTOR
+        )
+    });
+pub static DEMO_ANTI_AFFINITY_GROUP_CREATE: LazyLock<
+    params::AntiAffinityGroupCreate,
+> = LazyLock::new(|| params::AntiAffinityGroupCreate {
+    identity: IdentityMetadataCreateParams {
+        name: DEMO_ANTI_AFFINITY_GROUP_NAME.clone(),
+        description: String::from(""),
+    },
+    policy: AffinityPolicy::Allow,
+    failure_domain: FailureDomain::Sled,
+});
+pub static DEMO_ANTI_AFFINITY_GROUP_UPDATE: LazyLock<
+    params::AntiAffinityGroupUpdate,
+> = LazyLock::new(|| params::AntiAffinityGroupUpdate {
+    identity: IdentityMetadataUpdateParams {
+        name: None,
+        description: Some(String::from("an updated description")),
+    },
+});
+
 // Instance used for testing
 pub static DEMO_INSTANCE_NAME: LazyLock<Name> =
     LazyLock::new(|| "demo-instance".parse().unwrap());
+pub static DEMO_STOPPED_INSTANCE_NAME: LazyLock<Name> =
+    LazyLock::new(|| "demo-stopped-instance".parse().unwrap());
 pub static DEMO_INSTANCE_URL: LazyLock<String> = LazyLock::new(|| {
     format!("/v1/instances/{}?{}", *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR)
 });
@@ -537,6 +641,26 @@ pub static DEMO_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         start: true,
         auto_restart_policy: Default::default(),
     });
+pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
+    LazyLock::new(|| params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DEMO_STOPPED_INSTANCE_NAME.clone(),
+            description: String::from(""),
+        },
+        ncpus: InstanceCpuCount(1),
+        memory: ByteCount::from_gibibytes_u32(16),
+        hostname: "demo-instance".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: Some(Vec::new()),
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![params::ExternalIpCreate::Ephemeral {
+            pool: Some(DEMO_IP_POOL_NAME.clone().into()),
+        }],
+        disks: vec![],
+        boot_disk: None,
+        start: true,
+        auto_restart_policy: Default::default(),
+    });
 pub static DEMO_INSTANCE_UPDATE: LazyLock<params::InstanceUpdate> =
     LazyLock::new(|| params::InstanceUpdate {
         boot_disk: None,
@@ -600,10 +724,10 @@ pub const DEMO_SWITCH_PORT_URL: &'static str =
 pub static DEMO_SWITCH_PORT_SETTINGS_APPLY_URL: LazyLock<String> =
     LazyLock::new(|| {
         format!(
-        "/v1/system/hardware/switch-port/qsfp7/settings?rack_id={}&switch_location={}",
-        uuid::Uuid::new_v4(),
-        "switch0",
-    )
+            "/v1/system/hardware/switch-port/qsfp7/settings?rack_id={}&switch_location={}",
+            uuid::Uuid::new_v4(),
+            "switch0",
+        )
     });
 pub static DEMO_SWITCH_PORT_SETTINGS: LazyLock<
     params::SwitchPortApplySettings,
@@ -1778,6 +1902,98 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                     })
                     .unwrap(),
                 )],
+            },
+            /* Affinity Groups */
+            VerifyEndpoint {
+                url: &DEMO_PROJECT_URL_AFFINITY_GROUPS,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+
+                allowed_methods: vec![
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_AFFINITY_GROUP_CREATE)
+                            .unwrap(),
+                    ),
+                    AllowedMethod::Get,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_AFFINITY_GROUP_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_AFFINITY_GROUP_UPDATE)
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_AFFINITY_GROUP_MEMBERS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_AFFINITY_GROUP_INSTANCE_MEMBER_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                    AllowedMethod::Post(serde_json::Value::Null),
+                ],
+            },
+            /* Anti-Affinity Groups */
+            VerifyEndpoint {
+                url: &DEMO_ANTI_AFFINITY_GROUPS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+
+                allowed_methods: vec![
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_ANTI_AFFINITY_GROUP_CREATE)
+                            .unwrap(),
+                    ),
+                    AllowedMethod::Get,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_ANTI_AFFINITY_GROUP_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_ANTI_AFFINITY_GROUP_UPDATE)
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_ANTI_AFFINITY_GROUP_MEMBERS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_ANTI_AFFINITY_GROUP_INSTANCE_MEMBER_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                    AllowedMethod::Post(serde_json::Value::Null),
+                ],
             },
             VerifyEndpoint {
                 url: &DEMO_IMPORT_DISK_BULK_WRITE_START_URL,

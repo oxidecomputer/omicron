@@ -10,10 +10,10 @@ use openssl::error::ErrorStack;
 use openssl::nid::Nid;
 use openssl::x509::X509Ref;
 use openssl_sys::X509 as RawX509;
+use std::ffi::CStr;
 use std::ffi::c_char;
 use std::ffi::c_int;
 use std::ffi::c_uint;
-use std::ffi::CStr;
 use std::ptr;
 
 extern "C" {

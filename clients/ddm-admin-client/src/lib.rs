@@ -8,23 +8,16 @@
 #![allow(clippy::needless_lifetimes)]
 #![allow(clippy::match_single_binding)]
 #![allow(clippy::clone_on_copy)]
-
-pub use ddm_admin_client::types;
 pub use ddm_admin_client::Error;
+pub use ddm_admin_client::types;
 
-use ddm_admin_client::types::TunnelOrigin;
 use ddm_admin_client::Client as InnerClient;
 use either::Either;
-use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
-use omicron_common::backoff::retry_notify;
-use omicron_common::backoff::retry_policy_internal_service_aggressive;
-use sled_hardware_types::underlay::BootstrapInterface;
+use oxnet::Ipv6Net;
 use sled_hardware_types::underlay::BOOTSTRAP_MASK;
 use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
-use slog::info;
+use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
-use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -76,47 +69,41 @@ impl Client {
         Ok(Self { inner, log })
     }
 
-    /// Spawns a background task to instruct ddmd to advertise the given prefix
-    /// to peer sleds.
-    pub fn advertise_prefix(&self, address: Ipv6Subnet<SLED_PREFIX>) {
-        let me = self.clone();
-        tokio::spawn(async move {
-            let prefix = address.net();
-            retry_notify(retry_policy_internal_service_aggressive(), || async {
-                info!(
-                    me.log, "Sending prefix to ddmd for advertisement";
-                    "prefix" => ?prefix,
-                );
-
-                // TODO-cleanup Why does the generated openapi client require a
-                // `&Vec` instead of a `&[]`?
-                let prefixes = vec![prefix];
-                me.inner.advertise_prefixes(&prefixes).await?;
-                Ok(())
-            }, |err, duration| {
-                info!(
-                    me.log,
-                    "Failed to notify ddmd of our address (will retry after {duration:?})";
-                    "err" => %err,
-                );
-            }).await.unwrap();
-        });
+    pub fn log(&self) -> &Logger {
+        &self.log
     }
 
-    pub fn advertise_tunnel_endpoint(&self, endpoint: TunnelOrigin) {
-        let me = self.clone();
-        tokio::spawn(async move {
-            retry_notify(retry_policy_internal_service_aggressive(), || async {
-                me.inner.advertise_tunnel_endpoints(&vec![endpoint.clone()]).await?;
-                Ok(())
-            }, |err, duration| {
-                info!(
-                    me.log,
-                    "Failed to notify ddmd of tunnel endpoint (retry in {duration:?})";
-                    "err" => %err,
-                );
-            }).await.unwrap();
-        });
+    pub async fn advertise_prefixes(
+        &self,
+        prefixes: &Vec<Ipv6Net>,
+    ) -> Result<(), Error<types::Error>> {
+        self.inner
+            .advertise_prefixes(prefixes)
+            .await
+            .map(|resp| resp.into_inner())
+    }
+
+    pub async fn withdraw_prefixes(
+        &self,
+        prefixes: &Vec<Ipv6Net>,
+    ) -> Result<(), Error<types::Error>> {
+        self.inner
+            .withdraw_prefixes(prefixes)
+            .await
+            .map(|resp| resp.into_inner())
+    }
+
+    pub async fn get_originated(
+        &self,
+    ) -> Result<Vec<Ipv6Net>, Error<types::Error>> {
+        self.inner.get_originated().await.map(|resp| resp.into_inner())
+    }
+
+    pub async fn enable_stats(
+        &self,
+        request: &EnableStatsRequest,
+    ) -> Result<(), Error<types::Error>> {
+        self.inner.enable_stats(request).await.map(|resp| resp.into_inner())
     }
 
     /// Returns the addresses of connected sleds.
@@ -146,40 +133,5 @@ impl Client {
                 }
             })
         }))
-    }
-
-    /// Spawns a background task to instruct ddmd to advertise the given prefix
-    /// to peer sleds.
-    pub fn enable_stats(
-        &self,
-        addr: IpAddr,
-        dns_servers: Vec<SocketAddr>,
-        rack_id: uuid::Uuid,
-        sled_id: uuid::Uuid,
-    ) {
-        let me = self.clone();
-        tokio::spawn(async move {
-            retry_notify(retry_policy_internal_service_aggressive(), || async {
-                info!(
-                    me.log, "Enabling ddm stats";
-                    "addr" => ?addr,
-                    "dns_servers" => ?dns_servers
-                );
-
-                me.inner.enable_stats(&EnableStatsRequest{
-                    addr,
-                    dns_servers: dns_servers.iter().map(|x| x.to_string()).collect(),
-                    rack_id,
-                    sled_id,
-                }).await?;
-                Ok(())
-            }, |err, duration| {
-                info!(
-                    me.log,
-                    "Failed enable ddm stats (will retry after {duration:?})";
-                    "err" => %err,
-                );
-            }).await.unwrap();
-        });
     }
 }

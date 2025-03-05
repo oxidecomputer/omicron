@@ -4,8 +4,8 @@
 
 //! Integration tests for operating on Ports
 
-use http::method::Method;
 use http::StatusCode;
+use http::method::Method;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{

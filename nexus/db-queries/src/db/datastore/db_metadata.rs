@@ -6,19 +6,19 @@
 
 use super::DataStore;
 use crate::db;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use anyhow::{bail, ensure, Context};
+use crate::db::error::public_error_from_diesel;
+use anyhow::{Context, bail, ensure};
 use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_model::AllSchemaVersions;
+use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
 use nexus_db_model::SchemaUpgradeStep;
 use nexus_db_model::SchemaVersion;
-use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
 use omicron_common::api::external::Error;
 use semver::Version;
-use slog::{error, info, o, Logger};
+use slog::{Logger, error, info, o};
 use std::ops::Bound;
 use std::str::FromStr;
 

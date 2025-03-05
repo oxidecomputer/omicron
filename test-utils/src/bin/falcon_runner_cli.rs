@@ -6,7 +6,7 @@
 
 #[cfg(target_os = "illumos")]
 mod illumos {
-    pub use libfalcon::{cli::run, error::Error, unit::gb, Runner};
+    pub use libfalcon::{Runner, cli::run, error::Error, unit::gb};
 }
 
 #[cfg(target_os = "illumos")]

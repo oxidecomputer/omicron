@@ -1,16 +1,16 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
 use end_to_end_tests::helpers::cli::oxide_cli_style;
 use end_to_end_tests::helpers::icmp::ping4_test_run;
 use oxide_client::{
+    ClientHiddenExt, ClientLoginExt, ClientProjectsExt,
+    ClientSystemHardwareExt, ClientSystemIpPoolsExt, ClientSystemStatusExt,
+    ClientVpcsExt,
     types::{
         IpPoolCreate, IpPoolLinkSilo, IpRange, Ipv4Range, Name, NameOrId,
         PingStatus, ProbeCreate, ProbeInfo, ProjectCreate,
         UsernamePasswordCredentials,
     },
-    ClientHiddenExt, ClientLoginExt, ClientProjectsExt,
-    ClientSystemHardwareExt, ClientSystemIpPoolsExt, ClientSystemStatusExt,
-    ClientVpcsExt,
 };
 use std::{
     net::{IpAddr, Ipv4Addr},

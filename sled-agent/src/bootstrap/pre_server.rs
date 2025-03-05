@@ -15,16 +15,17 @@ use super::pumpkind;
 use super::server::StartError;
 use crate::config::Config;
 use crate::config::SidecarRevision;
+use crate::ddm_reconciler::DdmReconciler;
 use crate::long_running_tasks::{
-    spawn_all_longrunning_tasks, LongRunningTaskHandles,
+    LongRunningTaskHandles, spawn_all_longrunning_tasks,
 };
 use crate::services::ServiceManager;
 use crate::services::TimeSyncConfig;
 use crate::sled_agent::SledAgent;
 use camino::Utf8PathBuf;
 use cancel_safe_futures::TryStreamExt;
-use futures::stream;
 use futures::StreamExt;
+use futures::stream;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm;
 use illumos_utils::dladm::Dladm;
@@ -32,12 +33,11 @@ use illumos_utils::zfs;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zone;
 use illumos_utils::zone::Zones;
-use omicron_common::address::Ipv6Subnet;
 use omicron_common::FileKv;
-use omicron_ddm_admin_client::Client as DdmAdminClient;
-use sled_hardware::underlay;
+use omicron_common::address::Ipv6Subnet;
 use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
+use sled_hardware::underlay;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Drain;
 use slog::Logger;
@@ -48,7 +48,6 @@ use tokio::sync::oneshot;
 pub(super) struct BootstrapAgentStartup {
     pub(super) config: Config,
     pub(super) global_zone_bootstrap_ip: Ipv6Addr,
-    pub(super) ddm_admin_localhost_client: DdmAdminClient,
     pub(super) base_log: Logger,
     pub(super) startup_log: Logger,
     pub(super) service_manager: ServiceManager,
@@ -73,7 +72,7 @@ impl BootstrapAgentStartup {
 
         // Perform several blocking startup tasks first; we move `config` and
         // `log` into this task, and on success, it gives them back to us.
-        let (config, log, ddm_admin_localhost_client, startup_networking) =
+        let (config, log, startup_networking) =
             tokio::task::spawn_blocking(move || {
                 enable_mg_ddm(&config, &log)?;
                 pumpkind::enable_pumpkind_service(&log)?;
@@ -81,28 +80,23 @@ impl BootstrapAgentStartup {
 
                 let startup_networking = BootstrapNetworking::setup(&config)?;
 
-                // Start trying to notify ddmd of our bootstrap address so it can
-                // advertise it to other sleds.
-                let ddmd_client = DdmAdminClient::localhost(&log)
-                    .map_err(StartError::CreateDdmAdminLocalhostClient)?;
-                ddmd_client.advertise_prefix(Ipv6Subnet::new(
-                    startup_networking.global_zone_bootstrap_ip,
-                ));
-
                 // Before we create the switch zone, we need to ensure that the
                 // necessary ZFS and Zone resources are ready. All other zones
                 // are created on U.2 drives.
                 ensure_zfs_ramdisk_dataset()?;
 
-                Ok::<_, StartError>((
-                    config,
-                    log,
-                    ddmd_client,
-                    startup_networking,
-                ))
+                Ok::<_, StartError>((config, log, startup_networking))
             })
             .await
             .unwrap()?;
+
+        // Start the DDM reconciler, giving it our bootstrap subnet to
+        // advertise to other sleds.
+        let ddm_reconciler = DdmReconciler::new(
+            Ipv6Subnet::new(startup_networking.global_zone_bootstrap_ip),
+            &base_log,
+        )
+        .map_err(StartError::CreateDdmAdminLocalhostClient)?;
 
         // Before we start monitoring for hardware, ensure we're running from a
         // predictable state.
@@ -145,7 +139,7 @@ impl BootstrapAgentStartup {
 
         let service_manager = ServiceManager::new(
             &base_log,
-            ddm_admin_localhost_client.clone(),
+            ddm_reconciler,
             startup_networking,
             sled_mode,
             time_sync,
@@ -165,7 +159,6 @@ impl BootstrapAgentStartup {
         Ok(Self {
             config,
             global_zone_bootstrap_ip,
-            ddm_admin_localhost_client,
             base_log,
             startup_log: log,
             service_manager,
@@ -318,10 +311,12 @@ fn sled_mode_from_config(config: &Config) -> Result<SledMode, StartError> {
                     SidecarRevision::SoftPropolis(_) => {
                         DendriteAsic::SoftNpuPropolisDevice
                     }
-                    _ => return Err(StartError::IncorrectBuildPackaging(
-                        "sled-agent configured to run on softnpu zone but dosen't \
+                    _ => {
+                        return Err(StartError::IncorrectBuildPackaging(
+                            "sled-agent configured to run on softnpu zone but dosen't \
                          have a softnpu sidecar revision",
-                    )),
+                        ));
+                    }
                 }
             } else {
                 return Err(StartError::IncorrectBuildPackaging(

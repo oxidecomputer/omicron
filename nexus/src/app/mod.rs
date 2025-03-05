@@ -6,12 +6,12 @@
 
 use self::external_endpoints::NexusCertResolver;
 use self::saga::SagaExecutor;
+use crate::DropshotServer;
 use crate::app::background::BackgroundTasksData;
 use crate::app::background::SagaRecoveryHelpers;
-use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
-use crate::DropshotServer;
+use crate::populate::populate_start;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
 use internal_dns_types::names::ServiceName;
@@ -31,8 +31,8 @@ use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter_producer::Server as ProducerServer;
-use sagas::common_storage::make_pantry_connection_pool;
 use sagas::common_storage::PooledPantryClient;
+use sagas::common_storage::make_pantry_connection_pool;
 use slog::Logger;
 use std::collections::HashMap;
 use std::net::SocketAddrV6;
@@ -46,6 +46,7 @@ use uuid::Uuid;
 // The implementation of Nexus is large, and split into a number of submodules
 // by resource.
 mod address_lot;
+mod affinity;
 mod allow_list;
 pub(crate) mod background;
 mod bfd;
@@ -429,7 +430,11 @@ impl Nexus {
             None => {
                 let native_resolver =
                     qorb_resolver.for_service(ServiceName::ClickhouseNative);
+<<<<<<< HEAD
                 oximeter_db::Client::new_with_pool(native_resolver, &log, None)
+=======
+                oximeter_db::Client::new_with_resolver(native_resolver, &log)
+>>>>>>> main
             }
             Some(address) => oximeter_db::Client::new(*address, &log),
         };
@@ -613,7 +618,7 @@ impl Nexus {
                 PopulateStatus::NotDone => (),
                 PopulateStatus::Done => return Ok(()),
                 PopulateStatus::Failed(error) => {
-                    return Err(anyhow!(error.clone()))
+                    return Err(anyhow!(error.clone()));
                 }
             };
         }
@@ -1192,7 +1197,10 @@ async fn map_switch_zone_addrs(
                 switch_zone_addrs.insert(SwitchLocation::Switch1, addr);
             }
             _ => {
-                warn!(log, "Expected a slot number of 0 or 1, found {switch_slot:#?} when querying {addr:#?}");
+                warn!(
+                    log,
+                    "Expected a slot number of 0 or 1, found {switch_slot:#?} when querying {addr:#?}"
+                );
             }
         };
     }

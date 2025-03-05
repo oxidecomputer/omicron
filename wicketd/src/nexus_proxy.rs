@@ -7,10 +7,10 @@
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
 use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
+use slog::Logger;
 use slog::info;
 use slog::o;
 use slog::warn;
-use slog::Logger;
 use std::io;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;

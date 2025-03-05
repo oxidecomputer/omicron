@@ -1,4 +1,4 @@
-use crate::{execute, ExecutionError};
+use crate::{ExecutionError, execute};
 use std::process::Command;
 
 const COREADM: &str = "/usr/bin/coreadm";

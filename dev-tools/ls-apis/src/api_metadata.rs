@@ -4,13 +4,13 @@
 
 //! Developer-maintained API metadata
 
-use crate::cargo::DepPath;
-use crate::workspaces::Workspaces;
 use crate::ClientPackageName;
 use crate::DeploymentUnitName;
 use crate::ServerComponentName;
 use crate::ServerPackageName;
-use anyhow::{bail, Result};
+use crate::cargo::DepPath;
+use crate::workspaces::Workspaces;
+use anyhow::{Result, bail};
 use serde::Deserialize;
 use std::borrow::Borrow;
 use std::collections::BTreeMap;

@@ -92,8 +92,7 @@ mod silo_user_password_hash;
 mod sled;
 mod sled_instance;
 mod sled_policy;
-mod sled_resource;
-mod sled_resource_kind;
+mod sled_resource_vmm;
 mod sled_state;
 mod sled_underlay_subnet_allocation;
 mod snapshot;
@@ -203,8 +202,7 @@ pub use silo_user_password_hash::*;
 pub use sled::*;
 pub use sled_instance::*;
 pub use sled_policy::to_db_sled_policy; // Do not expose DbSledPolicy
-pub use sled_resource::*;
-pub use sled_resource_kind::*;
+pub use sled_resource_vmm::*;
 pub use sled_state::*;
 pub use sled_underlay_subnet_allocation::*;
 pub use snapshot::*;
@@ -488,48 +486,70 @@ mod tests {
             ipv6_block,
         );
         // Within subnet
-        assert!(subnet
-            .check_requestable_addr(IpAddr::from(Ipv4Addr::new(
-                192, 168, 1, 10
-            )))
-            .is_ok());
+        assert!(
+            subnet
+                .check_requestable_addr(IpAddr::from(Ipv4Addr::new(
+                    192, 168, 1, 10
+                )))
+                .is_ok()
+        );
         // Network address is reserved
-        assert!(subnet
-            .check_requestable_addr(IpAddr::from(Ipv4Addr::new(192, 168, 0, 0)))
-            .is_err());
+        assert!(
+            subnet
+                .check_requestable_addr(IpAddr::from(Ipv4Addr::new(
+                    192, 168, 0, 0
+                )))
+                .is_err()
+        );
         // Broadcast address is reserved
-        assert!(subnet
-            .check_requestable_addr(IpAddr::from(Ipv4Addr::new(
-                192, 168, 255, 255
-            )))
-            .is_err());
+        assert!(
+            subnet
+                .check_requestable_addr(IpAddr::from(Ipv4Addr::new(
+                    192, 168, 255, 255
+                )))
+                .is_err()
+        );
         // Within subnet, but reserved
-        assert!(subnet
-            .check_requestable_addr(IpAddr::from(Ipv4Addr::new(192, 168, 0, 1)))
-            .is_err());
+        assert!(
+            subnet
+                .check_requestable_addr(IpAddr::from(Ipv4Addr::new(
+                    192, 168, 0, 1
+                )))
+                .is_err()
+        );
         // Not within subnet
-        assert!(subnet
-            .check_requestable_addr(IpAddr::from(Ipv4Addr::new(192, 160, 1, 1)))
-            .is_err());
+        assert!(
+            subnet
+                .check_requestable_addr(IpAddr::from(Ipv4Addr::new(
+                    192, 160, 1, 1
+                )))
+                .is_err()
+        );
 
         // Within subnet
-        assert!(subnet
-            .check_requestable_addr(IpAddr::from(Ipv6Addr::new(
-                0xfd00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10
-            )))
-            .is_ok());
+        assert!(
+            subnet
+                .check_requestable_addr(IpAddr::from(Ipv6Addr::new(
+                    0xfd00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10
+                )))
+                .is_ok()
+        );
         // Within subnet, but reserved
-        assert!(subnet
-            .check_requestable_addr(IpAddr::from(Ipv6Addr::new(
-                0xfd00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01
-            )))
-            .is_err());
+        assert!(
+            subnet
+                .check_requestable_addr(IpAddr::from(Ipv6Addr::new(
+                    0xfd00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01
+                )))
+                .is_err()
+        );
         // Not within subnet
-        assert!(subnet
-            .check_requestable_addr(IpAddr::from(Ipv6Addr::new(
-                0xfc00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10
-            )))
-            .is_err());
+        assert!(
+            subnet
+                .check_requestable_addr(IpAddr::from(Ipv6Addr::new(
+                    0xfc00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10
+                )))
+                .is_err()
+        );
     }
 
     #[test]

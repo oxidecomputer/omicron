@@ -13,12 +13,12 @@ use crate::collection_task::CollectionTaskOutput;
 use oximeter::types::ProducerResultsItem;
 use oximeter_db::Client;
 use oximeter_db::DbWrite as _;
+use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::info;
 use slog::trace;
 use slog::warn;
-use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -41,7 +41,6 @@ pub async fn database_inserter(
     timer.tick().await; // completes immediately
     let mut batch = Vec::with_capacity(batch_size);
     loop {
-        let mut collection_token = None;
         let insert = tokio::select! {
             _ = timer.tick() => {
                 if batch.is_empty() {
@@ -53,7 +52,10 @@ pub async fn database_inserter(
             }
             results = rx.recv() => {
                 match results {
-                    Some((token, results)) => {
+                    Some(CollectionTaskOutput {
+                        was_forced_collection,
+                        results,
+                    }) => {
                         let flattened_results = {
                             let mut flattened = Vec::with_capacity(results.len());
                             for inner_batch in results.into_iter() {
@@ -72,12 +74,8 @@ pub async fn database_inserter(
                         };
                         batch.extend(flattened_results);
 
-                        collection_token = token;
-                        if collection_token.is_some() {
-                            true
-                        } else {
-                            batch.len() >= batch_size
-                        }
+                        // Always insert if this was a forced collection request
+                        was_forced_collection || batch.len() >= batch_size
                     }
                     None => {
                         warn!(log, "result queue closed, exiting");
@@ -154,10 +152,6 @@ pub async fn database_inserter(
             // disucssion.
             batch.clear();
         }
-
-        if let Some(token) = collection_token {
-            let _ = token.send(Ok(()));
-        }
     }
 }
 
@@ -165,7 +159,7 @@ pub async fn database_inserter(
 pub async fn logger(log: Logger, mut rx: mpsc::Receiver<CollectionTaskOutput>) {
     loop {
         match rx.recv().await {
-            Some((_, results)) => {
+            Some(CollectionTaskOutput { results, .. }) => {
                 for res in results.into_iter() {
                     match res {
                         ProducerResultsItem::Ok(samples) => {

@@ -5,11 +5,11 @@
 use std::net::IpAddr;
 use std::net::SocketAddr;
 
+use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::config::NameServerConfig;
 use hickory_resolver::config::Protocol;
 use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::config::ResolverOpts;
-use hickory_resolver::TokioAsyncResolver;
 use omicron_common::address::DNS_PORT;
 use reqwest::dns::Name;
 

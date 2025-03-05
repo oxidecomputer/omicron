@@ -4,9 +4,9 @@
 
 //! Interface for making API requests to a Sled Agent's Bootstrap API.
 
-use super::params::version;
 use super::params::Request;
 use super::params::RequestEnvelope;
+use super::params::version;
 use super::views::SledAgentResponse;
 use crate::bootstrap::views::Response;
 use crate::bootstrap::views::ResponseEnvelope;
@@ -56,7 +56,9 @@ pub enum Error {
     #[error("Request failed: {0}")]
     ServerFailure(String),
 
-    #[error("Bogus response from server (expected {expected} but received {received})")]
+    #[error(
+        "Bogus response from server (expected {expected} but received {received})"
+    )]
     InvalidResponse { expected: &'static str, received: &'static str },
 }
 

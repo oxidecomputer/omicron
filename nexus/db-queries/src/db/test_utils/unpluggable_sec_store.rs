@@ -7,8 +7,8 @@
 use crate::db;
 use async_trait::async_trait;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 
 /// A thin wrapper around [`db::CockroachDbSecStore`] that lets

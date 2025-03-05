@@ -4,7 +4,7 @@
 
 //! Utility for bundling target binaries as tarfiles.
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Parser, Subcommand};
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -24,9 +24,9 @@ use omicron_zone_package::target::TargetMap;
 use rayon::prelude::*;
 use ring::digest::{Context as DigestContext, Digest, SHA256};
 use sled_hardware::cleanup::cleanup_networking_resources;
-use slog::o;
 use slog::Drain;
 use slog::Logger;
+use slog::o;
 use slog::{info, warn};
 use std::env;
 use std::fs::create_dir_all;
@@ -370,7 +370,9 @@ async fn ensure_package(
                         Ok(()) => break,
                         Err(err) => {
                             attempts_left -= 1;
-                            let msg = format!("Failed to download prebuilt ({attempts_left} attempts remaining)");
+                            let msg = format!(
+                                "Failed to download prebuilt ({attempts_left} attempts remaining)"
+                            );
                             progress.set_error_message(msg.into());
                             if attempts_left == 0 {
                                 return Err(err);
@@ -422,13 +424,16 @@ async fn do_package(
     config: &Config,
     output_directory: &Utf8Path,
     disable_cache: bool,
+    no_rebuild: bool,
 ) -> Result<()> {
     create_dir_all(&output_directory)
         .map_err(|err| anyhow!("Cannot create output directory: {}", err))?;
 
     let ui = ProgressUI::new(config.log());
 
-    do_build(&config).await?;
+    if !no_rebuild {
+        do_build(&config).await?;
+    }
 
     let packages = config.packages_to_build();
 
@@ -881,10 +886,15 @@ async fn main() -> Result<()> {
             do_list_outputs(&get_config()?, &args.artifact_dir, intermediate)
                 .await?;
         }
-        SubCommand::Build(BuildCommand::Package { disable_cache, only }) => {
+        SubCommand::Build(BuildCommand::Package {
+            disable_cache,
+            only,
+            no_rebuild,
+        }) => {
             let mut config = get_config()?;
             config.set_only(only);
-            do_package(&config, &args.artifact_dir, disable_cache).await?;
+            do_package(&config, &args.artifact_dir, disable_cache, no_rebuild)
+                .await?;
         }
         SubCommand::Build(BuildCommand::Stamp { package_name, version }) => {
             do_stamp(
