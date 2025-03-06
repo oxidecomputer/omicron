@@ -297,9 +297,9 @@ impl DataStore {
         // event subscriptions and secrets.
         let mut result = Vec::with_capacity(receivers.len());
         for rx in receivers {
-            let secrets = self.rx_secret_list_on_conn(rx.id(), &*conn).await?;
+            let secrets = self.rx_secret_list_on_conn(rx.id(), &conn).await?;
             let events =
-                self.rx_subscription_list_on_conn(rx.id(), &*conn).await?;
+                self.rx_subscription_list_on_conn(rx.id(), &conn).await?;
             result.push(WebhookReceiverConfig { rx, secrets, events });
         }
 
