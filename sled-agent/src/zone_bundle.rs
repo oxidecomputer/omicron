@@ -22,7 +22,6 @@ use illumos_utils::zfs::EnsureDatasetError;
 use illumos_utils::zfs::GetValueError;
 use illumos_utils::zfs::ListDatasetsError;
 use illumos_utils::zfs::ListSnapshotsError;
-use illumos_utils::zfs::PropertySource;
 use illumos_utils::zfs::SetValueError;
 use illumos_utils::zfs::Snapshot;
 use illumos_utils::zfs::ZFS;
@@ -87,17 +86,16 @@ fn initialize_zfs_resources(log: &Logger) -> Result<(), BundleError> {
             let Ok([value]) = Zfs::get_values(
                 &name,
                 &[ZONE_BUNDLE_ZFS_PROPERTY_NAME],
-                Some(PropertySource::Local),
+                Some(illumos_utils::zfs::PropertySource::Local),
             ) else {
                 warn!(
                     log,
                     "Found a ZFS snapshot with a name reserved for zone \
                     bundling, but which does not have the zone-bundle-specific \
                     property. Bailing out, rather than risking deletion of \
-                    user data. \
-                    snap_name = {}, property = {}",
-                    &name,
-                    ZONE_BUNDLE_ZFS_PROPERTY_NAME
+                    user data.";
+                    "snap_name" => &name,
+                    "property" => ZONE_BUNDLE_ZFS_PROPERTY_NAME
                 );
                 return false;
             };
@@ -106,11 +104,10 @@ fn initialize_zfs_resources(log: &Logger) -> Result<(), BundleError> {
                     log,
                     "Found a ZFS snapshot with a name reserved for zone \
                     bundling, with an unexpected property value. \
-                    Bailing out, rather than risking deletion of user data. \
-                    snap_name = {}, property = {}, property_value = {}",
-                    &name,
-                    ZONE_BUNDLE_ZFS_PROPERTY_NAME,
-                    value
+                    Bailing out, rather than risking deletion of user data.";
+                    "snap_name" => &name,
+                    "property" => ZONE_BUNDLE_ZFS_PROPERTY_NAME,
+                    "property_value" => value,
                 );
                 return false;
             }
