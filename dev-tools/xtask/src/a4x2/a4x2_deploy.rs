@@ -345,6 +345,9 @@ fn try_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
             .run()
             .is_err()
     {
+        let eta = retries * 30 / 60;
+        eprintln!("Poll failed. Will poll for {eta} more minutes.");
+
         retries -= 1;
         thread::sleep(time::Duration::from_secs(25));
 
