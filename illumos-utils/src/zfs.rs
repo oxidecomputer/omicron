@@ -497,6 +497,15 @@ impl Zfs {
     ) -> Result<Vec<DatasetProperties>, anyhow::Error> {
         let mut command = std::process::Command::new(ZFS);
         let cmd = command.arg("get");
+
+        // Restrict to just filesystems and volumes to be consistent with
+        // `list_datasets()`. By default, `zfs list` (used by `list_datasets()`)
+        // lists only filesystems and volumes, but `zfs get` (which we're using
+        // here) includes all kinds of datasets. Our parsing below expects an
+        // integral value for `available`; snapshots do not have that, and we
+        // don't want to trip over parsing failures for them.
+        cmd.args(&["-t", "filesystem,volume"]);
+
         match which {
             WhichDatasets::SelfOnly => (),
             WhichDatasets::SelfAndChildren => {
