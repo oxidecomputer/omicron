@@ -1089,7 +1089,7 @@ pub struct WebhookSecretId {
     pub id: Uuid,
 }
 
-/// A delivery attempt for a webhook event.
+/// A delivery of a webhook event.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookDelivery {
     /// The UUID of this delivery attempt.
@@ -1104,28 +1104,58 @@ pub struct WebhookDelivery {
     /// The UUID of the event.
     pub event_id: WebhookEventUuid,
 
-    /// The state of the delivery attempt.
-    pub state: shared::WebhookDeliveryState,
-
-    /// The time at which the webhook delivery was attempted, or `null` if
-    /// webhook delivery has not yet been attempted (`state` is "pending").
-    pub time_sent: Option<DateTime<Utc>>,
+    /// The state of this delivery.
+    pub state: WebhookDeliveryState,
 
     /// Why this delivery was performed.
     pub trigger: WebhookDeliveryTrigger,
 
-    /// Describes the response returned by the receiver endpoint.
-    ///
-    /// This is present if the webhook has been delivered successfully, or if the
-    /// endpoint returned an HTTP error (`state` is "delivered" or
-    /// "failed_http_error"). This is `null` if the webhook has not yet been
-    /// delivered, or if the endpoint was unreachable (`state` is "pending" or
-    /// "failed_unreachable").
-    pub response: Option<WebhookDeliveryResponse>,
+    /// Individual attempts to deliver this webhook event, and their outcomes.
+    pub attempts: Vec<WebhookDeliveryAttempt>,
+}
 
-    /// Attempt number, starting at 1. If this is a retry of a previous failed
-    /// delivery, this value indicates that.
-    pub attempt: usize,
+/// The state of a webhook delivery attempt.
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    strum::VariantArray,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum WebhookDeliveryState {
+    /// The webhook event has not yet been delivered successfully.
+    ///
+    /// Either no delivery attempts have yet been performed, or the delivery has
+    /// failed at least once but has retries remaining.
+    Pending,
+    /// The webhook event has been delivered successfully.
+    Delivered,
+    /// The webhook delivery attempt has failed permanently and will not be
+    /// retried again.
+    Failed,
+}
+
+impl WebhookDeliveryState {
+    pub const ALL: &[Self] = <Self as strum::VariantArray>::VARIANTS;
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Delivered => "delivered",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+impl fmt::Display for WebhookDeliveryState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// The reason a webhook event was delivered
@@ -1156,6 +1186,70 @@ impl fmt::Display for WebhookDeliveryTrigger {
     }
 }
 
+/// An individual delivery attempt for a webhook event.
+///
+/// This represents a single HTTP request that was sent to the receiver, and its
+/// outcome.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookDeliveryAttempt {
+    /// The time at which the webhook delivery was attempted.
+    pub time_sent: DateTime<Utc>,
+
+    /// The attempt number.
+    pub attempt: usize,
+
+    /// The outcome of this delivery attempt: either the event was delivered
+    /// successfully, or the request failed for one of several reasons.
+    pub result: WebhookDeliveryAttemptResult,
+
+    pub response: Option<WebhookDeliveryResponse>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    strum::VariantArray,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum WebhookDeliveryAttemptResult {
+    /// The webhook event has been delivered successfully.
+    Succeeded,
+    /// A webhook request was sent to the endpoint, and it
+    /// returned a HTTP error status code indicating an error.
+    FailedHttpError,
+    /// The webhook request could not be sent to the receiver endpoint.
+    FailedUnreachable,
+    /// A connection to the receiver endpoint was successfully established, but
+    /// no response was received within the delivery timeout.
+    FailedTimeout,
+}
+
+impl WebhookDeliveryAttemptResult {
+    pub const ALL: &[Self] = <Self as strum::VariantArray>::VARIANTS;
+    pub const ALL_FAILED: &[Self] =
+        &[Self::FailedHttpError, Self::FailedUnreachable, Self::FailedTimeout];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Succeeded => "succeeded",
+            Self::FailedHttpError => "failed_http_error",
+            Self::FailedTimeout => "failed_timeout",
+            Self::FailedUnreachable => "failed_unreachable",
+        }
+    }
+}
+
+impl fmt::Display for WebhookDeliveryAttemptResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// The response received from a webhook receiver endpoint.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookDeliveryResponse {
@@ -1169,6 +1263,7 @@ pub struct WebhookDeliveryResponse {
 pub struct WebhookDeliveryId {
     pub delivery_id: Uuid,
 }
+
 /// Data describing the result of a webhook liveness probe attempt.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookProbeResult {

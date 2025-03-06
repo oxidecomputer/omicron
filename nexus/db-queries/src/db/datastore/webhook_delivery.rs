@@ -12,11 +12,11 @@ use crate::db::error::ErrorHandler;
 use crate::db::model::SqlU8;
 use crate::db::model::WebhookDelivery;
 use crate::db::model::WebhookDeliveryAttempt;
-use crate::db::model::WebhookDeliveryResult;
 use crate::db::model::WebhookDeliveryTrigger;
 use crate::db::model::WebhookEvent;
 use crate::db::model::WebhookEventClass;
-use crate::db::pagination::paginated_multicolumn;
+use crate::db::pagination::paginated;
+use crate::db::pool::DbConnection;
 use crate::db::schema;
 use crate::db::schema::webhook_delivery::dsl;
 use crate::db::schema::webhook_delivery_attempt::dsl as attempt_dsl;
@@ -28,12 +28,15 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::TimeDelta;
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
-use nexus_types::external_api::shared::WebhookDeliveryState;
+use nexus_types::external_api::params::WebhookDeliveryStateFilter;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
-use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, WebhookReceiverUuid};
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::WebhookDeliveryUuid;
+use omicron_uuid_kinds::WebhookReceiverUuid;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -130,121 +133,61 @@ impl DataStore {
             .distinct()
     }
 
-    pub async fn webhook_rx_delivery_list_attempts(
+    pub async fn webhook_rx_delivery_list_on_conn(
         &self,
-        opctx: &OpContext,
         rx_id: &WebhookReceiverUuid,
         triggers: &'static [WebhookDeliveryTrigger],
-        states: impl IntoIterator<Item = WebhookDeliveryState>,
-        pagparams: &DataPageParams<'_, (Uuid, SqlU8)>,
-    ) -> ListResultVec<(
-        WebhookDelivery,
-        Option<WebhookDeliveryAttempt>,
-        WebhookEventClass,
-    )> {
-        let conn = self.pool_connection_authorized(opctx).await?;
-        // The way we construct this query is a bit complex, so let's break down
-        // why we do it this way.
-        //
-        // We would like to list delivery attempts that  are in the provided
-        // `states`. If a delivery has been attempted at least once, there will
-        // be a record in the `webhook_delivery_attempts` table including a
-        // `result` column that contains a `WebhookDeliveryResult`. The
-        // `WebhookDeliveryResult` SQL enum represents the subset of
-        // `WebhookDeliveryState`s that are not `Pending` (e.g. the delivery
-        // attempt has succeeded or failed). On the other hand, if a delivery
-        // has not yet been attempted, there will be *no* corresponding records
-        // in `webhook_delivery_attempts`. So, based on whether or not the
-        // requested list of states includes `Pending`, we either want to select
-        // all delivery records where there is a corresponding attempt record in
-        // one of the requested states (if we don't want `Pending` deliveries),
-        // *OR*, we want to select all deliveries where there is a corresponding
-        // attempt record in the requested states *and* all delivery records
-        // where there is no corresponding attempt record (because the delivery
-        // is pending). Due to diesel being Like That, whether or not we add an
-        // `OR result IS NULL` clause changes the type of the query being built,
-        // so we must do that last, and execute the query in one of two `if`
-        // branches based on whether or not this clause is added.
-        //
-        // Additionally, we must paginate this query by both delivery ID and
-        // attempt number, since we may return multiple attempts of the same
-        // delivery. Because `paginated_multicolumn` requiers that the
-        // paginated expression implement `diesel::QuerySource`, we must first
-        // construct a selection by JOINing the delivery table and the attempt
-        // table, without applying any filters, pass the joined tables to
-        // `paginated_multicolumn`, and _then_ filtering the paginated query and
-        // JOINing again with the `event` table to get the event class as well.
-        //
-        // Neither of these weird contortions actually change the resultant SQL
-        // for the query, but they make the code for cosntructing it a bit
-        // wacky, so I figured it was worth writing this down for future
-        // generations.
-        let mut includes_pending = false;
-        let states = states
-            .into_iter()
-            .filter_map(|state| {
-                if state == WebhookDeliveryState::Pending {
-                    includes_pending = true;
-                }
-                WebhookDeliveryResult::from_api_state(state)
-            })
-            .collect::<Vec<_>>();
-
-        // Join the delivery table with the attempts table. If a delivery has
-        // not been attempted yet, there will be no attempts, so this is a LEFT
-        // JOIN.
-        let query = dsl::webhook_delivery.left_join(
-            attempt_dsl::webhook_delivery_attempt
-                .on(dsl::id.eq(attempt_dsl::delivery_id)),
-        );
-
-        // Paginate the query, ordering by the delivery ID and then the attempt
-        // number of the attempt.
-        let query = paginated_multicolumn(
-            query,
-            (dsl::id, attempt_dsl::attempt),
-            pagparams,
-        )
-        // Select only deliveries that are to the receiver we're interested in,
-        // and were initiated by the triggers we're interested in.
-        .filter(
-            dsl::rx_id
-                .eq(rx_id.into_untyped_uuid())
-                .and(dsl::trigger.eq_any(triggers)),
-        )
-        // Finally, join again with the event table on the delivery's event ID,
-        // so that we can grab the event class of the event that initiated this delivery.
-        .inner_join(
-            event_dsl::webhook_event.on(dsl::event_id.eq(event_dsl::id)),
-        )
-        .select((
-            WebhookDelivery::as_select(),
-            Option::<WebhookDeliveryAttempt>::as_select(),
-            event_dsl::event_class,
-        ));
-
-        // Before we actually execute the query, add a filter clause to select
-        // only attempts in the requested states. This branches on
-        // `includes_pending` as whether or not we care about pending deliveries
-        // adds an additional clause, changing the type of all the diesel junk
-        // and preventing us from assigning the query to the same variable in
-        // both cases, so we just run it immediatel.
-        if includes_pending {
-            query
-                .filter(
-                    attempt_dsl::result
-                        .eq_any(states)
-                        .or(attempt_dsl::result.is_null()),
-                )
-                .load_async(&*conn)
-                .await
-        } else {
-            query
-                .filter(attempt_dsl::result.eq_any(states))
-                .load_async(&*conn)
-                .await
+        state_filter: WebhookDeliveryStateFilter,
+        pagparams: &DataPageParams<'_, Uuid>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> ListResultVec<(WebhookDelivery, WebhookEventClass)> {
+        // Paginate the query, ordered by delivery UUID.
+        let mut query = paginated(dsl::webhook_delivery, dsl::id, pagparams)
+            // Select only deliveries that are to the receiver we're interested in,
+            // and were initiated by the triggers we're interested in.
+            .filter(
+                dsl::rx_id
+                    .eq(rx_id.into_untyped_uuid())
+                    .and(dsl::trigger.eq_any(triggers)),
+            )
+            // Join with the event table on the delivery's event ID,
+            // so that we can grab the event class of the event that initiated
+            // this delivery.
+            .inner_join(
+                event_dsl::webhook_event.on(dsl::event_id.eq(event_dsl::id)),
+            );
+        if !state_filter.include_failed() {
+            query = query.filter(dsl::failed_permanently.eq(false));
         }
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        if !state_filter.include_pending() {
+            query = query.filter(dsl::time_completed.is_not_null());
+        }
+        if !state_filter.include_succeeded() {
+            // If successful deliveries are excluded
+            query =
+                query.filter(dsl::time_completed.is_null().or(
+                    dsl::failed_permanently.eq(state_filter.include_failed()),
+                ));
+        }
+        query
+            .select((WebhookDelivery::as_select(), event_dsl::event_class))
+            .load_async(conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn webhook_delivery_attempt_list_on_conn(
+        &self,
+        delivery_id: &WebhookDeliveryUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> ListResultVec<WebhookDeliveryAttempt> {
+        attempt_dsl::webhook_delivery_attempt
+            .filter(
+                attempt_dsl::delivery_id.eq(delivery_id.into_untyped_uuid()),
+            )
+            .load_async(conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn webhook_rx_delivery_list_ready(
@@ -452,6 +395,7 @@ mod test {
     use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::expectorate_query_contents;
+    use dropshot::PaginationOrder;
     use nexus_types::external_api::params;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
@@ -543,40 +487,41 @@ mod test {
             "resending an event a second time should create a new delivery"
         );
 
-        let mut all_deliveries = std::collections::HashSet::new();
-        let mut paginator =
-            Paginator::new(crate::db::datastore::SQL_BATCH_SIZE);
-        while let Some(p) = paginator.next() {
-            let deliveries = datastore
-                .webhook_rx_delivery_list_attempts(
-                    &opctx,
-                    &rx_id,
-                    WebhookDeliveryTrigger::ALL,
-                    std::iter::once(WebhookDeliveryState::Pending),
-                    &p.current_pagparams(),
-                )
-                .await
-                .unwrap();
-            paginator = p.found_batch(&deliveries, &|(d, a, _): &(
-                WebhookDelivery,
-                Option<WebhookDeliveryAttempt>,
-                WebhookEventClass,
-            )| {
-                (
-                    *d.id.as_untyped_uuid(),
-                    a.as_ref()
-                        .map(|attempt| attempt.attempt)
-                        .unwrap_or(SqlU8::new(0)),
-                )
-            });
-            all_deliveries
-                .extend(deliveries.into_iter().map(|(d, _, _)| dbg!(d).id));
-        }
+        todo!("ELIZA PUT THIS PART BACK");
+        // let mut all_deliveries = std::collections::HashSet::new();
+        // let mut paginator =
+        //     Paginator::new(crate::db::datastore::SQL_BATCH_SIZE);
+        // while let Some(p) = paginator.next() {
+        //     let deliveries = datastore
+        //         .webhook_rx_delivery_list_attempts(
+        //             &opctx,
+        //             &rx_id,
+        //             WebhookDeliveryTrigger::ALL,
+        //             std::iter::once(WebhookDeliveryState::Pending),
+        //             &p.current_pagparams(),
+        //         )
+        //         .await
+        //         .unwrap();
+        //     paginator = p.found_batch(&deliveries, &|(d, a, _): &(
+        //         WebhookDelivery,
+        //         Option<WebhookDeliveryAttempt>,
+        //         WebhookEventClass,
+        //     )| {
+        //         (
+        //             *d.id.as_untyped_uuid(),
+        //             a.as_ref()
+        //                 .map(|attempt| attempt.attempt)
+        //                 .unwrap_or(SqlU8::new(0)),
+        //         )
+        //     });
+        //     all_deliveries
+        //         .extend(deliveries.into_iter().map(|(d, _, _)| dbg!(d).id));
+        // }
 
-        assert!(all_deliveries.contains(&dispatch1.id));
-        assert!(!all_deliveries.contains(&dispatch2.id));
-        assert!(all_deliveries.contains(&resend1.id));
-        assert!(all_deliveries.contains(&resend2.id));
+        // assert!(all_deliveries.contains(&dispatch1.id));
+        // assert!(!all_deliveries.contains(&dispatch2.id));
+        // assert!(all_deliveries.contains(&resend1.id));
+        // assert!(all_deliveries.contains(&resend2.id));
 
         db.terminate().await;
         logctx.cleanup_successful();

@@ -3614,6 +3614,7 @@ pub trait NexusExternalApi {
     async fn webhook_delivery_list(
         rqctx: RequestContext<Self::Context>,
         receiver: Query<params::WebhookReceiverSelector>,
+        state_filter: Query<params::WebhookDeliveryStateFilter>,
         pagination: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<views::WebhookDelivery>>, HttpError>;
 

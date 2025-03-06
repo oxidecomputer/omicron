@@ -7584,8 +7584,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn webhook_delivery_list(
         rqctx: RequestContext<Self::Context>,
-        _receiver: Query<params::WebhookReceiverSelector>,
-        _query_params: Query<PaginatedById>,
+        receiver: Query<params::WebhookReceiverSelector>,
+        filter: Query<params::WebhookDeliveryStateFilter>,
+        pagparams: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<views::WebhookDelivery>>, HttpError>
     {
         let apictx = rqctx.context();

@@ -34,6 +34,7 @@ use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
@@ -47,6 +48,7 @@ use sha2::Sha256;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
+use uuid::Uuid;
 
 impl super::Nexus {
     pub fn webhook_receiver_lookup<'a>(
@@ -133,6 +135,16 @@ impl super::Nexus {
         self.background_tasks.task_webhook_dispatcher.activate();
 
         Ok(event)
+    }
+
+    pub async fn webhook_receiver_delivery_list(
+        &self,
+        opctx: &OpContext,
+        rx: lookup::WebhookReceiver<'_>,
+        filter: params::WebhookDeliveryStateFilter,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<views::WebhookDelivery> {
+        todo!()
     }
 
     pub async fn webhook_receiver_probe(
@@ -231,7 +243,7 @@ impl super::Nexus {
         };
 
         Ok(views::WebhookProbeResult {
-            probe: delivery.to_api_delivery(CLASS, Some(&attempt)),
+            probe: delivery.to_api_delivery(CLASS, &[attempt]),
             resends_started,
         })
     }

@@ -510,35 +510,3 @@ impl RelayState {
         .context("json from relay state string")
     }
 }
-
-/// The state of a webhook delivery attempt.
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    Eq,
-    PartialEq,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    strum::VariantArray,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum WebhookDeliveryState {
-    /// The webhook event has not yet been delivered.
-    Pending,
-    /// The webhook event has been delivered successfully.
-    Delivered,
-    /// A webhook request was sent to the endpoint, and it
-    /// returned a HTTP error status code indicating an error.
-    FailedHttpError,
-    /// The webhook request could not be sent to the receiver endpoint.
-    FailedUnreachable,
-    /// A connection to the receiver endpoint was successfully established, but
-    /// no response was received within the delivery timeout.
-    FailedTimeout,
-}
-
-impl WebhookDeliveryState {
-    pub const ALL: &[Self] = <Self as strum::VariantArray>::VARIANTS;
-}

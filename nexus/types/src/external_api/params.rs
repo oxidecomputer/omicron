@@ -2445,6 +2445,36 @@ pub struct WebhookDeliveryPath {
     pub event_id: Uuid,
 }
 
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct WebhookDeliveryStateFilter {
+    pub pending: Option<bool>,
+    pub failed: Option<bool>,
+    pub succeeded: Option<bool>,
+}
+
+impl WebhookDeliveryStateFilter {
+    pub const ALL: Self =
+        Self { pending: Some(true), failed: Some(true), succeeded: Some(true) };
+
+    pub fn include_pending(&self) -> bool {
+        self.is_all_none() || self.pending == Some(true)
+    }
+
+    pub fn include_failed(&self) -> bool {
+        self.is_all_none() || self.failed == Some(true)
+    }
+
+    pub fn include_succeeded(&self) -> bool {
+        self.is_all_none() || self.succeeded == Some(true)
+    }
+
+    fn is_all_none(&self) -> bool {
+        self.pending.is_none()
+            && self.failed.is_none()
+            && self.succeeded.is_none()
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookProbe {
     /// If true, resend all events that have not been delivered successfully if

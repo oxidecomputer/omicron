@@ -13,6 +13,7 @@ use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::WebhookDeliveratorStatus;
+use nexus_types::internal_api::background::WebhookDeliveryFailure;
 use nexus_types::internal_api::background::WebhookRxDeliveryStatus;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::Error;
@@ -299,8 +300,16 @@ impl WebhookDeliverator {
                 delivery_status.delivered_ok += 1;
             } else {
                 delivery_status.failed_deliveries.push(
-                    delivery
-                        .to_api_delivery(event_class, Some(&delivery_attempt)),
+                    WebhookDeliveryFailure {
+                        delivery_id,
+                        event_id: delivery.event_id.into(),
+                        attempt: delivery_attempt.attempt.0 as usize,
+                        result: delivery_attempt.result.into(),
+                        response_status: delivery_attempt
+                            .response_status
+                            .map(|status| status as u16),
+                        response_duration: delivery_attempt.response_duration,
+                    },
                 );
             }
         }

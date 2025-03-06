@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::external_api::views::WebhookDelivery;
+use crate::external_api::views;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::SemverVersion;
@@ -499,9 +499,19 @@ pub struct WebhookRxDeliveryStatus {
     pub delivered_ok: usize,
     pub already_delivered: usize,
     pub in_progress: usize,
-    pub failed_deliveries: Vec<WebhookDelivery>,
+    pub failed_deliveries: Vec<WebhookDeliveryFailure>,
     pub delivery_errors: BTreeMap<WebhookDeliveryUuid, String>,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebhookDeliveryFailure {
+    pub delivery_id: WebhookDeliveryUuid,
+    pub event_id: WebhookEventUuid,
+    pub attempt: usize,
+    pub result: views::WebhookDeliveryAttemptResult,
+    pub response_status: Option<u16>,
+    pub response_duration: Option<chrono::TimeDelta>,
 }
 
 /// The status of a `read_only_region_replacement_start` background task
