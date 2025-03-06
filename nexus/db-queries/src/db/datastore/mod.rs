@@ -50,6 +50,7 @@ use std::sync::Arc;
 mod address_lot;
 mod affinity;
 mod allow_list;
+mod audit_log;
 mod auth;
 mod bfd;
 mod bgp;

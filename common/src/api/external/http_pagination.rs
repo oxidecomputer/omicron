@@ -45,6 +45,8 @@ use crate::api::external::Name;
 use crate::api::external::NameOrId;
 use crate::api::external::ObjectIdentity;
 use crate::api::external::PaginationOrder;
+use chrono::DateTime;
+use chrono::Utc;
 use dropshot::HttpError;
 use dropshot::PaginationParams;
 use dropshot::RequestContext;
@@ -418,6 +420,53 @@ impl<T: Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize>
             },
         }
         .map_err(|_| bad_token_error())
+    }
+}
+
+/// Query parameters for pagination by timestamp and ID
+pub type PaginatedByTimeAndId<Selector = ()> = PaginationParams<
+    ScanByTimeAndId<Selector>,
+    PageSelectorByTimeAndId<Selector>,
+>;
+/// Page selector for pagination by timestamp and ID
+pub type PageSelectorByTimeAndId<Selector = ()> =
+    PageSelector<ScanByTimeAndId<Selector>, (DateTime<Utc>, Uuid)>;
+
+/// Scan parameters for resources that support scanning by (timestamp, id)
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct ScanByTimeAndId<Selector = ()> {
+    #[serde(default = "default_ts_id_sort_mode")]
+    sort_by: TimeAndIdSortMode,
+
+    #[serde(flatten)]
+    pub selector: Selector,
+}
+/// Supported set of sort modes for scanning by timestamp and ID
+///
+/// Currently, we only support scanning in ascending order.
+#[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TimeAndIdSortMode {
+    /// sort in increasing order of timestamp and ID
+    Ascending,
+}
+
+fn default_ts_id_sort_mode() -> TimeAndIdSortMode {
+    TimeAndIdSortMode::Ascending
+}
+
+impl<T: Clone + Debug + DeserializeOwned + JsonSchema + PartialEq + Serialize>
+    ScanParams for ScanByTimeAndId<T>
+{
+    type MarkerValue = (DateTime<Utc>, Uuid);
+    fn direction(&self) -> PaginationOrder {
+        PaginationOrder::Ascending
+    }
+    fn from_query(p: &PaginatedByTimeAndId<T>) -> Result<&Self, HttpError> {
+        Ok(match p.page {
+            WhichPage::First(ref scan_params) => scan_params,
+            WhichPage::Next(PageSelector { ref scan, .. }) => scan,
+        })
     }
 }
 
