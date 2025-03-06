@@ -6407,6 +6407,72 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn target_release_get(
+        rqctx: RequestContext<ApiContext>,
+    ) -> Result<HttpResponseOk<views::TargetRelease>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let target_release =
+                nexus.datastore().target_release_get_current(&opctx).await?;
+            Ok(HttpResponseOk(
+                nexus
+                    .datastore()
+                    .target_release_view(&opctx, &target_release)
+                    .await?,
+            ))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn target_release_set(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<params::SetTargetReleaseParams>,
+    ) -> Result<HttpResponseCreated<views::TargetRelease>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let params = body.into_inner();
+            let system_version = params.system_version;
+            let tuf_repo_id = nexus
+                .datastore()
+                .update_tuf_repo_get(&opctx, system_version.into())
+                .await?
+                .repo
+                .id;
+            let current_target_release =
+                nexus.datastore().target_release_get_current(&opctx).await?;
+            let next_target_release =
+                nexus_db_model::TargetRelease::new_system_version(
+                    &current_target_release,
+                    tuf_repo_id,
+                );
+            let target_release = nexus
+                .datastore()
+                .target_release_insert(&opctx, next_target_release)
+                .await?;
+            Ok(HttpResponseCreated(
+                nexus
+                    .datastore()
+                    .target_release_view(&opctx, &target_release)
+                    .await?,
+            ))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     // Silo users
 
     async fn user_list(

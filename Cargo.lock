@@ -5920,6 +5920,7 @@ dependencies = [
  "term",
  "thiserror 1.0.69",
  "tokio",
+ "tufaceous-artifact",
  "url",
  "usdt",
  "uuid",
