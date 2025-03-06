@@ -326,7 +326,7 @@ fn try_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
 
     // Timeout = (retries / 2) minutes
     // XXX this is an arbitrary timeout. Should it be configurable? Skippable?
-    let mut retries = 50;
+    let mut retries = 40;
 
     // The important thing here is to do an HTTP request with timeout to the
     // control plane API endpoint. If the server is up, we'll get the page you'd
