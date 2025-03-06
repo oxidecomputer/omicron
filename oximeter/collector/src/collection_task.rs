@@ -6,8 +6,8 @@
 
 // Copyright 2024 Oxide Computer Company
 
-use crate::agent::WrapperTx;
 use crate::Error;
+use crate::agent::CollectionTaskSenderWrapper;
 use crate::self_stats;
 use chrono::DateTime;
 use chrono::Utc;
@@ -336,8 +336,7 @@ impl CollectionTaskHandle {
         log: &Logger,
         collector: self_stats::OximeterCollector,
         producer: ProducerEndpoint,
-        // outbox: mpsc::Sender<CollectionTaskOutput>,
-        outbox: WrapperTx,
+        outbox: CollectionTaskSenderWrapper,
     ) -> Self {
         let (task, task_tx) =
             CollectionTask::new(log, collector, producer, outbox).await;
@@ -484,7 +483,7 @@ struct CollectionTask {
 
     // Outbox for forwarding the results to the sink.
     //outbox: mpsc::Sender<CollectionTaskOutput>,
-    outbox: WrapperTx,
+    outbox: CollectionTaskSenderWrapper,
 
     // Timer for making collections periodically.
     collection_timer: Interval,
@@ -503,7 +502,7 @@ impl CollectionTask {
         log: &Logger,
         collector: self_stats::OximeterCollector,
         producer: ProducerEndpoint,
-        outbox: WrapperTx,
+        outbox: CollectionTaskSenderWrapper,
     ) -> (Self, mpsc::Sender<CollectionMessage>) {
         // Create our own logger.
         let log = log.new(o!(
@@ -790,10 +789,10 @@ impl CollectionTask {
                 self.details.on_success(success);
                 if self
                     .outbox
-                    .send(CollectionTaskOutput {
-                        was_forced_collection,
-                        results,
-                    }, &self.log)
+                    .send(
+                        CollectionTaskOutput { was_forced_collection, results },
+                        &self.log,
+                    )
                     .await
                     .is_err()
                 {

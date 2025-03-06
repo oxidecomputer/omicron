@@ -32,8 +32,6 @@ use tokio::time::interval;
 pub async fn database_inserter(
     log: Logger,
     client: Client,
-    // TODO-K: Should we have an enum that says whether it's a cluster or
-    // single node for the logs?
     batch_size: usize,
     batch_interval: Duration,
     mut rx: mpsc::Receiver<CollectionTaskOutput>,

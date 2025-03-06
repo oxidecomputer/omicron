@@ -59,7 +59,7 @@ pub struct OximeterAgent {
     collection_target: self_stats::OximeterCollector,
     // Wrapper of the two handles to the TX-side of the single-node and cluster
     // channels for collecting results from the collection tasks.
-    result_sender: WrapperTx,
+    result_sender: CollectionTaskSenderWrapper,
     // Handle to each Tokio task collection from a single producer.
     collection_tasks: Arc<Mutex<BTreeMap<Uuid, CollectionTaskHandle>>>,
     // The interval on which we refresh our list of producers from Nexus.
@@ -87,8 +87,8 @@ impl OximeterAgent {
         log: &Logger,
         replicated: bool,
     ) -> Result<Self, Error> {
-        let (wrapper_result_sender, single_rx, cluster_rx) =
-            collection_task_channel_wrapper();
+        let collection_task_wrapper = CollectionTaskWrapper::new();
+
         let log = log.new(o!(
             "component" => "oximeter-agent",
             "collector_id" => id.to_string(),
@@ -144,7 +144,7 @@ impl OximeterAgent {
                 // Some(cluster_client),
                 db_config.batch_size,
                 Duration::from_secs(db_config.batch_interval),
-                single_rx,
+                collection_task_wrapper.single_rx,
             )
             .await
         });
@@ -183,7 +183,7 @@ impl OximeterAgent {
                 cluster_client,
                 db_config.batch_size,
                 Duration::from_secs(db_config.batch_interval),
-                cluster_rx,
+                collection_task_wrapper.cluster_rx,
             )
             .await
         });
@@ -192,7 +192,7 @@ impl OximeterAgent {
             id,
             log,
             collection_target,
-            result_sender: wrapper_result_sender,
+            result_sender: collection_task_wrapper.wrapper_tx,
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
             refresh_interval,
             refresh_task: Arc::new(StdMutex::new(None)),
@@ -233,18 +233,13 @@ impl OximeterAgent {
         db_config: Option<DbConfig>,
         log: &Logger,
     ) -> Result<Self, Error> {
-        // TODO-K: Verify this actually works on the standalone
-      //  let (result_sender, result_receiver) = mpsc::channel(8);
         let log = log.new(o!(
             "component" => "oximeter-standalone",
             "collector_id" => id.to_string(),
             "collector_ip" => address.ip().to_string(),
         ));
 
-        // TODO-K: Maybe there's a prettier way to do this?
-        // TODO-K: We don't really need the cluster here
-        let (result_sender, single_rx, _cluster_rx) =
-            collection_task_channel_wrapper();
+        let collection_task_wrapper = CollectionTaskWrapper::new();
 
         // If we have configuration for ClickHouse, we'll spawn the results
         // sink task as usual. If not, we'll spawn a dummy task that simply
@@ -272,17 +267,17 @@ impl OximeterAgent {
                 results_sink::database_inserter(
                     insertion_log,
                     client,
-                    // None,
                     db_config.batch_size,
                     Duration::from_secs(db_config.batch_interval),
-                    single_rx,
+                    collection_task_wrapper.single_rx,
                 )
                 .await
             });
-
-            // TODO-K: spawn second task here too? 
         } else {
-            tokio::spawn(results_sink::logger(insertion_log, single_rx));
+            tokio::spawn(results_sink::logger(
+                insertion_log,
+                collection_task_wrapper.single_rx,
+            ));
         }
 
         // Set up tracking of statistics about ourselves.
@@ -301,7 +296,7 @@ impl OximeterAgent {
             id,
             log,
             collection_target,
-            result_sender,
+            result_sender: collection_task_wrapper.wrapper_tx,
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
             refresh_interval,
             refresh_task: Arc::new(StdMutex::new(None)),
@@ -493,26 +488,13 @@ impl OximeterAgent {
     }
 }
 
-// TODO-K: Have this take a `self` from a type instead of returning tuple?
-pub fn collection_task_channel_wrapper(
-) -> (
-    WrapperTx,
-    mpsc::Receiver<CollectionTaskOutput>,
-    mpsc::Receiver<CollectionTaskOutput>,
-) {
-    let (single_tx, single_rx) = mpsc::channel(8);
-    let (cluster_tx, cluster_rx) = mpsc::channel(8);
-
-    (WrapperTx { single_tx, cluster_tx }, single_rx, cluster_rx)
-}
-
 #[derive(Debug, Clone)]
-pub struct WrapperTx {
+pub struct CollectionTaskSenderWrapper {
     single_tx: mpsc::Sender<CollectionTaskOutput>,
     cluster_tx: mpsc::Sender<CollectionTaskOutput>,
 }
 
-impl WrapperTx {
+impl CollectionTaskSenderWrapper {
     pub async fn send(
         &self,
         msg: CollectionTaskOutput,
@@ -537,6 +519,26 @@ impl WrapperTx {
             );
         };
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct CollectionTaskWrapper {
+    wrapper_tx: CollectionTaskSenderWrapper,
+    single_rx: mpsc::Receiver<CollectionTaskOutput>,
+    cluster_rx: mpsc::Receiver<CollectionTaskOutput>,
+}
+
+impl CollectionTaskWrapper {
+    pub fn new() -> Self {
+        let (single_tx, single_rx) = mpsc::channel(8);
+        let (cluster_tx, cluster_rx) = mpsc::channel(8);
+
+        Self {
+            wrapper_tx: CollectionTaskSenderWrapper { single_tx, cluster_tx },
+            single_rx,
+            cluster_rx,
+        }
     }
 }
 
