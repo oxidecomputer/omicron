@@ -26,6 +26,7 @@ use oximeter_api::ProducerDetails;
 use oximeter_db::Client;
 use oximeter_db::DbWrite;
 use qorb::claim::Handle;
+use qorb::policy::Policy;
 use qorb::pool::Pool;
 use qorb::resolver::BoxedResolver;
 use slog::Logger;
@@ -56,11 +57,12 @@ pub struct OximeterAgent {
     log: Logger,
     // Oximeter target used by this agent to produce metrics about itself.
     collection_target: self_stats::OximeterCollector,
-    // Handle to the TX-side of a channel for collecting results from the collection tasks
-    result_sender: mpsc::Sender<CollectionTaskOutput>,
+    // Wrapper of the two handles to the TX-side of the single-node and cluster
+    // channels for collecting results from the collection tasks.
+    result_sender: CollectionTaskSenderWrapper,
     // Handle to each Tokio task collection from a single producer.
     collection_tasks: Arc<Mutex<BTreeMap<Uuid, CollectionTaskHandle>>>,
-    // The interval on which we refresh our list of producers from Nexus
+    // The interval on which we refresh our list of producers from Nexus.
     refresh_interval: Duration,
     // Handle to the task used to periodically refresh the list of producers.
     refresh_task: Arc<StdMutex<Option<tokio::task::JoinHandle<()>>>>,
@@ -70,22 +72,31 @@ pub struct OximeterAgent {
 
 impl OximeterAgent {
     /// Construct a new agent with the given ID and logger.
+    // TODO: Remove this linter exception once we only write to a
+    // single database
+    #[allow(clippy::too_many_arguments)]
     pub async fn with_id(
         id: Uuid,
         address: SocketAddrV6,
         refresh_interval: Duration,
         db_config: DbConfig,
         native_resolver: BoxedResolver,
+        // Temporary resolver to write to a replicated ClickHouse
+        // cluster as well as a single-node installation.
+        cluster_resolver: BoxedResolver,
         log: &Logger,
         replicated: bool,
     ) -> Result<Self, Error> {
-        let (result_sender, result_receiver) = mpsc::channel(8);
+        let collection_task_wrapper = CollectionTaskWrapper::new();
+
         let log = log.new(o!(
             "component" => "oximeter-agent",
             "collector_id" => id.to_string(),
             "collector_ip" => address.ip().to_string(),
         ));
         let insertion_log = log.new(o!("component" => "results-sink"));
+        let instertion_log_cluster =
+            log.new(o!("component" => "results-sink-cluster"));
 
         // Determine the version of the database.
         //
@@ -126,14 +137,54 @@ impl OximeterAgent {
             collector_port: address.port(),
         };
 
-        // Spawn the task for aggregating and inserting all metrics
+        // Spawn the task for aggregating and inserting all metrics to a
+        // single node ClickHouse installation.
         tokio::spawn(async move {
             crate::results_sink::database_inserter(
                 insertion_log,
                 client,
                 db_config.batch_size,
                 Duration::from_secs(db_config.batch_interval),
-                result_receiver,
+                collection_task_wrapper.single_rx,
+            )
+            .await
+        });
+
+        // Our internal testing rack will be running a ClickHouse cluster
+        // alongside a single-node installation for a while. We want to handle
+        // the case of these two installations running alongside each other, and
+        // oximeter writing to both of them. On our production racks ClickHouse
+        // will only be run on single-node modality, so we'll ignore all cases where
+        // the `ClickhouseClusterNative` service is not available.
+        // This will be done by spawning a second task for DB inserts to a replicated
+        // ClickHouse cluster. If oximeter cannot connect to the database, it will
+        // simply log a warning and move on.
+
+        // Temporary additional client that writes to a replicated cluster
+        // This will be removed once we phase out the single node installation.
+        //
+        // We don't need to check whether the DB is at the expected version since
+        // this is already handled by reconfigurator via clickhouse-admin.
+        //
+        // We have a short claim timeout so oximeter can move on quickly if the cluster
+        // does not exist.
+        let claim_policy = Policy {
+            claim_timeout: Duration::from_millis(100),
+            ..Default::default()
+        };
+
+        let cluster_client =
+            Client::new_with_pool_policy(cluster_resolver, claim_policy, &log);
+
+        // Spawn the task for aggregating and inserting all metrics to a
+        // replicated cluster ClickHouse installation
+        tokio::spawn(async move {
+            results_sink::database_inserter(
+                instertion_log_cluster,
+                cluster_client,
+                db_config.batch_size,
+                Duration::from_secs(db_config.batch_interval),
+                collection_task_wrapper.cluster_rx,
             )
             .await
         });
@@ -142,7 +193,7 @@ impl OximeterAgent {
             id,
             log,
             collection_target,
-            result_sender,
+            result_sender: collection_task_wrapper.wrapper_tx,
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
             refresh_interval,
             refresh_task: Arc::new(StdMutex::new(None)),
@@ -183,12 +234,13 @@ impl OximeterAgent {
         db_config: Option<DbConfig>,
         log: &Logger,
     ) -> Result<Self, Error> {
-        let (result_sender, result_receiver) = mpsc::channel(8);
         let log = log.new(o!(
             "component" => "oximeter-standalone",
             "collector_id" => id.to_string(),
             "collector_ip" => address.ip().to_string(),
         ));
+
+        let collection_task_wrapper = CollectionTaskWrapper::new();
 
         // If we have configuration for ClickHouse, we'll spawn the results
         // sink task as usual. If not, we'll spawn a dummy task that simply
@@ -218,12 +270,15 @@ impl OximeterAgent {
                     client,
                     db_config.batch_size,
                     Duration::from_secs(db_config.batch_interval),
-                    result_receiver,
+                    collection_task_wrapper.single_rx,
                 )
                 .await
             });
         } else {
-            tokio::spawn(results_sink::logger(insertion_log, result_receiver));
+            tokio::spawn(results_sink::logger(
+                insertion_log,
+                collection_task_wrapper.single_rx,
+            ));
         }
 
         // Set up tracking of statistics about ourselves.
@@ -242,7 +297,7 @@ impl OximeterAgent {
             id,
             log,
             collection_target,
-            result_sender,
+            result_sender: collection_task_wrapper.wrapper_tx,
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
             refresh_interval,
             refresh_task: Arc::new(StdMutex::new(None)),
@@ -434,6 +489,60 @@ impl OximeterAgent {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct CollectionTaskSenderWrapper {
+    single_tx: mpsc::Sender<CollectionTaskOutput>,
+    cluster_tx: mpsc::Sender<CollectionTaskOutput>,
+}
+
+impl CollectionTaskSenderWrapper {
+    pub async fn send(
+        &self,
+        msg: CollectionTaskOutput,
+        log: &Logger,
+    ) -> anyhow::Result<()> {
+        let (result_single, result_cluster) = futures::future::join(
+            self.single_tx.send(msg.clone()),
+            self.cluster_tx.send(msg),
+        )
+        .await;
+
+        if let Err(e) = result_single {
+            error!(
+                log,
+                "failed to send value from the collection task to channel for single node: {e:?}"
+            );
+        };
+        if let Err(e) = result_cluster {
+            error!(
+                log,
+                "failed to send value from the collection task to channel for cluster: {e:?}"
+            );
+        };
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct CollectionTaskWrapper {
+    wrapper_tx: CollectionTaskSenderWrapper,
+    single_rx: mpsc::Receiver<CollectionTaskOutput>,
+    cluster_rx: mpsc::Receiver<CollectionTaskOutput>,
+}
+
+impl CollectionTaskWrapper {
+    pub fn new() -> Self {
+        let (single_tx, single_rx) = mpsc::channel(8);
+        let (cluster_tx, cluster_rx) = mpsc::channel(8);
+
+        Self {
+            wrapper_tx: CollectionTaskSenderWrapper { single_tx, cluster_tx },
+            single_rx,
+            cluster_rx,
+        }
+    }
+}
+
 // A task which periodically updates our list of producers from Nexus.
 async fn refresh_producer_list_task(
     agent: OximeterAgent,
@@ -543,7 +652,7 @@ async fn claim_nexus_with_backoff(
             "failed to lookup Nexus IP, will retry";
             "delay" => ?delay,
             // No `InlineErrorChain` here: `error` is a string
-            "error" => error,
+            "error" => %error,
         );
     };
     let do_lookup = || async {
