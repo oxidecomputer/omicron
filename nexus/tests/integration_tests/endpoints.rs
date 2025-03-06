@@ -38,6 +38,7 @@ use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::UserId;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_test_utils::certificates::CertificateChain;
+use semver::Version;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
@@ -1135,6 +1136,12 @@ pub static ALLOW_LIST_URL: LazyLock<String> =
 pub static ALLOW_LIST_UPDATE: LazyLock<params::AllowListUpdate> =
     LazyLock::new(|| params::AllowListUpdate {
         allowed_ips: AllowedSourceIps::Any,
+    });
+
+// Updates
+pub static DEMO_TARGET_RELEASE: LazyLock<params::SetTargetReleaseParams> =
+    LazyLock::new(|| params::SetTargetReleaseParams {
+        system_version: Version::new(0, 0, 0),
     });
 
 /// Describes an API endpoint to be verified by the "unauthorized" test
@@ -2349,6 +2356,17 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 // The update system is disabled, which causes a 500 error even for
                 // privileged users. That is captured by GetUnimplemented.
                 allowed_methods: vec![AllowedMethod::GetUnimplemented],
+            },
+            VerifyEndpoint {
+                url: "/v1/system/update/target-release",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_TARGET_RELEASE).unwrap(),
+                    ),
+                ],
             },
             /* Metrics */
             VerifyEndpoint {
