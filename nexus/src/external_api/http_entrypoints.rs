@@ -7330,6 +7330,43 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn webhook_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::Webhook>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let query = query_params.into_inner();
+            let pagparams = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pagparams, scan_params)?;
+
+            let rxs = nexus
+                .webhook_receiver_list(&opctx, &paginated_by)
+                .await?
+                .into_iter()
+                .map(views::Webhook::try_from)
+                .collect::<Result<Vec<_>, _>>()?;
+
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
+                &query,
+                rxs,
+                &marker_for_name_or_id,
+            )?))
+        };
+
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn webhook_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::WebhookSelector>,
@@ -7453,7 +7490,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn webhook_secrets_list(
         rqctx: RequestContext<Self::Context>,
-        _query_params: Query<params::WebhookSelector>,
+        query_params: Query<params::WebhookSelector>,
     ) -> Result<HttpResponseOk<views::WebhookSecrets>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -7462,10 +7499,16 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
-            Err(nexus
-                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
-                .await
-                .into())
+            let webhook_selector = query_params.into_inner();
+            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let secrets = nexus
+                .webhook_receiver_secrets_list(&opctx, rx)
+                .await?
+                .into_iter()
+                .map(Into::into)
+                .collect();
+
+            Ok(HttpResponseOk(views::WebhookSecrets { secrets }))
         };
         apictx
             .context

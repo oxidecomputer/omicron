@@ -69,6 +69,32 @@ async fn webhook_get_as(
         .unwrap()
 }
 
+async fn webhook_rx_list(client: &ClientTestContext) -> Vec<views::Webhook> {
+    resource_helpers::objects_list_page_authz::<views::Webhook>(
+        client,
+        RECEIVERS_BASE_PATH,
+    )
+    .await
+    .items
+}
+
+async fn webhook_secrets_get(
+    client: &ClientTestContext,
+    webhook_name_or_id: impl Into<NameOrId>,
+) -> views::WebhookSecrets {
+    let name_or_id = webhook_name_or_id.into();
+    NexusRequest::object_get(
+        client,
+        &format!("{SECRETS_BASE_PATH}/?receiver={name_or_id}"),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap()
+}
+
 fn my_great_webhook_params(
     mock: &httpmock::MockServer,
 ) -> params::WebhookCreate {
@@ -313,6 +339,21 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
 
     let secret1_id = webhook.secrets[0].id;
 
+    let client = &cptestctx.external_client;
+    let assert_secrets_get = |mut expected: Vec<Uuid>| async move {
+        let mut actual = webhook_secrets_get(client, rx_id.into_untyped_uuid())
+            .await
+            .secrets
+            .into_iter()
+            .map(|secret| secret.id)
+            .collect::<Vec<_>>();
+        actual.sort();
+        expected.sort();
+        assert_eq!(expected, actual);
+    };
+
+    assert_secrets_get(vec![secret1_id]).await;
+
     // Add a second secret to the webhook receiver.
     let secret2_id = dbg!(
         secret_add(
@@ -323,6 +364,7 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
         .await
     )
     .id;
+    assert_secrets_get(vec![secret1_id, secret2_id]).await;
 
     // And a third one, just for kicks.
     let secret3_id = dbg!(
@@ -334,6 +376,7 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
         .await
     )
     .id;
+    assert_secrets_get(vec![secret1_id, secret2_id, secret3_id]).await;
 
     let mock = server
         .mock_async(|when, then| {
@@ -384,6 +427,7 @@ async fn test_multiple_secrets(cptestctx: &ControlPlaneTestContext) {
 async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
     let nexus = cptestctx.server.server_context().nexus.clone();
     let internal_client = &cptestctx.internal_client;
+    let client = &cptestctx.external_client;
 
     let datastore = nexus.datastore();
     let opctx =
@@ -391,6 +435,13 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
 
     let bar_event_id = WebhookEventUuid::new_v4();
     let baz_event_id = WebhookEventUuid::new_v4();
+
+    let assert_webhook_rx_list_matches = |mut expected: Vec<views::Webhook>| async move {
+        let mut actual = webhook_rx_list(client).await;
+        actual.sort_by_key(|rx| rx.identity.id);
+        expected.sort_by_key(|rx| rx.identity.id);
+        assert_eq!(expected, actual);
+    };
 
     // Create three webhook receivers
     let srv_bar = httpmock::MockServer::start_async().await;
@@ -412,6 +463,7 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
     dbg!(&rx_bar);
+    assert_webhook_rx_list_matches(vec![rx_bar.clone()]).await;
     let mock_bar = {
         let webhook = rx_bar.clone();
         srv_bar
@@ -448,6 +500,7 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
     dbg!(&rx_baz);
+    assert_webhook_rx_list_matches(vec![rx_bar.clone(), rx_baz.clone()]).await;
     let mock_baz = {
         let webhook = rx_baz.clone();
         srv_baz
@@ -484,6 +537,12 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
     dbg!(&rx_star);
+    assert_webhook_rx_list_matches(vec![
+        rx_bar.clone(),
+        rx_baz.clone(),
+        rx_star.clone(),
+    ])
+    .await;
     let mock_star = {
         let webhook = rx_star.clone();
         srv_star

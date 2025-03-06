@@ -141,6 +141,12 @@ impl WebhookSecret {
     }
 }
 
+impl From<WebhookSecret> for views::WebhookSecretId {
+    fn from(secret: WebhookSecret) -> Self {
+        Self { id: secret.identity.id.into_untyped_uuid() }
+    }
+}
+
 #[derive(
     Clone, Debug, Queryable, Selectable, Insertable, Serialize, Deserialize,
 )]

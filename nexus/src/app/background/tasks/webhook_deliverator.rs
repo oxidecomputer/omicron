@@ -1,22 +1,20 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
-use crate::app::authz;
 use crate::app::background::BackgroundTask;
-use crate::app::db::lookup::LookupPath;
 use crate::app::webhook::ReceiverClient;
 use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::webhook_delivery::DeliveryAttemptState;
 pub use nexus_db_queries::db::datastore::webhook_delivery::DeliveryConfig;
 use nexus_db_queries::db::model::WebhookDeliveryResult;
-use nexus_db_queries::db::model::WebhookReceiver;
+use nexus_db_queries::db::model::WebhookReceiverConfig;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
-use nexus_types::internal_api::background::{
-    WebhookDeliveratorStatus, WebhookRxDeliveryStatus,
-};
+use nexus_types::internal_api::background::WebhookDeliveratorStatus;
+use nexus_types::internal_api::background::WebhookRxDeliveryStatus;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, WebhookDeliveryUuid};
 use std::num::NonZeroU32;
@@ -125,18 +123,24 @@ impl WebhookDeliverator {
         while let Some(p) = paginator.next() {
             let rxs = self
                 .datastore
-                .webhook_rx_list(&opctx, &p.current_pagparams())
+                .webhook_rx_list(
+                    &opctx,
+                    &PaginatedBy::Id(p.current_pagparams()),
+                )
                 .await?;
-            paginator = p.found_batch(&rxs, &|rx| rx.id().into_untyped_uuid());
+            paginator = p
+                .found_batch(&rxs, &|WebhookReceiverConfig { rx, .. }| {
+                    rx.id().into_untyped_uuid()
+                });
 
             for rx in rxs {
+                let rx_id = rx.rx.id();
                 let opctx = opctx.child(maplit::btreemap! {
-                    "receiver_id".to_string() => rx.id().to_string(),
-                    "receiver_name".to_string() => rx.name().to_string(),
+                    "receiver_id".to_string() => rx_id.to_string(),
+                    "receiver_name".to_string() => rx.rx.name().to_string(),
                 });
                 let deliverator = self.clone();
                 tasks.spawn(async move {
-                    let rx_id = rx.id();
                     let status = match deliverator.rx_deliver(&opctx, rx).await {
                         Ok(status) => status,
                         Err(e) => {
@@ -171,22 +175,8 @@ impl WebhookDeliverator {
     async fn rx_deliver(
         &self,
         opctx: &OpContext,
-        rx: WebhookReceiver,
+        WebhookReceiverConfig { rx, secrets, .. }: WebhookReceiverConfig,
     ) -> Result<WebhookRxDeliveryStatus, anyhow::Error> {
-        // First, look up the receiver's secrets and any deliveries for that
-        // receiver. If any of these lookups fail, bail out, as we can't
-        // meaningfully deliver any events to a receiver if we don't know what
-        // they are or how to sign them.
-        let (authz_rx,) = LookupPath::new(opctx, &self.datastore)
-            .webhook_receiver_id(rx.id())
-            .lookup_for(authz::Action::ListChildren)
-            .await
-            .map_err(|e| anyhow::anyhow!("could not look up receiver: {e}"))?;
-        let secrets = self
-            .datastore
-            .webhook_rx_secret_list(opctx, &authz_rx)
-            .await
-            .map_err(|e| anyhow::anyhow!("could not list secrets: {e}"))?;
         let mut client = ReceiverClient::new(&self.client, secrets, &rx)?;
 
         let deliveries = self

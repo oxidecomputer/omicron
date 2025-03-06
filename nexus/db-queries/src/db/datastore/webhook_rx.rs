@@ -14,6 +14,7 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::DbSemverVersion;
 use crate::db::model::Generation;
+use crate::db::model::Name;
 use crate::db::model::WebhookEventClass;
 use crate::db::model::WebhookGlob;
 use crate::db::model::WebhookReceiver;
@@ -38,7 +39,9 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_types::external_api::params;
+use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::WebhookGlobStatus;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -47,6 +50,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::WebhookReceiverUuid;
+use ref_cast::RefCast;
 use uuid::Uuid;
 
 impl DataStore {
@@ -145,11 +149,21 @@ impl DataStore {
         authz_rx: &authz::WebhookReceiver,
     ) -> Result<(Vec<WebhookSubscriptionKind>, Vec<WebhookSecret>), Error> {
         opctx.authorize(authz::Action::ListChildren, authz_rx).await?;
-        let conn = self.pool_connection_authorized(opctx).await?;
+        self.rx_config_fetch_on_conn(
+            authz_rx.id(),
+            &*self.pool_connection_authorized(opctx).await?,
+        )
+        .await
+    }
+
+    async fn rx_config_fetch_on_conn(
+        &self,
+        rx_id: WebhookReceiverUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<(Vec<WebhookSubscriptionKind>, Vec<WebhookSecret>), Error> {
         let subscriptions =
-            self.webhook_rx_subscription_list_on_conn(authz_rx, &conn).await?;
-        let secrets =
-            self.webhook_rx_secret_list_on_conn(authz_rx, &conn).await?;
+            self.rx_subscription_list_on_conn(rx_id, &conn).await?;
+        let secrets = self.rx_secret_list_on_conn(rx_id, &conn).await?;
         Ok((subscriptions, secrets))
     }
 
@@ -243,6 +257,55 @@ impl DataStore {
         Ok(())
     }
 
+    pub async fn webhook_rx_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<WebhookReceiverConfig> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        // As we would like to return a list of `WebhookReceiverConfig` structs,
+        // which own `Vec`s of the receiver's secrets and event class
+        // subscriptions, we'll do this by first querying the database to load
+        // all the receivers, and then querying for their individual lists of
+        // secrets and event class subscriptions.
+        //
+        // This is a bit unfortunate, and it would be nicer to do this with
+        // JOINs, but it's a bit hairy as the subscriptions come from both the
+        // `webhook_rx_subscription` and `webhook_rx_glob` tables...
+
+        let receivers = match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(rx_dsl::webhook_receiver, rx_dsl::id, &pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                rx_dsl::webhook_receiver,
+                rx_dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(rx_dsl::time_deleted.is_null())
+        .select(WebhookReceiver::as_select())
+        .load_async(&*conn)
+        .await
+        .map_err(|e| {
+            public_error_from_diesel(e, ErrorHandler::Server)
+                .internal_context("failed to list receivers")
+        })?;
+
+        // Now that we've got the current page of receivers, go and get their
+        // event subscriptions and secrets.
+        let mut result = Vec::with_capacity(receivers.len());
+        for rx in receivers {
+            let secrets = self.rx_secret_list_on_conn(rx.id(), &*conn).await?;
+            let events =
+                self.rx_subscription_list_on_conn(rx.id(), &*conn).await?;
+            result.push(WebhookReceiverConfig { rx, secrets, events });
+        }
+
+        Ok(result)
+    }
+
     //
     // Subscriptions
     //
@@ -275,37 +338,36 @@ impl DataStore {
         Ok(())
     }
 
-    async fn webhook_rx_subscription_list_on_conn(
+    async fn rx_subscription_list_on_conn(
         &self,
-        authz_rx: &authz::WebhookReceiver,
+        rx_id: WebhookReceiverUuid,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> ListResultVec<WebhookSubscriptionKind> {
-        let rx_id = authz_rx.id().into_untyped_uuid();
+        // TODO(eliza): rather than performing two separate queries, this could
+        // perhaps be expressed using a SQL `union`, with an added "label"
+        // column to distinguish between globs and exact subscriptions, but this
+        // is a bit more complex, and would require raw SQL...
 
         // First, get all the exact subscriptions that aren't from globs.
         let exact = subscription_dsl::webhook_rx_subscription
-            .filter(subscription_dsl::rx_id.eq(rx_id))
+            .filter(subscription_dsl::rx_id.eq(rx_id.into_untyped_uuid()))
             .filter(subscription_dsl::glob.is_null())
             .select(subscription_dsl::event_class)
             .load_async::<WebhookEventClass>(conn)
             .await
             .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_rx),
-                )
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to list exact subscriptions")
             })?;
         // Then, get the globs
         let globs = glob_dsl::webhook_rx_event_glob
-            .filter(glob_dsl::rx_id.eq(rx_id))
+            .filter(glob_dsl::rx_id.eq(rx_id.into_untyped_uuid()))
             .select(WebhookGlob::as_select())
             .load_async::<WebhookGlob>(conn)
             .await
             .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_rx),
-                )
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to list glob subscriptions")
             })?;
         let subscriptions = exact
             .into_iter()
@@ -641,25 +703,23 @@ impl DataStore {
     ) -> ListResultVec<WebhookSecret> {
         opctx.authorize(authz::Action::ListChildren, authz_rx).await?;
         let conn = self.pool_connection_authorized(&opctx).await?;
-        self.webhook_rx_secret_list_on_conn(authz_rx, &conn).await
+        self.rx_secret_list_on_conn(authz_rx.id(), &conn).await
     }
 
-    async fn webhook_rx_secret_list_on_conn(
+    async fn rx_secret_list_on_conn(
         &self,
-        authz_rx: &authz::WebhookReceiver,
+        rx_id: WebhookReceiverUuid,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> ListResultVec<WebhookSecret> {
         secret_dsl::webhook_secret
-            .filter(secret_dsl::rx_id.eq(authz_rx.id().into_untyped_uuid()))
+            .filter(secret_dsl::rx_id.eq(rx_id.into_untyped_uuid()))
             .filter(secret_dsl::time_deleted.is_null())
             .select(WebhookSecret::as_select())
             .load_async(conn)
             .await
             .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_rx),
-                )
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to list webhook receiver secrets")
             })
     }
 
@@ -718,21 +778,6 @@ impl DataStore {
         .await
         .map_err(async_insert_error_to_txn(rx_id.into()))?;
         Ok(secret)
-    }
-
-    pub async fn webhook_rx_list(
-        &self,
-        opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<WebhookReceiver> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        let conn = self.pool_connection_authorized(opctx).await?;
-        paginated(rx_dsl::webhook_receiver, rx_dsl::id, pagparams)
-            .filter(rx_dsl::time_deleted.is_null())
-            .select(WebhookReceiver::as_select())
-            .load_async::<WebhookReceiver>(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }
 

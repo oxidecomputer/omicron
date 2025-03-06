@@ -3500,6 +3500,17 @@ pub trait NexusExternalApi {
         path_params: Path<params::EventClassSelector>,
     ) -> Result<HttpResponseOk<views::EventClass>, HttpError>;
 
+    /// List webhook receivers.
+    #[endpoint {
+        method = GET,
+        path = "/v1/webhooks/receivers/",
+        tags = ["system/webhooks"],
+    }]
+    async fn webhook_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::Webhook>>, HttpError>;
+
     /// Get the configuration for a webhook receiver.
     #[endpoint {
         method = GET,

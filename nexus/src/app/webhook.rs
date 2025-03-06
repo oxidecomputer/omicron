@@ -32,8 +32,10 @@ use nexus_db_queries::db::model::WebhookSecret;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_uuid_kinds::GenericUuid;
@@ -68,6 +70,15 @@ impl super::Nexus {
         }
     }
 
+    pub async fn webhook_receiver_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<WebhookReceiverConfig> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        self.datastore().webhook_rx_list(opctx, pagparams).await
+    }
+
     pub async fn webhook_receiver_config_fetch(
         &self,
         opctx: &OpContext,
@@ -77,6 +88,15 @@ impl super::Nexus {
         let (events, secrets) =
             self.datastore().webhook_rx_config_fetch(opctx, &authz_rx).await?;
         Ok(WebhookReceiverConfig { rx, secrets, events })
+    }
+
+    pub async fn webhook_receiver_secrets_list(
+        &self,
+        opctx: &OpContext,
+        rx: lookup::WebhookReceiver<'_>,
+    ) -> ListResultVec<WebhookSecret> {
+        let (authz_rx,) = rx.lookup_for(authz::Action::ListChildren).await?;
+        self.datastore().webhook_rx_secret_list(opctx, &authz_rx).await
     }
 
     pub async fn webhook_receiver_create(
