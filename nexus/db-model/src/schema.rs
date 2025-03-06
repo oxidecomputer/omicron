@@ -1393,6 +1393,7 @@ table! {
         time_created -> Timestamptz,
         sha256 -> Text,
         artifact_size -> Int8,
+        generation_added -> Int8,
     }
 }
 

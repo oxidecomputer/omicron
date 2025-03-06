@@ -597,7 +597,11 @@ impl ArtifactReplication {
         while let Some(p) = paginator.next() {
             let batch = self
                 .datastore
-                .update_tuf_artifact_list(opctx, &p.current_pagparams())
+                .update_tuf_artifact_list(
+                    opctx,
+                    generation,
+                    &p.current_pagparams(),
+                )
                 .await?;
             paginator = p.found_batch(&batch, &|a| a.id.into_untyped_uuid());
             for artifact in batch {

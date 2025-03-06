@@ -2396,8 +2396,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
     -- The length of the artifact, in bytes.
     artifact_size INT8 NOT NULL,
 
+    -- The generation number this artifact was added for.
+    generation_added INT8 NOT NULL,
+
     CONSTRAINT unique_name_version_kind UNIQUE (name, version, kind)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS tuf_artifact_added
+    ON omicron.public.tuf_artifact (generation_added, id)
+    STORING (name, version, kind, time_created, sha256, artifact_size);
 
 -- Reflects that a particular artifact was provided by a particular TUF repo.
 -- This is a many-many mapping.
@@ -2419,7 +2426,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_generation (
     -- access the version of this table with "singleton = false".
     singleton BOOL NOT NULL PRIMARY KEY,
     -- Generation number owned and incremented by Nexus
-    generation INT NOT NULL,
+    generation INT8 NOT NULL,
 
     CHECK (singleton = true)
 );

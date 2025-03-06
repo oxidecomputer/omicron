@@ -62,12 +62,9 @@ impl super::Nexus {
         .map_err(|error| error.to_http_error())?;
 
         // Now store the artifacts in the database.
-        let tuf_repo_description = TufRepoDescription::from_external(
-            artifacts_with_plan.description().clone(),
-        );
         let response = self
             .db_datastore
-            .update_tuf_repo_insert(opctx, tuf_repo_description)
+            .update_tuf_repo_insert(opctx, artifacts_with_plan.description())
             .await
             .map_err(HttpError::from)?;
 
