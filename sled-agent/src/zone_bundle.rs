@@ -22,6 +22,7 @@ use illumos_utils::zfs::EnsureDatasetError;
 use illumos_utils::zfs::GetValueError;
 use illumos_utils::zfs::ListDatasetsError;
 use illumos_utils::zfs::ListSnapshotsError;
+use illumos_utils::zfs::PropertySource;
 use illumos_utils::zfs::SetValueError;
 use illumos_utils::zfs::Snapshot;
 use illumos_utils::zfs::ZFS;
@@ -80,22 +81,39 @@ fn initialize_zfs_resources(log: &Logger) -> Result<(), BundleError> {
             // Additionally check for the zone-bundle-specific property.
             //
             // If we find a dataset that matches our names, but which _does not_
-            // have such a property, we'll panic rather than possibly deleting
-            // user data.
+            // have such a property (or has in invalid property), we'll log it
+            // but avoid deleting the snapshot.
             let name = snap.to_string();
-            let value =
-                Zfs::get_oxide_value(&name, ZONE_BUNDLE_ZFS_PROPERTY_NAME)
-                    .unwrap_or_else(|_| {
-                        panic!(
-                            "Found a ZFS snapshot with a name reserved for \
-                            zone bundling, but which does not have the \
-                            zone-bundle-specific property. Bailing out, \
-                            rather than risking deletion of user data. \
-                            snap_name = {}, property = {}",
-                            &name, ZONE_BUNDLE_ZFS_PROPERTY_NAME
-                        )
-                    });
-            assert_eq!(value, ZONE_BUNDLE_ZFS_PROPERTY_VALUE);
+            let Ok([value]) = Zfs::get_values(
+                &name,
+                &[ZONE_BUNDLE_ZFS_PROPERTY_NAME],
+                Some(PropertySource::Local),
+            ) else {
+                warn!(
+                    log,
+                    "Found a ZFS snapshot with a name reserved for zone \
+                    bundling, but which does not have the zone-bundle-specific \
+                    property. Bailing out, rather than risking deletion of \
+                    user data. \
+                    snap_name = {}, property = {}",
+                    &name,
+                    ZONE_BUNDLE_ZFS_PROPERTY_NAME
+                );
+                return false;
+            };
+            if value != ZONE_BUNDLE_ZFS_PROPERTY_VALUE {
+                warn!(
+                    log,
+                    "Found a ZFS snapshot with a name reserved for zone \
+                    bundling, with an unexpected property value. \
+                    Bailing out, rather than risking deletion of user data. \
+                    snap_name = {}, property = {}, property_value = {}",
+                    &name,
+                    ZONE_BUNDLE_ZFS_PROPERTY_NAME,
+                    value
+                );
+                return false;
+            }
             true
         });
     for snapshot in zb_snapshots {
