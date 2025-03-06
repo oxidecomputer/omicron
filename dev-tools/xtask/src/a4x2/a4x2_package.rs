@@ -23,6 +23,15 @@ pub struct A4x2PackageArgs {
     /// Bundle omicron end-to-end-tests package into the output tarball
     #[clap(long)]
     end_to_end_tests: bool,
+
+
+    /// Choose which source of oxidecomputer/testbed to build into the output.
+    #[clap(long, default_value_t = String::from("https://github.com/oxidecomputer/testbed"))]
+    testbed_source: String,
+
+    /// Choose which branch of oxidecomputer/testbed to build into the output.
+    #[clap(long, default_value_t = String::from("main"))]
+    testbed_branch: String,
 }
 
 struct Environment {
@@ -112,7 +121,7 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
 
     // This needs to happen last because it messes with the working tree in a
     // way that end-to-end tests doesnt like when building
-    build_a4x2(&sh, &env)?;
+    build_a4x2(&sh, &env, &args.testbed_source, &args.testbed_branch)?;
 
     create_output_artifact(&sh, &env)?;
 
@@ -242,7 +251,12 @@ fn build_live_tests(sh: &Shell, env: &Environment) -> Result<()> {
     Ok(())
 }
 
-fn build_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
+fn build_a4x2(
+    sh: &Shell,
+    env: &Environment,
+    testbed_source: &str,
+    testbed_branch: &str,
+) -> Result<()> {
     cmd!(sh, "banner testbed").run()?;
     let testbed_dir = env.work_dir.join("testbed");
     let a4x2_dir = testbed_dir.join("a4x2");
@@ -254,7 +268,7 @@ fn build_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
     let git = &env.git;
     cmd!(
         sh,
-        "{git} clone https://github.com/oxidecomputer/testbed {testbed_dir}"
+        "{git} clone {testbed_source} --branch {testbed_branch} {testbed_dir}"
     )
     .run()?;
 
