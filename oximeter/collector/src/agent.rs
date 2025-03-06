@@ -95,7 +95,8 @@ impl OximeterAgent {
             "collector_ip" => address.ip().to_string(),
         ));
         let insertion_log = log.new(o!("component" => "results-sink"));
-        let instertion_log_cluster = insertion_log.clone();
+        let instertion_log_cluster =
+            log.new(o!("component" => "results-sink-cluster"));
 
         // Determine the version of the database.
         //
@@ -136,12 +137,12 @@ impl OximeterAgent {
             collector_port: address.port(),
         };
 
-        // Spawn the task for aggregating and inserting all metrics
+        // Spawn the task for aggregating and inserting all metrics to a
+        // single node ClickHouse installation.
         tokio::spawn(async move {
             crate::results_sink::database_inserter(
                 insertion_log,
                 client,
-                // Some(cluster_client),
                 db_config.batch_size,
                 Duration::from_secs(db_config.batch_interval),
                 collection_task_wrapper.single_rx,

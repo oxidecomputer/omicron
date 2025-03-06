@@ -482,7 +482,6 @@ struct CollectionTask {
     result_rx: mpsc::Receiver<CollectionResponse>,
 
     // Outbox for forwarding the results to the sink.
-    //outbox: mpsc::Sender<CollectionTaskOutput>,
     outbox: CollectionTaskSenderWrapper,
 
     // Timer for making collections periodically.
