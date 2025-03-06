@@ -102,6 +102,9 @@ enum GetValueErrorRaw {
     #[error(transparent)]
     Execution(#[from] crate::ExecutionError),
 
+    #[error("Invalid property value 'all'")]
+    InvalidValueAll,
+
     #[error("No value found with that name")]
     MissingValue,
 }
@@ -843,13 +846,24 @@ impl Zfs {
         source: Option<PropertySource>,
     ) -> Result<[String; N], GetValueError> {
         let mut cmd = std::process::Command::new(PFEXEC);
-        let all_names =
-            names.into_iter().map(|n| *n).collect::<Vec<&str>>().join(",");
+        let all_names = names
+            .into_iter()
+            .map(|n| match *n {
+                "all" => Err(GetValueError {
+                    filesystem: filesystem_name.to_string(),
+                    name: "all".to_string(),
+                    err: GetValueErrorRaw::InvalidValueAll,
+                }),
+                n => Ok(n),
+            })
+            .collect::<Result<Vec<&str>, GetValueError>>()?
+            .join(",");
 
-        cmd.args(&[ZFS, "get", "-Ho", "value", &all_names]);
+        cmd.args(&[ZFS, "get", "-Ho", "value"]);
         if let Some(source) = source {
             cmd.args(&["-s", &source.to_string()]);
         }
+        cmd.arg(&all_names);
         cmd.arg(filesystem_name);
         let output = execute(&mut cmd).map_err(|err| GetValueError {
             filesystem: filesystem_name.to_string(),
@@ -939,6 +953,36 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    // This test validates that "get_values" at least parses correctly.
+    //
+    // To minimize test setup, we rely on a zfs dataset named "rpool" existing,
+    // but do not modify it within this test.
+    #[cfg(target_os = "illumos")]
+    #[test]
+    fn get_values_of_rpool() {
+        // If the rpool exists, it should have a name.
+        let values = Zfs::get_values("rpool", &["name"; 1], None)
+            .expect("Failed to query rpool type");
+        assert_eq!(values[0], "rpool");
+
+        // We don't really care if any local properties are set, we just don't
+        // want this to throw an error.
+        let _values =
+            Zfs::get_values("rpool", &["name"; 1], Some(PropertySource::Local))
+                .expect("Failed to query rpool type");
+
+        // Also, the "all" property should not be queryable. It's normally fine
+        // to pass this value, it just returns a variable number of properties,
+        // which doesn't work with the current implementation's parsing.
+        let err = Zfs::get_values("rpool", &["all"; 1], None)
+            .expect_err("Should not be able to query for 'all' property");
+
+        assert!(
+            matches!(err.err, GetValueErrorRaw::InvalidValueAll),
+            "Unexpected error: {err}"
+        );
+    }
 
     #[test]
     fn parse_dataset_props() {
