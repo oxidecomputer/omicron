@@ -9,22 +9,22 @@ use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::TransactionError;
 use crate::db::datastore::ValidateTransition;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::model::to_db_sled_policy;
+use crate::db::error::public_error_from_diesel;
 use crate::db::model::AffinityPolicy;
 use crate::db::model::Sled;
 use crate::db::model::SledResourceVmm;
 use crate::db::model::SledState;
 use crate::db::model::SledUpdate;
-use crate::db::pagination::paginated;
+use crate::db::model::to_db_sled_policy;
 use crate::db::pagination::Paginator;
+use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
 use crate::db::queries::affinity::lookup_affinity_sleds_query;
 use crate::db::queries::affinity::lookup_anti_affinity_sleds_query;
 use crate::db::update_and_check::{UpdateAndCheck, UpdateStatus};
-use crate::db::TransactionError;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -1111,20 +1111,19 @@ impl TransitionError {
 #[cfg(test)]
 pub(in crate::db::datastore) mod test {
     use super::*;
-    use crate::db::datastore::test::{
-        sled_baseboard_for_test, sled_system_hardware_for_test,
-    };
     use crate::db::datastore::test_utils::{
-        sled_set_policy, sled_set_state, Expected, IneligibleSleds,
+        Expected, IneligibleSleds, sled_set_policy, sled_set_state,
     };
     use crate::db::lookup::LookupPath;
-    use crate::db::model::to_db_typed_uuid;
-    use crate::db::model::AffinityGroup;
-    use crate::db::model::AntiAffinityGroup;
     use crate::db::model::ByteCount;
-    use crate::db::model::Project;
     use crate::db::model::SqlU32;
+    use crate::db::model::to_db_typed_uuid;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
+    use crate::db::pub_test_utils::helpers::create_affinity_group;
+    use crate::db::pub_test_utils::helpers::create_anti_affinity_group;
+    use crate::db::pub_test_utils::helpers::create_project;
+    use crate::db::pub_test_utils::helpers::small_resource_request;
     use anyhow::{Context, Result};
     use itertools::Itertools;
     use nexus_db_model::Generation;
@@ -1132,7 +1131,6 @@ pub(in crate::db::datastore) mod test {
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::PhysicalDiskPolicy;
     use nexus_db_model::PhysicalDiskState;
-    use nexus_types::external_api::params;
     use nexus_types::identity::Asset;
     use nexus_types::identity::Resource;
     use omicron_common::api::external;
@@ -1142,9 +1140,8 @@ pub(in crate::db::datastore) mod test {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
-    use predicates::{prelude::*, BoxPredicate};
+    use predicates::{BoxPredicate, prelude::*};
     use std::collections::HashMap;
-    use std::net::{Ipv6Addr, SocketAddrV6};
 
     fn rack_id() -> Uuid {
         Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap()
@@ -1153,66 +1150,6 @@ pub(in crate::db::datastore) mod test {
     #[tokio::test]
     async fn upsert_sled_updates_hardware() {
         let logctx = dev::test_setup_log("upsert_sled_updates_hardware");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let datastore = db.datastore();
-
-        let mut sled_update = test_new_sled_update();
-        let (observed_sled, _) =
-            datastore.sled_upsert(sled_update.clone()).await.unwrap();
-        assert_eq!(
-            observed_sled.usable_hardware_threads,
-            sled_update.usable_hardware_threads
-        );
-        assert_eq!(
-            observed_sled.usable_physical_ram,
-            sled_update.usable_physical_ram
-        );
-        assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
-
-        // Modify the sizes of hardware
-        sled_update.usable_hardware_threads =
-            SqlU32::new(sled_update.usable_hardware_threads.0 + 1);
-        const MIB: u64 = 1024 * 1024;
-        sled_update.usable_physical_ram = ByteCount::from(
-            external::ByteCount::try_from(
-                sled_update.usable_physical_ram.0.to_bytes() + MIB,
-            )
-            .unwrap(),
-        );
-        sled_update.reservoir_size = ByteCount::from(
-            external::ByteCount::try_from(
-                sled_update.reservoir_size.0.to_bytes() + MIB,
-            )
-            .unwrap(),
-        );
-
-        // Bump the generation number so the insert succeeds.
-        sled_update.sled_agent_gen.0 = sled_update.sled_agent_gen.0.next();
-
-        // Test that upserting the sled propagates those changes to the DB.
-        let (observed_sled, _) = datastore
-            .sled_upsert(sled_update.clone())
-            .await
-            .expect("Could not upsert sled during test prep");
-        assert_eq!(
-            observed_sled.usable_hardware_threads,
-            sled_update.usable_hardware_threads
-        );
-        assert_eq!(
-            observed_sled.usable_physical_ram,
-            sled_update.usable_physical_ram
-        );
-        assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn upsert_sled_updates_fails_with_stale_sled_agent_gen() {
-        let logctx = dev::test_setup_log(
-            "upsert_sled_updates_fails_with_stale_sled_agent_gen",
-        );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let datastore = db.datastore();
 
@@ -1439,69 +1376,15 @@ pub(in crate::db::datastore) mod test {
 
     // Utilities to help with Affinity Testing
 
-    // Create a resource request that will probably fit on a sled.
-    fn small_resource_request() -> db::model::Resources {
-        db::model::Resources::new(
-            1,
-            // Just require the bare non-zero amount of RAM.
-            ByteCount::try_from(1024).unwrap(),
-            ByteCount::try_from(1024).unwrap(),
-        )
-    }
-
     // Create a resource request that will entirely fill a sled.
     fn large_resource_request() -> db::model::Resources {
-        let sled_resources = sled_system_hardware_for_test();
+        // NOTE: This is dependent on [`test_new_sled_update`] using the default
+        // configuration for [`SledSystemHardware`].
+        let sled_resources = SledUpdateBuilder::new().hardware().build();
         let threads = sled_resources.usable_hardware_threads;
         let rss_ram = sled_resources.usable_physical_ram;
         let reservoir_ram = sled_resources.reservoir_size;
         db::model::Resources::new(threads, rss_ram, reservoir_ram)
-    }
-
-    async fn create_project(
-        opctx: &OpContext,
-        datastore: &DataStore,
-    ) -> (authz::Project, db::model::Project) {
-        let authz_silo = opctx.authn.silo_required().unwrap();
-
-        // Create a project
-        let project = Project::new(
-            authz_silo.id(),
-            params::ProjectCreate {
-                identity: external::IdentityMetadataCreateParams {
-                    name: "project".parse().unwrap(),
-                    description: "desc".to_string(),
-                },
-            },
-        );
-        datastore.project_create(&opctx, project).await.unwrap()
-    }
-
-    async fn create_anti_affinity_group(
-        opctx: &OpContext,
-        datastore: &DataStore,
-        authz_project: &authz::Project,
-        name: &'static str,
-        policy: external::AffinityPolicy,
-    ) -> AntiAffinityGroup {
-        datastore
-            .anti_affinity_group_create(
-                &opctx,
-                &authz_project,
-                AntiAffinityGroup::new(
-                    authz_project.id(),
-                    params::AntiAffinityGroupCreate {
-                        identity: external::IdentityMetadataCreateParams {
-                            name: name.parse().unwrap(),
-                            description: "desc".to_string(),
-                        },
-                        policy,
-                        failure_domain: external::FailureDomain::Sled,
-                    },
-                ),
-            )
-            .await
-            .unwrap()
     }
 
     // This short-circuits some of the logic and checks we normally have when
@@ -1523,33 +1406,6 @@ pub(in crate::db::datastore) mod test {
         .execute_async(&*datastore.pool_connection_for_tests().await.unwrap())
         .await
         .unwrap();
-    }
-
-    async fn create_affinity_group(
-        opctx: &OpContext,
-        datastore: &DataStore,
-        authz_project: &authz::Project,
-        name: &'static str,
-        policy: external::AffinityPolicy,
-    ) -> AffinityGroup {
-        datastore
-            .affinity_group_create(
-                &opctx,
-                &authz_project,
-                AffinityGroup::new(
-                    authz_project.id(),
-                    params::AffinityGroupCreate {
-                        identity: external::IdentityMetadataCreateParams {
-                            name: name.parse().unwrap(),
-                            description: "desc".to_string(),
-                        },
-                        policy,
-                        failure_domain: external::FailureDomain::Sled,
-                    },
-                ),
-            )
-            .await
-            .unwrap()
     }
 
     // This short-circuits some of the logic and checks we normally have when
@@ -1776,7 +1632,7 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore).await;
+            create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
         let sleds = create_sleds(&datastore, SLED_COUNT).await;
@@ -1825,7 +1681,7 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore).await;
+            create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 3;
         let sleds = create_sleds(&datastore, SLED_COUNT).await;
@@ -1871,7 +1727,7 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore).await;
+            create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
         let sleds = create_sleds(&datastore, SLED_COUNT).await;
@@ -1919,7 +1775,7 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore).await;
+            create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
         let sleds = create_sleds(&datastore, SLED_COUNT).await;
@@ -1966,7 +1822,7 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore).await;
+            create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 3;
         let sleds = create_sleds(&datastore, SLED_COUNT).await;
@@ -2029,7 +1885,7 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore).await;
+            create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
         let sleds = create_sleds(&datastore, SLED_COUNT).await;
@@ -2082,7 +1938,7 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore).await;
+            create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
         let sleds = create_sleds(&datastore, SLED_COUNT).await;
@@ -2130,7 +1986,7 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore).await;
+            create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
         let sleds = create_sleds(&datastore, SLED_COUNT).await;
@@ -2189,7 +2045,7 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore).await;
+            create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 2;
         let sleds = create_sleds(&datastore, SLED_COUNT).await;
@@ -2248,7 +2104,7 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore).await;
+            create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 4;
         let sleds = create_sleds(&datastore, SLED_COUNT).await;
@@ -2316,7 +2172,7 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore).await;
+            create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 4;
         let sleds = create_sleds(&datastore, SLED_COUNT).await;
@@ -2384,7 +2240,7 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore).await;
+            create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 3;
         let sleds = create_sleds(&datastore, SLED_COUNT).await;
@@ -2443,7 +2299,7 @@ pub(in crate::db::datastore) mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _project) =
-            create_project(&opctx, &datastore).await;
+            create_project(&opctx, &datastore, "project").await;
 
         const SLED_COUNT: usize = 3;
         let sleds = create_sleds(&datastore, SLED_COUNT).await;
@@ -2824,18 +2680,7 @@ pub(in crate::db::datastore) mod test {
     // ---
 
     pub(crate) fn test_new_sled_update() -> SledUpdate {
-        let sled_id = Uuid::new_v4();
-        let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
-        let repo_depot_port = 0;
-        SledUpdate::new(
-            sled_id,
-            addr,
-            repo_depot_port,
-            sled_baseboard_for_test(),
-            sled_system_hardware_for_test(),
-            rack_id(),
-            Generation::new(),
-        )
+        SledUpdateBuilder::new().rack_id(rack_id()).build()
     }
 
     /// Initial state for state transitions.

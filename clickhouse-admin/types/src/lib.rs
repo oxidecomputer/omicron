@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::{bail, Context, Error, Result};
+use anyhow::{Context, Error, Result, bail};
 use atomicwrites::AtomicFile;
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
@@ -11,12 +11,12 @@ use derive_more::{Add, AddAssign, Display, From};
 use itertools::Itertools;
 use omicron_common::api::external::Generation;
 use schemars::{
+    JsonSchema,
     gen::SchemaGenerator,
     schema::{Schema, SchemaObject},
-    JsonSchema,
 };
 use serde::{Deserialize, Serialize};
-use slog::{info, Logger};
+use slog::{Logger, info};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs::create_dir;
@@ -365,14 +365,20 @@ impl Lgif {
                 bail!("Returned None while attempting to retrieve key");
             };
             if key != expected_key {
-                bail!("Extracted key `{key:?}` from output differs from expected key `{expected_key}`");
+                bail!(
+                    "Extracted key `{key:?}` from output differs from expected key `{expected_key}`"
+                );
             }
             let Some(val) = split.next() else {
-                bail!("Command output has a line that does not contain a key-value pair: {key:?}");
+                bail!(
+                    "Command output has a line that does not contain a key-value pair: {key:?}"
+                );
             };
             let val = match u64::from_str(val) {
                 Ok(v) => v,
-                Err(e) => bail!("Unable to convert value {val:?} into u64 for key {key}: {e}"),
+                Err(e) => bail!(
+                    "Unable to convert value {val:?} into u64 for key {key}: {e}"
+                ),
             };
             vals.push(val);
         }
@@ -504,13 +510,17 @@ impl RaftConfig {
         for line in s.lines() {
             let mut split = line.split('=');
             let Some(server) = split.next() else {
-                bail!("Returned None while attempting to retrieve raft configuration");
+                bail!(
+                    "Returned None while attempting to retrieve raft configuration"
+                );
             };
 
             // Retrieve server ID
             let mut split_server = server.split(".");
             let Some(s) = split_server.next() else {
-                bail!("Returned None while attempting to retrieve server identifier")
+                bail!(
+                    "Returned None while attempting to retrieve server identifier"
+                )
             };
             if s != "server" {
                 bail!(
@@ -551,7 +561,9 @@ impl RaftConfig {
             // Retrieve host
             let p = format!(":{}", port);
             let Some(h) = address.split(&p).next() else {
-                bail!("A host could not be extracted from {address}. Missing port {port}")
+                bail!(
+                    "A host could not be extracted from {address}. Missing port {port}"
+                )
             };
             // The ouput we get from running the clickhouse keeper-client
             // command does not add square brackets to an IPv6 address
@@ -719,10 +731,14 @@ impl KeeperConf {
                 bail!("Returned None while attempting to retrieve key");
             };
             if key != expected_key {
-                bail!("Extracted key `{key:?}` from output differs from expected key `{expected_key}`");
+                bail!(
+                    "Extracted key `{key:?}` from output differs from expected key `{expected_key}`"
+                );
             }
             let Some(val) = split.next() else {
-                bail!("Command output has a line that does not contain a key-value pair: {key:?}");
+                bail!(
+                    "Command output has a line that does not contain a key-value pair: {key:?}"
+                );
             };
             vals.push(val);
         }
@@ -1288,7 +1304,7 @@ mod tests {
     use camino_tempfile::Builder;
     use chrono::{DateTime, Utc};
     use omicron_common::api::external::Generation;
-    use slog::{o, Drain};
+    use slog::{Drain, o};
     use slog_term::{FullFormat, PlainDecorator, TestStdoutWriter};
     use std::collections::BTreeMap;
     use std::net::{Ipv4Addr, Ipv6Addr};
@@ -1520,7 +1536,7 @@ mod tests {
 
         assert_eq!(
             format!("{}", root_cause),
-           "Output from the Keeper differs to the expected output keys \
+            "Output from the Keeper differs to the expected output keys \
            Output: \"\" \
            Expected output keys: [\"first_log_idx\", \"first_log_term\", \"last_log_idx\", \"last_log_term\", \"last_committed_log_idx\", \"leader_committed_log_idx\", \"target_committed_log_idx\", \"last_snapshot_idx\"]",
         );
@@ -1568,7 +1584,7 @@ mod tests {
 
         assert_eq!(
             format!("{}", root_cause),
-           "Output is not as expected. Server identifier: 'serv.1' Expected server identifier: 'server.{SERVER_ID}'",
+            "Output is not as expected. Server identifier: 'serv.1' Expected server identifier: 'server.{SERVER_ID}'",
         );
     }
 
@@ -1583,7 +1599,7 @@ mod tests {
 
         assert_eq!(
             format!("{}", root_cause),
-           "Unable to convert value \"BOB\" into u16: invalid digit found in string",
+            "Unable to convert value \"BOB\" into u16: invalid digit found in string",
         );
     }
 
@@ -1610,7 +1626,7 @@ mod tests {
 
         assert_eq!(
             format!("{}", root_cause),
-           "Unable to convert value \"\" into u64: cannot parse integer from empty string",
+            "Unable to convert value \"\" into u64: cannot parse integer from empty string",
         );
     }
 
@@ -1655,7 +1671,7 @@ mod tests {
 
         assert_eq!(
             format!("{}", root_cause),
-           "Unable to convert value \"\" into u16: cannot parse integer from empty string",
+            "Unable to convert value \"\" into u16: cannot parse integer from empty string",
         );
     }
 
@@ -1711,7 +1727,7 @@ mod tests {
 
         assert_eq!(
             format!("{}", root_cause),
-           "Unable to convert value \"\" into u16: cannot parse integer from empty string",
+            "Unable to convert value \"\" into u16: cannot parse integer from empty string",
         );
 
         let data = "server.1=::1:21001;learner\n".as_bytes();
@@ -1737,7 +1753,7 @@ mod tests {
 
         assert_eq!(
             format!("{}", root_cause),
-           "Unable to convert value \"BOB\" into u16: invalid digit found in string",
+            "Unable to convert value \"BOB\" into u16: invalid digit found in string",
         );
     }
 
@@ -1752,7 +1768,7 @@ mod tests {
 
         assert_eq!(
             format!("{}", root_cause),
-           "Output is not as expected. Server identifier: '' Expected server identifier: 'server.{SERVER_ID}'",
+            "Output is not as expected. Server identifier: '' Expected server identifier: 'server.{SERVER_ID}'",
         );
     }
 
@@ -1805,7 +1821,10 @@ snapshot_storage_disk=LocalSnapshotDisk
         assert!(conf.server_id == KeeperId(1));
         assert!(conf.enable_ipv6);
         assert!(conf.tcp_port == 20001);
-        assert!(conf.four_letter_word_allow_list == *"conf,cons,crst,envi,ruok,srst,srvr,stat,wchs,dirs,mntr,isro,rcvr,apiv,csnp,lgif,rqld,rclc,clrs,ftfl" );
+        assert!(
+            conf.four_letter_word_allow_list
+                == *"conf,cons,crst,envi,ruok,srst,srvr,stat,wchs,dirs,mntr,isro,rcvr,apiv,csnp,lgif,rqld,rclc,clrs,ftfl"
+        );
         assert!(conf.max_requests_batch_size == 100);
         assert!(conf.min_session_timeout_ms == 10000);
         assert!(conf.session_timeout_ms == 30000);
@@ -2231,7 +2250,7 @@ snapshot_storage_disk=LocalSnapshotDisk
 
         assert_eq!(
             format!("{}", root_cause),
-           "invalid type: integer `2024`, expected a string at line 1 column 12",
+            "invalid type: integer `2024`, expected a string at line 1 column 12",
         );
     }
 }

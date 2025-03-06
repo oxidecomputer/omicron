@@ -8,15 +8,15 @@
 #![allow(clippy::needless_lifetimes)]
 #![allow(clippy::match_single_binding)]
 #![allow(clippy::clone_on_copy)]
-pub use ddm_admin_client::types;
 pub use ddm_admin_client::Error;
+pub use ddm_admin_client::types;
 
 use ddm_admin_client::Client as InnerClient;
 use either::Either;
 use oxnet::Ipv6Net;
-use sled_hardware_types::underlay::BootstrapInterface;
 use sled_hardware_types::underlay::BOOTSTRAP_MASK;
 use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
+use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
@@ -75,12 +75,28 @@ impl Client {
 
     pub async fn advertise_prefixes(
         &self,
-        prefixes: Vec<Ipv6Net>,
+        prefixes: &Vec<Ipv6Net>,
     ) -> Result<(), Error<types::Error>> {
         self.inner
-            .advertise_prefixes(&prefixes)
+            .advertise_prefixes(prefixes)
             .await
             .map(|resp| resp.into_inner())
+    }
+
+    pub async fn withdraw_prefixes(
+        &self,
+        prefixes: &Vec<Ipv6Net>,
+    ) -> Result<(), Error<types::Error>> {
+        self.inner
+            .withdraw_prefixes(prefixes)
+            .await
+            .map(|resp| resp.into_inner())
+    }
+
+    pub async fn get_originated(
+        &self,
+    ) -> Result<Vec<Ipv6Net>, Error<types::Error>> {
+        self.inner.get_originated().await.map(|resp| resp.into_inner())
     }
 
     pub async fn enable_stats(

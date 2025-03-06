@@ -9,9 +9,9 @@ use crucible_agent_client::types::{
     Snapshot,
 };
 use dropshot::{
-    endpoint, ApiDescription, ApiDescriptionRegisterError, HttpError,
+    ApiDescription, ApiDescriptionRegisterError, HttpError,
     HttpResponseDeleted, HttpResponseOk, Path as TypedPath, RequestContext,
-    TypedBody,
+    TypedBody, endpoint,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;

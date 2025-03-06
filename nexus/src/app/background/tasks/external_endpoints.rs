@@ -7,10 +7,10 @@
 //! associated with those names
 
 use crate::app::background::BackgroundTask;
-use crate::app::external_endpoints::read_all_endpoints;
 pub use crate::app::external_endpoints::ExternalEndpoints;
-use futures::future::BoxFuture;
+use crate::app::external_endpoints::read_all_endpoints;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use serde_json::json;

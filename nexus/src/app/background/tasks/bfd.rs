@@ -10,8 +10,8 @@ use crate::app::{
 };
 
 use crate::app::background::BackgroundTask;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
 use mg_admin_client::types::{BfdPeerConfig, SessionMode};

@@ -5,9 +5,9 @@
 //! HTTP entrypoint functions for simulating the crucible pantry API.
 
 use dropshot::{
-    endpoint, ApiDescription, ApiDescriptionRegisterError, HttpError,
+    ApiDescription, ApiDescriptionRegisterError, HttpError,
     HttpResponseDeleted, HttpResponseOk, HttpResponseUpdatedNoContent,
-    Path as TypedPath, RequestContext, TypedBody,
+    Path as TypedPath, RequestContext, TypedBody, endpoint,
 };
 use propolis_client::VolumeConstructionRequest;
 use schemars::JsonSchema;
@@ -365,10 +365,10 @@ async fn detach(
 
 #[cfg(test)]
 mod tests {
+    use guppy::MetadataCommand;
     use guppy::graph::ExternalSource;
     use guppy::graph::GitReq;
     use guppy::graph::PackageGraph;
-    use guppy::MetadataCommand;
     use serde_json::Value;
     use std::path::Path;
 

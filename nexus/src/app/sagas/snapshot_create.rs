@@ -89,12 +89,12 @@
 //!
 
 use super::{
+    ACTION_GENERATE_ID, ActionRegistry, NexusActionContext, NexusSaga,
+    SagaInitError,
     common_storage::{
-        call_pantry_attach_for_disk, call_pantry_detach_for_disk,
-        get_pantry_address, is_pantry_gone,
+        call_pantry_attach_for_disk, call_pantry_detach, get_pantry_address,
+        is_pantry_gone,
     },
-    ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
-    ACTION_GENERATE_ID,
 };
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
@@ -109,12 +109,12 @@ use omicron_common::{
     api::external, progenitor_operation_retry::ProgenitorOperationRetry,
 };
 use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid, VolumeUuid};
-use rand::{rngs::StdRng, RngCore, SeedableRng};
+use rand::{RngCore, SeedableRng, rngs::StdRng};
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::VmmIssueDiskSnapshotRequestBody;
 use sled_agent_client::CrucibleOpts;
 use sled_agent_client::VolumeConstructionRequest;
+use sled_agent_client::types::VmmIssueDiskSnapshotRequestBody;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -1152,7 +1152,7 @@ async fn ssc_call_pantry_attach_for_disk_undo(
             pantry_address
         );
 
-        match call_pantry_detach_for_disk(
+        match call_pantry_detach(
             sagactx.user_data().nexus(),
             &log,
             params.disk_id,
@@ -1168,7 +1168,7 @@ async fn ssc_call_pantry_attach_for_disk_undo(
                     params.disk_id,
                     pantry_address,
                     InlineErrorChain::new(&err)
-                ))
+                ));
             }
         }
     } else {
@@ -1278,7 +1278,7 @@ async fn ssc_call_pantry_detach_for_disk(
             params.disk_id,
             pantry_address
         );
-        call_pantry_detach_for_disk(
+        call_pantry_detach(
             sagactx.user_data().nexus(),
             &log,
             params.disk_id,
@@ -1771,8 +1771,8 @@ mod test {
     };
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::context::OpContext;
-    use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
     use nexus_db_queries::db::DataStore;
+    use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
     use nexus_test_utils::resource_helpers::create_default_ip_pool;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
@@ -2331,15 +2331,17 @@ mod test {
                                 .await
                                 .expect("Failed to look up created disk");
 
-                        assert!(nexus
-                            .datastore()
-                            .disk_update_runtime(
-                                &opctx,
-                                &authz_disk,
-                                &db_disk.runtime().detach(),
-                            )
-                            .await
-                            .expect("failed to detach disk"));
+                        assert!(
+                            nexus
+                                .datastore()
+                                .disk_update_runtime(
+                                    &opctx,
+                                    &authz_disk,
+                                    &db_disk.runtime().detach(),
+                                )
+                                .await
+                                .expect("failed to detach disk")
+                        );
 
                         // Stop and destroy the test instance to satisfy the
                         // clean-slate check.
@@ -2465,15 +2467,17 @@ mod test {
                 .await
                 .expect("Failed to look up created disk");
 
-        assert!(nexus
-            .datastore()
-            .disk_update_runtime(
-                &opctx,
-                &authz_disk,
-                &db_disk.runtime().detach(),
-            )
-            .await
-            .expect("failed to detach disk"));
+        assert!(
+            nexus
+                .datastore()
+                .disk_update_runtime(
+                    &opctx,
+                    &authz_disk,
+                    &db_disk.runtime().detach(),
+                )
+                .await
+                .expect("failed to detach disk")
+        );
 
         // Rerun the saga
         let params = new_test_params(
@@ -2550,15 +2554,17 @@ mod test {
                 .await
                 .expect("Failed to look up created disk");
 
-        assert!(nexus
-            .datastore()
-            .disk_update_runtime(
-                &opctx,
-                &authz_disk,
-                &db_disk.runtime().detach(),
-            )
-            .await
-            .expect("failed to detach disk"));
+        assert!(
+            nexus
+                .datastore()
+                .disk_update_runtime(
+                    &opctx,
+                    &authz_disk,
+                    &db_disk.runtime().detach(),
+                )
+                .await
+                .expect("failed to detach disk")
+        );
 
         // Actually run the saga. This should fail.
         let output = runnable_saga

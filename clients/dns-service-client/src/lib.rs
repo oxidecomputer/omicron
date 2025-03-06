@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 progenitor::generate_api!(
-    spec = "../../openapi/dns-server.json",
+    spec = "../../openapi/dns-server/dns-server-latest.json",
     inner_type = slog::Logger,
     derives = [schemars::JsonSchema, Clone, Eq, PartialEq],
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {

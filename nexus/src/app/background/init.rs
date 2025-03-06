@@ -87,6 +87,8 @@
 //! It's not foolproof but hopefully these mechanisms will catch the easy
 //! mistakes.
 
+use super::Activator;
+use super::Driver;
 use super::driver::TaskDefinition;
 use super::tasks::abandoned_vmm_reaper;
 use super::tasks::bfd;
@@ -123,11 +125,9 @@ use super::tasks::sync_switch_configuration::SwitchPortSettingsManager;
 use super::tasks::tuf_artifact_replication;
 use super::tasks::v2p_mappings::V2PManager;
 use super::tasks::vpc_routes;
-use super::Activator;
-use super::Driver;
+use crate::Nexus;
 use crate::app::oximeter::PRODUCER_LEASE_DURATION;
 use crate::app::saga::StartSaga;
-use crate::Nexus;
 use nexus_config::BackgroundTaskConfig;
 use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
@@ -1030,8 +1030,8 @@ pub mod test {
     use internal_dns_types::names::ServiceName;
     use nexus_db_model::DnsGroup;
     use nexus_db_queries::context::OpContext;
-    use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
     use nexus_db_queries::db::DataStore;
+    use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::internal_api::params as nexus_params;
     use nexus_types::internal_api::params::DnsRecord;

@@ -2,15 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
+use clickhouse_admin_server_client::Client as ClickhouseServerClient;
 use clickhouse_admin_server_client::types::{
     SystemTimeSeries, TimestampFormat,
 };
-use clickhouse_admin_server_client::Client as ClickhouseServerClient;
-use futures::stream::FuturesOrdered;
 use futures::StreamExt;
+use futures::stream::FuturesOrdered;
 use omicron_common::FileKv;
 use ratatui::crossterm::event::{self, Event, KeyCode};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -18,7 +18,7 @@ use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::Span;
 use ratatui::widgets::Paragraph;
 use ratatui::{DefaultTerminal, Frame};
-use slog::{o, Drain, Logger};
+use slog::{Drain, Logger, o};
 use slog_async::Async;
 use slog_term::{FullFormat, PlainDecorator};
 use std::collections::BTreeMap;

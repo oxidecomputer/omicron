@@ -7,8 +7,8 @@
 use super::actor::AnyActor;
 use super::roles::RoleSet;
 use crate::authn;
-use crate::authz::oso_generic;
 use crate::authz::Action;
+use crate::authz::oso_generic;
 use crate::context::OpContext;
 use crate::storage::Storage;
 use futures::future::BoxFuture;

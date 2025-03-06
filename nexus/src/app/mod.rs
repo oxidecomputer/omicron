@@ -6,12 +6,12 @@
 
 use self::external_endpoints::NexusCertResolver;
 use self::saga::SagaExecutor;
+use crate::DropshotServer;
 use crate::app::background::BackgroundTasksData;
 use crate::app::background::SagaRecoveryHelpers;
-use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
-use crate::DropshotServer;
+use crate::populate::populate_start;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
 use internal_dns_types::names::ServiceName;
@@ -31,8 +31,8 @@ use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter_producer::Server as ProducerServer;
-use sagas::common_storage::make_pantry_connection_pool;
 use sagas::common_storage::PooledPantryClient;
+use sagas::common_storage::make_pantry_connection_pool;
 use slog::Logger;
 use std::collections::HashMap;
 use std::net::SocketAddrV6;
@@ -430,7 +430,7 @@ impl Nexus {
             None => {
                 let native_resolver =
                     qorb_resolver.for_service(ServiceName::ClickhouseNative);
-                oximeter_db::Client::new_with_pool(native_resolver, &log)
+                oximeter_db::Client::new_with_resolver(native_resolver, &log)
             }
             Some(address) => oximeter_db::Client::new(*address, &log),
         };
@@ -614,7 +614,7 @@ impl Nexus {
                 PopulateStatus::NotDone => (),
                 PopulateStatus::Done => return Ok(()),
                 PopulateStatus::Failed(error) => {
-                    return Err(anyhow!(error.clone()))
+                    return Err(anyhow!(error.clone()));
                 }
             };
         }
@@ -1052,6 +1052,22 @@ impl Nexus {
             ))
         })
     }
+
+    /// A `service` with `address` is considered gone if it is not present in a
+    /// DNS lookup of all addresses for that service.
+    async fn is_internal_service_gone(
+        &self,
+        service: ServiceName,
+        address: SocketAddrV6,
+    ) -> Result<bool, Error> {
+        match self.resolver().lookup_all_socket_v6(service).await {
+            Ok(entries) => Ok(!entries.contains(&address)),
+
+            Err(err) => {
+                return Err(Error::internal_error(&format!("{err}")));
+            }
+        }
+    }
 }
 
 /// For unimplemented endpoints, indicates whether the resource identified
@@ -1193,7 +1209,10 @@ async fn map_switch_zone_addrs(
                 switch_zone_addrs.insert(SwitchLocation::Switch1, addr);
             }
             _ => {
-                warn!(log, "Expected a slot number of 0 or 1, found {switch_slot:#?} when querying {addr:#?}");
+                warn!(
+                    log,
+                    "Expected a slot number of 0 or 1, found {switch_slot:#?} when querying {addr:#?}"
+                );
             }
         };
     }

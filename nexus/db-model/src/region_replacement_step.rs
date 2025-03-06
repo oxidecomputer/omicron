@@ -3,9 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
+use crate::SqlU16;
 use crate::ipv6;
 use crate::schema::region_replacement_step;
-use crate::SqlU16;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddrV6;

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use end_to_end_tests::helpers::ctx::{ClientParams, Context};
 use end_to_end_tests::helpers::{generate_name, get_system_ip_pool};
-use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
+use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use oxide_client::types::{
     ByteCount, DeviceAccessTokenRequest, DeviceAuthRequest, DeviceAuthVerify,
     DiskCreate, DiskSource, IpPoolCreate, IpPoolLinkSilo, IpRange, Ipv4Range,
@@ -11,7 +11,7 @@ use oxide_client::{
     ClientDisksExt, ClientHiddenExt, ClientProjectsExt, ClientSystemIpPoolsExt,
     ClientSystemSilosExt,
 };
-use serde::{de::DeserializeOwned, Deserialize};
+use serde::{Deserialize, de::DeserializeOwned};
 use std::time::Duration;
 use uuid::Uuid;
 
