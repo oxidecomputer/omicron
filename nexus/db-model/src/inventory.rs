@@ -921,9 +921,9 @@ pub struct InvNvmeDiskFirmware {
     inv_collection_id: DbTypedUuid<CollectionKind>,
     sled_id: DbTypedUuid<SledKind>,
     slot: i64,
+    number_of_slots: SqlU8,
     active_slot: SqlU8,
     next_active_slot: Option<SqlU8>,
-    number_of_slots: SqlU8,
     slot1_is_read_only: bool,
     slot_firmware_versions: Vec<Option<String>>,
 }
