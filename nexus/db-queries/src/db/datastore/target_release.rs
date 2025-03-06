@@ -129,40 +129,47 @@ mod test {
 
         // There should always be a target release.
         // This is ensured by the schema migration.
-        let target_release = datastore
+        let initial_target_release = datastore
             .target_release_get_current(opctx)
             .await
             .expect("should be a target release");
-        assert_eq!(target_release.generation, Generation(1.into()));
-        assert!(target_release.time_requested < Utc::now());
+        assert_eq!(initial_target_release.generation, Generation(1.into()));
+        assert!(initial_target_release.time_requested < Utc::now());
         assert_eq!(
-            target_release.release_source,
+            initial_target_release.release_source,
             TargetReleaseSource::Unspecified
         );
-        assert!(target_release.tuf_repo_id.is_none());
+        assert!(initial_target_release.tuf_repo_id.is_none());
 
-        // We should be able to set a new generation just like the first,
-        // with some (very small) fuzz allowed in the timestamp reported
-        // by the database.
-        let initial_target_release =
-            TargetRelease::new_unspecified(&target_release);
+        // We should be able to set a new generation just like the first.
+        // We allow some slack in the timestamp comparison because the
+        // database only stores timestamps with μsec precision.
+        let target_release =
+            TargetRelease::new_unspecified(&initial_target_release);
         let target_release = datastore
-            .target_release_insert(opctx, initial_target_release.clone())
+            .target_release_insert(opctx, target_release)
             .await
             .unwrap();
-        assert_eq!(
-            target_release.generation,
-            initial_target_release.generation
-        );
+        assert_eq!(target_release.generation, Generation(2.into()));
         assert!(
-            (target_release.time_requested
-                - initial_target_release.time_requested)
+            (target_release.time_requested - target_release.time_requested)
                 .abs()
                 < TimeDelta::new(0, 1_000).expect("1 μsec")
         );
         assert!(target_release.tuf_repo_id.is_none());
 
-        // Inserting a new "unspecified" target should be fine.
+        // Trying to reuse a generation should fail.
+        assert!(
+            datastore
+                .target_release_insert(
+                    opctx,
+                    TargetRelease::new_unspecified(&initial_target_release),
+                )
+                .await
+                .is_err()
+        );
+
+        // But inserting a new unspecified target should be fine.
         let target_release = datastore
             .target_release_insert(
                 opctx,
@@ -170,6 +177,7 @@ mod test {
             )
             .await
             .unwrap();
+        assert_eq!(target_release.generation, Generation(3.into()));
 
         // Now add a new TUF repo and use it as the source.
         let version = SemverVersion::new(0, 0, 1);
