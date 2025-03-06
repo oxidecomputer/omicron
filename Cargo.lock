@@ -6040,6 +6040,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-mgs-updates"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "gateway-client",
+ "gateway-messages",
+ "gateway-test-utils",
+ "hubtools",
+ "omicron-workspace-hack",
+ "rand 0.8.5",
+ "reqwest",
+ "slog",
+ "sp-sim",
+ "thiserror 1.0.69",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-networking"
 version = "0.1.0"
 dependencies = [
