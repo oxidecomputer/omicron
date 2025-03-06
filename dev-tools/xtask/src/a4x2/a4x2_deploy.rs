@@ -513,12 +513,40 @@ Virtual Sled IP addresses:
 fn get_node_ip(sh: &Shell, env: &Environment, node: &str) -> Result<String> {
     let _popdir = sh.push_dir(&env.a4x2_dir);
 
+    // We are parsing output that looks like this:
+    // > pfexec ./a4x2 exec g0 ipadm
+    // ADDROBJ           TYPE     STATE        ADDR
+    // lo0/v4            static   ok           127.0.0.1/8
+    // vioif3/v4         dhcp     ok           172.16.254.203/24
+    // lo0/v6            static   ok           ::1/128
+    // vioif1/ll         addrconf ok           fe80::aa40:25ff:fe00:1%vioif1/10
+    // vioif2/ll         addrconf ok           fe80::aa40:25ff:fe00:2%vioif2/10
+    // bootstrap0/ll     addrconf ok           fe80::8:20ff:fe05:1288%bootstrap0/10
+    // bootstrap0/bootstrap6 static ok         fdb0:a840:2500:1::1/64
+    // underlay0/ll      addrconf ok           fe80::8:20ff:fe02:9bb3%underlay0/10
+    // underlay0/sled6   static   ok           fd00:1122:3344:101::1/64
+    // underlay0/internaldns0 static ok        fd00:1122:3344:1::2/64
+    //
+    // We are trying to extract the IPv4 address for the DHCP-allocated IP
+    // address, in this case "vioif3/v4". This is the IP address on the user's
+    // local LAN, accessible from the machine running a4x2, and potentially
+    // other devices on the same local network.
     let ipadm = cmd!(sh, "pfexec ./a4x2 exec {node} ipadm").read()?;
-
     for ln in ipadm.lines() {
+        // Match the dhcp line
         if ln.contains("dhcp") {
-            let ipv4 = ln.split_whitespace().nth(3).ok_or(anyhow!("get_host_ip: could not extract IP for node {node} from line {ln}"))?;
-            let ipv4 = ipv4.strip_suffix("/24").ok_or(anyhow!("get_host_ip: could not extract IP for node {node} from line {ln}"))?;
+            // Take the "ADDR" column
+            let ipv4 = ln.split_whitespace()
+                .nth(3)
+                .with_context(|| format!("get_host_ip: could not extract IP for node {node} from line {ln}"))?;
+
+            // Strip the subnet suffix by splitting on the "/" and taking
+            // everything to the left of it.
+            let ipv4 = ipv4.split("/")
+                .nth(0)
+                .with_context(|| format!("get_host_ip: could not extract IP for node {node} from line {ln}"))?;
+
+            // Return the address since we have now matched the line
             return Ok(ipv4.to_string());
         }
     }
