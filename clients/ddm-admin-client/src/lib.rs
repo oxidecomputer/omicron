@@ -75,12 +75,28 @@ impl Client {
 
     pub async fn advertise_prefixes(
         &self,
-        prefixes: Vec<Ipv6Net>,
+        prefixes: &Vec<Ipv6Net>,
     ) -> Result<(), Error<types::Error>> {
         self.inner
-            .advertise_prefixes(&prefixes)
+            .advertise_prefixes(prefixes)
             .await
             .map(|resp| resp.into_inner())
+    }
+
+    pub async fn withdraw_prefixes(
+        &self,
+        prefixes: &Vec<Ipv6Net>,
+    ) -> Result<(), Error<types::Error>> {
+        self.inner
+            .withdraw_prefixes(prefixes)
+            .await
+            .map(|resp| resp.into_inner())
+    }
+
+    pub async fn get_originated(
+        &self,
+    ) -> Result<Vec<Ipv6Net>, Error<types::Error>> {
+        self.inner.get_originated().await.map(|resp| resp.into_inner())
     }
 
     pub async fn enable_stats(

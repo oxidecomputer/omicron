@@ -130,6 +130,7 @@ use sled_hardware_types::underlay::BootstrapInterface;
 use sled_storage::dataset::CONFIG_DATASET;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::{BTreeMap, BTreeSet, btree_map};
 use std::collections::{HashMap, HashSet};
 use std::iter;
@@ -175,6 +176,18 @@ pub enum SetupServiceError {
 
     #[error("Error initializing sled via sled-agent: {0}")]
     SledInitialization(String),
+
+    #[error(
+        "Permanent errors initializing disks: {}",
+        .permanent_errors.join(", ")
+    )]
+    DiskInitializationPermanent { permanent_errors: Vec<String> },
+
+    #[error(
+        "Transient errors initializing disks: {}",
+        .transient_errors.join(", ")
+    )]
+    DiskInitializationTransient { transient_errors: Vec<String> },
 
     #[error("Error resetting sled: {0}")]
     SledReset(String),
@@ -390,8 +403,61 @@ impl ServiceInner {
             let result = client
                 .omicron_physical_disks_put(&storage_config.clone())
                 .await;
-            let Err(error) = result else {
-                return Ok(());
+            let error = match result {
+                Ok(response) => {
+                    // An HTTP OK may contain _partial_ success: check whether
+                    // we got any individual disk failures, and split those out
+                    // into transient/permanent cases based on whether they
+                    // indicate we should retry.
+                    let disk_errors =
+                        response.into_inner().status.into_iter().filter_map(
+                            |status| {
+                                status.err.map(|err| (status.identity, err))
+                            },
+                        );
+                    let mut transient_errors = Vec::new();
+                    let mut permanent_errors = Vec::new();
+                    for (identity, error) in disk_errors {
+                        if error.retryable() {
+                            transient_errors.push(format!(
+                                "Retryable error initializing disk \
+                                 {} / {} / {}: {}",
+                                identity.vendor,
+                                identity.model,
+                                identity.serial,
+                                InlineErrorChain::new(&error)
+                            ));
+                        } else {
+                            permanent_errors.push(format!(
+                                "Non-retryable error initializing disk \
+                                 {} / {} / {}: {}",
+                                identity.vendor,
+                                identity.model,
+                                identity.serial,
+                                InlineErrorChain::new(&error)
+                            ));
+                        }
+                    }
+                    if !permanent_errors.is_empty() {
+                        return Err(BackoffError::permanent(
+                            SetupServiceError::DiskInitializationPermanent {
+                                permanent_errors,
+                            },
+                        ));
+                    }
+                    if !transient_errors.is_empty() {
+                        return Err(BackoffError::transient(
+                            SetupServiceError::DiskInitializationTransient {
+                                transient_errors,
+                            },
+                        ));
+                    }
+
+                    // No individual disk errors reported; all disks were
+                    // initialized.
+                    return Ok(());
+                }
+                Err(error) => error,
             };
 
             if let sled_agent_client::Error::ErrorResponse(response) = &error {

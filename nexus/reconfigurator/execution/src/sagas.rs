@@ -4,7 +4,6 @@
 
 //! Re-assign sagas from expunged Nexus zones
 
-use crate::omicron_zones::DeployZonesDone;
 use nexus_db_model::SecId;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -20,7 +19,6 @@ pub(crate) async fn reassign_sagas_from_expunged(
     datastore: &DataStore,
     blueprint: &Blueprint,
     nexus_id: SecId,
-    _deploy_zones_done: &DeployZonesDone,
 ) -> Result<bool, Error> {
     let log = &opctx.log;
 
@@ -36,12 +34,8 @@ pub(crate) async fn reassign_sagas_from_expunged(
     // instances running at the same time.  At that point, we will need to make
     // sure that we only ever try to assign ourselves sagas from other Nexus
     // instances that we know are running the same version as ourselves.
-    //
-    // TODO-correctness Once the planner fills in `ready_for_cleanup`, we should
-    // filter on that here and stop requiring `deploy_zones_done`. This is
-    // necessary to fix omicron#6999.
     let nexus_zone_ids: Vec<_> = blueprint
-        .all_omicron_zones(BlueprintZoneDisposition::is_expunged)
+        .all_omicron_zones(BlueprintZoneDisposition::is_ready_for_cleanup)
         .filter_map(|(_, z)| {
             z.zone_type
                 .is_nexus()

@@ -270,10 +270,13 @@ impl Blueprint {
     }
 
     /// Iterate over the [`BlueprintDatasetsConfig`] instances in the blueprint.
-    pub fn all_omicron_datasets(
+    pub fn all_omicron_datasets<F>(
         &self,
-        filter: BlueprintDatasetFilter,
-    ) -> impl Iterator<Item = (SledUuid, &BlueprintDatasetConfig)> {
+        mut filter: F,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintDatasetConfig)>
+    where
+        F: FnMut(BlueprintDatasetDisposition) -> bool,
+    {
         self.sleds
             .iter()
             .flat_map(move |(sled_id, config)| {
@@ -283,7 +286,7 @@ impl Blueprint {
                     .iter()
                     .map(|dataset| (*sled_id, dataset))
             })
-            .filter(move |(_, d)| d.disposition.matches(filter))
+            .filter(move |(_, d)| filter(d.disposition))
     }
 
     /// Iterate over the ids of all sleds in the blueprint
@@ -626,9 +629,7 @@ impl BlueprintZonesConfig {
     /// Returns true if all zones in the blueprint have a disposition of
     /// `Expunged`, false otherwise.
     pub fn are_all_zones_expunged(&self) -> bool {
-        self.zones.iter().all(|c| {
-            matches!(c.disposition, BlueprintZoneDisposition::Expunged { .. })
-        })
+        self.zones.iter().all(|c| c.disposition.is_expunged())
     }
 }
 
@@ -821,6 +822,12 @@ impl BlueprintZoneDisposition {
             } => !ready_for_cleanup,
         }
     }
+
+    /// Returns true if `self` indicates the zone is expunged and ready for
+    /// cleanup.
+    pub fn is_ready_for_cleanup(self) -> bool {
+        matches!(self, Self::Expunged { ready_for_cleanup: true, .. })
+    }
 }
 
 impl fmt::Display for BlueprintZoneDisposition {
@@ -920,22 +927,6 @@ pub struct PendingMgsUpdate {
     /// which artifact to apply to this device
     /// (implies which component is being updated)
     artifact_hash_id: ArtifactHashId,
-}
-
-/// Filters that apply to blueprint datasets.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub enum BlueprintDatasetFilter {
-    // ---
-    // Prefer to keep this list in alphabetical order.
-    // ---
-    /// All datasets
-    All,
-
-    /// Datasets that have been expunged.
-    Expunged,
-
-    /// Datasets that are in-service.
-    InService,
 }
 
 /// The desired state of an Omicron-managed physical disk in a blueprint.
@@ -1088,6 +1079,12 @@ impl BlueprintPhysicalDisksConfig {
                 .collect(),
         }
     }
+
+    /// Returns true if all disks in the blueprint have a disposition of
+    /// `Expunged`, false otherwise.
+    pub fn are_all_disks_expunged(&self) -> bool {
+        self.disks.iter().all(|c| c.disposition.is_expunged())
+    }
 }
 
 impl IdMappable for BlueprintPhysicalDiskConfig {
@@ -1149,8 +1146,7 @@ impl BlueprintDatasetsConfig {
                 .datasets
                 .into_iter()
                 .filter_map(|d| {
-                    if d.disposition.matches(BlueprintDatasetFilter::InService)
-                    {
+                    if d.disposition.is_in_service() {
                         Some((d.id, d.into()))
                     } else {
                         None
@@ -1158,6 +1154,12 @@ impl BlueprintDatasetsConfig {
                 })
                 .collect(),
         }
+    }
+
+    /// Returns true if all datasets in the blueprint have a disposition of
+    /// `Expunged`, false otherwise.
+    pub fn are_all_datasets_expunged(&self) -> bool {
+        self.datasets.iter().all(|c| c.disposition.is_expunged())
     }
 }
 
@@ -1197,19 +1199,29 @@ pub enum BlueprintDatasetDisposition {
 }
 
 impl BlueprintDatasetDisposition {
-    pub fn matches(self, filter: BlueprintDatasetFilter) -> bool {
-        match self {
-            Self::InService => match filter {
-                BlueprintDatasetFilter::All => true,
-                BlueprintDatasetFilter::Expunged => false,
-                BlueprintDatasetFilter::InService => true,
-            },
-            Self::Expunged => match filter {
-                BlueprintDatasetFilter::All => true,
-                BlueprintDatasetFilter::Expunged => true,
-                BlueprintDatasetFilter::InService => false,
-            },
-        }
+    /// Always returns true.
+    ///
+    /// This is intended for use with methods that take a filtering
+    /// closure operating on a `BlueprintDatasetDisposition` (e.g.,
+    /// `Blueprint::all_omicron_datasets()`), allowing callers to make it clear
+    /// they accept any disposition via
+    ///
+    /// ```rust,ignore
+    /// blueprint.all_omicron_datasets(BlueprintDatasetDisposition::any)
+    /// ```
+    pub fn any(self) -> bool {
+        true
+    }
+
+    /// Returns true if `self` is `BlueprintDatasetDisposition::InService`
+    pub fn is_in_service(self) -> bool {
+        matches!(self, Self::InService)
+    }
+
+    /// Returns true if `self` is `BlueprintDatasetDisposition::Expunged`,
+    /// regardless of any details contained within that variant.
+    pub fn is_expunged(self) -> bool {
+        matches!(self, Self::Expunged)
     }
 }
 

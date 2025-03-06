@@ -168,6 +168,7 @@ mod test {
     use httptest::Expectation;
     use httptest::matchers::{not, request};
     use httptest::responders::status_code;
+    use itertools::Itertools as _;
     use nexus_db_model::{
         ByteCount, SledBaseboard, SledSystemHardware, SledUpdate, Zpool,
     };
@@ -178,7 +179,7 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::execution::{
         EventBuffer, EventReport, ExecutionComponent, ExecutionStepId,
-        ReconfiguratorExecutionSpec, StepInfo,
+        StepOutcome, StepStatus,
     };
     use nexus_types::deployment::{
         Blueprint, BlueprintDatasetsConfig, BlueprintPhysicalDisksConfig,
@@ -196,13 +197,12 @@ mod test {
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use serde::Deserialize;
     use serde_json::json;
     use std::collections::BTreeMap;
     use std::net::SocketAddr;
     use std::sync::Arc;
     use tokio::sync::watch;
-    use update_engine::{NestedError, TerminalKind};
+    use update_engine::{CompletionReason, NestedError, TerminalKind};
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -539,26 +539,51 @@ mod test {
                 .respond_with(status_code(500)),
         );
 
-        #[derive(Deserialize)]
-        struct ErrorResult {
-            execution_error: NestedError,
-        }
-
         let mut value = task.activate(&opctx).await;
         let event_buffer = extract_event_buffer(&mut value);
 
-        println!("after failure: {:?}", value);
-        let result: ErrorResult = serde_json::from_value(value).unwrap();
-        assert_eq!(
-            result.execution_error.message(),
-            "step failed: Deploy Omicron zones"
-        );
+        let ensure_zones_outcome = {
+            let ensure_id =
+                serde_json::to_value(ExecutionStepId::Ensure).unwrap();
+            let zones_component =
+                serde_json::to_value(ExecutionComponent::OmicronZones).unwrap();
+            match event_buffer
+                .iter_steps_recursive()
+                .filter_map(|(_, step)| {
+                    let info = step.step_info();
+                    if info.id == ensure_id && info.component == zones_component
+                    {
+                        match step.step_status() {
+                            StepStatus::Completed {
+                                reason: CompletionReason::StepCompleted(info),
+                            } => Some(&info.outcome),
+                            status => {
+                                panic!("unexpected step status: {status:?}")
+                            }
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .exactly_one()
+            {
+                Ok(outcome) => outcome,
+                Err(outcomes) => panic!(
+                    "expected exactly one step outcome, but found {}",
+                    outcomes.count()
+                ),
+            }
+        };
 
-        assert_event_buffer_failed_at(
-            &event_buffer,
-            ExecutionComponent::OmicronZones,
-            ExecutionStepId::Ensure,
-        );
+        match ensure_zones_outcome {
+            StepOutcome::Warning { message, .. } => {
+                assert!(
+                    message.contains("Failed to put OmicronZonesConfig"),
+                    "unexpected warning message: {message}"
+                );
+            }
+            other => panic!("unexpected zones outcome: {other:?}"),
+        }
 
         s1.verify_and_clear();
         s2.verify_and_clear();
@@ -596,40 +621,6 @@ mod test {
             terminal_info.kind,
             TerminalKind::Completed,
             "execution should have completed successfully"
-        );
-    }
-
-    fn assert_event_buffer_failed_at(
-        event_buffer: &EventBuffer,
-        component: ExecutionComponent,
-        step_id: ExecutionStepId,
-    ) {
-        let execution_status = event_buffer
-            .root_execution_summary()
-            .expect("event buffer has root execution summary")
-            .execution_status;
-        let terminal_info =
-            execution_status.terminal_info().unwrap_or_else(|| {
-                panic!(
-                    "execution status has terminal info: {:?}",
-                    execution_status
-                );
-            });
-        assert_eq!(
-            terminal_info.kind,
-            TerminalKind::Failed,
-            "execution should have failed"
-        );
-        let step =
-            event_buffer.get(&terminal_info.step_key).expect("step exists");
-        let step_info = StepInfo::<ReconfiguratorExecutionSpec>::from_generic(
-            step.step_info().clone(),
-        )
-        .expect("step info follows ReconfiguratorExecutionSpec");
-        assert_eq!(
-            (step_info.component, step_info.id),
-            (component, step_id),
-            "component and step id matches expected"
         );
     }
 }

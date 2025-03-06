@@ -26,7 +26,6 @@ use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetDisposition;
-use nexus_types::deployment::BlueprintDatasetFilter;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
@@ -894,16 +893,13 @@ impl<'a> BlueprintBuilder<'a> {
                 }
             }
         }
-        for dataset in editor.datasets(BlueprintDatasetFilter::All) {
-            match dataset.disposition {
-                BlueprintDatasetDisposition::Expunged => (),
-                BlueprintDatasetDisposition::InService => {
-                    return Err(Error::Planner(anyhow!(
-                        "expunged all disks but a dataset \
-                         is still in service: {dataset:?}"
-                    )));
-                }
-            }
+        if let Some(dataset) =
+            editor.datasets(BlueprintDatasetDisposition::is_in_service).next()
+        {
+            return Err(Error::Planner(anyhow!(
+                "expunged all disks but a dataset \
+                 is still in service: {dataset:?}"
+            )));
         }
         for zone_id in zones_ready_for_cleanup {
             editor
@@ -1754,6 +1750,25 @@ impl<'a> BlueprintBuilder<'a> {
             .map_err(|err| Error::SledEditError { sled_id, err })?;
         let final_counts = editor.edit_counts();
 
+        Ok(final_counts.difference_since(initial_counts))
+    }
+
+    pub fn sled_set_zone_source(
+        &mut self,
+        sled_id: SledUuid,
+        zone_id: OmicronZoneUuid,
+        source: BlueprintZoneImageSource,
+    ) -> Result<SledEditCounts, Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to change image of zone on unknown sled {sled_id}"
+            ))
+        })?;
+        let initial_counts = editor.edit_counts();
+        editor
+            .set_zone_image_source(&zone_id, source)
+            .map_err(|err| Error::SledEditError { sled_id, err })?;
+        let final_counts = editor.edit_counts();
         Ok(final_counts.difference_since(initial_counts))
     }
 

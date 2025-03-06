@@ -333,14 +333,11 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::db::datastore::test::{
-        sled_baseboard_for_test, sled_system_hardware_for_test,
-    };
     use crate::db::lookup::LookupPath;
-    use crate::db::model::{PhysicalDiskKind, Sled, SledUpdate};
+    use crate::db::model::{PhysicalDiskKind, Sled};
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use dropshot::PaginationOrder;
-    use nexus_db_model::Generation;
     use nexus_sled_agent_shared::inventory::{
         Baseboard, Inventory, InventoryDisk, OmicronZonesConfig, SledRole,
     };
@@ -348,23 +345,10 @@ mod test {
     use omicron_common::api::external::ByteCount;
     use omicron_common::disk::{DiskIdentity, DiskVariant};
     use omicron_test_utils::dev;
-    use std::net::{Ipv6Addr, SocketAddrV6};
     use std::num::NonZeroU32;
 
     async fn create_test_sled(db: &DataStore) -> Sled {
-        let sled_id = Uuid::new_v4();
-        let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
-        let repo_depot_port = 0;
-        let rack_id = Uuid::new_v4();
-        let sled_update = SledUpdate::new(
-            sled_id,
-            addr,
-            repo_depot_port,
-            sled_baseboard_for_test(),
-            sled_system_hardware_for_test(),
-            rack_id,
-            Generation::new(),
-        );
+        let sled_update = SledUpdateBuilder::new().build();
         let (sled, _) = db
             .sled_upsert(sled_update)
             .await

@@ -512,7 +512,7 @@ pub enum DiskManagementError {
 }
 
 impl DiskManagementError {
-    fn retryable(&self) -> bool {
+    pub fn retryable(&self) -> bool {
         match self {
             DiskManagementError::KeyManager(_) => true,
             _ => false,

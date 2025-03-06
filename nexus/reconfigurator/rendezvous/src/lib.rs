@@ -11,7 +11,7 @@
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintDatasetFilter;
+use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::internal_api::background::BlueprintRendezvousStats;
 use nexus_types::inventory::Collection;
 
@@ -35,7 +35,7 @@ pub async fn reconcile_blueprint_rendezvous_tables(
         datastore,
         blueprint.id,
         blueprint
-            .all_omicron_datasets(BlueprintDatasetFilter::All)
+            .all_omicron_datasets(BlueprintDatasetDisposition::any)
             .map(|(_sled_id, dataset)| dataset),
         &inventory_dataset_ids,
     )
@@ -45,7 +45,7 @@ pub async fn reconcile_blueprint_rendezvous_tables(
         opctx,
         datastore,
         blueprint
-            .all_omicron_datasets(BlueprintDatasetFilter::All)
+            .all_omicron_datasets(BlueprintDatasetDisposition::any)
             .map(|(_sled_id, dataset)| dataset),
         &inventory_dataset_ids,
     )

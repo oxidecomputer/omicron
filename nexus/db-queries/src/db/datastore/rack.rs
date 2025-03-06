@@ -136,14 +136,18 @@ impl From<RackInitError> for Error {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             },
-            RackInitError::PhysicalDiskInsert(err) => err,
-            RackInitError::ZpoolInsert(err) => err,
-            RackInitError::BlueprintInsert(err) => Error::internal_error(
-                &format!("failed to insert Blueprint: {:#}", err),
-            ),
-            RackInitError::BlueprintTargetSet(err) => Error::internal_error(
-                &format!("failed to insert set target Blueprint: {:#}", err),
-            ),
+            RackInitError::PhysicalDiskInsert(err) => {
+                err.internal_context("failed to insert physical disk")
+            }
+            RackInitError::ZpoolInsert(err) => {
+                err.internal_context("failed to insert zpool")
+            }
+            RackInitError::BlueprintInsert(err) => {
+                err.internal_context("failed to insert Blueprint")
+            }
+            RackInitError::BlueprintTargetSet(err) => {
+                err.internal_context("failed to insert set target Blueprint")
+            }
             RackInitError::RackUpdate { err, rack_id } => {
                 public_error_from_diesel(
                     err,
@@ -153,17 +157,16 @@ impl From<RackInitError> for Error {
                     ),
                 )
             }
-            RackInitError::DnsSerialization(err) => Error::internal_error(
-                &format!("failed to serialize initial DNS records: {:#}", err),
-            ),
-            RackInitError::Silo(err) => Error::internal_error(&format!(
-                "failed to create recovery Silo: {:#}",
-                err
-            )),
-            RackInitError::RoleAssignment(err) => Error::internal_error(
-                &format!("failed to assign role to initial user: {:#}", err),
-            ),
-            RackInitError::Retryable(err) => Error::internal_error(&format!(
+            RackInitError::DnsSerialization(err) => {
+                err.internal_context("failed to serialize initial DNS records")
+            }
+            RackInitError::Silo(err) => {
+                err.internal_context("failed to create recovery Silo")
+            }
+            RackInitError::RoleAssignment(err) => {
+                err.internal_context("failed to assign role to initial user")
+            }
+            RackInitError::Retryable(err) => Error::unavail(&format!(
                 "failed operation due to database contention: {:#}",
                 err
             )),
@@ -991,18 +994,16 @@ impl DataStore {
 mod test {
     use super::*;
     use crate::db::datastore::Discoverability;
-    use crate::db::datastore::test::{
-        sled_baseboard_for_test, sled_system_hardware_for_test,
-    };
     use crate::db::model::ExternalIp;
     use crate::db::model::IpKind;
     use crate::db::model::IpPoolRange;
     use crate::db::model::Sled;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use async_bb8_diesel::AsyncSimpleConnection;
     use internal_dns_types::names::DNS_ZONE;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
-    use nexus_db_model::{DnsGroup, Generation, InitialDnsGroup, SledUpdate};
+    use nexus_db_model::{DnsGroup, Generation, InitialDnsGroup};
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::system::{
         SledBuilder, SystemDescription,
@@ -1042,7 +1043,7 @@ mod test {
     use omicron_uuid_kinds::{SledUuid, TypedUuid};
     use oxnet::IpNet;
     use std::collections::{BTreeMap, HashMap};
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::num::NonZeroU32;
 
     // Default impl is for tests only, and really just so that tests can more
@@ -1233,17 +1234,10 @@ mod test {
     }
 
     async fn create_test_sled(db: &DataStore, sled_id: Uuid) -> Sled {
-        let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
-        let repo_depot_port = 0;
-        let sled_update = SledUpdate::new(
-            sled_id,
-            addr,
-            repo_depot_port,
-            sled_baseboard_for_test(),
-            sled_system_hardware_for_test(),
-            rack_id(),
-            Generation::new(),
-        );
+        let sled_update = SledUpdateBuilder::new()
+            .sled_id(SledUuid::from_untyped_uuid(sled_id))
+            .rack_id(rack_id())
+            .build();
         let (sled, _) = db
             .sled_upsert(sled_update)
             .await
