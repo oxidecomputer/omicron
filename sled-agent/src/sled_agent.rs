@@ -578,6 +578,7 @@ impl SledAgent {
             .await?;
 
         let repo_depot = ArtifactStore::new(&log, storage_manager.clone())
+            .await?
             .start(sled_address, &config.dropshot)
             .await?;
 

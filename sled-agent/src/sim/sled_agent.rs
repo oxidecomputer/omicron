@@ -156,6 +156,8 @@ impl SledAgent {
         simulated_upstairs.register_storage(id, &storage);
 
         let repo_depot = ArtifactStore::new(&log, SimArtifactStorage::new())
+            .await
+            .unwrap()
             .start(&log, &config.dropshot);
 
         Arc::new(SledAgent {

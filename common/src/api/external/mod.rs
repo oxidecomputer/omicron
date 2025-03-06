@@ -715,7 +715,6 @@ impl From<ByteCount> for i64 {
     Ord,
     PartialEq,
     PartialOrd,
-    Serialize,
     Diffable,
 )]
 #[daft(leaf)]
@@ -763,6 +762,17 @@ impl<'de> Deserialize<'de> for Generation {
                 &"an integer between 0 and 9223372036854775807",
             )
         })
+    }
+}
+
+// This is the equivalent of applying `#[serde(transparent)]`, but that has a
+// side effect of changing the JsonSchema derive to no longer emit a schema.
+impl Serialize for Generation {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.serialize(serializer)
     }
 }
 
@@ -818,6 +828,17 @@ impl FromStr for Generation {
         // either.
         let _ = i64::from_str(s)?;
         Ok(Generation(u64::from_str(s)?))
+    }
+}
+
+impl slog::Value for Generation {
+    fn serialize(
+        &self,
+        _rec: &slog::Record,
+        key: slog::Key,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        serializer.emit_u64(key, self.0)
     }
 }
 

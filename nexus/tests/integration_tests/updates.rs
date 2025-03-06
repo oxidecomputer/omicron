@@ -14,6 +14,7 @@ use clap::Parser;
 use dropshot::test_util::LogContext;
 use http::{Method, StatusCode};
 use nexus_config::UpdatesConfig;
+use nexus_db_queries::context::OpContext;
 use nexus_test_utils::background::run_tuf_artifact_replication_step;
 use nexus_test_utils::background::wait_tuf_artifact_replication_step;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
@@ -65,7 +66,7 @@ async fn test_repo_upload_unconfigured() -> Result<()> {
     let status =
         run_tuf_artifact_replication_step(&cptestctx.internal_client).await;
     assert_eq!(
-        status.last_run_counters.sum() - status.last_run_counters.list_ok,
+        status.last_run_counters.put_ok + status.last_run_counters.copy_ok,
         0
     );
     assert_eq!(status.local_repos, 0);
@@ -108,6 +109,15 @@ async fn test_repo_upload() -> Result<()> {
     .await;
     let client = &cptestctx.external_client;
 
+    // The initial generation number should be 1.
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    assert_eq!(
+        datastore.update_tuf_generation_get(&opctx).await.unwrap(),
+        1u32.into()
+    );
+
     // Build a fake TUF repo
     let archive_path = make_archive(&logctx.log).await?;
 
@@ -147,9 +157,13 @@ async fn test_repo_upload() -> Result<()> {
             .collect::<Vec<_>>(),
         ["zone1", "zone2"]
     );
-    assert!(
-        !initial_description.artifacts.iter().any(|artifact| artifact.id.kind
-            == KnownArtifactKind::ControlPlane.into())
+    assert!(!initial_description.artifacts.iter().any(|artifact| {
+        artifact.id.kind == KnownArtifactKind::ControlPlane.into()
+    }));
+    // The generation number should now be 2.
+    assert_eq!(
+        datastore.update_tuf_generation_get(&opctx).await.unwrap(),
+        2u32.into()
     );
 
     // The artifact replication background task should have been activated, and
@@ -157,10 +171,11 @@ async fn test_repo_upload() -> Result<()> {
     let status =
         wait_tuf_artifact_replication_step(&cptestctx.internal_client).await;
     eprintln!("{status:?}");
+    assert_eq!(status.generation, 2u32.into());
+    assert_eq!(status.last_run_counters.put_config_ok, 4);
     assert_eq!(status.last_run_counters.list_ok, 4);
     assert_eq!(status.last_run_counters.put_ok, 3 * unique_sha256_count);
     assert_eq!(status.last_run_counters.copy_ok, unique_sha256_count);
-    assert_eq!(status.last_run_counters.delete_ok, 0);
     // The local repo is not deleted until the next task run.
     assert_eq!(status.local_repos, 1);
 
@@ -169,8 +184,9 @@ async fn test_repo_upload() -> Result<()> {
     let status =
         run_tuf_artifact_replication_step(&cptestctx.internal_client).await;
     eprintln!("{status:?}");
+    assert_eq!(status.last_run_counters.put_config_ok, 4);
     assert_eq!(status.last_run_counters.list_ok, 4);
-    assert_eq!(status.last_run_counters.sum(), 4);
+    assert_eq!(status.last_run_counters.sum(), 8);
     assert_eq!(status.local_repos, 0);
 
     // Upload the repository to Nexus again. This should return a 200 with an
@@ -195,6 +211,12 @@ async fn test_repo_upload() -> Result<()> {
     assert_eq!(
         initial_description, reupload_description,
         "initial description matches reupload"
+    );
+
+    // We didn't insert a new repo, so the generation number should still be 2.
+    assert_eq!(
+        datastore.update_tuf_generation_get(&opctx).await.unwrap(),
+        2u32.into()
     );
 
     // Now get the repository that was just uploaded.
@@ -291,16 +313,20 @@ async fn test_repo_upload() -> Result<()> {
                 .context("error deserializing response body")?;
         assert_eq!(response.status, TufRepoInsertStatus::Inserted);
     }
-
-    // No artifacts changed, so the task should have nothing to do and should
+    // No artifacts changed, so the generation number should still be 2...
+    assert_eq!(
+        datastore.update_tuf_generation_get(&opctx).await.unwrap(),
+        2u32.into()
+    );
+    // ... and the task should have nothing to do and should immediately
     // delete the local artifacts.
     let status =
         wait_tuf_artifact_replication_step(&cptestctx.internal_client).await;
     eprintln!("{status:?}");
+    assert_eq!(status.generation, 2u32.into());
     assert_eq!(status.last_run_counters.list_ok, 4);
     assert_eq!(status.last_run_counters.put_ok, 0);
     assert_eq!(status.last_run_counters.copy_ok, 0);
-    assert_eq!(status.last_run_counters.delete_ok, 0);
     assert_eq!(status.local_repos, 0);
 
     cptestctx.teardown().await;

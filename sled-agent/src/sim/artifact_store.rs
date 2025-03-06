@@ -44,14 +44,14 @@ impl DatasetsManager for SimArtifactStorage {
 
 impl ArtifactStore<SimArtifactStorage> {
     pub(super) fn start(
-        &self,
+        self,
         log: &slog::Logger,
         dropshot_config: &ConfigDropshot,
     ) -> HttpServer<Self> {
         ServerBuilder::new(
             repo_depot_api_mod::api_description::<RepoDepotImpl>()
                 .expect("registered entrypoints"),
-            self.clone(),
+            self,
             log.new(o!("component" => "dropshot (Repo Depot)")),
         )
         .config(dropshot_config.clone())

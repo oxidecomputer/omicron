@@ -19,8 +19,8 @@ use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use nexus_db_model::{ArtifactHash, TufArtifact, TufRepo, TufRepoDescription};
 use omicron_common::api::external::{
-    self, CreateResult, DataPageParams, ListResultVec, LookupResult,
-    LookupType, ResourceType, TufRepoInsertStatus,
+    self, CreateResult, DataPageParams, Generation, ListResultVec,
+    LookupResult, LookupType, ResourceType, TufRepoInsertStatus,
 };
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
@@ -77,7 +77,7 @@ impl DataStore {
     pub async fn update_tuf_repo_insert(
         &self,
         opctx: &OpContext,
-        description: TufRepoDescription,
+        description: &external::TufRepoDescription,
     ) -> CreateResult<TufRepoInsertResponse> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let log = opctx.log.new(
@@ -93,12 +93,7 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         self.transaction_retry_wrapper("update_tuf_repo_insert")
             .transaction(&conn, move |conn| {
-                insert_impl(
-                    log.clone(),
-                    conn,
-                    description.clone(),
-                    err2.clone(),
-                )
+                insert_impl(log.clone(), conn, description, err2.clone())
             })
             .await
             .map_err(|e| {
@@ -147,15 +142,29 @@ impl DataStore {
     pub async fn update_tuf_artifact_list(
         &self,
         opctx: &OpContext,
+        generation: Generation,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<TufArtifact> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
         use db::schema::tuf_artifact::dsl;
 
+        let generation = nexus_db_model::Generation(generation);
         paginated(dsl::tuf_artifact, dsl::id, pagparams)
+            .filter(dsl::generation_added.le(generation))
             .select(TufArtifact::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Returns the current TUF repo generation number.
+    pub async fn update_tuf_generation_get(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<Generation> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        get_generation(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
@@ -166,14 +175,21 @@ impl DataStore {
 async fn insert_impl(
     log: slog::Logger,
     conn: async_bb8_diesel::Connection<crate::db::DbConnection>,
-    desc: TufRepoDescription,
+    desc: &external::TufRepoDescription,
     err: OptionalError<InsertError>,
 ) -> Result<TufRepoInsertResponse, DieselError> {
+    // Load the current generation from the database and increment it, then
+    // use that when creating the `TufRepoDescription`. If we determine there
+    // are any artifacts to be inserted, we update the generation to this value
+    // later.
+    let old_generation = get_generation(&conn).await?;
+    let new_generation = old_generation.next();
+    let desc = TufRepoDescription::from_external(desc.clone(), new_generation);
+
     let repo = {
         use db::schema::tuf_repo::dsl;
 
-        // Load the existing repo by the system version, if
-        // any.
+        // Load the existing repo by the system version, if any.
         let existing_repo = dsl::tuf_repo
             .filter(dsl::system_version.eq(desc.repo.system_version.clone()))
             .select(TufRepo::as_select())
@@ -292,11 +308,22 @@ async fn insert_impl(
             "new_artifacts" => ?new_artifacts,
         );
 
-        // Insert new artifacts into the database.
-        diesel::insert_into(dsl::tuf_artifact)
-            .values(new_artifacts)
-            .execute_async(&conn)
-            .await?;
+        if !new_artifacts.is_empty() {
+            // Since we are inserting new artifacts, we need to bump the
+            // generation number.
+            debug!(log, "setting new TUF repo generation";
+                "generation" => new_generation,
+            );
+            put_generation(&conn, old_generation.into(), new_generation.into())
+                .await?;
+
+            // Insert new artifacts into the database.
+            diesel::insert_into(dsl::tuf_artifact)
+                .values(new_artifacts)
+                .execute_async(&conn)
+                .await?;
+        }
+
         all_artifacts
     };
 
@@ -328,6 +355,37 @@ async fn insert_impl(
         recorded,
         status: TufRepoInsertStatus::Inserted,
     })
+}
+
+async fn get_generation(
+    conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
+) -> Result<Generation, DieselError> {
+    use db::schema::tuf_generation::dsl;
+
+    let generation: nexus_db_model::Generation = dsl::tuf_generation
+        .filter(dsl::singleton.eq(true))
+        .select(dsl::generation)
+        .get_result_async(conn)
+        .await?;
+    Ok(generation.0)
+}
+
+async fn put_generation(
+    conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
+    old_generation: nexus_db_model::Generation,
+    new_generation: nexus_db_model::Generation,
+) -> Result<nexus_db_model::Generation, DieselError> {
+    use db::schema::tuf_generation::dsl;
+
+    // We use `get_result_async` instead of `execute_async` to check that we
+    // updated exactly one row.
+    diesel::update(dsl::tuf_generation.filter(
+        dsl::singleton.eq(true).and(dsl::generation.eq(old_generation)),
+    ))
+    .set(dsl::generation.eq(new_generation))
+    .returning(dsl::generation)
+    .get_result_async(conn)
+    .await
 }
 
 #[derive(Clone, Debug)]

@@ -1,0 +1,186 @@
+:showtitle:
+:numbered:
+
+= TUF Artifact Replication (a.k.a. TUF Repo Depot)
+
+The final output of our release process is a TUF repo consisting of all
+of the artifacts the product requires to run. For the update system to
+work, it needs access to those artifacts. There are some constraining
+factors:
+
+* Nexus is the only way into the system for these artifacts (either
+  through direct upload from an operator, or a download initiated by
+  Nexus to a service outside of the system).
+* Nexus has no persistent local storage, nor can it directly use the
+  artifacts (OS and zone images, firmware, etc.) even if it did store
+  them.
+* Sled Agent is generally what will directly use the artifacts (except
+  for SP and ROT images, which MGS needs), and it can also manage its
+  own local storage.
+
+Thus Nexus needs to accept artifacts from outside of the system and
+immediately offload them to individual Sled Agents for persistent
+storage and later use.
+
+We have chosen (see <<rfd424>>) the simplest possible implementation:
+every Sled Agent stores a copy of every artifact on each of its M.2
+devices. This is storage inefficient but means that a Sled Agent can
+directly use those resources to create zones from updated images,
+install an updated OS, or manage the installation of updates on other
+components, without Nexus having to ensure that it distributed an
+artifact to a sled _before_ telling it to use it. A Nexus background
+task periodically ensures that all sleds have all artifacts.
+
+== Sled Agent implementation
+
+Sled Agent stores artifacts as a content-addressed store on an *update*
+dataset on each M.2 device: the file name of each stored artifact is its
+SHA-256 hash.
+
+It also stores an _artifact configuration_ in memory: a list of all
+artifact hashes that the sled should store, and a generation number.
+The generation number is owned by Nexus, which increments the generation
+number when the set of TUF repos on the system changes. Sled Agent
+prevents modifying the configuration without an increase in the
+generation number.
+
+Sled Agent offers the following APIs on the underlay network, intended
+for Nexus:
+
+* `artifact_config_get`: Get the current artifact configuration.
+* `artifact_config_put`: Put the artifact configuration that should be
+  in effect. This API is idempotent (putting the same configuration does
+  not change anything). Modified configurations must also increase the
+  generation number.
+* `artifact_list`: List the artifacts present in the artifact
+  configuration along with the count of available copies of each
+  artifact across the *update* datasets. Also includes the current
+  generation number.
+* `artifact_put`: Put the request body into the artifact store.
+  Rejects the request if the artifact does not belong to the current
+  configuration.
+* `artifact_copy_from_depot`: Sends a request to another Sled Agent (via
+  the *TUF Repo Depot API*; see below) to fetch an artifact. The base
+  URL for the source sled is chosen by the requester. This API responds
+  after a successful HTTP response from the source sled and the copy
+  proceeds asynchronously. Rejects the request if the artifact does not
+  belong to the current configuration.
+
+Sled Agent also spawns another Dropshot API server called the *TUF Repo
+Depot API* which offers one API on the underlay network, intended for
+other Sled Agents:
+
+* `artifact_get_by_sha256`: Get the content of an artifact.
+
+In an asynchronous task called the _delete reconciler_, Sled Agent
+periodically scans the *update* datasets for artifacts that are not
+part of the present configuration and deletes them. Prior to each
+filesystem operation the task checks the configuration for presence of
+that artifact hash. The delete reconciler then waits for an artifact
+configuration change until running again.
+
+== Nexus implementation
+
+Nexus has a `tuf_artifact_replication` background task which runs this
+reliable persistent workflow:
+
+1. Collect the artifact configuration (the list of artifact hashes, and
+   the current generation number) from the database.
+2. Call `artifact_config_put` on all sleds. Stop if any sled rejects the
+   configuration (our information is already out of date).
+3. Call `artifact_list` on all sleds. Stop if any sled informs us of a
+   newer generation number.
+4. Delete any local copies of repositories where all artifacts are
+   sufficiently replicated across sleds. ("Sufficiently replicated"
+   currently means that at least 3 sleds each have at least one copy.)
+5. For any artifacts this Nexus has a local copy of, send `artifact_put`
+   requests to N random sleds, where N is the number of puts required to
+   sufficienty replicate the artifact.
+6. Send `artifact_copy_from_depot` requests to all remaining sleds
+   missing copies of an artifact. Nexus chooses the source sled randomly
+   out of the list of sleds that have a copy of the artifact.
+
+In each task execution, Nexus will attempt to do all possible work
+that leads to every sled having a copy of the artifact. In the absence
+of random I/O errors, a repository will be fully replicated across
+all sleds in the system in the first execution, and the Nexus-local
+copy of the repository will be deleted in the second execution.
+`artifact_copy_from_depot` requests that require the presence of an
+artifact on a sled that does not yet have it are scheduled after all
+`artifact_put` requests complete.
+
+== Preventing conflicts and loss of artifacts
+
+The artifact configuration is used to prevent conflicts that may be
+caused by two Nexus instances running the `tuf_artifact_replication`
+background task simultaneously with different information. The worst
+case scenario for a conflict is the total loss of an artifact across the
+system, although there are lesser evils as well. This section describes
+a number of possible faults and the mitigations taken.
+
+=== Recently-uploaded repositories and artifact deletion
+
+When Sled Agent receives an artifact configuration change, the delete
+reconciler task begins scanning the *update* datasets for artifacts that
+are no longer required and deletes them.
+
+Nexus maintains its local copy of recently-uploaded repositories
+until it confirms (via the `artifact_list` operation) that all of the
+artifacts in the repository are sufficiently replicated (currently, at
+least 3 sleds each have at least 1 copy).
+
+If the `artifact_list` operation lists any artifacts that could be
+deleted asynchronously, Nexus could incorrectly assume that an artifact
+is sufficiently replicated when it is not. This could happen if a
+repository is deleted, and another repository containing the same
+artifact is uploaded while another Nexus is running the background task.
+
+The artifact configuration is designed to mitigate this. The
+`artifact_list` operation filters the list of artifacts to contain
+only artifacts present in the current configuration. The delete
+reconciler decides whether to delete a file by re-checking the current
+configuration.
+
+When Nexus receives the `artifact_list` response, it verifies that
+the generation number reported is the same as the configuration it put
+earlier in the same task execution. Because the response only contains
+artifacts belonging to the current configuration, and that list of
+artifacts is based on the same configuration Nexus believes is current,
+it can trust that none of those artifacts are about to be deleted and
+safely delete local copies of sufficiently-replicated artifacts.
+
+=== Loss of all sleds with the only copy
+
+There are two potential situations where we could lose the only copy of
+an artifact. The first is a Nexus instance crashing or being replaced
+before a local artifact can be put to any sleds. Crashes are difficult
+to mitigate, as artifacts are currently stored in randomly-named
+temporary directories that are non-trivial to recover on startup;
+consequently there is no mitigation for this problem today. During
+graceful removal of Nexus zones, a quiesced Nexus (see <<rfd459>> and
+<<omicron5677>>) should remain alive until all local artifacts are
+sufficiently replicated.
+
+The second potential situation is a loss of all sleds that an artifact
+is copied to after Nexus deletes its local copy. This is mostly
+mitigated by Nexus attempting to fully replicate all artifacts onto
+all sleds in every execution of the background task; if there are no
+I/O errors, it only takes one task execution to ensure a repository is
+present across the entire system.
+
+=== Unnecessary work
+
+`artifact_put` and `artifact_copy_from_depot` requests include the
+current generation as a query string parameter. If the generation does
+not match the current configuration, or the artifact is not present in
+the configuration, Sled Agent rejects the request.
+
+[bibliography]
+== References
+
+* [[[rfd424]]] Oxide Computer Company.
+  https://rfd.shared.oxide.computer/rfd/424[TUF Repo Depot].
+* [[[rfd459]]] Oxide Computer Company.
+  https://rfd.shared.oxide.computer/rfd/424[Control plane component lifecycle].
+* [[[omicron5677]]] oxidecomputer/omicron.
+  https://github.com/oxidecomputer/omicron/issues/5677[nexus 'quiesce' support].
