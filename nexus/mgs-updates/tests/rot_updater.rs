@@ -9,9 +9,8 @@ use gateway_messages::SpPort;
 use gateway_test_utils::setup as mgs_setup;
 use hubtools::RawHubrisArchive;
 use hubtools::{CabooseBuilder, HubrisArchiveBuilder};
-use omicron_nexus::app::test_interfaces::{
-    MgsClients, RotUpdater, UpdateProgress,
-};
+use nexus_mgs_updates::{MgsClients, RotUpdater, UpdateProgress};
+use slog::debug;
 use sp_sim::SIM_ROT_BOARD;
 use sp_sim::SimulatedSp;
 use std::mem;
