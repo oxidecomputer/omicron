@@ -33,11 +33,11 @@ pub struct WebhookReceiverConfig {
     pub events: Vec<WebhookSubscriptionKind>,
 }
 
-impl TryFrom<WebhookReceiverConfig> for views::Webhook {
+impl TryFrom<WebhookReceiverConfig> for views::WebhookReceiver {
     type Error = Error;
     fn try_from(
         WebhookReceiverConfig { rx, secrets, events }: WebhookReceiverConfig,
-    ) -> Result<views::Webhook, Self::Error> {
+    ) -> Result<views::WebhookReceiver, Self::Error> {
         let secrets = secrets
             .iter()
             .map(|WebhookSecret { identity, .. }| views::WebhookSecretId {
@@ -57,7 +57,7 @@ impl TryFrom<WebhookReceiverConfig> for views::Webhook {
                     rx.endpoint,
                 ),
             })?;
-        Ok(views::Webhook {
+        Ok(views::WebhookReceiver {
             identity: rx.identity(),
             endpoint,
             secrets,

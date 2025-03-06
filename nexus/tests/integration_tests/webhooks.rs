@@ -34,12 +34,11 @@ const SECRETS_BASE_PATH: &str = "/v1/webhooks/secrets";
 async fn webhook_create(
     ctx: &ControlPlaneTestContext,
     params: &params::WebhookCreate,
-) -> views::Webhook {
-    resource_helpers::object_create::<params::WebhookCreate, views::Webhook>(
-        &ctx.external_client,
-        RECEIVERS_BASE_PATH,
-        params,
-    )
+) -> views::WebhookReceiver {
+    resource_helpers::object_create::<
+        params::WebhookCreate,
+        views::WebhookReceiver,
+    >(&ctx.external_client, RECEIVERS_BASE_PATH, params)
     .await
 }
 
@@ -51,7 +50,7 @@ fn get_webhooks_url(name_or_id: impl Into<NameOrId>) -> String {
 async fn webhook_get(
     client: &ClientTestContext,
     webhook_url: &str,
-) -> views::Webhook {
+) -> views::WebhookReceiver {
     webhook_get_as(client, webhook_url, AuthnMode::PrivilegedUser).await
 }
 
@@ -59,7 +58,7 @@ async fn webhook_get_as(
     client: &ClientTestContext,
     webhook_url: &str,
     authn_as: AuthnMode,
-) -> views::Webhook {
+) -> views::WebhookReceiver {
     NexusRequest::object_get(client, &webhook_url)
         .authn_as(authn_as)
         .execute()
@@ -69,8 +68,10 @@ async fn webhook_get_as(
         .unwrap()
 }
 
-async fn webhook_rx_list(client: &ClientTestContext) -> Vec<views::Webhook> {
-    resource_helpers::objects_list_page_authz::<views::Webhook>(
+async fn webhook_rx_list(
+    client: &ClientTestContext,
+) -> Vec<views::WebhookReceiver> {
+    resource_helpers::objects_list_page_authz::<views::WebhookReceiver>(
         client,
         RECEIVERS_BASE_PATH,
     )
@@ -153,7 +154,7 @@ async fn webhook_send_probe(
 }
 
 fn is_valid_for_webhook(
-    webhook: &views::Webhook,
+    webhook: &views::WebhookReceiver,
 ) -> impl FnOnce(httpmock::When) -> httpmock::When {
     let path = webhook.endpoint.path().to_string();
     let id = webhook.identity.id.to_string();
@@ -436,12 +437,13 @@ async fn test_multiple_receivers(cptestctx: &ControlPlaneTestContext) {
     let bar_event_id = WebhookEventUuid::new_v4();
     let baz_event_id = WebhookEventUuid::new_v4();
 
-    let assert_webhook_rx_list_matches = |mut expected: Vec<views::Webhook>| async move {
-        let mut actual = webhook_rx_list(client).await;
-        actual.sort_by_key(|rx| rx.identity.id);
-        expected.sort_by_key(|rx| rx.identity.id);
-        assert_eq!(expected, actual);
-    };
+    let assert_webhook_rx_list_matches =
+        |mut expected: Vec<views::WebhookReceiver>| async move {
+            let mut actual = webhook_rx_list(client).await;
+            actual.sort_by_key(|rx| rx.identity.id);
+            expected.sort_by_key(|rx| rx.identity.id);
+            assert_eq!(expected, actual);
+        };
 
     // Create three webhook receivers
     let srv_bar = httpmock::MockServer::start_async().await;

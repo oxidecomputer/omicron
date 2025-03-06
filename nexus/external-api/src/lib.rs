@@ -3506,10 +3506,10 @@ pub trait NexusExternalApi {
         path = "/v1/webhooks/receivers/",
         tags = ["system/webhooks"],
     }]
-    async fn webhook_list(
+    async fn webhook_receiver_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::Webhook>>, HttpError>;
+    ) -> Result<HttpResponseOk<ResultsPage<views::WebhookReceiver>>, HttpError>;
 
     /// Get the configuration for a webhook receiver.
     #[endpoint {
@@ -3517,10 +3517,10 @@ pub trait NexusExternalApi {
         path = "/v1/webhooks/receivers/{receiver}",
         tags = ["system/webhooks"],
     }]
-    async fn webhook_view(
+    async fn webhook_receiver_view(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookSelector>,
-    ) -> Result<HttpResponseOk<views::Webhook>, HttpError>;
+        path_params: Path<params::WebhookReceiverSelector>,
+    ) -> Result<HttpResponseOk<views::WebhookReceiver>, HttpError>;
 
     /// Create a new webhook receiver.
     #[endpoint {
@@ -3528,10 +3528,10 @@ pub trait NexusExternalApi {
         path = "/v1/webhooks/receivers",
         tags = ["system/webhooks"],
     }]
-    async fn webhook_create(
+    async fn webhook_receiver_create(
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<params::WebhookCreate>,
-    ) -> Result<HttpResponseCreated<views::Webhook>, HttpError>;
+    ) -> Result<HttpResponseCreated<views::WebhookReceiver>, HttpError>;
 
     /// Update the configuration of an existing webhook receiver.
     #[endpoint {
@@ -3541,7 +3541,7 @@ pub trait NexusExternalApi {
     }]
     async fn webhook_update(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookSelector>,
+        path_params: Path<params::WebhookReceiverSelector>,
         params: TypedBody<params::WebhookUpdate>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
@@ -3551,9 +3551,9 @@ pub trait NexusExternalApi {
         path = "/v1/webhooks/receivers/{receiver}",
         tags = ["system/webhooks"],
     }]
-    async fn webhook_delete(
+    async fn webhook_receiver_delete(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookSelector>,
+        path_params: Path<params::WebhookReceiverSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
     /// Send a liveness probe request to a webhook receiver.
@@ -3565,9 +3565,9 @@ pub trait NexusExternalApi {
         path = "/v1/webhooks/receivers/{receiver}/probe",
         tags = ["system/webhooks"],
     }]
-    async fn webhook_probe(
+    async fn webhook_receiver_probe(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookSelector>,
+        path_params: Path<params::WebhookReceiverSelector>,
         query_params: Query<params::WebhookProbe>,
     ) -> Result<HttpResponseOk<views::WebhookProbeResult>, HttpError>;
 
@@ -3579,7 +3579,7 @@ pub trait NexusExternalApi {
     }]
     async fn webhook_secrets_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<params::WebhookSelector>,
+        query_params: Query<params::WebhookReceiverSelector>,
     ) -> Result<HttpResponseOk<views::WebhookSecrets>, HttpError>;
 
     /// Add a secret to a webhook receiver.
@@ -3590,7 +3590,7 @@ pub trait NexusExternalApi {
     }]
     async fn webhook_secrets_add(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<params::WebhookSelector>,
+        query_params: Query<params::WebhookReceiverSelector>,
         params: TypedBody<params::WebhookSecretCreate>,
     ) -> Result<HttpResponseCreated<views::WebhookSecretId>, HttpError>;
 
@@ -3613,7 +3613,7 @@ pub trait NexusExternalApi {
     }]
     async fn webhook_delivery_list(
         rqctx: RequestContext<Self::Context>,
-        receiver: Query<params::WebhookSelector>,
+        receiver: Query<params::WebhookReceiverSelector>,
         pagination: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<views::WebhookDelivery>>, HttpError>;
 
@@ -3626,7 +3626,7 @@ pub trait NexusExternalApi {
     async fn webhook_delivery_resend(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::WebhookDeliveryPath>,
-        receiver: Query<params::WebhookSelector>,
+        receiver: Query<params::WebhookReceiverSelector>,
     ) -> Result<HttpResponseCreated<views::WebhookDeliveryId>, HttpError>;
 }
 

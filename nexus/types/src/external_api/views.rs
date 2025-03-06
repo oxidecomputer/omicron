@@ -1064,7 +1064,7 @@ pub struct EventClass {
 #[derive(
     ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq,
 )]
-pub struct Webhook {
+pub struct WebhookReceiver {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 

@@ -52,7 +52,7 @@ impl super::Nexus {
     pub fn webhook_receiver_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        webhook_selector: params::WebhookSelector,
+        webhook_selector: params::WebhookReceiverSelector,
     ) -> LookupResult<lookup::WebhookReceiver<'a>> {
         match webhook_selector.receiver {
             NameOrId::Id(id) => {

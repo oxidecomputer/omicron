@@ -266,18 +266,19 @@ ping                                     GET      /v1/ping
 
 API operations found with tag "system/webhooks"
 OPERATION ID                             METHOD   URL PATH
-webhook_create                           POST     /v1/webhooks/receivers
-webhook_delete                           DELETE   /v1/webhooks/receivers/{receiver}
 webhook_delivery_list                    GET      /v1/webhooks/deliveries
 webhook_delivery_resend                  POST     /v1/webhooks/deliveries/{event_id}/resend
 webhook_event_class_list                 GET      /v1/webhooks/event-classes
 webhook_event_class_view                 GET      /v1/webhooks/event-classes/{name}
-webhook_probe                            POST     /v1/webhooks/receivers/{receiver}/probe
+webhook_receiver_create                  POST     /v1/webhooks/receivers
+webhook_receiver_delete                  DELETE   /v1/webhooks/receivers/{receiver}
+webhook_receiver_list                    GET      /v1/webhooks/receivers
+webhook_receiver_probe                   POST     /v1/webhooks/receivers/{receiver}/probe
+webhook_receiver_view                    GET      /v1/webhooks/receivers/{receiver}
 webhook_secrets_add                      POST     /v1/webhooks/secrets
 webhook_secrets_delete                   DELETE   /v1/webhooks/secrets/{secret_id}
 webhook_secrets_list                     GET      /v1/webhooks/secrets
 webhook_update                           PUT      /v1/webhooks/receivers/{receiver}
-webhook_view                             GET      /v1/webhooks/receivers/{receiver}
 
 API operations found with tag "vpcs"
 OPERATION ID                             METHOD   URL PATH

@@ -2390,7 +2390,7 @@ pub struct EventClassSelector {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookSelector {
+pub struct WebhookReceiverSelector {
     /// The name or ID of the webhook receiver.
     pub receiver: NameOrId,
 }

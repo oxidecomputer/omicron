@@ -12081,12 +12081,69 @@
       }
     },
     "/v1/webhooks/receivers": {
+      "get": {
+        "tags": [
+          "system/webhooks"
+        ],
+        "summary": "List webhook receivers.",
+        "operationId": "webhook_receiver_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookReceiverResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
       "post": {
         "tags": [
           "system/webhooks"
         ],
         "summary": "Create a new webhook receiver.",
-        "operationId": "webhook_create",
+        "operationId": "webhook_receiver_create",
         "requestBody": {
           "content": {
             "application/json": {
@@ -12103,7 +12160,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Webhook"
+                  "$ref": "#/components/schemas/WebhookReceiver"
                 }
               }
             }
@@ -12123,7 +12180,7 @@
           "system/webhooks"
         ],
         "summary": "Get the configuration for a webhook receiver.",
-        "operationId": "webhook_view",
+        "operationId": "webhook_receiver_view",
         "parameters": [
           {
             "in": "path",
@@ -12141,7 +12198,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Webhook"
+                  "$ref": "#/components/schemas/WebhookReceiver"
                 }
               }
             }
@@ -12198,7 +12255,7 @@
           "system/webhooks"
         ],
         "summary": "Delete a webhook receiver.",
-        "operationId": "webhook_delete",
+        "operationId": "webhook_receiver_delete",
         "parameters": [
           {
             "in": "path",
@@ -12229,7 +12286,7 @@
           "system/webhooks"
         ],
         "summary": "Send a liveness probe request to a webhook receiver.",
-        "operationId": "webhook_probe",
+        "operationId": "webhook_receiver_probe",
         "parameters": [
           {
             "in": "path",
@@ -25037,67 +25094,6 @@
           }
         }
       },
-      "Webhook": {
-        "description": "The configuration for a webhook.",
-        "type": "object",
-        "properties": {
-          "description": {
-            "description": "human-readable free-form text about a resource",
-            "type": "string"
-          },
-          "endpoint": {
-            "description": "The URL that webhook notification requests are sent to.",
-            "type": "string",
-            "format": "uri"
-          },
-          "events": {
-            "description": "The list of event classes to which this receiver is subscribed.",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          },
-          "secrets": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/WebhookSecretId"
-            }
-          },
-          "time_created": {
-            "description": "timestamp when this resource was created",
-            "type": "string",
-            "format": "date-time"
-          },
-          "time_modified": {
-            "description": "timestamp when this resource was last modified",
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "description",
-          "endpoint",
-          "events",
-          "id",
-          "name",
-          "secrets",
-          "time_created",
-          "time_modified"
-        ]
-      },
       "WebhookCreate": {
         "description": "Create-time identity-related parameters",
         "type": "object",
@@ -25356,6 +25352,88 @@
         },
         "required": [
           "probe"
+        ]
+      },
+      "WebhookReceiver": {
+        "description": "The configuration for a webhook.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "endpoint": {
+            "description": "The URL that webhook notification requests are sent to.",
+            "type": "string",
+            "format": "uri"
+          },
+          "events": {
+            "description": "The list of event classes to which this receiver is subscribed.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "secrets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookSecretId"
+            }
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "endpoint",
+          "events",
+          "id",
+          "name",
+          "secrets",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "WebhookReceiverResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookReceiver"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "WebhookSecretCreate": {
