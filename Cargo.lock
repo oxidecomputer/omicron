@@ -739,7 +739,7 @@ dependencies = [
  "bitflags 2.6.0",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.12.1",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -12528,7 +12528,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#d2387032714f66e31b7e255d89f9bf6eb9b3a010"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#bbadc279786d8da5376f61067b42738e2ad6342e"
 dependencies = [
  "anyhow",
  "camino",
@@ -12549,6 +12549,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#bbadc279786d8da5376f61067b42738e2ad6342e"
 dependencies = [
  "daft",
  "parse-display",
@@ -12564,7 +12565,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#d2387032714f66e31b7e255d89f9bf6eb9b3a010"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#bbadc279786d8da5376f61067b42738e2ad6342e"
 dependencies = [
  "semver 1.0.25",
  "serde",
@@ -12575,7 +12576,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#d2387032714f66e31b7e255d89f9bf6eb9b3a010"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#bbadc279786d8da5376f61067b42738e2ad6342e"
 dependencies = [
  "anyhow",
  "async-trait",
