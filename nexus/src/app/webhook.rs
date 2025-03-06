@@ -144,7 +144,26 @@ impl super::Nexus {
         filter: params::WebhookDeliveryStateFilter,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<views::WebhookDelivery> {
-        todo!()
+        let (authz_rx,) = rx.lookup_for(authz::Action::ListChildren).await?;
+        let deliveries = self
+            .datastore()
+            .webhook_rx_delivery_list(
+                opctx,
+                &authz_rx.id(),
+                &[
+                    WebhookDeliveryTrigger::Event,
+                    WebhookDeliveryTrigger::Resend,
+                ],
+                filter,
+                pagparams,
+            )
+            .await?
+            .into_iter()
+            .map(|(delivery, class, attempts)| {
+                delivery.to_api_delivery(class, &attempts)
+            })
+            .collect();
+        Ok(deliveries)
     }
 
     pub async fn webhook_receiver_probe(

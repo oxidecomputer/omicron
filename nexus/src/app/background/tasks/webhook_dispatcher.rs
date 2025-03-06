@@ -298,7 +298,6 @@ mod test {
     use diesel::prelude::*;
     use nexus_db_queries::db;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::external_api::shared::WebhookDeliveryState;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::SemverVersion;
     use omicron_uuid_kinds::WebhookEventUuid;

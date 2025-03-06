@@ -809,10 +809,13 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
 
     mock.assert_async().await;
 
-    assert_eq!(probe1.probe.attempt, 1);
+    assert_eq!(
+        probe1.probe.attempts[0].result,
+        views::WebhookDeliveryAttemptResult::FailedTimeout
+    );
     assert_eq!(probe1.probe.event_class, "probe");
     assert_eq!(probe1.probe.trigger, views::WebhookDeliveryTrigger::Probe);
-    assert_eq!(probe1.probe.state, shared::WebhookDeliveryState::FailedTimeout);
+    assert_eq!(probe1.probe.state, views::WebhookDeliveryState::Failed);
     assert_eq!(
         probe1.resends_started, None,
         "we did not request events be resent"
@@ -844,13 +847,13 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
     dbg!(&probe2);
 
     mock.assert_async().await;
-    assert_eq!(probe2.probe.attempt, 1);
+    assert_eq!(
+        probe2.probe.attempts[0].result,
+        views::WebhookDeliveryAttemptResult::FailedHttpError
+    );
     assert_eq!(probe2.probe.event_class, "probe");
     assert_eq!(probe2.probe.trigger, views::WebhookDeliveryTrigger::Probe);
-    assert_eq!(
-        probe2.probe.state,
-        shared::WebhookDeliveryState::FailedHttpError
-    );
+    assert_eq!(probe2.probe.state, views::WebhookDeliveryState::Failed);
     assert_ne!(
         probe2.probe.id, probe1.probe.id,
         "a new delivery ID should be assigned to each probe"
@@ -885,10 +888,13 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
             .await;
     dbg!(&probe3);
     mock.assert_async().await;
-    assert_eq!(probe3.probe.attempt, 1);
+    assert_eq!(
+        probe3.probe.attempts[0].state,
+        views::WebhookDeliveryAttemptResult::Succeeded
+    );
     assert_eq!(probe3.probe.event_class, "probe");
     assert_eq!(probe3.probe.trigger, views::WebhookDeliveryTrigger::Probe);
-    assert_eq!(probe3.probe.state, shared::WebhookDeliveryState::Delivered);
+    assert_eq!(probe3.probe.state, views::WebhookDeliveryState::Delivered);
     assert_ne!(
         probe3.probe.id, probe1.probe.id,
         "a new delivery ID should be assigned to each probe"
@@ -1039,7 +1045,7 @@ async fn test_probe_resends_failed_deliveries(
     dbg!(&probe);
     probe_mock.assert_async().await;
     probe_mock.delete_async().await;
-    assert_eq!(probe.probe.state, shared::WebhookDeliveryState::Delivered);
+    assert_eq!(probe.probe.state, views::WebhookDeliveryState::Delivered);
     assert_eq!(probe.resends_started, Some(2));
 
     // Both events should be resent.

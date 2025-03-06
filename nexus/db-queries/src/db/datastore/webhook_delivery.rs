@@ -16,7 +16,6 @@ use crate::db::model::WebhookDeliveryTrigger;
 use crate::db::model::WebhookEvent;
 use crate::db::model::WebhookEventClass;
 use crate::db::pagination::paginated;
-use crate::db::pool::DbConnection;
 use crate::db::schema;
 use crate::db::schema::webhook_delivery::dsl;
 use crate::db::schema::webhook_delivery_attempt::dsl as attempt_dsl;
@@ -35,7 +34,6 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use omicron_uuid_kinds::WebhookDeliveryUuid;
 use omicron_uuid_kinds::WebhookReceiverUuid;
 use uuid::Uuid;
 
@@ -133,14 +131,19 @@ impl DataStore {
             .distinct()
     }
 
-    pub async fn webhook_rx_delivery_list_on_conn(
+    pub async fn webhook_rx_delivery_list(
         &self,
+        opctx: &OpContext,
         rx_id: &WebhookReceiverUuid,
         triggers: &'static [WebhookDeliveryTrigger],
         state_filter: WebhookDeliveryStateFilter,
         pagparams: &DataPageParams<'_, Uuid>,
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> ListResultVec<(WebhookDelivery, WebhookEventClass)> {
+    ) -> ListResultVec<(
+        WebhookDelivery,
+        WebhookEventClass,
+        Vec<WebhookDeliveryAttempt>,
+    )> {
+        let conn = self.pool_connection_authorized(opctx).await?;
         // Paginate the query, ordered by delivery UUID.
         let mut query = paginated(dsl::webhook_delivery, dsl::id, pagparams)
             // Select only deliveries that are to the receiver we're interested in,
@@ -169,25 +172,32 @@ impl DataStore {
                     dsl::failed_permanently.eq(state_filter.include_failed()),
                 ));
         }
-        query
-            .select((WebhookDelivery::as_select(), event_dsl::event_class))
-            .load_async(conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
 
-    pub async fn webhook_delivery_attempt_list_on_conn(
-        &self,
-        delivery_id: &WebhookDeliveryUuid,
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> ListResultVec<WebhookDeliveryAttempt> {
-        attempt_dsl::webhook_delivery_attempt
-            .filter(
-                attempt_dsl::delivery_id.eq(delivery_id.into_untyped_uuid()),
-            )
-            .load_async(conn)
+        let deliveries = query
+            .select((WebhookDelivery::as_select(), event_dsl::event_class))
+            .load_async::<(WebhookDelivery, WebhookEventClass)>(&*conn)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        let mut result = Vec::with_capacity(deliveries.len());
+        for (delivery, class) in deliveries {
+            let attempts = attempt_dsl::webhook_delivery_attempt
+                .filter(
+                    attempt_dsl::delivery_id
+                        .eq(delivery.id.into_untyped_uuid()),
+                )
+                .select(WebhookDeliveryAttempt::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(
+                            "failed to list attempts for a delivery",
+                        )
+                })?;
+            result.push((delivery, class, attempts));
+        }
+        Ok(result)
     }
 
     pub async fn webhook_rx_delivery_list_ready(
