@@ -7,21 +7,21 @@ use crossterm::event::EventStream;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen,
-    LeaveAlternateScreen,
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+    enable_raw_mode,
 };
 use futures::StreamExt;
-use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 use slog::Logger;
 use slog::{debug, error, info};
-use std::io::{stdout, Stdout};
+use std::io::{Stdout, stdout};
 use std::net::SocketAddrV6;
 use std::time::Instant;
 use tokio::sync::mpsc::{
-    unbounded_channel, UnboundedReceiver, UnboundedSender,
+    UnboundedReceiver, UnboundedSender, unbounded_channel,
 };
-use tokio::time::{interval, Duration};
+use tokio::time::{Duration, interval};
 use wicket_common::rack_update::AbortUpdateOptions;
 
 use crate::events::EventReportMap;
@@ -122,10 +122,17 @@ impl RunnerCore {
                 self.screen.resize(&mut self.state, width, height);
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
-            Event::Inventory { inventory, mgs_last_seen } => {
-                self.state.service_status.reset_mgs(mgs_last_seen);
-                self.state.service_status.reset_wicketd(Duration::ZERO);
+            Event::Inventory { inventory } => {
+                if let Some(mgs) = &inventory.mgs {
+                    self.state.service_status.reset_mgs(mgs.last_seen);
+                }
+                if let Some(transceivers) = &inventory.transceivers {
+                    self.state
+                        .service_status
+                        .reset_transceivers(transceivers.last_seen);
+                }
                 self.state.inventory.update_inventory(inventory)?;
+                self.state.service_status.reset_wicketd(Duration::ZERO);
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
             Event::ArtifactsAndEventReports {

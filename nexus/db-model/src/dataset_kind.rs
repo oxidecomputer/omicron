@@ -51,10 +51,10 @@ impl DatasetKind {
             (Self::Debug, None) => ApiKind::Debug,
             (Self::Update, None) => ApiKind::Update,
             (Self::TransientZone, None) => {
-                return Err(Error::internal_error("Zone kind needs name"))
+                return Err(Error::internal_error("Zone kind needs name"));
             }
             (_, Some(_)) => {
-                return Err(Error::internal_error("Only zone kind needs name"))
+                return Err(Error::internal_error("Only zone kind needs name"));
             }
         };
 

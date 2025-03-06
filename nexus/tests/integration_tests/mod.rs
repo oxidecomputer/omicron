@@ -1,9 +1,14 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 //! Nexus integration tests
 //!
 //! See the driver in the parent directory for how and why this is structured
 //! the way it is.
 
 mod address_lots;
+mod affinity;
 mod allow_list;
 mod authn_http;
 mod authz;
@@ -16,13 +21,13 @@ mod demo_saga;
 mod device_auth;
 mod disks;
 mod external_ips;
-mod host_phase1_updater;
 mod images;
 mod initialization;
 mod instances;
 mod internet_gateway;
 mod ip_pools;
 mod metrics;
+mod metrics_querier;
 mod oximeter;
 mod pantry;
 mod password_login;
@@ -32,7 +37,6 @@ mod quotas;
 mod rack;
 mod role_assignments;
 mod roles_builtin;
-mod rot_updater;
 mod router_routes;
 mod saml;
 mod schema;
@@ -40,7 +44,6 @@ mod silo_users;
 mod silos;
 mod sleds;
 mod snapshots;
-mod sp_updater;
 mod ssh_keys;
 mod subnet_allocation;
 mod support_bundles;

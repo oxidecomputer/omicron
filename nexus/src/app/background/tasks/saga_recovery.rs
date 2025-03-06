@@ -120,12 +120,12 @@
 //! to process things in the right order.  These details are mostly handled by
 //! the separate [`nexus_saga_recovery`] crate.
 
+use crate::Nexus;
 use crate::app::background::BackgroundTask;
 use crate::app::sagas::NexusSagaType;
 use crate::saga_interface::SagaContext;
-use crate::Nexus;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
@@ -491,15 +491,17 @@ mod test {
     use nexus_types::internal_api::views::LastResult;
     use omicron_test_utils::dev::{
         self,
-        poll::{wait_for_condition, CondCheckError},
+        poll::{CondCheckError, wait_for_condition},
     };
-    use once_cell::sync::Lazy;
     use pretty_assertions::assert_eq;
-    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+    use std::sync::{
+        LazyLock,
+        atomic::{AtomicBool, AtomicU32, Ordering},
+    };
     use steno::{
-        new_action_noop_undo, Action, ActionContext, ActionError,
-        ActionRegistry, DagBuilder, Node, SagaDag, SagaId, SagaName,
-        SagaResult, SagaType, SecClient,
+        Action, ActionContext, ActionError, ActionRegistry, DagBuilder, Node,
+        SagaDag, SagaId, SagaName, SagaResult, SagaType, SecClient,
+        new_action_noop_undo,
     };
     use uuid::Uuid;
     type ControlPlaneTestContext =
@@ -561,10 +563,10 @@ mod test {
         }
     }
 
-    static ACTION_N1: Lazy<Arc<dyn Action<TestOp>>> =
-        Lazy::new(|| new_action_noop_undo("n1_action", node_one));
-    static ACTION_N2: Lazy<Arc<dyn Action<TestOp>>> =
-        Lazy::new(|| new_action_noop_undo("n2_action", node_two));
+    static ACTION_N1: LazyLock<Arc<dyn Action<TestOp>>> =
+        LazyLock::new(|| new_action_noop_undo("n1_action", node_one));
+    static ACTION_N2: LazyLock<Arc<dyn Action<TestOp>>> =
+        LazyLock::new(|| new_action_noop_undo("n2_action", node_two));
 
     fn registry_create() -> Arc<ActionRegistry<TestOp>> {
         let mut registry = ActionRegistry::new();

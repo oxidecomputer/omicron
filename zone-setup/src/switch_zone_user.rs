@@ -4,8 +4,8 @@
 
 use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
-use illumos_utils::{execute, ExecutionError};
-use slog::{info, Logger};
+use illumos_utils::{ExecutionError, execute};
+use slog::{Logger, info};
 use std::fs::{copy, create_dir_all};
 use uzers::{get_group_by_name, get_user_by_name};
 

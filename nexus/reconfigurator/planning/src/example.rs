@@ -418,12 +418,13 @@ impl ExampleSystemBuilder {
                 );
         }
 
-        for (i, (sled_id, sled_resources)) in
-            base_input.all_sled_resources(SledFilter::Commissioned).enumerate()
+        for (i, (sled_id, sled_details)) in
+            base_input.all_sleds(SledFilter::Commissioned).enumerate()
         {
             if self.create_disks_in_blueprint {
-                let _ =
-                    builder.sled_ensure_disks(sled_id, sled_resources).unwrap();
+                let _ = builder
+                    .sled_add_disks(sled_id, &sled_details.resources)
+                    .unwrap();
             }
             if self.create_zones {
                 let _ = builder.sled_ensure_zone_ntp(sled_id).unwrap();
@@ -446,7 +447,7 @@ impl ExampleSystemBuilder {
                 }
             }
             if self.create_zones {
-                for pool_name in sled_resources.zpools.keys() {
+                for pool_name in sled_details.resources.zpools.keys() {
                     let _ = builder
                         .sled_ensure_zone_crucible(sled_id, *pool_name)
                         .unwrap();
@@ -456,10 +457,8 @@ impl ExampleSystemBuilder {
         }
 
         let blueprint = builder.build();
-        for sled_id in blueprint.sleds() {
-            let Some(zones) = blueprint.blueprint_zones.get(&sled_id) else {
-                continue;
-            };
+        for sled_cfg in blueprint.sleds.values() {
+            let zones = &sled_cfg.zones_config;
             for zone in zones.zones.iter() {
                 let service_id = zone.id;
                 if let Some((external_ip, nic)) =
@@ -485,11 +484,14 @@ impl ExampleSystemBuilder {
             }
         }
 
-        for (sled_id, zones) in &blueprint.blueprint_zones {
+        for (sled_id, sled_cfg) in &blueprint.sleds {
             system
                 .sled_set_omicron_zones(
                     *sled_id,
-                    zones.clone().into_running_omicron_zones_config(),
+                    sled_cfg
+                        .zones_config
+                        .clone()
+                        .into_running_omicron_zones_config(),
                 )
                 .unwrap();
         }
@@ -499,10 +501,10 @@ impl ExampleSystemBuilder {
         //
         // Go back and add them so that the blueprint is consistent with
         // inventory.
-        for (sled_id, datasets) in &blueprint.blueprint_datasets {
+        for (sled_id, sled_cfg) in &blueprint.sleds {
             let sled = system.get_sled_mut(*sled_id).unwrap();
 
-            for dataset_config in datasets.datasets.iter() {
+            for dataset_config in sled_cfg.datasets_config.datasets.iter() {
                 let config = dataset_config.clone().try_into().unwrap();
                 sled.add_synthetic_dataset(config);
             }
@@ -543,7 +545,8 @@ impl ZoneCount {
 mod tests {
     use chrono::{NaiveDateTime, TimeZone, Utc};
     use nexus_sled_agent_shared::inventory::{OmicronZoneConfig, ZoneKind};
-    use nexus_types::deployment::{BlueprintZoneConfig, BlueprintZoneFilter};
+    use nexus_types::deployment::BlueprintZoneConfig;
+    use nexus_types::deployment::BlueprintZoneDisposition;
     use omicron_test_utils::dev::test_setup_log;
 
     use super::*;
@@ -690,7 +693,7 @@ mod tests {
         kind: ZoneKind,
     ) -> Vec<&BlueprintZoneConfig> {
         blueprint
-            .all_omicron_zones(BlueprintZoneFilter::All)
+            .all_omicron_zones(BlueprintZoneDisposition::any)
             .filter_map(|(_, zone)| {
                 (zone.zone_type.kind() == kind).then_some(zone)
             })

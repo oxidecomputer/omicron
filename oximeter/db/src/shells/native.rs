@@ -6,7 +6,7 @@
 
 // Copyright 2024 Oxide Computer Company
 
-use crate::native::{self, block::ValueArray, QueryResult};
+use crate::native::{self, QueryResult, block::ValueArray};
 use anyhow::Context as _;
 use crossterm::style::Stylize;
 use display_error_chain::DisplayErrorChain;
@@ -172,11 +172,7 @@ fn values_to_string<'a>(
         ValueArray::Nullable { is_null, values } => {
             let inner = values_to_string(values);
             let it = is_null.iter().zip(inner).map(|(is_null, value)| {
-                if *is_null {
-                    String::from("NULL")
-                } else {
-                    value.to_string()
-                }
+                if *is_null { String::from("NULL") } else { value.to_string() }
             });
             Box::new(it)
         }

@@ -8,8 +8,8 @@
 use super::coverage::Coverage;
 use crate::db;
 use authz::ApiResource;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use nexus_auth::authz;
 use nexus_auth::authz::ApiResourceWithRolesType;
 use nexus_auth::authz::AuthorizedResource;
@@ -243,6 +243,8 @@ macro_rules! impl_dyn_authorized_resource_for_resource {
 }
 
 impl_dyn_authorized_resource_for_resource!(authz::AddressLot);
+impl_dyn_authorized_resource_for_resource!(authz::AffinityGroup);
+impl_dyn_authorized_resource_for_resource!(authz::AntiAffinityGroup);
 impl_dyn_authorized_resource_for_resource!(authz::Blueprint);
 impl_dyn_authorized_resource_for_resource!(authz::Certificate);
 impl_dyn_authorized_resource_for_resource!(authz::DeviceAccessToken);

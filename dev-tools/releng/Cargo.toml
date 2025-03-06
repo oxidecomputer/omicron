@@ -14,11 +14,9 @@ clap.workspace = true
 fs-err = { workspace = true, features = ["tokio"] }
 futures.workspace = true
 hex.workspace = true
-omicron-common.workspace = true
 omicron-pins.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-zone-package.workspace = true
-once_cell.workspace = true
 reqwest.workspace = true
 semver.workspace = true
 serde.workspace = true
@@ -30,6 +28,7 @@ slog-term.workspace = true
 tar.workspace = true
 tokio = { workspace = true, features = ["full"] }
 toml.workspace = true
+tufaceous-artifact.workspace = true
 tufaceous-lib.workspace = true
 
 [lints]

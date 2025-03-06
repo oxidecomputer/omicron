@@ -59,7 +59,6 @@ nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-ddm-admin-client.workspace = true
 omicron-uuid-kinds.workspace = true
-once_cell.workspace = true
 oximeter.workspace = true
 oximeter-instruments.workspace = true
 oximeter-producer.workspace = true
@@ -109,7 +108,7 @@ omicron-workspace-hack.workspace = true
 slog-error-chain.workspace = true
 walkdir.workspace = true
 zip.workspace = true
-omicron-brand-metadata.workspace = true
+tufaceous-brand-metadata.workspace = true
 
 [target.'cfg(target_os = "illumos")'.dependencies]
 opte-ioctl.workspace = true

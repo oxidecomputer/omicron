@@ -8,20 +8,20 @@ use super::DataStore;
 use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::db;
+use crate::db::TransactionError;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::datastore::OpContext;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Asset;
 use crate::db::model::PhysicalDisk;
 use crate::db::model::PhysicalDiskPolicy;
 use crate::db::model::PhysicalDiskState;
 use crate::db::model::Sled;
 use crate::db::model::Zpool;
-use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
-use crate::db::TransactionError;
+use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -246,9 +246,9 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         if region_snapshot_count > 0 {
-            return Err(
-                Error::unavail(&format!("Cannot delete this zpool; it has {region_snapshot_count} region snapshots"))
-            );
+            return Err(Error::unavail(&format!(
+                "Cannot delete this zpool; it has {region_snapshot_count} region snapshots"
+            )));
         }
 
         // Ensure the datasets are deleted

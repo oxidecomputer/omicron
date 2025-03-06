@@ -25,8 +25,8 @@ futures.workspace = true
 internal-dns-resolver.workspace = true
 internal-dns-types.workspace = true
 ipnetwork.workspace = true
+itertools.workspace = true
 macaddr.workspace = true
-once_cell.workspace = true
 oxnet.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
@@ -75,6 +75,7 @@ testing = ["omicron-test-utils"]
 [dev-dependencies]
 assert_matches.workspace = true
 camino-tempfile.workspace = true
+criterion.workspace = true
 expectorate.workspace = true
 hyper-rustls.workspace = true
 gateway-client.workspace = true
@@ -85,7 +86,7 @@ nexus-inventory.workspace = true
 nexus-reconfigurator-planning.workspace = true
 nexus-test-utils.workspace = true
 omicron-sled-agent.workspace = true
-omicron-test-utils.workspace = true
+omicron-test-utils = { workspace = true, features = ["seed-gen"] }
 openapiv3.workspace = true
 oso.workspace = true
 pem.workspace = true
@@ -97,3 +98,7 @@ regex.workspace = true
 rustls.workspace = true
 subprocess.workspace = true
 term.workspace = true
+
+[[bench]]
+name = "sled_reservation"
+harness = false

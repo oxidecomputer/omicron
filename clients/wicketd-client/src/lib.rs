@@ -91,6 +91,12 @@ progenitor::generate_api!(
         UserSpecifiedImportExportPolicy = wicket_common::rack_setup::UserSpecifiedImportExportPolicy,
         UserSpecifiedPortConfig = wicket_common::rack_setup::UserSpecifiedPortConfig,
         UserSpecifiedRackNetworkConfig = wicket_common::rack_setup::UserSpecifiedRackNetworkConfig,
+    },
+    convert = {
+        {
+            type = "string",
+            pattern = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$",
+        } = semver::Version,
     }
 );
 

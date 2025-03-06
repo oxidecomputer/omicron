@@ -5,12 +5,12 @@
 //! Allocator for zone underlay IP addresses with a single sled's subnet.
 
 use ipnet::IpAdd;
-use omicron_common::address::get_sled_address;
-use omicron_common::address::get_switch_zone_address;
-use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::CP_SERVICES_RESERVED_ADDRESSES;
+use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::SLED_RESERVED_ADDRESSES;
+use omicron_common::address::get_sled_address;
+use omicron_common::address::get_switch_zone_address;
 use std::net::Ipv6Addr;
 
 /// Very simple allocator for picking addresses from a sled's subnet

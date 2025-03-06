@@ -2,12 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use omicron_common::address::get_switch_zone_address;
-use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::DENDRITE_PORT;
+use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::get_switch_zone_address;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;

@@ -26,7 +26,7 @@ use oximeter_types::types::{
     Cumulative, Datum, DatumType, FieldType, FieldValue, Measurement, Sample,
 };
 use oximeter_types::{Metric, Target};
-use slog::{debug, info, Logger};
+use slog::{Logger, debug, info};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -177,7 +177,7 @@ pub async fn wait_for_keepers(
             }
         },
         &Duration::from_millis(1),
-        &Duration::from_secs(30),
+        &Duration::from_secs(90),
     )
     .await
     .with_context(|| format!("failed to contact all keepers: {ids:?}"))?;
@@ -199,7 +199,7 @@ pub async fn wait_for_ping(
                 .map_err(|_| poll::CondCheckError::<oximeter_db::Error>::NotYet)
         },
         &Duration::from_millis(100),
-        &Duration::from_secs(30),
+        &Duration::from_secs(90),
     )
     .await
     .context("failed to ping ClickHouse server")?;
@@ -211,11 +211,11 @@ pub async fn wait_for_ping(
 mod tests {
     use chrono::Utc;
     use oximeter_types::{
-        schema::{
-            default_schema_version, AuthzScope, FieldSchema, FieldSource,
-            TimeseriesSchema, Units,
-        },
         TimeseriesName,
+        schema::{
+            AuthzScope, FieldSchema, FieldSource, TimeseriesSchema, Units,
+            default_schema_version,
+        },
     };
 
     use super::*;

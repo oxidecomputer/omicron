@@ -15,7 +15,6 @@ use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::Name;
 use nexus_defaults as defaults;
 use omicron_common::api::external;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -26,6 +25,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -51,12 +51,11 @@ impl super::Nexus {
                     .vpc_name_owned(name.into());
                 Ok(vpc)
             }
-            params::VpcSelector {
-                vpc: NameOrId::Id(_),
-                project: Some(_),
-            } => Err(Error::invalid_request(
-                "when providing vpc as an ID, project should not be specified",
-            )),
+            params::VpcSelector { vpc: NameOrId::Id(_), project: Some(_) } => {
+                Err(Error::invalid_request(
+                    "when providing vpc as an ID, project should not be specified",
+                ))
+            }
             _ => Err(Error::invalid_request(
                 "vpc should either be an ID or project should be specified",
             )),
@@ -213,7 +212,7 @@ impl super::Nexus {
                     _ => {
                         return Err(external::Error::internal_error(
                             "unexpected target in default firewall rule",
-                        ))
+                        ));
                     }
                 }
                 if let Some(ref mut filter_hosts) = rule.filter_hosts {
@@ -224,9 +223,11 @@ impl super::Nexus {
                             ) if name.as_str() == "default" => {
                                 *name = vpc_name.clone().into()
                             }
-                            _ => return Err(external::Error::internal_error(
-                                "unexpected host filter in default firewall rule"
-                            )),
+                            _ => {
+                                return Err(external::Error::internal_error(
+                                    "unexpected host filter in default firewall rule",
+                                ));
+                            }
                         }
                     }
                 }

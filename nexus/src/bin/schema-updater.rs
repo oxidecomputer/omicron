@@ -14,7 +14,7 @@ use nexus_db_model::AllSchemaVersions;
 use nexus_db_model::SCHEMA_VERSION;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
-use omicron_common::api::external::SemverVersion;
+use semver::Version;
 use slog::Drain;
 use slog::Level;
 use slog::LevelFilter;
@@ -56,7 +56,7 @@ enum Cmd {
     #[clap(visible_alias = "up")]
     Upgrade {
         #[arg(default_value_t = SCHEMA_VERSION)]
-        version: SemverVersion,
+        version: Version,
     },
 }
 

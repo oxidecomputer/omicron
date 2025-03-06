@@ -5,20 +5,20 @@
 use nexus_db_model as model;
 use nexus_types::{external_api::params, silo::INTERNAL_SILO_ID};
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 /// The name of the built-in Project and VPC for Oxide services.
 pub const SERVICES_DB_NAME: &str = "oxide-services";
 
 /// UUID of built-in project for internal services on the rack.
-pub static SERVICES_PROJECT_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
+pub static SERVICES_PROJECT_ID: LazyLock<uuid::Uuid> = LazyLock::new(|| {
     "001de000-4401-4000-8000-000000000000"
         .parse()
         .expect("invalid uuid for builtin services project id")
 });
 
 /// Built-in Project for internal services on the rack.
-pub static SERVICES_PROJECT: Lazy<model::Project> = Lazy::new(|| {
+pub static SERVICES_PROJECT: LazyLock<model::Project> = LazyLock::new(|| {
     model::Project::new_with_id(
         *SERVICES_PROJECT_ID,
         INTERNAL_SILO_ID,

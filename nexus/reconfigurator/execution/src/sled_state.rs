@@ -5,16 +5,35 @@
 //! Updates sled states required by a given blueprint
 
 use anyhow::Context;
-use nexus_db_model::SledState;
+use nexus_db_model::SledState as DbSledState;
 use nexus_db_queries::authz::Action;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::TransitionError;
 use nexus_db_queries::db::lookup::LookupPath;
-use nexus_db_queries::db::DataStore;
+use nexus_types::deployment::Blueprint;
+use nexus_types::external_api::views::SledState;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 
 pub(crate) async fn decommission_sleds(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    blueprint: &Blueprint,
+) -> Result<(), Vec<anyhow::Error>> {
+    decommission_sleds_impl(
+        opctx,
+        datastore,
+        blueprint
+            .sleds
+            .iter()
+            .filter(|(_, sled)| sled.state == SledState::Decommissioned)
+            .map(|(&sled_id, _)| sled_id),
+    )
+    .await
+}
+
+pub(crate) async fn decommission_sleds_impl(
     opctx: &OpContext,
     datastore: &DataStore,
     sled_ids_to_decommission: impl Iterator<Item = SledUuid>,
@@ -28,11 +47,7 @@ pub(crate) async fn decommission_sleds(
         }
     }
 
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors)
-    }
+    if errors.is_empty() { Ok(()) } else { Err(errors) }
 }
 
 async fn decommission_one_sled(
@@ -54,7 +69,7 @@ async fn decommission_one_sled(
         // already realized), this sled may already be decommissioned; that's
         // fine.
         Err(TransitionError::InvalidTransition { current, .. })
-            if current.state() == SledState::Decommissioned =>
+            if current.state() == DbSledState::Decommissioned =>
         {
             Ok(())
         }
@@ -116,7 +131,7 @@ mod tests {
             .expect("expunged sled");
 
         // Decommission the sled.
-        decommission_sleds(
+        decommission_sleds_impl(
             &opctx,
             datastore,
             std::iter::once(decommissioned_sled_id),
@@ -131,7 +146,7 @@ mod tests {
         );
 
         // Try to decommission the sled again; this should be fine.
-        decommission_sleds(
+        decommission_sleds_impl(
             &opctx,
             datastore,
             std::iter::once(decommissioned_sled_id),

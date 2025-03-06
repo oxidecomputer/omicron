@@ -3,15 +3,15 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //! Built-in assignments for built-in users and built-in roles
 
+use super::FLEET_ID;
 use super::role_builtin;
 use super::user_builtin;
-use super::FLEET_ID;
 use nexus_db_model::IdentityType;
 use nexus_db_model::RoleAssignment;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
-pub static BUILTIN_ROLE_ASSIGNMENTS: Lazy<Vec<RoleAssignment>> =
-    Lazy::new(|| {
+pub static BUILTIN_ROLE_ASSIGNMENTS: LazyLock<Vec<RoleAssignment>> =
+    LazyLock::new(|| {
         vec![
             // The "internal-api" user gets the "admin" role on the sole Fleet.
             // This is a pretty elevated privilege.

@@ -7,7 +7,7 @@
 // - test that an unknown artifact returns 404, not 500
 // - tests around target names and artifact names that contain dangerous paths like `../`
 
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 use camino::Utf8Path;
 use camino_tempfile::{Builder, Utf8TempPath};
 use clap::Parser;
@@ -19,16 +19,16 @@ use nexus_test_utils::background::wait_tuf_artifact_replication_step;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::{load_test_config, test_setup, test_setup_with_config};
 use omicron_common::api::external::{
-    SemverVersion, TufRepoGetResponse, TufRepoInsertResponse,
-    TufRepoInsertStatus,
+    TufRepoGetResponse, TufRepoInsertResponse, TufRepoInsertStatus,
 };
-use omicron_common::api::internal::nexus::KnownArtifactKind;
 use omicron_sled_agent::sim;
 use pretty_assertions::assert_eq;
+use semver::Version;
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::io::Write;
+use tufaceous_artifact::KnownArtifactKind;
 use tufaceous_lib::assemble::{DeserializedManifest, ManifestTweak};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -147,11 +147,10 @@ async fn test_repo_upload() -> Result<()> {
             .collect::<Vec<_>>(),
         ["zone1", "zone2"]
     );
-    assert!(!initial_description
-        .artifacts
-        .iter()
-        .any(|artifact| artifact.id.kind
-            == KnownArtifactKind::ControlPlane.into()));
+    assert!(
+        !initial_description.artifacts.iter().any(|artifact| artifact.id.kind
+            == KnownArtifactKind::ControlPlane.into())
+    );
 
     // The artifact replication background task should have been activated, and
     // we should see a local repo and successful PUTs.
@@ -369,7 +368,7 @@ fn make_upload_request<'a>(
 
 fn make_get_request(
     client: &dropshot::test_util::ClientTestContext,
-    system_version: SemverVersion,
+    system_version: Version,
     expected_status: StatusCode,
 ) -> NexusRequest<'_> {
     let request = NexusRequest::new(

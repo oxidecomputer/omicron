@@ -9,7 +9,7 @@ use omicron_common::address::{Ipv6Subnet, SLED_PREFIX};
 use omicron_uuid_kinds::SledUuid;
 
 use crate::deployment::{
-    blueprint_zone_type, Blueprint, BlueprintZoneFilter, BlueprintZoneType,
+    Blueprint, BlueprintZoneDisposition, BlueprintZoneType, blueprint_zone_type,
 };
 
 /// The minimal information needed to represent a sled in the context of
@@ -54,7 +54,7 @@ impl Sled {
 /// Return the Nexus external addresses according to the given blueprint
 pub fn blueprint_nexus_external_ips(blueprint: &Blueprint) -> Vec<IpAddr> {
     blueprint
-        .all_omicron_zones(BlueprintZoneFilter::ShouldBeExternallyReachable)
+        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         .filter_map(|(_, z)| match z.zone_type {
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 external_ip,

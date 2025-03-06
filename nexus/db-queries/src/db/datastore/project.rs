@@ -11,8 +11,8 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Resource;
 use crate::db::model::CollectionTypeProvisioned;
 use crate::db::model::Name;
@@ -27,7 +27,6 @@ use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_fixed_data::project::SERVICES_PROJECT;
 use nexus_types::silo::INTERNAL_SILO_ID;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -36,6 +35,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use ref_cast::RefCast;
 
 // Generates internal functions used for validation during project deletion.
@@ -225,6 +225,8 @@ impl DataStore {
     generate_fn_to_ensure_none_in_project!(project_image, name, String);
     generate_fn_to_ensure_none_in_project!(snapshot, name, String);
     generate_fn_to_ensure_none_in_project!(vpc, name, String);
+    generate_fn_to_ensure_none_in_project!(affinity_group, name, String);
+    generate_fn_to_ensure_none_in_project!(anti_affinity_group, name, String);
 
     /// Delete a project
     pub async fn project_delete(
@@ -242,6 +244,9 @@ impl DataStore {
         self.ensure_no_project_images_in_project(opctx, authz_project).await?;
         self.ensure_no_snapshots_in_project(opctx, authz_project).await?;
         self.ensure_no_vpcs_in_project(opctx, authz_project).await?;
+        self.ensure_no_affinity_groups_in_project(opctx, authz_project).await?;
+        self.ensure_no_anti_affinity_groups_in_project(opctx, authz_project)
+            .await?;
 
         use db::schema::project::dsl;
 

@@ -8,9 +8,10 @@ use crate::addrobj::AddrObject;
 use crate::dladm;
 use camino::Utf8Path;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use opte_ioctl::Error as OpteError;
 use opte_ioctl::OpteHdl;
-use slog::info;
 use slog::Logger;
+use slog::info;
 use std::net::IpAddr;
 
 #[derive(thiserror::Error, Debug)]
@@ -63,7 +64,7 @@ pub enum Error {
 
 /// Delete all xde devices on the system.
 pub fn delete_all_xde_devices(log: &Logger) -> Result<(), Error> {
-    let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
+    let hdl = Handle::new()?;
     for port_info in hdl.list_ports()?.ports.into_iter() {
         let name = &port_info.name;
         info!(
@@ -103,7 +104,7 @@ pub fn initialize_xde_driver(
             String::from(MESSAGE),
         )));
     }
-    match OpteHdl::open(OpteHdl::XDE_CTL)?.set_xde_underlay(
+    match Handle::new()?.set_xde_underlay(
         underlay_nics[0].interface(),
         underlay_nics[1].interface(),
     ) {
@@ -129,5 +130,26 @@ pub fn initialize_xde_driver(
             opte_ioctl::OpteError::System { errno: libc::EEXIST, .. },
         )) => Ok(()),
         Err(e) => Err(e.into()),
+    }
+}
+
+/// Handle to the OPTE kernel driver.
+pub struct Handle {
+    inner: OpteHdl,
+}
+
+impl Handle {
+    /// Construct a new handle to the OPTE kernel driver.
+    pub fn new() -> Result<Self, OpteError> {
+        OpteHdl::open(OpteHdl::XDE_CTL).map(|inner| Self { inner })
+    }
+}
+
+// This deref impl lets us use the actual API of `OpteHdl`.
+impl std::ops::Deref for Handle {
+    type Target = OpteHdl;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
     }
 }

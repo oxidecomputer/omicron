@@ -17,34 +17,34 @@
 // NOTE: allowing "transaction_async" without retry
 #![allow(clippy::disallowed_methods)]
 
+use crate::Omdb;
 use crate::check_allow_destructive::DestructiveOperationToken;
-use crate::helpers::const_max_len;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::DATABASE_OPTIONS_HEADING;
-use crate::Omdb;
-use anyhow::bail;
+use crate::helpers::const_max_len;
 use anyhow::Context;
+use anyhow::bail;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::AsyncSimpleConnection;
 use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
-use clap::builder::PossibleValue;
-use clap::builder::PossibleValuesParser;
-use clap::builder::TypedValueParser;
 use clap::ArgAction;
 use clap::Args;
 use clap::Subcommand;
 use clap::ValueEnum;
-use diesel::expression::SelectableHelper;
-use diesel::query_dsl::QueryDsl;
+use clap::builder::PossibleValue;
+use clap::builder::PossibleValuesParser;
+use clap::builder::TypedValueParser;
 use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::JoinOnDsl;
 use diesel::NullableExpressionMethods;
 use diesel::OptionalExtension;
 use diesel::TextExpressionMethods;
+use diesel::expression::SelectableHelper;
+use diesel::query_dsl::QueryDsl;
 use gateway_client::types::SpType;
 use indicatif::ProgressBar;
 use indicatif::ProgressDrawTarget;
@@ -53,7 +53,6 @@ use internal_dns_types::names::ServiceName;
 use ipnetwork::IpNetwork;
 use itertools::Itertools;
 use nexus_config::PostgresConfigWithUrl;
-use nexus_db_model::to_db_typed_uuid;
 use nexus_db_model::CrucibleDataset;
 use nexus_db_model::Disk;
 use nexus_db_model::DnsGroup;
@@ -97,21 +96,21 @@ use nexus_db_model::Volume;
 use nexus_db_model::VolumeRepair;
 use nexus_db_model::VpcSubnet;
 use nexus_db_model::Zpool;
+use nexus_db_model::to_db_typed_uuid;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
+use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::CrucibleTargets;
 use nexus_db_queries::db::datastore::DataStoreConnection;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
+use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::pagination::paginated;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
-use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
-use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::SledFilter;
@@ -1283,7 +1282,7 @@ async fn lookup_service_info(
     blueprint: &Blueprint,
 ) -> anyhow::Result<Option<ServiceInfo>> {
     let Some(zone_config) = blueprint
-        .all_omicron_zones(BlueprintZoneFilter::All)
+        .all_omicron_zones(BlueprintZoneDisposition::any)
         .find_map(|(_sled_id, zone_config)| {
             if zone_config.id.into_untyped_uuid() == service_id {
                 Some(zone_config)
@@ -1563,7 +1562,7 @@ async fn cmd_db_disk_info(
     struct DownstairsRow {
         host_serial: String,
         region: String,
-        zone: String,
+        dataset: String,
         physical_disk: String,
     }
 
@@ -1688,7 +1687,7 @@ async fn cmd_db_disk_info(
         rows.push(DownstairsRow {
             host_serial: my_sled.serial_number().to_string(),
             region: region.id().to_string(),
-            zone: format!("oxz_crucible_{}", dataset.id()),
+            dataset: dataset.id().to_string(),
             physical_disk: my_zpool.physical_disk_id.to_string(),
         });
     }
@@ -1724,7 +1723,7 @@ async fn get_and_display_vcr(
     for v in volumes {
         match serde_json::from_str(&v.data()) {
             Ok(vcr) => {
-                println!("\nVCR from volume ID {volume_id}");
+                println!("VCR from volume ID {volume_id}");
                 print_vcr(vcr, 0);
             }
             Err(e) => {
@@ -2125,12 +2124,12 @@ async fn cmd_db_snapshot_info(
     struct DownstairsRow {
         host_serial: String,
         region: String,
-        zone: String,
+        dataset: String,
         physical_disk: String,
     }
 
     use db::schema::snapshot::dsl as snapshot_dsl;
-    let snapshots = snapshot_dsl::snapshot
+    let mut snapshots = snapshot_dsl::snapshot
         .filter(snapshot_dsl::id.eq(args.uuid))
         .limit(1)
         .select(Snapshot::as_select())
@@ -2138,32 +2137,75 @@ async fn cmd_db_snapshot_info(
         .await
         .context("loading requested snapshot")?;
 
-    let mut dest_volume_ids = Vec::new();
-    let mut source_volume_ids = Vec::new();
-    let rows = snapshots.into_iter().map(|snapshot| {
-        dest_volume_ids.push(snapshot.destination_volume_id());
-        source_volume_ids.push(snapshot.volume_id());
-        SnapshotRow::from(snapshot)
-    });
-    if rows.len() == 0 {
-        bail!("No snapshout with UUID: {} found", args.uuid);
+    if snapshots.is_empty() {
+        bail!("No snapshot with UUID: {} found", args.uuid);
+    }
+    let snap = snapshots.pop().expect("Found more that one snapshot");
+
+    let dest_vol_id = snap.destination_volume_id;
+    let source_vol_id = snap.volume_id;
+    let snap = SnapshotRow::from(snap);
+
+    println!("                 Name: {}", snap.snap_name);
+    println!("                   id: {}", snap.id);
+    println!("                state: {}", snap.state);
+    println!("                 size: {}", snap.size);
+    println!("       source_disk_id: {}", snap.source_disk_id);
+    println!("     source_volume_id: {}", snap.source_volume_id);
+    println!("destination_volume_id: {}", snap.destination_volume_id);
+
+    use db::schema::region_snapshot::dsl as region_snapshot_dsl;
+    let region_snapshots = region_snapshot_dsl::region_snapshot
+        .filter(region_snapshot_dsl::snapshot_id.eq(args.uuid))
+        .select(RegionSnapshot::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .context("loading region snapshots")?;
+
+    println!();
+    if region_snapshots.is_empty() {
+        println!("No region snapshot info found");
+    } else {
+        // The row describing the region_snapshot.
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct RegionSnapshotRow {
+            dataset_id: String,
+            region_id: String,
+            snapshot_id: String,
+            snapshot_addr: String,
+            volume_references: String,
+        }
+        let mut rsnap = Vec::new();
+
+        // From each region snapshot:
+        // Collect the snapshot IDs for later use.
+        // Display the region snapshot rows.
+        let mut snapshot_ids = HashSet::new();
+        for rs in region_snapshots {
+            snapshot_ids.insert(rs.snapshot_id);
+            let rs = RegionSnapshotRow {
+                dataset_id: rs.dataset_id.to_string(),
+                region_id: rs.region_id.to_string(),
+                snapshot_id: rs.snapshot_id.to_string(),
+                snapshot_addr: rs.snapshot_addr.to_string(),
+                volume_references: rs.volume_references.to_string(),
+            };
+            rsnap.push(rs);
+        }
+        let table = tabled::Table::new(rsnap)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0))
+            .to_string();
+
+        println!("REGION SNAPSHOT INFO:");
+        println!("{}", table);
     }
 
-    let table = tabled::Table::new(rows)
-        .with(tabled::settings::Style::empty())
-        .with(tabled::settings::Padding::new(0, 1, 0, 0))
-        .to_string();
-
-    println!("{}", table);
-
-    println!("SOURCE VOLUME VCR:");
-    for vol in source_volume_ids {
-        get_and_display_vcr(vol, datastore).await?;
-    }
-    for vol_id in dest_volume_ids {
-        // Get the dataset backing this volume.
-        let regions = datastore.get_allocated_regions(vol_id).await?;
-
+    let regions = datastore.get_allocated_regions(source_vol_id.into()).await?;
+    if regions.is_empty() {
+        println!("\nNo source region info found");
+    } else {
         let mut rows = Vec::with_capacity(3);
         for (dataset, region) in regions {
             let my_pool_id = dataset.pool_id;
@@ -2184,7 +2226,7 @@ async fn cmd_db_snapshot_info(
             rows.push(DownstairsRow {
                 host_serial: my_sled.serial_number().to_string(),
                 region: region.id().to_string(),
-                zone: format!("oxz_crucible_{}", dataset.id()),
+                dataset: dataset.id().to_string(),
                 physical_disk: my_zpool.physical_disk_id.to_string(),
             });
         }
@@ -2194,11 +2236,50 @@ async fn cmd_db_snapshot_info(
             .with(tabled::settings::Padding::new(0, 1, 0, 0))
             .to_string();
 
-        println!("DESTINATION REGION INFO:");
+        println!("\nSOURCE REGION INFO:");
         println!("{}", table);
-        println!("DESTINATION VOLUME VCR:");
-        get_and_display_vcr(vol_id, datastore).await?;
     }
+
+    println!("SOURCE VOLUME VCR:");
+    get_and_display_vcr(source_vol_id.into(), datastore).await?;
+
+    // Get the dataset backing this volume.
+    let regions = datastore.get_allocated_regions(dest_vol_id.into()).await?;
+
+    let mut rows = Vec::with_capacity(3);
+    for (dataset, region) in regions {
+        let my_pool_id = dataset.pool_id;
+        let (_, my_zpool) = LookupPath::new(opctx, datastore)
+            .zpool_id(my_pool_id)
+            .fetch()
+            .await
+            .context("failed to look up zpool")?;
+
+        let my_sled_id = my_zpool.sled_id;
+
+        let (_, my_sled) = LookupPath::new(opctx, datastore)
+            .sled_id(my_sled_id)
+            .fetch()
+            .await
+            .context("failed to look up sled")?;
+
+        rows.push(DownstairsRow {
+            host_serial: my_sled.serial_number().to_string(),
+            region: region.id().to_string(),
+            dataset: dataset.id().to_string(),
+            physical_disk: my_zpool.physical_disk_id.to_string(),
+        });
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("DESTINATION REGION INFO:");
+    println!("{}", table);
+    println!("DESTINATION VOLUME VCR:");
+    get_and_display_vcr(dest_vol_id.into(), datastore).await?;
 
     Ok(())
 }
@@ -2558,6 +2639,7 @@ async fn cmd_db_region_list(
             blocks_per_extent: u64,
             extent_count: u64,
             read_only: bool,
+            deleting: bool,
         }
 
         let rows: Vec<_> = regions
@@ -2570,6 +2652,7 @@ async fn cmd_db_region_list(
                 blocks_per_extent: region.blocks_per_extent(),
                 extent_count: region.extent_count(),
                 read_only: region.read_only(),
+                deleting: region.deleting(),
             })
             .collect();
 
@@ -3271,7 +3354,9 @@ async fn cmd_db_instance_info(
             }
         };
         if vmm.is_none() {
-            eprintln!(" /!\\ BAD: instance has an active VMM ({id}) but no matching VMM record was found!");
+            eprintln!(
+                " /!\\ BAD: instance has an active VMM ({id}) but no matching VMM record was found!"
+            );
         }
         vmm
     } else {
@@ -3360,7 +3445,7 @@ async fn cmd_db_instance_info(
     }
 
     println!("\n{:=<80}", "== CONFIGURATION ");
-    println!("    {VCPUS:>WIDTH$}: {}", instance.ncpus.0 .0);
+    println!("    {VCPUS:>WIDTH$}: {}", instance.ncpus.0.0);
     println!("    {MEMORY:>WIDTH$}: {}", instance.memory.0);
     println!("    {HOSTNAME:>WIDTH$}: {}", instance.hostname);
     println!("    {BOOT_DISK:>WIDTH$}: {:?}", instance.boot_disk_id);
@@ -4851,9 +4936,9 @@ async fn cmd_db_validate_regions(
             continue;
         }
 
+        use crucible_agent_client::Client as CrucibleAgentClient;
         use crucible_agent_client::types::RegionId;
         use crucible_agent_client::types::State;
-        use crucible_agent_client::Client as CrucibleAgentClient;
 
         let dataset_addr = dataset.address();
         let url = format!("http://{}", dataset_addr);
@@ -4969,8 +5054,8 @@ async fn cmd_db_validate_regions(
             continue;
         }
 
-        use crucible_agent_client::types::State;
         use crucible_agent_client::Client as CrucibleAgentClient;
+        use crucible_agent_client::types::State;
 
         let dataset_addr = dataset.address();
         let url = format!("http://{}", dataset_addr);
@@ -5118,9 +5203,9 @@ async fn cmd_db_validate_region_snapshots(
             continue;
         }
 
+        use crucible_agent_client::Client as CrucibleAgentClient;
         use crucible_agent_client::types::RegionId;
         use crucible_agent_client::types::State;
-        use crucible_agent_client::Client as CrucibleAgentClient;
 
         let dataset_addr = dataset.address();
         let url = format!("http://{}", dataset_addr);
@@ -5294,9 +5379,9 @@ async fn cmd_db_validate_region_snapshots(
             continue;
         }
 
+        use crucible_agent_client::Client as CrucibleAgentClient;
         use crucible_agent_client::types::RegionId;
         use crucible_agent_client::types::State;
-        use crucible_agent_client::Client as CrucibleAgentClient;
 
         let dataset_addr = dataset.address();
         let url = format!("http://{}", dataset_addr);
@@ -6322,7 +6407,7 @@ async fn cmd_db_vmm_info(
     &VmmInfoArgs { uuid }: &VmmInfoArgs,
 ) -> Result<(), anyhow::Error> {
     use db::schema::migration::dsl as migration_dsl;
-    use db::schema::sled_resource::dsl as resource_dsl;
+    use db::schema::sled_resource_vmm::dsl as resource_dsl;
     use db::schema::vmm::dsl as vmm_dsl;
 
     let vmm = vmm_dsl::vmm
@@ -6358,20 +6443,20 @@ async fn cmd_db_vmm_info(
     );
 
     fn prettyprint_reservation(
-        resource: db::model::SledResource,
+        resource: db::model::SledResourceVmm,
         include_sled_id: bool,
     ) {
         use db::model::ByteCount;
-        let db::model::SledResource {
+        let db::model::SledResourceVmm {
             id: _,
             sled_id,
-            kind: _,
             resources:
                 db::model::Resources {
                     hardware_threads,
                     rss_ram: ByteCount(rss),
                     reservoir_ram: ByteCount(reservoir),
                 },
+            instance_id: _,
         } = resource;
         const SLED_ID: &'static str = "sled ID";
         const THREADS: &'static str = "hardware threads";
@@ -6386,10 +6471,10 @@ async fn cmd_db_vmm_info(
         println!("    {RESERVOIR:>WIDTH$}: {reservoir}");
     }
 
-    let reservations = resource_dsl::sled_resource
+    let reservations = resource_dsl::sled_resource_vmm
         .filter(resource_dsl::id.eq(uuid))
-        .select(db::model::SledResource::as_select())
-        .load_async::<db::model::SledResource>(
+        .select(db::model::SledResourceVmm::as_select())
+        .load_async::<db::model::SledResourceVmm>(
             &*datastore.pool_connection_for_tests().await?,
         )
         .await

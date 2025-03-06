@@ -22,7 +22,6 @@ ipnetwork.workspace = true
 macaddr.workspace = true
 newtype_derive.workspace = true
 omicron-uuid-kinds.workspace = true
-once_cell.workspace = true
 oxnet.workspace = true
 parse-display.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
@@ -51,6 +50,7 @@ nexus-types.workspace = true
 omicron-passwords.workspace = true
 sled-agent-client.workspace = true
 omicron-workspace-hack.workspace = true
+tufaceous-artifact.workspace = true
 
 [dev-dependencies]
 camino-tempfile.workspace = true

@@ -6,19 +6,20 @@
 
 use super::external_ips::floating_ip_get;
 use super::external_ips::get_floating_ip_by_id_url;
-use super::metrics::{get_latest_silo_metric, get_latest_system_metric};
+use super::metrics::{assert_silo_metrics, assert_system_metrics};
 
-use http::method::Method;
 use http::StatusCode;
+use http::method::Method;
 use itertools::Itertools;
 use nexus_auth::authz::Action;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::lookup::LookupPath;
-use nexus_db_queries::db::DataStore;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::resource_helpers::assert_ip_pool_utilization;
 use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_disk;
@@ -32,9 +33,10 @@ use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::object_create_error;
 use nexus_test_utils::resource_helpers::object_delete;
 use nexus_test_utils::resource_helpers::object_delete_error;
+use nexus_test_utils::resource_helpers::object_get;
 use nexus_test_utils::resource_helpers::object_put;
+use nexus_test_utils::resource_helpers::object_put_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
-use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::wait_for_producer;
 use nexus_types::external_api::params::SshKeyCreate;
 use nexus_types::external_api::shared::IpKind;
@@ -63,11 +65,11 @@ use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterId;
 use omicron_common::api::internal::shared::RouterKind;
+use omicron_nexus::Nexus;
+use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::app::MAX_MEMORY_BYTES_PER_INSTANCE;
 use omicron_nexus::app::MAX_VCPU_PER_INSTANCE;
 use omicron_nexus::app::MIN_MEMORY_BYTES_PER_INSTANCE;
-use omicron_nexus::Nexus;
-use omicron_nexus::TestInterfaces as _;
 use omicron_sled_agent::sim::SledAgent;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::PropolisUuid;
@@ -1595,49 +1597,11 @@ async fn assert_metrics(
     cpus: i64,
     ram: i64,
 ) {
-    cptestctx
-        .oximeter
-        .try_force_collect()
-        .await
-        .expect("Could not force oximeter collection");
-
-    for id in &[None, Some(project_id)] {
-        assert_eq!(
-            get_latest_silo_metric(
-                cptestctx,
-                "virtual_disk_space_provisioned",
-                *id,
-            )
-            .await,
-            disk
-        );
-        assert_eq!(
-            get_latest_silo_metric(cptestctx, "cpus_provisioned", *id).await,
-            cpus
-        );
-        assert_eq!(
-            get_latest_silo_metric(cptestctx, "ram_provisioned", *id).await,
-            ram
-        );
+    for id in [None, Some(project_id)] {
+        assert_silo_metrics(cptestctx, id, disk, cpus, ram).await;
     }
-    for id in &[None, Some(DEFAULT_SILO_ID)] {
-        assert_eq!(
-            get_latest_system_metric(
-                cptestctx,
-                "virtual_disk_space_provisioned",
-                *id
-            )
-            .await,
-            disk
-        );
-        assert_eq!(
-            get_latest_system_metric(cptestctx, "cpus_provisioned", *id).await,
-            cpus
-        );
-        assert_eq!(
-            get_latest_system_metric(cptestctx, "ram_provisioned", *id).await,
-            ram
-        );
+    for id in [None, Some(DEFAULT_SILO_ID)] {
+        assert_system_metrics(cptestctx, id, disk, cpus, ram).await;
     }
 }
 
@@ -2018,9 +1982,11 @@ async fn test_instances_invalid_creation_returns_bad_request(
         )
         .await
         .unwrap_err();
-    assert!(error
-        .message
-        .starts_with("unable to parse JSON body: EOF while parsing an object"));
+    assert!(
+        error.message.starts_with(
+            "unable to parse JSON body: EOF while parsing an object"
+        )
+    );
 
     let request_body = r##"
         {
@@ -2150,7 +2116,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
     };
     let interface_params =
         params::InstanceNetworkInterfaceAttachment::Create(vec![
-            if0_params.clone()
+            if0_params.clone(),
         ]);
 
     // Create the parameters for the instance itself, and create it.
@@ -2229,7 +2195,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
     };
     let interface_params =
         params::InstanceNetworkInterfaceAttachment::Create(vec![
-            if0_params.clone()
+            if0_params.clone(),
         ]);
     let instance_params = params::InstanceCreate {
         network_interfaces: interface_params,
@@ -2271,7 +2237,7 @@ async fn test_instance_with_single_explicit_ip_address(
     };
     let interface_params =
         params::InstanceNetworkInterfaceAttachment::Create(vec![
-            if0_params.clone()
+            if0_params.clone(),
         ]);
 
     // Create the parameters for the instance itself, and create it.
@@ -3116,6 +3082,235 @@ async fn test_instance_update_network_interfaces(
     assert_eq!(iface.identity.name, if_params[0].identity.name);
 }
 
+#[nexus_test]
+async fn test_instance_update_network_interface_transit_ips(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "transit-ips-test";
+    let nic_name = "net0";
+
+    create_project_and_pool(&client).await;
+
+    // Create a stopped instance with a single network interface.
+    let instance = create_instance_with(
+        &client,
+        PROJECT_NAME,
+        instance_name,
+        &params::InstanceNetworkInterfaceAttachment::Default,
+        vec![],
+        vec![],
+        false,
+        Default::default(),
+    )
+    .await;
+
+    let url_interface = format!(
+        "/v1/network-interfaces/{nic_name}?instance={}",
+        instance.identity.id
+    );
+
+    let base_update = params::InstanceNetworkInterfaceUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: None,
+            description: None,
+        },
+        primary: false,
+        transit_ips: vec![
+            "10.0.0.0/9".parse().unwrap(),
+            "10.128.0.0/9".parse().unwrap(),
+            "1.1.1.1/32".parse().unwrap(),
+        ],
+    };
+
+    // Verify that a selection of transit IPs (mixture of private and global
+    // unicast, no overlaps) is accepted.
+    let updated_nic: InstanceNetworkInterface =
+        object_put(client, &url_interface, &base_update).await;
+
+    assert_eq!(base_update.transit_ips, updated_nic.transit_ips);
+
+    // Non-canonical form (e.g., host identifier is nonzero) subnets should
+    // be rejected.
+    let with_extra_bits = params::InstanceNetworkInterfaceUpdate {
+        transit_ips: vec![
+            "10.0.0.0/9".parse().unwrap(),
+            "10.128.0.0/9".parse().unwrap(),
+            //  Invalid vvv
+            "172.30.255.255/24".parse().unwrap(),
+        ],
+        ..base_update.clone()
+    };
+    let err = object_put_error(
+        client,
+        &url_interface,
+        &with_extra_bits,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        err.message,
+        "transit IP block 172.30.255.255/24 has a non-zero host identifier",
+    );
+
+    // Multicast IP blocks should be rejected.
+    let with_mc1 = params::InstanceNetworkInterfaceUpdate {
+        transit_ips: vec![
+            "10.0.0.0/9".parse().unwrap(),
+            "10.128.0.0/9".parse().unwrap(),
+            "224.0.0.0/4".parse().unwrap(),
+        ],
+        ..base_update.clone()
+    };
+    let err = object_put_error(
+        client,
+        &url_interface,
+        &with_mc1,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        err.message,
+        "transit IP block 224.0.0.0/4 is a multicast network",
+    );
+
+    let with_mc2 = params::InstanceNetworkInterfaceUpdate {
+        transit_ips: vec![
+            "10.0.0.0/9".parse().unwrap(),
+            "10.128.0.0/9".parse().unwrap(),
+            "230.20.20.128/32".parse().unwrap(),
+        ],
+        ..base_update.clone()
+    };
+    let err = object_put_error(
+        client,
+        &url_interface,
+        &with_mc2,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        err.message,
+        "transit IP 230.20.20.128/32 is a multicast address",
+    );
+
+    // Loopback ranges.
+    let with_lo1 = params::InstanceNetworkInterfaceUpdate {
+        transit_ips: vec![
+            "10.0.0.0/9".parse().unwrap(),
+            "10.128.0.0/9".parse().unwrap(),
+            "127.42.77.0/24".parse().unwrap(),
+        ],
+        ..base_update.clone()
+    };
+    let err = object_put_error(
+        client,
+        &url_interface,
+        &with_lo1,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        err.message,
+        "transit IP block 127.42.77.0/24 is a loopback network",
+    );
+
+    let with_lo2 = params::InstanceNetworkInterfaceUpdate {
+        transit_ips: vec![
+            "10.0.0.0/9".parse().unwrap(),
+            "10.128.0.0/9".parse().unwrap(),
+            "127.0.0.1/32".parse().unwrap(),
+        ],
+        ..base_update.clone()
+    };
+    let err = object_put_error(
+        client,
+        &url_interface,
+        &with_lo2,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(err.message, "transit IP 127.0.0.1/32 is a loopback address");
+
+    // Overlapping IP ranges should be rejected, as should identical ranges.
+    let with_dup1 = params::InstanceNetworkInterfaceUpdate {
+        transit_ips: vec![
+            "10.0.0.0/9".parse().unwrap(),
+            "10.128.0.0/9".parse().unwrap(),
+            "10.0.0.0/9".parse().unwrap(),
+        ],
+        ..base_update.clone()
+    };
+    let err = object_put_error(
+        client,
+        &url_interface,
+        &with_dup1,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        err.message,
+        "transit IP block 10.0.0.0/9 overlaps with 10.0.0.0/9",
+    );
+
+    let with_dup2 = params::InstanceNetworkInterfaceUpdate {
+        transit_ips: vec![
+            "10.0.0.0/9".parse().unwrap(),
+            "10.128.0.0/9".parse().unwrap(),
+            "10.128.32.0/24".parse().unwrap(),
+        ],
+        ..base_update.clone()
+    };
+    let err = object_put_error(
+        client,
+        &url_interface,
+        &with_dup2,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        err.message,
+        "transit IP block 10.128.32.0/24 overlaps with 10.128.0.0/9",
+    );
+
+    // Verify that we also catch more specific CIDRs appearing sooner in the list.
+    let with_dup3 = params::InstanceNetworkInterfaceUpdate {
+        transit_ips: vec![
+            "10.20.20.0/30".parse().unwrap(),
+            "10.0.0.0/8".parse().unwrap(),
+        ],
+        ..base_update.clone()
+    };
+    let err = object_put_error(
+        client,
+        &url_interface,
+        &with_dup3,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        err.message,
+        "transit IP block 10.0.0.0/8 overlaps with 10.20.20.0/30",
+    );
+
+    // ...and in the end, no changes have applied.
+    let final_nic: InstanceNetworkInterface =
+        object_get(client, &url_interface).await;
+    assert_eq!(updated_nic.transit_ips, final_nic.transit_ips);
+
+    // As a final sanity test, we can still effectively remove spoof checking
+    // using the unspecified network address.
+    let allow_all = params::InstanceNetworkInterfaceUpdate {
+        transit_ips: vec!["0.0.0.0/0".parse().unwrap()],
+        ..base_update.clone()
+    };
+
+    let updated_nic: InstanceNetworkInterface =
+        object_put(client, &url_interface, &allow_all).await;
+
+    assert_eq!(allow_all.transit_ips, updated_nic.transit_ips);
+}
+
 /// This test specifically creates two NICs, the second of which will fail the
 /// saga on purpose, since its IP address is the same. This is to verify that
 /// the initial NIC is also deleted.
@@ -3381,10 +3576,9 @@ async fn test_instance_create_attach_disks_undo(
     // set `faulted_disk` to the faulted state
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
-    assert!(nexus
-        .set_disk_as_faulted(&faulted_disk.identity.id)
-        .await
-        .unwrap());
+    assert!(
+        nexus.set_disk_as_faulted(&faulted_disk.identity.id).await.unwrap()
+    );
 
     // Assert regular and faulted disks were created
     let disks: Vec<Disk> =

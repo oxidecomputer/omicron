@@ -6,25 +6,26 @@
 use super::role_builtin;
 use nexus_db_model as model;
 use nexus_types::{identity::Asset, silo::DEFAULT_SILO_ID};
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 /// Test user that's granted all privileges, used for automated testing and
 /// local development
 // TODO-security Once we have a way to bootstrap the initial Silo with the
 // initial privileged user, this user should be created in the test suite,
 // not automatically at Nexus startup.  See omicron#2305.
-pub static USER_TEST_PRIVILEGED: Lazy<model::SiloUser> = Lazy::new(|| {
-    model::SiloUser::new(
-        DEFAULT_SILO_ID,
-        // "4007" looks a bit like "root".
-        "001de000-05e4-4000-8000-000000004007".parse().unwrap(),
-        "privileged".into(),
-    )
-});
+pub static USER_TEST_PRIVILEGED: LazyLock<model::SiloUser> =
+    LazyLock::new(|| {
+        model::SiloUser::new(
+            DEFAULT_SILO_ID,
+            // "4007" looks a bit like "root".
+            "001de000-05e4-4000-8000-000000004007".parse().unwrap(),
+            "privileged".into(),
+        )
+    });
 
 /// Role assignments needed for the privileged user
-pub static ROLE_ASSIGNMENTS_PRIVILEGED: Lazy<Vec<model::RoleAssignment>> =
-    Lazy::new(|| {
+pub static ROLE_ASSIGNMENTS_PRIVILEGED: LazyLock<Vec<model::RoleAssignment>> =
+    LazyLock::new(|| {
         vec![
             // The "test-privileged" user gets the "admin" role on the sole
             // Fleet as well as the default Silo.
@@ -49,14 +50,15 @@ pub static ROLE_ASSIGNMENTS_PRIVILEGED: Lazy<Vec<model::RoleAssignment>> =
 // TODO-security Once we have a way to bootstrap the initial Silo with the
 // initial privileged user, this user should be created in the test suite,
 // not automatically at Nexus startup.  See omicron#2305.
-pub static USER_TEST_UNPRIVILEGED: Lazy<model::SiloUser> = Lazy::new(|| {
-    model::SiloUser::new(
-        DEFAULT_SILO_ID,
-        // 60001 is the decimal uid for "nobody" on Helios.
-        "001de000-05e4-4000-8000-000000060001".parse().unwrap(),
-        "unprivileged".into(),
-    )
-});
+pub static USER_TEST_UNPRIVILEGED: LazyLock<model::SiloUser> =
+    LazyLock::new(|| {
+        model::SiloUser::new(
+            DEFAULT_SILO_ID,
+            // 60001 is the decimal uid for "nobody" on Helios.
+            "001de000-05e4-4000-8000-000000060001".parse().unwrap(),
+            "unprivileged".into(),
+        )
+    });
 
 #[cfg(test)]
 mod test {

@@ -8,8 +8,8 @@
 //! blueprint changes.
 
 use crate::app::background::BackgroundTask;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::{Blueprint, BlueprintTarget};
@@ -216,10 +216,7 @@ mod test {
             },
             Blueprint {
                 id,
-                blueprint_zones: BTreeMap::new(),
-                blueprint_disks: BTreeMap::new(),
-                blueprint_datasets: BTreeMap::new(),
-                sled_state: BTreeMap::new(),
+                sleds: BTreeMap::new(),
                 cockroachdb_setting_preserve_downgrade:
                     CockroachDbPreserveDowngrade::DoNotModify,
                 parent_blueprint_id: Some(parent_blueprint_id),

@@ -2,169 +2,99 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::time::Duration;
-
+use super::metrics_querier::MetricsNotYet;
+use super::metrics_querier::MetricsQuerier;
 use crate::integration_tests::instances::{
-    create_project_and_pool, instance_post, instance_simulate, InstanceOp,
+    InstanceOp, create_project_and_pool, instance_post, instance_simulate,
 };
 use chrono::Utc;
-use dropshot::test_util::ClientTestContext;
-use dropshot::{HttpErrorResponseBody, ResultsPage};
+use dropshot::HttpErrorResponseBody;
 use http::{Method, StatusCode};
 use nexus_auth::authn::USER_TEST_UNPRIVILEGED;
 use nexus_db_queries::db::identity::Asset;
+use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
-    create_default_ip_pool, create_disk, create_instance, create_project,
-    grant_iam, object_create_error, objects_list_page_authz, DiskTest,
+    DiskTest, create_default_ip_pool, create_disk, create_instance,
+    create_project, grant_iam, object_create_error,
 };
 use nexus_test_utils::wait_for_producer;
-use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::shared::ProjectRole;
 use nexus_types::external_api::views::OxqlQueryResult;
 use nexus_types::silo::DEFAULT_SILO_ID;
-use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
-use oximeter::types::Datum;
-use oximeter::types::FieldValue;
-use oximeter::types::Measurement;
 use oximeter::TimeseriesSchema;
+use oximeter::types::FieldValue;
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-pub async fn query_for_metrics(
-    client: &ClientTestContext,
-    path: &str,
-) -> ResultsPage<Measurement> {
-    let measurements: ResultsPage<Measurement> =
-        objects_list_page_authz(client, path).await;
-    assert!(!measurements.items.is_empty());
-    measurements
-}
-
-pub async fn get_latest_system_metric(
-    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
-    metric_name: &str,
-    silo_id: Option<Uuid>,
-) -> i64 {
-    let client = &cptestctx.external_client;
-    let id_param = match silo_id {
-        Some(id) => format!("&silo={}", id),
-        None => "".to_string(),
-    };
-    let url = format!(
-        "/v1/system/metrics/{metric_name}?start_time={:?}&end_time={:?}&order=descending&limit=1{}",
-        cptestctx.start_time,
-        Utc::now(),
-        id_param,
-    );
-    let measurements =
-        objects_list_page_authz::<Measurement>(client, &url).await;
-
-    // prevent more confusing error on next line
-    assert!(measurements.items.len() == 1, "Expected exactly one measurement");
-
-    let item = &measurements.items[0];
-    let datum = match item.datum() {
-        Datum::I64(c) => c,
-        _ => panic!("Unexpected datum type {:?}", item.datum()),
-    };
-    return *datum;
-}
-
-pub async fn get_latest_silo_metric(
-    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
-    metric_name: &str,
-    project_id: Option<Uuid>,
-) -> i64 {
-    let client = &cptestctx.external_client;
-    let id_param = match project_id {
-        Some(id) => format!("&project={}", id),
-        None => "".to_string(),
-    };
-    let url = format!(
-        "/v1/metrics/{metric_name}?start_time={:?}&end_time={:?}&order=descending&limit=1{}",
-        cptestctx.start_time,
-        Utc::now(),
-        id_param,
-    );
-    let measurements =
-        objects_list_page_authz::<Measurement>(client, &url).await;
-
-    // prevent more confusing error on next line
-    assert_eq!(measurements.items.len(), 1, "Expected exactly one measurement");
-
-    let item = &measurements.items[0];
-    let datum = match item.datum() {
-        Datum::I64(c) => c,
-        _ => panic!("Unexpected datum type {:?}", item.datum()),
-    };
-    return *datum;
-}
-
-async fn assert_system_metrics(
+pub async fn assert_system_metrics(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
     silo_id: Option<Uuid>,
     disk: i64,
     cpus: i64,
     ram: i64,
 ) {
-    cptestctx
-        .oximeter
-        .try_force_collect()
-        .await
-        .expect("Could not force oximeter collection");
-    assert_eq!(
-        get_latest_system_metric(
-            cptestctx,
-            "virtual_disk_space_provisioned",
-            silo_id,
-        )
-        .await,
-        disk
-    );
-    assert_eq!(
-        get_latest_system_metric(cptestctx, "cpus_provisioned", silo_id).await,
-        cpus
-    );
-    assert_eq!(
-        get_latest_system_metric(cptestctx, "ram_provisioned", silo_id).await,
-        ram
-    );
+    let metrics_querier = MetricsQuerier::new(cptestctx);
+
+    for (metric_name, value) in [
+        ("virtual_disk_space_provisioned", disk),
+        ("cpus_provisioned", cpus),
+        ("ram_provisioned", ram),
+    ] {
+        metrics_querier
+            .wait_for_latest_system_metric(
+                metric_name,
+                silo_id,
+                |measurement| {
+                    if measurement == value {
+                        Ok(())
+                    } else {
+                        Err(MetricsNotYet::new(format!(
+                            "waiting for {metric_name}={value} \
+                             (currently {measurement})"
+                        )))
+                    }
+                },
+            )
+            .await;
+    }
 }
 
-async fn assert_silo_metrics(
+pub async fn assert_silo_metrics(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
     project_id: Option<Uuid>,
     disk: i64,
     cpus: i64,
     ram: i64,
 ) {
-    cptestctx
-        .oximeter
-        .try_force_collect()
-        .await
-        .expect("Could not force oximeter collection");
-    assert_eq!(
-        get_latest_silo_metric(
-            cptestctx,
-            "virtual_disk_space_provisioned",
-            project_id,
-        )
-        .await,
-        disk
-    );
-    assert_eq!(
-        get_latest_silo_metric(cptestctx, "cpus_provisioned", project_id).await,
-        cpus
-    );
-    assert_eq!(
-        get_latest_silo_metric(cptestctx, "ram_provisioned", project_id).await,
-        ram
-    );
+    let metrics_querier = MetricsQuerier::new(cptestctx);
+
+    for (metric_name, value) in [
+        ("virtual_disk_space_provisioned", disk),
+        ("cpus_provisioned", cpus),
+        ("ram_provisioned", ram),
+    ] {
+        metrics_querier
+            .wait_for_latest_silo_metric(
+                metric_name,
+                project_id,
+                |measurement| {
+                    if measurement == value {
+                        Ok(())
+                    } else {
+                        Err(MetricsNotYet::new(format!(
+                            "waiting for {metric_name}={value} \
+                             (currently {measurement})"
+                        )))
+                    }
+                },
+            )
+            .await;
+    }
 }
 
 async fn assert_404(
@@ -282,166 +212,40 @@ async fn test_system_timeseries_schema_list(
     // We should be able to fetch the list of timeseries, and it should include
     // Nexus's HTTP latency distribution. This is defined in Nexus itself, and
     // should always exist after we've registered as a producer and start
-    // producing data. Force a collection to ensure that happens.
-    cptestctx
-        .oximeter
-        .try_force_collect()
-        .await
-        .expect("Could not force oximeter collection");
-    let client = &cptestctx.external_client;
-    let url = "/v1/system/timeseries/schemas";
-    let schema =
-        objects_list_page_authz::<TimeseriesSchema>(client, &url).await;
-    schema
-        .items
-        .iter()
-        .find(|sc| {
-            sc.timeseries_name == "http_service:request_latency_histogram"
-        })
-        .expect("Failed to find HTTP request latency histogram schema");
-}
-
-/// Run an OxQL query until it succeeds or panics.
-pub async fn system_timeseries_query(
-    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
-    query: impl ToString,
-) -> Vec<oxql_types::Table> {
-    timeseries_query_until_success(
-        cptestctx,
-        "/v1/system/timeseries/query",
-        query,
-    )
-    .await
-}
-
-/// Run a project-scoped OxQL query until it succeeds or panics.
-pub async fn project_timeseries_query(
-    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
-    project: &str,
-    query: impl ToString,
-) -> Vec<oxql_types::Table> {
-    timeseries_query_until_success(
-        cptestctx,
-        &format!("/v1/timeseries/query?project={}", project),
-        query,
-    )
-    .await
-}
-
-/// Run an OxQL query until it succeeds or panics.
-async fn timeseries_query_until_success(
-    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
-    endpoint: &str,
-    query: impl ToString,
-) -> Vec<oxql_types::Table> {
-    const POLL_INTERVAL: Duration = Duration::from_secs(1);
-    const POLL_MAX: Duration = Duration::from_secs(30);
-    let query_ = query.to_string();
-    wait_for_condition(
-        || async {
-            match execute_timeseries_query(cptestctx, endpoint, &query_).await {
-                Some(r) => Ok(r),
-                None => Err(CondCheckError::<()>::NotYet),
+    // producing data.
+    MetricsQuerier::new(&cptestctx)
+        .wait_for_timeseries_schema(|schemas: Vec<TimeseriesSchema>| {
+            if schemas.iter().any(|sc| {
+                sc.timeseries_name == "http_service:request_latency_histogram"
+            }) {
+                Ok(())
+            } else {
+                Err(MetricsNotYet::new("waiting for request_latency_histogram"))
             }
-        },
-        &POLL_INTERVAL,
-        &POLL_MAX,
-    )
-    .await
-    .unwrap_or_else(|_| {
-        panic!(
-            "Timeseries named in query are not available \
-            after {:?}, query: '{}'",
-            POLL_MAX,
-            query.to_string(),
-        )
-    })
-}
-
-/// Run an OxQL query.
-///
-/// This returns `None` if the query resulted in client error and the body
-/// indicates that a timeseries named in the query could not be found. In all
-/// other cases, it either succeeds or panics.
-pub async fn execute_timeseries_query(
-    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
-    endpoint: &str,
-    query: impl ToString,
-) -> Option<Vec<oxql_types::Table>> {
-    // first, make sure the latest timeseries have been collected.
-    cptestctx
-        .oximeter
-        .try_force_collect()
-        .await
-        .expect("Could not force oximeter collection");
-
-    // okay, do the query
-    let body = nexus_types::external_api::params::TimeseriesQuery {
-        query: query.to_string(),
-    };
-    let query = &body.query;
-    let rsp = NexusRequest::new(
-        nexus_test_utils::http_testing::RequestBuilder::new(
-            &cptestctx.external_client,
-            http::Method::POST,
-            endpoint,
-        )
-        .body(Some(&body)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap_or_else(|e| {
-        panic!("timeseries query failed: {e:?}\nquery: {query}")
-    });
-
-    // Check for a timeseries-not-found error specifically.
-    if rsp.status.is_client_error() {
-        let text = std::str::from_utf8(&rsp.body)
-            .expect("Timeseries query response body should be UTF-8");
-        if text.starts_with("Timeseries not found for: ") {
-            return None;
-        }
-    }
-
-    // Try to parse the query as usual, which will fail on other kinds of
-    // errors.
-    Some(
-        rsp.parsed_body::<OxqlQueryResult>()
-            .unwrap_or_else(|e| {
-                panic!(
-                    "could not parse timeseries query response: {e:?}\n\
-                    query: {query}\nresponse: {rsp:#?}"
-                );
-            })
-            .tables,
-    )
+        })
+        .await;
 }
 
 #[nexus_test]
 async fn test_instance_watcher_metrics(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
 ) {
-    macro_rules! assert_gte {
+    macro_rules! check_gte {
         ($a:expr, $b:expr) => {{
             let a = $a;
             let b = $b;
-            assert!(
-                $a >= $b,
-                concat!(
-                    "assertion failed: ",
-                    stringify!($a),
-                    " >= ",
-                    stringify!($b),
-                    ", ",
-                    stringify!($a),
-                    " = {:?}, ",
-                    stringify!($b),
-                    " = {:?}",
-                ),
-                a,
-                b
-            );
+            if a < b {
+                return Err(MetricsNotYet::new(format!(
+                    concat!(
+                        "waiting for ",
+                        stringify!($a),
+                        " (currently {:?}) to be >= ",
+                        stringify!($b),
+                        " (currently {:?})"
+                    ),
+                    a, b
+                )));
+            }
         }};
     }
     const INSTANCE_ID_FIELD: &str = "instance_id";
@@ -462,13 +266,6 @@ async fn test_instance_watcher_metrics(
 
         let _ = activate_background_task(&internal_client, "instance_watcher")
             .await;
-
-        // Make sure that the latest metrics have been collected.
-        cptestctx
-            .oximeter
-            .try_force_collect()
-            .await
-            .expect("Could not force oximeter collection");
     };
 
     #[track_caller]
@@ -476,7 +273,7 @@ async fn test_instance_watcher_metrics(
         table: &oxql_types::Table,
         instance_id: InstanceUuid,
         state: &'static str,
-    ) -> i64 {
+    ) -> Result<i64, MetricsNotYet> {
         use oxql_types::point::ValueArray;
         let uuid = FieldValue::Uuid(instance_id.into_untyped_uuid());
         let state = FieldValue::String(state.into());
@@ -484,12 +281,12 @@ async fn test_instance_watcher_metrics(
             ts.fields.get(INSTANCE_ID_FIELD) == Some(&uuid)
                 && ts.fields.get(STATE_FIELD) == Some(&state)
         });
-        let Some(timeseries) = timeserieses.next() else {
-            panic!(
+        let timeseries = timeserieses.next().ok_or_else(|| {
+            MetricsNotYet::new(format!(
                 "missing timeseries for instance {instance_id}, state {state}\n\
                 found: {table:#?}"
-            )
-        };
+            ))
+        })?;
         if let Some(timeseries) = timeserieses.next() {
             panic!(
                 "multiple timeseries for instance {instance_id}, state {state}: \
@@ -499,7 +296,7 @@ async fn test_instance_watcher_metrics(
         }
         match timeseries.points.values(0) {
             Some(ValueArray::Integer(ref vals)) => {
-                vals.iter().filter_map(|&v| v).sum()
+                Ok(vals.iter().filter_map(|&v| v).sum())
             }
             x => panic!(
                 "expected timeseries for instance {instance_id}, \
@@ -523,13 +320,21 @@ async fn test_instance_watcher_metrics(
     // activate the instance watcher background task.
     activate_instance_watcher().await;
 
-    let metrics = system_timeseries_query(&cptestctx, OXQL_QUERY).await;
-    let checks = metrics
-        .iter()
-        .find(|t| t.name() == "virtual_machine:check")
-        .expect("missing virtual_machine:check");
-    let ts = dbg!(count_state(&checks, instance1_uuid, STATE_STARTING));
-    assert_gte!(ts, 1);
+    let metrics_querier = MetricsQuerier::new(&cptestctx);
+    metrics_querier
+        .system_timeseries_query_until(OXQL_QUERY, |metrics| {
+            let checks = metrics
+                .iter()
+                .find(|t| t.name() == "virtual_machine:check")
+                .ok_or_else(|| {
+                    MetricsNotYet::new("missing virtual_machine:check")
+                })?;
+            let ts =
+                dbg!(count_state(&checks, instance1_uuid, STATE_STARTING)?);
+            check_gte!(ts, 1);
+            Ok(())
+        })
+        .await;
 
     // okay, make another instance
     eprintln!("--- creating instance 2 ---");
@@ -539,15 +344,21 @@ async fn test_instance_watcher_metrics(
     // activate the instance watcher background task.
     activate_instance_watcher().await;
 
-    let metrics = system_timeseries_query(&cptestctx, OXQL_QUERY).await;
-    let checks = metrics
-        .iter()
-        .find(|t| t.name() == "virtual_machine:check")
-        .expect("missing virtual_machine:check");
-    let ts1 = dbg!(count_state(&checks, instance1_uuid, STATE_STARTING));
-    let ts2 = dbg!(count_state(&checks, instance2_uuid, STATE_STARTING));
-    assert_gte!(ts1, 2);
-    assert_gte!(ts2, 1);
+    metrics_querier
+        .system_timeseries_query_until(OXQL_QUERY, |metrics| {
+            let checks = metrics
+                .iter()
+                .find(|t| t.name() == "virtual_machine:check")
+                .expect("missing virtual_machine:check");
+            let ts1 =
+                dbg!(count_state(&checks, instance1_uuid, STATE_STARTING)?);
+            let ts2 =
+                dbg!(count_state(&checks, instance2_uuid, STATE_STARTING)?);
+            check_gte!(ts1, 2);
+            check_gte!(ts2, 1);
+            Ok(())
+        })
+        .await;
 
     // poke instance 1 to get it into the running state
     eprintln!("--- starting instance 1 ---");
@@ -556,18 +367,24 @@ async fn test_instance_watcher_metrics(
     // activate the instance watcher background task.
     activate_instance_watcher().await;
 
-    let metrics = system_timeseries_query(&cptestctx, OXQL_QUERY).await;
-    let checks = metrics
-        .iter()
-        .find(|t| t.name() == "virtual_machine:check")
-        .expect("missing virtual_machine:check");
-    let ts1_starting =
-        dbg!(count_state(&checks, instance1_uuid, STATE_STARTING));
-    let ts1_running = dbg!(count_state(&checks, instance1_uuid, STATE_RUNNING));
-    let ts2 = dbg!(count_state(&checks, instance2_uuid, STATE_STARTING));
-    assert_gte!(ts1_starting, 2);
-    assert_gte!(ts1_running, 1);
-    assert_gte!(ts2, 2);
+    metrics_querier
+        .system_timeseries_query_until(OXQL_QUERY, |metrics| {
+            let checks = metrics
+                .iter()
+                .find(|t| t.name() == "virtual_machine:check")
+                .expect("missing virtual_machine:check");
+            let ts1_starting =
+                dbg!(count_state(&checks, instance1_uuid, STATE_STARTING)?);
+            let ts1_running =
+                dbg!(count_state(&checks, instance1_uuid, STATE_RUNNING)?);
+            let ts2 =
+                dbg!(count_state(&checks, instance2_uuid, STATE_STARTING)?);
+            check_gte!(ts1_starting, 2);
+            check_gte!(ts1_running, 1);
+            check_gte!(ts2, 2);
+            Ok(())
+        })
+        .await;
 
     // poke instance 2 to get it into the Running state.
     eprintln!("--- starting instance 2 ---");
@@ -581,25 +398,31 @@ async fn test_instance_watcher_metrics(
     // activate the instance watcher background task.
     activate_instance_watcher().await;
 
-    let metrics = system_timeseries_query(&cptestctx, OXQL_QUERY).await;
-    let checks = metrics
-        .iter()
-        .find(|t| t.name() == "virtual_machine:check")
-        .expect("missing virtual_machine:check");
+    metrics_querier
+        .system_timeseries_query_until(OXQL_QUERY, |metrics| {
+            let checks = metrics
+                .iter()
+                .find(|t| t.name() == "virtual_machine:check")
+                .expect("missing virtual_machine:check");
 
-    let ts1_starting =
-        dbg!(count_state(&checks, instance1_uuid, STATE_STARTING));
-    let ts1_running = dbg!(count_state(&checks, instance1_uuid, STATE_RUNNING));
-    let ts1_stopping =
-        dbg!(count_state(&checks, instance1_uuid, STATE_STOPPING));
-    let ts2_starting =
-        dbg!(count_state(&checks, instance2_uuid, STATE_STARTING));
-    let ts2_running = dbg!(count_state(&checks, instance2_uuid, STATE_RUNNING));
-    assert_gte!(ts1_starting, 2);
-    assert_gte!(ts1_running, 1);
-    assert_gte!(ts1_stopping, 1);
-    assert_gte!(ts2_starting, 2);
-    assert_gte!(ts2_running, 1);
+            let ts1_starting =
+                dbg!(count_state(&checks, instance1_uuid, STATE_STARTING)?);
+            let ts1_running =
+                dbg!(count_state(&checks, instance1_uuid, STATE_RUNNING)?);
+            let ts1_stopping =
+                dbg!(count_state(&checks, instance1_uuid, STATE_STOPPING)?);
+            let ts2_starting =
+                dbg!(count_state(&checks, instance2_uuid, STATE_STARTING)?);
+            let ts2_running =
+                dbg!(count_state(&checks, instance2_uuid, STATE_RUNNING)?);
+            check_gte!(ts1_starting, 2);
+            check_gte!(ts1_running, 1);
+            check_gte!(ts1_stopping, 1);
+            check_gte!(ts2_starting, 2);
+            check_gte!(ts2_running, 1);
+            Ok(())
+        })
+        .await;
 
     // simulate instance 1 completing its stop, which will remove it from the
     // set of active instances in CRDB. now, it won't be checked again.
@@ -610,24 +433,30 @@ async fn test_instance_watcher_metrics(
     // activate the instance watcher background task.
     activate_instance_watcher().await;
 
-    let metrics = system_timeseries_query(&cptestctx, OXQL_QUERY).await;
-    let checks = metrics
-        .iter()
-        .find(|t| t.name() == "virtual_machine:check")
-        .expect("missing virtual_machine:check");
-    let ts1_starting =
-        dbg!(count_state(&checks, instance1_uuid, STATE_STARTING));
-    let ts1_running = dbg!(count_state(&checks, instance1_uuid, STATE_RUNNING));
-    let ts1_stopping =
-        dbg!(count_state(&checks, instance1_uuid, STATE_STOPPING));
-    let ts2_starting =
-        dbg!(count_state(&checks, instance2_uuid, STATE_STARTING));
-    let ts2_running = dbg!(count_state(&checks, instance2_uuid, STATE_RUNNING));
-    assert_gte!(ts1_starting, 2);
-    assert_gte!(ts1_running, 1);
-    assert_gte!(ts1_stopping, 1);
-    assert_gte!(ts2_starting, 2);
-    assert_gte!(ts2_running, 2);
+    metrics_querier
+        .system_timeseries_query_until(OXQL_QUERY, |metrics| {
+            let checks = metrics
+                .iter()
+                .find(|t| t.name() == "virtual_machine:check")
+                .expect("missing virtual_machine:check");
+            let ts1_starting =
+                dbg!(count_state(&checks, instance1_uuid, STATE_STARTING)?);
+            let ts1_running =
+                dbg!(count_state(&checks, instance1_uuid, STATE_RUNNING)?);
+            let ts1_stopping =
+                dbg!(count_state(&checks, instance1_uuid, STATE_STOPPING)?);
+            let ts2_starting =
+                dbg!(count_state(&checks, instance2_uuid, STATE_STARTING)?);
+            let ts2_running =
+                dbg!(count_state(&checks, instance2_uuid, STATE_RUNNING)?);
+            check_gte!(ts1_starting, 2);
+            check_gte!(ts1_running, 1);
+            check_gte!(ts1_stopping, 1);
+            check_gte!(ts2_starting, 2);
+            check_gte!(ts2_running, 2);
+            Ok(())
+        })
+        .await;
 }
 
 #[nexus_test]
@@ -655,29 +484,45 @@ async fn test_project_timeseries_query(
     // Query with no project specified
     let q1 = "get virtual_machine:check";
 
-    let result = project_timeseries_query(&cptestctx, "project1", q1).await;
-    assert_eq!(result.len(), 1);
-    assert!(result[0].timeseries().len() > 0);
+    let metrics_querier = MetricsQuerier::new(&cptestctx);
+
+    // We only use project_timeseries_query_until for this first check; all the
+    // remaining queries are hitting the same metrics, so we only need to wait
+    // for Oximeter on this first attempt.
+    metrics_querier
+        .project_timeseries_query_until("project1", q1, |result| {
+            if result.is_empty() {
+                return Err(MetricsNotYet::new("waiting for table creation"));
+            }
+            assert_eq!(result.len(), 1);
+            if result[0].timeseries().len() == 0 {
+                return Err(MetricsNotYet::new(
+                    "waiting for timeseries population",
+                ));
+            }
+            Ok(())
+        })
+        .await;
 
     // also works with project ID
-    let result =
-        project_timeseries_query(&cptestctx, &p1.identity.id.to_string(), q1)
-            .await;
+    let result = metrics_querier
+        .project_timeseries_query(&p1.identity.id.to_string(), q1)
+        .await;
     assert_eq!(result.len(), 1);
     assert!(result[0].timeseries().len() > 0);
 
-    let result = project_timeseries_query(&cptestctx, "project2", q1).await;
+    let result = metrics_querier.project_timeseries_query("project2", q1).await;
     assert_eq!(result.len(), 1);
     assert!(result[0].timeseries().len() > 0);
 
     // with project specified
     let q2 = &format!("{} | filter project_id == \"{}\"", q1, p1.identity.id);
 
-    let result = project_timeseries_query(&cptestctx, "project1", q2).await;
+    let result = metrics_querier.project_timeseries_query("project1", q2).await;
     assert_eq!(result.len(), 1);
     assert!(result[0].timeseries().len() > 0);
 
-    let result = project_timeseries_query(&cptestctx, "project2", q2).await;
+    let result = metrics_querier.project_timeseries_query("project2", q2).await;
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].timeseries().len(), 0);
 
@@ -685,12 +530,12 @@ async fn test_project_timeseries_query(
     let q3 = &format!("{} | filter instance_id == \"{}\"", q1, i1.identity.id);
 
     // project containing instance gives me something
-    let result = project_timeseries_query(&cptestctx, "project1", q3).await;
+    let result = metrics_querier.project_timeseries_query("project1", q3).await;
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].timeseries().len(), 1);
 
     // should be empty or error
-    let result = project_timeseries_query(&cptestctx, "project2", q3).await;
+    let result = metrics_querier.project_timeseries_query("project2", q3).await;
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].timeseries().len(), 0);
 
@@ -863,8 +708,8 @@ async fn test_mgs_metrics(
         cpu_tctl_sensors.insert(sp.serial_number.clone(), cpu_tctl);
     }
 
-    async fn check_all_timeseries_present(
-        cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
+    async fn check_all_timeseries_present<N>(
+        querier: &MetricsQuerier<'_, N>,
         name: &str,
         expected: HashMap<String, usize>,
     ) {
@@ -881,62 +726,28 @@ async fn test_mgs_metrics(
         let query =
             format!("get {metric_name} | filter timestamp > @2000-01-01");
 
+        let name = &metric_name;
+
         // MGS polls SP sensor data once every second. It's possible that, when
         // we triggered Oximeter to collect samples from MGS, it may not have
         // run a poll yet, so retry this a few times to avoid a flaky failure if
         // no simulated SPs have been polled yet.
         //
-        // We really don't need to wait that long to know that the sensor
-        // metrics will never be present. This could probably be shorter
-        // than 30 seconds, but I want to be fairly generous to make sure
-        // there are no flaky failures even when things take way longer than
-        // expected...
-        const MAX_RETRY_DURATION: Duration = Duration::from_secs(30);
-        let result = wait_for_condition(
-            || async {
-                match check_inner(cptestctx, &metric_name, &query, &expected).await {
-                    Ok(_) => Ok(()),
-                    Err(e) => {
-                        eprintln!("{e}; will try again to ensure all samples are collected");
-                        Err(CondCheckError::<()>::NotYet)
-                    }
-                }
-            },
-            &Duration::from_secs(1),
-            &MAX_RETRY_DURATION,
-        )
-        .await;
-        if result.is_err() {
-            panic!(
-                "failed to find expected timeseries when running OxQL query \
-                 {query:?} within {MAX_RETRY_DURATION:?}"
-            )
-        };
-
-        // Note that *some* of these checks panic if they fail, but others call
-        // `anyhow::ensure!`. This is because, if we don't see all the expected
-        // timeseries, it's possible that this is because some sensor polls
-        // haven't completed yet, so we'll retry those checks a few times. On
-        // the other hand, if we see malformed timeseries, or timeseries that we
-        // don't expect to exist, that means something has gone wrong, and we
+        // Note that *some* of these checks panic if they fail, but others
+        // return a `MetricsNotYet`. This is because, if we don't see all the
+        // expected timeseries, it's possible that this is because some sensor
+        // polls haven't completed yet, so we'll retry those checks a few times.
+        // On the other hand, if we see malformed timeseries, or timeseries that
+        // we don't expect to exist, that means something has gone wrong, and we
         // will fail the test immediately.
-        async fn check_inner(
-            cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
-            name: &str,
-            query: &str,
-            expected: &HashMap<String, usize>,
-        ) -> anyhow::Result<()> {
-            cptestctx
-                .oximeter
-                .try_force_collect()
-                .await
-                .expect("Could not force oximeter collection");
-            let table = system_timeseries_query(&cptestctx, &query)
-                .await
+        querier.system_timeseries_query_until(&query, |tables| {
+            let table = tables
                 .into_iter()
                 .find(|t| t.name() == name)
                 .ok_or_else(|| {
-                    anyhow::anyhow!("failed to find table for {query}")
+                    MetricsNotYet::new(format!(
+                        "failed to find table for {query}",
+                    ))
                 })?;
 
             let mut found = expected
@@ -945,63 +756,70 @@ async fn test_mgs_metrics(
                 .collect::<HashMap<_, usize>>();
             for timeseries in table.timeseries() {
                 let fields = &timeseries.fields;
-                let n_points = timeseries.points.len();
-                anyhow::ensure!(
-                    n_points > 0,
-                    "{name} timeseries {fields:?} should have points"
-                );
-                let serial_str: &str = match timeseries.fields.get("chassis_serial")
-            {
-                Some(FieldValue::String(s)) => s.borrow(),
-                Some(x) => panic!(
-                    "{name} `chassis_serial` field should be a string, but got: {x:?}"
-                ),
-                None => {
-                    panic!("{name} timeseries should have a `chassis_serial` field")
+                if timeseries.points.is_empty() {
+                    return Err(MetricsNotYet::new(format!(
+                        "{name} timeseries {fields:?} should have points"
+                    )));
                 }
-            };
+                let serial_str: &str = match timeseries
+                    .fields
+                    .get("chassis_serial")
+                {
+                    Some(FieldValue::String(s)) => s.borrow(),
+                    Some(x) => panic!(
+                        "{name} `chassis_serial` field should be a string, \
+                         but got: {x:?}"
+                    ),
+                    None => {
+                        panic!("{name} timeseries should have a \
+                               `chassis_serial` field")
+                    }
+                };
                 if let Some(count) = found.get_mut(serial_str) {
                     *count += 1;
                 } else {
                     panic!(
                         "{name} timeseries had an unexpected chassis serial \
-                        number {serial_str:?} (not in the config file)",
+                         number {serial_str:?} (not in the config file)",
                     );
                 }
             }
 
             eprintln!("-> {name}: found timeseries: {found:#?}");
-            anyhow::ensure!(
-                &found == expected,
-                "number of {name} timeseries didn't match expected in {table:#?}",
-            );
+            if found != expected {
+                return Err(MetricsNotYet::new(format!(
+                    "number of {name} timeseries didn't match \
+                    expected in {table:#?}",
+                )));
+            }
             eprintln!("-> okay, looks good!");
             Ok(())
-        }
+        }).await;
     }
 
     // Wait until the MGS registers as a producer with Oximeter.
     wait_for_producer(&cptestctx.oximeter, mgs.gateway_id).await;
 
-    check_all_timeseries_present(&cptestctx, "temperature", temp_sensors).await;
-    check_all_timeseries_present(&cptestctx, "voltage", voltage_sensors).await;
-    check_all_timeseries_present(&cptestctx, "current", current_sensors).await;
-    check_all_timeseries_present(&cptestctx, "power", power_sensors).await;
+    let querier = MetricsQuerier::new(&cptestctx);
+    check_all_timeseries_present(&querier, "temperature", temp_sensors).await;
+    check_all_timeseries_present(&querier, "voltage", voltage_sensors).await;
+    check_all_timeseries_present(&querier, "current", current_sensors).await;
+    check_all_timeseries_present(&querier, "power", power_sensors).await;
     check_all_timeseries_present(
-        &cptestctx,
+        &querier,
         "input_voltage",
         input_voltage_sensors,
     )
     .await;
     check_all_timeseries_present(
-        &cptestctx,
+        &querier,
         "input_current",
         input_current_sensors,
     )
     .await;
-    check_all_timeseries_present(&cptestctx, "fan_speed", fan_speed_sensors)
+    check_all_timeseries_present(&querier, "fan_speed", fan_speed_sensors)
         .await;
-    check_all_timeseries_present(&cptestctx, "amd_cpu_tctl", cpu_tctl_sensors)
+    check_all_timeseries_present(&querier, "amd_cpu_tctl", cpu_tctl_sensors)
         .await;
 
     // Because the `ControlPlaneTestContext` isn't managing the MGS we made for

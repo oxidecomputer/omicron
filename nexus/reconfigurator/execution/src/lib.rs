@@ -6,28 +6,25 @@
 //!
 //! See `nexus_reconfigurator_planning` crate-level docs for background.
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::execution::*;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::SledFilter;
-use nexus_types::external_api::views::SledState;
+use nexus_types::deployment::execution::*;
 use nexus_types::identity::Asset;
-use omicron_physical_disks::DeployDisksDone;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
-use omicron_zones::DeployZonesDone;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use update_engine::merge_anyhow_list;
+use update_engine::StepSuccess;
 use update_engine::StepWarning;
+use update_engine::merge_anyhow_list;
 
 mod clickhouse;
 mod cockroachdb;
@@ -110,7 +107,7 @@ pub async fn realize_blueprint_with_overrides(
     )
     .into_shared();
 
-    let deploy_disks_done = register_deploy_disks_step(
+    register_deploy_disks_step(
         &engine.for_component(ExecutionComponent::PhysicalDisks),
         &opctx,
         blueprint,
@@ -124,7 +121,7 @@ pub async fn realize_blueprint_with_overrides(
         sled_list.clone(),
     );
 
-    let deploy_zones_done = register_deploy_zones_step(
+    register_deploy_zones_step(
         &engine.for_component(ExecutionComponent::OmicronZones),
         &opctx,
         blueprint,
@@ -147,13 +144,12 @@ pub async fn realize_blueprint_with_overrides(
         sled_list.clone(),
     );
 
-    let deploy_zones_done = register_cleanup_expunged_zones_step(
+    register_cleanup_expunged_zones_step(
         &engine.for_component(ExecutionComponent::OmicronZones),
         &opctx,
         datastore,
         resolver,
         blueprint,
-        deploy_zones_done,
     );
 
     register_decommission_sleds_step(
@@ -163,11 +159,11 @@ pub async fn realize_blueprint_with_overrides(
         blueprint,
     );
 
-    register_decommission_expunged_disks_step(
+    register_decommission_disks_step(
         &engine.for_component(ExecutionComponent::PhysicalDisks),
         &opctx,
         datastore,
-        deploy_disks_done,
+        blueprint,
     );
 
     register_deploy_clickhouse_cluster_nodes_step(
@@ -182,13 +178,12 @@ pub async fn realize_blueprint_with_overrides(
         blueprint,
     );
 
-    let deploy_zones_done = register_support_bundle_failure_step(
+    register_support_bundle_failure_step(
         &engine.for_component(ExecutionComponent::SupportBundles),
         &opctx,
         datastore,
         blueprint,
         nexus_id,
-        deploy_zones_done,
     );
 
     let reassign_saga_output = register_reassign_sagas_step(
@@ -197,28 +192,40 @@ pub async fn realize_blueprint_with_overrides(
         datastore,
         blueprint,
         nexus_id,
-        deploy_zones_done,
     );
 
-    let register_cockroach_output = register_cockroachdb_settings_step(
+    register_cockroachdb_settings_step(
         &engine.for_component(ExecutionComponent::Cockroach),
         &opctx,
         datastore,
         blueprint,
     );
 
-    let output = register_finalize_step(
-        &engine.for_component(ExecutionComponent::Cockroach),
-        reassign_saga_output,
-        register_cockroach_output,
-    );
-
     // All steps are registered, so execute the engine.
     let result = engine.execute().await?;
 
-    Ok(output.into_value(result.token()).await)
+    let needs_saga_recovery =
+        reassign_saga_output.into_value(result.token()).await;
+
+    Ok(RealizeBlueprintOutput { needs_saga_recovery })
 }
 
+// Convert a `Result<(), anyhow::Error>` into a `StepResult` containing either a
+// `StepSuccess` or `StepWarning`.
+//
+// Most steps use this to avoid stopping execution at the errored step, which
+// would prevent other independent steps after the errored step from executing.
+fn map_err_to_step_warning(
+    res: Result<(), anyhow::Error>,
+) -> StepResult<(), ReconfiguratorExecutionSpec> {
+    match res {
+        Ok(_) => StepSuccess::new(()).build(),
+        Err(e) => StepWarning::new((), format!("{e:#}")).build(),
+    }
+}
+
+/// We explicitly don't continue with execution after this step. It only talks
+/// to CRDB, and if nexus cannot talk to CRDB, we probably shouldn't continue.
 fn register_zone_external_networking_step<'a>(
     registrar: &ComponentRegistrar<'_, 'a>,
     opctx: &'a OpContext,
@@ -236,7 +243,7 @@ fn register_zone_external_networking_step<'a>(
             move |_cx| async move {
                 datastore
                     .blueprint_ensure_external_networking_resources(
-                        &opctx, blueprint,
+                        opctx, blueprint,
                     )
                     .await
                     .map_err(|err| anyhow!(err))?;
@@ -253,25 +260,28 @@ fn register_support_bundle_failure_step<'a>(
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
     nexus_id: OmicronZoneUuid,
-    deploy_zones_done: StepHandle<DeployZonesDone>,
-) -> StepHandle<DeployZonesDone> {
+) {
     registrar
         .new_step(
-            ExecutionStepId::Ensure,
-            "Mark support bundles as failed if they rely on an expunged disk or sled",
-            move |cx| async move {
-                let done = deploy_zones_done.into_value(cx.token()).await;
-                datastore
-                    .support_bundle_fail_expunged(
-                        &opctx, blueprint, nexus_id
-                    )
+            ExecutionStepId::Cleanup,
+            "Mark support bundles as failed if they rely on \
+             an expunged disk or sled",
+            move |_cx| async move {
+                let res = match datastore
+                    .support_bundle_fail_expunged(opctx, blueprint, nexus_id)
                     .await
-                    .map_err(|err| anyhow!(err))?;
-
-                StepSuccess::new(done).into()
+                {
+                    Ok(report) => StepSuccess::new(())
+                        .with_message(format!(
+                            "support bundle expunge report: {report:?}"
+                        ))
+                        .build(),
+                    Err(err) => StepWarning::new((), err.to_string()).build(),
+                };
+                Ok(res)
             },
         )
-        .register()
+        .register();
 }
 
 fn register_sled_list_step<'a>(
@@ -285,7 +295,7 @@ fn register_sled_list_step<'a>(
             "Fetch sled list",
             move |_cx| async move {
                 let sleds_by_id: BTreeMap<SledUuid, _> = datastore
-                    .sled_list_all_batched(&opctx, SledFilter::InService)
+                    .sled_list_all_batched(opctx, SledFilter::InService)
                     .await
                     .context("listing all sleds")?
                     .into_iter()
@@ -308,25 +318,27 @@ fn register_deploy_disks_step<'a>(
     opctx: &'a OpContext,
     blueprint: &'a Blueprint,
     sleds: SharedStepHandle<Arc<BTreeMap<SledUuid, Sled>>>,
-) -> StepHandle<DeployDisksDone> {
+) {
     registrar
         .new_step(
             ExecutionStepId::Ensure,
             "Deploy physical disks",
             move |cx| async move {
                 let sleds_by_id = sleds.into_value(cx.token()).await;
-                let done = omicron_physical_disks::deploy_disks(
-                    &opctx,
+                let res = omicron_physical_disks::deploy_disks(
+                    opctx,
                     &sleds_by_id,
-                    &blueprint.blueprint_disks,
+                    blueprint
+                        .sleds
+                        .iter()
+                        .map(|(sled_id, sled)| (*sled_id, &sled.disks_config)),
                 )
                 .await
-                .map_err(merge_anyhow_list)?;
-
-                StepSuccess::new(done).into()
+                .map_err(merge_anyhow_list);
+                Ok(map_err_to_step_warning(res))
             },
         )
-        .register()
+        .register();
 }
 
 fn register_deploy_datasets_step<'a>(
@@ -341,15 +353,11 @@ fn register_deploy_datasets_step<'a>(
             "Deploy datasets",
             move |cx| async move {
                 let sleds_by_id = sleds.into_value(cx.token()).await;
-                datasets::deploy_datasets(
-                    &opctx,
-                    &sleds_by_id,
-                    &blueprint.blueprint_datasets,
-                )
-                .await
-                .map_err(merge_anyhow_list)?;
-
-                StepSuccess::new(()).into()
+                let res =
+                    datasets::deploy_datasets(opctx, &sleds_by_id, blueprint)
+                        .await
+                        .map_err(merge_anyhow_list);
+                Ok(map_err_to_step_warning(res))
             },
         )
         .register();
@@ -360,25 +368,27 @@ fn register_deploy_zones_step<'a>(
     opctx: &'a OpContext,
     blueprint: &'a Blueprint,
     sleds: SharedStepHandle<Arc<BTreeMap<SledUuid, Sled>>>,
-) -> StepHandle<DeployZonesDone> {
+) {
     registrar
         .new_step(
             ExecutionStepId::Ensure,
             "Deploy Omicron zones",
             move |cx| async move {
                 let sleds_by_id = sleds.into_value(cx.token()).await;
-                let done = omicron_zones::deploy_zones(
-                    &opctx,
+                let res = omicron_zones::deploy_zones(
+                    opctx,
                     &sleds_by_id,
-                    &blueprint.blueprint_zones,
+                    blueprint
+                        .sleds
+                        .iter()
+                        .map(|(sled_id, sled)| (*sled_id, &sled.zones_config)),
                 )
                 .await
-                .map_err(merge_anyhow_list)?;
-
-                StepSuccess::new(done).into()
+                .map_err(merge_anyhow_list);
+                Ok(map_err_to_step_warning(res))
             },
         )
-        .register()
+        .register();
 }
 
 fn register_plumb_firewall_rules_step<'a>(
@@ -398,17 +408,16 @@ fn register_plumb_firewall_rules_step<'a>(
             ExecutionStepId::Ensure,
             "Plumb service firewall rules",
             move |_cx| async move {
-                nexus_networking::plumb_service_firewall_rules(
+                let res = nexus_networking::plumb_service_firewall_rules(
                     datastore,
-                    &opctx,
+                    opctx,
                     &[],
-                    &opctx,
+                    opctx,
                     &opctx.log,
                 )
                 .await
-                .context("failed to plumb service firewall rules to sleds")?;
-
-                StepSuccess::new(()).into()
+                .context("failed to plumb service firewall rules to sleds");
+                Ok(map_err_to_step_warning(res))
             },
         )
         .register();
@@ -430,8 +439,8 @@ fn register_dns_records_step<'a>(
             move |cx| async move {
                 let sleds_by_id = sleds.into_value(cx.token()).await;
 
-                dns::deploy_dns(
-                    &opctx,
+                let res = dns::deploy_dns(
+                    opctx,
                     datastore,
                     nexus_id.to_string(),
                     blueprint,
@@ -439,9 +448,8 @@ fn register_dns_records_step<'a>(
                     overrides,
                 )
                 .await
-                .map_err(|e| anyhow!("{}", InlineErrorChain::new(&e)))?;
-
-                StepSuccess::new(()).into()
+                .map_err(|e| anyhow!("{}", InlineErrorChain::new(&e)));
+                Ok(map_err_to_step_warning(res))
             },
         )
         .register();
@@ -453,28 +461,21 @@ fn register_cleanup_expunged_zones_step<'a>(
     datastore: &'a DataStore,
     resolver: &'a Resolver,
     blueprint: &'a Blueprint,
-    deploy_zones_done: StepHandle<DeployZonesDone>,
-) -> StepHandle<DeployZonesDone> {
+) {
     registrar
         .new_step(
-            ExecutionStepId::Remove,
+            ExecutionStepId::Cleanup,
             "Cleanup expunged zones",
-            move |cx| async move {
-                let done = deploy_zones_done.into_value(cx.token()).await;
-                omicron_zones::clean_up_expunged_zones(
-                    &opctx,
-                    datastore,
-                    resolver,
-                    blueprint.all_omicron_zones(BlueprintZoneFilter::Expunged),
-                    &done,
+            move |_cx| async move {
+                let res = omicron_zones::clean_up_expunged_zones(
+                    opctx, datastore, resolver, blueprint,
                 )
                 .await
-                .map_err(merge_anyhow_list)?;
-
-                StepSuccess::new(done).into()
+                .map_err(merge_anyhow_list);
+                Ok(map_err_to_step_warning(res))
             },
         )
-        .register()
+        .register();
 }
 
 fn register_decommission_sleds_step<'a>(
@@ -485,51 +486,36 @@ fn register_decommission_sleds_step<'a>(
 ) {
     registrar
         .new_step(
-            ExecutionStepId::Remove,
+            ExecutionStepId::Cleanup,
             "Decommission sleds",
             move |_cx| async move {
-                sled_state::decommission_sleds(
-                    &opctx,
-                    datastore,
-                    blueprint
-                        .sled_state
-                        .iter()
-                        .filter(|&(_, &state)| {
-                            state == SledState::Decommissioned
-                        })
-                        .map(|(&sled_id, _)| sled_id),
-                )
-                .await
-                .map_err(merge_anyhow_list)?;
-
-                StepSuccess::new(()).into()
+                let res =
+                    sled_state::decommission_sleds(opctx, datastore, blueprint)
+                        .await
+                        .map_err(merge_anyhow_list);
+                Ok(map_err_to_step_warning(res))
             },
         )
         .register();
 }
 
-fn register_decommission_expunged_disks_step<'a>(
+fn register_decommission_disks_step<'a>(
     registrar: &ComponentRegistrar<'_, 'a>,
     opctx: &'a OpContext,
     datastore: &'a DataStore,
-    deploy_disks_done: StepHandle<DeployDisksDone>,
+    blueprint: &'a Blueprint,
 ) {
-    // This depends on the "deploy_disks" call earlier -- disk expungement is a
-    // statement of policy, but we need to be assured that the Sled Agent has
-    // stopped using that disk before we can mark its state as decommissioned.
     registrar
         .new_step(
-            ExecutionStepId::Remove,
+            ExecutionStepId::Cleanup,
             "Decommission expunged disks",
-            move |cx| async move {
-                let done = deploy_disks_done.into_value(cx.token()).await;
-                omicron_physical_disks::decommission_expunged_disks(
-                    &opctx, datastore, done,
+            move |_cx| async move {
+                let res = omicron_physical_disks::decommission_expunged_disks(
+                    opctx, datastore, blueprint,
                 )
                 .await
-                .map_err(merge_anyhow_list)?;
-
-                StepSuccess::new(()).into()
+                .map_err(merge_anyhow_list);
+                Ok(map_err_to_step_warning(res))
             },
         )
         .register();
@@ -548,13 +534,14 @@ fn register_deploy_clickhouse_cluster_nodes_step<'a>(
                 if let Some(clickhouse_cluster_config) =
                     &blueprint.clickhouse_cluster_config
                 {
-                    clickhouse::deploy_nodes(
-                        &opctx,
-                        &blueprint.blueprint_zones,
+                    let res = clickhouse::deploy_nodes(
+                        opctx,
+                        blueprint,
                         &clickhouse_cluster_config,
                     )
                     .await
-                    .map_err(merge_anyhow_list)?;
+                    .map_err(merge_anyhow_list);
+                    return Ok(map_err_to_step_warning(res));
                 }
 
                 StepSuccess::new(()).into()
@@ -573,76 +560,42 @@ fn register_deploy_clickhouse_single_node_step<'a>(
             ExecutionStepId::Ensure,
             "Deploy single-node clickhouse cluster",
             move |_cx| async move {
-                if let Err(e) = clickhouse::deploy_single_node(
-                    &opctx,
-                    &blueprint.blueprint_zones,
-                )
-                .await
-                {
-                    StepWarning::new((), e.to_string()).into()
-                } else {
-                    StepSuccess::new(()).into()
-                }
+                let res =
+                    clickhouse::deploy_single_node(opctx, blueprint).await;
+                Ok(map_err_to_step_warning(res))
             },
         )
         .register();
 }
 
-#[derive(Debug)]
-struct ReassignSagaOutput {
-    needs_saga_recovery: bool,
-    error: Option<anyhow::Error>,
-}
-
+// Returns a boolean indicating whether saga recovery is needed.
 fn register_reassign_sagas_step<'a>(
     registrar: &ComponentRegistrar<'_, 'a>,
     opctx: &'a OpContext,
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
     nexus_id: OmicronZoneUuid,
-    deploy_zones_done: StepHandle<DeployZonesDone>,
-) -> StepHandle<ReassignSagaOutput> {
-    // For this and subsequent steps, we'll assume that any errors that we
-    // encounter do *not* require stopping execution.  We'll just accumulate
-    // them and return them all at the end.
-    //
-    // TODO We should probably do this with more of the errors above, too.
+) -> StepHandle<bool> {
     registrar
         .new_step(
-            ExecutionStepId::Ensure,
+            ExecutionStepId::Cleanup,
             "Reassign sagas",
-            move |cx| async move {
-                let done = deploy_zones_done.into_value(cx.token()).await;
-
+            move |_cx| async move {
                 // For any expunged Nexus zones, re-assign in-progress sagas to
                 // some other Nexus.  If this fails for some reason, it doesn't
                 // affect anything else.
                 let sec_id = nexus_db_model::SecId::from(nexus_id);
                 let reassigned = sagas::reassign_sagas_from_expunged(
-                    &opctx, datastore, blueprint, sec_id, &done,
+                    opctx, datastore, blueprint, sec_id,
                 )
                 .await
                 .context("failed to re-assign sagas");
                 match reassigned {
                     Ok(needs_saga_recovery) => {
-                        let output = ReassignSagaOutput {
-                            needs_saga_recovery,
-                            error: None,
-                        };
-                        StepSuccess::new(output).into()
+                        Ok(StepSuccess::new(needs_saga_recovery).build())
                     }
                     Err(error) => {
-                        // We treat errors as non-fatal here, but we still want
-                        // to log them. It's okay to just log the message here
-                        // without the chain of sources, since we collect the
-                        // full chain in the last step
-                        // (`register_finalize_step`).
-                        let message = error.to_string();
-                        let output = ReassignSagaOutput {
-                            needs_saga_recovery: false,
-                            error: Some(error),
-                        };
-                        StepWarning::new(output, message).into()
+                        Ok(StepWarning::new(false, error.to_string()).build())
                     }
                 }
             },
@@ -655,63 +608,17 @@ fn register_cockroachdb_settings_step<'a>(
     opctx: &'a OpContext,
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
-) -> StepHandle<Option<anyhow::Error>> {
+) {
     registrar
         .new_step(
             ExecutionStepId::Ensure,
             "Ensure CockroachDB settings",
             move |_cx| async move {
-                if let Err(error) =
-                    cockroachdb::ensure_settings(&opctx, datastore, blueprint)
-                        .await
-                {
-                    // We treat errors as non-fatal here, but we still want to
-                    // log them. It's okay to just log the message here without
-                    // the chain of sources, since we collect the full chain in
-                    // the last step (`register_finalize_step`).
-                    let message = error.to_string();
-                    StepWarning::new(Some(error), message).into()
-                } else {
-                    StepSuccess::new(None).into()
-                }
+                let res =
+                    cockroachdb::ensure_settings(opctx, datastore, blueprint)
+                        .await;
+                Ok(map_err_to_step_warning(res))
             },
         )
-        .register()
-}
-
-fn register_finalize_step(
-    registrar: &ComponentRegistrar<'_, '_>,
-    reassign_saga_output: StepHandle<ReassignSagaOutput>,
-    register_cockroach_output: StepHandle<Option<anyhow::Error>>,
-) -> StepHandle<RealizeBlueprintOutput> {
-    registrar
-        .new_step(
-            ExecutionStepId::Finalize,
-            "Finalize and check for errors",
-            move |cx| async move {
-                let reassign_saga_output =
-                    reassign_saga_output.into_value(cx.token()).await;
-                let register_cockroach_output =
-                    register_cockroach_output.into_value(cx.token()).await;
-
-                let mut errors = Vec::new();
-                if let Some(error) = register_cockroach_output {
-                    errors.push(error);
-                }
-                if let Some(error) = reassign_saga_output.error {
-                    errors.push(error);
-                }
-
-                if errors.is_empty() {
-                    StepSuccess::new(RealizeBlueprintOutput {
-                        needs_saga_recovery: reassign_saga_output
-                            .needs_saga_recovery,
-                    })
-                    .into()
-                } else {
-                    Err(merge_anyhow_list(errors))
-                }
-            },
-        )
-        .register()
+        .register();
 }

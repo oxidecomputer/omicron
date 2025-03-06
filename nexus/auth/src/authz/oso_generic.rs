@@ -4,18 +4,18 @@
 
 //! Oso integration
 
+use super::Authz;
 use super::actor::AnyActor;
 use super::actor::AuthenticatedActor;
 use super::api_resources::*;
 use super::context::AuthorizedResource;
 use super::roles::RoleSet;
-use super::Authz;
 use crate::authn;
 use crate::context::OpContext;
-use anyhow::ensure;
 use anyhow::Context;
-use futures::future::BoxFuture;
+use anyhow::ensure;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use omicron_common::api::external::Error;
 use oso::Oso;
 use oso::PolarClass;
@@ -125,6 +125,8 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         Disk::init(),
         Snapshot::init(),
         ProjectImage::init(),
+        AffinityGroup::init(),
+        AntiAffinityGroup::init(),
         Instance::init(),
         IpPool::init(),
         InstanceNetworkInterface::init(),

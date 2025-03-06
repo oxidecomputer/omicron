@@ -13,6 +13,7 @@ use omicron_common::{
         internal::shared::{NetworkInterface, SourceNatConfig},
     },
     disk::DiskVariant,
+    update::ArtifactHash,
     zpool_name::ZpoolName,
 };
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
@@ -160,6 +161,10 @@ pub struct OmicronZoneConfig {
     /// permitted to destroy this dataset each time the zone is initialized.
     pub filesystem_pool: Option<ZpoolName>,
     pub zone_type: OmicronZoneType,
+    // Use `InstallDataset` if this field is not present in a deserialized
+    // blueprint or ledger.
+    #[serde(default = "deserialize_image_source_default")]
+    pub image_source: OmicronZoneImageSource,
 }
 
 impl OmicronZoneConfig {
@@ -589,6 +594,47 @@ impl ZoneKind {
             ZoneKind::Oximeter => "oximeter",
         }
     }
+}
+
+/// Where Sled Agent should get the image for a zone.
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Diffable,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum OmicronZoneImageSource {
+    /// This zone's image source is whatever happens to be on the sled's
+    /// "install" dataset.
+    ///
+    /// This is whatever was put in place at the factory or by the latest
+    /// MUPdate. The image used here can vary by sled and even over time (if the
+    /// sled gets MUPdated again).
+    ///
+    /// Historically, this was the only source for zone images. In an system
+    /// with automated control-plane-driven update we expect to only use this
+    /// variant in emergencies where the system had to be recovered via MUPdate.
+    InstallDataset,
+    /// This zone's image source is the artifact matching this hash from the TUF
+    /// artifact store (aka "TUF repo depot").
+    ///
+    /// This originates from TUF repos uploaded to Nexus which are then
+    /// replicated out to all sleds.
+    Artifact { hash: ArtifactHash },
+}
+
+// See `OmicronZoneConfig`. This is a separate function instead of being `impl
+// Default` because we don't want to accidentally use this default in Rust code.
+fn deserialize_image_source_default() -> OmicronZoneImageSource {
+    OmicronZoneImageSource::InstallDataset
 }
 
 #[cfg(test)]

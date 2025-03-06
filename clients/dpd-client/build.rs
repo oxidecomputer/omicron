@@ -10,9 +10,9 @@
 // public, we can remove this and point the services in `omicron`
 // that require the `dpd-client` library to the `Dendrite` repo.
 
-use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
+use anyhow::bail;
 use omicron_zone_package::config::Config;
 use omicron_zone_package::config::PackageName;
 use omicron_zone_package::package::PackageSource;
@@ -47,7 +47,9 @@ fn main() -> Result<()> {
                     format!("../../out/downloads/dpd-{commit}.json")
                 });
             if !Path::new(&local_path).exists() {
-                bail!("{local_path} doesn't exist; rerun `cargo xtask download dendrite-openapi` (after updating `tools/dendrite_openapi_version` if the dendrite commit in package-manifest.toml has changed)");
+                bail!(
+                    "{local_path} doesn't exist; rerun `cargo xtask download dendrite-openapi` (after updating `tools/dendrite_openapi_version` if the dendrite commit in package-manifest.toml has changed)"
+                );
             }
             println!("cargo:rerun-if-changed={local_path}");
             local_path
@@ -56,14 +58,18 @@ fn main() -> Result<()> {
         PackageSource::Manual => {
             let local_path = "../../out/downloads/dpd-manual.json".to_string();
             if !Path::new(&local_path).exists() {
-                bail!("{local_path} doesn't exist, please copy manually built dpd.json there!");
+                bail!(
+                    "{local_path} doesn't exist, please copy manually built dpd.json there!"
+                );
             }
             println!("cargo:rerun-if-changed={local_path}");
             local_path
         }
 
         _ => {
-            bail!("dendrite external package must have type `prebuilt` or `manual`")
+            bail!(
+                "dendrite external package must have type `prebuilt` or `manual`"
+            )
         }
     };
 

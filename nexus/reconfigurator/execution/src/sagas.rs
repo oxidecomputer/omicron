@@ -4,12 +4,10 @@
 
 //! Re-assign sagas from expunged Nexus zones
 
-use crate::omicron_zones::DeployZonesDone;
 use nexus_db_model::SecId;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::{Blueprint, BlueprintZoneDisposition};
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
 use slog::{debug, info, warn};
@@ -21,7 +19,6 @@ pub(crate) async fn reassign_sagas_from_expunged(
     datastore: &DataStore,
     blueprint: &Blueprint,
     nexus_id: SecId,
-    _deploy_zones_done: &DeployZonesDone,
 ) -> Result<bool, Error> {
     let log = &opctx.log;
 
@@ -38,7 +35,7 @@ pub(crate) async fn reassign_sagas_from_expunged(
     // sure that we only ever try to assign ourselves sagas from other Nexus
     // instances that we know are running the same version as ourselves.
     let nexus_zone_ids: Vec<_> = blueprint
-        .all_omicron_zones(BlueprintZoneFilter::Expunged)
+        .all_omicron_zones(BlueprintZoneDisposition::is_ready_for_cleanup)
         .filter_map(|(_, z)| {
             z.zone_type
                 .is_nexus()

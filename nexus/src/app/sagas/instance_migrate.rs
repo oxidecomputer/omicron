@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{NexusActionContext, NexusSaga, ACTION_GENERATE_ID};
+use super::{ACTION_GENERATE_ID, NexusActionContext, NexusSaga};
 use crate::app::instance::{
     InstanceEnsureRegisteredApiResources, InstanceRegisterReason,
     InstanceStateChangeError, InstanceStateChangeRequest,
@@ -186,14 +186,15 @@ async fn sim_reserve_sled_resources(
 
     let resource = super::instance_common::reserve_vmm_resources(
         osagactx.nexus(),
+        InstanceUuid::from_untyped_uuid(params.instance.id()),
         propolis_id,
-        u32::from(params.instance.ncpus.0 .0),
+        u32::from(params.instance.ncpus.0.0),
         params.instance.memory,
         constraints,
     )
     .await?;
 
-    Ok(SledUuid::from_untyped_uuid(resource.sled_id))
+    Ok(resource.sled_id.into())
 }
 
 async fn sim_release_sled_resources(
@@ -202,10 +203,7 @@ async fn sim_release_sled_resources(
     let osagactx = sagactx.user_data();
     let propolis_id = sagactx.lookup::<PropolisUuid>("dst_propolis_id")?;
 
-    osagactx
-        .nexus()
-        .delete_sled_reservation(propolis_id.into_untyped_uuid())
-        .await?;
+    osagactx.nexus().delete_sled_reservation(propolis_id).await?;
     Ok(())
 }
 
@@ -481,11 +479,7 @@ async fn sim_ensure_destination_propolis_undo(
     {
         Ok(_) => Ok(()),
         Err(InstanceStateChangeError::SledAgent(inner)) => {
-            if !inner.vmm_gone() {
-                Ok(())
-            } else {
-                Err(inner.0.into())
-            }
+            if !inner.vmm_gone() { Ok(()) } else { Err(inner.0.into()) }
         }
         Err(e) => Err(e.into()),
     }
