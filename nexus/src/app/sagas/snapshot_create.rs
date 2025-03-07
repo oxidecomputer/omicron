@@ -92,8 +92,8 @@ use super::{
     ACTION_GENERATE_ID, ActionRegistry, NexusActionContext, NexusSaga,
     SagaInitError,
     common_storage::{
-        call_pantry_attach_for_disk, call_pantry_detach_for_disk,
-        get_pantry_address, is_pantry_gone,
+        call_pantry_attach_for_disk, call_pantry_detach, get_pantry_address,
+        is_pantry_gone,
     },
 };
 use crate::app::sagas::declare_saga_actions;
@@ -1152,7 +1152,7 @@ async fn ssc_call_pantry_attach_for_disk_undo(
             pantry_address
         );
 
-        match call_pantry_detach_for_disk(
+        match call_pantry_detach(
             sagactx.user_data().nexus(),
             &log,
             params.disk_id,
@@ -1278,7 +1278,7 @@ async fn ssc_call_pantry_detach_for_disk(
             params.disk_id,
             pantry_address
         );
-        call_pantry_detach_for_disk(
+        call_pantry_detach(
             sagactx.user_data().nexus(),
             &log,
             params.disk_id,

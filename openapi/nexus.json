@@ -10205,6 +10205,70 @@
         }
       }
     },
+    "/v1/system/update/target-release": {
+      "get": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Get the current target release of the rack's system software",
+        "description": "This may not correspond to the actual software running on the rack at the time of request; it is instead the release that the rack reconfigurator should be moving towards as a goal state. After some number of planning and execution phases, the software running on the rack should eventually correspond to the release described here.",
+        "operationId": "target_release_view",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TargetRelease"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Set the current target release of the rack's system software",
+        "description": "The rack reconfigurator will treat the software specified here as a goal state for the rack's software, and attempt to asynchronously update to that release.",
+        "operationId": "target_release_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTargetReleaseParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TargetRelease"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/users": {
       "get": {
         "tags": [
@@ -21200,6 +21264,20 @@
           }
         ]
       },
+      "SetTargetReleaseParams": {
+        "description": "Parameters for PUT requests to `/v1/system/update/target-release`.",
+        "type": "object",
+        "properties": {
+          "system_version": {
+            "description": "Version of the system software to make the target release.",
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+          }
+        },
+        "required": [
+          "system_version"
+        ]
+      },
       "Silo": {
         "description": "View of a Silo\n\nA Silo is the highest level unit of isolation.",
         "type": "object",
@@ -23104,6 +23182,75 @@
         "required": [
           "name",
           "timeseries"
+        ]
+      },
+      "TargetRelease": {
+        "description": "View of a system software target release.",
+        "type": "object",
+        "properties": {
+          "generation": {
+            "description": "The target-release generation number.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "release_source": {
+            "description": "The source of the target release.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TargetReleaseSource"
+              }
+            ]
+          },
+          "time_requested": {
+            "description": "The time it was set as the target release.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "generation",
+          "release_source",
+          "time_requested"
+        ]
+      },
+      "TargetReleaseSource": {
+        "description": "Source of a system software target release.",
+        "oneOf": [
+          {
+            "description": "Unspecified or unknown source (probably MUPdate).",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unspecified"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The specified release of the rack's system software.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "system_version"
+                ]
+              },
+              "version": {
+                "type": "string",
+                "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+              }
+            },
+            "required": [
+              "type",
+              "version"
+            ]
+          }
         ]
       },
       "Timeseries": {
