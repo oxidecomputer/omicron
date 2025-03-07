@@ -4594,9 +4594,9 @@ checksum = "bfa799dd5ed20a7e349f3b4639aa80d74549c81716d9ec4f994c9b5815598306"
 
 [[package]]
 name = "indoc"
-version = "2.0.5"
+version = "2.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b248f5224d1d606005e02c97f5aa4e88eeb230488bcc03bc9ca4d7991399f2b5"
+checksum = "f4c7245a08504955605670dbf141fceab975f15ca21570696aebe9d2e71576bd"
 
 [[package]]
 name = "ingot"
@@ -9604,7 +9604,7 @@ dependencies = [
  "cassowary",
  "compact_str",
  "crossterm",
- "indoc 2.0.5",
+ "indoc 2.0.6",
  "instability",
  "itertools 0.13.0",
  "lru",
@@ -12996,7 +12996,7 @@ dependencies = [
  "indent_write",
  "indexmap 2.7.1",
  "indicatif",
- "indoc 2.0.5",
+ "indoc 2.0.6",
  "libsw",
  "linear-map",
  "omicron-test-utils",
