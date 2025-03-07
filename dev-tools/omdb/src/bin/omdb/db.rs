@@ -2639,6 +2639,7 @@ async fn cmd_db_region_list(
             blocks_per_extent: u64,
             extent_count: u64,
             read_only: bool,
+            deleting: bool,
         }
 
         let rows: Vec<_> = regions
@@ -2651,6 +2652,7 @@ async fn cmd_db_region_list(
                 blocks_per_extent: region.blocks_per_extent(),
                 extent_count: region.extent_count(),
                 read_only: region.read_only(),
+                deleting: region.deleting(),
             })
             .collect();
 

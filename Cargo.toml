@@ -79,6 +79,7 @@ members = [
     "nexus/inventory",
     "nexus/macros-common",
     "nexus/metrics-producer-gc",
+    "nexus/mgs-updates",
     "nexus/networking",
     "nexus/reconfigurator/blippy",
     "nexus/reconfigurator/execution",
@@ -214,6 +215,7 @@ default-members = [
     "nexus/inventory",
     "nexus/macros-common",
     "nexus/metrics-producer-gc",
+    "nexus/mgs-updates",
     "nexus/networking",
     "nexus/reconfigurator/blippy",
     "nexus/reconfigurator/execution",
@@ -265,7 +267,7 @@ default-members = [
     "workspace-hack",
     "zone-setup",
 ]
-resolver = "2"
+resolver = "3"
 
 #
 # Tree-wide lint configuration.
@@ -312,7 +314,7 @@ approx = "0.5.1"
 assert_matches = "1.5.0"
 assert_cmd = "2.0.16"
 async-bb8-diesel = "0.2"
-async-trait = "0.1.86"
+async-trait = "0.1.87"
 atomicwrites = "0.4.4"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
@@ -370,14 +372,14 @@ debug-ignore = "1.0.5"
 derive_more = "0.99.19"
 derive-where = "1.2.7"
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
-diesel = { version = "2.2.7", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+diesel = { version = "2.2.8", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = "0.4.2"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { path = "clients/dpd-client" }
 dropshot = { version = "0.16.0", features = [ "usdt-probes" ] }
-dyn-clone = "1.0.18"
+dyn-clone = "1.0.19"
 either = "1.14.0"
 expectorate = "1.1.0"
 fatfs = "0.3.6"
@@ -473,6 +475,7 @@ nexus-inventory = { path = "nexus/inventory" }
 nexus-internal-api = { path = "nexus/internal-api" }
 nexus-macros-common = { path = "nexus/macros-common" }
 nexus-metrics-producer-gc = { path = "nexus/metrics-producer-gc" }
+nexus-mgs-updates = { path = "nexus/mgs-updates" }
 nexus-networking = { path = "nexus/networking" }
 nexus-reconfigurator-blippy = { path = "nexus/reconfigurator/blippy" }
 nexus-reconfigurator-execution = { path = "nexus/reconfigurator/execution" }
@@ -557,13 +560,10 @@ progenitor-client = "0.9.1"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "95d6a559890c94e3aa62c8adcd7c4e123ec4c6dc" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "95d6a559890c94e3aa62c8adcd7c4e123ec4c6dc" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "95d6a559890c94e3aa62c8adcd7c4e123ec4c6dc" }
-# NOTE: propolis-mock-server is currently out of sync with other propolis deps,
-# but when we update propolis to a commit after 2652487, please just bump this
-# as well and delete this comment.
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "2652487c19ede2db2cbc634b0dee3a78848dfea1" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "6b5f2af796a3ea57405721407ab70520a93ec73f" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "6b5f2af796a3ea57405721407ab70520a93ec73f" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "6b5f2af796a3ea57405721407ab70520a93ec73f" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "6b5f2af796a3ea57405721407ab70520a93ec73f" }
 # NOTE: see above!
 proptest = "1.6.0"
 qorb = "0.2.1"
@@ -592,6 +592,7 @@ rustls-pemfile = "2.2.0"
 rustyline = "14.0.0"
 samael = { version = "0.0.18", features = ["xmlsec"] }
 schemars = "0.8.22"
+scopeguard = "1.2.0"
 secrecy = "0.8.0"
 semver = { version = "1.0.25", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }

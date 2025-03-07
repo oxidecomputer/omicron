@@ -9,6 +9,8 @@ use camino::Utf8PathBuf;
 use clap::Parser;
 use std::{collections::HashSet, process::Command};
 
+use crate::common::cargo_command;
+
 const SUPPORTED_ARCHITECTURES: [&str; 1] = ["x86_64"];
 const CI_EXCLUDED_FEATURES: [&str; 2] = ["image-trampoline", "image-standard"];
 
@@ -40,16 +42,13 @@ pub fn run_cmd(args: Args) -> Result<()> {
         bail!("cannot specify --ci and --install-version together");
     }
 
-    let cargo =
-        std::env::var("CARGO").unwrap_or_else(|_| String::from("cargo"));
-
-    let mut command = Command::new(&cargo);
+    let mut command = cargo_command();
 
     // Add the `hack check` subcommand.
     command.args(&["hack", "check"]);
 
     if args.ci {
-        install_prebuilt_cargo_hack(&cargo)?;
+        install_prebuilt_cargo_hack()?;
 
         let ex = if let Some(mut features) = args.exclude_features {
             // Extend the list of features to exclude with the CI defaults.
@@ -68,7 +67,7 @@ pub fn run_cmd(args: Args) -> Result<()> {
         // Add the `--exclude-features` flag if we are running in CI mode.
         command.args(["--exclude-features", &ex]);
     } else {
-        install_cargo_hack(&cargo, args.install_version)?;
+        install_cargo_hack(args.install_version)?;
         // Add "only" the `--exclude-features` flag if it was provided.
         if let Some(features) = args.exclude_features {
             command.args(["--exclude-features", &features.join(",")]);
@@ -131,9 +130,9 @@ fn out_dir() -> Utf8PathBuf {
 
 /// Install `cargo-hack` if the `install-version` was specified; otherwise,
 /// download a pre-built version if it's not already in our `out` directory.
-fn install_cargo_hack(cargo: &str, version: Option<String>) -> Result<()> {
+fn install_cargo_hack(version: Option<String>) -> Result<()> {
     if let Some(version) = version {
-        let mut command = Command::new(cargo);
+        let mut command = cargo_command();
 
         eprintln!(
             "installing cargo-hack at version {} to {}",
@@ -143,7 +142,7 @@ fn install_cargo_hack(cargo: &str, version: Option<String>) -> Result<()> {
         command.args(&["install", "cargo-hack", "--version", &version]);
         exec(command)
     } else if !out_dir().exists() {
-        install_prebuilt_cargo_hack(cargo)
+        install_prebuilt_cargo_hack()
     } else {
         let out_dir = out_dir();
         eprintln!("cargo-hack found in {}", out_dir);
@@ -153,8 +152,8 @@ fn install_cargo_hack(cargo: &str, version: Option<String>) -> Result<()> {
 
 /// Download a pre-built version of `cargo-hack` to the `out` directory via the
 /// download `xtask`.
-fn install_prebuilt_cargo_hack(cargo: &str) -> Result<()> {
-    let mut command = Command::new(cargo);
+fn install_prebuilt_cargo_hack() -> Result<()> {
+    let mut command = cargo_command();
 
     let out_dir = out_dir();
     eprintln!(
@@ -185,12 +184,9 @@ fn install_prebuilt_cargo_hack(cargo: &str) -> Result<()> {
 
 /// Execute the command and check the exit status.
 fn exec(mut command: Command) -> Result<()> {
-    let cargo =
-        std::env::var("CARGO").unwrap_or_else(|_| String::from("cargo"));
-
     eprintln!(
         "running: {:?} {}",
-        &cargo,
+        command.get_program(),
         command
             .get_args()
             .map(|arg| format!("{:?}", arg.to_str().unwrap()))

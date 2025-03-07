@@ -48,6 +48,7 @@ strum.workspace = true
 swrite.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
+tufaceous-artifact.workspace = true
 url.workspace = true
 usdt.workspace = true
 uuid.workspace = true
