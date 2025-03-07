@@ -71,9 +71,12 @@ fn initialize_zfs_resources(log: &Logger) -> Result<(), BundleError> {
     let zb_snapshots =
         Zfs::list_snapshots().unwrap().into_iter().filter(|snap| {
             // Check for snapshots named how we expect to create them.
-            if snap.snap_name != ZONE_ROOT_SNAPSHOT_NAME
-                || !snap.snap_name.starts_with(ARCHIVE_SNAPSHOT_PREFIX)
-            {
+            let is_root_snapshot = snap.snap_name == ZONE_ROOT_SNAPSHOT_NAME;
+            let is_archive_snapshot =
+                snap.snap_name.starts_with(ARCHIVE_SNAPSHOT_PREFIX);
+            let is_zone_bundle_snapshot =
+                is_root_snapshot || is_archive_snapshot;
+            if !is_zone_bundle_snapshot {
                 return false;
             }
 
