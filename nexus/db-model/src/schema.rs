@@ -2238,6 +2238,7 @@ table! {
     webhook_event (id) {
         id -> Uuid,
         time_created -> Timestamptz,
+        time_modified -> Timestamptz,
         time_dispatched -> Nullable<Timestamptz>,
         event_class -> crate::WebhookEventClassEnum,
         event -> Jsonb,

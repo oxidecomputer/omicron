@@ -3,10 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::schema::webhook_event;
-use crate::typed_uuid::DbTypedUuid;
 use crate::WebhookEventClass;
 use chrono::{DateTime, Utc};
-use omicron_uuid_kinds::WebhookEventKind;
+use db_macros::Asset;
 use serde::{Deserialize, Serialize};
 
 /// A webhook event.
@@ -19,14 +18,13 @@ use serde::{Deserialize, Serialize};
     Deserialize,
     Insertable,
     PartialEq,
+    Asset,
 )]
 #[diesel(table_name = webhook_event)]
+#[asset(uuid_kind = WebhookEventKind)]
 pub struct WebhookEvent {
-    /// ID of the event.
-    pub id: DbTypedUuid<WebhookEventKind>,
-
-    /// The time this event was created.
-    pub time_created: DateTime<Utc>,
+    #[diesel(embed)]
+    pub identity: WebhookEventIdentity,
 
     /// The time at which this event was dispatched by creating entries in the
     /// `webhook_delivery` table.

@@ -1044,6 +1044,14 @@ authz_resource! {
 }
 
 authz_resource! {
+    name = "WebhookEvent",
+    parent = "Fleet",
+    primary_key = { uuid_kind = WebhookEventKind },
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
     name = "WebhookReceiver",
     parent = "Fleet",
     primary_key = { uuid_kind = WebhookReceiverKind },

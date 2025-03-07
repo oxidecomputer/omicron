@@ -14,6 +14,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
+use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::{
     WebhookDispatched, WebhookDispatcherStatus, WebhookGlobStatus,
@@ -178,7 +179,7 @@ impl WebhookDispatcher {
             slog::trace!(
                 &opctx.log,
                 "dispatching webhook event...";
-                "event_id" => ?event.id,
+                "event_id" => ?event.id(),
                 "event_class" => %event.event_class,
             );
 
@@ -197,13 +198,14 @@ impl WebhookDispatcher {
                     slog::error!(
                         &opctx.log,
                         "{MSG}";
-                        "event_id" => ?event.id,
+                        "event_id" => ?event.id(),
                         "event_class" => %event.event_class,
                         "error" => &error,
                     );
                     status.errors.push(format!(
                         "{MSG} {} ({}): {error}",
-                        event.id, event.event_class
+                        event.id(),
+                        event.event_class
                     ));
                     // We weren't able to find receivers for this event, so
                     // *don't* mark it as dispatched --- it's someone else's
@@ -216,7 +218,7 @@ impl WebhookDispatcher {
                 slog::trace!(&opctx.log, "webhook receiver is subscribed to event";
                     "rx_name" => %rx.name(),
                     "rx_id" => ?rx.id(),
-                    "event_id" => ?event.id,
+                    "event_id" => ?event.id(),
                     "event_class" => %event.event_class,
                     "glob" => ?sub.glob,
                 );
@@ -233,26 +235,26 @@ impl WebhookDispatcher {
                     Ok(created) => created,
                     Err(error) => {
                         slog::error!(&opctx.log, "failed to insert webhook deliveries";
-                            "event_id" => ?event.id,
+                            "event_id" => ?event.id(),
                             "event_class" => %event.event_class,
                             "error" => %error,
                             "num_subscribed" => ?subscribed,
                         );
-                        status.errors.push(format!("failed to insert {subscribed} webhook deliveries for event {} ({}): {error}", event.id, event.event_class));
+                        status.errors.push(format!("failed to insert {subscribed} webhook deliveries for event {} ({}): {error}", event.id(), event.event_class));
                         // We weren't able to create deliveries for this event, so
                         // *don't* mark it as dispatched.
                         continue;
                     }
                 };
                 status.dispatched.push(WebhookDispatched {
-                    event_id: event.id.into(),
+                    event_id: event.id().into(),
                     subscribed,
                     dispatched,
                 });
                 slog::debug!(
                     &opctx.log,
                     "dispatched webhook event";
-                    "event_id" => ?event.id,
+                    "event_id" => ?event.id(),
                     "event_class" => %event.event_class,
                     "num_subscribed" => subscribed,
                     "num_dispatched" => dispatched,
@@ -262,10 +264,10 @@ impl WebhookDispatcher {
                 slog::debug!(
                     &opctx.log,
                     "no webhook receivers subscribed to event";
-                    "event_id" => ?event.id,
+                    "event_id" => ?event.id(),
                     "event_class" => %event.event_class,
                 );
-                status.no_receivers.push(event.id.into());
+                status.no_receivers.push(event.id().into());
                 0
             };
 
@@ -273,18 +275,18 @@ impl WebhookDispatcher {
                 .datastore
                 .webhook_event_mark_dispatched(
                     &opctx,
-                    &event.id.into(),
+                    &event.id().into(),
                     subscribed,
                 )
                 .await
             {
                 slog::error!(&opctx.log, "failed to mark webhook event as dispatched";
-                    "event_id" => ?event.id,
+                    "event_id" => ?event.id(),
                     "event_class" => %event.event_class,
                     "error" => %error,
                     "num_subscribed" => subscribed,
                 );
-                status.errors.push(format!("failed to mark webhook event {} ({}) as dispatched: {error}", event.id, event.event_class));
+                status.errors.push(format!("failed to mark webhook event {} ({}) as dispatched: {error}", event.id(), event.event_class));
             }
         }
         Ok(())

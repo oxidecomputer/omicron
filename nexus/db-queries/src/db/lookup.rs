@@ -26,6 +26,7 @@ use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::TufArtifactKind;
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::WebhookEventUuid;
 use omicron_uuid_kinds::WebhookReceiverUuid;
 use omicron_uuid_kinds::WebhookSecretUuid;
 use uuid::Uuid;
@@ -590,6 +591,14 @@ impl<'a> LookupPath<'a> {
     {
         WebhookSecret::PrimaryKey(Root { lookup_root: self }, id)
     }
+
+    /// Select a resource of type [`WebhookEvent`], identified by its UUID.
+    pub fn webhook_event_id<'b>(self, id: WebhookEventUuid) -> WebhookEvent<'b>
+    where
+        'a: 'b,
+    {
+        WebhookEvent::PrimaryKey(Root { lookup_root: self }, id)
+    }
 }
 
 /// Represents the head of the selection path for a resource
@@ -971,6 +980,16 @@ lookup_resource! {
     soft_deletes = false,
     primary_key_columns = [
         { column_name = "id", uuid_kind = WebhookSecretKind }
+    ]
+}
+
+lookup_resource! {
+    name = "WebhookEvent",
+    ancestors = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [
+        { column_name = "id", uuid_kind = WebhookEventKind }
     ]
 }
 

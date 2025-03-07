@@ -5102,6 +5102,7 @@ on omicron.public.webhook_rx_subscription (
 CREATE TABLE IF NOT EXISTS omicron.public.webhook_event (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
     -- The class of event that this is.
     event_class omicron.public.webhook_event_class NOT NULL,
     -- Actual event data. The structure of this depends on the event class.
@@ -5125,6 +5126,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_event (
 INSERT INTO omicron.public.webhook_event (
     id,
     time_created,
+    time_modified,
     event_class,
     event,
     time_dispatched,
@@ -5132,6 +5134,7 @@ INSERT INTO omicron.public.webhook_event (
 ) VALUES (
     -- NOTE: this UUID is duplicated in nexus_db_model::webhook_event.
     '001de000-7768-4000-8000-000000000001',
+    NOW(),
     NOW(),
     'probe',
     '{}',

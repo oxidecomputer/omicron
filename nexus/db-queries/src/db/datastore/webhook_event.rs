@@ -10,6 +10,7 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::WebhookEvent;
 use crate::db::model::WebhookEventClass;
+use crate::db::model::WebhookEventIdentity;
 use crate::db::schema::webhook_event::dsl as event_dsl;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
@@ -28,16 +29,14 @@ impl DataStore {
         event: serde_json::Value,
     ) -> CreateResult<WebhookEvent> {
         let conn = self.pool_connection_authorized(&opctx).await?;
-        let now =
-            diesel::dsl::now.into_sql::<diesel::pg::sql_types::Timestamptz>();
         diesel::insert_into(event_dsl::webhook_event)
-            .values((
-                event_dsl::event_class.eq(event_class),
-                event_dsl::id.eq(id.into_untyped_uuid()),
-                event_dsl::time_created.eq(now),
-                event_dsl::event.eq(event),
-                event_dsl::num_dispatched.eq(0),
-            ))
+            .values(WebhookEvent {
+                identity: WebhookEventIdentity::new(id),
+                time_dispatched: None,
+                event_class,
+                event,
+                num_dispatched: 0,
+            })
             .returning(WebhookEvent::as_returning())
             .get_result_async(&*conn)
             .await

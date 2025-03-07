@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS omicron.public.webhook_event (
     id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
     -- The class of event that this is.
     event_class omicron.public.webhook_event_class NOT NULL,
     -- Actual event data. The structure of this depends on the event class.

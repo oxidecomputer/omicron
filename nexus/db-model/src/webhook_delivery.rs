@@ -13,6 +13,7 @@ use crate::WebhookEvent;
 use crate::WebhookEventClass;
 use chrono::{DateTime, TimeDelta, Utc};
 use nexus_types::external_api::views;
+use nexus_types::identity::Asset;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::{
     OmicronZoneKind, OmicronZoneUuid, WebhookDeliveryKind, WebhookDeliveryUuid,
@@ -78,7 +79,7 @@ impl WebhookDelivery {
         Self {
             // N.B.: perhaps we ought to use timestamp-based UUIDs for these?
             id: WebhookDeliveryUuid::new_v4().into(),
-            event_id: event.id,
+            event_id: event.id().into(),
             rx_id: (*rx_id).into(),
             trigger,
             payload: event.event.clone(),

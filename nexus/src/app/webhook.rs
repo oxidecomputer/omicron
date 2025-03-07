@@ -129,7 +129,7 @@ impl super::Nexus {
             "enqueued webhook event";
             "event_id" => ?id,
             "event_class" => %event.event_class,
-            "time_created" => ?event.time_created,
+            "time_created" => ?event.identity.time_created,
         );
 
         // Once the event has been isnerted, activate the dispatcher task to
