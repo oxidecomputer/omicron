@@ -227,11 +227,17 @@ impl AffinityGroupInstanceMembership {
     pub fn new(group_id: AffinityGroupUuid, instance_id: InstanceUuid) -> Self {
         Self { group_id: group_id.into(), instance_id: instance_id.into() }
     }
-}
 
-impl From<AffinityGroupInstanceMembership> for external::AffinityGroupMember {
-    fn from(member: AffinityGroupInstanceMembership) -> Self {
-        Self::Instance(member.instance_id.into())
+    pub fn to_external(
+        self,
+        member_name: external::Name,
+        run_state: external::InstanceState,
+    ) -> external::AffinityGroupMember {
+        external::AffinityGroupMember::Instance {
+            id: self.instance_id.into(),
+            name: member_name,
+            run_state,
+        }
     }
 }
 
@@ -249,13 +255,17 @@ impl AntiAffinityGroupInstanceMembership {
     ) -> Self {
         Self { group_id: group_id.into(), instance_id: instance_id.into() }
     }
-}
 
-impl From<AntiAffinityGroupInstanceMembership>
-    for external::AntiAffinityGroupMember
-{
-    fn from(member: AntiAffinityGroupInstanceMembership) -> Self {
-        Self::Instance(member.instance_id.into())
+    pub fn to_external(
+        self,
+        member_name: external::Name,
+        run_state: external::InstanceState,
+    ) -> external::AntiAffinityGroupMember {
+        external::AntiAffinityGroupMember::Instance {
+            id: self.instance_id.into(),
+            name: member_name,
+            run_state,
+        }
     }
 }
 
@@ -276,12 +286,13 @@ impl AntiAffinityGroupAffinityMembership {
             affinity_group_id: affinity_group_id.into(),
         }
     }
-}
-
-impl From<AntiAffinityGroupAffinityMembership>
-    for external::AntiAffinityGroupMember
-{
-    fn from(member: AntiAffinityGroupAffinityMembership) -> Self {
-        Self::AffinityGroup(member.affinity_group_id.into())
+    pub fn to_external(
+        self,
+        member_name: external::Name,
+    ) -> external::AntiAffinityGroupMember {
+        external::AntiAffinityGroupMember::AffinityGroup {
+            id: self.affinity_group_id.into(),
+            name: member_name,
+        }
     }
 }
