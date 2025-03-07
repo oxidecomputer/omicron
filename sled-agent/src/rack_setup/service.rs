@@ -1253,8 +1253,6 @@ impl ServiceInner {
         let service_plan =
             ServicePlan::create(&self.log, &config, &sled_plan.sleds).await?;
 
-        rss_step.update(RssStep::EnsureStorage);
-
         // Set up internal DNS services first and write the initial
         // DNS configuration to the internal DNS servers.
         let v1generator = OmicronZonesConfigGenerator::initial_version(
