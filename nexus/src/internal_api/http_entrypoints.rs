@@ -23,6 +23,7 @@ use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
 use nexus_types::deployment::ClickhousePolicy;
+use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::external_api::params::PhysicalDiskPath;
 use nexus_types::external_api::params::SledSelector;
 use nexus_types::external_api::params::UninitializedSledId;
@@ -970,4 +971,51 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
+
+    async fn oximeter_read_policy_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<OximeterReadPolicy>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            let nexus = &apictx.nexus;
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            match nexus.datastore().oximeter_read_policy_get_latest(&opctx).await?
+            {
+                Some(policy) => Ok(HttpResponseOk(policy)),
+                None => Err(HttpError::for_not_found(
+                    None,
+                    "No oximeter read policy in database".into(),
+                )),
+            }
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn oximeter_read_policy_set(
+        rqctx: RequestContext<Self::Context>,
+        policy: TypedBody<OximeterReadPolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_internal_api(&rqctx).await;
+            nexus
+                .datastore()
+                .oximeter_read_policy_insert_latest_version(
+                    &opctx,
+                    &policy.into_inner(),
+                )
+                .await?;
+            Ok(HttpResponseUpdatedNoContent())
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }    
 }

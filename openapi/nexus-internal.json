@@ -966,6 +966,55 @@
         }
       }
     },
+    "/oximeter_read/policy": {
+      "get": {
+        "summary": "Get the current oximeter read policy",
+        "operationId": "oximeter_read_policy_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OximeterReadPolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Set the new oximeter read policy",
+        "operationId": "oximeter_read_policy_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OximeterReadPolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/physical-disk/expunge": {
       "post": {
         "summary": "Mark a physical disk as expunged",
@@ -4643,6 +4692,61 @@
         "required": [
           "address",
           "collector_id"
+        ]
+      },
+      "OximeterReadMode": {
+        "description": "Where oximeter should read from",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "single_node"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cluster"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "OximeterReadPolicy": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/OximeterReadMode"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "mode",
+          "time_created",
+          "version"
         ]
       },
       "PhysicalDiskKind": {

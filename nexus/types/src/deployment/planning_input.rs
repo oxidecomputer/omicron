@@ -932,7 +932,7 @@ pub struct OximeterReadPolicy {
     pub time_created: DateTime<Utc>,
 }
 
-/// How to deploy clickhouse nodes
+/// Where oximeter should read from
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "type", content = "value")]
 pub enum OximeterReadMode {
