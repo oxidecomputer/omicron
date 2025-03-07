@@ -50,17 +50,16 @@ pub(crate) async fn get_pantry_address(
 // DNS, we can't go back and choose another pantry anyway, so we'll just keep
 // retrying until DNS comes back. All that to say: a failure to resolve DNS is
 // treated as "the pantry is not gone".
-pub(super) async fn is_pantry_gone(
+pub(crate) async fn is_pantry_gone(
     nexus: &Nexus,
     pantry_address: SocketAddrV6,
     log: &Logger,
 ) -> bool {
-    let all_pantry_dns_entries = match nexus
-        .resolver()
-        .lookup_all_socket_v6(ServiceName::CruciblePantry)
+    match nexus
+        .is_internal_service_gone(ServiceName::CruciblePantry, pantry_address)
         .await
     {
-        Ok(entries) => entries,
+        Ok(answer) => answer,
         Err(err) => {
             warn!(
                 log, "Failed to query DNS for Crucible pantry";
@@ -68,8 +67,7 @@ pub(super) async fn is_pantry_gone(
             );
             return false;
         }
-    };
-    !all_pantry_dns_entries.contains(&pantry_address)
+    }
 }
 
 pub(crate) async fn call_pantry_attach_for_disk(
@@ -79,8 +77,6 @@ pub(crate) async fn call_pantry_attach_for_disk(
     disk_id: Uuid,
     pantry_address: SocketAddrV6,
 ) -> Result<(), ActionError> {
-    let endpoint = format!("http://{}", pantry_address);
-
     let (.., disk) = LookupPath::new(opctx, &nexus.datastore())
         .disk_id(disk_id)
         .fetch_for(authz::Action::Modify)
@@ -96,12 +92,6 @@ pub(crate) async fn call_pantry_attach_for_disk(
         .await
         .map_err(ActionError::action_failed)?;
 
-    info!(
-        log,
-        "sending attach for disk {disk_id} volume {} to endpoint {endpoint}",
-        disk.volume_id(),
-    );
-
     let volume_construction_request: VolumeConstructionRequest =
         serde_json::from_str(&disk_volume.data()).map_err(|e| {
             ActionError::action_failed(Error::internal_error(&format!(
@@ -111,14 +101,36 @@ pub(crate) async fn call_pantry_attach_for_disk(
             )))
         })?;
 
+    call_pantry_attach_for_volume(
+        log,
+        nexus,
+        disk_id,
+        volume_construction_request,
+        pantry_address,
+    )
+    .await
+}
+
+pub(crate) async fn call_pantry_attach_for_volume(
+    log: &slog::Logger,
+    nexus: &Nexus,
+    attach_id: Uuid,
+    volume_construction_request: VolumeConstructionRequest,
+    pantry_address: SocketAddrV6,
+) -> Result<(), ActionError> {
+    let endpoint = format!("http://{}", pantry_address);
+
+    info!(log, "sending attach request for {attach_id} to {pantry_address}");
+
     let client = crucible_pantry_client::Client::new(&endpoint);
 
     let attach_request = crucible_pantry_client::types::AttachRequest {
         volume_construction_request,
     };
 
-    let attach_operation =
-        || async { client.attach(&disk_id.to_string(), &attach_request).await };
+    let attach_operation = || async {
+        client.attach(&attach_id.to_string(), &attach_request).await
+    };
     let gone_check =
         || async { Ok(is_pantry_gone(nexus, pantry_address, log).await) };
 
@@ -135,20 +147,20 @@ pub(crate) async fn call_pantry_attach_for_disk(
     Ok(())
 }
 
-pub(crate) async fn call_pantry_detach_for_disk(
+pub(crate) async fn call_pantry_detach(
     nexus: &Nexus,
     log: &slog::Logger,
-    disk_id: Uuid,
+    attach_id: Uuid,
     pantry_address: SocketAddrV6,
 ) -> Result<(), ProgenitorOperationRetryError<CruciblePantryClientError>> {
     let endpoint = format!("http://{}", pantry_address);
 
-    info!(log, "sending detach for disk {disk_id} to endpoint {endpoint}");
+    info!(log, "sending detach for {attach_id} to endpoint {endpoint}");
 
     let client = crucible_pantry_client::Client::new(&endpoint);
 
     let detach_operation =
-        || async { client.detach(&disk_id.to_string()).await };
+        || async { client.detach(&attach_id.to_string()).await };
     let gone_check =
         || async { Ok(is_pantry_gone(nexus, pantry_address, log).await) };
 

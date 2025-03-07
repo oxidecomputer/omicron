@@ -249,6 +249,9 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                                 }))
                                 .into();
                             }
+                            LinkState::ConfigError(e) => {
+                                format!("link config error: {e:?}")
+                            }
                             state @ (LinkState::Down
                             | LinkState::Unknown
                             | LinkState::Faulted(_)) => {
