@@ -86,21 +86,25 @@ fn initialize_zfs_resources(log: &Logger) -> Result<(), BundleError> {
             // have such a property (or has in invalid property), we'll log it
             // but avoid deleting the snapshot.
             let name = snap.to_string();
-            let Ok([value]) = Zfs::get_values(
+            let value = match Zfs::get_values(
                 &name,
                 &[ZONE_BUNDLE_ZFS_PROPERTY_NAME],
                 Some(illumos_utils::zfs::PropertySource::Local),
-            ) else {
-                warn!(
-                    log,
-                    "Found a ZFS snapshot with a name reserved for zone \
-                    bundling, but which does not have the zone-bundle-specific \
-                    property. Bailing out, rather than risking deletion of \
-                    user data.";
-                    "snap_name" => &name,
-                    "property" => ZONE_BUNDLE_ZFS_PROPERTY_NAME
-                );
-                return false;
+            ) {
+                Ok([value]) => value,
+                Err(err) => {
+                    warn!(
+                        log,
+                        "Found a ZFS snapshot with a name reserved for zone \
+                        bundling, but which does not have the zone-bundle-specific \
+                        property. Bailing out, rather than risking deletion of \
+                        user data.";
+                        "snap_name" => &name,
+                        "property" => ZONE_BUNDLE_ZFS_PROPERTY_NAME,
+                        "error" => slog_error_chain::InlineErrorChain::new(&err),
+                    );
+                    return false;
+                }
             };
             if value != ZONE_BUNDLE_ZFS_PROPERTY_VALUE {
                 warn!(
