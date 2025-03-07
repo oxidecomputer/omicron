@@ -638,10 +638,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "f56bcbb8a6c1a2414f83825b0dde931277853a85"
+source.commit = "caafd889f31faacfaa51e02902990c220c20ef60"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "8c5bc9b4cac5bbad80f919acb50594d7ab5d6ab38077c106fde3fcaa2eb26967"
+source.sha256 = "2c59de7b890f68775282943cab0f99f658a7c883485dd6fc2ce6b1a1b26eb03d"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -654,10 +654,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "f56bcbb8a6c1a2414f83825b0dde931277853a85"
+source.commit = "caafd889f31faacfaa51e02902990c220c20ef60"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "1263e31fa71fa77c45f948b8bbb608ad6708de82a30807ca6f2986c8cd86b6d7"
+source.sha256 = "a3e6c0108fad37a8d9e00a902e3d6954cf014224fa8dca8a2cf48693d4e8932e"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -669,7 +669,7 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "f56bcbb8a6c1a2414f83825b0dde931277853a85"
+source.commit = "caafd889f31faacfaa51e02902990c220c20ef60"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
 source.sha256 = "620472050a7e166522f09ed524eb9a23e81d5e27fb3d8032d5c42386496fb6d6"
