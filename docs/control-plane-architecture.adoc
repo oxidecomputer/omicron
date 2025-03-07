@@ -88,12 +88,12 @@ At the "bottom" of the stack, we have a few basic components that reside alongsi
 | One per sled, tied to that specific sled
 | N/A
 
-| Internal DNS
-| One zone per non-Scrimlet sled
+| Internal NTP
+| One zone per sled that doesn't have a Boundary NTP
 | N/A
 
 | Boundary NTP
-| One zone per Scrimlet.  Both instances within a rack are fungible.
+| One zone on each of two sleds in the rack.  Both instances within a rack are fungible.
 | There are two.  Short-term failure (order of hours or even days) is unlikely to affect anything since sled clocks do not drift that quickly.
 
 | Dendrite
