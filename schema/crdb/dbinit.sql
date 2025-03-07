@@ -2410,6 +2410,40 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo_artifact (
 
 /*******************************************************************/
 
+-- The source of the software release that should be deployed to the rack.
+CREATE TYPE IF NOT EXISTS omicron.public.target_release_source AS ENUM (
+    'unspecified',
+    'system_version'
+);
+
+-- Software releases that should be/have been deployed to the rack. The
+-- current target release is the one with the largest generation number.
+CREATE TABLE IF NOT EXISTS omicron.public.target_release (
+    generation INT8 NOT NULL PRIMARY KEY,
+    time_requested TIMESTAMPTZ NOT NULL,
+    release_source omicron.public.target_release_source NOT NULL,
+    tuf_repo_id UUID, -- "foreign key" into the `tuf_repo` table
+    CONSTRAINT tuf_repo_for_system_version CHECK (
+      (release_source != 'system_version' AND tuf_repo_id IS NULL) OR
+      (release_source = 'system_version' AND tuf_repo_id IS NOT NULL)
+    )
+);
+
+-- System software is by default from the `install` dataset.
+INSERT INTO omicron.public.target_release (
+    generation,
+    time_requested,
+    release_source,
+    tuf_repo_id
+) VALUES (
+    1,
+    NOW(),
+    'unspecified',
+    NULL
+) ON CONFLICT DO NOTHING;
+
+/*******************************************************************/
+
 /*
  * Support Bundles
  */
@@ -4990,7 +5024,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '129.0.0', NULL)
+    (TRUE, NOW(), NOW(), '130.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

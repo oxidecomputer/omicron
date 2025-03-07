@@ -7,6 +7,7 @@
 use futures::Future;
 use gateway_client::Client;
 use slog::Logger;
+use slog::warn;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
