@@ -41,6 +41,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::WebhookDeliveryUuid;
 use omicron_uuid_kinds::WebhookEventUuid;
 use omicron_uuid_kinds::WebhookReceiverUuid;
@@ -194,8 +195,12 @@ impl super::Nexus {
         let datastore = self.datastore();
         let secrets =
             datastore.webhook_rx_secret_list(opctx, &authz_rx).await?;
-        let mut client =
-            ReceiverClient::new(&self.webhook_delivery_client, secrets, &rx)?;
+        let mut client = ReceiverClient::new(
+            &self.webhook_delivery_client,
+            secrets,
+            &rx,
+            self.id,
+        )?;
         let mut delivery = WebhookDelivery::new_probe(&rx_id, &self.id);
 
         const CLASS: WebhookEventClass = WebhookEventClass::Probe;
@@ -345,6 +350,7 @@ pub(crate) struct ReceiverClient<'a> {
     rx: &'a WebhookReceiver,
     secrets: Vec<(WebhookSecretUuid, Hmac<Sha256>)>,
     hdr_rx_id: http::HeaderValue,
+    nexus_id: OmicronZoneUuid,
 }
 
 impl<'a> ReceiverClient<'a> {
@@ -352,6 +358,7 @@ impl<'a> ReceiverClient<'a> {
         client: &'a reqwest::Client,
         secrets: impl IntoIterator<Item = WebhookSecret>,
         rx: &'a WebhookReceiver,
+        nexus_id: OmicronZoneUuid,
     ) -> Result<Self, Error> {
         let secrets = secrets
             .into_iter()
@@ -368,7 +375,7 @@ impl<'a> ReceiverClient<'a> {
         }
         let hdr_rx_id = HeaderValue::try_from(rx.id().to_string())
             .expect("UUIDs should always be a valid header value");
-        Ok(Self { client, secrets, hdr_rx_id, rx })
+        Ok(Self { client, secrets, hdr_rx_id, rx, nexus_id })
     }
 
     pub(crate) async fn send_delivery_request(
@@ -595,6 +602,7 @@ impl<'a> ReceiverClient<'a> {
             response_status: status.map(|s| s.as_u16() as i16),
             response_duration,
             time_created: chrono::Utc::now(),
+            deliverator_id: self.nexus_id.into(),
         })
     }
 }

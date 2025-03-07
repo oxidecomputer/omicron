@@ -174,6 +174,8 @@ pub struct WebhookDeliveryAttempt {
     pub response_duration: Option<TimeDelta>,
 
     pub time_created: DateTime<Utc>,
+
+    pub deliverator_id: DbTypedUuid<OmicronZoneKind>,
 }
 
 impl WebhookDeliveryAttempt {

@@ -2276,6 +2276,7 @@ table! {
         response_status -> Nullable<Int2>,
         response_duration -> Nullable<Interval>,
         time_created -> Timestamptz,
+        deliverator_id -> Uuid,
     }
 }
 

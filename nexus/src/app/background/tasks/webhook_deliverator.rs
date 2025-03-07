@@ -178,7 +178,8 @@ impl WebhookDeliverator {
         opctx: &OpContext,
         WebhookReceiverConfig { rx, secrets, .. }: WebhookReceiverConfig,
     ) -> Result<WebhookRxDeliveryStatus, anyhow::Error> {
-        let mut client = ReceiverClient::new(&self.client, secrets, &rx)?;
+        let mut client =
+            ReceiverClient::new(&self.client, secrets, &rx, self.nexus_id)?;
 
         let deliveries = self
             .datastore

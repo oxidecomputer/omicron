@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery_attempt (
     response_status INT2,
     response_duration INTERVAL,
     time_created TIMESTAMPTZ NOT NULL,
+    -- UUID of the Nexus who did this delivery attempt.
+    deliverator_id UUID NOT NULL,
 
     PRIMARY KEY (delivery_id, attempt),
 
