@@ -380,7 +380,7 @@ impl DataStore {
     ) -> LookupResult<SwitchPortSettingsCombinedResult> {
         #[derive(Debug)]
         enum SwitchPortSettingsGetError {
-            NotFound(external::Name),
+            NotFound(NameOrId),
         }
 
         let err = OptionalError::new();
@@ -403,7 +403,23 @@ impl DataStore {
                 };
 
                 let id = match name_or_id {
-                    NameOrId::Id(id) => *id,
+                    NameOrId::Id(id) => {
+                        switch_port_settings::table
+                            .filter(switch_port_settings::time_deleted.is_null())
+                            .filter(switch_port_settings::id.eq(*id))
+                            .select(switch_port_settings::id)
+                            .limit(1)
+                            .first_async::<Uuid>(&conn)
+                            .await
+                            .map_err(|diesel_error| {
+                                err.bail_retryable_or_else(diesel_error, |_| {
+                                    SwitchPortSettingsGetError::NotFound(
+                                        name_or_id.clone()
+                                    )
+                                })
+                            })?
+
+                    }
                     NameOrId::Name(name) => {
                         let name_str = name.to_string();
                         port_settings_dsl::switch_port_settings
@@ -416,7 +432,7 @@ impl DataStore {
                             .map_err(|diesel_error| {
                                 err.bail_retryable_or_else(diesel_error, |_| {
                                     SwitchPortSettingsGetError::NotFound(
-                                        name.clone(),
+                                        name_or_id.clone()
                                     )
                                 })
                             })?
@@ -639,11 +655,11 @@ impl DataStore {
         .map_err(|e| {
             if let Some(err) = err.take() {
                 match err {
-                    SwitchPortSettingsGetError::NotFound(name) => {
-                        Error::not_found_by_name(
-                            ResourceType::SwitchPortSettings,
-                            &name,
-                        )
+                    SwitchPortSettingsGetError::NotFound(name_or_id) => {
+                        match name_or_id {
+                            NameOrId::Id(uuid) => Error::not_found_by_id(ResourceType::SwitchPortSettings, &uuid),
+                            NameOrId::Name(name) => Error::not_found_by_name(ResourceType::SwitchPortSettings, &name),
+                        }
                     }
                 }
             } else {
@@ -1550,7 +1566,6 @@ async fn do_switch_port_settings_delete(
     use db::schema::switch_port_settings;
     use db::schema::switch_port_settings::dsl as port_settings_dsl;
     let id = match selector {
-        // TODO: perform lookup here
         NameOrId::Id(id) => switch_port_settings::table
             .filter(switch_port_settings::time_deleted.is_null())
             .filter(switch_port_settings::id.eq(*id))
