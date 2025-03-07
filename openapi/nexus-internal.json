@@ -966,7 +966,7 @@
         }
       }
     },
-    "/oximeter_read/policy": {
+    "/oximeter-read/policy": {
       "get": {
         "summary": "Get the current oximeter read policy",
         "operationId": "oximeter_read_policy_get",
