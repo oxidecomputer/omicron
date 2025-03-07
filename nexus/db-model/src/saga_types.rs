@@ -89,6 +89,7 @@ impl From<&SecId> for Uuid {
 pub struct SagaId(pub steno::SagaId);
 
 NewtypeFrom! { () pub struct SagaId(steno::SagaId); }
+NewtypeDisplay! { () pub struct SagaId(steno::SagaId); }
 
 impl ToSql<sql_types::Uuid, Pg> for SagaId {
     fn to_sql<'a>(
