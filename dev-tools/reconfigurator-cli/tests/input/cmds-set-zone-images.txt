@@ -1,0 +1,24 @@
+# Load example system
+load-example --nsleds 1 --ndisks-per-sled 3
+blueprint-show 971eeb12-1830-4fa0-a699-98ea0164505c
+
+# Set a zone's image source to a specific artifact.
+blueprint-edit 971eeb12-1830-4fa0-a699-98ea0164505c set-zone-image 026f8db9-b966-45ec-bf89-fb7b41a04cc9 artifact 1.2.3 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+blueprint-show 9766ca20-38d4-4380-b005-e7c43c797e7c
+blueprint-diff 971eeb12-1830-4fa0-a699-98ea0164505c 9766ca20-38d4-4380-b005-e7c43c797e7c
+
+# Set the zone's image source back to the install dataset.
+blueprint-edit 9766ca20-38d4-4380-b005-e7c43c797e7c set-zone-image 026f8db9-b966-45ec-bf89-fb7b41a04cc9 install-dataset
+blueprint-show f714e6ea-e85a-4d7d-93c2-a018744fe176
+blueprint-diff 9766ca20-38d4-4380-b005-e7c43c797e7c f714e6ea-e85a-4d7d-93c2-a018744fe176
+
+# test help output
+blueprint-edit 9766ca20-38d4-4380-b005-e7c43c797e7c help
+blueprint-edit 9766ca20-38d4-4380-b005-e7c43c797e7c set-zone-image help
+
+# test error case: no such zone id
+blueprint-edit 9766ca20-38d4-4380-b005-e7c43c797e7c set-zone-image 126f8db9-b966-45ec-bf89-fb7b41a04cc9 install-dataset
+# test error case: bad semver
+blueprint-edit 9766ca20-38d4-4380-b005-e7c43c797e7c set-zone-image 026f8db9-b966-45ec-bf89-fb7b41a04cc9 artifact one e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+# test error case: bad hash
+blueprint-edit 9766ca20-38d4-4380-b005-e7c43c797e7c set-zone-image 026f8db9-b966-45ec-bf89-fb7b41a04cc9 artifact 1.2.3 aaaa
