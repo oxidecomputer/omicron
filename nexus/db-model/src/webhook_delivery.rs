@@ -2,11 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::impl_enum_type;
 use crate::schema::{webhook_delivery, webhook_delivery_attempt};
 use crate::serde_time_delta::optional_time_delta;
 use crate::typed_uuid::DbTypedUuid;
 use crate::SqlU8;
+use crate::WebhookDeliveryAttemptResult;
 use crate::WebhookDeliveryState;
 use crate::WebhookDeliveryTrigger;
 use crate::WebhookEvent;
@@ -21,31 +21,6 @@ use omicron_uuid_kinds::{
 };
 use serde::Deserialize;
 use serde::Serialize;
-
-impl_enum_type!(
-    #[derive(SqlType, Debug, Clone)]
-    #[diesel(postgres_type(name = "webhook_delivery_attempt_result", schema = "public"))]
-    pub struct WebhookDeliveryAttemptResultEnum;
-
-    #[derive(
-        Copy,
-        Clone,
-        Debug,
-        PartialEq,
-        AsExpression,
-        FromSqlRow,
-        Serialize,
-        Deserialize,
-        strum::VariantArray,
-    )]
-    #[diesel(sql_type = WebhookDeliveryAttemptResultEnum)]
-    pub enum WebhookDeliveryAttemptResult;
-
-    FailedHttpError => b"failed_http_error"
-    FailedUnreachable => b"failed_unreachable"
-    FailedTimeout => b"failed_timeout"
-    Succeeded => b"succeeded"
-);
 
 /// A webhook delivery dispatch entry.
 #[derive(
@@ -218,29 +193,6 @@ impl From<&'_ WebhookDeliveryAttempt> for views::WebhookDeliveryAttempt {
             result: attempt.result.into(),
             time_sent: attempt.time_created,
             response,
-        }
-    }
-}
-
-impl WebhookDeliveryAttemptResult {
-    pub fn is_failed(&self) -> bool {
-        views::WebhookDeliveryAttemptResult::from(*self).is_failed()
-    }
-}
-
-impl From<WebhookDeliveryAttemptResult>
-    for views::WebhookDeliveryAttemptResult
-{
-    fn from(result: WebhookDeliveryAttemptResult) -> Self {
-        match result {
-            WebhookDeliveryAttemptResult::FailedHttpError => {
-                Self::FailedHttpError
-            }
-            WebhookDeliveryAttemptResult::FailedTimeout => Self::FailedTimeout,
-            WebhookDeliveryAttemptResult::FailedUnreachable => {
-                Self::FailedUnreachable
-            }
-            WebhookDeliveryAttemptResult::Succeeded => Self::Succeeded,
         }
     }
 }
