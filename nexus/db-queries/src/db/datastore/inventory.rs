@@ -6,10 +6,12 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::column_walker::AllColumnsOf;
 use crate::db::error::ErrorHandler;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::public_error_from_diesel_lookup;
-use crate::db::pagination::{Paginator, paginated, paginated_multicolumn};
+use crate::db::pagination::Paginator;
+use crate::db::pagination::RawPaginator;
 use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
@@ -25,7 +27,10 @@ use diesel::OptionalExtension;
 use diesel::QueryDsl;
 use diesel::Table;
 use diesel::expression::SelectableHelper;
+use diesel::helper_types::AsSelect;
 use diesel::sql_types::Nullable;
+use diesel::pg::Pg;
+use diesel::pg::sql_types::Array;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use nexus_db_model::CabooseWhichEnum;
@@ -1571,19 +1576,23 @@ impl DataStore {
             let mut errors = Vec::new();
             let mut paginator = Paginator::new(batch_size);
             while let Some(p) = paginator.next() {
-                let batch = paginated(
-                    dsl::inv_collection_error,
-                    dsl::idx,
-                    &p.current_pagparams(),
-                )
-                .filter(dsl::inv_collection_id.eq(db_id))
-                .order_by(dsl::idx)
-                .select(InvCollectionError::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                let mut pagination_query = RawPaginator::new();
+                pagination_query.source()
+                    .sql("SELECT ")
+                    .sql(AllColumnsOf::<dsl::inv_collection_error>::as_str())
+                    .sql(" FROM inv_collection_error WHERE inv_collection_id = ")
+                    .param()
+                    .bind::<diesel::sql_types::Uuid, _>(db_id);
+                let batch = pagination_query
+                    .with_parameters(&p.current_pagparams())
+                    .paginate_by_diesel_column::<dsl::idx>()
+                    .query::<AsSelect<InvCollectionError, Pg>>()
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context("SELECT-ing inv_collection_error")
+                    })?;
                 paginator =
                     p.found_batch(&batch, &|row: &InvCollectionError| row.idx);
                 errors.extend(batch.into_iter().map(|e| e.message));
@@ -1598,18 +1607,23 @@ impl DataStore {
 
             let mut paginator = Paginator::new(batch_size);
             while let Some(p) = paginator.next() {
-                let batch = paginated(
-                    dsl::inv_service_processor,
-                    dsl::hw_baseboard_id,
-                    &p.current_pagparams(),
-                )
-                .filter(dsl::inv_collection_id.eq(db_id))
-                .select(InvServiceProcessor::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                let mut pagination_query = RawPaginator::new();
+                pagination_query.source()
+                    .sql("SELECT ")
+                    .sql(AllColumnsOf::<dsl::inv_service_processor>::as_str())
+                    .sql(" FROM inv_service_processor WHERE inv_collection_id = ")
+                    .param()
+                    .bind::<diesel::sql_types::Uuid, _>(db_id);
+                let batch = pagination_query
+                    .with_parameters(&p.current_pagparams())
+                    .paginate_by_diesel_column::<dsl::hw_baseboard_id>()
+                    .query::<AsSelect<InvServiceProcessor, Pg>>()
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context("SELECT-ing inv_service_processor")
+                    })?;
                 paginator = p.found_batch(&batch, &|row| row.hw_baseboard_id);
                 sps.extend(batch.into_iter().map(|row| {
                     let baseboard_id = row.hw_baseboard_id;
@@ -1629,18 +1643,23 @@ impl DataStore {
 
             let mut paginator = Paginator::new(batch_size);
             while let Some(p) = paginator.next() {
-                let batch = paginated(
-                    dsl::inv_root_of_trust,
-                    dsl::hw_baseboard_id,
-                    &p.current_pagparams(),
-                )
-                .filter(dsl::inv_collection_id.eq(db_id))
-                .select(InvRootOfTrust::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                let mut pagination_query = RawPaginator::new();
+                pagination_query.source()
+                    .sql("SELECT ")
+                    .sql(AllColumnsOf::<dsl::inv_root_of_trust>::as_str())
+                    .sql(" FROM inv_root_of_trust WHERE inv_collection_id = ")
+                    .param()
+                    .bind::<diesel::sql_types::Uuid, _>(db_id);
+                let batch = pagination_query
+                    .with_parameters(&p.current_pagparams())
+                    .paginate_by_diesel_column::<dsl::hw_baseboard_id>()
+                    .query::<AsSelect<InvRootOfTrust, Pg>>()
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context("SELECT-ing inv_root_of_trust")
+                    })?;
                 paginator = p.found_batch(&batch, &|row| row.hw_baseboard_id);
                 rots.extend(batch.into_iter().map(|rot_row| {
                     let baseboard_id = rot_row.hw_baseboard_id;
@@ -1660,18 +1679,23 @@ impl DataStore {
 
             let mut paginator = Paginator::new(batch_size);
             while let Some(p) = paginator.next() {
-                let mut batch = paginated(
-                    dsl::inv_sled_agent,
-                    dsl::sled_id,
-                    &p.current_pagparams(),
-                )
-                .filter(dsl::inv_collection_id.eq(db_id))
-                .select(InvSledAgent::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                let mut pagination_query = RawPaginator::new();
+                pagination_query.source()
+                    .sql("SELECT ")
+                    .sql(AllColumnsOf::<dsl::inv_sled_agent>::as_str())
+                    .sql(" FROM inv_sled_agent WHERE inv_collection_id = ")
+                    .param()
+                    .bind::<diesel::sql_types::Uuid, _>(db_id);
+                let mut batch = pagination_query
+                    .with_parameters(&p.current_pagparams())
+                    .paginate_by_diesel_column::<dsl::sled_id>()
+                    .query::<AsSelect<InvSledAgent, Pg>>()
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context("SELECT-ing inv_sled_agent")
+                    })?;
                 paginator = p.found_batch(&batch, &|row| row.sled_id);
                 rows.append(&mut batch);
             }
@@ -1692,18 +1716,26 @@ impl DataStore {
             >::new();
             let mut paginator = Paginator::new(batch_size);
             while let Some(p) = paginator.next() {
-                let batch = paginated_multicolumn(
-                    dsl::inv_nvme_disk_firmware,
-                    (dsl::sled_id, dsl::slot),
-                    &p.current_pagparams(),
-                )
-                .filter(dsl::inv_collection_id.eq(db_id))
-                .select(InvNvmeDiskFirmware::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                let mut pagination_query = RawPaginator::new();
+                pagination_query.source()
+                    .sql("SELECT ")
+                    .sql(AllColumnsOf::<dsl::inv_nvme_disk_firmware>::as_str())
+                    .sql(" FROM inv_nvme_disk_firmware WHERE inv_collection_id = ")
+                    .param()
+                    .bind::<diesel::sql_types::Uuid, _>(db_id);
+                let batch = pagination_query
+                    .with_parameters(&p.current_pagparams())
+                    .paginate_by_diesel_columns::<dsl::sled_id, dsl::slot>()
+                    .query::<AsSelect<InvNvmeDiskFirmware, Pg>>()
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context("SELECT-ing inv_nvme_disk_firmware")
+                    })?;
+
+                println!("Batch: {batch:?}");
+
                 paginator =
                     p.found_batch(&batch, &|row| (row.sled_id(), row.slot()));
                 for firmware in batch {
@@ -1734,18 +1766,24 @@ impl DataStore {
             >::new();
             let mut paginator = Paginator::new(batch_size);
             while let Some(p) = paginator.next() {
-                let batch = paginated_multicolumn(
-                    dsl::inv_physical_disk,
-                    (dsl::sled_id, dsl::slot),
-                    &p.current_pagparams(),
-                )
-                .filter(dsl::inv_collection_id.eq(db_id))
-                .select(InvPhysicalDisk::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                let mut pagination_query = RawPaginator::new();
+                pagination_query.source()
+                    .sql("SELECT ")
+                    .sql(AllColumnsOf::<dsl::inv_physical_disk>::as_str())
+                    .sql(" FROM inv_physical_disk WHERE inv_collection_id = ")
+                    .param()
+                    .bind::<diesel::sql_types::Uuid, _>(db_id);
+                let batch = pagination_query
+                    .with_parameters(&p.current_pagparams())
+                    .paginate_by_diesel_columns::<dsl::sled_id, dsl::slot>()
+                    .query::<AsSelect<InvPhysicalDisk, Pg>>()
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context("SELECT-ing inv_physical_disk")
+                    })?;
+
                 paginator =
                     p.found_batch(&batch, &|row| (row.sled_id, row.slot));
                 for disk in batch {
@@ -1780,18 +1818,23 @@ impl DataStore {
                 BTreeMap::<Uuid, Vec<nexus_types::inventory::Zpool>>::new();
             let mut paginator = Paginator::new(batch_size);
             while let Some(p) = paginator.next() {
-                let batch = paginated_multicolumn(
-                    dsl::inv_zpool,
-                    (dsl::sled_id, dsl::id),
-                    &p.current_pagparams(),
-                )
-                .filter(dsl::inv_collection_id.eq(db_id))
-                .select(InvZpool::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                let mut pagination_query = RawPaginator::new();
+                pagination_query.source()
+                    .sql("SELECT ")
+                    .sql(AllColumnsOf::<dsl::inv_zpool>::as_str())
+                    .sql(" FROM inv_zpool WHERE inv_collection_id = ")
+                    .param()
+                    .bind::<diesel::sql_types::Uuid, _>(db_id);
+                let batch = pagination_query
+                    .with_parameters(&p.current_pagparams())
+                    .paginate_by_diesel_columns::<dsl::sled_id, dsl::id>()
+                    .query::<AsSelect<InvZpool, Pg>>()
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context("SELECT-ing inv_zpool")
+                    })?;
                 paginator = p.found_batch(&batch, &|row| (row.sled_id, row.id));
                 for zpool in batch {
                     zpools
@@ -1811,18 +1854,24 @@ impl DataStore {
                 BTreeMap::<Uuid, Vec<nexus_types::inventory::Dataset>>::new();
             let mut paginator = Paginator::new(batch_size);
             while let Some(p) = paginator.next() {
-                let batch = paginated_multicolumn(
-                    dsl::inv_dataset,
-                    (dsl::sled_id, dsl::name),
-                    &p.current_pagparams(),
-                )
-                .filter(dsl::inv_collection_id.eq(db_id))
-                .select(InvDataset::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                let mut pagination_query = RawPaginator::new();
+                pagination_query.source()
+                    .sql("SELECT ")
+                    .sql(AllColumnsOf::<dsl::inv_dataset>::as_str())
+                    .sql(" FROM inv_dataset WHERE inv_collection_id = ")
+                    .param()
+                    .bind::<diesel::sql_types::Uuid, _>(db_id);
+                let batch = pagination_query
+                    .with_parameters(&p.current_pagparams())
+                    .paginate_by_diesel_columns::<dsl::sled_id, dsl::name>()
+                    .query::<AsSelect<InvDataset, Pg>>()
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context("SELECT-ing inv_dataset")
+                    })?;
+
                 paginator = p.found_batch(&batch, &|row| {
                     (row.sled_id, row.name.clone())
                 });
@@ -1838,12 +1887,15 @@ impl DataStore {
 
         // Collect the unique baseboard ids referenced by SPs, RoTs, and Sled
         // Agents.
-        let baseboard_id_ids: BTreeSet<_> = sps
+        let baseboard_id_ids: Vec<_> = sps
             .keys()
             .chain(rots.keys())
             .cloned()
             .chain(sled_agent_rows.iter().filter_map(|s| s.hw_baseboard_id))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
             .collect();
+
         // Fetch the corresponding baseboard records.
         let baseboards_by_id: BTreeMap<_, _> = {
             use db::schema::hw_baseboard_id::dsl;
@@ -1852,18 +1904,24 @@ impl DataStore {
 
             let mut paginator = Paginator::new(batch_size);
             while let Some(p) = paginator.next() {
-                let batch = paginated(
-                    dsl::hw_baseboard_id,
-                    dsl::id,
-                    &p.current_pagparams(),
-                )
-                .filter(dsl::id.eq_any(baseboard_id_ids.clone()))
-                .select(HwBaseboardId::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                let mut pagination_query = RawPaginator::new();
+                pagination_query.source()
+                    .sql("SELECT ")
+                    .sql(AllColumnsOf::<dsl::hw_baseboard_id>::as_str())
+                    .sql(" FROM hw_baseboard_id WHERE id = ANY(")
+                    .param()
+                    .bind::<Array<diesel::sql_types::Uuid>, _>(baseboard_id_ids.clone())
+                    .sql(")");
+                let batch = pagination_query
+                    .with_parameters(&p.current_pagparams())
+                    .paginate_by_diesel_column::<dsl::id>()
+                    .query::<AsSelect<HwBaseboardId, Pg>>()
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context("SELECT-ing hw_baseboard_id")
+                    })?;
                 paginator = p.found_batch(&batch, &|row| row.id);
                 bbs.extend(batch.into_iter().map(|bb| {
                     (
@@ -1912,18 +1970,24 @@ impl DataStore {
 
             let mut paginator = Paginator::new(batch_size);
             while let Some(p) = paginator.next() {
-                let mut batch = paginated_multicolumn(
-                    dsl::inv_caboose,
-                    (dsl::hw_baseboard_id, dsl::which),
-                    &p.current_pagparams(),
-                )
-                .filter(dsl::inv_collection_id.eq(db_id))
-                .select(InvCaboose::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                let mut pagination_query = RawPaginator::new();
+                pagination_query.source()
+                    .sql("SELECT ")
+                    .sql(AllColumnsOf::<dsl::inv_caboose>::as_str())
+                    .sql(" FROM inv_caboose WHERE inv_collection_id = ")
+                    .param()
+                    .bind::<diesel::sql_types::Uuid, _>(db_id);
+                let mut batch = pagination_query
+                    .with_parameters(&p.current_pagparams())
+                    .paginate_by_diesel_columns::<dsl::hw_baseboard_id, dsl::which>()
+                    .query::<AsSelect<InvCaboose, Pg>>()
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context("SELECT-ing inv_caboose")
+                    })?;
+
                 paginator = p.found_batch(&batch, &|row| {
                     (row.hw_baseboard_id, row.which)
                 });
@@ -1934,9 +1998,11 @@ impl DataStore {
         };
 
         // Collect the unique sw_caboose_ids for those cabooses.
-        let sw_caboose_ids: BTreeSet<_> = inv_caboose_rows
+        let sw_caboose_ids: Vec<_> = inv_caboose_rows
             .iter()
             .map(|inv_caboose| inv_caboose.sw_caboose_id)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
             .collect();
         // Fetch the corresponing records.
         let cabooses_by_id: BTreeMap<_, _> = {
@@ -1946,15 +2012,24 @@ impl DataStore {
 
             let mut paginator = Paginator::new(batch_size);
             while let Some(p) = paginator.next() {
-                let batch =
-                    paginated(dsl::sw_caboose, dsl::id, &p.current_pagparams())
-                        .filter(dsl::id.eq_any(sw_caboose_ids.clone()))
-                        .select(SwCaboose::as_select())
-                        .load_async(&*conn)
-                        .await
-                        .map_err(|e| {
-                            public_error_from_diesel(e, ErrorHandler::Server)
-                        })?;
+                let mut pagination_query = RawPaginator::new();
+                pagination_query.source()
+                    .sql("SELECT ")
+                    .sql(AllColumnsOf::<dsl::sw_caboose>::as_str())
+                    .sql(" FROM sw_caboose WHERE id = ANY(")
+                    .param()
+                    .bind::<Array<diesel::sql_types::Uuid>, _>(sw_caboose_ids.clone())
+                    .sql(")");
+                let batch = pagination_query
+                    .with_parameters(&p.current_pagparams())
+                    .paginate_by_diesel_column::<dsl::id>()
+                    .query::<AsSelect<SwCaboose, Pg>>()
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context("SELECT-ing sw_caboose")
+                    })?;
                 paginator = p.found_batch(&batch, &|row| row.id);
                 cabooses.extend(batch.into_iter().map(|sw_caboose_row| {
                     (
@@ -2014,18 +2089,24 @@ impl DataStore {
 
             let mut paginator = Paginator::new(batch_size);
             while let Some(p) = paginator.next() {
-                let mut batch = paginated_multicolumn(
-                    dsl::inv_root_of_trust_page,
-                    (dsl::hw_baseboard_id, dsl::which),
-                    &p.current_pagparams(),
-                )
-                .filter(dsl::inv_collection_id.eq(db_id))
-                .select(InvRotPage::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                let mut pagination_query = RawPaginator::new();
+                pagination_query.source()
+                    .sql("SELECT ")
+                    .sql(AllColumnsOf::<dsl::inv_root_of_trust_page>::as_str())
+                    .sql(" FROM inv_root_of_trust_page WHERE inv_collection_id = ")
+                    .param()
+                    .bind::<diesel::sql_types::Uuid, _>(db_id);
+                let mut batch = pagination_query
+                    .with_parameters(&p.current_pagparams())
+                    .paginate_by_diesel_columns::<dsl::hw_baseboard_id, dsl::which>()
+                    .query::<AsSelect<InvRotPage, Pg>>()
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context("SELECT-ing inv_root_of_trust_page")
+                    })?;
+
                 paginator = p.found_batch(&batch, &|row| {
                     (row.hw_baseboard_id, row.which)
                 });
@@ -2036,9 +2117,11 @@ impl DataStore {
         };
 
         // Collect the unique sw_rot_page_ids for those pages.
-        let sw_rot_page_ids: BTreeSet<_> = inv_rot_page_rows
+        let sw_rot_page_ids: Vec<_> = inv_rot_page_rows
             .iter()
             .map(|inv_rot_page| inv_rot_page.sw_root_of_trust_page_id)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
             .collect();
         // Fetch the corresponding records.
         let rot_pages_by_id: BTreeMap<_, _> = {
@@ -2048,18 +2131,25 @@ impl DataStore {
 
             let mut paginator = Paginator::new(batch_size);
             while let Some(p) = paginator.next() {
-                let batch = paginated(
-                    dsl::sw_root_of_trust_page,
-                    dsl::id,
-                    &p.current_pagparams(),
-                )
-                .filter(dsl::id.eq_any(sw_rot_page_ids.clone()))
-                .select(SwRotPage::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                let mut pagination_query = RawPaginator::new();
+                pagination_query.source()
+                    .sql("SELECT ")
+                    .sql(AllColumnsOf::<dsl::sw_root_of_trust_page>::as_str())
+                    .sql(" FROM sw_root_of_trust_page WHERE id = ANY(")
+                    .param()
+                    .bind::<Array<diesel::sql_types::Uuid>, _>(sw_rot_page_ids.clone())
+                    .sql(")");
+                let batch = pagination_query
+                    .with_parameters(&p.current_pagparams())
+                    .paginate_by_diesel_column::<dsl::id>()
+                    .query::<AsSelect<SwRotPage, Pg>>()
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context("SELECT-ing sw_root_of_trust_page")
+                    })?;
+
                 paginator = p.found_batch(&batch, &|row| row.id);
                 rot_pages.extend(batch.into_iter().map(|sw_rot_page_row| {
                     (
@@ -2128,18 +2218,23 @@ impl DataStore {
 
             let mut paginator = Paginator::new(batch_size);
             while let Some(p) = paginator.next() {
-                let batch = paginated(
-                    dsl::inv_sled_omicron_zones,
-                    dsl::sled_id,
-                    &p.current_pagparams(),
-                )
-                .filter(dsl::inv_collection_id.eq(db_id))
-                .select(InvSledOmicronZones::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                let mut pagination_query = RawPaginator::new();
+                pagination_query.source()
+                    .sql("SELECT ")
+                    .sql(AllColumnsOf::<dsl::inv_sled_omicron_zones>::as_str())
+                    .sql(" FROM inv_sled_omicron_zones WHERE inv_collection_id = ")
+                    .param()
+                    .bind::<diesel::sql_types::Uuid, _>(db_id);
+                let batch = pagination_query
+                    .with_parameters(&p.current_pagparams())
+                    .paginate_by_diesel_column::<dsl::sled_id>()
+                    .query::<AsSelect<InvSledOmicronZones, Pg>>()
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context("SELECT-ing inv_sled_omicron_zones")
+                    })?;
                 paginator = p.found_batch(&batch, &|row| row.sled_id);
                 zones.extend(batch.into_iter().map(|sled_zones_config| {
                     (
@@ -2167,18 +2262,23 @@ impl DataStore {
 
                 let mut paginator = Paginator::new(batch_size);
                 while let Some(p) = paginator.next() {
-                    let batch = paginated(
-                        dsl::inv_omicron_zone_nic,
-                        dsl::id,
-                        &p.current_pagparams(),
-                    )
-                    .filter(dsl::inv_collection_id.eq(db_id))
-                    .select(InvOmicronZoneNic::as_select())
-                    .load_async(&*conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel(e, ErrorHandler::Server)
-                    })?;
+                    let mut pagination_query = RawPaginator::new();
+                    pagination_query.source()
+                        .sql("SELECT ")
+                        .sql(AllColumnsOf::<dsl::inv_omicron_zone_nic>::as_str())
+                        .sql(" FROM inv_omicron_zone_nic WHERE inv_collection_id = ")
+                        .param()
+                        .bind::<diesel::sql_types::Uuid, _>(db_id);
+                    let batch = pagination_query
+                        .with_parameters(&p.current_pagparams())
+                        .paginate_by_diesel_column::<dsl::id>()
+                        .query::<AsSelect<InvOmicronZoneNic, Pg>>()
+                        .load_async(&*conn)
+                        .await
+                        .map_err(|e| {
+                            public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context("SELECT-ing inv_omicron_zone_nic")
+                        })?;
                     paginator = p.found_batch(&batch, &|row| row.id);
                     nics.extend(batch.into_iter().map(|found_zone_nic| {
                         (found_zone_nic.id, found_zone_nic)
@@ -2196,22 +2296,23 @@ impl DataStore {
 
             let mut paginator = Paginator::new(batch_size);
             while let Some(p) = paginator.next() {
-                let mut batch = paginated(
-                    dsl::inv_omicron_zone,
-                    dsl::id,
-                    &p.current_pagparams(),
-                )
-                .filter(dsl::inv_collection_id.eq(db_id))
-                // It's not strictly necessary to order these by id.  Doing so
-                // ensures a consistent representation for `Collection`, which
-                // makes testing easier.  It's already indexed to do this, too.
-                .order_by(dsl::id)
-                .select(InvOmicronZone::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                let mut pagination_query = RawPaginator::new();
+                pagination_query.source()
+                    .sql("SELECT ")
+                    .sql(AllColumnsOf::<dsl::inv_omicron_zone>::as_str())
+                    .sql(" FROM inv_omicron_zone WHERE inv_collection_id = ")
+                    .param()
+                    .bind::<diesel::sql_types::Uuid, _>(db_id);
+                let mut batch = pagination_query
+                    .with_parameters(&p.current_pagparams())
+                    .paginate_by_diesel_column::<dsl::id>()
+                    .query::<AsSelect<InvOmicronZone, Pg>>()
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context("SELECT-ing inv_omicron_zone")
+                    })?;
                 paginator = p.found_batch(&batch, &|row| row.id);
                 zones.append(&mut batch);
             }
@@ -2264,18 +2365,23 @@ impl DataStore {
             let mut memberships = BTreeSet::new();
             let mut paginator = Paginator::new(batch_size);
             while let Some(p) = paginator.next() {
-                let batch = paginated(
-                    dsl::inv_clickhouse_keeper_membership,
-                    dsl::queried_keeper_id,
-                    &p.current_pagparams(),
-                )
-                .filter(dsl::inv_collection_id.eq(db_id))
-                .select(InvClickhouseKeeperMembership::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                let mut pagination_query = RawPaginator::new();
+                pagination_query.source()
+                    .sql("SELECT ")
+                    .sql(AllColumnsOf::<dsl::inv_clickhouse_keeper_membership>::as_str())
+                    .sql(" FROM inv_clickhouse_keeper_membership WHERE inv_collection_id = ")
+                    .param()
+                    .bind::<diesel::sql_types::Uuid, _>(db_id);
+                let batch = pagination_query
+                    .with_parameters(&p.current_pagparams())
+                    .paginate_by_diesel_column::<dsl::queried_keeper_id>()
+                    .query::<AsSelect<InvClickhouseKeeperMembership, Pg>>()
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context("SELECT-ing inv_clickhouse_keeper_membership")
+                    })?;
                 paginator = p.found_batch(&batch, &|row| row.queried_keeper_id);
                 for membership in batch.into_iter() {
                     memberships.insert(

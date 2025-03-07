@@ -9,6 +9,7 @@ use crate::authz;
 use crate::authz::AuthorizedResource;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::column_walker::AllColumnsOf;
 use crate::db::datastore::RunnableQuery;
 use crate::db::datastore::RunnableQueryNoReturn;
 use crate::db::error::ErrorHandler;
@@ -18,10 +19,12 @@ use crate::db::model::DatabaseString;
 use crate::db::model::IdentityType;
 use crate::db::model::RoleAssignment;
 use crate::db::model::RoleBuiltin;
-use crate::db::pagination::paginated_multicolumn;
+use crate::db::pagination::RawPaginator;
 use crate::db::pool::DbConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use diesel::helper_types::AsSelect;
+use diesel::pg::Pg;
 use nexus_db_fixed_data::role_assignment::BUILTIN_ROLE_ASSIGNMENTS;
 use nexus_db_fixed_data::role_builtin::BUILTIN_ROLES;
 use nexus_types::external_api::shared;
@@ -38,18 +41,22 @@ impl DataStore {
         pagparams: &DataPageParams<'_, (String, String)>,
     ) -> ListResultVec<RoleBuiltin> {
         use db::schema::role_builtin::dsl;
+
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        paginated_multicolumn(
-            dsl::role_builtin,
-            (dsl::resource_type, dsl::role_name),
-            pagparams,
-        )
-        .select(RoleBuiltin::as_select())
-        .load_async::<RoleBuiltin>(&*conn)
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+
+        let mut paginator = RawPaginator::new();
+        paginator.source()
+            .sql("SELECT ")
+            .sql(AllColumnsOf::<dsl::role_builtin>::as_str());
+        paginator
+            .with_parameters(pagparams)
+            .paginate_by_diesel_columns::<dsl::resource_type, dsl::role_name>()
+            .query::<AsSelect<RoleBuiltin, Pg>>()
+            .load_async::<RoleBuiltin>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Load built-in roles into the database

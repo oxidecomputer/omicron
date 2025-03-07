@@ -274,6 +274,20 @@ pub struct RawPaginatorWithParams<'a, M> {
 }
 
 impl<M> RawPaginatorWithParams<'_, M> {
+    /// Short-hand for [Self::paginate_by_column], when paginating on a
+    /// Diesel column.
+    pub fn paginate_by_diesel_column<C>(
+        self,
+    ) -> QueryBuilder
+    where
+        C: diesel::Column,
+        C::SqlType: Send + 'static,
+        Pg: diesel::sql_types::HasSqlType<C::SqlType>,
+        M: diesel::serialize::ToSql<C::SqlType, Pg> + Send + Clone + 'static,
+    {
+        self.paginate_by_column(C::NAME)
+    }
+
     pub fn paginate_by_column<BindSt>(
         mut self,
         key_column: &'static str,
@@ -314,6 +328,24 @@ impl<M> RawPaginatorWithParams<'_, M> {
 }
 
 impl<M1, M2> RawPaginatorWithParams<'_, (M1, M2)> {
+    /// Short-hand for [Self::paginate_by_columns], when paginating on a
+    /// Diesel column.
+    pub fn paginate_by_diesel_columns<C1, C2>(
+        self,
+    ) -> QueryBuilder
+    where
+        C1: diesel::Column,
+        C1::SqlType: Send + 'static,
+        C2: diesel::Column,
+        C2::SqlType: Send + 'static,
+        Pg: diesel::sql_types::HasSqlType<C1::SqlType>,
+        Pg: diesel::sql_types::HasSqlType<C2::SqlType>,
+        M1: diesel::serialize::ToSql<C1::SqlType, Pg> + Send + Clone + 'static,
+        M2: diesel::serialize::ToSql<C2::SqlType, Pg> + Send + Clone + 'static,
+    {
+        self.paginate_by_columns(C1::NAME, C2::NAME)
+    }
+
     pub fn paginate_by_columns<BindSt1, BindSt2>(
         mut self,
         key_column1: &'static str,
