@@ -10064,7 +10064,7 @@
         ],
         "summary": "Get the current target release of the rack's system software",
         "description": "This may not correspond to the actual software running on the rack at the time of request; it is instead the release that the rack reconfigurator should be moving towards as a goal state. After some number of planning and execution phases, the software running on the rack should eventually correspond to the release described here.",
-        "operationId": "target_release_get",
+        "operationId": "target_release_view",
         "responses": {
           "200": {
             "description": "successful operation",
@@ -10090,7 +10090,7 @@
         ],
         "summary": "Set the current target release of the rack's system software",
         "description": "The rack reconfigurator will treat the software specified here as a goal state for the rack's software, and attempt to asynchronously update to that release.",
-        "operationId": "target_release_set",
+        "operationId": "target_release_update",
         "requestBody": {
           "content": {
             "application/json": {
