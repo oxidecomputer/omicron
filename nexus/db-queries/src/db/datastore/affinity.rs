@@ -10,6 +10,7 @@ use crate::authz::ApiResource;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::column_walker::AllColumnsOf;
 use crate::db::datastore::InstanceAndActiveVmm;
 use crate::db::datastore::OpContext;
 use crate::db::error::ErrorHandler;
@@ -28,15 +29,15 @@ use crate::db::model::Name;
 use crate::db::model::Project;
 use crate::db::model::VmmState;
 use crate::db::model::VmmStateEnum;
-use crate::db::pagination::paginated;
-use crate::db::raw_query_builder::QueryBuilder;
+use crate::db::pagination::RawPaginator;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
+use diesel::helper_types::AsSelect;
+use diesel::pg::Pg;
 use diesel::prelude::*;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -48,7 +49,6 @@ use omicron_uuid_kinds::AffinityGroupUuid;
 use omicron_uuid_kinds::AntiAffinityGroupUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
-use ref_cast::RefCast;
 use uuid::Uuid;
 
 impl DataStore {
@@ -62,22 +62,21 @@ impl DataStore {
 
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
-        match pagparams {
-            PaginatedBy::Id(pagparams) => {
-                paginated(dsl::affinity_group, dsl::id, &pagparams)
-            }
-            PaginatedBy::Name(pagparams) => paginated(
-                dsl::affinity_group,
-                dsl::name,
-                &pagparams.map_name(|n| Name::ref_cast(n)),
-            ),
-        }
-        .filter(dsl::project_id.eq(authz_project.id()))
-        .filter(dsl::time_deleted.is_null())
-        .select(AffinityGroup::as_select())
-        .get_results_async(&*self.pool_connection_authorized(opctx).await?)
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        let mut paginator = RawPaginator::new();
+        paginator
+            .source()
+            .sql("SELECT ")
+            .sql(AllColumnsOf::<dsl::affinity_group>::as_str())
+            .sql(" FROM affinity_group WHERE project_id = ")
+            .param()
+            .bind::<diesel::sql_types::Uuid, _>(authz_project.id())
+            .sql(" AND time_deleted IS NULL");
+        paginator
+            .paginate_by_id_or_name(pagparams)
+            .query::<AsSelect<AffinityGroup, Pg>>()
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn anti_affinity_group_list(
@@ -90,22 +89,21 @@ impl DataStore {
 
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
-        match pagparams {
-            PaginatedBy::Id(pagparams) => {
-                paginated(dsl::anti_affinity_group, dsl::id, &pagparams)
-            }
-            PaginatedBy::Name(pagparams) => paginated(
-                dsl::anti_affinity_group,
-                dsl::name,
-                &pagparams.map_name(|n| Name::ref_cast(n)),
-            ),
-        }
-        .filter(dsl::project_id.eq(authz_project.id()))
-        .filter(dsl::time_deleted.is_null())
-        .select(AntiAffinityGroup::as_select())
-        .get_results_async(&*self.pool_connection_authorized(opctx).await?)
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        let mut paginator = RawPaginator::new();
+        paginator
+            .source()
+            .sql("SELECT ")
+            .sql(AllColumnsOf::<dsl::anti_affinity_group>::as_str())
+            .sql(" FROM anti_affinity_group WHERE project_id = ")
+            .param()
+            .bind::<diesel::sql_types::Uuid, _>(authz_project.id())
+            .sql(" AND time_deleted IS NULL");
+        paginator
+            .paginate_by_id_or_name(pagparams)
+            .query::<AsSelect<AntiAffinityGroup, Pg>>()
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn affinity_group_create(
@@ -383,10 +381,11 @@ impl DataStore {
     ) -> ListResultVec<external::AffinityGroupMember> {
         opctx.authorize(authz::Action::Read, authz_affinity_group).await?;
 
-        let mut query = QueryBuilder::new()
+        let mut paginator = RawPaginator::new();
+        paginator
+            .source()
             .sql(
                 "
-                SELECT * FROM (
                 SELECT
                     instance.id as id,
                     instance.name as name,
@@ -404,56 +403,8 @@ impl DataStore {
                     group_id = ",
             )
             .param()
-            .bind::<diesel::sql_types::Uuid, _>(authz_affinity_group.id())
-            .sql(") ");
-
-        let (direction, limit) = match pagparams {
-            PaginatedBy::Id(p) => (p.direction, p.limit),
-            PaginatedBy::Name(p) => (p.direction, p.limit),
-        };
-        let asc = match direction {
-            dropshot::PaginationOrder::Ascending => true,
-            dropshot::PaginationOrder::Descending => false,
-        };
-
-        match pagparams {
-            PaginatedBy::Id(DataPageParams { marker, .. }) => {
-                if let Some(id) = marker {
-                    query = query
-                        .sql("WHERE id ")
-                        .sql(if asc { ">" } else { "<" })
-                        .sql(" ")
-                        .param()
-                        .bind::<diesel::sql_types::Uuid, _>(**id);
-                };
-                query = query.sql(" ORDER BY id ");
-            }
-            PaginatedBy::Name(DataPageParams { marker, .. }) => {
-                if let Some(name) = marker {
-                    query = query
-                        .sql("WHERE name ")
-                        .sql(if asc { ">" } else { "<" })
-                        .sql(" ")
-                        .param()
-                        .bind::<diesel::sql_types::Text, _>(Name(
-                            (*name).clone(),
-                        ));
-                };
-                query = query.sql(" ORDER BY name ");
-            }
-        }
-        if asc {
-            query = query.sql("ASC ");
-        } else {
-            query = query.sql("DESC ");
-        }
-
-        query = query
-            .sql(" LIMIT ")
-            .param()
-            .bind::<diesel::sql_types::BigInt, _>(i64::from(limit.get()));
-
-        query
+            .bind::<diesel::sql_types::Uuid, _>(authz_affinity_group.id());
+        paginator.paginate_by_id_or_name(pagparams)
             .query::<(
                 diesel::sql_types::Uuid,
                 diesel::sql_types::Text,
@@ -489,97 +440,47 @@ impl DataStore {
     ) -> ListResultVec<external::AntiAffinityGroupMember> {
         opctx.authorize(authz::Action::Read, authz_anti_affinity_group).await?;
 
-        let (direction, limit) = match pagparams {
-            PaginatedBy::Id(p) => (p.direction, p.limit),
-            PaginatedBy::Name(p) => (p.direction, p.limit),
-        };
-        let asc = match direction {
-            dropshot::PaginationOrder::Ascending => true,
-            dropshot::PaginationOrder::Descending => false,
-        };
-
-        let mut query = QueryBuilder::new()
-            .sql(
-                "SELECT id,name,label,instance_state,migration_id,vmm_state
-                FROM (
-                    SELECT
-                        instance.id as id,
-                        instance.name as name,
-                        'instance' as label,
-                        instance.state as instance_state,
-                        instance.migration_id as migration_id,
-                        vmm.state as vmm_state
-                    FROM anti_affinity_group_instance_membership
-                    INNER JOIN instance
-                    ON instance.id = anti_affinity_group_instance_membership.instance_id
-                    LEFT JOIN vmm
-                    ON instance.active_propolis_id = vmm.id
-                    WHERE
-                        instance.time_deleted IS NULL AND
-                        vmm.time_deleted IS NULL AND
-                        group_id = ",
+        let mut paginator = RawPaginator::new();
+        paginator.source()
+            .sql("
+                SELECT
+                    instance.id as id,
+                    instance.name as name,
+                    'instance' as label,
+                    instance.state as instance_state,
+                    instance.migration_id as migration_id,
+                    vmm.state as vmm_state
+                FROM anti_affinity_group_instance_membership
+                INNER JOIN instance
+                ON instance.id = anti_affinity_group_instance_membership.instance_id
+                LEFT JOIN vmm
+                ON instance.active_propolis_id = vmm.id
+                WHERE
+                    instance.time_deleted IS NULL AND
+                    vmm.time_deleted IS NULL AND
+                    group_id = ",
             )
             .param()
             .bind::<diesel::sql_types::Uuid, _>(authz_anti_affinity_group.id())
-            .sql(
-                "
+            .sql("
                 UNION
-                    SELECT
-                        affinity_group.id as id,
-                        affinity_group.name as name,
-                        'affinity_group' as label,
-                        NULL as instance_state,
-                        NULL as migration_id,
-                        NULL as vmm_state
-                    FROM anti_affinity_group_affinity_membership
-                    INNER JOIN affinity_group
-                    ON affinity_group.id = anti_affinity_group_affinity_membership.affinity_group_id
-                    WHERE
-                        affinity_group.time_deleted IS NULL AND
-                        anti_affinity_group_id = ",
+                SELECT
+                    affinity_group.id as id,
+                    affinity_group.name as name,
+                    'affinity_group' as label,
+                    NULL as instance_state,
+                    NULL as migration_id,
+                    NULL as vmm_state
+                FROM anti_affinity_group_affinity_membership
+                INNER JOIN affinity_group
+                ON affinity_group.id = anti_affinity_group_affinity_membership.affinity_group_id
+                WHERE
+                    affinity_group.time_deleted IS NULL AND
+                    anti_affinity_group_id = ",
             )
             .param()
-            .bind::<diesel::sql_types::Uuid, _>(authz_anti_affinity_group.id())
-            .sql(") ");
-
-        match pagparams {
-            PaginatedBy::Id(DataPageParams { marker, .. }) => {
-                if let Some(id) = marker {
-                    query = query
-                        .sql("WHERE id ")
-                        .sql(if asc { ">" } else { "<" })
-                        .sql(" ")
-                        .param()
-                        .bind::<diesel::sql_types::Uuid, _>(**id);
-                };
-                query = query.sql(" ORDER BY id ");
-            }
-            PaginatedBy::Name(DataPageParams { marker, .. }) => {
-                if let Some(name) = marker {
-                    query = query
-                        .sql("WHERE name ")
-                        .sql(if asc { ">" } else { "<" })
-                        .sql(" ")
-                        .param()
-                        .bind::<diesel::sql_types::Text, _>(Name(
-                            (*name).clone(),
-                        ));
-                };
-                query = query.sql(" ORDER BY name ");
-            }
-        }
-        if asc {
-            query = query.sql("ASC ");
-        } else {
-            query = query.sql("DESC ");
-        }
-
-        query = query
-            .sql(" LIMIT ")
-            .param()
-            .bind::<diesel::sql_types::BigInt, _>(i64::from(limit.get()));
-
-        query
+            .bind::<diesel::sql_types::Uuid, _>(authz_anti_affinity_group.id());
+        paginator.paginate_by_id_or_name(pagparams)
             .query::<(
                 diesel::sql_types::Uuid,
                 diesel::sql_types::Text,

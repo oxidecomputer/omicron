@@ -66,18 +66,17 @@ impl DataStore {
         type QueryRow = (sql_types::Text, sql_types::Text, sql_types::Text);
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let output: QueryOutput = QueryBuilder::new()
+        let mut query = QueryBuilder::new();
+        query
             .sql("SELECT ")
             .sql(STATE_FINGERPRINT_SQL)
             .sql(", * FROM ")
             .sql("[SHOW CLUSTER SETTING version], ")
-            .sql("[SHOW CLUSTER SETTING cluster.preserve_downgrade_option]")
-            .query::<QueryRow>()
-            .get_result_async(&*conn)
-            .await
-            .map_err(|err| {
-                public_error_from_diesel(err, ErrorHandler::Server)
-            })?;
+            .sql("[SHOW CLUSTER SETTING cluster.preserve_downgrade_option]");
+        let output: QueryOutput =
+            query.query::<QueryRow>().get_result_async(&*conn).await.map_err(
+                |err| public_error_from_diesel(err, ErrorHandler::Server),
+            )?;
         Ok(CockroachDbSettings {
             state_fingerprint: output.state_fingerprint,
             version: output.version,
@@ -96,7 +95,8 @@ impl DataStore {
         value: String,
     ) -> Result<(), Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        QueryBuilder::new()
+        let mut query = QueryBuilder::new();
+        query
             .sql("SET CLUSTER SETTING ")
             .sql(setting)
             // `CASE` is the one conditional statement we get out of the
@@ -114,13 +114,10 @@ impl DataStore {
             // below in `test_state_fingerprint`).
             .sql(" ELSE NULL END")
             .bind::<sql_types::Text, _>(state_fingerprint)
-            .bind::<sql_types::Text, _>(value.clone())
-            .query::<()>()
-            .execute_async(&*conn)
-            .await
-            .map_err(|err| {
-                public_error_from_diesel(err, ErrorHandler::Server)
-            })?;
+            .bind::<sql_types::Text, _>(value.clone());
+        query.query::<()>().execute_async(&*conn).await.map_err(|err| {
+            public_error_from_diesel(err, ErrorHandler::Server)
+        })?;
         info!(
             opctx.log,
             "set cockroachdb setting";
