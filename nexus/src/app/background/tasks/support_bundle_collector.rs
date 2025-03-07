@@ -1022,8 +1022,10 @@ mod test {
                     )
                 })
                 .collect();
-            let dataset_config =
-                DatasetsConfig { generation: Generation::new(), datasets };
+            let dataset_config = DatasetsConfig {
+                generation: Generation::new().next(),
+                datasets,
+            };
 
             let res = cptestctx
                 .first_sled_agent()

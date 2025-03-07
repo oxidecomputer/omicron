@@ -20,6 +20,7 @@ pub use crate::inventory::ZpoolName;
 use blueprint_diff::ClickhouseClusterConfigDiffTablesForSingleBlueprint;
 use blueprint_display::BpDatasetsTableSchema;
 use daft::Diffable;
+use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
@@ -563,6 +564,29 @@ pub struct BlueprintSledConfig {
     pub disks_config: BlueprintPhysicalDisksConfig,
     pub datasets_config: BlueprintDatasetsConfig,
     pub zones_config: BlueprintZonesConfig,
+}
+
+impl BlueprintSledConfig {
+    /// Converts self into [`OmicronSledConfig`].
+    ///
+    /// This function is effectively a `From` implementation, but
+    /// is named slightly more explicitly, as it filters the blueprint
+    /// configuration to only consider components that should be in-service.
+    pub fn into_in_service_sled_config(self) -> OmicronSledConfig {
+        OmicronSledConfig {
+            disks_config: self.disks_config.into_in_service_disks(),
+            datasets_config: self.datasets_config.into_in_service_datasets(),
+            zones_config: self.zones_config.into_running_omicron_zones_config(),
+        }
+    }
+
+    /// Returns true if all disks, datasets, and zones in the blueprint have a
+    /// disposition of `Expunged`, false otherwise.
+    pub fn are_all_items_expunged(&self) -> bool {
+        self.disks_config.are_all_disks_expunged()
+            && self.datasets_config.are_all_datasets_expunged()
+            && self.zones_config.are_all_zones_expunged()
+    }
 }
 
 /// Information about an Omicron zone as recorded in a blueprint.
