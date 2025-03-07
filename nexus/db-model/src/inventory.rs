@@ -4,6 +4,7 @@
 
 //! Types for representing the hardware/software inventory in the database
 
+use crate::PhysicalDiskKind;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::schema::{
     hw_baseboard_id, inv_caboose, inv_clickhouse_keeper_membership,
@@ -14,12 +15,11 @@ use crate::schema::{
     sw_root_of_trust_page,
 };
 use crate::typed_uuid::DbTypedUuid;
-use crate::PhysicalDiskKind;
 use crate::{
-    impl_enum_type, ipv6, ByteCount, Generation, MacAddr, Name, ServiceKind,
-    SqlU16, SqlU32, SqlU8,
+    ByteCount, Generation, MacAddr, Name, ServiceKind, SqlU8, SqlU16, SqlU32,
+    impl_enum_type, ipv6,
 };
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use chrono::DateTime;
 use chrono::Utc;
 use clickhouse_admin_types::{ClickhouseKeeperClusterMembership, KeeperId};
@@ -30,8 +30,10 @@ use diesel::pg::Pg;
 use diesel::serialize::ToSql;
 use diesel::{serialize, sql_types};
 use ipnetwork::IpNetwork;
-use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_sled_agent_shared::inventory::{OmicronZoneConfig, OmicronZoneType};
+use nexus_sled_agent_shared::inventory::{
+    OmicronZoneConfig, OmicronZoneDataset, OmicronZoneImageSource,
+    OmicronZoneType,
+};
 use nexus_types::inventory::{
     BaseboardId, Caboose, Collection, NvmeFirmware, PowerState, RotPage,
     RotSlot,
@@ -1654,6 +1656,7 @@ impl InvOmicronZone {
                 .filesystem_pool
                 .map(|id| ZpoolName::new_external(id.into())),
             zone_type,
+            image_source: OmicronZoneImageSource::InstallDataset,
         })
     }
 }
@@ -1785,7 +1788,7 @@ mod test {
     use nexus_types::inventory::NvmeFirmware;
     use omicron_uuid_kinds::{CollectionKind, SledUuid, TypedUuid};
 
-    use crate::{typed_uuid, InvNvmeDiskFirmware, InvNvmeDiskFirmwareError};
+    use crate::{InvNvmeDiskFirmware, InvNvmeDiskFirmwareError, typed_uuid};
 
     #[test]
     fn test_inv_nvme_disk_firmware() {
@@ -1985,12 +1988,14 @@ mod test {
                 Some("4567".to_string()),
             ],
         };
-        assert!(InvNvmeDiskFirmware::new(
-            inv_collection_id,
-            sled_id,
-            slot,
-            firmware,
+        assert!(
+            InvNvmeDiskFirmware::new(
+                inv_collection_id,
+                sled_id,
+                slot,
+                firmware,
+            )
+            .is_ok()
         )
-        .is_ok())
     }
 }

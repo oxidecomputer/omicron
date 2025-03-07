@@ -1,3 +1,24 @@
+API operations found with tag "affinity"
+OPERATION ID                             METHOD   URL PATH
+affinity_group_create                    POST     /v1/affinity-groups
+affinity_group_delete                    DELETE   /v1/affinity-groups/{affinity_group}
+affinity_group_list                      GET      /v1/affinity-groups
+affinity_group_member_instance_add       POST     /v1/affinity-groups/{affinity_group}/members/instance/{instance}
+affinity_group_member_instance_delete    DELETE   /v1/affinity-groups/{affinity_group}/members/instance/{instance}
+affinity_group_member_instance_view      GET      /v1/affinity-groups/{affinity_group}/members/instance/{instance}
+affinity_group_member_list               GET      /v1/affinity-groups/{affinity_group}/members
+affinity_group_update                    PUT      /v1/affinity-groups/{affinity_group}
+affinity_group_view                      GET      /v1/affinity-groups/{affinity_group}
+anti_affinity_group_create               POST     /v1/anti-affinity-groups
+anti_affinity_group_delete               DELETE   /v1/anti-affinity-groups/{anti_affinity_group}
+anti_affinity_group_list                 GET      /v1/anti-affinity-groups
+anti_affinity_group_member_instance_add  POST     /v1/anti-affinity-groups/{anti_affinity_group}/members/instance/{instance}
+anti_affinity_group_member_instance_delete DELETE   /v1/anti-affinity-groups/{anti_affinity_group}/members/instance/{instance}
+anti_affinity_group_member_instance_view GET      /v1/anti-affinity-groups/{anti_affinity_group}/members/instance/{instance}
+anti_affinity_group_member_list          GET      /v1/anti-affinity-groups/{anti_affinity_group}/members
+anti_affinity_group_update               PUT      /v1/anti-affinity-groups/{anti_affinity_group}
+anti_affinity_group_view                 GET      /v1/anti-affinity-groups/{anti_affinity_group}
+
 API operations found with tag "disks"
 OPERATION ID                             METHOD   URL PATH
 disk_bulk_write_import                   POST     /v1/disks/{disk}/bulk-write
@@ -39,6 +60,8 @@ support_bundle_head_file                 HEAD     /experimental/v1/system/suppor
 support_bundle_index                     GET      /experimental/v1/system/support-bundles/{support_bundle}/index
 support_bundle_list                      GET      /experimental/v1/system/support-bundles
 support_bundle_view                      GET      /experimental/v1/system/support-bundles/{support_bundle}
+target_release_get                       GET      /v1/system/update/target-release
+target_release_set                       PUT      /v1/system/update/target-release
 timeseries_query                         POST     /v1/timeseries/query
 
 API operations found with tag "images"

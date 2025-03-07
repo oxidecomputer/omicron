@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 cfg_if::cfg_if! {
-    if #[cfg(target_os = "illumos")] {
+    if #[cfg(all(target_os = "illumos", not(test)))] {
         mod illumos;
         pub use illumos::*;
     } else {
@@ -87,22 +87,21 @@ fn net_to_cidr(net: IpNet) -> IpCidr {
 
 /// Convert a nexus `RouterTarget` to an OPTE `RouterTarget`.
 ///
-/// Currently, we strip InternetGateway IDs from any routes targeting
-/// non-instance NICs, because we need to actively store the full set
-/// (and division of) SNAT/ephemeral/floating IPs.
-/// Sled-agent only holds this today for instances, because these are
-/// reconfigurable at run-time (whereas services and probes are fixed).
-fn router_target_opte(
-    target: &shared::RouterTarget,
-    is_instance: bool,
-) -> RouterTarget {
+/// This is effectively a `From` impl, but defined for two out-of-crate types.
+/// We map internet gateways that target the (single) "system" VPC IG to
+/// `InternetGateway(None)`. Everything else is mapped directly, translating IP
+/// address types as needed.
+fn router_target_opte(target: &shared::RouterTarget) -> RouterTarget {
+    use shared::InternetGatewayRouterTarget;
     use shared::RouterTarget::*;
     match target {
         Drop => RouterTarget::Drop,
-        InternetGateway(id) if is_instance => {
-            RouterTarget::InternetGateway(*id)
+        InternetGateway(InternetGatewayRouterTarget::System) => {
+            RouterTarget::InternetGateway(None)
         }
-        InternetGateway(_) => RouterTarget::InternetGateway(None),
+        InternetGateway(InternetGatewayRouterTarget::Instance(id)) => {
+            RouterTarget::InternetGateway(Some(*id))
+        }
         Ip(ip) => RouterTarget::Ip((*ip).into()),
         VpcSubnet(net) => RouterTarget::VpcSubnet(net_to_cidr(*net)),
     }

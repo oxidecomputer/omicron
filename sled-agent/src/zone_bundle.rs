@@ -6,15 +6,15 @@
 
 //! Tools for collecting and inspecting service bundles for zones.
 
-use anyhow::anyhow;
 use anyhow::Context;
+use anyhow::anyhow;
 use camino::FromPathBufError;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use flate2::bufread::GzDecoder;
-use illumos_utils::running_zone::is_oxide_smf_log_file;
 use illumos_utils::running_zone::RunningZone;
 use illumos_utils::running_zone::ServiceProcess;
+use illumos_utils::running_zone::is_oxide_smf_log_file;
 use illumos_utils::zfs::CreateSnapshotError;
 use illumos_utils::zfs::DestroyDatasetError;
 use illumos_utils::zfs::DestroySnapshotError;
@@ -24,8 +24,8 @@ use illumos_utils::zfs::ListDatasetsError;
 use illumos_utils::zfs::ListSnapshotsError;
 use illumos_utils::zfs::SetValueError;
 use illumos_utils::zfs::Snapshot;
-use illumos_utils::zfs::Zfs;
 use illumos_utils::zfs::ZFS;
+use illumos_utils::zfs::Zfs;
 use illumos_utils::zone::AdmError;
 use sled_agent_types::zone_bundle::*;
 use sled_storage::dataset::U2_DEBUG_DATASET;
@@ -43,8 +43,8 @@ use tar::Header;
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::sync::Notify;
-use tokio::time::sleep;
 use tokio::time::Instant;
+use tokio::time::sleep;
 use uuid::Uuid;
 
 // The name of the snapshot created from the zone root filesystem.
@@ -80,22 +80,37 @@ fn initialize_zfs_resources(log: &Logger) -> Result<(), BundleError> {
             // Additionally check for the zone-bundle-specific property.
             //
             // If we find a dataset that matches our names, but which _does not_
-            // have such a property, we'll panic rather than possibly deleting
-            // user data.
+            // have such a property (or has in invalid property), we'll log it
+            // but avoid deleting the snapshot.
             let name = snap.to_string();
-            let value =
-                Zfs::get_oxide_value(&name, ZONE_BUNDLE_ZFS_PROPERTY_NAME)
-                    .unwrap_or_else(|_| {
-                        panic!(
-                            "Found a ZFS snapshot with a name reserved for \
-                            zone bundling, but which does not have the \
-                            zone-bundle-specific property. Bailing out, \
-                            rather than risking deletion of user data. \
-                            snap_name = {}, property = {}",
-                            &name, ZONE_BUNDLE_ZFS_PROPERTY_NAME
-                        )
-                    });
-            assert_eq!(value, ZONE_BUNDLE_ZFS_PROPERTY_VALUE);
+            let Ok([value]) = Zfs::get_values(
+                &name,
+                &[ZONE_BUNDLE_ZFS_PROPERTY_NAME],
+                Some(illumos_utils::zfs::PropertySource::Local),
+            ) else {
+                warn!(
+                    log,
+                    "Found a ZFS snapshot with a name reserved for zone \
+                    bundling, but which does not have the zone-bundle-specific \
+                    property. Bailing out, rather than risking deletion of \
+                    user data.";
+                    "snap_name" => &name,
+                    "property" => ZONE_BUNDLE_ZFS_PROPERTY_NAME
+                );
+                return false;
+            };
+            if value != ZONE_BUNDLE_ZFS_PROPERTY_VALUE {
+                warn!(
+                    log,
+                    "Found a ZFS snapshot with a name reserved for zone \
+                    bundling, with an unexpected property value. \
+                    Bailing out, rather than risking deletion of user data.";
+                    "snap_name" => &name,
+                    "property" => ZONE_BUNDLE_ZFS_PROPERTY_NAME,
+                    "property_value" => value,
+                );
+                return false;
+            }
             true
         });
     for snapshot in zb_snapshots {
@@ -698,9 +713,11 @@ fn create_zfs_snapshots(
                                 unwind any previously created snapshots";
                                 "error" => ?e,
                             );
-                            assert!(maybe_err
-                                .replace(BundleError::from(e))
-                                .is_none());
+                            assert!(
+                                maybe_err
+                                    .replace(BundleError::from(e))
+                                    .is_none()
+                            );
                             break;
                         }
                     };
@@ -1715,8 +1732,6 @@ mod tests {
 
 #[cfg(all(target_os = "illumos", test))]
 mod illumos_tests {
-    use super::find_archived_log_files;
-    use super::zfs_quota;
     use super::CleanupContext;
     use super::CleanupPeriod;
     use super::PriorityOrder;
@@ -1728,6 +1743,8 @@ mod illumos_tests {
     use super::ZoneBundleInfo;
     use super::ZoneBundleMetadata;
     use super::ZoneBundler;
+    use super::find_archived_log_files;
+    use super::zfs_quota;
     use anyhow::Context;
     use chrono::DateTime;
     use chrono::TimeZone;
@@ -2301,10 +2318,12 @@ mod illumos_tests {
             should_match.sort();
             files.sort();
             assert_eq!(files.len(), should_match.len());
-            assert!(files
-                .iter()
-                .zip(should_match.iter())
-                .all(|(file, name)| { file.file_name().unwrap() == *name }));
+            assert!(
+                files
+                    .iter()
+                    .zip(should_match.iter())
+                    .all(|(file, name)| { file.file_name().unwrap() == *name })
+            );
         }
     }
 

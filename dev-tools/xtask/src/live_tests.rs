@@ -4,8 +4,8 @@
 
 //! Subcommand: cargo xtask live-tests
 
-use crate::common::run_subcmd;
-use anyhow::{bail, Context, Result};
+use crate::common::{cargo_command, run_subcmd};
+use anyhow::{Context, Result, bail};
 use clap::Parser;
 use std::process::Command;
 
@@ -45,9 +45,7 @@ pub fn run_cmd(_args: Args) -> Result<()> {
     std::fs::create_dir(&proto_root)
         .with_context(|| format!("mkdir {:?}", &proto_root))?;
 
-    let cargo =
-        std::env::var("CARGO").unwrap_or_else(|_| String::from("cargo"));
-    let mut command = Command::new(&cargo);
+    let mut command = cargo_command();
 
     command.arg("nextest");
     command.arg("archive");

@@ -17,7 +17,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::UpdateResult;
-use rand::{rngs::StdRng, RngCore, SeedableRng};
+use rand::{RngCore, SeedableRng, rngs::StdRng};
 use uuid::Uuid;
 
 fn generate_session_token() -> String {

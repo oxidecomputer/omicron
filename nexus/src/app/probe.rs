@@ -7,8 +7,8 @@ use nexus_types::external_api::shared::ProbeInfo;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::{
-    http_pagination::PaginatedBy, CreateResult, DataPageParams, DeleteResult,
-    ListResultVec, LookupResult, NameOrId,
+    CreateResult, DataPageParams, DeleteResult, ListResultVec, LookupResult,
+    NameOrId, http_pagination::PaginatedBy,
 };
 use uuid::Uuid;
 

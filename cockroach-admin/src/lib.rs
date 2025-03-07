@@ -5,9 +5,9 @@
 use context::ServerContext;
 use omicron_common::FileKv;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use slog::Drain;
 use slog::debug;
 use slog::error;
-use slog::Drain;
 use slog_dtrace::ProbeRegistration;
 use slog_error_chain::SlogInlineError;
 use std::io;

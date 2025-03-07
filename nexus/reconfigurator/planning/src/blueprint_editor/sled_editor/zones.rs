@@ -5,12 +5,12 @@
 use crate::blueprint_builder::EditCounts;
 use illumos_utils::zpool::ZpoolName;
 use nexus_sled_agent_shared::inventory::ZoneKind;
-use nexus_types::deployment::id_map::Entry;
-use nexus_types::deployment::id_map::IdMap;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
-use nexus_types::deployment::BlueprintZoneFilter;
+use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZonesConfig;
+use nexus_types::deployment::id_map::Entry;
+use nexus_types::deployment::id_map::IdMap;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -23,6 +23,17 @@ pub enum ZonesEditError {
     AddDuplicateZoneId { id: OmicronZoneUuid, kind1: ZoneKind, kind2: ZoneKind },
     #[error("tried to expunge nonexistent zone {id}")]
     ExpungeNonexistentZone { id: OmicronZoneUuid },
+    #[error("tried to mark a nonexistent zone as ready for cleanup: {id}")]
+    MarkNonexistentZoneReadyForCleanup { id: OmicronZoneUuid },
+    #[error("tried to mark a non-expunged zone as ready for cleanup: {id}")]
+    MarkNonExpungedZoneReadyForCleanup { id: OmicronZoneUuid },
+    #[error(
+        "tried to set image source for nonexistent zone {id} to {image_source:?}"
+    )]
+    SetImageSourceForNonexistentZone {
+        id: OmicronZoneUuid,
+        image_source: BlueprintZoneImageSource,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -65,13 +76,14 @@ impl ZonesEditor {
         self.counts
     }
 
-    pub fn zones(
+    pub fn zones<F>(
         &self,
-        filter: BlueprintZoneFilter,
-    ) -> impl Iterator<Item = &BlueprintZoneConfig> {
-        self.zones
-            .iter()
-            .filter(move |config| config.disposition.matches(filter))
+        mut filter: F,
+    ) -> impl Iterator<Item = &BlueprintZoneConfig>
+    where
+        F: FnMut(BlueprintZoneDisposition) -> bool,
+    {
+        self.zones.iter().filter(move |config| filter(config.disposition))
     }
 
     pub fn add_zone(
@@ -132,23 +144,84 @@ impl ZonesEditor {
             ZonesEditError::ExpungeNonexistentZone { id: *zone_id }
         })?;
 
-        let did_expunge = Self::expunge_impl(&mut config, &mut self.counts);
+        let did_expunge =
+            Self::expunge_impl(&mut config, &mut self.counts, self.generation);
 
         Ok((did_expunge, config.into_ref()))
+    }
+
+    /// Set an expunged zone's `ready_for_cleanup` flag to true.
+    ///
+    /// Unlike most edit operations, this (alone) will not result in an
+    /// increased generation when `finalize()` is called: this flag is produced
+    /// and consumed inside the Reconfigurator system, and is not included in
+    /// the generation-guarded config send to sled-agents.
+    ///
+    /// # Errors
+    ///
+    /// Fails if this zone ID does not exist or is not already in the expunged
+    /// disposition.
+    pub fn mark_expunged_zone_ready_for_cleanup(
+        &mut self,
+        zone_id: &OmicronZoneUuid,
+    ) -> Result<bool, ZonesEditError> {
+        let mut config = self.zones.get_mut(zone_id).ok_or_else(|| {
+            ZonesEditError::MarkNonexistentZoneReadyForCleanup { id: *zone_id }
+        })?;
+
+        match &mut config.disposition {
+            BlueprintZoneDisposition::InService => {
+                Err(ZonesEditError::MarkNonExpungedZoneReadyForCleanup {
+                    id: *zone_id,
+                })
+            }
+            BlueprintZoneDisposition::Expunged {
+                ready_for_cleanup, ..
+            } => {
+                let did_mark_ready = !*ready_for_cleanup;
+                *ready_for_cleanup = true;
+                Ok(did_mark_ready)
+            }
+        }
+    }
+
+    /// Set the image source for a zone, returning the old image source.
+    pub fn set_zone_image_source(
+        &mut self,
+        zone_id: &OmicronZoneUuid,
+        image_source: BlueprintZoneImageSource,
+    ) -> Result<BlueprintZoneImageSource, ZonesEditError> {
+        let mut config = self.zones.get_mut(zone_id).ok_or_else(|| {
+            ZonesEditError::SetImageSourceForNonexistentZone {
+                id: *zone_id,
+                image_source: image_source.clone(),
+            }
+        })?;
+
+        let old_image_source = config.image_source.clone();
+        if old_image_source != image_source {
+            self.counts.updated += 1;
+        }
+        config.image_source = image_source;
+
+        Ok(old_image_source)
     }
 
     fn expunge_impl(
         config: &mut BlueprintZoneConfig,
         counts: &mut EditCounts,
+        current_generation: Generation,
     ) -> bool {
         match config.disposition {
-            BlueprintZoneDisposition::InService
-            | BlueprintZoneDisposition::Quiesced => {
-                config.disposition = BlueprintZoneDisposition::Expunged;
+            BlueprintZoneDisposition::InService => {
+                config.disposition = BlueprintZoneDisposition::Expunged {
+                    as_of_generation: current_generation.next(),
+                    ready_for_cleanup: false,
+                };
                 counts.expunged += 1;
                 true
             }
-            BlueprintZoneDisposition::Expunged => {
+            BlueprintZoneDisposition::Expunged { .. } => {
                 // expunge is idempotent; do nothing
                 false
             }
@@ -171,7 +244,11 @@ impl ZonesEditor {
                 .durable_zpool()
                 .map_or(false, |pool| pool.id() == *zpool);
             if fs_is_on_zpool || dd_is_on_zpool {
-                if Self::expunge_impl(&mut config, &mut self.counts) {
+                if Self::expunge_impl(
+                    &mut config,
+                    &mut self.counts,
+                    self.generation,
+                ) {
                     nexpunged += 1;
                 }
             }

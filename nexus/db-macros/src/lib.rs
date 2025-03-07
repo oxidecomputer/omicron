@@ -18,7 +18,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use serde_tokenstream::ParseWrapper;
 use syn::spanned::Spanned;
-use syn::{parse_quote, Data, DataStruct, DeriveInput, Error, Fields, Ident};
+use syn::{Data, DataStruct, DeriveInput, Error, Fields, Ident, parse_quote};
 
 mod lookup;
 #[cfg(test)]
@@ -32,7 +32,6 @@ mod test_helpers;
 /// lookup_resource! {
 ///     name = "Organization",
 ///     ancestors = [],
-///     children = [ "Project" ],
 ///     lookup_by_name = true,
 ///     soft_deletes = true,
 ///     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -52,7 +51,6 @@ mod test_helpers;
 /// lookup_resource! {
 ///     name = "Organization",
 ///     ancestors = [],
-///     children = [ "Project" ],
 ///     lookup_by_name = true,
 ///     soft_deletes = true,
 ///     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -61,7 +59,6 @@ mod test_helpers;
 /// lookup_resource! {
 ///     name = "Instance",
 ///     ancestors = [ "Organization", "Project" ],
-///     children = [],
 ///     lookup_by_name = true,
 ///     soft_deletes = true,
 ///     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -77,7 +74,6 @@ mod test_helpers;
 /// lookup_resource! {
 ///     name = "Sled",
 ///     ancestors = [ "Organization", "Project" ],
-///     children = [],
 ///     lookup_by_name = true,
 ///     soft_deletes = true,
 ///     primary_key_columns = [ { column_name = "id", uuid_kind = SledType } ]
@@ -122,11 +118,7 @@ fn get_field_with_name<'a>(
 ) -> Option<&'a syn::Field> {
     if let Fields::Named(ref data_fields) = data.fields {
         data_fields.named.iter().find(|field| {
-            if let Some(ident) = &field.ident {
-                ident == name
-            } else {
-                false
-            }
+            if let Some(ident) = &field.ident { ident == name } else { false }
         })
     } else {
         None

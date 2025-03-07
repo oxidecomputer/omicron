@@ -5,7 +5,7 @@
 //! Builders for constructing descriptions of systems (real or synthetic) and
 //! associated inventory collections and blueprints
 
-use anyhow::{anyhow, bail, ensure, Context};
+use anyhow::{Context, anyhow, bail, ensure};
 use gateway_client::types::RotState;
 use gateway_client::types::SpState;
 use indexmap::IndexMap;
@@ -37,11 +37,11 @@ use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::PowerState;
 use nexus_types::inventory::RotSlot;
 use nexus_types::inventory::SpType;
-use omicron_common::address::get_sled_address;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::get_sled_address;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
@@ -149,11 +149,13 @@ impl SystemDescription {
             CockroachDbClusterVersion::POLICY;
 
         // IPs from TEST-NET-1 (RFC 5737)
-        let service_ip_pool_ranges = vec![IpRange::try_from((
-            "192.0.2.2".parse::<Ipv4Addr>().unwrap(),
-            "192.0.2.20".parse::<Ipv4Addr>().unwrap(),
-        ))
-        .unwrap()];
+        let service_ip_pool_ranges = vec![
+            IpRange::try_from((
+                "192.0.2.2".parse::<Ipv4Addr>().unwrap(),
+                "192.0.2.20".parse::<Ipv4Addr>().unwrap(),
+            ))
+            .unwrap(),
+        ];
 
         SystemDescription {
             sleds: IndexMap::new(),

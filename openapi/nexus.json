@@ -683,6 +683,958 @@
         }
       }
     },
+    "/v1/affinity-groups": {
+      "get": {
+        "tags": [
+          "affinity"
+        ],
+        "summary": "List affinity groups",
+        "operationId": "affinity_group_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AffinityGroupResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": [
+            "project"
+          ]
+        }
+      },
+      "post": {
+        "tags": [
+          "affinity"
+        ],
+        "summary": "Create affinity group",
+        "operationId": "affinity_group_create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AffinityGroupCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AffinityGroup"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/affinity-groups/{affinity_group}": {
+      "get": {
+        "tags": [
+          "affinity"
+        ],
+        "summary": "Fetch affinity group",
+        "operationId": "affinity_group_view",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "affinity_group",
+            "description": "Name or ID of the affinity group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AffinityGroup"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "affinity"
+        ],
+        "summary": "Update affinity group",
+        "operationId": "affinity_group_update",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "affinity_group",
+            "description": "Name or ID of the affinity group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AffinityGroupUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AffinityGroup"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "affinity"
+        ],
+        "summary": "Delete affinity group",
+        "operationId": "affinity_group_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "affinity_group",
+            "description": "Name or ID of the affinity group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/affinity-groups/{affinity_group}/members": {
+      "get": {
+        "tags": [
+          "affinity"
+        ],
+        "summary": "List affinity group members",
+        "operationId": "affinity_group_member_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          },
+          {
+            "in": "path",
+            "name": "affinity_group",
+            "description": "Name or ID of the affinity group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AffinityGroupMemberResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/affinity-groups/{affinity_group}/members/instance/{instance}": {
+      "get": {
+        "tags": [
+          "affinity"
+        ],
+        "summary": "Fetch affinity group member",
+        "operationId": "affinity_group_member_instance_view",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "affinity_group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AffinityGroupMember"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "affinity"
+        ],
+        "summary": "Add member to affinity group",
+        "operationId": "affinity_group_member_instance_add",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "affinity_group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AffinityGroupMember"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "affinity"
+        ],
+        "summary": "Remove member from affinity group",
+        "operationId": "affinity_group_member_instance_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "affinity_group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/anti-affinity-groups": {
+      "get": {
+        "tags": [
+          "affinity"
+        ],
+        "summary": "List anti-affinity groups",
+        "operationId": "anti_affinity_group_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AntiAffinityGroupResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": [
+            "project"
+          ]
+        }
+      },
+      "post": {
+        "tags": [
+          "affinity"
+        ],
+        "summary": "Create anti-affinity group",
+        "operationId": "anti_affinity_group_create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AntiAffinityGroupCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AntiAffinityGroup"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/anti-affinity-groups/{anti_affinity_group}": {
+      "get": {
+        "tags": [
+          "affinity"
+        ],
+        "summary": "Fetch anti-affinity group",
+        "operationId": "anti_affinity_group_view",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "anti_affinity_group",
+            "description": "Name or ID of the anti affinity group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AntiAffinityGroup"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "affinity"
+        ],
+        "summary": "Update anti-affinity group",
+        "operationId": "anti_affinity_group_update",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "anti_affinity_group",
+            "description": "Name or ID of the anti affinity group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AntiAffinityGroupUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AntiAffinityGroup"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "affinity"
+        ],
+        "summary": "Delete anti-affinity group",
+        "operationId": "anti_affinity_group_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "anti_affinity_group",
+            "description": "Name or ID of the anti affinity group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/anti-affinity-groups/{anti_affinity_group}/members": {
+      "get": {
+        "tags": [
+          "affinity"
+        ],
+        "summary": "List anti-affinity group members",
+        "operationId": "anti_affinity_group_member_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          },
+          {
+            "in": "path",
+            "name": "anti_affinity_group",
+            "description": "Name or ID of the anti affinity group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AntiAffinityGroupMemberResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/anti-affinity-groups/{anti_affinity_group}/members/instance/{instance}": {
+      "get": {
+        "tags": [
+          "affinity"
+        ],
+        "summary": "Fetch anti-affinity group member",
+        "operationId": "anti_affinity_group_member_instance_view",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "anti_affinity_group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AntiAffinityGroupMember"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "affinity"
+        ],
+        "summary": "Add member to anti-affinity group",
+        "operationId": "anti_affinity_group_member_instance_add",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "anti_affinity_group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AntiAffinityGroupMember"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "affinity"
+        ],
+        "summary": "Remove member from anti-affinity group",
+        "operationId": "anti_affinity_group_member_instance_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "anti_affinity_group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/certificates": {
       "get": {
         "tags": [
@@ -9105,6 +10057,70 @@
         }
       }
     },
+    "/v1/system/update/target-release": {
+      "get": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Get the current target release of the rack's system software",
+        "description": "This may not correspond to the actual software running on the rack at the time of request; it is instead the release that the rack reconfigurator should be moving towards as a goal state. After some number of planning and execution phases, the software running on the rack should eventually correspond to the release described here.",
+        "operationId": "target_release_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TargetRelease"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Set the current target release of the rack's system software",
+        "description": "The rack reconfigurator will treat the software specified here as a goal state for the rack's software, and attempt to asynchronously update to that release.",
+        "operationId": "target_release_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTargetReleaseParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TargetRelease"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/users": {
       "get": {
         "tags": [
@@ -11180,6 +12196,181 @@
           "items"
         ]
       },
+      "AffinityGroup": {
+        "description": "Identity-related metadata that's included in nearly all public API objects",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "failure_domain": {
+            "$ref": "#/components/schemas/FailureDomain"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "policy": {
+            "$ref": "#/components/schemas/AffinityPolicy"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "failure_domain",
+          "id",
+          "name",
+          "policy",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "AffinityGroupCreate": {
+        "description": "Create-time parameters for an `AffinityGroup`",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "failure_domain": {
+            "$ref": "#/components/schemas/FailureDomain"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/AffinityPolicy"
+          }
+        },
+        "required": [
+          "description",
+          "failure_domain",
+          "name",
+          "policy"
+        ]
+      },
+      "AffinityGroupMember": {
+        "description": "A member of an Affinity Group\n\nMembership in a group is not exclusive - members may belong to multiple affinity / anti-affinity groups.",
+        "oneOf": [
+          {
+            "description": "An instance belonging to this group, identified by UUID.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
+      "AffinityGroupMemberResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AffinityGroupMember"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "AffinityGroupResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AffinityGroup"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "AffinityGroupUpdate": {
+        "description": "Updateable properties of an `AffinityGroup`",
+        "type": "object",
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        }
+      },
+      "AffinityPolicy": {
+        "description": "Affinity policy used to describe \"what to do when a request cannot be satisfied\"\n\nUsed for both Affinity and Anti-Affinity Groups",
+        "oneOf": [
+          {
+            "description": "If the affinity request cannot be satisfied, allow it anyway.\n\nThis enables a \"best-effort\" attempt to satisfy the affinity policy.",
+            "type": "string",
+            "enum": [
+              "allow"
+            ]
+          },
+          {
+            "description": "If the affinity request cannot be satisfied, fail explicitly.",
+            "type": "string",
+            "enum": [
+              "fail"
+            ]
+          }
+        ]
+      },
       "AggregateBgpMessageHistory": {
         "description": "BGP message history for rack switches.",
         "type": "object",
@@ -11283,6 +12474,162 @@
             ]
           }
         ]
+      },
+      "AntiAffinityGroup": {
+        "description": "Identity-related metadata that's included in nearly all public API objects",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "failure_domain": {
+            "$ref": "#/components/schemas/FailureDomain"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "policy": {
+            "$ref": "#/components/schemas/AffinityPolicy"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "failure_domain",
+          "id",
+          "name",
+          "policy",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "AntiAffinityGroupCreate": {
+        "description": "Create-time parameters for an `AntiAffinityGroup`",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "failure_domain": {
+            "$ref": "#/components/schemas/FailureDomain"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/AffinityPolicy"
+          }
+        },
+        "required": [
+          "description",
+          "failure_domain",
+          "name",
+          "policy"
+        ]
+      },
+      "AntiAffinityGroupMember": {
+        "description": "A member of an Anti-Affinity Group\n\nMembership in a group is not exclusive - members may belong to multiple affinity / anti-affinity groups.",
+        "oneOf": [
+          {
+            "description": "An instance belonging to this group, identified by UUID.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
+      "AntiAffinityGroupMemberResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AntiAffinityGroupMember"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "AntiAffinityGroupResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AntiAffinityGroup"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "AntiAffinityGroupUpdate": {
+        "description": "Updateable properties of an `AntiAffinityGroup`",
+        "type": "object",
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        }
       },
       "AuthzScope": {
         "description": "Authorization scope for a timeseries.\n\nThis describes the level at which a user must be authorized to read data from a timeseries. For example, fleet-scoping means the data is only visible to an operator or fleet reader. Project-scoped, on the other hand, indicates that a user will see data limited to the projects on which they have read permissions.",
@@ -14633,6 +15980,18 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "FailureDomain": {
+        "description": "Describes the scope of affinity for the purposes of co-location.",
+        "oneOf": [
+          {
+            "description": "Instances are considered co-located if they are on the same sled",
+            "type": "string",
+            "enum": [
+              "sled"
+            ]
+          }
         ]
       },
       "FieldSchema": {
@@ -19694,6 +21053,20 @@
           }
         ]
       },
+      "SetTargetReleaseParams": {
+        "description": "Parameters for PUT requests to `/v1/system/update/target-release`.",
+        "type": "object",
+        "properties": {
+          "system_version": {
+            "description": "Version of the system software to make the target release.",
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+          }
+        },
+        "required": [
+          "system_version"
+        ]
+      },
       "Silo": {
         "description": "View of a Silo\n\nA Silo is the highest level unit of isolation.",
         "type": "object",
@@ -21600,6 +22973,75 @@
           "timeseries"
         ]
       },
+      "TargetRelease": {
+        "description": "View of a system software target release.",
+        "type": "object",
+        "properties": {
+          "generation": {
+            "description": "The target-release generation number.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "release_source": {
+            "description": "The source of the target release.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TargetReleaseSource"
+              }
+            ]
+          },
+          "time_requested": {
+            "description": "The time it was set as the target release.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "generation",
+          "release_source",
+          "time_requested"
+        ]
+      },
+      "TargetReleaseSource": {
+        "description": "Source of a system software target release.",
+        "oneOf": [
+          {
+            "description": "Unspecified or unknown source (probably MUPdate).",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unspecified"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The specified release of the rack's system software.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "system_version"
+                ]
+              },
+              "version": {
+                "type": "string",
+                "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+              }
+            },
+            "required": [
+              "type",
+              "version"
+            ]
+          }
+        ]
+      },
       "Timeseries": {
         "description": "A timeseries contains a timestamped set of values from one source.\n\nThis includes the typed key-value pairs that uniquely identify it, and the set of timestamps and data values from it.",
         "type": "object",
@@ -21757,6 +23199,10 @@
             "format": "int32"
           }
         }
+      },
+      "TypedUuidForInstanceKind": {
+        "type": "string",
+        "format": "uuid"
       },
       "TypedUuidForSupportBundleKind": {
         "type": "string",
@@ -23264,6 +24710,13 @@
     }
   },
   "tags": [
+    {
+      "name": "affinity",
+      "description": "Affinity and anti-affinity groups give control over instance placement.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/affinity"
+      }
+    },
     {
       "name": "disks",
       "description": "Virtual disks are used to store instance-local data which includes the operating system.",

@@ -10,7 +10,6 @@ use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::{authn, authz, db};
-use omicron_common::api::external::{Error, ResourceType};
 use omicron_common::api::internal::shared::SwitchLocation;
 use serde::Deserialize;
 use serde::Serialize;
@@ -84,16 +83,6 @@ async fn sid_delete_instance_record(
         .datastore()
         .project_delete_instance(&opctx, &params.authz_instance)
         .await
-        .or_else(|err| {
-            // Necessary for idempotency
-            match err {
-                Error::ObjectNotFound {
-                    type_name: ResourceType::Instance,
-                    lookup_type: _,
-                } => Ok(()),
-                _ => Err(err),
-            }
-        })
         .map_err(ActionError::action_failed)?;
     Ok(())
 }
@@ -180,10 +169,10 @@ mod test {
     use nexus_db_queries::{
         authn::saga::Serialized, context::OpContext, db, db::lookup::LookupPath,
     };
+    use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils::resource_helpers::create_default_ip_pool;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
-    use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::identity::Resource;
     use omicron_common::api::external::{

@@ -13,8 +13,8 @@ use std::time::Duration;
 use crate::{EventBuffer, ExecutionTerminalInfo, StepSpec};
 
 use super::{
-    line_display_shared::LineDisplayOutput, LineDisplayFormatter,
-    LineDisplayShared,
+    LineDisplayFormatter, LineDisplayShared,
+    line_display_shared::LineDisplayOutput,
 };
 
 /// A line-oriented display.

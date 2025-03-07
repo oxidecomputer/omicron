@@ -12,8 +12,8 @@ use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::cte_utils::BoxedQuery;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::model::IncompleteNetworkInterface;
 use crate::db::model::Instance;
 use crate::db::model::InstanceNetworkInterface;
@@ -22,8 +22,8 @@ use crate::db::model::NetworkInterface;
 use crate::db::model::NetworkInterfaceKind;
 use crate::db::model::NetworkInterfaceUpdate;
 use crate::db::model::VpcSubnet;
-use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
+use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
 use crate::db::queries::network_interface;
 use crate::transaction_retry::OptionalError;
@@ -33,7 +33,6 @@ use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use nexus_db_model::ServiceNetworkInterface;
 use nexus_types::identity::Resource;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
@@ -42,6 +41,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
@@ -648,7 +648,12 @@ impl DataStore {
                 &*self.pool_connection_authorized(opctx).await?,
             )
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| match e {
+                DieselError::NotFound => Error::non_resourcetype_not_found(
+                    "instance has no primary NIC",
+                ),
+                e => public_error_from_diesel(e, ErrorHandler::Server),
+            })
     }
 
     /// Get network interface associated with a given probe.

@@ -25,11 +25,12 @@
 //! - [ServiceManager::activate_switch] exposes an API to specifically enable
 //!   or disable (via [ServiceManager::deactivate_switch]) the switch zone.
 
+use crate::bootstrap::BootstrapNetworking;
 use crate::bootstrap::early_networking::{
     EarlyNetworkSetup, EarlyNetworkSetupError,
 };
-use crate::bootstrap::BootstrapNetworking;
 use crate::config::SidecarRevision;
+use crate::ddm_reconciler::DdmReconciler;
 use crate::metrics::MetricsRequestQueue;
 use crate::params::{DendriteAsic, OmicronZoneConfigExt, OmicronZoneTypeExt};
 use crate::profile::*;
@@ -41,7 +42,7 @@ use clickhouse_admin_types::CLICKHOUSE_KEEPER_CONFIG_DIR;
 use clickhouse_admin_types::CLICKHOUSE_KEEPER_CONFIG_FILE;
 use clickhouse_admin_types::CLICKHOUSE_SERVER_CONFIG_DIR;
 use clickhouse_admin_types::CLICKHOUSE_SERVER_CONFIG_FILE;
-use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
+use dpd_client::{Client as DpdClient, Error as DpdError, types as DpdTypes};
 use dropshot::HandlerTaskMode;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::IPV6_LINK_LOCAL_ADDROBJ_NAME;
@@ -60,7 +61,7 @@ use illumos_utils::smf_helper::SmfHelper;
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zpool::{PathInPool, ZpoolName, ZpoolOrRamdisk};
-use illumos_utils::{execute, PFEXEC};
+use illumos_utils::{PFEXEC, execute};
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
 use internal_dns_types::names::DNS_ZONE;
@@ -79,32 +80,32 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::TFPORTD_PORT;
 use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
+use omicron_common::address::{BOOTSTRAP_ARTIFACT_PORT, COCKROACH_ADMIN_PORT};
 use omicron_common::address::{
-    get_internal_dns_server_addresses, CLICKHOUSE_ADMIN_PORT,
-    CLICKHOUSE_TCP_PORT,
+    CLICKHOUSE_ADMIN_PORT, CLICKHOUSE_TCP_PORT,
+    get_internal_dns_server_addresses,
 };
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
-use omicron_common::address::{BOOTSTRAP_ARTIFACT_PORT, COCKROACH_ADMIN_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::{
     HostPortConfig, RackNetworkConfig, SledIdentifiers,
 };
 use omicron_common::backoff::{
-    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
+    BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::{self, Ledger, Ledgerable};
-use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
+use omicron_ddm_admin_client::DdmError;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use once_cell::sync::OnceCell;
 use rand::prelude::SliceRandom;
 use sled_agent_types::{
+    sled::SWITCH_ZONE_BASEBOARD_FILE,
     time_sync::TimeSync,
     zone_bundle::{ZoneBundleCause, ZoneBundleMetadata},
 };
+use sled_hardware::SledMode;
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
-use sled_hardware::SledMode;
 use sled_hardware_types::Baseboard;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::{CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET};
@@ -115,10 +116,10 @@ use std::collections::HashSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
-use tokio::sync::{oneshot, MutexGuard};
+use tokio::sync::{MutexGuard, oneshot};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
@@ -137,8 +138,6 @@ const CLICKHOUSE_SERVER_BINARY: &str =
 const CLICKHOUSE_KEEPER_BINARY: &str =
     "/opt/oxide/clickhouse_keeper/clickhouse";
 const CLICKHOUSE_BINARY: &str = "/opt/oxide/clickhouse/clickhouse";
-
-pub const SWITCH_ZONE_BASEBOARD_FILE: &str = "/opt/oxide/baseboard.json";
 
 #[derive(thiserror::Error, Debug, slog_error_chain::SlogInlineError)]
 pub enum Error {
@@ -247,7 +246,9 @@ pub enum Error {
         source: illumos_utils::zfs::GetValueError,
     },
 
-    #[error("Cannot launch {zone} with {dataset} (saw {prop_name} = {prop_value}, expected {prop_value_expected})")]
+    #[error(
+        "Cannot launch {zone} with {dataset} (saw {prop_name} = {prop_value}, expected {prop_value_expected})"
+    )]
     DatasetNotReady {
         zone: String,
         dataset: String,
@@ -727,14 +728,13 @@ pub struct ServiceManagerInner {
     underlay_vnic_allocator: VnicAllocator<Etherstub>,
     underlay_vnic: EtherstubVnic,
     bootstrap_vnic_allocator: VnicAllocator<Etherstub>,
-    ddmd_client: DdmAdminClient,
-    advertised_prefixes: Mutex<HashSet<Ipv6Subnet<SLED_PREFIX>>>,
-    sled_info: OnceCell<SledAgentInfo>,
+    ddm_reconciler: DdmReconciler,
+    sled_info: OnceLock<SledAgentInfo>,
     switch_zone_bootstrap_address: Ipv6Addr,
     storage: StorageHandle,
     zone_bundler: ZoneBundler,
-    ledger_directory_override: OnceCell<Utf8PathBuf>,
-    image_directory_override: OnceCell<Utf8PathBuf>,
+    ledger_directory_override: OnceLock<Utf8PathBuf>,
+    image_directory_override: OnceLock<Utf8PathBuf>,
 }
 
 // Late-binding information, only known once the sled agent is up and
@@ -781,7 +781,7 @@ impl ServiceManager {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         log: &Logger,
-        ddmd_client: DdmAdminClient,
+        ddm_reconciler: DdmReconciler,
         bootstrap_networking: BootstrapNetworking,
         sled_mode: SledMode,
         time_sync_config: TimeSyncConfig,
@@ -815,15 +815,14 @@ impl ServiceManager {
                     "Bootstrap",
                     bootstrap_networking.bootstrap_etherstub,
                 ),
-                ddmd_client,
-                advertised_prefixes: Mutex::new(HashSet::new()),
-                sled_info: OnceCell::new(),
+                ddm_reconciler,
+                sled_info: OnceLock::new(),
                 switch_zone_bootstrap_address: bootstrap_networking
                     .switch_zone_bootstrap_ip,
                 storage,
                 zone_bundler,
-                ledger_directory_override: OnceCell::new(),
-                image_directory_override: OnceCell::new(),
+                ledger_directory_override: OnceLock::new(),
+                image_directory_override: OnceLock::new(),
             }),
         }
     }
@@ -836,6 +835,10 @@ impl ServiceManager {
     #[cfg(all(test, target_os = "illumos"))]
     fn override_image_directory(&self, path: Utf8PathBuf) {
         self.inner.image_directory_override.set(path).unwrap();
+    }
+
+    pub(crate) fn ddm_reconciler(&self) -> &DdmReconciler {
+        &self.inner.ddm_reconciler
     }
 
     pub fn switch_zone_bootstrap_address(&self) -> Ipv6Addr {
@@ -1040,18 +1043,6 @@ impl ServiceManager {
     /// Returns the metrics queue for the sled agent.
     fn metrics_queue(&self) -> &MetricsRequestQueue {
         &self.maybe_metrics_queue().expect("Sled agent should have started")
-    }
-
-    // Advertise the /64 prefix of `address`, unless we already have.
-    //
-    // This method only blocks long enough to check our HashSet of
-    // already-advertised prefixes; the actual request to ddmd to advertise the
-    // prefix is spawned onto a background task.
-    async fn advertise_prefix_of_address(&self, address: Ipv6Addr) {
-        let subnet = Ipv6Subnet::new(address);
-        if self.inner.advertised_prefixes.lock().await.insert(subnet) {
-            self.inner.ddmd_client.advertise_prefix(subnet);
-        }
     }
 
     // Check the services intended to run in the zone to determine whether any
@@ -2356,10 +2347,6 @@ impl ServiceManager {
                     err,
                 })?;
 
-                // If this address is in a new ipv6 prefix, notify
-                // maghemite so it can advertise it to other sleds.
-                self.advertise_prefix_of_address(*gz_address).await;
-
                 let internal_dns_config = PropertyGroupBuilder::new("config")
                     .add_property(
                         "http_address",
@@ -2828,12 +2815,14 @@ impl ServiceManager {
                                             ref s,
                                         ) => s,
                                         _ => {
-                                            return Err(Error::SidecarRevision(
-                                                anyhow::anyhow!(
-                                                    "expected soft sidecar \
+                                            return Err(
+                                                Error::SidecarRevision(
+                                                    anyhow::anyhow!(
+                                                        "expected soft sidecar \
                                                     revision"
+                                                    ),
                                                 ),
-                                            ))
+                                            );
                                         }
                                     };
 
@@ -3610,6 +3599,20 @@ impl ServiceManager {
             new_zones.into_iter().map(|zone| (zone.name().to_string(), zone)),
         );
 
+        // Update our DDM reconciler with the set of all internal DNS global
+        // zone addresses we need maghemite to advertise on our behalf.
+        self.ddm_reconciler().set_internal_dns_subnets(
+            existing_zones
+                .values()
+                .filter_map(|z| match z.config.zone.zone_type {
+                    OmicronZoneType::InternalDns { gz_address, .. } => {
+                        Some(Ipv6Subnet::new(gz_address))
+                    }
+                    _ => None,
+                })
+                .collect(),
+        );
+
         // If any zones failed to start, exit with an error
         if !errors.is_empty() {
             return Err(Error::ZoneEnsure { errors });
@@ -4026,7 +4029,7 @@ impl ServiceManager {
             SledMode::Gimlet => {
                 return Err(Error::SwitchZone(anyhow::anyhow!(
                     "attempted to activate switch zone on non-scrimlet sled"
-                )))
+                )));
             }
 
             // Sled is a scrimlet and the real tofino driver has been loaded.
@@ -4491,7 +4494,10 @@ impl ServiceManager {
                                 }
                             }
                             smfh.refresh()?;
-                            info!(self.inner.log, "refreshed dendrite service with new configuration")
+                            info!(
+                                self.inner.log,
+                                "refreshed dendrite service with new configuration"
+                            )
                         }
                         SwitchService::Wicketd { .. } => {
                             if let Some(&address) = first_address {
@@ -4509,7 +4515,10 @@ impl ServiceManager {
                                 )?;
 
                                 smfh.refresh()?;
-                                info!(self.inner.log, "refreshed wicketd service with new configuration")
+                                info!(
+                                    self.inner.log,
+                                    "refreshed wicketd service with new configuration"
+                                )
                             } else {
                                 error!(
                                     self.inner.log,
@@ -4531,7 +4540,10 @@ impl ServiceManager {
                                 )?;
                             }
                             smfh.refresh()?;
-                            info!(self.inner.log, "refreshed lldpd service with new configuration")
+                            info!(
+                                self.inner.log,
+                                "refreshed lldpd service with new configuration"
+                            )
                         }
                         SwitchService::Tfport { pkt_source, asic } => {
                             info!(self.inner.log, "configuring tfport service");
@@ -4567,7 +4579,10 @@ impl ServiceManager {
                             }
 
                             smfh.refresh()?;
-                            info!(self.inner.log, "refreshed tfport service with new configuration")
+                            info!(
+                                self.inner.log,
+                                "refreshed tfport service with new configuration"
+                            )
                         }
                         SwitchService::Pumpkind { .. } => {
                             // Unless we want to plumb through the "only log
@@ -4661,7 +4676,10 @@ impl ServiceManager {
                                 }
                             }
                             smfh.refresh()?;
-                            info!(self.inner.log, "refreshed mg-ddm service with new configuration")
+                            info!(
+                                self.inner.log,
+                                "refreshed mg-ddm service with new configuration"
+                            )
                         }
                     }
                 }
@@ -4933,13 +4951,14 @@ mod illumos_tests {
     use super::*;
     use illumos_utils::{
         dladm::{
-            Etherstub, MockDladm, BOOTSTRAP_ETHERSTUB_NAME,
+            BOOTSTRAP_ETHERSTUB_NAME, Etherstub, MockDladm,
             UNDERLAY_ETHERSTUB_NAME, UNDERLAY_ETHERSTUB_VNIC_NAME,
         },
         svc,
         zone::MockZones,
     };
 
+    use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use std::os::unix::process::ExitStatusExt;
@@ -5176,6 +5195,7 @@ mod illumos_tests {
                         id,
                         zone_type,
                         filesystem_pool: None,
+                        image_source: OmicronZoneImageSource::InstallDataset,
                     }],
                 },
                 Some(&tmp_dir),
@@ -5202,6 +5222,7 @@ mod illumos_tests {
                     id,
                     zone_type: OmicronZoneType::InternalNtp { address },
                     filesystem_pool: None,
+                    image_source: OmicronZoneImageSource::InstallDataset,
                 }],
             },
             Some(&tmp_dir),
@@ -5290,7 +5311,6 @@ mod illumos_tests {
 
     struct LedgerTestHelper<'a> {
         log: slog::Logger,
-        ddmd_client: DdmAdminClient,
         storage_test_harness: StorageManagerTestHarness,
         zone_bundler: ZoneBundler,
         test_config: &'a TestConfig,
@@ -5298,7 +5318,6 @@ mod illumos_tests {
 
     impl<'a> LedgerTestHelper<'a> {
         async fn new(log: slog::Logger, test_config: &'a TestConfig) -> Self {
-            let ddmd_client = DdmAdminClient::localhost(&log).unwrap();
             let storage_test_harness = setup_storage(&log).await;
             let zone_bundler = ZoneBundler::new(
                 log.clone(),
@@ -5308,7 +5327,6 @@ mod illumos_tests {
 
             LedgerTestHelper {
                 log,
-                ddmd_client,
                 storage_test_harness,
                 zone_bundler,
                 test_config,
@@ -5328,9 +5346,12 @@ mod illumos_tests {
             time_sync_config: TimeSyncConfig,
         ) -> ServiceManager {
             let log = &self.log;
+            let reconciler =
+                DdmReconciler::new(Ipv6Subnet::new(Ipv6Addr::LOCALHOST), log)
+                    .expect("created DdmReconciler");
             let mgr = ServiceManager::new(
                 log,
-                self.ddmd_client.clone(),
+                reconciler,
                 make_bootstrap_networking_config(),
                 SledMode::Auto,
                 time_sync_config,
@@ -5784,6 +5805,7 @@ mod illumos_tests {
             id: id1,
             zone_type: OmicronZoneType::InternalNtp { address },
             filesystem_pool: None,
+            image_source: OmicronZoneImageSource::InstallDataset,
         }];
 
         let tmp_dir = String::from(test_config.config_dir.path().as_str());
@@ -5806,6 +5828,7 @@ mod illumos_tests {
             id: id2,
             zone_type: OmicronZoneType::InternalNtp { address },
             filesystem_pool: None,
+            image_source: OmicronZoneImageSource::InstallDataset,
         });
 
         // Now try to apply that list with an older generation number.  This
@@ -5869,6 +5892,7 @@ mod illumos_tests {
 
 #[cfg(test)]
 mod test {
+    use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use omicron_uuid_kinds::ZpoolUuid;
 
     use super::*;
@@ -5915,6 +5939,7 @@ mod test {
                 zone_type: OmicronZoneType::Oximeter {
                     address: "[::1]:0".parse().unwrap(),
                 },
+                image_source: OmicronZoneImageSource::InstallDataset,
             }
         }
 

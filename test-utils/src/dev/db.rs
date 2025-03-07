@@ -5,9 +5,9 @@
 //! Facilities for managing a local database for development
 
 use crate::dev::poll;
+use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
-use anyhow::Context;
 use nexus_config::PostgresConfigWithUrl;
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
@@ -18,8 +18,8 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
-use tempfile::tempdir;
 use tempfile::TempDir;
+use tempfile::tempdir;
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tokio_postgres::config::Host;
@@ -691,7 +691,7 @@ impl Drop for CockroachInstance {
                      \tcargo xtask db-dev run --no-populate --store-dir {data_path:?}\n\
                      \t# Access the database. Note the port may change if you run multiple databases.\n\
                      \tcockroach sql --host=localhost:32221 --insecure",
-                     data_path = path.join("data"),
+                    data_path = path.join("data"),
                 );
             }
         }
@@ -1072,11 +1072,11 @@ impl Client {
 // These are more integration tests than unit tests.
 #[cfg(test)]
 mod test {
-    use super::has_omicron_schema;
-    use super::make_pg_config;
     use super::CockroachStartError;
     use super::CockroachStarter;
     use super::CockroachStarterBuilder;
+    use super::has_omicron_schema;
+    use super::make_pg_config;
     use crate::dev::db::process_exited;
     use crate::dev::poll;
     use crate::dev::process_running;
@@ -1104,10 +1104,12 @@ mod test {
         let builder = new_builder();
         let starter = builder.build().unwrap();
         let directory = starter.temp_dir().to_owned();
-        assert!(fs::metadata(&directory)
-            .await
-            .expect("temporary directory is missing")
-            .is_dir());
+        assert!(
+            fs::metadata(&directory)
+                .await
+                .expect("temporary directory is missing")
+                .is_dir()
+        );
         drop(starter);
         assert_eq!(
             libc::ENOENT,
@@ -1203,10 +1205,12 @@ mod test {
         // The child process should still be running.
         assert!(process_running(pid));
         // The temporary directory should still exist.
-        assert!(fs::metadata(&directory)
-            .await
-            .expect("temporary directory is missing")
-            .is_dir());
+        assert!(
+            fs::metadata(&directory)
+                .await
+                .expect("temporary directory is missing")
+                .is_dir()
+        );
         // Kill the child process (to clean up after ourselves).
         assert_eq!(0, unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) });
 
@@ -1345,10 +1349,12 @@ mod test {
         // At this point, our extra temporary directory should still exist.
         // This is important -- the library should not clean up a data directory
         // that was specified by the user.
-        assert!(fs::metadata(&data_dir)
-            .await
-            .expect("CockroachDB data directory is missing")
-            .is_dir());
+        assert!(
+            fs::metadata(&data_dir)
+                .await
+                .expect("CockroachDB data directory is missing")
+                .is_dir()
+        );
         // Clean it up.
         let extra_temp_dir_path = extra_temp_dir.path().to_owned();
         extra_temp_dir
@@ -1412,10 +1418,12 @@ mod test {
         // The database process should be running and the database's store
         // directory should exist.
         assert!(process_running(pid));
-        assert!(fs::metadata(data_dir.as_ref())
-            .await
-            .expect("CockroachDB data directory is missing")
-            .is_dir());
+        assert!(
+            fs::metadata(data_dir.as_ref())
+                .await
+                .expect("CockroachDB data directory is missing")
+                .is_dir()
+        );
 
         // Check the environment variables.  Doing this is platform-specific and
         // we only bother implementing it for illumos.

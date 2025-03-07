@@ -25,7 +25,6 @@ hyper.workspace = true
 illumos-utils.workspace = true
 ipcc.workspace = true
 omicron-common.workspace = true
-once_cell.workspace = true
 schemars.workspace = true
 serde.workspace = true
 signal-hook.workspace = true

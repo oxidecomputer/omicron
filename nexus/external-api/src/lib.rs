@@ -74,6 +74,13 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
         allow_other_tags = false,
         policy = EndpointTagPolicy::ExactlyOne,
         tags = {
+            "affinity" = {
+                description = "Affinity and anti-affinity groups give control over instance placement.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/affinity"
+                }
+
+            },
             "disks" = {
                 description = "Virtual disks are used to store instance-local data which includes the operating system.",
                 external_docs = {
@@ -1256,6 +1263,224 @@ pub trait NexusExternalApi {
         query_params: Query<params::OptionalProjectSelector>,
         disk_to_detach: TypedBody<params::DiskPath>,
     ) -> Result<HttpResponseAccepted<Disk>, HttpError>;
+
+    // Affinity Groups
+
+    /// List affinity groups
+    #[endpoint {
+        method = GET,
+        path = "/v1/affinity-groups",
+        tags = ["affinity"],
+    }]
+    async fn affinity_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AffinityGroup>>, HttpError>;
+
+    /// Fetch affinity group
+    #[endpoint {
+        method = GET,
+        path = "/v1/affinity-groups/{affinity_group}",
+        tags = ["affinity"],
+    }]
+    async fn affinity_group_view(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AffinityGroupPath>,
+    ) -> Result<HttpResponseOk<views::AffinityGroup>, HttpError>;
+
+    /// List affinity group members
+    #[endpoint {
+        method = GET,
+        path = "/v1/affinity-groups/{affinity_group}/members",
+        tags = ["affinity"],
+    }]
+    async fn affinity_group_member_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
+        path_params: Path<params::AffinityGroupPath>,
+    ) -> Result<HttpResponseOk<ResultsPage<AffinityGroupMember>>, HttpError>;
+
+    /// Fetch affinity group member
+    #[endpoint {
+        method = GET,
+        path = "/v1/affinity-groups/{affinity_group}/members/instance/{instance}",
+        tags = ["affinity"],
+    }]
+    async fn affinity_group_member_instance_view(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AffinityInstanceGroupMemberPath>,
+    ) -> Result<HttpResponseOk<AffinityGroupMember>, HttpError>;
+
+    /// Add member to affinity group
+    #[endpoint {
+        method = POST,
+        path = "/v1/affinity-groups/{affinity_group}/members/instance/{instance}",
+        tags = ["affinity"],
+    }]
+    async fn affinity_group_member_instance_add(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AffinityInstanceGroupMemberPath>,
+    ) -> Result<HttpResponseCreated<AffinityGroupMember>, HttpError>;
+
+    /// Remove member from affinity group
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/affinity-groups/{affinity_group}/members/instance/{instance}",
+        tags = ["affinity"],
+    }]
+    async fn affinity_group_member_instance_delete(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AffinityInstanceGroupMemberPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Create affinity group
+    #[endpoint {
+        method = POST,
+        path = "/v1/affinity-groups",
+        tags = ["affinity"],
+    }]
+    async fn affinity_group_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_affinity_group_params: TypedBody<params::AffinityGroupCreate>,
+    ) -> Result<HttpResponseCreated<views::AffinityGroup>, HttpError>;
+
+    /// Update affinity group
+    #[endpoint {
+        method = PUT,
+        path = "/v1/affinity-groups/{affinity_group}",
+        tags = ["affinity"],
+    }]
+    async fn affinity_group_update(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AffinityGroupPath>,
+        updated_group: TypedBody<params::AffinityGroupUpdate>,
+    ) -> Result<HttpResponseOk<views::AffinityGroup>, HttpError>;
+
+    /// Delete affinity group
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/affinity-groups/{affinity_group}",
+        tags = ["affinity"],
+    }]
+    async fn affinity_group_delete(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AffinityGroupPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List anti-affinity groups
+    #[endpoint {
+        method = GET,
+        path = "/v1/anti-affinity-groups",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AntiAffinityGroup>>, HttpError>;
+
+    /// Fetch anti-affinity group
+    #[endpoint {
+        method = GET,
+        path = "/v1/anti-affinity-groups/{anti_affinity_group}",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_view(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AntiAffinityGroupPath>,
+    ) -> Result<HttpResponseOk<views::AntiAffinityGroup>, HttpError>;
+
+    /// List anti-affinity group members
+    #[endpoint {
+        method = GET,
+        path = "/v1/anti-affinity-groups/{anti_affinity_group}/members",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_member_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
+        path_params: Path<params::AntiAffinityGroupPath>,
+    ) -> Result<HttpResponseOk<ResultsPage<AntiAffinityGroupMember>>, HttpError>;
+
+    /// Fetch anti-affinity group member
+    #[endpoint {
+        method = GET,
+        path = "/v1/anti-affinity-groups/{anti_affinity_group}/members/instance/{instance}",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_member_instance_view(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AntiAffinityInstanceGroupMemberPath>,
+    ) -> Result<HttpResponseOk<AntiAffinityGroupMember>, HttpError>;
+
+    /// Add member to anti-affinity group
+    #[endpoint {
+        method = POST,
+        path = "/v1/anti-affinity-groups/{anti_affinity_group}/members/instance/{instance}",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_member_instance_add(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AntiAffinityInstanceGroupMemberPath>,
+    ) -> Result<HttpResponseCreated<AntiAffinityGroupMember>, HttpError>;
+
+    /// Remove member from anti-affinity group
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/anti-affinity-groups/{anti_affinity_group}/members/instance/{instance}",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_member_instance_delete(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AntiAffinityInstanceGroupMemberPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Create anti-affinity group
+    #[endpoint {
+        method = POST,
+        path = "/v1/anti-affinity-groups",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_affinity_group_params: TypedBody<params::AntiAffinityGroupCreate>,
+    ) -> Result<HttpResponseCreated<views::AntiAffinityGroup>, HttpError>;
+
+    /// Update anti-affinity group
+    #[endpoint {
+        method = PUT,
+        path = "/v1/anti-affinity-groups/{anti_affinity_group}",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_update(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AntiAffinityGroupPath>,
+        updated_group: TypedBody<params::AntiAffinityGroupUpdate>,
+    ) -> Result<HttpResponseOk<views::AntiAffinityGroup>, HttpError>;
+
+    /// Delete anti-affinity group
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/anti-affinity-groups/{anti_affinity_group}",
+        tags = ["affinity"],
+    }]
+    async fn anti_affinity_group_delete(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::AntiAffinityGroupPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
 
     // Certificates
 
@@ -2661,6 +2886,37 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::UpdatesGetRepositoryParams>,
     ) -> Result<HttpResponseOk<TufRepoGetResponse>, HttpError>;
+
+    /// Get the current target release of the rack's system software
+    ///
+    /// This may not correspond to the actual software running on the rack
+    /// at the time of request; it is instead the release that the rack
+    /// reconfigurator should be moving towards as a goal state. After some
+    /// number of planning and execution phases, the software running on the
+    /// rack should eventually correspond to the release described here.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/update/target-release",
+        tags = ["hidden"], // "system/update"
+    }]
+    async fn target_release_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<views::TargetRelease>, HttpError>;
+
+    /// Set the current target release of the rack's system software
+    ///
+    /// The rack reconfigurator will treat the software specified here as
+    /// a goal state for the rack's software, and attempt to asynchronously
+    /// update to that release.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/update/target-release",
+        tags = ["hidden"], // "system/update"
+    }]
+    async fn target_release_set(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<params::SetTargetReleaseParams>,
+    ) -> Result<HttpResponseCreated<views::TargetRelease>, HttpError>;
 
     // Silo users
 

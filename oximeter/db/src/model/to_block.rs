@@ -7,12 +7,12 @@
 //! Trait for serializing an array of values into a `Block`.
 
 use super::columns;
+use crate::native::Error;
 use crate::native::block::Block;
 use crate::native::block::Column;
 use crate::native::block::DataType;
 use crate::native::block::Precision;
 use crate::native::block::ValueArray;
-use crate::native::Error;
 use chrono::TimeZone as _;
 use chrono_tz::Tz;
 use indexmap::IndexMap;

@@ -8,25 +8,25 @@ mod job;
 mod tuf;
 
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::time::Duration;
 use std::time::Instant;
 
-use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
+use anyhow::bail;
 use camino::Utf8PathBuf;
 use chrono::Utc;
 use clap::Parser;
 use fs_err::tokio as fs;
 use omicron_zone_package::config::Config;
 use omicron_zone_package::config::PackageName;
-use once_cell::sync::Lazy;
 use semver::Version;
+use slog::Drain;
+use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::info;
-use slog::Drain;
-use slog::Logger;
 use slog_term::FullFormat;
 use slog_term::TermDecorator;
 use tokio::sync::Semaphore;
@@ -88,7 +88,7 @@ const TUF_PACKAGES: [&PackageName; 11] = [
 
 const HELIOS_REPO: &str = "https://pkg.oxide.computer/helios/2/dev/";
 
-static WORKSPACE_DIR: Lazy<Utf8PathBuf> = Lazy::new(|| {
+static WORKSPACE_DIR: LazyLock<Utf8PathBuf> = LazyLock::new(|| {
     // $CARGO_MANIFEST_DIR is at `.../omicron/dev-tools/releng`
     let mut dir =
         Utf8PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect(
@@ -426,18 +426,6 @@ async fn main() -> Result<()> {
             .env_remove("CARGO")
             .env_remove("RUSTUP_TOOLCHAIN"),
     );
-
-    // Download the toolchain for phbl before we get to the image build steps.
-    // (This is possibly a micro-optimization.)
-    jobs.push_command(
-        "phbl-toolchain",
-        Command::new(&rustup_cargo)
-            .arg("--version")
-            .current_dir(args.helios_dir.join("projects/phbl"))
-            .env_remove("CARGO")
-            .env_remove("RUSTUP_TOOLCHAIN"),
-    )
-    .after("helios-setup");
 
     let omicron_package = if let Some(path) = &args.omicron_package_bin {
         // omicron-package is provided, so don't build it.

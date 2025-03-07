@@ -2,6 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::Responsiveness;
+use crate::SIM_ROT_BOARD;
+use crate::SimulatedSp;
 use crate::config::GimletConfig;
 use crate::config::SpComponentConfig;
 use crate::helpers::rot_slot_id_from_u16;
@@ -12,17 +15,10 @@ use crate::server;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
 use crate::update::SimSpUpdate;
-use crate::Responsiveness;
-use crate::SimulatedSp;
-use crate::SIM_ROT_BOARD;
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
-use futures::future;
 use futures::Future;
-use gateway_messages::ignition::{self, LinkEvents};
-use gateway_messages::sp_impl::Sender;
-use gateway_messages::sp_impl::SpHandler;
-use gateway_messages::sp_impl::{BoundsChecked, DeviceDescription};
+use futures::future;
 use gateway_messages::CfpaPage;
 use gateway_messages::ComponentAction;
 use gateway_messages::ComponentActionResponse;
@@ -38,11 +34,15 @@ use gateway_messages::SpError;
 use gateway_messages::SpPort;
 use gateway_messages::SpRequest;
 use gateway_messages::SpStateV2;
-use gateway_messages::{version, MessageKind};
+use gateway_messages::ignition::{self, LinkEvents};
+use gateway_messages::sp_impl::Sender;
+use gateway_messages::sp_impl::SpHandler;
+use gateway_messages::sp_impl::{BoundsChecked, DeviceDescription};
 use gateway_messages::{ComponentDetails, Message, MgsError, StartupOptions};
 use gateway_messages::{DiscoverResponse, IgnitionState, PowerState};
+use gateway_messages::{MessageKind, version};
 use gateway_types::component::SpState;
-use slog::{debug, error, info, warn, Logger};
+use slog::{Logger, debug, error, info, warn};
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::iter;
@@ -52,10 +52,10 @@ use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::select;
+use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 use tokio::sync::watch;
-use tokio::sync::Mutex as TokioMutex;
 use tokio::task::{self, JoinHandle};
 
 pub const SIM_GIMLET_BOARD: &str = "SimGimletSp";
@@ -194,10 +194,10 @@ impl Gimlet {
         let (commands, commands_rx) = mpsc::unbounded_channel();
         let last_request_handled = Arc::default();
 
-        // Weird case - if we don't have any bind addresses, we're only being
+        // Weird case - if we don't have any network config, we're only being
         // created to simulate an RoT, so go ahead and return without actually
         // starting a simulated SP.
-        let Some(bind_addrs) = gimlet.common.bind_addrs else {
+        let Some(network_config) = &gimlet.common.network_config else {
             return Ok(Self {
                 local_addrs: None,
                 handler: None,
@@ -210,12 +210,14 @@ impl Gimlet {
         };
 
         // bind to our two local "KSZ" ports
-        assert_eq!(bind_addrs.len(), 2); // gimlet SP always has 2 ports
+        assert_eq!(network_config.len(), 2); // gimlet SP always has 2 ports
+
         let servers = future::try_join(
-            UdpServer::new(bind_addrs[0], gimlet.common.multicast_addr, &log),
-            UdpServer::new(bind_addrs[1], gimlet.common.multicast_addr, &log),
+            UdpServer::new(&network_config[0], &log),
+            UdpServer::new(&network_config[1], &log),
         )
         .await?;
+
         let servers = [servers.0, servers.1];
 
         for component_config in &gimlet.common.components {
@@ -240,9 +242,9 @@ impl Gimlet {
                         .to_string(),
                     listener
                         .local_addr()
-                        .with_context(|| {
-                            "failed to get local address of bound socket"
-                        })
+                        .with_context(
+                            || "failed to get local address of bound socket",
+                        )
                         .and_then(|addr| match addr {
                             SocketAddr::V4(addr) => {
                                 bail!("bound IPv4 address {}", addr)

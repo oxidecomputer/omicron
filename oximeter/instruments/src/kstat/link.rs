@@ -4,21 +4,21 @@
 
 //! Report metrics about Ethernet data links on the host system
 
-use crate::kstat::hrtime_to_utc;
 use crate::kstat::ConvertNamedData;
 use crate::kstat::Error;
 use crate::kstat::KstatList;
 use crate::kstat::KstatTarget;
+use crate::kstat::hrtime_to_utc;
 use chrono::DateTime;
 use chrono::Utc;
 use kstat_rs::Data;
 use kstat_rs::Kstat;
 use kstat_rs::Named;
-use oximeter::types::Cumulative;
 use oximeter::FieldType;
 use oximeter::FieldValue;
 use oximeter::Sample;
 use oximeter::Target;
+use oximeter::types::Cumulative;
 use uuid::Uuid;
 
 oximeter::use_timeseries!("sled-data-link.toml");
@@ -178,22 +178,22 @@ impl Target for SledDataLink {
 #[cfg(all(test, target_os = "illumos"))]
 mod tests {
     use super::*;
-    use crate::kstat::sampler::KstatPath;
-    use crate::kstat::sampler::CREATION_TIME_PRUNE_INTERVAL;
     use crate::kstat::CollectionDetails;
     use crate::kstat::KstatSampler;
     use crate::kstat::TargetStatus;
+    use crate::kstat::sampler::CREATION_TIME_PRUNE_INTERVAL;
+    use crate::kstat::sampler::KstatPath;
     use kstat_rs::Ctl;
     use oximeter::Producer;
-    use rand::distributions::Uniform;
     use rand::Rng;
-    use slog::info;
+    use rand::distributions::Uniform;
     use slog::Drain;
     use slog::Logger;
+    use slog::info;
     use std::time::Duration;
     use tokio::time::Instant;
-    use uuid::uuid;
     use uuid::Uuid;
+    use uuid::uuid;
 
     fn test_logger() -> Logger {
         let dec =
@@ -231,7 +231,6 @@ mod tests {
                 rand::thread_rng()
                     .sample_iter(Uniform::new('a', 'z'))
                     .take(5)
-                    .map(char::from)
                     .collect::<String>(),
             );
             Self::create(&name);

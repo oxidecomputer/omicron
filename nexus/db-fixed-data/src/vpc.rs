@@ -7,47 +7,48 @@ use nexus_db_model as model;
 use nexus_types::external_api::params;
 use omicron_common::address::SERVICE_VPC_IPV6_PREFIX;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 /// UUID of built-in VPC for internal services on the rack.
-pub static SERVICES_VPC_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
+pub static SERVICES_VPC_ID: LazyLock<uuid::Uuid> = LazyLock::new(|| {
     "001de000-074c-4000-8000-000000000000"
         .parse()
         .expect("invalid uuid for builtin services vpc id")
 });
 
 /// UUID of VpcRouter for built-in Services VPC.
-pub static SERVICES_VPC_ROUTER_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
+pub static SERVICES_VPC_ROUTER_ID: LazyLock<uuid::Uuid> = LazyLock::new(|| {
     "001de000-074c-4000-8000-000000000001"
         .parse()
         .expect("invalid uuid for builtin services vpc router id")
 });
 
 /// UUID of InternetGateway for built-in Services VPC.
-pub static SERVICES_INTERNET_GATEWAY_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
-    "001de000-074c-4000-8000-000000000002"
-        .parse()
-        .expect("invalid uuid for builtin services internet gateway id")
-});
+pub static SERVICES_INTERNET_GATEWAY_ID: LazyLock<uuid::Uuid> =
+    LazyLock::new(|| {
+        "001de000-074c-4000-8000-000000000002"
+            .parse()
+            .expect("invalid uuid for builtin services internet gateway id")
+    });
 
 /// UUID of InternetGateway IPv4 default route for built-in Services VPC.
-pub static SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V4: Lazy<uuid::Uuid> =
-    Lazy::new(|| {
+pub static SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V4: LazyLock<uuid::Uuid> =
+    LazyLock::new(|| {
         "001de000-074c-4000-8000-000000000003"
         .parse()
         .expect("invalid uuid for builtin services internet gateway default route v4")
     });
 
 /// UUID of InternetGateway IPv6 default route for built-in Services VPC.
-pub static SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V6: Lazy<uuid::Uuid> =
-    Lazy::new(|| {
+pub static SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V6: LazyLock<uuid::Uuid> =
+    LazyLock::new(|| {
         "001de000-074c-4000-8000-000000000004"
         .parse()
         .expect("invalid uuid for builtin services internet gateway default route v4")
     });
 
 /// Built-in VPC for internal services on the rack.
-pub static SERVICES_VPC: Lazy<model::IncompleteVpc> = Lazy::new(|| {
+pub static SERVICES_VPC: LazyLock<model::IncompleteVpc> = LazyLock::new(|| {
     model::IncompleteVpc::new(
         *SERVICES_VPC_ID,
         *super::project::SERVICES_PROJECT_ID,

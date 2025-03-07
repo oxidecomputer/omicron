@@ -66,6 +66,7 @@ progenitor::generate_api!(
         OmicronPhysicalDisksConfig = omicron_common::disk::OmicronPhysicalDisksConfig,
         OmicronZoneConfig = nexus_sled_agent_shared::inventory::OmicronZoneConfig,
         OmicronZoneDataset = nexus_sled_agent_shared::inventory::OmicronZoneDataset,
+        OmicronZoneImageSource = nexus_sled_agent_shared::inventory::OmicronZoneImageSource,
         OmicronZoneType = nexus_sled_agent_shared::inventory::OmicronZoneType,
         OmicronZonesConfig = nexus_sled_agent_shared::inventory::OmicronZonesConfig,
         PortFec = omicron_common::api::internal::shared::PortFec,

@@ -10,11 +10,13 @@
 use crate::api::external::{self, Error};
 use crate::policy::INTERNAL_DNS_REDUNDANCY;
 use ipnetwork::Ipv6Network;
-use once_cell::sync::Lazy;
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6},
+    sync::LazyLock,
+};
 
 pub const AZ_PREFIX: u8 = 48;
 pub const RACK_PREFIX: u8 = 56;
@@ -101,7 +103,7 @@ pub const NUM_SOURCE_NAT_PORTS: u16 = 1 << 14;
 // prefix range (`fd00::/48`). See `random_vpc_ipv6_prefix`.
 // Furthermore, all the below *_OPTE_IPV6_SUBNET constants are
 // /64's within this prefix.
-pub static SERVICE_VPC_IPV6_PREFIX: Lazy<Ipv6Net> = Lazy::new(|| {
+pub static SERVICE_VPC_IPV6_PREFIX: LazyLock<Ipv6Net> = LazyLock::new(|| {
     Ipv6Net::new(
         Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 0, 0, 0, 0, 0),
         VPC_IPV6_PREFIX_LENGTH,
@@ -110,11 +112,11 @@ pub static SERVICE_VPC_IPV6_PREFIX: Lazy<Ipv6Net> = Lazy::new(|| {
 });
 
 /// The IPv4 subnet for External DNS OPTE ports.
-pub static DNS_OPTE_IPV4_SUBNET: Lazy<Ipv4Net> =
-    Lazy::new(|| Ipv4Net::new(Ipv4Addr::new(172, 30, 1, 0), 24).unwrap());
+pub static DNS_OPTE_IPV4_SUBNET: LazyLock<Ipv4Net> =
+    LazyLock::new(|| Ipv4Net::new(Ipv4Addr::new(172, 30, 1, 0), 24).unwrap());
 
 /// The IPv6 subnet for External DNS OPTE ports.
-pub static DNS_OPTE_IPV6_SUBNET: Lazy<Ipv6Net> = Lazy::new(|| {
+pub static DNS_OPTE_IPV6_SUBNET: LazyLock<Ipv6Net> = LazyLock::new(|| {
     Ipv6Net::new(
         Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 1, 0, 0, 0, 0),
         VPC_SUBNET_IPV6_PREFIX_LENGTH,
@@ -123,11 +125,11 @@ pub static DNS_OPTE_IPV6_SUBNET: Lazy<Ipv6Net> = Lazy::new(|| {
 });
 
 /// The IPv4 subnet for Nexus OPTE ports.
-pub static NEXUS_OPTE_IPV4_SUBNET: Lazy<Ipv4Net> =
-    Lazy::new(|| Ipv4Net::new(Ipv4Addr::new(172, 30, 2, 0), 24).unwrap());
+pub static NEXUS_OPTE_IPV4_SUBNET: LazyLock<Ipv4Net> =
+    LazyLock::new(|| Ipv4Net::new(Ipv4Addr::new(172, 30, 2, 0), 24).unwrap());
 
 /// The IPv6 subnet for Nexus OPTE ports.
-pub static NEXUS_OPTE_IPV6_SUBNET: Lazy<Ipv6Net> = Lazy::new(|| {
+pub static NEXUS_OPTE_IPV6_SUBNET: LazyLock<Ipv6Net> = LazyLock::new(|| {
     Ipv6Net::new(
         Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 2, 0, 0, 0, 0),
         VPC_SUBNET_IPV6_PREFIX_LENGTH,
@@ -136,11 +138,11 @@ pub static NEXUS_OPTE_IPV6_SUBNET: Lazy<Ipv6Net> = Lazy::new(|| {
 });
 
 /// The IPv4 subnet for Boundary NTP OPTE ports.
-pub static NTP_OPTE_IPV4_SUBNET: Lazy<Ipv4Net> =
-    Lazy::new(|| Ipv4Net::new(Ipv4Addr::new(172, 30, 3, 0), 24).unwrap());
+pub static NTP_OPTE_IPV4_SUBNET: LazyLock<Ipv4Net> =
+    LazyLock::new(|| Ipv4Net::new(Ipv4Addr::new(172, 30, 3, 0), 24).unwrap());
 
 /// The IPv6 subnet for Boundary NTP OPTE ports.
-pub static NTP_OPTE_IPV6_SUBNET: Lazy<Ipv6Net> = Lazy::new(|| {
+pub static NTP_OPTE_IPV6_SUBNET: LazyLock<Ipv6Net> = LazyLock::new(|| {
     Ipv6Net::new(
         Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 3, 0, 0, 0, 0),
         VPC_SUBNET_IPV6_PREFIX_LENGTH,
@@ -839,7 +841,9 @@ mod test {
             "net": "ff12::3456/64"
         });
 
-        assert!(serde_json::from_value::<Ipv6Subnet<64>>(value.clone()).is_ok());
+        assert!(
+            serde_json::from_value::<Ipv6Subnet<64>>(value.clone()).is_ok()
+        );
         assert!(serde_json::from_value::<Ipv6Subnet<56>>(value).is_err());
     }
 }

@@ -7,12 +7,12 @@
 
 use clickhouse_admin_types::{ClickhouseKeeperClusterMembership, KeeperId};
 use nexus_types::deployment::{
-    Blueprint, BlueprintZoneFilter, BlueprintZoneType, BlueprintZonesConfig,
-    ClickhouseClusterConfig,
+    Blueprint, BlueprintZoneDisposition, BlueprintZoneType,
+    BlueprintZonesConfig, ClickhouseClusterConfig,
 };
 use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
-use slog::{error, Logger};
-use std::collections::{BTreeMap, BTreeSet};
+use slog::{Logger, error};
+use std::collections::BTreeSet;
 use thiserror::Error;
 
 // The set of clickhouse server and keeper zones that should be running as
@@ -26,17 +26,16 @@ pub struct ClickhouseZonesThatShouldBeRunning {
     pub servers: BTreeSet<OmicronZoneUuid>,
 }
 
-impl From<&BTreeMap<SledUuid, BlueprintZonesConfig>>
-    for ClickhouseZonesThatShouldBeRunning
-{
-    fn from(
-        zones_by_sled_id: &BTreeMap<SledUuid, BlueprintZonesConfig>,
-    ) -> Self {
+impl ClickhouseZonesThatShouldBeRunning {
+    pub fn new<'a, I>(zones_by_sled_id: I) -> Self
+    where
+        I: Iterator<Item = (SledUuid, &'a BlueprintZonesConfig)>,
+    {
         let mut keepers = BTreeSet::new();
         let mut servers = BTreeSet::new();
         for (_, bp_zone_config) in Blueprint::filtered_zones(
             zones_by_sled_id,
-            BlueprintZoneFilter::ShouldBeRunning,
+            BlueprintZoneDisposition::is_in_service,
         ) {
             match bp_zone_config.zone_type {
                 BlueprintZoneType::ClickhouseKeeper(_) => {
@@ -294,6 +293,7 @@ pub mod test {
     use clickhouse_admin_types::ServerId;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
+    use std::collections::BTreeMap;
 
     fn initial_config(
         n_keeper_zones: u64,
@@ -620,8 +620,7 @@ pub mod test {
 
     #[test]
     fn expunge_a_different_keeper_while_adding_keeper() {
-        static TEST_NAME: &str =
-            "clickhouse_allocator_expunge_a_different_keeper_while_adding_keeper";
+        static TEST_NAME: &str = "clickhouse_allocator_expunge_a_different_keeper_while_adding_keeper";
         let logctx = test_setup_log(TEST_NAME);
 
         let (n_keeper_zones, n_server_zones, n_keepers, n_servers) =

@@ -2,6 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::Responsiveness;
+use crate::SIM_ROT_BOARD;
+use crate::SIM_ROT_STAGE0_BOARD;
+use crate::SimulatedSp;
 use crate::config::Config;
 use crate::config::SidecarConfig;
 use crate::config::SimulatedSpsConfig;
@@ -14,21 +18,10 @@ use crate::server;
 use crate::server::SimSpHandler;
 use crate::server::UdpServer;
 use crate::update::SimSpUpdate;
-use crate::Responsiveness;
-use crate::SimulatedSp;
-use crate::SIM_ROT_BOARD;
-use crate::SIM_ROT_STAGE0_BOARD;
 use anyhow::Result;
 use async_trait::async_trait;
-use futures::future;
 use futures::Future;
-use gateway_messages::ignition;
-use gateway_messages::ignition::IgnitionError;
-use gateway_messages::ignition::LinkEvents;
-use gateway_messages::sp_impl::BoundsChecked;
-use gateway_messages::sp_impl::DeviceDescription;
-use gateway_messages::sp_impl::Sender;
-use gateway_messages::sp_impl::SpHandler;
+use futures::future;
 use gateway_messages::CfpaPage;
 use gateway_messages::ComponentAction;
 use gateway_messages::ComponentActionResponse;
@@ -49,20 +42,27 @@ use gateway_messages::SpError;
 use gateway_messages::SpPort;
 use gateway_messages::SpStateV2;
 use gateway_messages::StartupOptions;
+use gateway_messages::ignition;
+use gateway_messages::ignition::IgnitionError;
+use gateway_messages::ignition::LinkEvents;
+use gateway_messages::sp_impl::BoundsChecked;
+use gateway_messages::sp_impl::DeviceDescription;
+use gateway_messages::sp_impl::Sender;
+use gateway_messages::sp_impl::SpHandler;
 use gateway_types::component::SpState;
+use slog::Logger;
 use slog::debug;
 use slog::info;
 use slog::warn;
-use slog::Logger;
 use std::iter;
 use std::net::SocketAddrV6;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::select;
+use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
-use tokio::sync::Mutex as TokioMutex;
 use tokio::task;
 use tokio::task::JoinHandle;
 
@@ -167,22 +167,14 @@ impl Sidecar {
         let (commands, commands_rx) = mpsc::unbounded_channel();
 
         let (local_addrs, inner_task, handler, responses_sent_count) =
-            if let Some(bind_addrs) = sidecar.common.bind_addrs {
+            if let Some(network_config) = &sidecar.common.network_config {
                 // bind to our two local "KSZ" ports
-                assert_eq!(bind_addrs.len(), 2);
                 let servers = future::try_join(
-                    UdpServer::new(
-                        bind_addrs[0],
-                        sidecar.common.multicast_addr,
-                        &log,
-                    ),
-                    UdpServer::new(
-                        bind_addrs[1],
-                        sidecar.common.multicast_addr,
-                        &log,
-                    ),
+                    UdpServer::new(&network_config[0], &log),
+                    UdpServer::new(&network_config[1], &log),
                 )
                 .await?;
+
                 let servers = [servers.0, servers.1];
                 let local_addrs =
                     [servers[0].local_addr(), servers[1].local_addr()];

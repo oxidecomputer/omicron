@@ -6,11 +6,11 @@
 
 use anyhow::Error;
 use async_trait::async_trait;
+use futures::StreamExt;
 use futures::future::{FusedFuture, FutureExt, Shared};
 use futures::stream::FuturesUnordered;
-use futures::StreamExt;
 use omicron_common::backoff::{
-    retry_notify, retry_policy_internal_service, BackoffError,
+    BackoffError, retry_notify, retry_policy_internal_service,
 };
 use std::future::Future;
 use std::pin::Pin;

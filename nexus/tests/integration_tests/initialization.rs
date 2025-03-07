@@ -5,13 +5,13 @@
 use nexus_config::Database;
 use nexus_config::InternalDns;
 use nexus_test_interface::NexusServer;
-use nexus_test_utils::{load_test_config, ControlPlaneTestContextBuilder};
+use nexus_test_utils::{ControlPlaneTestContextBuilder, load_test_config};
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::internal::shared::SwitchLocation;
 use std::collections::HashMap;
+use tokio::time::Duration;
 use tokio::time::sleep;
 use tokio::time::timeout;
-use tokio::time::Duration;
 
 #[tokio::test]
 async fn test_nexus_boots_before_cockroach() {
@@ -209,9 +209,9 @@ async fn test_nexus_does_not_boot_without_valid_schema() {
     let s = nexus_db_model::SCHEMA_VERSION;
 
     let schemas_to_test = vec![
-        semver::Version::new(s.0.major + 1, s.0.minor, s.0.patch),
-        semver::Version::new(s.0.major, s.0.minor + 1, s.0.patch),
-        semver::Version::new(s.0.major, s.0.minor, s.0.patch + 1),
+        semver::Version::new(s.major + 1, s.minor, s.patch),
+        semver::Version::new(s.major, s.minor + 1, s.patch),
+        semver::Version::new(s.major, s.minor, s.patch + 1),
     ];
 
     for schema in schemas_to_test {
@@ -260,9 +260,9 @@ async fn test_nexus_does_not_boot_without_valid_schema() {
 async fn test_nexus_does_not_boot_until_schema_updated() {
     let good_schema = nexus_db_model::SCHEMA_VERSION;
     let bad_schema = semver::Version::new(
-        good_schema.0.major + 1,
-        good_schema.0.minor,
-        good_schema.0.patch,
+        good_schema.major + 1,
+        good_schema.minor,
+        good_schema.patch,
     );
 
     let mut config = load_test_config();

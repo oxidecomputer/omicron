@@ -13,12 +13,13 @@ use chrono::DateTime;
 use chrono::Utc;
 use daft::Diffable;
 use omicron_common::api::external::{
-    AllowedSourceIps as ExternalAllowedSourceIps, ByteCount, Digest, Error,
-    IdentityMetadata, InstanceState, Name, ObjectIdentity, RoleName,
-    SimpleIdentityOrName,
+    AffinityPolicy, AllowedSourceIps as ExternalAllowedSourceIps, ByteCount,
+    Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
+    ObjectIdentity, RoleName, SimpleIdentityOrName,
 };
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -110,6 +111,24 @@ impl SimpleIdentityOrName for SiloUtilization {
     fn name(&self) -> &Name {
         &self.silo_name
     }
+}
+
+// AFFINITY GROUPS
+
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AffinityGroup {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    pub policy: AffinityPolicy,
+    pub failure_domain: FailureDomain,
+}
+
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AntiAffinityGroup {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    pub policy: AffinityPolicy,
+    pub failure_domain: FailureDomain,
 }
 
 // IDENTITY PROVIDER
@@ -850,6 +869,7 @@ impl fmt::Display for PhysicalDiskPolicy {
     PartialEq,
     Eq,
     EnumIter,
+    Diffable,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum PhysicalDiskState {
@@ -1026,4 +1046,30 @@ pub struct AllowList {
 pub struct OxqlQueryResult {
     /// Tables resulting from the query, each containing timeseries.
     pub tables: Vec<oxql_types::Table>,
+}
+
+// UPDATE
+
+/// Source of a system software target release.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, JsonSchema, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TargetReleaseSource {
+    /// Unspecified or unknown source (probably MUPdate).
+    Unspecified,
+
+    /// The specified release of the rack's system software.
+    SystemVersion { version: Version },
+}
+
+/// View of a system software target release.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct TargetRelease {
+    /// The target-release generation number.
+    pub generation: i64,
+
+    /// The time it was set as the target release.
+    pub time_requested: DateTime<Utc>,
+
+    /// The source of the target release.
+    pub release_source: TargetReleaseSource,
 }

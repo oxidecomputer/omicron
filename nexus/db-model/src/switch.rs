@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::Generation;
-use crate::{schema::switch, SqlU32};
+use crate::{SqlU32, schema::switch};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_types::{external_api::shared, external_api::views, identity::Asset};
