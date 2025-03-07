@@ -20,6 +20,10 @@ PACKAGES=(
   "mg-ddm"
   "mgd"
 )
+CRATES=(
+  "mg-admin-client"
+  "ddm-admin-client"
+)
 REPO="oxidecomputer/maghemite"
 . "$SOURCE_DIR/update_helpers.sh"
 
@@ -83,13 +87,14 @@ function main {
     done
 
     if [[ -z "$TARGET_COMMIT" ]]; then
-	    TARGET_COMMIT=$(get_latest_commit_from_gh "$REPO" "$TARGET_BRANCH")
+        TARGET_COMMIT=$(get_latest_commit_from_gh "$REPO" "$TARGET_BRANCH")
     fi
     install_toml2json
     update_mgd "$TARGET_COMMIT" "$DRY_RUN"
     update_openapi "$TARGET_COMMIT" "$DRY_RUN" ddm
     update_openapi "$TARGET_COMMIT" "$DRY_RUN" mg
     do_update_packages "$TARGET_COMMIT" "$DRY_RUN" "$REPO" "${PACKAGES[@]}"
+    do_update_crates "$TARGET_COMMIT" "$DRY_RUN" "$REPO" "${CRATES[@]}"
 }
 
 main "$@"
