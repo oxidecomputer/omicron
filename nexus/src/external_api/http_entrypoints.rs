@@ -6407,7 +6407,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn target_release_get(
+    async fn target_release_view(
         rqctx: RequestContext<ApiContext>,
     ) -> Result<HttpResponseOk<views::TargetRelease>, HttpError> {
         let apictx = rqctx.context();
@@ -6431,7 +6431,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn target_release_set(
+    async fn target_release_update(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<params::SetTargetReleaseParams>,
     ) -> Result<HttpResponseCreated<views::TargetRelease>, HttpError> {
