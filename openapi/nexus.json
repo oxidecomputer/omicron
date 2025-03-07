@@ -11885,6 +11885,30 @@
           },
           {
             "in": "query",
+            "name": "delivered",
+            "schema": {
+              "nullable": true,
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "failed",
+            "schema": {
+              "nullable": true,
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pending",
+            "schema": {
+              "nullable": true,
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
             "name": "limit",
             "description": "Maximum number of items returned by a single call",
             "schema": {
@@ -11917,7 +11941,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WebhookDeliveryResultsPage"
+                  "$ref": "#/components/schemas/WebhookDeliveryAttemptResultsPage"
                 }
               }
             }
@@ -25133,14 +25157,15 @@
         ]
       },
       "WebhookDelivery": {
-        "description": "A delivery attempt for a webhook event.",
+        "description": "A delivery of a webhook event.",
         "type": "object",
         "properties": {
-          "attempt": {
-            "description": "Attempt number, starting at 1. If this is a retry of a previous failed delivery, this value indicates that.",
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
+          "attempts": {
+            "description": "Individual attempts to deliver this webhook event, and their outcomes.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookDeliveryAttempt"
+            }
           },
           "event_class": {
             "description": "The event class.",
@@ -25159,28 +25184,13 @@
             "type": "string",
             "format": "uuid"
           },
-          "response": {
-            "nullable": true,
-            "description": "Describes the response returned by the receiver endpoint.\n\nThis is present if the webhook has been delivered successfully, or if the endpoint returned an HTTP error (`state` is \"delivered\" or \"failed_http_error\"). This is `null` if the webhook has not yet been delivered, or if the endpoint was unreachable (`state` is \"pending\" or \"failed_unreachable\").",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/WebhookDeliveryResponse"
-              }
-            ]
-          },
           "state": {
-            "description": "The state of the delivery attempt.",
+            "description": "The state of this delivery.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/WebhookDeliveryState"
               }
             ]
-          },
-          "time_sent": {
-            "nullable": true,
-            "description": "The time at which the webhook delivery was attempted, or `null` if webhook delivery has not yet been attempted (`state` is \"pending\").",
-            "type": "string",
-            "format": "date-time"
           },
           "trigger": {
             "description": "Why this delivery was performed.",
@@ -25200,13 +25210,83 @@
           }
         },
         "required": [
-          "attempt",
+          "attempts",
           "event_class",
           "event_id",
           "id",
           "state",
           "trigger",
           "webhook_id"
+        ]
+      },
+      "WebhookDeliveryAttempt": {
+        "description": "An individual delivery attempt for a webhook event.\n\nThis represents a single HTTP request that was sent to the receiver, and its outcome.",
+        "type": "object",
+        "properties": {
+          "attempt": {
+            "description": "The attempt number.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "response": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WebhookDeliveryResponse"
+              }
+            ]
+          },
+          "result": {
+            "description": "The outcome of this delivery attempt: either the event was delivered successfully, or the request failed for one of several reasons.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WebhookDeliveryAttemptResult"
+              }
+            ]
+          },
+          "time_sent": {
+            "description": "The time at which the webhook delivery was attempted.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "attempt",
+          "result",
+          "time_sent"
+        ]
+      },
+      "WebhookDeliveryAttemptResult": {
+        "oneOf": [
+          {
+            "description": "The webhook event has been delivered successfully.",
+            "type": "string",
+            "enum": [
+              "succeeded"
+            ]
+          },
+          {
+            "description": "A webhook request was sent to the endpoint, and it returned a HTTP error status code indicating an error.",
+            "type": "string",
+            "enum": [
+              "failed_http_error"
+            ]
+          },
+          {
+            "description": "The webhook request could not be sent to the receiver endpoint.",
+            "type": "string",
+            "enum": [
+              "failed_unreachable"
+            ]
+          },
+          {
+            "description": "A connection to the receiver endpoint was successfully established, but no response was received within the delivery timeout.",
+            "type": "string",
+            "enum": [
+              "failed_timeout"
+            ]
+          }
         ]
       },
       "WebhookDeliveryId": {
@@ -25243,7 +25323,7 @@
           "status"
         ]
       },
-      "WebhookDeliveryResultsPage": {
+      "WebhookDeliveryAttemptResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -25268,7 +25348,7 @@
         "description": "The state of a webhook delivery attempt.",
         "oneOf": [
           {
-            "description": "The webhook event has not yet been delivered.",
+            "description": "The webhook event has not yet been delivered successfully.\n\nEither no delivery attempts have yet been performed, or the delivery has failed at least once but has retries remaining.",
             "type": "string",
             "enum": [
               "pending"
@@ -25282,24 +25362,10 @@
             ]
           },
           {
-            "description": "A webhook request was sent to the endpoint, and it returned a HTTP error status code indicating an error.",
+            "description": "The webhook delivery attempt has failed permanently and will not be retried again.",
             "type": "string",
             "enum": [
-              "failed_http_error"
-            ]
-          },
-          {
-            "description": "The webhook request could not be sent to the receiver endpoint.",
-            "type": "string",
-            "enum": [
-              "failed_unreachable"
-            ]
-          },
-          {
-            "description": "A connection to the receiver endpoint was successfully established, but no response was received within the delivery timeout.",
-            "type": "string",
-            "enum": [
-              "failed_timeout"
+              "failed"
             ]
           }
         ]

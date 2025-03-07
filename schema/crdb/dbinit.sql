@@ -5165,6 +5165,16 @@ CREATE TYPE IF NOT EXISTS omicron.public.webhook_delivery_trigger AS ENUM (
     'probe'
 );
 
+-- Describes the state of a webhook delivery
+CREATE TYPE IF NOT EXISTS omicron.public.webhook_delivery_state AS ENUM (
+    --  This delivery has not yet completed.
+    'pending',
+    -- This delivery has failed.
+    'failed',
+    --- This delivery has completed successfully.
+    'delivered'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
     -- UUID of this delivery.
     id UUID PRIMARY KEY,
@@ -5185,9 +5195,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
     -- If this is set, then this webhook message has either been delivered
     -- successfully, or is considered permanently failed.
     time_completed TIMESTAMPTZ,
-    -- If true, this webhook delivery has failed permanently and is eligible to
-    -- be resent.
-    failed_permanently BOOLEAN NOT NULL,
+
+    state omicron.public.webhook_delivery_state NOT NULL,
+
     -- Deliverator coordination bits
     deliverator_id UUID,
     time_delivery_started TIMESTAMPTZ,
@@ -5195,11 +5205,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
     CONSTRAINT attempts_is_non_negative CHECK (attempts >= 0),
     CONSTRAINT active_deliveries_have_started_timestamps CHECK (
         (deliverator_id IS NULL) OR (
-            (deliverator_id IS NOT NULL) AND (time_delivery_started IS NOT NULL)
+            deliverator_id IS NOT NULL AND time_delivery_started IS NOT NULL
         )
     ),
-    CONSTRAINT failed_permanently_only_if_completed CHECK (
-        (failed_permanently IS false) OR (failed_permanently AND (time_completed IS NOT NULL))
+    CONSTRAINT time_completed_iff_not_pending CHECK (
+        (state = 'pending' AND time_completed IS NULL) OR
+            (state != 'pending' AND time_completed IS NOT NULL)
     )
 );
 
@@ -5234,7 +5245,7 @@ ON omicron.public.webhook_delivery (
 ) WHERE
     time_completed IS NULL;
 
-CREATE TYPE IF NOT EXISTS omicron.public.webhook_delivery_result as ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.webhook_delivery_attempt_result as ENUM (
     -- The delivery attempt failed with an HTTP error.
     'failed_http_error',
     -- The delivery attempt failed because the receiver endpoint was
@@ -5257,7 +5268,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery_attempt (
     -- `omicron.public.webhook_rx`)
     rx_id UUID NOT NULL,
 
-    result omicron.public.webhook_delivery_result NOT NULL,
+    result omicron.public.webhook_delivery_attempt_result NOT NULL,
     -- A status code > 599 would be Very Surprising, so rather than using an
     -- INT4 to store a full unsigned 16-bit number in the database, we'll use a
     -- signed 16-bit integer with a check constraint that it's unsigned.

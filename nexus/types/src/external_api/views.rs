@@ -1242,6 +1242,11 @@ impl WebhookDeliveryAttemptResult {
             Self::FailedUnreachable => "failed_unreachable",
         }
     }
+
+    /// Returns `true` if this `WebhookDeliveryAttemptResult` represents a failure
+    pub fn is_failed(&self) -> bool {
+        *self != Self::Succeeded
+    }
 }
 
 impl fmt::Display for WebhookDeliveryAttemptResult {

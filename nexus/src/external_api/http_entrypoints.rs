@@ -7586,7 +7586,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         receiver: Query<params::WebhookReceiverSelector>,
         filter: Query<params::WebhookDeliveryStateFilter>,
-        pagparams: Query<PaginatedById>,
+        query: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<views::WebhookDelivery>>, HttpError>
     {
         let apictx = rqctx.context();
@@ -7596,10 +7596,20 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
-            Err(nexus
-                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
-                .await
-                .into())
+            let webhook_selector = receiver.into_inner();
+            let filter = filter.into_inner();
+            let query = query.into_inner();
+            let pagparams = data_page_params_for(&rqctx, &query)?;
+            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let deliveries = nexus
+                .webhook_receiver_delivery_list(&opctx, rx, filter, &pagparams)
+                .await?;
+
+            Ok(HttpResponseOk(ScanById::results_page(
+                &query,
+                deliveries,
+                &|_, d| d.id,
+            )?))
         };
         apictx
             .context

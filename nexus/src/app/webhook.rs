@@ -23,7 +23,8 @@ use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::SqlU8;
 use nexus_db_queries::db::model::WebhookDelivery;
 use nexus_db_queries::db::model::WebhookDeliveryAttempt;
-use nexus_db_queries::db::model::WebhookDeliveryResult;
+use nexus_db_queries::db::model::WebhookDeliveryAttemptResult;
+use nexus_db_queries::db::model::WebhookDeliveryState;
 use nexus_db_queries::db::model::WebhookDeliveryTrigger;
 use nexus_db_queries::db::model::WebhookEvent;
 use nexus_db_queries::db::model::WebhookEventClass;
@@ -145,16 +146,32 @@ impl super::Nexus {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<views::WebhookDelivery> {
         let (authz_rx,) = rx.lookup_for(authz::Action::ListChildren).await?;
+        let only_states = if filter.include_all() {
+            Vec::new()
+        } else {
+            let mut states = Vec::with_capacity(3);
+            if filter.include_failed() {
+                states.push(WebhookDeliveryState::Failed);
+            }
+            if filter.include_pending() {
+                states.push(WebhookDeliveryState::Pending);
+            }
+            if filter.include_delivered() {
+                states.push(WebhookDeliveryState::Delivered);
+            }
+            states
+        };
         let deliveries = self
             .datastore()
             .webhook_rx_delivery_list(
                 opctx,
                 &authz_rx.id(),
+                // No probes; they could have their own list endpoint later...
                 &[
                     WebhookDeliveryTrigger::Event,
                     WebhookDeliveryTrigger::Resend,
                 ],
-                filter,
+                only_states,
                 pagparams,
             )
             .await?
@@ -179,7 +196,7 @@ impl super::Nexus {
             datastore.webhook_rx_secret_list(opctx, &authz_rx).await?;
         let mut client =
             ReceiverClient::new(&self.webhook_delivery_client, secrets, &rx)?;
-        let delivery = WebhookDelivery::new_probe(&rx_id, &self.id);
+        let mut delivery = WebhookDelivery::new_probe(&rx_id, &self.id);
 
         const CLASS: WebhookEventClass = WebhookEventClass::Probe;
 
@@ -201,8 +218,16 @@ impl super::Nexus {
                 }
             };
 
+        // Update the delivery state based on the result of the probe attempt.
+        // Otherwise, it will still appear "pending", which is obviously wrong.
+        delivery.state = if attempt.result.is_failed() {
+            WebhookDeliveryState::Failed
+        } else {
+            WebhookDeliveryState::Delivered
+        };
+
         let resends_started = if params.resend
-            && attempt.result == WebhookDeliveryResult::Succeeded
+            && attempt.result == WebhookDeliveryAttemptResult::Succeeded
         {
             slog::debug!(
                 &opctx.log,
@@ -495,16 +520,19 @@ impl<'a> ReceiverClient<'a> {
                         "response_status" => ?status,
                         "response_duration" => ?duration,
                     );
-                    (WebhookDeliveryResult::FailedHttpError, Some(status))
+                    (
+                        WebhookDeliveryAttemptResult::FailedHttpError,
+                        Some(status),
+                    )
                 } else {
                     let result = if e.is_connect() {
-                        WebhookDeliveryResult::FailedUnreachable
+                        WebhookDeliveryAttemptResult::FailedUnreachable
                     } else if e.is_timeout() {
-                        WebhookDeliveryResult::FailedTimeout
+                        WebhookDeliveryAttemptResult::FailedTimeout
                     } else if e.is_redirect() {
-                        WebhookDeliveryResult::FailedHttpError
+                        WebhookDeliveryAttemptResult::FailedHttpError
                     } else {
-                        WebhookDeliveryResult::FailedUnreachable
+                        WebhookDeliveryAttemptResult::FailedUnreachable
                     };
                     slog::warn!(
                         &opctx.log,
@@ -531,7 +559,7 @@ impl<'a> ReceiverClient<'a> {
                         "response_status" => ?status,
                         "response_duration" => ?duration,
                     );
-                    (WebhookDeliveryResult::Succeeded, Some(status))
+                    (WebhookDeliveryAttemptResult::Succeeded, Some(status))
                 } else {
                     slog::warn!(
                         &opctx.log,
@@ -543,7 +571,10 @@ impl<'a> ReceiverClient<'a> {
                         "response_status" => ?status,
                         "response_duration" => ?duration,
                     );
-                    (WebhookDeliveryResult::FailedHttpError, Some(status))
+                    (
+                        WebhookDeliveryAttemptResult::FailedHttpError,
+                        Some(status),
+                    )
                 }
             }
         };

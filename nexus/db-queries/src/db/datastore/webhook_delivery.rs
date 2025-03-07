@@ -12,6 +12,8 @@ use crate::db::error::ErrorHandler;
 use crate::db::model::SqlU8;
 use crate::db::model::WebhookDelivery;
 use crate::db::model::WebhookDeliveryAttempt;
+use crate::db::model::WebhookDeliveryAttemptResult;
+use crate::db::model::WebhookDeliveryState;
 use crate::db::model::WebhookDeliveryTrigger;
 use crate::db::model::WebhookEvent;
 use crate::db::model::WebhookEventClass;
@@ -27,7 +29,6 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::TimeDelta;
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
-use nexus_types::external_api::params::WebhookDeliveryStateFilter;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -117,7 +118,9 @@ impl DataStore {
                         also_delivery.field(dsl::event_id).eq(event_dsl::id),
                     )
                     .filter(
-                        also_delivery.field(dsl::failed_permanently).eq(&false),
+                        also_delivery
+                            .field(dsl::state)
+                            .ne(WebhookDeliveryState::Failed),
                     )
                     .filter(
                         also_delivery
@@ -136,7 +139,7 @@ impl DataStore {
         opctx: &OpContext,
         rx_id: &WebhookReceiverUuid,
         triggers: &'static [WebhookDeliveryTrigger],
-        state_filter: WebhookDeliveryStateFilter,
+        only_states: Vec<WebhookDeliveryState>,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<(
         WebhookDelivery,
@@ -159,18 +162,8 @@ impl DataStore {
             .inner_join(
                 event_dsl::webhook_event.on(dsl::event_id.eq(event_dsl::id)),
             );
-        if !state_filter.include_failed() {
-            query = query.filter(dsl::failed_permanently.eq(false));
-        }
-        if !state_filter.include_pending() {
-            query = query.filter(dsl::time_completed.is_not_null());
-        }
-        if !state_filter.include_succeeded() {
-            // If successful deliveries are excluded
-            query =
-                query.filter(dsl::time_completed.is_null().or(
-                    dsl::failed_permanently.eq(state_filter.include_failed()),
-                ));
+        if !only_states.is_empty() {
+            query = query.filter(dsl::state.eq_any(only_states));
         }
 
         let deliveries = query
@@ -214,7 +207,12 @@ impl DataStore {
             // executed synchronously by the probe endpoint, rather than by the
             // webhook deliverator.
             .filter(dsl::trigger.ne(WebhookDeliveryTrigger::Probe))
-            .filter(dsl::time_completed.is_null())
+            // Only select deliveries that are still in progress.
+            .filter(
+                dsl::time_completed
+                    .is_null()
+                    .and(dsl::state.eq(WebhookDeliveryState::Pending)),
+            )
             .filter(dsl::rx_id.eq(rx_id.into_untyped_uuid()))
             .filter(
                 (dsl::deliverator_id.is_null()).or(dsl::time_delivery_started
@@ -266,7 +264,11 @@ impl DataStore {
             diesel::dsl::now.into_sql::<diesel::pg::sql_types::Timestamptz>();
         let id = delivery.id.into_untyped_uuid();
         let updated = diesel::update(dsl::webhook_delivery)
-            .filter(dsl::time_completed.is_null())
+            .filter(
+                dsl::time_completed
+                    .is_null()
+                    .and(dsl::state.eq(WebhookDeliveryState::Pending)),
+            )
             .filter(dsl::id.eq(id))
             .filter(
                 dsl::deliverator_id.is_null().or(dsl::time_delivery_started
@@ -333,19 +335,30 @@ impl DataStore {
 
         // Has the delivery either completed successfully or exhausted all of
         // its retry attempts?
-        let succeeded =
-            attempt.result == nexus_db_model::WebhookDeliveryResult::Succeeded;
-        let failed_permanently = !succeeded && *attempt.attempt >= MAX_ATTEMPTS;
-        let (completed, new_nexus_id) = if succeeded || failed_permanently {
-            // If the delivery has succeeded or failed permanently, set the
-            // "time_completed" timestamp to mark it as finished. Also, leave
-            // the delivering Nexus ID in place to maintain a record of who
-            // finished the delivery.
-            (Some(Utc::now()), Some(nexus_id.into_untyped_uuid()))
-        } else {
-            // Otherwise, "unlock" the delivery for other nexii.
-            (None, None)
-        };
+        let new_state =
+            if attempt.result == WebhookDeliveryAttemptResult::Succeeded {
+                // The delivery has completed successfully.
+                WebhookDeliveryState::Delivered
+            } else if *attempt.attempt >= MAX_ATTEMPTS {
+                // The delivery attempt failed, and we are out of retries. This
+                // delivery has failed permanently.
+                WebhookDeliveryState::Failed
+            } else {
+                // This delivery attempt failed, but we still have retries
+                // remaining, so the delivery remains pending.
+                WebhookDeliveryState::Pending
+            };
+        let (completed, new_nexus_id) =
+            if new_state != WebhookDeliveryState::Pending {
+                // If the delivery has succeeded or failed permanently, set the
+                // "time_completed" timestamp to mark it as finished. Also, leave
+                // the delivering Nexus ID in place to maintain a record of who
+                // finished the delivery.
+                (Some(Utc::now()), Some(nexus_id.into_untyped_uuid()))
+            } else {
+                // Otherwise, "unlock" the delivery for other nexii.
+                (None, None)
+            };
 
         let prev_attempts = SqlU8::new((*attempt.attempt) - 1);
         let UpdateAndQueryResult { status, found } =
@@ -354,14 +367,18 @@ impl DataStore {
                 .filter(dsl::deliverator_id.eq(nexus_id.into_untyped_uuid()))
                 .filter(dsl::attempts.eq(prev_attempts))
                 // Don't mark a delivery as completed if it's already completed!
-                .filter(dsl::time_completed.is_null())
+                .filter(
+                    dsl::time_completed
+                        .is_null()
+                        .and(dsl::state.eq(WebhookDeliveryState::Pending)),
+                )
                 .set((
+                    dsl::state.eq(new_state),
                     dsl::time_completed.eq(completed),
                     // XXX(eliza): hmm this might be racy; we should probably increment this
                     // in place and use it to determine the attempt number?
                     dsl::attempts.eq(attempt.attempt),
                     dsl::deliverator_id.eq(new_nexus_id),
-                    dsl::failed_permanently.eq(failed_permanently),
                 ))
                 .check_if_exists::<WebhookDelivery>(delivery.id)
                 .execute_and_check(&conn)
@@ -381,7 +398,9 @@ impl DataStore {
             )));
         }
 
-        if found.time_completed.is_some() {
+        if found.time_completed.is_some()
+            || found.state != WebhookDeliveryState::Pending
+        {
             return Err(Error::conflict(
                 "delivery was already marked as completed",
             ));
@@ -405,7 +424,6 @@ mod test {
     use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::expectorate_query_contents;
-    use dropshot::PaginationOrder;
     use nexus_types::external_api::params;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
@@ -497,41 +515,30 @@ mod test {
             "resending an event a second time should create a new delivery"
         );
 
-        todo!("ELIZA PUT THIS PART BACK");
-        // let mut all_deliveries = std::collections::HashSet::new();
-        // let mut paginator =
-        //     Paginator::new(crate::db::datastore::SQL_BATCH_SIZE);
-        // while let Some(p) = paginator.next() {
-        //     let deliveries = datastore
-        //         .webhook_rx_delivery_list_attempts(
-        //             &opctx,
-        //             &rx_id,
-        //             WebhookDeliveryTrigger::ALL,
-        //             std::iter::once(WebhookDeliveryState::Pending),
-        //             &p.current_pagparams(),
-        //         )
-        //         .await
-        //         .unwrap();
-        //     paginator = p.found_batch(&deliveries, &|(d, a, _): &(
-        //         WebhookDelivery,
-        //         Option<WebhookDeliveryAttempt>,
-        //         WebhookEventClass,
-        //     )| {
-        //         (
-        //             *d.id.as_untyped_uuid(),
-        //             a.as_ref()
-        //                 .map(|attempt| attempt.attempt)
-        //                 .unwrap_or(SqlU8::new(0)),
-        //         )
-        //     });
-        //     all_deliveries
-        //         .extend(deliveries.into_iter().map(|(d, _, _)| dbg!(d).id));
-        // }
+        let mut all_deliveries = std::collections::HashSet::new();
+        let mut paginator =
+            Paginator::new(crate::db::datastore::SQL_BATCH_SIZE);
+        while let Some(p) = paginator.next() {
+            let deliveries = datastore
+                .webhook_rx_delivery_list(
+                    &opctx,
+                    &rx_id,
+                    WebhookDeliveryTrigger::ALL,
+                    Vec::new(),
+                    &p.current_pagparams(),
+                )
+                .await
+                .unwrap();
+            paginator = p
+                .found_batch(&deliveries, &|(d, _, _)| *d.id.as_untyped_uuid());
+            all_deliveries
+                .extend(deliveries.into_iter().map(|(d, _, _)| dbg!(d).id));
+        }
 
-        // assert!(all_deliveries.contains(&dispatch1.id));
-        // assert!(!all_deliveries.contains(&dispatch2.id));
-        // assert!(all_deliveries.contains(&resend1.id));
-        // assert!(all_deliveries.contains(&resend2.id));
+        assert!(all_deliveries.contains(&dispatch1.id));
+        assert!(!all_deliveries.contains(&dispatch2.id));
+        assert!(all_deliveries.contains(&resend1.id));
+        assert!(all_deliveries.contains(&resend2.id));
 
         db.terminate().await;
         logctx.cleanup_successful();

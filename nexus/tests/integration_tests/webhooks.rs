@@ -15,7 +15,7 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::{params, shared, views};
+use nexus_types::external_api::{params, views};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::NameOrId;
 use omicron_uuid_kinds::GenericUuid;
@@ -889,7 +889,7 @@ async fn test_probe(cptestctx: &ControlPlaneTestContext) {
     dbg!(&probe3);
     mock.assert_async().await;
     assert_eq!(
-        probe3.probe.attempts[0].state,
+        probe3.probe.attempts[0].result,
         views::WebhookDeliveryAttemptResult::Succeeded
     );
     assert_eq!(probe3.probe.event_class, "probe");

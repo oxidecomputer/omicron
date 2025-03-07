@@ -7,6 +7,7 @@ use crate::schema::{webhook_delivery, webhook_delivery_attempt};
 use crate::serde_time_delta::optional_time_delta;
 use crate::typed_uuid::DbTypedUuid;
 use crate::SqlU8;
+use crate::WebhookDeliveryState;
 use crate::WebhookDeliveryTrigger;
 use crate::WebhookEvent;
 use crate::WebhookEventClass;
@@ -23,8 +24,8 @@ use serde::Serialize;
 
 impl_enum_type!(
     #[derive(SqlType, Debug, Clone)]
-    #[diesel(postgres_type(name = "webhook_delivery_result", schema = "public"))]
-    pub struct WebhookDeliveryResultEnum;
+    #[diesel(postgres_type(name = "webhook_delivery_attempt_result", schema = "public"))]
+    pub struct WebhookDeliveryAttemptResultEnum;
 
     #[derive(
         Copy,
@@ -37,8 +38,8 @@ impl_enum_type!(
         Deserialize,
         strum::VariantArray,
     )]
-    #[diesel(sql_type = WebhookDeliveryResultEnum)]
-    pub enum WebhookDeliveryResult;
+    #[diesel(sql_type = WebhookDeliveryAttemptResultEnum)]
+    pub enum WebhookDeliveryAttemptResult;
 
     FailedHttpError => b"failed_http_error"
     FailedUnreachable => b"failed_unreachable"
@@ -86,7 +87,7 @@ pub struct WebhookDelivery {
     /// or permanently failed.
     pub time_completed: Option<DateTime<Utc>>,
 
-    pub failed_permanently: bool,
+    pub state: WebhookDeliveryState,
 
     pub deliverator_id: Option<DbTypedUuid<OmicronZoneKind>>,
 
@@ -111,7 +112,7 @@ impl WebhookDelivery {
             time_completed: None,
             deliverator_id: None,
             time_delivery_started: None,
-            failed_permanently: false,
+            state: WebhookDeliveryState::Pending,
         }
     }
 
@@ -131,13 +132,13 @@ impl WebhookDelivery {
             .into(),
             rx_id: (*rx_id).into(),
             trigger: WebhookDeliveryTrigger::Probe,
+            state: WebhookDeliveryState::Pending,
             payload: serde_json::json!({}),
             attempts: SqlU8::new(0),
             time_created: Utc::now(),
             time_completed: None,
             deliverator_id: Some((*deliverator_id).into()),
             time_delivery_started: Some(Utc::now()),
-            failed_permanently: false,
         }
     }
 
@@ -151,19 +152,17 @@ impl WebhookDelivery {
             webhook_id: self.rx_id.into(),
             event_class: event_class.as_str().to_owned(),
             event_id: self.event_id.into(),
-            state: if self.failed_permanently {
-                views::WebhookDeliveryState::Failed
-            } else if self.time_completed.is_some() {
-                views::WebhookDeliveryState::Delivered
-            } else {
-                views::WebhookDeliveryState::Pending
-            },
+            state: self.state.into(),
             trigger: self.trigger.into(),
             attempts: attempts
                 .iter()
                 .map(views::WebhookDeliveryAttempt::from)
                 .collect(),
         };
+        // Make sure attempts are in order; each attempt entry also includes an
+        // attempt number, which should be used authoritatively to determine the
+        // ordering of attempts, but it seems nice to also sort the list,
+        // because we can...
         view.attempts.sort_by_key(|a| a.attempt);
         view
     }
@@ -192,7 +191,7 @@ pub struct WebhookDeliveryAttempt {
     /// `webhook_rx`).
     pub rx_id: DbTypedUuid<WebhookReceiverKind>,
 
-    pub result: WebhookDeliveryResult,
+    pub result: WebhookDeliveryAttemptResult,
 
     pub response_status: Option<i16>,
 
@@ -223,13 +222,25 @@ impl From<&'_ WebhookDeliveryAttempt> for views::WebhookDeliveryAttempt {
     }
 }
 
-impl From<WebhookDeliveryResult> for views::WebhookDeliveryAttemptResult {
-    fn from(result: WebhookDeliveryResult) -> Self {
+impl WebhookDeliveryAttemptResult {
+    pub fn is_failed(&self) -> bool {
+        views::WebhookDeliveryAttemptResult::from(*self).is_failed()
+    }
+}
+
+impl From<WebhookDeliveryAttemptResult>
+    for views::WebhookDeliveryAttemptResult
+{
+    fn from(result: WebhookDeliveryAttemptResult) -> Self {
         match result {
-            WebhookDeliveryResult::FailedHttpError => Self::FailedHttpError,
-            WebhookDeliveryResult::FailedTimeout => Self::FailedTimeout,
-            WebhookDeliveryResult::FailedUnreachable => Self::FailedUnreachable,
-            WebhookDeliveryResult::Succeeded => Self::Succeeded,
+            WebhookDeliveryAttemptResult::FailedHttpError => {
+                Self::FailedHttpError
+            }
+            WebhookDeliveryAttemptResult::FailedTimeout => Self::FailedTimeout,
+            WebhookDeliveryAttemptResult::FailedUnreachable => {
+                Self::FailedUnreachable
+            }
+            WebhookDeliveryAttemptResult::Succeeded => Self::Succeeded,
         }
     }
 }

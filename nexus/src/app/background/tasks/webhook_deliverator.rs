@@ -7,7 +7,7 @@ use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::webhook_delivery::DeliveryAttemptState;
 pub use nexus_db_queries::db::datastore::webhook_delivery::DeliveryConfig;
-use nexus_db_queries::db::model::WebhookDeliveryResult;
+use nexus_db_queries::db::model::WebhookDeliveryAttemptResult;
 use nexus_db_queries::db::model::WebhookReceiverConfig;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
@@ -296,7 +296,9 @@ impl WebhookDeliverator {
                     .insert(delivery_id, format!("{MSG}: {e}"));
             }
 
-            if delivery_attempt.result == WebhookDeliveryResult::Succeeded {
+            if delivery_attempt.result
+                == WebhookDeliveryAttemptResult::Succeeded
+            {
                 delivery_status.delivered_ok += 1;
             } else {
                 delivery_status.failed_deliveries.push(

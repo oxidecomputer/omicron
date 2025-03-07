@@ -2449,29 +2449,42 @@ pub struct WebhookDeliveryPath {
 pub struct WebhookDeliveryStateFilter {
     pub pending: Option<bool>,
     pub failed: Option<bool>,
-    pub succeeded: Option<bool>,
+    pub delivered: Option<bool>,
+}
+
+impl Default for WebhookDeliveryStateFilter {
+    fn default() -> Self {
+        Self::ALL
+    }
 }
 
 impl WebhookDeliveryStateFilter {
     pub const ALL: Self =
-        Self { pending: Some(true), failed: Some(true), succeeded: Some(true) };
+        Self { pending: Some(true), failed: Some(true), delivered: Some(true) };
 
     pub fn include_pending(&self) -> bool {
-        self.is_all_none() || self.pending == Some(true)
+        self.pending == Some(true) || self.is_all_none()
     }
 
     pub fn include_failed(&self) -> bool {
-        self.is_all_none() || self.failed == Some(true)
+        self.failed == Some(true) || self.is_all_none()
     }
 
-    pub fn include_succeeded(&self) -> bool {
-        self.is_all_none() || self.succeeded == Some(true)
+    pub fn include_delivered(&self) -> bool {
+        self.delivered == Some(true) || self.is_all_none()
+    }
+
+    pub fn include_all(&self) -> bool {
+        self.is_all_none()
+            || (self.pending == Some(true)
+                && self.failed == Some(true)
+                && self.delivered == Some(true))
     }
 
     fn is_all_none(&self) -> bool {
         self.pending.is_none()
             && self.failed.is_none()
-            && self.succeeded.is_none()
+            && self.delivered.is_none()
     }
 }
 

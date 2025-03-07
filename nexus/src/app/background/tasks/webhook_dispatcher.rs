@@ -466,41 +466,34 @@ mod test {
 
         // There should now be a delivery entry for the event we published.
         //
-        // Use `webhook_rx_delivery_list_attempts` rather than
+        // Use `webhook_rx_delivery_list` rather than
         // `webhook_rx_delivery_list_ready`, even though it's a bit more
         // complex due to requiring pagination. This is because the
         // webhook_deliverator background task may have activated and might
         // attempt to deliver the event, making it no longer show up in the
         // "ready" query.
-        todo!("ELIZA PUT THIS PART BACK");
-        // let mut paginator = Paginator::new(db::datastore::SQL_BATCH_SIZE);
-        // let mut deliveries = Vec::new();
-        // while let Some(p) = paginator.next() {
-        //     let batch = datastore
-        //         .webhook_rx_delivery_list_attempts(
-        //             &opctx,
-        //             &rx_id,
-        //             &[WebhookDeliveryTrigger::Event],
-        //             WebhookDeliveryState::ALL.iter().copied(),
-        //             &p.current_pagparams(),
-        //         )
-        //         .await
-        //         .unwrap();
-        //     paginator = p.found_batch(&batch, &|(delivery, attempt, _)| {
-        //         let id = delivery.id.into_untyped_uuid();
-        //         let attempt = attempt
-        //             .as_ref()
-        //             .map(|attempt| attempt.attempt)
-        //             .unwrap_or_else(|| 0.into());
-        //         (id, attempt)
-        //     });
-        //     deliveries.extend(batch);
-        // }
-        // let event =
-        //     deliveries.iter().find(|(d, _, _)| d.event_id == event_id.into());
-        // assert!(
-        //     dbg!(event).is_some(),
-        //     "delivery entry for dispatched event must exist"
-        // );
+        let mut paginator = Paginator::new(db::datastore::SQL_BATCH_SIZE);
+        let mut deliveries = Vec::new();
+        while let Some(p) = paginator.next() {
+            let batch = datastore
+                .webhook_rx_delivery_list(
+                    &opctx,
+                    &rx_id,
+                    &[WebhookDeliveryTrigger::Event],
+                    Vec::new(),
+                    &p.current_pagparams(),
+                )
+                .await
+                .unwrap();
+            paginator =
+                p.found_batch(&batch, &|(d, _, _)| d.id.into_untyped_uuid());
+            deliveries.extend(batch);
+        }
+        let event =
+            deliveries.iter().find(|(d, _, _)| d.event_id == event_id.into());
+        assert!(
+            dbg!(event).is_some(),
+            "delivery entry for dispatched event must exist"
+        );
     }
 }

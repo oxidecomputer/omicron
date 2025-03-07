@@ -1,4 +1,6 @@
-CREATE INDEX IF NOT EXISTS lookup_webhook_delivery_dispatched_to_rx
+CREATE UNIQUE INDEX IF NOT EXISTS one_webhook_event_dispatch_per_rx
 ON omicron.public.webhook_delivery (
-    rx_id, event_id
-);
+    event_id, rx_id
+)
+WHERE
+    trigger = 'event';

@@ -2255,7 +2255,7 @@ table! {
         attempts -> Int2,
         time_created -> Timestamptz,
         time_completed -> Nullable<Timestamptz>,
-        failed_permanently -> Bool,
+        state -> crate::WebhookDeliveryStateEnum,
         deliverator_id -> Nullable<Uuid>,
         time_delivery_started -> Nullable<Timestamptz>,
     }
@@ -2272,7 +2272,7 @@ table! {
         delivery_id -> Uuid,
         attempt -> Int2,
         rx_id -> Uuid,
-        result -> crate::WebhookDeliveryResultEnum,
+        result -> crate::WebhookDeliveryAttemptResultEnum,
         response_status -> Nullable<Int2>,
         response_duration -> Nullable<Interval>,
         time_created -> Timestamptz,

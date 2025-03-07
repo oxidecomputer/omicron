@@ -35,21 +35,23 @@ each receiver.
 * *Webhook message dispatching and delivery attempts*:
 ** *Dispatch table*:
 *** `up15.sql` creates the `omicron.public.webhook_delivery_trigger` enum, which tracks why a webhook delivery was initiated.
-*** `up16.sql` creates the table `omicron.public.webhook_delivery`, which tracks the webhook messages that have been dispatched to receivers.
-*** `up17.sql` creates the `one_webhook_event_dispatch_per_rx` unique index on `webhook_delivery`.
+
+*** `up16.sql` creates the `omicron.public.webhook_delivery_state` enum, representing the current state of a webhook delivery.
+*** `up17.sql` creates the table `omicron.public.webhook_delivery`, which tracks the webhook messages that have been dispatched to receivers.
+*** `up18.sql` creates the `one_webhook_event_dispatch_per_rx` unique index on `webhook_delivery`.
 +
 This index functions as a `UNIQUE` constraint on the tuple of `(event_id, rx_id)`, but ONLY for rows with `trigger = 'event'`. This ensures that concurrently-executing webhook dispatchers will not create multiple deliveries when dispatching a new event, but permits multiple re-deliveries of an event to be explicitly triggered.
-*** `up18.sql` creates an index `lookup_webhook_delivery_dispatched_to_rx` for looking up
+*** `up19.sql` creates an index `lookup_webhook_delivery_dispatched_to_rx` for looking up
 entries in `webhook_delivery` by receiver ID.
-*** `up19.sql` creates an index `lookup_webhook_deliveries_for_event` on `webhook_delivery` for looking up deliveries by event UUID.
-*** `up20.sql` creates an index `webhook_deliveries_in_flight` for looking up all currently in-flight webhook
+*** `up20.sql` creates an index `lookup_webhook_deliveries_for_event` on `webhook_delivery` for looking up deliveries by event UUID.
+*** `up21.sql` creates an index `webhook_deliveries_in_flight` for looking up all currently in-flight webhook
 deliveries (entries where the `time_completed` field has not been set).
 ** *Delivery attempts*:
-*** `up21.sql` creates the enum `omicron.public.webhook_delivery_result`,
+*** `up22.sql` creates the enum `omicron.public.webhook_delivery_attempt_result`,
 representing the potential outcomes of a webhook delivery attempt.
-*** `up22.sql` creates the table `omicron.public.webhook_delivery_attempt`,
+*** `up23.sql` creates the table `omicron.public.webhook_delivery_attempt`,
 which records each individual delivery attempt for a webhook delivery in the
 `webhook_delivery` table.
-*** `up23.sql` creates an index `lookup_attempts_for_webhook_delivery` on
+*** `up24.sql` creates an index `lookup_attempts_for_webhook_delivery` on
 `webhook_delivery_attempt`, for looking up the attempts for a given delivery ID.
-*** `up24.sql` creates an index `lookup_webhook_delivery_attempts_to_rx` on the `webhook_delivery_attempt` table, for looking up delivery attempts to a given receiver ID. This is primarily used for deleting delivery attempts when a receiver is deleted.
+*** `up25.sql` creates an index `lookup_webhook_delivery_attempts_to_rx` on the `webhook_delivery_attempt` table, for looking up delivery attempts to a given receiver ID. This is primarily used for deleting delivery attempts when a receiver is deleted.
