@@ -11,6 +11,7 @@ use anyhow::anyhow;
 use futures::StreamExt;
 use futures::stream;
 use nexus_db_queries::context::OpContext;
+use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use omicron_common::disk::DatasetsConfig;
 use omicron_uuid_kinds::GenericUuid;
@@ -22,7 +23,23 @@ use std::collections::BTreeMap;
 
 /// Idempotently ensures that the specified datasets are deployed to the
 /// corresponding sleds
-pub(crate) async fn deploy_datasets<'a, I>(
+pub(crate) async fn deploy_datasets(
+    opctx: &OpContext,
+    sleds_by_id: &BTreeMap<SledUuid, Sled>,
+    blueprint: &Blueprint,
+) -> Result<(), Vec<anyhow::Error>> {
+    deploy_datasets_impl(
+        opctx,
+        sleds_by_id,
+        blueprint
+            .sleds
+            .iter()
+            .map(|(sled_id, sled)| (*sled_id, &sled.datasets_config)),
+    )
+    .await
+}
+
+async fn deploy_datasets_impl<'a, I>(
     opctx: &OpContext,
     sleds_by_id: &BTreeMap<SledUuid, Sled>,
     sled_configs: I,
@@ -40,6 +57,14 @@ where
             let db_sled = match sleds_by_id.get(&sled_id) {
                 Some(sled) => sled,
                 None => {
+                    if config.are_all_datasets_expunged() {
+                        info!(
+                            log,
+                            "Skipping dataset deployment to expunged sled";
+                            "sled_id" => %sled_id
+                        );
+                        return None;
+                    }
                     let err = anyhow!("sled not found in db list: {}", sled_id);
                     warn!(log, "{err:#}");
                     return Some(err);
@@ -184,7 +209,7 @@ mod tests {
         let sled_configs = [(sim_sled_agent.id, &datasets_config)];
 
         // Give the simulated sled agent a configuration to deploy
-        deploy_datasets(&opctx, &sleds_by_id, sled_configs.into_iter())
+        deploy_datasets_impl(&opctx, &sleds_by_id, sled_configs.into_iter())
             .await
             .expect("Deploying datasets should have succeeded");
 

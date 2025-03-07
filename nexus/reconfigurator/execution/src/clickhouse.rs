@@ -22,7 +22,9 @@ use futures::future::Either;
 use futures::stream::FuturesUnordered;
 use futures::stream::StreamExt;
 use nexus_db_queries::context::OpContext;
+use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneConfig;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use omicron_common::address::CLICKHOUSE_ADMIN_PORT;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -38,7 +40,20 @@ use std::str::FromStr;
 
 const CLICKHOUSE_DATA_DIR: &str = "/data";
 
-pub(crate) async fn deploy_nodes<'a, I>(
+pub(crate) async fn deploy_nodes(
+    opctx: &OpContext,
+    blueprint: &Blueprint,
+    clickhouse_cluster_config: &ClickhouseClusterConfig,
+) -> Result<(), Vec<anyhow::Error>> {
+    deploy_nodes_impl(
+        opctx,
+        blueprint.all_omicron_zones(BlueprintZoneDisposition::any),
+        clickhouse_cluster_config,
+    )
+    .await
+}
+
+async fn deploy_nodes_impl<'a, I>(
     opctx: &OpContext,
     zones: I,
     clickhouse_cluster_config: &ClickhouseClusterConfig,
@@ -186,7 +201,20 @@ where
     Ok(())
 }
 
-pub(crate) async fn deploy_single_node<'a, I>(
+pub(crate) async fn deploy_single_node(
+    opctx: &OpContext,
+    blueprint: &Blueprint,
+) -> Result<(), anyhow::Error> {
+    deploy_single_node_impl(
+        opctx,
+        blueprint
+            .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            .filter(|(_, z)| z.zone_type.is_clickhouse()),
+    )
+    .await
+}
+
+async fn deploy_single_node_impl<'a, I>(
     opctx: &OpContext,
     mut zones: I,
 ) -> Result<(), anyhow::Error>
@@ -330,7 +358,6 @@ mod test {
     use clickhouse_admin_types::ServerId;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_types::deployment::BlueprintZoneConfig;
-    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::blueprint_zone_type;
