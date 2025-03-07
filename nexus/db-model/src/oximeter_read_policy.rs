@@ -5,8 +5,8 @@
 //! Database representation of an oximeter read policy
 
 use super::impl_enum_type;
-use crate::schema::oximeter_read_policy;
 use crate::SqlU32;
+use crate::schema::oximeter_read_policy;
 use chrono::{DateTime, Utc};
 use nexus_types::deployment;
 use serde::{Deserialize, Serialize};
