@@ -540,24 +540,24 @@ pub trait NexusInternalApi {
         policy: TypedBody<ClickhousePolicy>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-        /// Get the current oximeter read policy
-        #[endpoint {
+    /// Get the current oximeter read policy
+    #[endpoint {
             method = GET,
             path = "/oximeter-read/policy"
             }]
-           async fn oximeter_read_policy_get(
-               rqctx: RequestContext<Self::Context>,
-           ) -> Result<HttpResponseOk<OximeterReadPolicy>, HttpError>;
-       
-           /// Set the new oximeter read policy
-           #[endpoint {
+    async fn oximeter_read_policy_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<OximeterReadPolicy>, HttpError>;
+
+    /// Set the new oximeter read policy
+    #[endpoint {
                method = POST,
                path = "/oximeter-read/policy"
            }]
-           async fn oximeter_read_policy_set(
-               rqctx: RequestContext<Self::Context>,
-               policy: TypedBody<OximeterReadPolicy>,
-           ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+    async fn oximeter_read_policy_set(
+        rqctx: RequestContext<Self::Context>,
+        policy: TypedBody<OximeterReadPolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 }
 
 /// Path parameters for Sled Agent requests (internal API)

@@ -980,7 +980,10 @@ impl NexusInternalApi for NexusInternalApiImpl {
             let nexus = &apictx.nexus;
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
-            match nexus.datastore().oximeter_read_policy_get_latest(&opctx).await?
+            match nexus
+                .datastore()
+                .oximeter_read_policy_get_latest(&opctx)
+                .await?
             {
                 Some(policy) => Ok(HttpResponseOk(policy)),
                 None => Err(HttpError::for_not_found(
@@ -1017,5 +1020,5 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
-    }    
+    }
 }

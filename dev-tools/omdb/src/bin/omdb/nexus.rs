@@ -601,7 +601,8 @@ impl NexusArgs {
                 }
                 OximeterReadPolicyCommands::Set(args) => {
                     let token = omdb.check_allow_destructive()?;
-                    cmd_nexus_oximeter_read_policy_set(&client, args, token).await
+                    cmd_nexus_oximeter_read_policy_set(&client, args, token)
+                        .await
                 }
             },
 
