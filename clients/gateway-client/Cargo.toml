@@ -10,6 +10,7 @@ workspace = true
 [dependencies]
 base64.workspace = true
 chrono.workspace = true
+daft.workspace = true
 gateway-messages.workspace = true
 progenitor.workspace = true
 rand.workspace = true

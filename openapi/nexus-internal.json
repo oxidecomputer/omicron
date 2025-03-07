@@ -1546,6 +1546,25 @@
           }
         ]
       },
+      "ArtifactHashId": {
+        "description": "A hash-based identifier for an artifact.\n\nSome places, e.g. the installinator, request artifacts by hash rather than by name and version. This type indicates that.",
+        "type": "object",
+        "properties": {
+          "hash": {
+            "description": "The hash of the artifact.",
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "kind": {
+            "description": "The kind of artifact this is.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hash",
+          "kind"
+        ]
+      },
       "BackgroundTask": {
         "description": "Background tasks\n\nThese are currently only intended for observability by developers.  We will eventually want to flesh this out into something more observable for end users.",
         "type": "object",
@@ -1627,6 +1646,24 @@
           "part",
           "revision",
           "serial"
+        ]
+      },
+      "BaseboardId": {
+        "description": "A unique baseboard id found during a collection\n\nBaseboard ids are the keys used to link up information from disparate sources (like a service processor and a sled agent).\n\nThese are normalized in the database.  Each distinct baseboard id is assigned a uuid and shared across the many possible collections that reference it.\n\nUsually, the part number and serial number are combined with a revision number.  We do not include that here.  If we ever did find a baseboard with the same part number and serial number but a new revision number, we'd want to treat that as the same baseboard as one with a different revision number.",
+        "type": "object",
+        "properties": {
+          "part_number": {
+            "description": "Oxide Part Number",
+            "type": "string"
+          },
+          "serial_number": {
+            "description": "Serial number (unique for a given part number)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "part_number",
+          "serial_number"
         ]
       },
       "BfdMode": {
@@ -1917,6 +1954,13 @@
               }
             ]
           },
+          "pending_mgs_updates": {
+            "description": "List of pending MGS-mediated updates",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PendingMgsUpdate"
+            }
+          },
           "sleds": {
             "description": "A map of sled id -> desired configuration of the sled.",
             "type": "object",
@@ -1938,6 +1982,7 @@
           "external_dns_version",
           "id",
           "internal_dns_version",
+          "pending_mgs_updates",
           "sleds",
           "time_created"
         ]
@@ -4645,6 +4690,47 @@
           "collector_id"
         ]
       },
+      "PendingMgsUpdate": {
+        "type": "object",
+        "properties": {
+          "artifact_hash_id": {
+            "description": "which artifact to apply to this device (implies which component is being updated)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ArtifactHashId"
+              }
+            ]
+          },
+          "baseboard_id": {
+            "description": "id of the baseboard that we're going to update",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BaseboardId"
+              }
+            ]
+          },
+          "slot_id": {
+            "description": "last known MGS slot (cubby number) of the baseboard",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "sp_type": {
+            "description": "what type of baseboard this is",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpType"
+              }
+            ]
+          }
+        },
+        "required": [
+          "artifact_hash_id",
+          "baseboard_id",
+          "slot_id",
+          "sp_type"
+        ]
+      },
       "PhysicalDiskKind": {
         "description": "Describes the form factor of physical disks.",
         "type": "string",
@@ -5764,6 +5850,15 @@
           "first_port",
           "ip",
           "last_port"
+        ]
+      },
+      "SpType": {
+        "description": "SpType\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"sled\", \"power\", \"switch\" ] } ``` </details>",
+        "type": "string",
+        "enum": [
+          "sled",
+          "power",
+          "switch"
         ]
       },
       "Srv": {
