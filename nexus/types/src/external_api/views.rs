@@ -19,6 +19,7 @@ use omicron_common::api::external::{
 };
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -1045,4 +1046,30 @@ pub struct AllowList {
 pub struct OxqlQueryResult {
     /// Tables resulting from the query, each containing timeseries.
     pub tables: Vec<oxql_types::Table>,
+}
+
+// UPDATE
+
+/// Source of a system software target release.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, JsonSchema, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TargetReleaseSource {
+    /// Unspecified or unknown source (probably MUPdate).
+    Unspecified,
+
+    /// The specified release of the rack's system software.
+    SystemVersion { version: Version },
+}
+
+/// View of a system software target release.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct TargetRelease {
+    /// The target-release generation number.
+    pub generation: i64,
+
+    /// The time it was set as the target release.
+    pub time_requested: DateTime<Utc>,
+
+    /// The source of the target release.
+    pub release_source: TargetReleaseSource,
 }
