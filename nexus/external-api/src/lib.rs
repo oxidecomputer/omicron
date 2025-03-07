@@ -2899,7 +2899,7 @@ pub trait NexusExternalApi {
         path = "/v1/system/update/target-release",
         tags = ["hidden"], // "system/update"
     }]
-    async fn target_release_get(
+    async fn target_release_view(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<views::TargetRelease>, HttpError>;
 
@@ -2913,7 +2913,7 @@ pub trait NexusExternalApi {
         path = "/v1/system/update/target-release",
         tags = ["hidden"], // "system/update"
     }]
-    async fn target_release_set(
+    async fn target_release_update(
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<params::SetTargetReleaseParams>,
     ) -> Result<HttpResponseCreated<views::TargetRelease>, HttpError>;
