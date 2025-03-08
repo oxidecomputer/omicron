@@ -14,6 +14,7 @@ use camino_tempfile::tempfile_in;
 use futures::FutureExt;
 use futures::StreamExt;
 use futures::future::BoxFuture;
+use futures::stream::FuturesUnordered;
 use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
 use nexus_db_queries::authz;
@@ -661,6 +662,35 @@ impl BundleCollection<'_> {
                         );
                     }
                 }
+
+                // Collect all of the log files on this sled
+                let log_index = sled_client.support_logs().await?.into_inner();
+                let mut log_futs: FuturesUnordered<_> = log_index
+                    .logs()
+                    .iter()
+                    .flat_map(|(zone, services)| {
+                        services.iter().flat_map(|(service, logs)| {
+                            logs.iter().map(|log| {
+                                save_log_file(
+                                    &sled_client,
+                                    log,
+                                    &sled_path,
+                                    zone,
+                                    service,
+                                )
+                            })
+                        })
+                    })
+                    .collect();
+
+                while let Some(result) = log_futs.next().await {
+                    if let Err(e) = result {
+                        error!(
+                            &self.log,
+                            "failed to write log file output: {e}"
+                        );
+                    }
+                }
             }
         }
 
@@ -770,6 +800,44 @@ async fn sha2_hash(file: &mut tokio::fs::File) -> anyhow::Result<ArtifactHash> {
 
     let digest = ctx.finalize();
     Ok(ArtifactHash(digest.as_slice().try_into()?))
+}
+
+/// For a given zone and service, save it's log into a support bundle path.
+async fn save_log_file(
+    client: &sled_agent_client::Client,
+    log: &Utf8Path,
+    path: &Utf8Path,
+    zone: &str,
+    service: &str,
+) -> anyhow::Result<()> {
+    // Grab the stream of log file contents
+    let byte_stream =
+        client.support_logs_download(log.as_str()).await?.into_inner();
+
+    // Create the output directory and output file on disk
+    let output_file = log
+        .file_name()
+        .ok_or(anyhow::anyhow!("Could not determine filename for {log}"))?;
+    let output_dir = path.join(format!("{zone}/{service}"));
+    tokio::fs::create_dir_all(&output_dir)
+        .await
+        .with_context(|| format!("failed to create output dir {output_dir}"))?;
+    let output = output_dir.join(output_file);
+    let mut file = tokio::fs::File::create(&output)
+        .await
+        .with_context(|| format!("failed to create {output}"))?;
+
+    // Stream the log file contents into the support bundle log file on disk
+    //
+    // TODO MTZ: is there a better way to do this?
+    // tokio::io::copy wants std::io::Error rather than reqwest::Error
+    let stream = byte_stream
+        .into_inner()
+        .map(|chunk| chunk.map_err(|e| std::io::Error::other(e.to_string())));
+    let mut reader = tokio_util::io::StreamReader::new(stream);
+    let _nbytes = tokio::io::copy(&mut reader, &mut file).await?;
+
+    Ok(())
 }
 
 /// Run a `sled-dianostics` future and save its output to a corresponding file.
