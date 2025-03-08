@@ -2441,7 +2441,7 @@ pub struct WebhookSecretSelector {
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct WebhookDeliveryPath {
+pub struct WebhookEventSelector {
     pub event_id: Uuid,
 }
 

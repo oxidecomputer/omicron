@@ -7620,7 +7620,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn webhook_delivery_resend(
         rqctx: RequestContext<Self::Context>,
-        _path_params: Path<params::WebhookDeliveryPath>,
+        _path_params: Path<params::WebhookEventSelector>,
         _receiver: Query<params::WebhookReceiverSelector>,
     ) -> Result<HttpResponseCreated<views::WebhookDeliveryId>, HttpError> {
         let apictx = rqctx.context();

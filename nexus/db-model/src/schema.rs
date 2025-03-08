@@ -2228,7 +2228,8 @@ allow_tables_to_appear_in_same_query!(
     webhook_receiver,
     webhook_secret,
     webhook_rx_subscription,
-    webhook_rx_event_glob
+    webhook_rx_event_glob,
+    webhook_event,
 );
 joinable!(webhook_rx_subscription -> webhook_receiver (rx_id));
 joinable!(webhook_secret -> webhook_receiver (rx_id));

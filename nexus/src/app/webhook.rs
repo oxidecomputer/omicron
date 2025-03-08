@@ -74,6 +74,16 @@ impl super::Nexus {
         }
     }
 
+    pub fn webhook_event_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        params::WebhookEventSelector { event_id }: params::WebhookEventSelector,
+    ) -> LookupResult<lookup::WebhookEvent<'a>> {
+        let event = LookupPath::new(opctx, &self.db_datastore)
+            .webhook_event_id(WebhookEventUuid::from_untyped_uuid(event_id));
+        Ok(event)
+    }
+
     pub async fn webhook_receiver_list(
         &self,
         opctx: &OpContext,

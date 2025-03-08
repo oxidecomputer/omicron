@@ -30,6 +30,7 @@ use crate::db::pagination::paginated_multicolumn;
 use crate::db::pool::DbConnection;
 use crate::db::schema::webhook_delivery::dsl as delivery_dsl;
 use crate::db::schema::webhook_delivery_attempt::dsl as delivery_attempt_dsl;
+use crate::db::schema::webhook_event::dsl as event_dsl;
 use crate::db::schema::webhook_receiver::dsl as rx_dsl;
 use crate::db::schema::webhook_rx_event_glob::dsl as glob_dsl;
 use crate::db::schema::webhook_rx_subscription::dsl as subscription_dsl;
@@ -309,6 +310,30 @@ impl DataStore {
     //
     // Subscriptions
     //
+
+    pub async fn webhook_rx_is_subscribed_to_event(
+        &self,
+        opctx: &OpContext,
+        authz_rx: &authz::WebhookReceiver,
+        authz_event: &authz::WebhookEvent,
+    ) -> Result<bool, Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let event_class = event_dsl::webhook_event
+            .filter(event_dsl::id.eq(authz_event.id().into_untyped_uuid()))
+            .select(event_dsl::event_class)
+            .single_value();
+        subscription_dsl::webhook_rx_subscription
+            .filter(
+                subscription_dsl::rx_id.eq(authz_rx.id().into_untyped_uuid()),
+            )
+            .filter(subscription_dsl::event_class.nullable().eq(event_class))
+            .select(subscription_dsl::rx_id)
+            .first_async::<Uuid>(&*conn)
+            .await
+            .optional()
+            .map(|x| x.is_some())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
 
     pub async fn webhook_rx_subscription_add(
         &self,
@@ -798,11 +823,55 @@ fn async_insert_error_to_txn(
 #[cfg(test)]
 mod test {
     use super::*;
-
+    use crate::authz;
     use crate::db::explain::ExplainableAsync;
+    use crate::db::lookup::LookupPath;
     use crate::db::pub_test_utils::TestDatabase;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::WebhookEventUuid;
+
+    async fn create_receiver(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        name: &str,
+        events: Vec<String>,
+    ) -> WebhookReceiverConfig {
+        datastore
+            .webhook_rx_create(
+                opctx,
+                params::WebhookCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: name.parse().unwrap(),
+                        description: "it'sa  webhook".to_string(),
+                    },
+                    endpoint: format!("http://{name}").parse().unwrap(),
+                    secrets: vec![name.to_string()],
+                    events,
+                },
+            )
+            .await
+            .expect("cant create ye webhook receiver!!!!")
+    }
+
+    async fn create_event(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        event_class: WebhookEventClass,
+    ) -> (authz::WebhookEvent, crate::db::model::WebhookEvent) {
+        let id = WebhookEventUuid::new_v4();
+        datastore
+            .webhook_event_create(opctx, id, event_class, serde_json::json!({}))
+            .await
+            .expect("cant create ye event");
+        LookupPath::new(opctx, datastore)
+            .webhook_event_id(id)
+            .fetch()
+            .await
+            .expect(
+            "cant get ye event (i just created it, so this is extra weird?)",
+        )
+    }
 
     #[tokio::test]
     async fn test_event_class_globs() {
@@ -810,7 +879,7 @@ mod test {
         let logctx = dev::test_setup_log("test_event_class_globs");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
-        let mut all_rxs = Vec::new();
+        let mut all_rxs: Vec<WebhookReceiverConfig> = Vec::new();
         async fn create_rx(
             datastore: &DataStore,
             opctx: &OpContext,
@@ -818,21 +887,13 @@ mod test {
             name: &str,
             subscription: &str,
         ) -> WebhookReceiverConfig {
-            let rx = datastore
-                .webhook_rx_create(
-                    opctx,
-                    params::WebhookCreate {
-                        identity: IdentityMetadataCreateParams {
-                            name: name.parse().unwrap(),
-                            description: String::new(),
-                        },
-                        endpoint: format!("http://{name}").parse().unwrap(),
-                        secrets: vec![name.to_string()],
-                        events: vec![subscription.to_string()],
-                    },
-                )
-                .await
-                .unwrap();
+            let rx = create_receiver(
+                datastore,
+                opctx,
+                name,
+                vec![subscription.to_string()],
+            )
+            .await;
             all_rxs.push(rx.clone());
             rx
         }
@@ -1000,6 +1061,57 @@ mod test {
             .await
             .expect("Failed to explain query - is it valid SQL?");
         println!("{explanation}");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_rx_is_subscribed_to_event() {
+        // Test setup
+        let logctx = dev::test_setup_log("test_rx_is_subscribed_to_event");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let rx = create_receiver(
+            datastore,
+            opctx,
+            "webhooked-on-phonics",
+            vec!["test.*.bar".to_string()],
+        )
+        .await;
+
+        let (authz_rx, _) = LookupPath::new(opctx, datastore)
+            .webhook_receiver_id(rx.rx.id())
+            .fetch()
+            .await
+            .expect("cant get ye receiver");
+
+        let (authz_foo, _) =
+            create_event(datastore, opctx, WebhookEventClass::TestFoo).await;
+        let (authz_foo_bar, _) =
+            create_event(datastore, opctx, WebhookEventClass::TestFooBar).await;
+        let (authz_quux_bar, _) =
+            create_event(datastore, opctx, WebhookEventClass::TestQuuxBar)
+                .await;
+
+        let is_subscribed_foo = datastore
+            .webhook_rx_is_subscribed_to_event(opctx, &authz_rx, &authz_foo)
+            .await;
+        assert_eq!(is_subscribed_foo, Ok(false));
+
+        let is_subscribed_foo_bar = datastore
+            .webhook_rx_is_subscribed_to_event(opctx, &authz_rx, &authz_foo_bar)
+            .await;
+        assert_eq!(is_subscribed_foo_bar, Ok(true));
+
+        let is_subscribed_quux_bar = datastore
+            .webhook_rx_is_subscribed_to_event(
+                opctx,
+                &authz_rx,
+                &authz_quux_bar,
+            )
+            .await;
+        assert_eq!(is_subscribed_quux_bar, Ok(true));
 
         db.terminate().await;
         logctx.cleanup_successful();

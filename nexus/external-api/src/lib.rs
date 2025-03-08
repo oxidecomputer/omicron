@@ -3626,7 +3626,7 @@ pub trait NexusExternalApi {
     }]
     async fn webhook_delivery_resend(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::WebhookDeliveryPath>,
+        path_params: Path<params::WebhookEventSelector>,
         receiver: Query<params::WebhookReceiverSelector>,
     ) -> Result<HttpResponseCreated<views::WebhookDeliveryId>, HttpError>;
 }
