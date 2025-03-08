@@ -434,7 +434,7 @@ iana-time-zone = "0.1.61"
 indent_write = "2.2.0"
 indexmap = "2.7.1"
 indicatif = { version = "0.17.11", features = ["rayon"] }
-indoc = "2.0.5"
+indoc = "2.0.6"
 installinator = { path = "installinator" }
 installinator-api = { path = "installinator-api" }
 installinator-client = { path = "clients/installinator-client" }
