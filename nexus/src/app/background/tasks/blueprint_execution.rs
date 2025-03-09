@@ -247,6 +247,7 @@ mod test {
         let blueprint = Blueprint {
             id,
             sleds: blueprint_sleds,
+            pending_mgs_updates: BTreeMap::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: Some(current_target.target_id),

@@ -739,7 +739,7 @@ dependencies = [
  "bitflags 2.6.0",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.12.1",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -3467,6 +3467,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "daft",
  "gateway-messages",
  "omicron-workspace-hack",
  "progenitor 0.9.1",
@@ -7505,6 +7506,7 @@ dependencies = [
  "crossterm",
  "crypto-common",
  "curve25519-dalek",
+ "daft",
  "digest",
  "dof",
  "dropshot 0.12.0",
@@ -7538,6 +7540,7 @@ dependencies = [
  "indexmap 2.7.1",
  "indicatif",
  "inout",
+ "ipnetwork",
  "itertools 0.10.5",
  "itertools 0.12.1",
  "lalrpop-util",
@@ -12543,7 +12546,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#d2387032714f66e31b7e255d89f9bf6eb9b3a010"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#bbadc279786d8da5376f61067b42738e2ad6342e"
 dependencies = [
  "anyhow",
  "camino",
@@ -12564,8 +12567,9 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#d2387032714f66e31b7e255d89f9bf6eb9b3a010"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#bbadc279786d8da5376f61067b42738e2ad6342e"
 dependencies = [
+ "daft",
  "parse-display",
  "proptest",
  "schemars",
@@ -12579,7 +12583,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#d2387032714f66e31b7e255d89f9bf6eb9b3a010"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#bbadc279786d8da5376f61067b42738e2ad6342e"
 dependencies = [
  "semver 1.0.25",
  "serde",
@@ -12590,7 +12594,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#d2387032714f66e31b7e255d89f9bf6eb9b3a010"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#bbadc279786d8da5376f61067b42738e2ad6342e"
 dependencies = [
  "anyhow",
  "async-trait",
