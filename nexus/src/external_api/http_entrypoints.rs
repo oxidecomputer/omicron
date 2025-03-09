@@ -7620,8 +7620,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn webhook_delivery_resend(
         rqctx: RequestContext<Self::Context>,
-        _path_params: Path<params::WebhookEventSelector>,
-        _receiver: Query<params::WebhookReceiverSelector>,
+        path_params: Path<params::WebhookEventSelector>,
+        receiver: Query<params::WebhookReceiverSelector>,
     ) -> Result<HttpResponseCreated<views::WebhookDeliveryId>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -7630,10 +7630,16 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
-            Err(nexus
-                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
-                .await
-                .into())
+            let event_selector = path_params.into_inner();
+            let webhook_selector = receiver.into_inner();
+            let event = nexus.webhook_event_lookup(&opctx, event_selector)?;
+            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            let delivery_id =
+                nexus.webhook_receiver_event_resend(&opctx, rx, event).await?;
+
+            Ok(HttpResponseCreated(views::WebhookDeliveryId {
+                delivery_id: delivery_id.into_untyped_uuid(),
+            }))
         };
         apictx
             .context

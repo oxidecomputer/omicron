@@ -30,6 +30,7 @@ type ControlPlaneTestContext =
 
 const RECEIVERS_BASE_PATH: &str = "/v1/webhooks/receivers";
 const SECRETS_BASE_PATH: &str = "/v1/webhooks/secrets";
+const DELIVERIES_BASE_PATH: &str = "/v1/webhooks/deliveries";
 
 async fn webhook_create(
     ctx: &ControlPlaneTestContext,
@@ -94,6 +95,56 @@ async fn webhook_secrets_get(
     .unwrap()
     .parsed_body()
     .unwrap()
+}
+
+fn resend_url(
+    webhook_name_or_id: impl Into<NameOrId>,
+    event_id: WebhookEventUuid,
+) -> String {
+    let rx = webhook_name_or_id.into();
+    format!("{DELIVERIES_BASE_PATH}/{event_id}/resend?receiver={rx}")
+}
+async fn webhook_delivery_resend(
+    client: &ClientTestContext,
+    webhook_name_or_id: impl Into<NameOrId>,
+    event_id: WebhookEventUuid,
+) -> views::WebhookDeliveryId {
+    let req = RequestBuilder::new(
+        client,
+        http::Method::POST,
+        &resend_url(webhook_name_or_id, event_id),
+    )
+    .body::<serde_json::Value>(None)
+    .expect_status(Some(http::StatusCode::CREATED));
+    NexusRequest::new(req)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap()
+}
+
+async fn webhook_delivery_resend_error(
+    client: &ClientTestContext,
+    webhook_name_or_id: impl Into<NameOrId>,
+    event_id: WebhookEventUuid,
+    status: http::StatusCode,
+) -> dropshot::HttpErrorResponseBody {
+    let req = RequestBuilder::new(
+        client,
+        http::Method::POST,
+        &resend_url(webhook_name_or_id, event_id),
+    )
+    .body::<serde_json::Value>(None)
+    .expect_status(Some(status));
+    NexusRequest::new(req)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap()
 }
 
 fn my_great_webhook_params(
@@ -1053,4 +1104,133 @@ async fn test_probe_resends_failed_deliveries(
         activate_background_task(internal_client, "webhook_deliverator").await
     );
     mock.assert_calls_async(2).await;
+}
+
+#[nexus_test]
+async fn test_api_resends_failed_deliveries(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let nexus = cptestctx.server.server_context().nexus.clone();
+    let internal_client = &cptestctx.internal_client;
+    let client = &cptestctx.external_client;
+    let server = httpmock::MockServer::start_async().await;
+
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Create a webhook receiver.
+    let webhook =
+        webhook_create(&cptestctx, &my_great_webhook_params(&server)).await;
+    dbg!(&webhook);
+
+    let event1_id = WebhookEventUuid::new_v4();
+    let event2_id = WebhookEventUuid::new_v4();
+    let body = serde_json::json!({
+        "event_class": "test.foo",
+        "event_id": event1_id,
+        "data": {
+            "hello_world": true,
+        }
+    })
+    .to_string();
+    let mock = {
+        let webhook = webhook.clone();
+        let body = body.clone();
+        server
+            .mock_async(move |when, then| {
+                when.method(POST)
+                    .header("x-oxide-event-class", "test.foo")
+                    .header("x-oxide-event-id", event1_id.to_string())
+                    .and(is_valid_for_webhook(&webhook))
+                    .is_true(signature_verifies(
+                        webhook.secrets[0].id,
+                        MY_COOL_SECRET.as_bytes().to_vec(),
+                    ))
+                    .json_body_includes(body);
+                then.status(500);
+            })
+            .await
+    };
+
+    // Publish an event
+    let event1 = nexus
+        .webhook_event_publish(
+            &opctx,
+            event1_id,
+            WebhookEventClass::TestFoo,
+            serde_json::json!({"hello_world": true}),
+        )
+        .await
+        .expect("event should be published successfully");
+    dbg!(event1);
+
+    // Publish another event that our receiver is not subscribed to.
+    let event2 = nexus
+        .webhook_event_publish(
+            &opctx,
+            event2_id,
+            WebhookEventClass::TestQuuxBar,
+            serde_json::json!({"hello_world": true}),
+        )
+        .await
+        .expect("event should be published successfully");
+    dbg!(event2);
+
+    dbg!(activate_background_task(internal_client, "webhook_dispatcher").await);
+    dbg!(
+        activate_background_task(internal_client, "webhook_deliverator").await
+    );
+
+    tokio::time::sleep(std::time::Duration::from_secs(11)).await;
+    dbg!(
+        activate_background_task(internal_client, "webhook_deliverator").await
+    );
+    tokio::time::sleep(std::time::Duration::from_secs(22)).await;
+    dbg!(
+        activate_background_task(internal_client, "webhook_deliverator").await
+    );
+
+    mock.assert_calls_async(3).await;
+    mock.delete_async().await;
+
+    let mock = {
+        let webhook = webhook.clone();
+        let body = body.clone();
+        server
+            .mock_async(move |when, then| {
+                when.method(POST)
+                    .header("x-oxide-event-class", "test.foo")
+                    .header("x-oxide-event-id", event1_id.to_string())
+                    .and(is_valid_for_webhook(&webhook))
+                    .is_true(signature_verifies(
+                        webhook.secrets[0].id,
+                        MY_COOL_SECRET.as_bytes().to_vec(),
+                    ))
+                    .json_body_includes(body);
+                then.status(200);
+            })
+            .await
+    };
+
+    // Try to resend event 1.
+    let delivery =
+        webhook_delivery_resend(client, webhook.identity.id, event1_id).await;
+    dbg!(delivery);
+
+    // Try to resend event 2. This should fail, as the receiver is not
+    // subscribed to this event class.
+    let error = webhook_delivery_resend_error(
+        client,
+        webhook.identity.id,
+        event2_id,
+        http::StatusCode::BAD_REQUEST,
+    )
+    .await;
+    dbg!(error);
+
+    dbg!(
+        activate_background_task(internal_client, "webhook_deliverator").await
+    );
+    mock.assert_calls_async(1).await;
 }

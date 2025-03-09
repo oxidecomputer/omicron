@@ -123,6 +123,62 @@ impl super::Nexus {
         self.datastore().webhook_rx_create(&opctx, params).await
     }
 
+    pub async fn webhook_receiver_event_resend(
+        &self,
+        opctx: &OpContext,
+        rx: lookup::WebhookReceiver<'_>,
+        event: lookup::WebhookEvent<'_>,
+    ) -> CreateResult<WebhookDeliveryUuid> {
+        let (authz_rx,) = rx.lookup_for(authz::Action::CreateChild).await?;
+        let (authz_event, event) = event.fetch().await?;
+        let datastore = self.datastore();
+
+        let is_subscribed = datastore
+            .webhook_rx_is_subscribed_to_event(opctx, &authz_rx, &authz_event)
+            .await?;
+        if !is_subscribed {
+            return Err(Error::invalid_request(format!(
+                "cannot resend event: receiver is not subscribed to the '{}' \
+                 event class",
+                event.event_class,
+            )));
+        }
+
+        let delivery = WebhookDelivery::new(
+            &event,
+            &authz_rx.id(),
+            WebhookDeliveryTrigger::Resend,
+        );
+        let delivery_id = delivery.id.into();
+
+        if let Err(e) =
+            datastore.webhook_delivery_create_batch(opctx, vec![delivery]).await
+        {
+            slog::error!(
+                &opctx.log,
+                "failed to create new delivery to resend webhook event";
+                "rx_id" => ?authz_rx.id(),
+                "event_id" => ?authz_event.id(),
+                "event_class" => %event.event_class,
+                "delivery_id" => ?delivery_id,
+                "error" => %e,
+            );
+            return Err(e);
+        }
+
+        slog::info!(
+            &opctx.log,
+            "resending webhook event";
+            "rx_id" => ?authz_rx.id(),
+            "event_id" => ?authz_event.id(),
+            "event_class" => %event.event_class,
+            "delivery_id" => ?delivery_id,
+        );
+
+        self.background_tasks.task_webhook_deliverator.activate();
+        Ok(delivery_id)
+    }
+
     pub async fn webhook_event_publish(
         &self,
         opctx: &OpContext,
