@@ -140,17 +140,20 @@ pub async fn activate_background_task(
                         panic!("completed, then never completed?!");
                     }
 
-                    (LastResult::Completed(a), LastResult::Completed(b)) => {
-                        if a.iteration < b.iteration {
+                    (
+                        LastResult::Completed(last),
+                        LastResult::Completed(current),
+                    ) => {
+                        if last.iteration < current.iteration {
                             Ok(task)
-                        } else if a.iteration == b.iteration {
+                        } else if last.iteration == current.iteration {
                             // task hasn't started yet
                             Err(CondCheckError::<()>::NotYet)
                         } else {
-                            // a.iteration > b.iteration
+                            // last.iteration > current.iteration
                             panic!(
                                 "last iteration {}, current iteration {}",
-                                a.iteration, b.iteration,
+                                last.iteration, current.iteration,
                             );
                         }
                     }
