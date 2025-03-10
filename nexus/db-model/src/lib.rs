@@ -63,6 +63,7 @@ mod rendezvous_debug_dataset;
 mod semver_version;
 mod switch_interface;
 mod switch_port;
+mod target_release;
 mod v2p_mapping;
 mod vmm_state;
 // These actually represent subqueries, not real table.
@@ -211,6 +212,7 @@ pub use support_bundle::*;
 pub use switch::*;
 pub use switch_interface::*;
 pub use switch_port::*;
+pub use target_release::*;
 pub use tuf_repo::*;
 pub use typed_uuid::to_db_typed_uuid;
 pub use upstairs_repair::*;
