@@ -184,90 +184,142 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_rx: &authz::WebhookReceiver,
+        db_rx: &WebhookReceiver,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Delete, authz_rx).await?;
-        let conn = self.pool_connection_authorized(opctx).await?;
         let rx_id = authz_rx.id().into_untyped_uuid();
-        // First, mark the webhook receiver record as deleted.
-        diesel::update(rx_dsl::webhook_receiver)
-            .filter(rx_dsl::id.eq(rx_id))
-            .filter(rx_dsl::time_deleted.is_null())
-            .set((
-                rx_dsl::time_deleted.eq(chrono::Utc::now()),
-                rx_dsl::rcgen.eq(rx_dsl::rcgen + 1),
-            ))
-            .execute_async(&*conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-                    .internal_context("failed to mark receiver as deleted")
-            })?;
 
-        // Now, delete the webhook's secrets.
-        let secrets_deleted = diesel::delete(secret_dsl::webhook_secret)
-            .filter(secret_dsl::rx_id.eq(rx_id))
-            .execute_async(&*conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-                    .internal_context("failed to delete secrets")
-            })?;
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.transaction_retry_wrapper("webhook_rx_delete").transaction(
+            &conn,
+            |conn| {
+                let err = err.clone();
+                async move {
+                    let now = chrono::Utc::now();
+                    // Delete the webhook's secrets.
+                    let secrets_deleted =
+                        diesel::delete(secret_dsl::webhook_secret)
+                            .filter(secret_dsl::rx_id.eq(rx_id))
+                            .execute_async(&conn)
+                            .await
+                            .map_err(|e| {
+                                err.bail_retryable_or_else(e, |e| {
+                                    public_error_from_diesel(
+                                        e,
+                                        ErrorHandler::Server,
+                                    )
+                                    .internal_context(
+                                        "failed to delete secrets",
+                                    )
+                                })
+                            })?;
 
-        // Delete subscriptions and globs.
-        let exact_subscriptions_deleted =
-            diesel::delete(subscription_dsl::webhook_rx_subscription)
-                .filter(subscription_dsl::rx_id.eq(rx_id))
-                .execute_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                        .internal_context(
-                            "failed to delete exact subscriptions",
-                        )
-                })?;
+                    // Delete subscriptions and globs.
+                    let exact_subscriptions_deleted = diesel::delete(
+                        subscription_dsl::webhook_rx_subscription,
+                    )
+                    .filter(subscription_dsl::rx_id.eq(rx_id))
+                    .execute_async(&conn)
+                    .await
+                    .map_err(|e| {
+                        err.bail_retryable_or_else(e, |e| {
+                            public_error_from_diesel(e, ErrorHandler::Server)
+                                .internal_context(
+                                    "failed to delete exact subscriptions",
+                                )
+                        })
+                    })?;
 
-        let globs_deleted = diesel::delete(glob_dsl::webhook_rx_event_glob)
-            .filter(glob_dsl::rx_id.eq(rx_id))
-            .execute_async(&*conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-                    .internal_context("failed to delete globs")
-            })?;
+                    let globs_deleted =
+                        diesel::delete(glob_dsl::webhook_rx_event_glob)
+                            .filter(glob_dsl::rx_id.eq(rx_id))
+                            .execute_async(&conn)
+                            .await
+                            .map_err(|e| {
+                                err.bail_retryable_or_else(e, |e| {
+                                    public_error_from_diesel(
+                                        e,
+                                        ErrorHandler::Server,
+                                    )
+                                    .internal_context("failed to delete globs")
+                                })
+                            })?;
 
-        let deliveries_deleted = diesel::delete(delivery_dsl::webhook_delivery)
-            .filter(delivery_dsl::rx_id.eq(rx_id))
-            .execute_async(&*conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-                    .internal_context("failed to delete delivery records")
-            })?;
+                    let deliveries_deleted =
+                        diesel::delete(delivery_dsl::webhook_delivery)
+                            .filter(delivery_dsl::rx_id.eq(rx_id))
+                            .execute_async(&conn)
+                            .await
+                            .map_err(|e| {
+                                err.bail_retryable_or_else(e, |e| {
+                                    public_error_from_diesel(
+                                        e,
+                                        ErrorHandler::Server,
+                                    )
+                                    .internal_context(
+                                        "failed to delete delivery records",
+                                    )
+                                })
+                            })?;
 
-        let delivery_attempts_deleted =
-            diesel::delete(delivery_attempt_dsl::webhook_delivery_attempt)
-                .filter(delivery_attempt_dsl::rx_id.eq(rx_id))
-                .execute_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                        .internal_context(
-                            "failed to delete delivery attempt records",
-                        )
-                })?;
+                    let delivery_attempts_deleted = diesel::delete(
+                        delivery_attempt_dsl::webhook_delivery_attempt,
+                    )
+                    .filter(delivery_attempt_dsl::rx_id.eq(rx_id))
+                    .execute_async(&conn)
+                    .await
+                    .map_err(|e| {
+                        err.bail_retryable_or_else(e, |e| {
+                            public_error_from_diesel(e, ErrorHandler::Server)
+                                .internal_context(
+                                    "failed to delete delivery attempt records",
+                                )
+                        })
+                    })?;
+                    // Finally, mark the webhook receiver record as deleted,
+                    // provided that none of its children were modified in the interim.
+                    let deleted = diesel::update(rx_dsl::webhook_receiver)
+                        .filter(rx_dsl::id.eq(rx_id))
+                        .filter(rx_dsl::time_deleted.is_null())
+                        .filter(rx_dsl::rcgen.eq(db_rx.rcgen))
+                        .set(rx_dsl::time_deleted.eq(now))
+                        .execute_async(&conn)
+                        .await
+                        .map_err(|e| err.bail_retryable_or_else(e, |e| {
+                            public_error_from_diesel(e, ErrorHandler::Server)
+                                .internal_context(
+                                    "failed to mark receiver as deleted",
+                                )
+                        }))?;
+                    if deleted == 0 {
+                        return Err(err.bail(Error::conflict(
+                            "deletion failed due to concurrent modification",
+                        )));
+                    }
 
-        slog::debug!(
-            &opctx.log,
-            "deleted webhook receiver";
-            "rx_id" => %rx_id,
-            "secrets_deleted" => ?secrets_deleted,
-            "exact_subscriptions_deleted" => ?exact_subscriptions_deleted,
-            "globs_deleted" => ?globs_deleted,
-            "deliveries_deleted" => ?deliveries_deleted,
-            "delivery_attempts_deleted" => ?delivery_attempts_deleted,
-        );
+                    slog::info!(
+                        &opctx.log,
+                        "deleted webhook receiver";
+                        "rx_id" => %rx_id,
+                        "rx_name" => %db_rx.identity.name,
+                        "secrets_deleted" => ?secrets_deleted,
+                        "exact_subscriptions_deleted" => ?exact_subscriptions_deleted,
+                        "globs_deleted" => ?globs_deleted,
+                        "deliveries_deleted" => ?deliveries_deleted,
+                        "delivery_attempts_deleted" => ?delivery_attempts_deleted,
+                    );
 
-        Ok(())
+                    Ok(())
+                }
+            },
+        ).await
+        .map_err(|e| {
+            if let Some(err) = err.take() {
+                return err;
+            }
+            public_error_from_diesel(e, ErrorHandler::Server)
+        })
     }
 
     pub async fn webhook_rx_list(

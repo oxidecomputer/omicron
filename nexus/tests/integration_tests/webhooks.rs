@@ -278,7 +278,7 @@ async fn test_webhook_receiver_get(cptestctx: &ControlPlaneTestContext) {
         webhook_create(&cptestctx, &my_great_webhook_params(&server)).await;
     dbg!(&created_webhook);
 
-    // Fetch the receiver by name.
+    // Fetch the receiver by ID.
     let by_id_url = get_webhooks_url(created_webhook.identity.id);
     let webhook_view = webhook_get(client, &by_id_url).await;
     assert_eq!(created_webhook, webhook_view);
@@ -289,6 +289,33 @@ async fn test_webhook_receiver_get(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(created_webhook, webhook_view);
 }
 
+#[nexus_test]
+async fn test_webhook_receiver_create_delete(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let server = httpmock::MockServer::start_async().await;
+
+    // Create a webhook receiver.
+    let created_webhook =
+        webhook_create(&cptestctx, &my_great_webhook_params(&server)).await;
+    dbg!(&created_webhook);
+
+    resource_helpers::object_delete(
+        client,
+        &format!("{RECEIVERS_BASE_PATH}/{}", created_webhook.identity.name),
+    )
+    .await;
+
+    // It should be gone now.
+    resource_helpers::object_delete_error(
+        client,
+        &format!("{RECEIVERS_BASE_PATH}/{}", created_webhook.identity.name),
+        http::StatusCode::NOT_FOUND,
+    )
+    .await;
+}
 #[nexus_test]
 async fn test_webhook_receiver_names_are_unique(
     cptestctx: &ControlPlaneTestContext,

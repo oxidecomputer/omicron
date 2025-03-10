@@ -7450,8 +7450,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
             let webhook_selector = path_params.into_inner();
             let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
-            let (authz_rx,) = rx.lookup_for(authz::Action::Delete).await?;
-            nexus.datastore().webhook_rx_delete(&opctx, &authz_rx).await?;
+            nexus.webhook_receiver_delete(&opctx, rx).await?;
 
             Ok(HttpResponseDeleted())
         };

@@ -36,6 +36,7 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
+use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
@@ -121,6 +122,15 @@ impl super::Nexus {
         // TODO(eliza): validate endpoint URI; reject underlay network IPs for
         // SSRF prevention...
         self.datastore().webhook_rx_create(&opctx, params).await
+    }
+
+    pub async fn webhook_receiver_delete(
+        &self,
+        opctx: &OpContext,
+        rx: lookup::WebhookReceiver<'_>,
+    ) -> DeleteResult {
+        let (authz_rx, db_rx) = rx.fetch_for(authz::Action::Delete).await?;
+        self.datastore().webhook_rx_delete(&opctx, &authz_rx, &db_rx).await
     }
 
     pub async fn webhook_receiver_event_resend(
