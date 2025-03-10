@@ -104,6 +104,7 @@ use id_map::{IdMap, IdMappable};
 
 use crate::inventory::BaseboardId;
 pub use blueprint_diff::BlueprintDiffSummary;
+use blueprint_display::BpPendingMgsUpdates;
 use gateway_client::types::SpType;
 use omicron_common::update::ArtifactHashId;
 
@@ -481,9 +482,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
         let Blueprint {
             id,
             sleds,
-            // TODO Will need to print these when we can actually create
-            // blueprints with pending MGS updates.
-            pending_mgs_updates: _,
+            pending_mgs_updates,
             parent_blueprint_id,
             // These two cockroachdb_* fields are handled by
             // `make_cockroachdb_table()`, called below.
@@ -556,6 +555,38 @@ impl fmt::Display for BlueprintDisplay<'_> {
 
         writeln!(f, "{}", self.make_cockroachdb_table())?;
         writeln!(f, "{}", self.make_metadata_table())?;
+
+        writeln!(
+            f,
+            " PENDING MGS-MANAGED UPDATES: {}",
+            pending_mgs_updates.len()
+        )?;
+        if !pending_mgs_updates.is_empty() {
+            writeln!(
+                f,
+                "{}",
+                BpTable::new(
+                    BpPendingMgsUpdates {},
+                    BpGeneration::NotApplicable,
+                    pending_mgs_updates
+                        .values()
+                        .map(|pu| {
+                            BpTableRow::from_strings(
+                                BpDiffState::Unchanged,
+                                vec![
+                                    pu.sp_type.to_string(),
+                                    pu.slot_id.to_string(),
+                                    pu.baseboard_id.part_number.clone(),
+                                    pu.baseboard_id.serial_number.clone(),
+                                    pu.artifact_hash_id.kind.to_string(),
+                                    pu.artifact_hash_id.hash.to_string(),
+                                ],
+                            )
+                        })
+                        .collect()
+                )
+            )?;
+        }
 
         Ok(())
     }
