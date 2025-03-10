@@ -31,12 +31,12 @@ use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use dropshot::WhichPage;
-use dropshot::{http_response_found, http_response_see_other};
 use dropshot::{ApiDescription, StreamingBody};
 use dropshot::{HttpResponseAccepted, HttpResponseFound, HttpResponseSeeOther};
 use dropshot::{HttpResponseCreated, HttpResponseHeaders};
 use dropshot::{WebsocketChannelResult, WebsocketConnection};
-use http::{header, Response, StatusCode};
+use dropshot::{http_response_found, http_response_see_other};
+use http::{Response, StatusCode, header};
 use ipnetwork::IpNetwork;
 use nexus_db_queries::authn::external::session_cookie::{self, SessionStore};
 use nexus_db_queries::authz;
@@ -53,20 +53,6 @@ use nexus_types::{
         shared::{BfdStatus, ProbeInfo},
     },
 };
-use omicron_common::api::external::http_pagination::data_page_params_for;
-use omicron_common::api::external::http_pagination::id_pagination;
-use omicron_common::api::external::http_pagination::marker_for_id;
-use omicron_common::api::external::http_pagination::marker_for_name;
-use omicron_common::api::external::http_pagination::marker_for_name_or_id;
-use omicron_common::api::external::http_pagination::name_or_id_pagination;
-use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::external::http_pagination::PaginatedById;
-use omicron_common::api::external::http_pagination::PaginatedByName;
-use omicron_common::api::external::http_pagination::PaginatedByNameOrId;
-use omicron_common::api::external::http_pagination::ScanById;
-use omicron_common::api::external::http_pagination::ScanByName;
-use omicron_common::api::external::http_pagination::ScanByNameOrId;
-use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::AddressLot;
 use omicron_common::api::external::AddressLotBlock;
 use omicron_common::api::external::AddressLotCreateResponse;
@@ -99,14 +85,28 @@ use omicron_common::api::external::TufRepoGetResponse;
 use omicron_common::api::external::TufRepoInsertResponse;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
+use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::external::http_pagination::PaginatedById;
+use omicron_common::api::external::http_pagination::PaginatedByName;
+use omicron_common::api::external::http_pagination::PaginatedByNameOrId;
+use omicron_common::api::external::http_pagination::ScanById;
+use omicron_common::api::external::http_pagination::ScanByName;
+use omicron_common::api::external::http_pagination::ScanByNameOrId;
+use omicron_common::api::external::http_pagination::ScanParams;
+use omicron_common::api::external::http_pagination::data_page_params_for;
+use omicron_common::api::external::http_pagination::id_pagination;
+use omicron_common::api::external::http_pagination::marker_for_id;
+use omicron_common::api::external::http_pagination::marker_for_name;
+use omicron_common::api::external::http_pagination::marker_for_name_or_id;
+use omicron_common::api::external::http_pagination::name_or_id_pagination;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
+use propolis_client::support::WebSocketStream;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::{
     CloseFrame, Role as WebSocketRole,
 };
-use propolis_client::support::WebSocketStream;
 use range_requests::RequestContextEx;
 use ref_cast::RefCast;
 
@@ -6407,6 +6407,72 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn target_release_view(
+        rqctx: RequestContext<ApiContext>,
+    ) -> Result<HttpResponseOk<views::TargetRelease>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let target_release =
+                nexus.datastore().target_release_get_current(&opctx).await?;
+            Ok(HttpResponseOk(
+                nexus
+                    .datastore()
+                    .target_release_view(&opctx, &target_release)
+                    .await?,
+            ))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn target_release_update(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<params::SetTargetReleaseParams>,
+    ) -> Result<HttpResponseCreated<views::TargetRelease>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let params = body.into_inner();
+            let system_version = params.system_version;
+            let tuf_repo_id = nexus
+                .datastore()
+                .update_tuf_repo_get(&opctx, system_version.into())
+                .await?
+                .repo
+                .id;
+            let current_target_release =
+                nexus.datastore().target_release_get_current(&opctx).await?;
+            let next_target_release =
+                nexus_db_model::TargetRelease::new_system_version(
+                    &current_target_release,
+                    tuf_repo_id,
+                );
+            let target_release = nexus
+                .datastore()
+                .target_release_insert(&opctx, next_target_release)
+                .await?;
+            Ok(HttpResponseCreated(
+                nexus
+                    .datastore()
+                    .target_release_view(&opctx, &target_release)
+                    .await?,
+            ))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     // Silo users
 
     async fn user_list(
@@ -7524,7 +7590,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                             "error": "invalid_request",
                             "error_description": error,
                         }),
-                    )
+                    );
                 }
             };
 

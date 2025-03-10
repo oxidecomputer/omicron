@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use hkdf::Hkdf;
 use secrecy::{ExposeSecret, Secret};
 use sha3::Sha3_256;
-use slog::{o, warn, Logger};
+use slog::{Logger, o, warn};
 use tokio::sync::{mpsc, oneshot};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 

@@ -79,7 +79,6 @@ pub trait DatastoreDetachManyTarget<ResourceType>:
         // Treat the collection and resource as boxed tables.
         CollectionTable<ResourceType, Self>: BoxableTable,
         ResourceTable<ResourceType, Self>: BoxableTable,
-
         // Allows treating "collection_exists_query" as a boxed "dyn QueryFragment<Pg>".
         QueryFromClause<CollectionTable<ResourceType, Self>>:
             QueryFragment<Pg> + Send,
@@ -88,14 +87,12 @@ pub trait DatastoreDetachManyTarget<ResourceType>:
         QueryFromClause<ResourceTable<ResourceType, Self>>:
             QueryFragment<Pg> + Send,
         QuerySqlType<ResourceTable<ResourceType, Self>>: Send,
-
         // Allows calling ".filter()" on the boxed collection table.
         BoxedQuery<CollectionTable<ResourceType, Self>>: FilterBy<Eq<CollectionPrimaryKey<ResourceType, Self>, Self::Id>>
             + FilterBy<IsNull<Self::CollectionTimeDeletedColumn>>,
         // Allows calling ".filter()" on the boxed resource table.
         BoxedQuery<ResourceTable<ResourceType, Self>>: FilterBy<Eq<Self::ResourceCollectionIdColumn, Self::Id>>
             + FilterBy<IsNull<Self::ResourceTimeDeletedColumn>>,
-
         // Allows calling "update.into_boxed()"
         UpdateStatement<
             CollectionTable<ResourceType, Self>,
@@ -107,7 +104,6 @@ pub trait DatastoreDetachManyTarget<ResourceType>:
             ResourceTableDefaultWhereClause<ResourceType, Self>,
             VR,
         >: BoxableUpdateStatement<ResourceTable<ResourceType, Self>, VR>,
-
         // Allows calling
         // ".filter(collection_table().primary_key().eq(collection_id)" on the
         // boxed update statement.
@@ -126,7 +122,6 @@ pub trait DatastoreDetachManyTarget<ResourceType>:
             VR,
         >: FilterBy<Eq<Self::ResourceCollectionIdColumn, Self::Id>>
             + FilterBy<IsNull<Self::ResourceTimeDeletedColumn>>,
-
         // Allows using "id" in expressions (e.g. ".eq(...)") with...
         Self::Id: AsExpression<
                 // ... The Collection table's PK
@@ -141,7 +136,6 @@ pub trait DatastoreDetachManyTarget<ResourceType>:
         ExprSqlType<CollectionPrimaryKey<ResourceType, Self>>: SingleValue,
         ExprSqlType<ResourcePrimaryKey<ResourceType, Self>>: SingleValue,
         ExprSqlType<Self::ResourceCollectionIdColumn>: SingleValue,
-
         ResourceType: Selectable<Pg>,
     {
         let collection_table =
@@ -484,10 +478,10 @@ mod test {
     use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use chrono::Utc;
     use db_macros::Resource;
-    use diesel::expression_methods::ExpressionMethods;
-    use diesel::pg::Pg;
     use diesel::QueryDsl;
     use diesel::SelectableHelper;
+    use diesel::expression_methods::ExpressionMethods;
+    use diesel::pg::Pg;
     use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
     use omicron_test_utils::dev;
     use uuid::Uuid;
@@ -1131,14 +1125,12 @@ mod test {
         assert_eq!(returned_resource.description(), "Updated desc");
 
         // Note that only "resource1" and "resource2" should be detached.
-        assert!(get_resource(resource_id1, &conn)
-            .await
-            .collection_id
-            .is_none());
-        assert!(get_resource(resource_id2, &conn)
-            .await
-            .collection_id
-            .is_none());
+        assert!(
+            get_resource(resource_id1, &conn).await.collection_id.is_none()
+        );
+        assert!(
+            get_resource(resource_id2, &conn).await.collection_id.is_none()
+        );
 
         // "resource3" should have been left alone.
         assert_eq!(

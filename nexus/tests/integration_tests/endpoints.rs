@@ -38,6 +38,7 @@ use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::UserId;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_test_utils::certificates::CertificateChain;
+use semver::Version;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
@@ -141,13 +142,14 @@ pub static DEMO_SILO_USER_ID_DELETE_URL: LazyLock<String> =
             DEFAULT_SILO.identity().name,
         )
     });
-pub static DEMO_SILO_USER_ID_SET_PASSWORD_URL: LazyLock<String> =
-    LazyLock::new(|| {
+pub static DEMO_SILO_USER_ID_SET_PASSWORD_URL: LazyLock<String> = LazyLock::new(
+    || {
         format!(
-        "/v1/system/identity-providers/local/users/{{id}}/set-password?silo={}",
-        DEFAULT_SILO.identity().name,
-    )
-    });
+            "/v1/system/identity-providers/local/users/{{id}}/set-password?silo={}",
+            DEFAULT_SILO.identity().name,
+        )
+    },
+);
 
 // Project used for testing
 pub static DEMO_PROJECT_NAME: LazyLock<Name> =
@@ -723,10 +725,10 @@ pub const DEMO_SWITCH_PORT_URL: &'static str =
 pub static DEMO_SWITCH_PORT_SETTINGS_APPLY_URL: LazyLock<String> =
     LazyLock::new(|| {
         format!(
-        "/v1/system/hardware/switch-port/qsfp7/settings?rack_id={}&switch_location={}",
-        uuid::Uuid::new_v4(),
-        "switch0",
-    )
+            "/v1/system/hardware/switch-port/qsfp7/settings?rack_id={}&switch_location={}",
+            uuid::Uuid::new_v4(),
+            "switch0",
+        )
     });
 pub static DEMO_SWITCH_PORT_SETTINGS: LazyLock<
     params::SwitchPortApplySettings,
@@ -1134,6 +1136,12 @@ pub static ALLOW_LIST_URL: LazyLock<String> =
 pub static ALLOW_LIST_UPDATE: LazyLock<params::AllowListUpdate> =
     LazyLock::new(|| params::AllowListUpdate {
         allowed_ips: AllowedSourceIps::Any,
+    });
+
+// Updates
+pub static DEMO_TARGET_RELEASE: LazyLock<params::SetTargetReleaseParams> =
+    LazyLock::new(|| params::SetTargetReleaseParams {
+        system_version: Version::new(0, 0, 0),
     });
 
 /// Describes an API endpoint to be verified by the "unauthorized" test
@@ -2348,6 +2356,17 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                 // The update system is disabled, which causes a 500 error even for
                 // privileged users. That is captured by GetUnimplemented.
                 allowed_methods: vec![AllowedMethod::GetUnimplemented],
+            },
+            VerifyEndpoint {
+                url: "/v1/system/update/target-release",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_TARGET_RELEASE).unwrap(),
+                    ),
+                ],
             },
             /* Metrics */
             VerifyEndpoint {

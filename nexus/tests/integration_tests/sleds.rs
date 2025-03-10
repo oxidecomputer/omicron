@@ -10,17 +10,17 @@ use nexus_db_model::PhysicalDisk as DbPhysicalDisk;
 use nexus_db_model::PhysicalDiskKind as DbPhysicalDiskKind;
 use nexus_db_queries::context::OpContext;
 use nexus_test_interface::NexusServer;
+use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::start_sled_agent;
-use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views::SledInstance;
 use nexus_types::external_api::views::{PhysicalDisk, Sled};
 use omicron_sled_agent::sim;
-use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
+use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -174,9 +174,11 @@ async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
         let sled_id = sled.identity.id;
         let instances_url =
             format!("/v1/system/hardware/sleds/{sled_id}/instances");
-        assert!(sled_instance_list(&external_client, &instances_url)
-            .await
-            .is_empty());
+        assert!(
+            sled_instance_list(&external_client, &instances_url)
+                .await
+                .is_empty()
+        );
     }
 
     // Create an IP pool and project that we'll use for testing.

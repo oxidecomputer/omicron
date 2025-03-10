@@ -5,10 +5,10 @@
 //! Background task for reading inventory for the rack
 
 use crate::app::background::BackgroundTask;
-use anyhow::ensure;
 use anyhow::Context;
-use futures::future::BoxFuture;
+use anyhow::ensure;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use internal_dns_resolver::ResolveError;
 use internal_dns_types::names::ServiceName;
 use nexus_db_queries::context::OpContext;

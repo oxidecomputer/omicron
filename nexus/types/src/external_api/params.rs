@@ -22,8 +22,8 @@ use parse_display::Display;
 use schemars::JsonSchema;
 use semver::Version;
 use serde::{
-    de::{self, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
+    de::{self, Visitor},
 };
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -2232,10 +2232,16 @@ pub struct UpdatesPutRepositoryParams {
 }
 
 /// Parameters for GET requests for `/v1/system/update/repository`.
-
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 pub struct UpdatesGetRepositoryParams {
     /// The version to get.
+    pub system_version: Version,
+}
+
+/// Parameters for PUT requests to `/v1/system/update/target-release`.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct SetTargetReleaseParams {
+    /// Version of the system software to make the target release.
     pub system_version: Version,
 }
 

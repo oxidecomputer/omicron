@@ -15,8 +15,8 @@ use slog::{info, warn};
 use wicket::OutputKind;
 use wicket_common::inventory::{SpIdentifier, SpType};
 use wicket_common::rack_setup::BootstrapSledDescription;
-use wicketd_client::types::{GetInventoryParams, GetInventoryResponse};
 use wicketd_client::Error;
+use wicketd_client::types::{GetInventoryParams, GetInventoryResponse};
 
 #[tokio::test]
 async fn test_inventory() {

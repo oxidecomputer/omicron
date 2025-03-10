@@ -11,7 +11,7 @@ use std::{borrow::Cow, collections::VecDeque, error, fmt};
 use derive_where::derive_where;
 use tokio::sync::mpsc;
 
-use crate::{events::Event, AsError, StepSpec};
+use crate::{AsError, StepSpec, events::Event};
 
 // NOTE: have to hand write `ExecutionError` and `NestedEngineError` impls
 // because #[source] doesn't work for AsError.

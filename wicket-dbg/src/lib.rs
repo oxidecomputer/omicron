@@ -87,10 +87,6 @@ pub struct DebugState {
 
 impl Rpy {
     fn is_err(&self) -> bool {
-        if let Rpy::Err(_) = self {
-            true
-        } else {
-            false
-        }
+        if let Rpy::Err(_) = self { true } else { false }
     }
 }

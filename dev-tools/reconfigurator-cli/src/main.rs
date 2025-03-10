@@ -4,7 +4,7 @@
 
 //! developer REPL for driving blueprint planning
 
-use anyhow::{anyhow, bail, Context};
+use anyhow::{Context, anyhow, bail};
 use camino::Utf8PathBuf;
 use clap::CommandFactory;
 use clap::FromArgMatches;
@@ -24,17 +24,19 @@ use nexus_reconfigurator_planning::system::{SledBuilder, SystemDescription};
 use nexus_reconfigurator_simulation::SimState;
 use nexus_reconfigurator_simulation::SimStateBuilder;
 use nexus_reconfigurator_simulation::Simulator;
-use nexus_types::deployment::execution;
-use nexus_types::deployment::execution::blueprint_external_dns_config;
-use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::execution;
+use nexus_types::deployment::execution::blueprint_external_dns_config;
+use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
 use omicron_common::policy::NEXUS_REDUNDANCY;
+use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -48,7 +50,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::io::BufRead;
 use std::io::IsTerminal;
-use swrite::{swriteln, SWrite};
+use swrite::{SWrite, swriteln};
 use tabled::Tabled;
 
 mod log_capture;
@@ -233,6 +235,12 @@ fn process_entry(
     entry: String,
     logs: &LogCapture,
 ) -> LoopResult {
+    // Strip everything after '#' as a comment.
+    let entry = match entry.split_once('#') {
+        Some((real, _comment)) => real,
+        None => &entry,
+    };
+
     // If no input was provided, take another lap (print the prompt and accept
     // another line).  This gets handled specially because otherwise clap would
     // treat this as a usage error and print a help message, which isn't what we
@@ -439,8 +447,36 @@ enum BlueprintEditCommands {
     },
     /// add a CockroachDB instance to a particular sled
     AddCockroach { sled_id: SledUuid },
-    /// expunge a particular zone from a particular sled
+    /// set the image source for a zone
+    SetZoneImage {
+        /// id of zone whose image to set
+        zone_id: OmicronZoneUuid,
+        #[command(subcommand)]
+        image_source: ImageSourceArgs,
+    },
+    /// expunge a zone
     ExpungeZone { zone_id: OmicronZoneUuid },
+}
+
+#[derive(Debug, Subcommand)]
+enum ImageSourceArgs {
+    /// the zone image comes from the `install` dataset
+    InstallDataset,
+    /// the zone image comes from a specific TUF repo artifact
+    Artifact { version: semver::Version, hash: ArtifactHash },
+}
+
+impl From<ImageSourceArgs> for BlueprintZoneImageSource {
+    fn from(value: ImageSourceArgs) -> Self {
+        match value {
+            ImageSourceArgs::InstallDataset => {
+                BlueprintZoneImageSource::InstallDataset
+            }
+            ImageSourceArgs::Artifact { version, hash } => {
+                BlueprintZoneImageSource::Artifact { version, hash }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -886,20 +922,20 @@ fn cmd_blueprint_edit(
                 .context("failed to add CockroachDB zone")?;
             format!("added CockroachDB zone to sled {}", sled_id)
         }
+        BlueprintEditCommands::SetZoneImage { zone_id, image_source } => {
+            let sled_id = sled_with_zone(&builder, &zone_id)?;
+            let source = BlueprintZoneImageSource::from(image_source);
+            let rv = format!(
+                "set sled {sled_id} zone {zone_id} image source to {source}\n\
+                 warn: no validation is done on the requested image source"
+            );
+            builder
+                .sled_set_zone_source(sled_id, zone_id, source)
+                .context("failed to set image source")?;
+            rv
+        }
         BlueprintEditCommands::ExpungeZone { zone_id } => {
-            let mut parent_sled_id = None;
-            for sled_id in builder.sled_ids_with_zones() {
-                if builder
-                    .current_sled_zones(sled_id, BlueprintZoneDisposition::any)
-                    .any(|z| z.id == zone_id)
-                {
-                    parent_sled_id = Some(sled_id);
-                    break;
-                }
-            }
-            let Some(sled_id) = parent_sled_id else {
-                bail!("could not find parent sled for zone {zone_id}");
-            };
+            let sled_id = sled_with_zone(&builder, &zone_id)?;
             builder
                 .sled_expunge_zone(sled_id, zone_id)
                 .context("failed to expunge zone")?;
@@ -926,6 +962,26 @@ fn cmd_blueprint_edit(
 
     sim.commit_and_bump("reconfigurator-cli blueprint-edit".to_owned(), state);
     Ok(Some(rv))
+}
+
+fn sled_with_zone(
+    builder: &BlueprintBuilder<'_>,
+    zone_id: &OmicronZoneUuid,
+) -> anyhow::Result<SledUuid> {
+    let mut parent_sled_id = None;
+
+    for sled_id in builder.sled_ids_with_zones() {
+        if builder
+            .current_sled_zones(sled_id, BlueprintZoneDisposition::any)
+            .any(|z| z.id == *zone_id)
+        {
+            parent_sled_id = Some(sled_id);
+            break;
+        }
+    }
+
+    parent_sled_id
+        .ok_or_else(|| anyhow!("could not find parent sled for zone {zone_id}"))
 }
 
 fn cmd_blueprint_show(

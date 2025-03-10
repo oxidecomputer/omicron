@@ -5,8 +5,8 @@
 use crate::integration_tests::instances::assert_sled_vpc_routes;
 use crate::integration_tests::instances::instance_simulate;
 use dropshot::test_util::ClientTestContext;
-use http::method::Method;
 use http::StatusCode;
+use http::method::Method;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_utils::http_testing::AuthnMode;

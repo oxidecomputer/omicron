@@ -28,17 +28,17 @@
 
 use std::sync::LazyLock;
 
+use super::Action;
 use super::actor::AnyActor;
 use super::context::AuthorizedResource;
 use super::oso_generic::Init;
-use super::roles::{load_roles_for_resource_tree, RoleSet};
-use super::Action;
-use super::{actor::AuthenticatedActor, Authz};
+use super::roles::{RoleSet, load_roles_for_resource_tree};
+use super::{Authz, actor::AuthenticatedActor};
 use crate::authn;
 use crate::context::OpContext;
 use authz_macros::authz_resource;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use nexus_db_fixed_data::FLEET_ID;
 use nexus_types::external_api::shared::{FleetRole, ProjectRole, SiloRole};
 use omicron_common::api::external::{Error, LookupType, ResourceType};
@@ -651,6 +651,49 @@ impl AuthorizedResource for SiloUserList {
         // There are no roles on this resource, but we still need to load the
         // Silo-related roles.
         self.silo().load_roles(opctx, authn, roleset)
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
+/// System software target version configuration
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TargetReleaseConfig;
+
+pub const TARGET_RELEASE_CONFIG: TargetReleaseConfig = TargetReleaseConfig;
+
+impl oso::PolarClass for TargetReleaseConfig {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("fleet", |_: &TargetReleaseConfig| FLEET)
+    }
+}
+
+impl AuthorizedResource for TargetReleaseConfig {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on the TargetReleaseConfig, only permissions. But we
+        // still need to load the Fleet-related roles to verify that the actor
+        // has the "admin" role on the Fleet (possibly conferred from a Silo
+        // role).
+        load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
     }
 
     fn on_unauthorized(

@@ -5,7 +5,7 @@
 //! Utilities for manipulating the routing tables.
 
 use crate::zone::ROUTE;
-use crate::{execute, inner, output_to_exec_error, ExecutionError, PFEXEC};
+use crate::{ExecutionError, PFEXEC, execute, inner, output_to_exec_error};
 use libc::ESRCH;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 

@@ -137,8 +137,8 @@
 //!
 
 use super::{
-    ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
-    ACTION_GENERATE_ID,
+    ACTION_GENERATE_ID, ActionRegistry, NexusActionContext, NexusSaga,
+    SagaInitError,
 };
 use crate::app::db::datastore::InstanceAndActiveVmm;
 use crate::app::db::lookup::LookupPath;
@@ -944,10 +944,12 @@ async fn srrd_drive_region_replacement_prepare(
                             | VmmState::Creating => {
                                 // Propolis server is not ok to receive volume
                                 // replacement requests, bail out
-                                return Err(ActionError::action_failed(format!(
-                                    "vmm {} propolis not in a state to receive request",
-                                    vmm.id,
-                                )));
+                                return Err(ActionError::action_failed(
+                                    format!(
+                                        "vmm {} propolis not in a state to receive request",
+                                        vmm.id,
+                                    ),
+                                ));
                             }
                         }
 
@@ -1302,78 +1304,80 @@ async fn execute_pantry_drive_action(
     //
     // Try to get the volume's status in order to check.
 
-    let detach_required =
-        match client.volume_status(&volume_id.to_string()).await {
-            Ok(volume_status) => {
-                info!(
-                    log,
-                    "volume is already attached with status {volume_status:?}";
-                    "region replacement id" => %request_id,
-                    "volume id" => ?volume_id,
-                    "endpoint" => endpoint.clone(),
-                );
+    let detach_required = match client
+        .volume_status(&volume_id.to_string())
+        .await
+    {
+        Ok(volume_status) => {
+            info!(
+                log,
+                "volume is already attached with status {volume_status:?}";
+                "region replacement id" => %request_id,
+                "volume id" => ?volume_id,
+                "endpoint" => endpoint.clone(),
+            );
 
-                // In the case where this forward action is being rerun,
-                // detaching the volume would mean that the reconciliation would
-                // be interrupted. This is ok, as that operation can be
-                // interrupted at any time.
+            // In the case where this forward action is being rerun,
+            // detaching the volume would mean that the reconciliation would
+            // be interrupted. This is ok, as that operation can be
+            // interrupted at any time.
 
-                // Detach this volume so we can reattach with this saga's job id.
-                true
-            }
+            // Detach this volume so we can reattach with this saga's job id.
+            true
+        }
 
-            Err(e) => {
-                match e {
-                    crucible_pantry_client::Error::ErrorResponse(ref rv) => {
-                        match rv.status() {
-                            http::StatusCode::NOT_FOUND => {
-                                // No detach required, this Volume isn't attached to
-                                // this Pantry.
-                                false
-                            }
+        Err(e) => {
+            match e {
+                crucible_pantry_client::Error::ErrorResponse(ref rv) => {
+                    match rv.status() {
+                        http::StatusCode::NOT_FOUND => {
+                            // No detach required, this Volume isn't attached to
+                            // this Pantry.
+                            false
+                        }
 
-                            http::StatusCode::GONE => {
-                                // 410 Gone means detach is required - it was
-                                // previously attached and may have been activated
-                                true
-                            }
+                        http::StatusCode::GONE => {
+                            // 410 Gone means detach is required - it was
+                            // previously attached and may have been activated
+                            true
+                        }
 
-                            _ => {
-                                error!(
-                                    log,
-                                    "error checking volume status: {e}";
-                                    "region replacement id" => %request_id,
-                                    "volume id" => ?volume_id,
-                                    "endpoint" => endpoint.clone(),
-                                );
+                        _ => {
+                            error!(
+                                log,
+                                "error checking volume status: {e}";
+                                "region replacement id" => %request_id,
+                                "volume id" => ?volume_id,
+                                "endpoint" => endpoint.clone(),
+                            );
 
-                                return Err(ActionError::action_failed(
-                                    Error::internal_error(&format!(
+                            return Err(ActionError::action_failed(
+                                Error::internal_error(&format!(
                                     "unexpected error from volume_status: {e}"
                                 )),
-                                ));
-                            }
+                            ));
                         }
                     }
+                }
 
-                    _ => {
-                        error!(
-                            log,
-                            "error checking volume status: {e}";
-                            "region replacement id" => %request_id,
-                            "volume id" => ?volume_id,
-                            "endpoint" => endpoint.clone(),
-                        );
+                _ => {
+                    error!(
+                        log,
+                        "error checking volume status: {e}";
+                        "region replacement id" => %request_id,
+                        "volume id" => ?volume_id,
+                        "endpoint" => endpoint.clone(),
+                    );
 
-                        return Err(ActionError::action_failed(
-                            Error::internal_error(&format!(
-                                "unexpected error from volume_status: {e}"
-                            )),
-                        ));
-                    }
+                    return Err(ActionError::action_failed(
+                        Error::internal_error(&format!(
+                            "unexpected error from volume_status: {e}"
+                        )),
+                    ));
                 }
             }
-        };
+        }
+    };
 
     if detach_required {
         info!(

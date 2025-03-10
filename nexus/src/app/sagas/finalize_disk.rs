@@ -5,12 +5,12 @@
 //! For disks in state ImportReady, "finalize" them: detach them from their
 //! attached Pantry, and set to Detached.
 
-use super::declare_saga_actions;
 use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
 use super::SagaInitError;
-use crate::app::sagas::common_storage::call_pantry_detach_for_disk;
+use super::declare_saga_actions;
+use crate::app::sagas::common_storage::call_pantry_detach;
 use crate::app::sagas::snapshot_create;
 use crate::external_api::params;
 use nexus_db_model::Generation;
@@ -287,7 +287,7 @@ async fn sfd_call_pantry_detach_for_disk(
     let params = sagactx.saga_params::<Params>()?;
     let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
 
-    call_pantry_detach_for_disk(
+    call_pantry_detach(
         sagactx.user_data().nexus(),
         &log,
         params.disk_id,

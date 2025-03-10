@@ -3,12 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{
+    ACTION_GENERATE_ID, ActionRegistry, NexusActionContext, NexusSaga,
+    SagaInitError,
     common_storage::{
-        call_pantry_attach_for_disk, call_pantry_detach_for_disk,
-        get_pantry_address,
+        call_pantry_attach_for_disk, call_pantry_detach, get_pantry_address,
     },
-    ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
-    ACTION_GENERATE_ID,
 };
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
@@ -18,7 +17,7 @@ use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::VolumeUuid;
-use rand::{rngs::StdRng, RngCore, SeedableRng};
+use rand::{RngCore, SeedableRng, rngs::StdRng};
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::{CrucibleOpts, VolumeConstructionRequest};
@@ -569,7 +568,11 @@ async fn sdc_regions_ensure_undo(
             // the disk that the saga created: change that disk's state to
             // Faulted here.
 
-            error!(log, "sdc_regions_ensure_undo: Deleting crucible regions failed with {}", e);
+            error!(
+                log,
+                "sdc_regions_ensure_undo: Deleting crucible regions failed with {}",
+                e
+            );
 
             let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
             let (.., authz_disk, db_disk) = LookupPath::new(&opctx, &datastore)
@@ -758,7 +761,7 @@ async fn sdc_call_pantry_attach_for_disk_undo(
 
     let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
 
-    call_pantry_detach_for_disk(
+    call_pantry_detach(
         sagactx.user_data().nexus(),
         &log,
         disk_id,

@@ -8,8 +8,8 @@
 use super::coverage::Coverage;
 use crate::db;
 use authz::ApiResource;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use nexus_auth::authz;
 use nexus_auth::authz::ApiResourceWithRolesType;
 use nexus_auth::authz::AuthorizedResource;
@@ -287,6 +287,7 @@ impl_dyn_authorized_resource_for_global!(authz::DeviceAuthRequestList);
 impl_dyn_authorized_resource_for_global!(authz::DnsConfig);
 impl_dyn_authorized_resource_for_global!(authz::IpPoolList);
 impl_dyn_authorized_resource_for_global!(authz::Inventory);
+impl_dyn_authorized_resource_for_global!(authz::TargetReleaseConfig);
 
 impl DynAuthorizedResource for authz::SiloCertificateList {
     fn do_authorize<'a, 'b>(

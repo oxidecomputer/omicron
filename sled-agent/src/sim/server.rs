@@ -9,32 +9,33 @@ use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 use super::storage::PantryServer;
 use crate::nexus::NexusClient;
-use crate::rack_setup::service::build_initial_blueprint_from_sled_configs;
 use crate::rack_setup::SledConfig;
+use crate::rack_setup::service::build_initial_blueprint_from_sled_configs;
 use crate::rack_setup::{
     from_ipaddr_to_external_floating_ip,
     from_sockaddr_to_external_floating_addr,
 };
 use crate::sim::SimulatedUpstairs;
-use anyhow::{anyhow, Context as _};
+use anyhow::{Context as _, anyhow};
 use crucible_agent_client::types::State as RegionState;
 use illumos_utils::zpool::ZpoolName;
 use internal_dns_types::config::DnsConfigBuilder;
-use internal_dns_types::names::ServiceName;
 use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
+use internal_dns_types::names::ServiceName;
 use nexus_client::types as NexusTypes;
 use nexus_client::types::{IpRange, Ipv4Range, Ipv6Range};
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_types::deployment::{
-    blueprint_zone_type, BlueprintPhysicalDiskConfig,
-    BlueprintPhysicalDiskDisposition, BlueprintPhysicalDisksConfig,
-    BlueprintZoneImageSource,
+    BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
+    BlueprintPhysicalDisksConfig, BlueprintZoneImageSource,
+    blueprint_zone_type,
 };
 use nexus_types::deployment::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
 };
 use nexus_types::inventory::NetworkInterfaceKind;
+use omicron_common::FileKv;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::api::external::Generation;
@@ -42,10 +43,9 @@ use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::backoff::{
-    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
+    BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::DiskIdentity;
-use omicron_common::FileKv;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -53,7 +53,7 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
 use sled_agent_types::rack_init::RecoverySiloConfig;
-use slog::{info, Drain, Logger};
+use slog::{Drain, Logger, info};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::net::IpAddr;

@@ -1,4 +1,4 @@
-use crate::{execute, ExecutionError};
+use crate::{ExecutionError, execute};
 use camino::Utf8PathBuf;
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;

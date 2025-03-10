@@ -2,14 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::config::{
     LookupIpStrategy, NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
 };
 use hickory_resolver::lookup::SrvLookup;
-use hickory_resolver::TokioAsyncResolver;
 use internal_dns_types::names::ServiceName;
 use omicron_common::address::{
-    get_internal_dns_server_addresses, Ipv6Subnet, AZ_PREFIX, DNS_PORT,
+    AZ_PREFIX, DNS_PORT, Ipv6Subnet, get_internal_dns_server_addresses,
 };
 use slog::{debug, error, info, trace};
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -394,16 +394,16 @@ mod test {
     use anyhow::Context;
     use assert_matches::assert_matches;
     use dropshot::{
-        endpoint, ApiDescription, HandlerTaskMode, HttpError, HttpResponseOk,
-        RequestContext,
+        ApiDescription, HandlerTaskMode, HttpError, HttpResponseOk,
+        RequestContext, endpoint,
     };
     use internal_dns_types::config::DnsConfigBuilder;
     use internal_dns_types::config::DnsConfigParams;
-    use internal_dns_types::names::ServiceName;
     use internal_dns_types::names::DNS_ZONE;
+    use internal_dns_types::names::ServiceName;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::OmicronZoneUuid;
-    use slog::{o, Logger};
+    use slog::{Logger, o};
     use std::collections::HashMap;
     use std::net::Ipv6Addr;
     use std::net::SocketAddr;
@@ -641,9 +641,9 @@ mod test {
             .lookup_socket_v6(ServiceName::Cockroach)
             .await
             .expect("Should have been able to look up IP address");
-        assert!(cockroach_addrs
-            .iter()
-            .any(|addr| addr.ip() == resolved_addr.ip()));
+        assert!(
+            cockroach_addrs.iter().any(|addr| addr.ip() == resolved_addr.ip())
+        );
 
         // Look up all the Cockroach addresses.
         let mut ips =

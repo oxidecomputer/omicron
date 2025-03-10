@@ -6,12 +6,12 @@ use anyhow::Result;
 use camino::Utf8PathBuf;
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, DistributedDdlQueue, KeeperConf,
-    KeeperId, Lgif, RaftConfig, SystemTimeSeries, SystemTimeSeriesSettings,
-    OXIMETER_CLUSTER,
+    KeeperId, Lgif, OXIMETER_CLUSTER, RaftConfig, SystemTimeSeries,
+    SystemTimeSeriesSettings,
 };
 use dropshot::HttpError;
-use illumos_utils::{output_to_exec_error, ExecutionError};
-use slog::{debug, Logger};
+use illumos_utils::{ExecutionError, output_to_exec_error};
+use slog::{Logger, debug};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
@@ -234,7 +234,7 @@ impl ClickhouseCli {
             Err(e) => {
                 return Err(ClickhouseCliError::ServerUnavailable(format!(
                     "command timed out after {elapsed:?}: {e}"
-                )))
+                )));
             }
         };
 

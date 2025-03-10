@@ -8,7 +8,7 @@
 use crate::{
     apis::{ApiIdent, ManagedApis},
     environment::ErrorAccumulator,
-    git::{git_ls_tree, git_merge_base_head, git_show_file, GitRevision},
+    git::{GitRevision, git_ls_tree, git_merge_base_head, git_show_file},
     spec_files_generic::{
         ApiFiles, ApiLoad, ApiSpecFile, ApiSpecFilesBuilder, AsRawFiles,
     },

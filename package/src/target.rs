@@ -4,7 +4,7 @@
 
 //! Type safety for target parsing
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use clap::ValueEnum;
 use omicron_zone_package::target::TargetMap;
 use std::collections::BTreeMap;
@@ -175,10 +175,14 @@ impl KnownTarget {
     ) -> Result<Self> {
         if matches!(image, Image::Trampoline) {
             if machine.is_some() {
-                bail!("Trampoline image does not execute the sled agent (do not pass 'machine' flag)");
+                bail!(
+                    "Trampoline image does not execute the sled agent (do not pass 'machine' flag)"
+                );
             }
             if switch.is_some() {
-                bail!("Trampoline image does not contain switch zone (do not pass 'switch' flag)");
+                bail!(
+                    "Trampoline image does not contain switch zone (do not pass 'switch' flag)"
+                );
             }
         }
 

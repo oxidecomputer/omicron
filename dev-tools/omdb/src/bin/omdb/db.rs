@@ -17,34 +17,34 @@
 // NOTE: allowing "transaction_async" without retry
 #![allow(clippy::disallowed_methods)]
 
+use crate::Omdb;
 use crate::check_allow_destructive::DestructiveOperationToken;
-use crate::helpers::const_max_len;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::DATABASE_OPTIONS_HEADING;
-use crate::Omdb;
-use anyhow::bail;
+use crate::helpers::const_max_len;
 use anyhow::Context;
+use anyhow::bail;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::AsyncSimpleConnection;
 use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
-use clap::builder::PossibleValue;
-use clap::builder::PossibleValuesParser;
-use clap::builder::TypedValueParser;
 use clap::ArgAction;
 use clap::Args;
 use clap::Subcommand;
 use clap::ValueEnum;
-use diesel::expression::SelectableHelper;
-use diesel::query_dsl::QueryDsl;
+use clap::builder::PossibleValue;
+use clap::builder::PossibleValuesParser;
+use clap::builder::TypedValueParser;
 use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::JoinOnDsl;
 use diesel::NullableExpressionMethods;
 use diesel::OptionalExtension;
 use diesel::TextExpressionMethods;
+use diesel::expression::SelectableHelper;
+use diesel::query_dsl::QueryDsl;
 use gateway_client::types::SpType;
 use indicatif::ProgressBar;
 use indicatif::ProgressDrawTarget;
@@ -53,7 +53,6 @@ use internal_dns_types::names::ServiceName;
 use ipnetwork::IpNetwork;
 use itertools::Itertools;
 use nexus_config::PostgresConfigWithUrl;
-use nexus_db_model::to_db_typed_uuid;
 use nexus_db_model::CrucibleDataset;
 use nexus_db_model::Disk;
 use nexus_db_model::DnsGroup;
@@ -97,18 +96,19 @@ use nexus_db_model::Volume;
 use nexus_db_model::VolumeRepair;
 use nexus_db_model::VpcSubnet;
 use nexus_db_model::Zpool;
+use nexus_db_model::to_db_typed_uuid;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
+use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::CrucibleTargets;
 use nexus_db_queries::db::datastore::DataStoreConnection;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
+use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::pagination::paginated;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
-use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
@@ -2639,6 +2639,7 @@ async fn cmd_db_region_list(
             blocks_per_extent: u64,
             extent_count: u64,
             read_only: bool,
+            deleting: bool,
         }
 
         let rows: Vec<_> = regions
@@ -2651,6 +2652,7 @@ async fn cmd_db_region_list(
                 blocks_per_extent: region.blocks_per_extent(),
                 extent_count: region.extent_count(),
                 read_only: region.read_only(),
+                deleting: region.deleting(),
             })
             .collect();
 
@@ -3352,7 +3354,9 @@ async fn cmd_db_instance_info(
             }
         };
         if vmm.is_none() {
-            eprintln!(" /!\\ BAD: instance has an active VMM ({id}) but no matching VMM record was found!");
+            eprintln!(
+                " /!\\ BAD: instance has an active VMM ({id}) but no matching VMM record was found!"
+            );
         }
         vmm
     } else {
@@ -3441,7 +3445,7 @@ async fn cmd_db_instance_info(
     }
 
     println!("\n{:=<80}", "== CONFIGURATION ");
-    println!("    {VCPUS:>WIDTH$}: {}", instance.ncpus.0 .0);
+    println!("    {VCPUS:>WIDTH$}: {}", instance.ncpus.0.0);
     println!("    {MEMORY:>WIDTH$}: {}", instance.memory.0);
     println!("    {HOSTNAME:>WIDTH$}: {}", instance.hostname);
     println!("    {BOOT_DISK:>WIDTH$}: {:?}", instance.boot_disk_id);
@@ -4932,9 +4936,9 @@ async fn cmd_db_validate_regions(
             continue;
         }
 
+        use crucible_agent_client::Client as CrucibleAgentClient;
         use crucible_agent_client::types::RegionId;
         use crucible_agent_client::types::State;
-        use crucible_agent_client::Client as CrucibleAgentClient;
 
         let dataset_addr = dataset.address();
         let url = format!("http://{}", dataset_addr);
@@ -5050,8 +5054,8 @@ async fn cmd_db_validate_regions(
             continue;
         }
 
-        use crucible_agent_client::types::State;
         use crucible_agent_client::Client as CrucibleAgentClient;
+        use crucible_agent_client::types::State;
 
         let dataset_addr = dataset.address();
         let url = format!("http://{}", dataset_addr);
@@ -5199,9 +5203,9 @@ async fn cmd_db_validate_region_snapshots(
             continue;
         }
 
+        use crucible_agent_client::Client as CrucibleAgentClient;
         use crucible_agent_client::types::RegionId;
         use crucible_agent_client::types::State;
-        use crucible_agent_client::Client as CrucibleAgentClient;
 
         let dataset_addr = dataset.address();
         let url = format!("http://{}", dataset_addr);
@@ -5375,9 +5379,9 @@ async fn cmd_db_validate_region_snapshots(
             continue;
         }
 
+        use crucible_agent_client::Client as CrucibleAgentClient;
         use crucible_agent_client::types::RegionId;
         use crucible_agent_client::types::State;
-        use crucible_agent_client::Client as CrucibleAgentClient;
 
         let dataset_addr = dataset.address();
         let url = format!("http://{}", dataset_addr);

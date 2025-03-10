@@ -4,13 +4,13 @@
 
 //! Interface for making API requests to the Oxide control plane.
 
-use anyhow::anyhow;
 use anyhow::Context;
+use anyhow::anyhow;
 use futures::FutureExt;
+use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::config::{
     NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
 };
-use hickory_resolver::TokioAsyncResolver;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use thiserror::Error;
