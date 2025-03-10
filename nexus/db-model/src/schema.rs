@@ -2190,7 +2190,8 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         endpoint -> Text,
-        rcgen -> Int8,
+        secret_gen -> Int8,
+        subscription_gen -> Int8,
     }
 }
 

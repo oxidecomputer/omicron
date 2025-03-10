@@ -2416,12 +2416,12 @@ pub struct WebhookCreate {
 
 /// Parameters to update a webhook configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WebhookUpdate {
+pub struct WebhookReceiverUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
 
     /// The URL that webhook notification requests should be sent to
-    pub endpoint: Url,
+    pub endpoint: Option<Url>,
 
     /// A list of webhook event classes to subscribe to.
     ///

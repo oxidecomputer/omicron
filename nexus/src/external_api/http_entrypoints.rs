@@ -7416,7 +7416,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn webhook_receiver_update(
         rqctx: RequestContext<Self::Context>,
         _path_params: Path<params::WebhookReceiverSelector>,
-        _params: TypedBody<params::WebhookUpdate>,
+        _params: TypedBody<params::WebhookReceiverUpdate>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
         let handler = async {

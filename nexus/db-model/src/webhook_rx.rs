@@ -11,6 +11,7 @@ use crate::schema_versions;
 use crate::typed_uuid::DbTypedUuid;
 use crate::EventClassParseError;
 use crate::Generation;
+use crate::Name;
 use crate::WebhookEventClass;
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
@@ -84,29 +85,32 @@ pub struct WebhookReceiver {
     pub identity: WebhookReceiverIdentity,
     pub endpoint: String,
 
-    /// child resource generation number, per RFD 192
-    pub rcgen: Generation,
+    /// child resource generation number for secrets, per RFD 192
+    pub secret_gen: Generation,
+    /// child resource generation number for event subscriptions, per RFD 192
+    pub subscription_gen: Generation,
 }
 
+// Note that while we have both a `secret_gen` and a `subscription_gen`, we only
+// implement `DatastoreCollection` for secrets, not subscriptions. This is
+// because subscriptions are updated in a batch, using a transaction, rather
+// than via add and delete operations for individual IDs, like secrets.
 impl DatastoreCollectionConfig<WebhookSecret> for WebhookReceiver {
     type CollectionId = Uuid;
-    type GenerationNumberColumn = webhook_receiver::dsl::rcgen;
+    type GenerationNumberColumn = webhook_receiver::dsl::secret_gen;
     type CollectionTimeDeletedColumn = webhook_receiver::dsl::time_deleted;
     type CollectionIdColumn = webhook_secret::dsl::rx_id;
 }
 
-impl DatastoreCollectionConfig<WebhookRxSubscription> for WebhookReceiver {
-    type CollectionId = Uuid;
-    type GenerationNumberColumn = webhook_receiver::dsl::rcgen;
-    type CollectionTimeDeletedColumn = webhook_receiver::dsl::time_deleted;
-    type CollectionIdColumn = webhook_rx_subscription::dsl::rx_id;
-}
-
-impl DatastoreCollectionConfig<WebhookRxEventGlob> for WebhookReceiver {
-    type CollectionId = Uuid;
-    type GenerationNumberColumn = webhook_receiver::dsl::rcgen;
-    type CollectionTimeDeletedColumn = webhook_receiver::dsl::time_deleted;
-    type CollectionIdColumn = webhook_rx_event_glob::dsl::rx_id;
+/// Describes a set of updates for the [`WebhookReceiver`] model.
+#[derive(Clone, AsChangeset)]
+#[diesel(table_name = webhook_receiver)]
+pub struct WebhookReceiverUpdate {
+    pub name: Option<Name>,
+    pub description: Option<String>,
+    pub endpoint: Option<String>,
+    pub time_modified: DateTime<Utc>,
+    pub subscription_gen: Option<Generation>,
 }
 
 #[derive(
@@ -180,7 +184,7 @@ impl WebhookRxEventGlob {
         }
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum WebhookSubscriptionKind {
     Glob(WebhookGlob),
     Exact(WebhookEventClass),
@@ -215,7 +219,16 @@ impl WebhookSubscriptionKind {
 }
 
 #[derive(
-    Clone, Debug, Queryable, Selectable, Insertable, Serialize, Deserialize,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Hash,
+    Queryable,
+    Selectable,
+    Insertable,
+    Serialize,
+    Deserialize,
 )]
 #[diesel(table_name = webhook_rx_event_glob)]
 pub struct WebhookGlob {

@@ -3542,7 +3542,7 @@ pub trait NexusExternalApi {
     async fn webhook_receiver_update(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::WebhookReceiverSelector>,
-        params: TypedBody<params::WebhookUpdate>,
+        params: TypedBody<params::WebhookReceiverUpdate>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Delete a webhook receiver.
