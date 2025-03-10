@@ -983,7 +983,7 @@ mod tests {
         let count: usize = stats
             .failed_collections
             .iter()
-            .filter_map(|(reason, value)| {
+            .map(|(reason, value)| {
                 let value = match reason {
                     FailureReason::CollectionsInProgress => value,
                     FailureReason::Other(sc)
@@ -993,7 +993,7 @@ mod tests {
                     }
                     _ => panic!("Unexpected failure reason: {reason:?}"),
                 };
-                Some(value.datum.value() as usize)
+                value.datum.value() as usize
             })
             .sum();
         assert!(count != 0);
