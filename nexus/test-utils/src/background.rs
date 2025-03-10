@@ -86,7 +86,7 @@ pub async fn activate_background_task(
         &Duration::from_secs(10),
     )
     .await
-    .expect("task went to idle");
+    .expect("task never went to idle");
 
     internal_client
         .make_request(
