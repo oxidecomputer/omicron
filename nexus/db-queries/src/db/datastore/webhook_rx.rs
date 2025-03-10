@@ -92,12 +92,24 @@ impl DataStore {
                 let subscriptions = subscriptions.clone();
                 let secret_keys = secrets.clone();
                 let err = err.clone();
+                let name = identity.name.clone();
                 async move {
                     let rx = diesel::insert_into(rx_dsl::webhook_receiver)
                         .values(receiver)
                         .returning(WebhookReceiver::as_returning())
                         .get_result_async(&conn)
-                        .await?;
+                        .await
+                        .map_err(|e| {
+                            err.bail_retryable_or_else(e, |e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Conflict(
+                                        ResourceType::WebhookReceiver,
+                                        name.as_str(),
+                                    ),
+                                )
+                            })
+                        })?;
                     for subscription in subscriptions {
                         self.add_subscription_on_conn(
                             opctx,

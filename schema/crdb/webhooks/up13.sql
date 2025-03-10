@@ -1,21 +1,22 @@
--- Singleton probe event
-INSERT INTO omicron.public.webhook_event (
-    id,
-    time_created,
-    time_modified,
-    event_class,
-    event,
-    time_dispatched,
-    num_dispatched
-) VALUES (
-    -- NOTE: this UUID is duplicated in nexus_db_model::webhook_event.
-    '001de000-7768-4000-8000-000000000001',
-    NOW(),
-    NOW(),
-    'probe',
-    '{}',
-    -- Pretend to be dispatched so we won't show up in "list events needing
-    -- dispatch" queries
-    NOW(),
-    0
-) ON CONFLICT DO NOTHING;
+CREATE TABLE IF NOT EXISTS omicron.public.webhook_event (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    -- The class of event that this is.
+    event_class omicron.public.webhook_event_class NOT NULL,
+    -- Actual event data. The structure of this depends on the event class.
+    event JSONB NOT NULL,
+
+    -- Set when dispatch entries have been created for this event.
+    time_dispatched TIMESTAMPTZ,
+    -- The number of receivers that this event was dispatched to.
+    num_dispatched INT8 NOT NULL,
+
+    CONSTRAINT time_dispatched_set_if_dispatched CHECK (
+        (num_dispatched = 0) OR (time_dispatched IS NOT NULL)
+    ),
+
+    CONSTRAINT num_dispatched_is_positive CHECK (
+        (num_dispatched >= 0)
+    )
+);

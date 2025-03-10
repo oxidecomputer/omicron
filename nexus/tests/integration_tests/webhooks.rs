@@ -268,7 +268,7 @@ fn signature_verifies(
 }
 
 #[nexus_test]
-async fn test_webhook_get(cptestctx: &ControlPlaneTestContext) {
+async fn test_webhook_receiver_get(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     let server = httpmock::MockServer::start_async().await;
@@ -287,6 +287,32 @@ async fn test_webhook_get(cptestctx: &ControlPlaneTestContext) {
     let by_name_url = get_webhooks_url(created_webhook.identity.name.clone());
     let webhook_view = webhook_get(client, &by_name_url).await;
     assert_eq!(created_webhook, webhook_view);
+}
+
+#[nexus_test]
+async fn test_webhook_receiver_names_are_unique(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let server = httpmock::MockServer::start_async().await;
+
+    // Create a webhook receiver.
+    let created_webhook =
+        webhook_create(&cptestctx, &my_great_webhook_params(&server)).await;
+    dbg!(&created_webhook);
+
+    let error = resource_helpers::object_create_error(
+        &client,
+        RECEIVERS_BASE_PATH,
+        &my_great_webhook_params(&server),
+        http::StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        dbg!(&error).message,
+        "already exists: webhook-receiver \"my-great-webhook\""
+    );
 }
 
 #[nexus_test]

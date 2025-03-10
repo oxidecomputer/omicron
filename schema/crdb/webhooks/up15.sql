@@ -1,9 +1,4 @@
-CREATE TYPE IF NOT EXISTS omicron.public.webhook_delivery_trigger AS ENUM (
-    --  This delivery was triggered by the event being dispatched.
-    'event',
-    -- This delivery was triggered by an explicit call to the webhook event
-    -- resend API.
-    'resend',
-    --- This delivery is a liveness probe.
-    'probe'
-);
+CREATE INDEX IF NOT EXISTS lookup_undispatched_webhook_events
+ON omicron.public.webhook_event (
+    id, time_created
+) WHERE time_dispatched IS NULL;

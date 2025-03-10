@@ -1,13 +1,5 @@
-CREATE TYPE IF NOT EXISTS omicron.public.webhook_event_class AS ENUM (
-    -- Liveness probes, which are technically not real events, but, you know...
-    'probe',
-    -- Test classes used to test globbing.
-    --
-    -- These are not publicly exposed.
-    'test.foo',
-    'test.foo.bar',
-    'test.foo.baz',
-    'test.quux.bar',
-    'test.quux.bar.baz'
-    -- Add new event classes here!
-);
+CREATE INDEX IF NOT EXISTS lookup_webhook_secrets_by_rx
+ON omicron.public.webhook_secret (
+    rx_id
+) WHERE
+    time_deleted IS NULL;

@@ -1,17 +1,13 @@
-CREATE TABLE IF NOT EXISTS omicron.public.webhook_rx_event_glob (
-    -- UUID of the webhook receiver (foreign key into
-    -- `omicron.public.webhook_rx`)
-    rx_id UUID NOT NULL,
-    -- An event class glob to which this receiver is subscribed.
-    glob STRING(512) NOT NULL,
-    -- Regex used when evaluating this filter against concrete event classes.
-    regex STRING(512) NOT NULL,
-    time_created TIMESTAMPTZ NOT NULL,
-    -- The database schema version at which this glob was last expanded.
+CREATE TYPE IF NOT EXISTS omicron.public.webhook_event_class AS ENUM (
+    -- Liveness probes, which are technically not real events, but, you know...
+    'probe',
+    -- Test classes used to test globbing.
     --
-    -- This is used to detect when a glob must be re-processed to generate exact
-    -- subscriptions on schema changes.
-    schema_version STRING(64) NOT NULL,
-
-    PRIMARY KEY (rx_id, glob)
+    -- These are not publicly exposed.
+    'test.foo',
+    'test.foo.bar',
+    'test.foo.baz',
+    'test.quux.bar',
+    'test.quux.bar.baz'
+    -- Add new event classes here!
 );

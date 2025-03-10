@@ -1,2 +1,4 @@
-CREATE INDEX IF NOT EXISTS lookup_webhook_event_globs_by_schema_version
-ON omicron.public.webhook_rx_event_glob (schema_version);
+CREATE INDEX IF NOT EXISTS lookup_webhook_event_globs_for_rx
+ON omicron.public.webhook_rx_event_glob (
+    rx_id
+);
