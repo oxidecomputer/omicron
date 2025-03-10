@@ -345,8 +345,7 @@ async fn simc_create_image_record_undo(
             osagactx
                 .datastore()
                 .silo_image_delete(&opctx, &authz_image, db_image)
-                .await
-                .map_err(ActionError::action_failed)?;
+                .await?;
         }
     }
 
