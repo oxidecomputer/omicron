@@ -682,6 +682,7 @@ mod test {
         let mut blueprint = Blueprint {
             id: BlueprintUuid::new_v4(),
             sleds: blueprint_sleds,
+            pending_mgs_updates: BTreeMap::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,

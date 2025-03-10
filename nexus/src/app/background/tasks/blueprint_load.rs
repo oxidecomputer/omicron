@@ -217,6 +217,7 @@ mod test {
             Blueprint {
                 id,
                 sleds: BTreeMap::new(),
+                pending_mgs_updates: BTreeMap::new(),
                 cockroachdb_setting_preserve_downgrade:
                     CockroachDbPreserveDowngrade::DoNotModify,
                 parent_blueprint_id: Some(parent_blueprint_id),
