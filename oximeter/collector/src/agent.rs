@@ -684,6 +684,7 @@ mod tests {
     use omicron_common::api::internal::nexus::ProducerKind;
     use omicron_test_utils::dev::test_setup_log;
     use oximeter::types::ProducerResults;
+    use reqwest::StatusCode;
     use std::net::Ipv6Addr;
     use std::net::SocketAddr;
     use std::net::SocketAddrV6;
@@ -976,12 +977,24 @@ mod tests {
         // https://github.com/oxidecomputer/omicron/issues/7255#issuecomment-2711537164
         // for example.
         //
-        // Sum over all reasons to get the correct count.
+        // Sum over all the expected reasons to get the correct count. We should
+        // never get anything but a 500, or possibly an in-progress error.
         dbg!(&stats.failed_collections);
         let count: usize = stats
             .failed_collections
-            .values()
-            .map(|value| value.datum.value() as usize)
+            .iter()
+            .filter_map(|(reason, value)| {
+                let value = match reason {
+                    FailureReason::CollectionsInProgress => value,
+                    FailureReason::Other(sc)
+                        if sc == &StatusCode::INTERNAL_SERVER_ERROR =>
+                    {
+                        value
+                    }
+                    _ => panic!("Unexpected failure reason: {reason:?}"),
+                };
+                Some(value.datum.value() as usize)
+            })
             .sum();
         assert!(count != 0);
 
