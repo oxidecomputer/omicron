@@ -1401,20 +1401,6 @@
               "status": {
                 "type": "string",
                 "enum": [
-                  "ensure_storage"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
                   "init_dns"
                 ]
               }
