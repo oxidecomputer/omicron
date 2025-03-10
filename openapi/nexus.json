@@ -12345,7 +12345,7 @@
         ]
       },
       "AffinityGroup": {
-        "description": "Identity-related metadata that's included in nearly all public API objects",
+        "description": "View of an Affinity Group",
         "type": "object",
         "properties": {
           "description": {
@@ -12371,6 +12371,10 @@
           "policy": {
             "$ref": "#/components/schemas/AffinityPolicy"
           },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -12388,6 +12392,7 @@
           "id",
           "name",
           "policy",
+          "project_id",
           "time_created",
           "time_modified"
         ]
@@ -12640,7 +12645,7 @@
         ]
       },
       "AntiAffinityGroup": {
-        "description": "Identity-related metadata that's included in nearly all public API objects",
+        "description": "View of an Anti-Affinity Group",
         "type": "object",
         "properties": {
           "description": {
@@ -12666,6 +12671,10 @@
           "policy": {
             "$ref": "#/components/schemas/AffinityPolicy"
           },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -12683,6 +12692,7 @@
           "id",
           "name",
           "policy",
+          "project_id",
           "time_created",
           "time_modified"
         ]

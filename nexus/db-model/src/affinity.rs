@@ -126,6 +126,7 @@ impl From<AffinityGroup> for views::AffinityGroup {
         };
         Self {
             identity,
+            project_id: group.project_id,
             policy: group.policy.into(),
             failure_domain: group.failure_domain.into(),
         }
@@ -191,6 +192,7 @@ impl From<AntiAffinityGroup> for views::AntiAffinityGroup {
         };
         Self {
             identity,
+            project_id: group.project_id,
             policy: group.policy.into(),
             failure_domain: group.failure_domain.into(),
         }
