@@ -11941,7 +11941,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WebhookDeliveryAttemptResultsPage"
+                  "$ref": "#/components/schemas/WebhookDeliveryResultsPage"
                 }
               }
             }
@@ -12240,7 +12240,7 @@
           "system/webhooks"
         ],
         "summary": "Update the configuration of an existing webhook receiver.",
-        "operationId": "webhook_update",
+        "operationId": "webhook_receiver_update",
         "parameters": [
           {
             "in": "path",
@@ -25323,7 +25323,7 @@
           "status"
         ]
       },
-      "WebhookDeliveryAttemptResultsPage": {
+      "WebhookDeliveryResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {

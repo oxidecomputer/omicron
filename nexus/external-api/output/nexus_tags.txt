@@ -274,11 +274,11 @@ webhook_receiver_create                  POST     /v1/webhooks/receivers
 webhook_receiver_delete                  DELETE   /v1/webhooks/receivers/{receiver}
 webhook_receiver_list                    GET      /v1/webhooks/receivers
 webhook_receiver_probe                   POST     /v1/webhooks/receivers/{receiver}/probe
+webhook_receiver_update                  PUT      /v1/webhooks/receivers/{receiver}
 webhook_receiver_view                    GET      /v1/webhooks/receivers/{receiver}
 webhook_secrets_add                      POST     /v1/webhooks/secrets
 webhook_secrets_delete                   DELETE   /v1/webhooks/secrets/{secret_id}
 webhook_secrets_list                     GET      /v1/webhooks/secrets
-webhook_update                           PUT      /v1/webhooks/receivers/{receiver}
 
 API operations found with tag "vpcs"
 OPERATION ID                             METHOD   URL PATH

@@ -3539,7 +3539,7 @@ pub trait NexusExternalApi {
         path = "/v1/webhooks/receivers/{receiver}",
         tags = ["system/webhooks"],
     }]
-    async fn webhook_update(
+    async fn webhook_receiver_update(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::WebhookReceiverSelector>,
         params: TypedBody<params::WebhookUpdate>,

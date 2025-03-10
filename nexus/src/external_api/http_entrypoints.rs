@@ -7413,7 +7413,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn webhook_update(
+    async fn webhook_receiver_update(
         rqctx: RequestContext<Self::Context>,
         _path_params: Path<params::WebhookReceiverSelector>,
         _params: TypedBody<params::WebhookUpdate>,
