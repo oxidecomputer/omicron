@@ -88,8 +88,6 @@
 //! mistakes.
 
 use super::Activator;
-use super::Activator;
-use super::Driver;
 use super::Driver;
 use super::driver::TaskDefinition;
 use super::tasks::abandoned_vmm_reaper;
