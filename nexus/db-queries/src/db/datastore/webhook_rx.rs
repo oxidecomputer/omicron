@@ -204,6 +204,7 @@ impl DataStore {
                     let secrets_deleted =
                         diesel::delete(secret_dsl::webhook_secret)
                             .filter(secret_dsl::rx_id.eq(rx_id))
+                            .filter(secret_dsl::time_deleted.is_null())
                             .execute_async(&conn)
                             .await
                             .map_err(|e| {
