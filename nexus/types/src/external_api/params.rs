@@ -2433,7 +2433,7 @@ pub struct WebhookReceiverUpdate {
     /// A list of webhook event classes to subscribe to.
     ///
     /// If this list is empty, the webhook will not be subscribed to any events.
-    pub events: Vec<String>,
+    pub events: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

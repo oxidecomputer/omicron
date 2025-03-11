@@ -37,6 +37,8 @@ use crate::db::schema::webhook_receiver::dsl as rx_dsl;
 use crate::db::schema::webhook_rx_event_glob::dsl as glob_dsl;
 use crate::db::schema::webhook_rx_subscription::dsl as subscription_dsl;
 use crate::db::schema::webhook_secret::dsl as secret_dsl;
+use crate::db::update_and_check::UpdateAndCheck;
+use crate::db::update_and_check::UpdateStatus;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
@@ -332,73 +334,146 @@ impl DataStore {
         opctx: &OpContext,
         authz_rx: &authz::WebhookReceiver,
         db_rx: &WebhookReceiver,
-        update: params::WebhookReceiverUpdate,
+        params: params::WebhookReceiverUpdate,
     ) -> UpdateResult<WebhookReceiverConfig> {
         use std::collections::HashSet;
 
         opctx.authorize(authz::Action::Modify, authz_rx).await?;
-        let rx_id = authz_rx.id();
-
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let new_subscriptions = update
-            .events
-            .into_iter()
-            .map(WebhookSubscriptionKind::new)
-            .collect::<Result<HashSet<_>, _>>()?;
-        let curr_subscriptions = self
-            .rx_subscription_list_on_conn(rx_id, &conn)
-            .await?
-            .into_iter()
-            .collect::<HashSet<_>>();
+        let rx_id = authz_rx.id();
         let update = db::model::WebhookReceiverUpdate {
             subscription_gen: None,
-            name: update.identity.name.map(db::model::Name),
-            description: update.identity.description,
-            endpoint: update.endpoint.as_ref().map(ToString::to_string),
+            name: params.identity.name.map(db::model::Name),
+            description: params.identity.description,
+            endpoint: params.endpoint.as_ref().map(ToString::to_string),
             time_modified: chrono::Utc::now(),
         };
 
-        let err = OptionalError::new();
-        let rx = self.transaction_retry_wrapper("webhook_rx_update")
-            .transaction(&conn, |conn| {
-                let mut update = update.clone();
-                let new_subscriptions = new_subscriptions.clone();
-                let curr_subscriptions = curr_subscriptions.clone();
-                let db_rx = db_rx.clone();
-                let err = err.clone();
-                async move {
-                    let subs_added = self.rx_add_subscriptions_on_conn(opctx, rx_id, new_subscriptions.difference(&curr_subscriptions), &conn).await
-                    .map_err(|e| match e {
+        // If the update changes event class subscriptions, query to get the
+        // current subscriptions so we can determine the difference in order to
+        // apply the update.
+        //
+        // If we are changing subscriptions, we must perform the changes to the
+        // subscription table in a transaction with the changes to the receiver
+        // table, so that we can undo those changes should the receiver update fail.
+        let rx = if let Some(new_subscriptions) = params.events {
+            let new_subscriptions = new_subscriptions
+                .into_iter()
+                .map(WebhookSubscriptionKind::new)
+                .collect::<Result<HashSet<_>, _>>()?;
+            let curr_subscriptions = self
+                .rx_subscription_list_on_conn(rx_id, &conn)
+                .await?
+                .into_iter()
+                .collect::<HashSet<_>>();
+            let err = OptionalError::new();
+            self.transaction_retry_wrapper("webhook_rx_update")
+                .transaction(&conn, |conn| {
+                    let mut update = update.clone();
+                    let new_subscriptions = new_subscriptions.clone();
+                    let curr_subscriptions = curr_subscriptions.clone();
+                    let db_rx = db_rx.clone();
+                    let err = err.clone();
+                    async move {
+                        let subs_added = self
+                            .rx_add_subscriptions_on_conn(
+                                opctx,
+                                rx_id,
+                                new_subscriptions
+                                    .difference(&curr_subscriptions),
+                                &conn,
+                            )
+                            .await
+                            .map_err(|e| match e {
                                 TransactionError::CustomError(e) => err.bail(e),
                                 TransactionError::Database(e) => e,
                             })?;
-                    let subs_deleted = self.rx_delete_subscriptions_on_conn(opctx, rx_id, curr_subscriptions.difference(&new_subscriptions).cloned().collect::<Vec<_>>(), &conn).await?;
-                    if subs_added + subs_deleted > 0 {
-                        update.subscription_gen = Some(db_rx.subscription_gen.next().into());
+                        let subs_deleted = self
+                            .rx_delete_subscriptions_on_conn(
+                                opctx,
+                                rx_id,
+                                curr_subscriptions
+                                    .difference(&new_subscriptions)
+                                    .cloned()
+                                    .collect::<Vec<_>>(),
+                                &conn,
+                            )
+                            .await?;
+                        if subs_added + subs_deleted > 0 {
+                            update.subscription_gen =
+                                Some(db_rx.subscription_gen.next().into());
+                        }
+                        self.rx_record_update_on_conn(&db_rx, update, &conn)
+                            .await
+                            .map_err(|e| match e {
+                                TransactionError::CustomError(e) => err.bail(e),
+                                TransactionError::Database(e) => e,
+                            })
                     }
-                    diesel::update(rx_dsl::webhook_receiver)
-                        .filter(rx_dsl::id.eq(rx_id.into_untyped_uuid()))
-                        .filter(rx_dsl::time_deleted.is_null())
-                        .filter(rx_dsl::subscription_gen.eq(db_rx.subscription_gen))
-                        .set(update).returning(WebhookReceiver::as_returning())
-                        .get_result_async(&conn)
-                        .await
-                        .map_err(|e| err.bail_retryable_or_else(e, |_| Error::conflict("cannot update receiver configuration as its state changed concurrently")))
-                }
+                })
+                .await
+                .map_err(|e| {
+                    if let Some(err) = err.take() {
+                        return err;
+                    }
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::NotFoundByResource(authz_rx),
+                    )
+                })?
+        } else {
+            // If we are *not* changing subscriptions, we can just update the
+            // receiver record, eliding the transaction. This will still fail if
+            // the subscription generation has changed since we snapshotted the
+            // receiver.
+            self.rx_record_update_on_conn(db_rx, update, &conn).await.map_err(
+                |e| match e {
+                    TransactionError::CustomError(e) => e,
+                    TransactionError::Database(e) => public_error_from_diesel(
+                        e,
+                        ErrorHandler::NotFoundByResource(authz_rx),
+                    ),
+                },
+            )?
+        };
 
-            })
-            .await        .map_err(|e| {
-            if let Some(err) = err.take() {
-                return err;
-            }
-            public_error_from_diesel(e, ErrorHandler::Server)
-        })?;
-        Ok(WebhookReceiverConfig {
-            rx,
-            events: new_subscriptions.into_iter().collect::<Vec<_>>(),
-            secrets: self.rx_secret_list_on_conn(rx_id, &*conn).await?,
-        })
+        // Query to get the secrets and subscriptions for the returned view.
+        let (events, secrets) =
+            self.rx_config_fetch_on_conn(rx_id, &conn).await?;
+        Ok(WebhookReceiverConfig { rx, events, secrets })
+    }
+
+    /// Update the `webhook_receiver` record for the provided webhook receiver
+    /// and update.
+    ///
+    /// This is factored out as it may or may not be run in a transaction,
+    /// depending on whether or not event subscriptions have changed.
+    async fn rx_record_update_on_conn(
+        &self,
+        curr: &WebhookReceiver,
+        update: db::model::WebhookReceiverUpdate,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<WebhookReceiver, TransactionError<Error>> {
+        let rx_id = curr.identity.id.into_untyped_uuid();
+        let result = diesel::update(rx_dsl::webhook_receiver)
+            .filter(rx_dsl::id.eq(rx_id))
+            .filter(rx_dsl::time_deleted.is_null())
+            .filter(rx_dsl::subscription_gen.eq(curr.subscription_gen))
+            .set(update)
+            .check_if_exists::<WebhookReceiver>(rx_id)
+            .execute_and_check(&conn)
+            .await
+            .map_err(TransactionError::Database)?;
+
+        match result.status {
+            UpdateStatus::Updated => Ok(result.found),
+            UpdateStatus::NotUpdatedButExists => Err(Error::conflict(
+                "cannot update receiver configuration, as it has changed \
+                concurrently",
+            )
+            .into()),
+        }
     }
 
     pub async fn webhook_rx_list(
