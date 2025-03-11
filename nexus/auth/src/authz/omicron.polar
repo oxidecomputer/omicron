@@ -593,3 +593,14 @@ has_role(USER_DB_INIT: AuthenticatedActor, "admin", _silo: Silo);
 
 # Allow the internal API admin permissions on all silos.
 has_role(USER_INTERNAL_API: AuthenticatedActor, "admin", _silo: Silo);
+
+resource WebhookSecret {
+	permissions = [ "read", "modify" ];
+	relations = { parent_webhook_receiver: WebhookReceiver };
+
+	"read" if "read" on "parent_webhook_receiver";
+	"modify" if "modify" on "parent_webhook_receiver";
+}
+
+has_relation(rx: WebhookReceiver, "parent_webhook_receiver", secret: WebhookSecret)
+	if secret.webhook_receiver = rx;
