@@ -335,7 +335,7 @@ impl DataStore {
         authz_rx: &authz::WebhookReceiver,
         db_rx: &WebhookReceiver,
         params: params::WebhookReceiverUpdate,
-    ) -> UpdateResult<WebhookReceiverConfig> {
+    ) -> UpdateResult<WebhookReceiver> {
         use std::collections::HashSet;
 
         opctx.authorize(authz::Action::Modify, authz_rx).await?;
@@ -438,10 +438,7 @@ impl DataStore {
             )?
         };
 
-        // Query to get the secrets and subscriptions for the returned view.
-        let (events, secrets) =
-            self.rx_config_fetch_on_conn(rx_id, &conn).await?;
-        Ok(WebhookReceiverConfig { rx, events, secrets })
+        Ok(rx)
     }
 
     /// Update the `webhook_receiver` record for the provided webhook receiver

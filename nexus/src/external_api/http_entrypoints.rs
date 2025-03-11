@@ -7801,8 +7801,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn webhook_receiver_update(
         rqctx: RequestContext<Self::Context>,
-        _path_params: Path<params::WebhookReceiverSelector>,
-        _params: TypedBody<params::WebhookReceiverUpdate>,
+        path_params: Path<params::WebhookReceiverSelector>,
+        params: TypedBody<params::WebhookReceiverUpdate>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -7811,10 +7811,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
-            Err(nexus
-                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
-                .await
-                .into())
+            let webhook_selector = path_params.into_inner();
+            let params = params.into_inner();
+            let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
+            nexus.webhook_receiver_update(&opctx, rx, params).await?;
+
+            Ok(HttpResponseUpdatedNoContent())
         };
         apictx
             .context

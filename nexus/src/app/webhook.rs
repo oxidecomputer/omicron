@@ -6,7 +6,7 @@
 //!
 //! # Webhooks: Theory and Practice
 //!
-//! For a discussion of     
+//! [RFD 538] describes the user-facing
 
 use crate::app::external_dns;
 use anyhow::Context;
@@ -33,7 +33,6 @@ use nexus_db_queries::db::model::WebhookSecret;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -41,6 +40,8 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::WebhookDeliveryUuid;
@@ -105,15 +106,6 @@ impl super::Nexus {
         Ok(WebhookReceiverConfig { rx, secrets, events })
     }
 
-    pub async fn webhook_receiver_secrets_list(
-        &self,
-        opctx: &OpContext,
-        rx: lookup::WebhookReceiver<'_>,
-    ) -> ListResultVec<WebhookSecret> {
-        let (authz_rx,) = rx.lookup_for(authz::Action::ListChildren).await?;
-        self.datastore().webhook_rx_secret_list(opctx, &authz_rx).await
-    }
-
     pub async fn webhook_receiver_create(
         &self,
         opctx: &OpContext,
@@ -124,6 +116,20 @@ impl super::Nexus {
         self.datastore().webhook_rx_create(&opctx, params).await
     }
 
+    pub async fn webhook_receiver_update(
+        &self,
+        opctx: &OpContext,
+        rx: lookup::WebhookReceiver<'_>,
+        params: params::WebhookReceiverUpdate,
+    ) -> UpdateResult<()> {
+        let (authz_rx, rx) = rx.fetch_for(authz::Action::Modify).await?;
+        let _ = self
+            .datastore()
+            .webhook_rx_update(opctx, &authz_rx, &rx, params)
+            .await?;
+        Ok(())
+    }
+
     pub async fn webhook_receiver_delete(
         &self,
         opctx: &OpContext,
@@ -131,6 +137,15 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (authz_rx, db_rx) = rx.fetch_for(authz::Action::Delete).await?;
         self.datastore().webhook_rx_delete(&opctx, &authz_rx, &db_rx).await
+    }
+
+    pub async fn webhook_receiver_secrets_list(
+        &self,
+        opctx: &OpContext,
+        rx: lookup::WebhookReceiver<'_>,
+    ) -> ListResultVec<WebhookSecret> {
+        let (authz_rx,) = rx.lookup_for(authz::Action::ListChildren).await?;
+        self.datastore().webhook_rx_secret_list(opctx, &authz_rx).await
     }
 
     pub async fn webhook_receiver_event_resend(
