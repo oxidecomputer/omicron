@@ -26,10 +26,10 @@ use nexus_client::types as NexusTypes;
 use nexus_client::types::{IpRange, Ipv4Range, Ipv6Range};
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+use nexus_types::deployment::id_map::IdMap;
 use nexus_types::deployment::{
     BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
-    BlueprintPhysicalDisksConfig, BlueprintZoneImageSource,
-    blueprint_zone_type,
+    BlueprintZoneImageSource, blueprint_zone_type,
 };
 use nexus_types::deployment::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneType,
@@ -387,7 +387,8 @@ pub async fn run_standalone_server(
         SocketAddr::V6(a) => a,
     };
     let pool_name = ZpoolName::new_external(ZpoolUuid::new_v4());
-    let mut zones = vec![BlueprintZoneConfig {
+    let mut zones = IdMap::new();
+    zones.insert(BlueprintZoneConfig {
         disposition: BlueprintZoneDisposition::InService,
         id: OmicronZoneUuid::new_v4(),
         zone_type: BlueprintZoneType::InternalDns(
@@ -405,7 +406,7 @@ pub async fn run_standalone_server(
         // Co-locate the filesystem pool with the dataset
         filesystem_pool: Some(pool_name),
         image_source: BlueprintZoneImageSource::InstallDataset,
-    }];
+    });
 
     let mut internal_services_ip_pool_ranges = vec![];
     let mut macs = MacAddr::iter_system();
@@ -413,7 +414,7 @@ pub async fn run_standalone_server(
         let ip = nexus_external_addr.ip();
         let id = OmicronZoneUuid::new_v4();
 
-        zones.push(BlueprintZoneConfig {
+        zones.insert(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
             zone_type: BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
@@ -462,7 +463,7 @@ pub async fn run_standalone_server(
         let ip = *external_dns_internal_addr.ip();
         let id = OmicronZoneUuid::new_v4();
         let pool_name = ZpoolName::new_external(ZpoolUuid::new_v4());
-        zones.push(BlueprintZoneConfig {
+        zones.insert(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
             zone_type: BlueprintZoneType::ExternalDns(
@@ -546,21 +547,17 @@ pub async fn run_standalone_server(
     sled_configs.insert(
         config.id,
         SledConfig {
-            disks: BlueprintPhysicalDisksConfig {
-                generation: omicron_physical_disks_config.generation,
-                disks: omicron_physical_disks_config
-                    .disks
-                    .into_iter()
-                    .map(|config| BlueprintPhysicalDiskConfig {
-                        disposition:
-                            BlueprintPhysicalDiskDisposition::InService,
-                        identity: config.identity,
-                        id: config.id,
-                        pool_id: config.pool_id,
-                    })
-                    .collect(),
-            },
-            datasets: server.sled_agent.datasets_config_list()?,
+            disks: omicron_physical_disks_config
+                .disks
+                .into_iter()
+                .map(|config| BlueprintPhysicalDiskConfig {
+                    disposition: BlueprintPhysicalDiskDisposition::InService,
+                    identity: config.identity,
+                    id: config.id,
+                    pool_id: config.pool_id,
+                })
+                .collect(),
+            datasets: server.sled_agent.datasets_config_list()?.datasets,
             zones,
         },
     );
