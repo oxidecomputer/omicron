@@ -4,14 +4,15 @@
 
 //! Subcommand: cargo xtask a4x2-deploy
 
-use anyhow::{anyhow, bail, Context, Result};
+use super::cmd;
+use anyhow::{Context, Result, bail};
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use fs_err as fs;
 use serde::Deserialize;
 use std::env;
 use std::{thread, time};
-use xshell::{cmd, Shell};
+use xshell::Shell;
 
 /// Args for sshing in without checking/storing the remote host key. Every time
 /// we start a4x2, it will have new keys.
@@ -197,8 +198,12 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
                         let _ = teardown_a4x2(&sh, &env);
                     } else {
                         print_a4x2_access_info(&sh, &env);
-                        println!("errors occurred. we are NOT stopping a4x2, to avoid destroying evidence");
-                        println!("Use `cargo xtask a4x2 deploy stop` to stop a4x2 manually");
+                        println!(
+                            "errors occurred. we are NOT stopping a4x2, to avoid destroying evidence"
+                        );
+                        println!(
+                            "Use `cargo xtask a4x2 deploy stop` to stop a4x2 manually"
+                        );
                     }
                 }
 
@@ -211,6 +216,8 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
             }
 
             // Unwrap the launch/tests error now, if there was one
+            // TODO: print something confirming success instead of letting no
+            // output here indicate success.
             result?;
         }
     }
@@ -223,13 +230,18 @@ fn unpack_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
     let tgz_path = &env.a4x2_package_tar;
 
     if !tgz_path.try_exists()? {
-        bail!("a4x2-package bundle does not exist at {}, did you run `cargo xtask a4x2-package`?", tgz_path);
+        bail!(
+            "a4x2-package bundle does not exist at {}, did you run `cargo xtask a4x2-package`?",
+            tgz_path
+        );
     }
 
     cmd!(sh, "tar -xvzf {tgz_path}").run()?;
 
     if !env.a4x2_dir.try_exists()? {
-        bail!("extracting a4x2-package bundle did not result in a4x2-package-out/ existing");
+        bail!(
+            "extracting a4x2-package bundle did not result in a4x2-package-out/ existing"
+        );
     }
 
     let a4x2_dir = &env.a4x2_dir;
@@ -248,7 +260,10 @@ fn prepare_to_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
 
     // TODO could move these into the a4x2-package bundle.
     // mostly of matter of having a consistent version of propolis.
-    exec_remote_script(&sh, "https://raw.githubusercontent.com/oxidecomputer/falcon/main/get-ovmf.sh")?;
+    exec_remote_script(
+        &sh,
+        "https://raw.githubusercontent.com/oxidecomputer/falcon/main/get-ovmf.sh",
+    )?;
     exec_remote_script(&sh, "https://raw.githubusercontent.com/oxidecomputer/falcon/main/get-propolis.sh")?;
 
     // Generate an ssh key we will use to log into the sleds.
@@ -319,7 +334,9 @@ fn try_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
 
     // Not sure how this IP is fixed, but it is
     let api_url = DEFAULT_OMICRON_NEXUS_ADDR;
-    println!("polling control plane @ {api_url} for signs of life for up to 25 minutes");
+    println!(
+        "polling control plane @ {api_url} for signs of life for up to 25 minutes"
+    );
 
     // Print the date for the logs' benefit
     let _ = cmd!(sh, "date").run();
@@ -430,26 +447,51 @@ fn teardown_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
         route_cmd.set_ignore_status(true);
 
         let route = route_cmd.read()?;
+        let mut gateway: Option<&str> = None;
+        let mut not_in_table = false;
 
-        let mut had_gateway = false;
+        // Output parsing
         for ln in route.lines() {
-            if ln.contains("gateway") {
-                let gateway = ln.split_whitespace().nth(1).ok_or(anyhow!(
-                    "teardown_a4x2: could not get gateway for a4x2 route from line {ln}"
-                ))?;
+            // We succesfully confirmed no routes exist anymore.
+            if ln.contains("not in table") {
+                not_in_table = true;
+            }
 
+            // A route exists and we need to delete it
+            if ln.contains("gateway") {
+                gateway = Some(
+                    ln.split_whitespace().nth(1).with_context(|| {
+                        format!("teardown_a4x2: could not get gateway for a4x2 route from line `{ln}`")
+                    })?
+                );
+            }
+        }
+
+        match gateway {
+            // not_in_table: positive confirmation that there are no routes
+            // None gateway: negative confirmation that there are no routes
+            // This is the goal state: all routes gone and we know it.
+            None if not_in_table => {
+                break;
+            }
+
+            // Some(gateway): positive confirmation that there is a route
+            // !not_in_table: negative confirmation that there is a route
+            // We have a route to delete, and so we delete it.
+            Some(gateway) if !not_in_table => {
                 cmd!(
                     sh,
                     "pfexec route -n delete {DEFAULT_OMICRON_SUBNET} {gateway}"
                 )
                 .run()?;
 
-                had_gateway = true;
+                break;
             }
-        }
 
-        if !had_gateway {
-            break;
+            // Anything else is unexpected
+            _ => {
+                bail!("Unexpected output from route get: `{}`", route);
+            }
         }
     }
 

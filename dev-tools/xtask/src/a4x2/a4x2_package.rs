@@ -4,6 +4,7 @@
 
 //! Subcommand: cargo xtask a4x2-package
 
+use super::cmd;
 use anyhow::Result;
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
@@ -12,7 +13,7 @@ use sha2::Digest;
 use std::env;
 use std::io::{Read, Write};
 use walkdir::WalkDir;
-use xshell::{cmd, Shell};
+use xshell::Shell;
 
 #[derive(Parser)]
 pub struct A4x2PackageArgs {
@@ -23,7 +24,6 @@ pub struct A4x2PackageArgs {
     /// Bundle omicron end-to-end-tests package into the output tarball
     #[clap(long)]
     end_to_end_tests: bool,
-
 
     /// Choose which source of oxidecomputer/testbed to build into the output.
     #[clap(long, default_value_t = String::from("https://github.com/oxidecomputer/testbed"))]
