@@ -1144,6 +1144,65 @@ pub static DEMO_TARGET_RELEASE: LazyLock<params::SetTargetReleaseParams> =
         system_version: Version::new(0, 0, 0),
     });
 
+// Webhooks
+pub static WEBHOOK_RECEIVERS_URL: &'static str = "/v1/webhooks/receivers";
+
+pub static DEMO_WEBHOOK_RECEIVER_NAME: LazyLock<Name> =
+    LazyLock::new(|| "my-great-webhook".parse().unwrap());
+pub static DEMO_WEBHOOK_RECEIVER_CREATE: LazyLock<params::WebhookCreate> =
+    LazyLock::new(|| params::WebhookCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DEMO_WEBHOOK_RECEIVER_NAME.clone(),
+            description: "webhook, line, and sinker".to_string(),
+        },
+        endpoint: "https://example.com/my-great-webhook".parse().unwrap(),
+        secrets: vec!["my cool secret".to_string()],
+        events: vec!["test.foo.bar".to_string(), "test.*".to_string()],
+    });
+
+pub static DEMO_WEBHOOK_RECEIVER_UPDATE: LazyLock<
+    params::WebhookReceiverUpdate,
+> = LazyLock::new(|| params::WebhookReceiverUpdate {
+    identity: IdentityMetadataUpdateParams {
+        name: None,
+        description: Some("webhooked on phonics".to_string()),
+    },
+    endpoint: Some("https://example.com/my-cool-webhook".parse().unwrap()),
+    events: Some(vec![
+        "test.foo.bar".to_string(),
+        "test.*".to_string(),
+        "test.**.baz".to_string(),
+    ]),
+});
+
+pub static DEMO_WEBHOOK_RECEIVER_URL: LazyLock<String> = LazyLock::new(|| {
+    format!("{WEBHOOK_RECEIVERS_URL}/{}", *DEMO_WEBHOOK_RECEIVER_NAME)
+});
+pub static DEMO_WEBHOOK_RECEIVER_PROBE_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!("{WEBHOOK_RECEIVERS_URL}/{}/probe", *DEMO_WEBHOOK_RECEIVER_NAME)
+    });
+pub static DEMO_WEBHOOK_DELIVERY_URL: LazyLock<String> = LazyLock::new(|| {
+    format!("/v1/webhooks/deliveries?receiver={}", *DEMO_WEBHOOK_RECEIVER_NAME)
+});
+
+pub static DEMO_WEBHOOK_SECRETS_URL: LazyLock<String> = LazyLock::new(|| {
+    format!("/v1/webhooks/secrets?receiver={}", *DEMO_WEBHOOK_RECEIVER_NAME)
+});
+
+pub static DEMO_WEBHOOK_SECRET_DELETE_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/webhooks/secrets/{{id}}?receiver={}",
+            *DEMO_WEBHOOK_RECEIVER_NAME
+        )
+    });
+
+pub static DEMO_WEBHOOK_SECRET_CREATE: LazyLock<params::WebhookSecretCreate> =
+    LazyLock::new(|| params::WebhookSecretCreate {
+        secret: "TRUSTNO1".to_string(),
+    });
+
 /// Describes an API endpoint to be verified by the "unauthorized" test
 ///
 /// These structs are also used to check whether we're covering all endpoints in
@@ -2712,6 +2771,64 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                         serde_json::to_value(&*ALLOW_LIST_UPDATE).unwrap(),
                     ),
                 ],
+            },
+            // Webhooks
+            VerifyEndpoint {
+                url: &WEBHOOK_RECEIVERS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_WEBHOOK_RECEIVER_CREATE)
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_WEBHOOK_RECEIVER_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_WEBHOOK_RECEIVER_UPDATE)
+                            .unwrap(),
+                    ),
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_WEBHOOK_RECEIVER_PROBE_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::to_value(()).unwrap(),
+                )],
+            },
+            VerifyEndpoint {
+                url: &DEMO_WEBHOOK_SECRETS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_WEBHOOK_SECRET_CREATE)
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_WEBHOOK_SECRET_DELETE_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Delete],
+            },
+            VerifyEndpoint {
+                url: &DEMO_WEBHOOK_DELIVERY_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
             },
         ]
     });
