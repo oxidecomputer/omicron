@@ -9,13 +9,12 @@ use crate::app::{
     background::tasks::networking::{
         api_to_dpd_port_settings, build_dpd_clients, build_mgd_clients,
     },
-    map_switch_zone_addrs,
+    switch_zone_address_mappings,
 };
 use oxnet::Ipv4Net;
 use slog::o;
 
 use internal_dns_resolver::Resolver;
-use internal_dns_types::names::ServiceName;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{
     AddressLotBlock, BgpConfig, BootstoreConfig, INFRA_LOT, LoopbackAddress,
@@ -320,24 +319,16 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 let rack_id = rack.id().to_string();
                 let log = log.new(o!("rack_id" => rack_id));
 
-                // lookup switch zones via DNS
-                // TODO https://github.com/oxidecomputer/omicron/issues/5201
-                let switch_zone_addresses = match self
-                    .resolver
-                    .lookup_all_ipv6(ServiceName::Dendrite)
-                    .await
-                {
-                    Ok(addrs) => addrs,
-                    Err(e) => {
-                        error!(log, "failed to resolve addresses for Dendrite services";
-                            "error" => %DisplayErrorChain::new(&e));
-                        continue;
-                    },
-                };
-
-                // TODO https://github.com/oxidecomputer/omicron/issues/5201
-                let mappings =
-                    map_switch_zone_addrs(&log, switch_zone_addresses).await;
+                let mappings = match
+					 switch_zone_address_mappings(&self.resolver, &log).await
+				{
+					Ok(mappings) => mappings,
+					Err(e) => {
+						error!(log, "failed to resolve addresses for Dendrite services";
+							"error" => %e);
+						continue;
+					},
+				};
 
                 // TODO https://github.com/oxidecomputer/omicron/issues/5201
                 // build sled agent clients
