@@ -532,9 +532,11 @@ impl fmt::Display for BlueprintDisplay<'_> {
 
             // Look up the sled state
             let sled_state = config.state;
+            let generation = config.sled_agent_generation;
             writeln!(
                 f,
-                "\n  sled: {sled_id} ({sled_state})\n\n{disks_table}\n",
+                "\n  sled: {sled_id} ({sled_state}, config generation \
+                 {generation})\n\n{disks_table}\n",
             )?;
 
             // Construct the datasets subtable

@@ -107,7 +107,6 @@ pub mod test {
         // prune out all but the first of them to give us space to add more.
         for (_, sled_config) in blueprint1.sleds.iter_mut().skip(1) {
             sled_config
-                .zones_config
                 .zones
                 .retain(|z| !z.zone_type.is_internal_dns());
         }
@@ -117,7 +116,7 @@ pub mod test {
         // Also prune out the zones' datasets, or we're left with an invalid
         // blueprint.
         for (_, sled_config) in blueprint1.sleds.iter_mut().skip(1) {
-            sled_config.datasets_config.datasets.retain(|dataset| {
+            sled_config.datasets.retain(|dataset| {
                 // This is gross; once zone configs know explicit dataset IDs,
                 // we should retain by ID instead.
                 match &dataset.kind {

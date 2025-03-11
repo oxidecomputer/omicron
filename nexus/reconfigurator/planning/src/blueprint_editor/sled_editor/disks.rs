@@ -5,12 +5,11 @@
 use crate::blueprint_builder::EditCounts;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
-use nexus_types::deployment::BlueprintPhysicalDisksConfig;
+use nexus_types::deployment::id_map::Entry;
+use nexus_types::deployment::id_map::IdMap;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use std::collections::BTreeMap;
-use std::collections::btree_map::Entry;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DisksEditError {
@@ -24,46 +23,35 @@ pub enum DisksEditError {
     DecommissionInServiceDisk { id: PhysicalDiskUuid },
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error(
-    "invalid blueprint input: duplicate disk ID {id} \
-     (zpools: {zpool1:?}, {zpool2:?})"
-)]
-pub struct DuplicateDiskId {
-    pub id: PhysicalDiskUuid,
-    pub zpool1: ZpoolUuid,
-    pub zpool2: ZpoolUuid,
-}
-
 #[derive(Debug)]
 pub(super) struct DisksEditor {
-    generation: Generation,
-    disks: BTreeMap<PhysicalDiskUuid, BlueprintPhysicalDiskConfig>,
+    incoming_sled_agent_generation: Generation,
+    disks: IdMap<BlueprintPhysicalDiskConfig>,
     counts: EditCounts,
 }
 
 impl DisksEditor {
-    pub fn empty() -> Self {
+    pub fn new(
+        incoming_sled_agent_generation: Generation,
+        disks: IdMap<BlueprintPhysicalDiskConfig>,
+    ) -> Self {
         Self {
-            generation: Generation::new(),
-            disks: BTreeMap::new(),
+            incoming_sled_agent_generation,
+            disks,
             counts: EditCounts::zeroes(),
         }
     }
 
-    pub fn finalize(self) -> (BlueprintPhysicalDisksConfig, EditCounts) {
-        let mut generation = self.generation;
-        if self.counts.has_nonzero_counts() {
-            generation = generation.next();
+    pub fn empty() -> Self {
+        Self {
+            incoming_sled_agent_generation: Generation::new(),
+            disks: IdMap::new(),
+            counts: EditCounts::zeroes(),
         }
+    }
 
-        (
-            BlueprintPhysicalDisksConfig {
-                generation,
-                disks: self.disks.into_values().collect(),
-            },
-            self.counts,
-        )
+    pub fn finalize(self) -> (IdMap<BlueprintPhysicalDiskConfig>, EditCounts) {
+        (self.disks, self.counts)
     }
 
     pub fn edit_counts(&self) -> EditCounts {
@@ -77,11 +65,11 @@ impl DisksEditor {
     where
         F: FnMut(BlueprintPhysicalDiskDisposition) -> bool,
     {
-        self.disks.values().filter(move |config| filter(config.disposition))
+        self.disks.iter().filter(move |config| filter(config.disposition))
     }
 
     pub fn contains_zpool(&self, zpool_id: &ZpoolUuid) -> bool {
-        self.disks.values().any(|disk| disk.pool_id == *zpool_id)
+        self.disks.iter().any(|disk| disk.pool_id == *zpool_id)
     }
 
     pub fn ensure(
@@ -141,7 +129,7 @@ impl DisksEditor {
         &mut self,
         disk_id: &PhysicalDiskUuid,
     ) -> Result<(bool, ZpoolUuid), DisksEditError> {
-        let config = self.disks.get_mut(disk_id).ok_or_else(|| {
+        let mut config = self.disks.get_mut(disk_id).ok_or_else(|| {
             DisksEditError::ExpungeNonexistentDisk { id: *disk_id }
         })?;
 
@@ -150,10 +138,12 @@ impl DisksEditor {
             BlueprintPhysicalDiskDisposition::InService => {
                 config.disposition =
                     BlueprintPhysicalDiskDisposition::Expunged {
-                        // We don't update the editor generation until the call
-                        // to `finalize` which occurs later. We bump it here
-                        // to compensate.
-                        as_of_generation: self.generation.next(),
+                        // Our parent is responsible for bumping the sled-agent
+                        // generation; record that bumped value here as the
+                        // generation in which this disk was expunged.
+                        as_of_generation: self
+                            .incoming_sled_agent_generation
+                            .next(),
                         ready_for_cleanup: false,
                     };
                 self.counts.expunged += 1;
@@ -172,7 +162,7 @@ impl DisksEditor {
         &mut self,
         disk_id: &PhysicalDiskUuid,
     ) -> Result<bool, DisksEditError> {
-        let config = self.disks.get_mut(disk_id).ok_or_else(|| {
+        let mut config = self.disks.get_mut(disk_id).ok_or_else(|| {
             DisksEditError::DecommissionNonexistentDisk { id: *disk_id }
         })?;
 
@@ -203,34 +193,5 @@ impl DisksEditor {
                 Ok(did_decommision)
             }
         }
-    }
-}
-
-impl TryFrom<BlueprintPhysicalDisksConfig> for DisksEditor {
-    type Error = DuplicateDiskId;
-
-    fn try_from(
-        config: BlueprintPhysicalDisksConfig,
-    ) -> Result<Self, Self::Error> {
-        let mut disks = BTreeMap::new();
-        for disk in config.disks {
-            match disks.entry(disk.id) {
-                Entry::Vacant(slot) => {
-                    slot.insert(disk);
-                }
-                Entry::Occupied(prev) => {
-                    return Err(DuplicateDiskId {
-                        id: disk.id,
-                        zpool1: disk.pool_id,
-                        zpool2: prev.get().pool_id,
-                    });
-                }
-            }
-        }
-        Ok(Self {
-            generation: config.generation,
-            disks,
-            counts: EditCounts::zeroes(),
-        })
     }
 }

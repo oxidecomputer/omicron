@@ -8,7 +8,7 @@
 use clickhouse_admin_types::{ClickhouseKeeperClusterMembership, KeeperId};
 use nexus_types::deployment::{
     Blueprint, BlueprintZoneDisposition, BlueprintZoneType,
-    BlueprintZonesConfig, ClickhouseClusterConfig,
+    BlueprintSledConfig, ClickhouseClusterConfig,
 };
 use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
 use slog::{Logger, error};
@@ -29,7 +29,7 @@ pub struct ClickhouseZonesThatShouldBeRunning {
 impl ClickhouseZonesThatShouldBeRunning {
     pub fn new<'a, I>(zones_by_sled_id: I) -> Self
     where
-        I: Iterator<Item = (SledUuid, &'a BlueprintZonesConfig)>,
+        I: Iterator<Item = (SledUuid, &'a BlueprintSledConfig)>,
     {
         let mut keepers = BTreeSet::new();
         let mut servers = BTreeSet::new();

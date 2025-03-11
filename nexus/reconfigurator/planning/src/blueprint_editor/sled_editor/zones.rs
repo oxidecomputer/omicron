@@ -8,7 +8,6 @@ use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
-use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::id_map::Entry;
 use nexus_types::deployment::id_map::IdMap;
 use omicron_common::api::external::Generation;
@@ -36,40 +35,35 @@ pub enum ZonesEditError {
     },
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error(
-    "invalid blueprint input: duplicate zone ID {id} \
-     (kinds: {kind1:?}, {kind2:?})"
-)]
-pub struct DuplicateZoneId {
-    pub id: OmicronZoneUuid,
-    pub kind1: ZoneKind,
-    pub kind2: ZoneKind,
-}
-
 #[derive(Debug)]
 pub(super) struct ZonesEditor {
-    generation: Generation,
+    incoming_sled_agent_generation: Generation,
     zones: IdMap<BlueprintZoneConfig>,
     counts: EditCounts,
 }
 
 impl ZonesEditor {
+    pub fn new(
+        incoming_sled_agent_generation: Generation,
+        zones: IdMap<BlueprintZoneConfig>,
+    ) -> Self {
+        Self {
+            incoming_sled_agent_generation,
+            zones,
+            counts: EditCounts::zeroes(),
+        }
+    }
+
     pub fn empty() -> Self {
         Self {
-            generation: Generation::new(),
+            incoming_sled_agent_generation: Generation::new(),
             zones: IdMap::new(),
             counts: EditCounts::zeroes(),
         }
     }
 
-    pub fn finalize(self) -> (BlueprintZonesConfig, EditCounts) {
-        let mut generation = self.generation;
-        if self.counts.has_nonzero_counts() {
-            generation = generation.next();
-        }
-        let config = BlueprintZonesConfig { generation, zones: self.zones };
-        (config, self.counts)
+    pub fn finalize(self) -> (IdMap<BlueprintZoneConfig>, EditCounts) {
+        (self.zones, self.counts)
     }
 
     pub fn edit_counts(&self) -> EditCounts {
@@ -144,8 +138,11 @@ impl ZonesEditor {
             ZonesEditError::ExpungeNonexistentZone { id: *zone_id }
         })?;
 
-        let did_expunge =
-            Self::expunge_impl(&mut config, &mut self.counts, self.generation);
+        let did_expunge = Self::expunge_impl(
+            &mut config,
+            &mut self.counts,
+            self.incoming_sled_agent_generation,
+        );
 
         Ok((did_expunge, config.into_ref()))
     }
@@ -247,22 +244,12 @@ impl ZonesEditor {
                 if Self::expunge_impl(
                     &mut config,
                     &mut self.counts,
-                    self.generation,
+                    self.incoming_sled_agent_generation,
                 ) {
                     nexpunged += 1;
                 }
             }
         }
         nexpunged
-    }
-}
-
-impl From<BlueprintZonesConfig> for ZonesEditor {
-    fn from(config: BlueprintZonesConfig) -> Self {
-        Self {
-            generation: config.generation,
-            zones: config.zones,
-            counts: EditCounts::zeroes(),
-        }
     }
 }

@@ -312,10 +312,8 @@ impl<'a> DatasetsBySledCache<'a> {
             }
         };
 
-        let config = &sled_config.datasets_config;
         let mut by_zpool = BTreeMap::new();
-
-        for dataset in config.datasets.iter() {
+        for dataset in sled_config.datasets.iter() {
             let by_kind: &mut BTreeMap<_, _> =
                 by_zpool.entry(dataset.pool.id()).or_default();
 
@@ -358,7 +356,6 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
         let sled_datasets = datasets.get_cached(blippy, sled_id, sled_config);
 
         for disk in sled_config
-            .disks_config
             .disks
             .iter()
             .filter(|d| d.disposition.is_in_service())
@@ -403,7 +400,6 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
         // There should be a dataset for every dataset referenced by a running
         // zone (filesystem or durable).
         for zone_config in sled_config
-            .zones_config
             .zones
             .iter()
             .filter(|z| z.disposition.is_in_service())

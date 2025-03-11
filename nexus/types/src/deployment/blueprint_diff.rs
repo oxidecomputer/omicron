@@ -1736,7 +1736,7 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
             for (sled_id, sled) in unchanged_iter {
                 writeln!(
                     f,
-                    "  sled {sled_id} ({}, gen {}):\n",
+                    "  sled {sled_id} ({}, config generation {}):\n",
                     sled.state, sled.sled_agent_generation
                 )?;
                 self.write_tables(f, sled_id)?;
@@ -1749,7 +1749,7 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
             for (sled_id, sled) in &summary.diff.sleds.removed {
                 writeln!(
                     f,
-                    "  sled {sled_id} (was {}, gen {}):\n",
+                    "  sled {sled_id} (was {}, config generation {}):\n",
                     sled.state, sled.sled_agent_generation
                 )?;
                 self.write_tables(f, sled_id)?;
@@ -1761,18 +1761,28 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
         if modified_iter.peek().is_some() {
             writeln!(f, " MODIFIED SLEDS:\n")?;
             for (sled_id, sled) in modified_iter {
-                if sled.before.state != sled.after.state {
-                    writeln!(
-                        f,
-                        "  sled {sled_id} ({} -> {}, gen {} -> {}):\n",
-                        sled.before.state,
-                        sled.after.state,
-                        sled.before.sled_agent_generation,
-                        sled.after.sled_agent_generation,
-                    )?;
+                let state = if sled.before.state != sled.after.state {
+                    format!("{} -> {}", sled.before.state, sled.after.state)
                 } else {
-                    writeln!(f, "  sled {sled_id} ({}):\n", sled.before.state)?;
-                }
+                    sled.before.state.to_string()
+                };
+                let generation = if sled.before.sled_agent_generation
+                    != sled.after.sled_agent_generation
+                {
+                    format!(
+                        "{} -> {}",
+                        sled.before.sled_agent_generation,
+                        sled.after.sled_agent_generation
+                    )
+                } else {
+                    sled.before.sled_agent_generation.to_string()
+                };
+
+                writeln!(
+                    f,
+                    "  sled {sled_id} \
+                       ({state}, config generation {generation}):\n"
+                )?;
                 self.write_tables(f, sled_id)?;
             }
         }
@@ -1783,7 +1793,7 @@ impl fmt::Display for BlueprintDiffDisplay<'_> {
             for (sled_id, sled) in &summary.diff.sleds.added {
                 writeln!(
                     f,
-                    "  sled {sled_id} ({}, gen {}):\n",
+                    "  sled {sled_id} ({}, config generation {}):\n",
                     sled.state, sled.sled_agent_generation
                 )?;
                 self.write_tables(f, sled_id)?;
