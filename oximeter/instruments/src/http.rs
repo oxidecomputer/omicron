@@ -10,7 +10,7 @@ use dropshot::{HttpError, HttpResponse, RequestContext, ServerContext};
 use futures::Future;
 use http::StatusCode;
 use oximeter::{
-    histogram::Histogram, histogram::Record, MetricsError, Producer, Sample,
+    MetricsError, Producer, Sample, histogram::Histogram, histogram::Record,
 };
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash as _, Hasher};

@@ -12,21 +12,20 @@ use chrono::Timelike;
 use chrono::Utc;
 use fs_err::tokio as fs;
 use fs_err::tokio::File;
-use omicron_common::api::external::SemverVersion;
-use omicron_common::api::internal::nexus::KnownArtifactKind;
 use omicron_zone_package::config::Config;
 use semver::Version;
 use sha2::Digest;
 use sha2::Sha256;
 use slog::Logger;
 use tokio::io::AsyncReadExt;
+use tufaceous_artifact::KnownArtifactKind;
+use tufaceous_lib::Key;
 use tufaceous_lib::assemble::ArtifactManifest;
 use tufaceous_lib::assemble::DeserializedArtifactData;
 use tufaceous_lib::assemble::DeserializedArtifactSource;
 use tufaceous_lib::assemble::DeserializedControlPlaneZoneSource;
 use tufaceous_lib::assemble::DeserializedManifest;
 use tufaceous_lib::assemble::OmicronRepoAssembler;
-use tufaceous_lib::Key;
 
 pub(crate) async fn build_tuf_repo(
     logger: Logger,
@@ -48,7 +47,7 @@ pub(crate) async fn build_tuf_repo(
     )
     .context("failed to open intermediate hubris staging manifest")?;
     // Set the version.
-    manifest.system_version = SemverVersion(version);
+    manifest.system_version = version;
 
     // Load the Hubris production manifest and merge it in.
     let hubris_production = DeserializedManifest::from_path(

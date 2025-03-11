@@ -10,12 +10,11 @@ use anyhow::Result;
 use camino::Utf8PathBuf;
 use fs_err::tokio as fs;
 use futures::future::TryFutureExt;
-use omicron_common::api::external::SemverVersion;
-use omicron_common::api::internal::nexus::KnownArtifactKind;
 use semver::Version;
 use serde::Deserialize;
-use slog::warn;
 use slog::Logger;
+use slog::warn;
+use tufaceous_artifact::KnownArtifactKind;
 use tufaceous_lib::assemble::DeserializedArtifactData;
 use tufaceous_lib::assemble::DeserializedArtifactSource;
 use tufaceous_lib::assemble::DeserializedFileArtifactSource;
@@ -42,7 +41,7 @@ pub(crate) async fn fetch_hubris_artifacts(
     // takes less time than OS builds.
 
     let mut manifest = DeserializedManifest {
-        system_version: SemverVersion(Version::new(0, 0, 0)),
+        system_version: Version::new(0, 0, 0),
         artifacts: BTreeMap::new(),
     };
 
@@ -156,7 +155,7 @@ struct Manifest {
 #[derive(Deserialize)]
 struct Artifact {
     name: String,
-    version: SemverVersion,
+    version: Version,
     source: Source,
 }
 

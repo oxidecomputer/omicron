@@ -4,25 +4,25 @@
 
 //! Async networking used by peer.rs
 
+use super::Msg as FsmMsg;
 use super::messages::Identify;
 use super::storage::NetworkConfig;
-use super::Msg as FsmMsg;
 use crate::schemes::Hello;
 use bytes::Buf;
 use derive_more::From;
 use serde::{Deserialize, Serialize};
 use sled_hardware_types::Baseboard;
-use slog::{debug, error, info, o, warn, Logger};
+use slog::{Logger, debug, error, info, o, warn};
 use std::collections::VecDeque;
 use std::io::Cursor;
 use std::net::SocketAddrV6;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tokio::time::{interval, sleep, Instant, MissedTickBehavior};
+use tokio::time::{Instant, MissedTickBehavior, interval, sleep};
 
 const CONN_BUF_SIZE: usize = 512 * 1024;
 const CONNECTION_RETRY_TIMEOUT: Duration = Duration::from_secs(1);

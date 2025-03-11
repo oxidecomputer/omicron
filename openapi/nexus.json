@@ -755,7 +755,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Create an affinity group",
+        "summary": "Create affinity group",
         "operationId": "affinity_group_create",
         "parameters": [
           {
@@ -803,7 +803,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Fetch an affinity group",
+        "summary": "Fetch affinity group",
         "operationId": "affinity_group_view",
         "parameters": [
           {
@@ -847,7 +847,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Update an affinity group",
+        "summary": "Update affinity group",
         "operationId": "affinity_group_update",
         "parameters": [
           {
@@ -901,7 +901,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Delete an affinity group",
+        "summary": "Delete affinity group",
         "operationId": "affinity_group_delete",
         "parameters": [
           {
@@ -940,7 +940,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "List members of an affinity group",
+        "summary": "List affinity group members",
         "operationId": "affinity_group_member_list",
         "parameters": [
           {
@@ -1016,7 +1016,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Fetch an affinity group member",
+        "summary": "Fetch affinity group member",
         "operationId": "affinity_group_member_instance_view",
         "parameters": [
           {
@@ -1067,7 +1067,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Add a member to an affinity group",
+        "summary": "Add member to affinity group",
         "operationId": "affinity_group_member_instance_add",
         "parameters": [
           {
@@ -1118,7 +1118,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Remove a member from an affinity group",
+        "summary": "Remove member from affinity group",
         "operationId": "affinity_group_member_instance_delete",
         "parameters": [
           {
@@ -1231,7 +1231,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Create an anti-affinity group",
+        "summary": "Create anti-affinity group",
         "operationId": "anti_affinity_group_create",
         "parameters": [
           {
@@ -1279,7 +1279,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Fetch an anti-affinity group",
+        "summary": "Fetch anti-affinity group",
         "operationId": "anti_affinity_group_view",
         "parameters": [
           {
@@ -1323,7 +1323,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Update an anti-affinity group",
+        "summary": "Update anti-affinity group",
         "operationId": "anti_affinity_group_update",
         "parameters": [
           {
@@ -1377,7 +1377,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Delete an anti-affinity group",
+        "summary": "Delete anti-affinity group",
         "operationId": "anti_affinity_group_delete",
         "parameters": [
           {
@@ -1416,7 +1416,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "List members of an anti-affinity group",
+        "summary": "List anti-affinity group members",
         "operationId": "anti_affinity_group_member_list",
         "parameters": [
           {
@@ -1492,7 +1492,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Fetch an anti-affinity group member",
+        "summary": "Fetch anti-affinity group member",
         "operationId": "anti_affinity_group_member_instance_view",
         "parameters": [
           {
@@ -1543,7 +1543,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Add a member to an anti-affinity group",
+        "summary": "Add member to anti-affinity group",
         "operationId": "anti_affinity_group_member_instance_add",
         "parameters": [
           {
@@ -1594,7 +1594,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Remove a member from an anti-affinity group",
+        "summary": "Remove member from anti-affinity group",
         "operationId": "anti_affinity_group_member_instance_delete",
         "parameters": [
           {
@@ -10057,6 +10057,70 @@
         }
       }
     },
+    "/v1/system/update/target-release": {
+      "get": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Get the current target release of the rack's system software",
+        "description": "This may not correspond to the actual software running on the rack at the time of request; it is instead the release that the rack reconfigurator should be moving towards as a goal state. After some number of planning and execution phases, the software running on the rack should eventually correspond to the release described here.",
+        "operationId": "target_release_view",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TargetRelease"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Set the current target release of the rack's system software",
+        "description": "The rack reconfigurator will treat the software specified here as a goal state for the rack's software, and attempt to asynchronously update to that release.",
+        "operationId": "target_release_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetTargetReleaseParams"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TargetRelease"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/users": {
       "get": {
         "tags": [
@@ -12733,7 +12797,7 @@
         ]
       },
       "AffinityGroup": {
-        "description": "Identity-related metadata that's included in nearly all public API objects",
+        "description": "View of an Affinity Group",
         "type": "object",
         "properties": {
           "description": {
@@ -12759,6 +12823,10 @@
           "policy": {
             "$ref": "#/components/schemas/AffinityPolicy"
           },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -12776,6 +12844,7 @@
           "id",
           "name",
           "policy",
+          "project_id",
           "time_created",
           "time_modified"
         ]
@@ -13012,7 +13081,7 @@
         ]
       },
       "AntiAffinityGroup": {
-        "description": "Identity-related metadata that's included in nearly all public API objects",
+        "description": "View of an Anti-Affinity Group",
         "type": "object",
         "properties": {
           "description": {
@@ -13038,6 +13107,10 @@
           "policy": {
             "$ref": "#/components/schemas/AffinityPolicy"
           },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -13055,6 +13128,7 @@
           "id",
           "name",
           "policy",
+          "project_id",
           "time_created",
           "time_modified"
         ]
@@ -21628,6 +21702,20 @@
           }
         ]
       },
+      "SetTargetReleaseParams": {
+        "description": "Parameters for PUT requests to `/v1/system/update/target-release`.",
+        "type": "object",
+        "properties": {
+          "system_version": {
+            "description": "Version of the system software to make the target release.",
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+          }
+        },
+        "required": [
+          "system_version"
+        ]
+      },
       "Silo": {
         "description": "View of a Silo\n\nA Silo is the highest level unit of isolation.",
         "type": "object",
@@ -23532,6 +23620,75 @@
         "required": [
           "name",
           "timeseries"
+        ]
+      },
+      "TargetRelease": {
+        "description": "View of a system software target release.",
+        "type": "object",
+        "properties": {
+          "generation": {
+            "description": "The target-release generation number.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "release_source": {
+            "description": "The source of the target release.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TargetReleaseSource"
+              }
+            ]
+          },
+          "time_requested": {
+            "description": "The time it was set as the target release.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "generation",
+          "release_source",
+          "time_requested"
+        ]
+      },
+      "TargetReleaseSource": {
+        "description": "Source of a system software target release.",
+        "oneOf": [
+          {
+            "description": "Unspecified or unknown source (probably MUPdate).",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unspecified"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The specified release of the rack's system software.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "system_version"
+                ]
+              },
+              "version": {
+                "type": "string",
+                "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+              }
+            },
+            "required": [
+              "type",
+              "version"
+            ]
+          }
         ]
       },
       "Timeseries": {

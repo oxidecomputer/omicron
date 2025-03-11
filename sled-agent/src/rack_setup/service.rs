@@ -77,7 +77,7 @@ use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
 };
 use crate::rack_setup::plan::sled::Plan as SledPlan;
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use chrono::Utc;
@@ -85,15 +85,16 @@ use dns_service_client::DnsError;
 use internal_dns_resolver::Resolver as DnsResolver;
 use internal_dns_types::names::ServiceName;
 use nexus_client::{
-    types as NexusTypes, Client as NexusClient, Error as NexusError,
+    Client as NexusClient, Error as NexusError, types as NexusTypes,
 };
 use nexus_sled_agent_shared::inventory::{
-    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
+    OmicronSledConfig, OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
+use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::{
-    blueprint_zone_type, id_map::IdMap, Blueprint, BlueprintDatasetConfig,
-    BlueprintDatasetDisposition, BlueprintDatasetsConfig, BlueprintZoneType,
-    BlueprintZonesConfig, CockroachDbPreserveDowngrade,
+    Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
+    BlueprintDatasetsConfig, BlueprintZoneType, BlueprintZonesConfig,
+    CockroachDbPreserveDowngrade, blueprint_zone_type, id_map::IdMap,
 };
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::get_sled_address;
@@ -101,11 +102,9 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::LldpAdminStatus;
 use omicron_common::backoff::{
-    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
+    BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
-use omicron_common::disk::{
-    DatasetKind, DatasetsConfig, OmicronPhysicalDisksConfig,
-};
+use omicron_common::disk::DatasetKind;
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use omicron_uuid_kinds::BlueprintUuid;
@@ -114,7 +113,7 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
-    types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
+    Client as SledAgentClient, Error as SledAgentError, types as SledAgentTypes,
 };
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
@@ -129,7 +128,8 @@ use sled_hardware_types::underlay::BootstrapInterface;
 use sled_storage::dataset::CONFIG_DATASET;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
-use std::collections::{btree_map, BTreeMap, BTreeSet};
+use slog_error_chain::InlineErrorChain;
+use std::collections::{BTreeMap, BTreeSet, btree_map};
 use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::net::SocketAddrV6;
@@ -174,6 +174,24 @@ pub enum SetupServiceError {
 
     #[error("Error initializing sled via sled-agent: {0}")]
     SledInitialization(String),
+
+    #[error(
+        "Permanent errors initializing disks: {}",
+        .permanent_errors.join(", ")
+    )]
+    DiskInitializationPermanent { permanent_errors: Vec<String> },
+
+    #[error(
+        "Transient errors initializing disks: {}",
+        .transient_errors.join(", ")
+    )]
+    DiskInitializationTransient { transient_errors: Vec<String> },
+
+    #[error(
+        "Errors initializing datasets: {}",
+        .errors.join(", ")
+    )]
+    DatasetInitialization { errors: Vec<String> },
 
     #[error("Error resetting sled: {0}")]
     SledReset(String),
@@ -328,289 +346,201 @@ impl ServiceInner {
         ServiceInner { log }
     }
 
-    // Ensures that all storage for a particular generation is configured.
+    /// Sends a request for a sled's configuration (disks, datasets, and zones).
+    async fn set_config_on_sled(
+        &self,
+        sled_address: SocketAddrV6,
+        sled_config: OmicronSledConfig,
+    ) -> Result<(), SetupServiceError> {
+        let dur = std::time::Duration::from_secs(60);
+        let client = reqwest::ClientBuilder::new()
+            .connect_timeout(dur)
+            .build()
+            .map_err(SetupServiceError::HttpClient)?;
+        let log = self.log.new(o!("sled_address" => sled_address.to_string()));
+        let client = SledAgentClient::new_with_client(
+            &format!("http://{}", sled_address),
+            client,
+            log.clone(),
+        );
+
+        let config_put = || async {
+            info!(
+                log,
+                "attempting to set sled's config";
+                "disks" => ?sled_config.disks_config,
+                "datasets" => ?sled_config.datasets_config,
+                "zones" => ?sled_config.zones_config,
+            );
+            let result = client.omicron_config_put(&sled_config).await;
+            let error = match result {
+                Ok(response) => {
+                    let response = response.into_inner();
+
+                    // An HTTP OK may contain _partial_ success: check whether
+                    // we got any individual disk failures, and split those out
+                    // into transient/permanent cases based on whether they
+                    // indicate we should retry.
+                    let disk_errors =
+                        response.disks.into_iter().filter_map(|status| {
+                            status.err.map(|err| (status.identity, err))
+                        });
+                    let mut transient_errors = Vec::new();
+                    let mut permanent_errors = Vec::new();
+                    for (identity, error) in disk_errors {
+                        if error.retryable() {
+                            transient_errors.push(format!(
+                                "Retryable error initializing disk \
+                                 {} / {} / {}: {}",
+                                identity.vendor,
+                                identity.model,
+                                identity.serial,
+                                InlineErrorChain::new(&error)
+                            ));
+                        } else {
+                            permanent_errors.push(format!(
+                                "Non-retryable error initializing disk \
+                                 {} / {} / {}: {}",
+                                identity.vendor,
+                                identity.model,
+                                identity.serial,
+                                InlineErrorChain::new(&error)
+                            ));
+                        }
+                    }
+                    if !permanent_errors.is_empty() {
+                        return Err(BackoffError::permanent(
+                            SetupServiceError::DiskInitializationPermanent {
+                                permanent_errors,
+                            },
+                        ));
+                    }
+                    if !transient_errors.is_empty() {
+                        return Err(BackoffError::transient(
+                            SetupServiceError::DiskInitializationTransient {
+                                transient_errors,
+                            },
+                        ));
+                    }
+
+                    // No individual disk errors reported; all disks were
+                    // initialized. Check for any dataset errors; these are not
+                    // retryable.
+                    let dataset_errors = response
+                        .datasets
+                        .into_iter()
+                        .filter_map(|status| {
+                            status.err.map(|err| {
+                                format!(
+                                    "Error initializing dataset {}: {err}",
+                                    status.dataset_name.full_name()
+                                )
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    if !dataset_errors.is_empty() {
+                        return Err(BackoffError::permanent(
+                            SetupServiceError::DatasetInitialization {
+                                errors: dataset_errors,
+                            },
+                        ));
+                    }
+
+                    // No individual dataset errors reported. We don't get
+                    // status for individual zones (any failure there results in
+                    // an HTTP-level error), so everything is good.
+                    return Ok(());
+                }
+                Err(error) => error,
+            };
+
+            if let sled_agent_client::Error::ErrorResponse(response) = &error {
+                if response.status() == http::StatusCode::CONFLICT {
+                    warn!(
+                        log,
+                        "ignoring attempt to initialize config because \
+                        the server seems to be newer";
+                        "attempted_disks_generation" =>
+                            i64::from(&sled_config.disks_config.generation),
+                        "attempted_datasets_generation" =>
+                            i64::from(&sled_config.datasets_config.generation),
+                        "attempted_zones_generation" =>
+                            i64::from(&sled_config.zones_config.generation),
+                        "req_id" => &response.request_id,
+                        "server_message" => &response.message,
+                    );
+
+                    return Err(BackoffError::permanent(
+                        SetupServiceError::SledInitialization(format!(
+                            "Conflict setting sled config: {}",
+                            response.message
+                        )),
+                    ));
+                }
+            }
+
+            // TODO Many other codes here should not be retried.  See
+            // omicron#4578.
+            return Err(BackoffError::transient(SetupServiceError::SledApi(
+                error,
+            )));
+        };
+        let log_failure = |error, delay| {
+            warn!(
+                log,
+                "failed to set sled Omicron config";
+                "error" => #%error,
+                "retry_after" => ?delay,
+            );
+        };
+        retry_notify(
+            retry_policy_internal_service_aggressive(),
+            config_put,
+            log_failure,
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    // Ensure that the desired sled configuration for a particular zone version
+    // is deployed.
+    //
+    // Note that `ServicePlan` contains the _full_ set of zones RSS wants, but
+    // they must be deployed in stages. We use the disks and datasets config
+    // from `ServicePlan`, but ignore the plan's full set of zones and take the
+    // specified zones for each sled.
     //
     // This will either return:
-    // - Ok if the requests are all successful (where "successful" also
-    // includes any of the sleds having a storage configuration more recent than
-    // what we've requested), or
-    // - An error from attempting to configure storage on the underlying sleds
-    async fn ensure_storage_config_at_least(
+    // - Ok if the requests are all successful
+    // - An error from attempting to configure one of the underlying sleds
+    async fn ensure_sled_config_at_least(
         &self,
         plan: &ServicePlan,
+        zone_configs: &HashMap<SocketAddrV6, OmicronZonesConfig>,
     ) -> Result<(), SetupServiceError> {
         cancel_safe_futures::future::join_all_then_try(
             plan.services.iter().map(|(sled_address, config)| async move {
-                // Ensure all the physical disks are initialized
-                self.initialize_disks_on_sled(
-                    *sled_address,
-                    config.disks.clone().into_in_service_disks(),
-                )
-                .await?;
+                let zones_config = zone_configs
+                    .get(sled_address)
+                    .ok_or_else(|| {
+                        SetupServiceError::BadConfig(format!(
+                            "ensure_sled_config_at_least called for sled \
+                             {sled_address} with no known zones config"
+                        ))
+                    })?
+                    .clone();
+                let sled_config = OmicronSledConfig {
+                    disks_config: config.disks.clone().into_in_service_disks(),
+                    datasets_config: config.datasets.clone(),
+                    zones_config,
+                };
 
-                // Ensure all datasets are initialized
-                self.initialize_datasets_on_sled(
-                    *sled_address,
-                    config.datasets.clone(),
-                )
-                .await?;
+                self.set_config_on_sled(*sled_address, sled_config).await?;
 
                 Ok::<(), SetupServiceError>(())
             }),
         )
-        .await?;
-        Ok(())
-    }
-
-    /// Requests that the specified sled configure storage as described
-    /// by `storage_config`.
-    async fn initialize_disks_on_sled(
-        &self,
-        sled_address: SocketAddrV6,
-        storage_config: OmicronPhysicalDisksConfig,
-    ) -> Result<(), SetupServiceError> {
-        let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(dur)
-            .build()
-            .map_err(SetupServiceError::HttpClient)?;
-        let log = self.log.new(o!("sled_address" => sled_address.to_string()));
-        let client = SledAgentClient::new_with_client(
-            &format!("http://{}", sled_address),
-            client,
-            log.clone(),
-        );
-
-        let storage_put = || async {
-            info!(
-                log,
-                "attempting to set up sled's storage: {:?}", storage_config,
-            );
-            let result = client
-                .omicron_physical_disks_put(&storage_config.clone())
-                .await;
-            let Err(error) = result else {
-                return Ok(());
-            };
-
-            if let sled_agent_client::Error::ErrorResponse(response) = &error {
-                if response.status() == http::StatusCode::CONFLICT {
-                    warn!(
-                        log,
-                        "ignoring attempt to initialize storage because \
-                        the server seems to be newer";
-                        "attempted_generation" => i64::from(&storage_config.generation),
-                        "req_id" => &response.request_id,
-                        "server_message" => &response.message,
-                    );
-
-                    return Err(BackoffError::permanent(
-                        SetupServiceError::SledInitialization(format!(
-                            "Conflict initializing disks: {}",
-                            response.message
-                        )),
-                    ));
-                }
-            }
-
-            // TODO Many other codes here should not be retried.  See
-            // omicron#4578.
-            return Err(BackoffError::transient(SetupServiceError::SledApi(
-                error,
-            )));
-        };
-        let log_failure = |error, delay| {
-            warn!(
-                log,
-                "failed to initialize Omicron storage";
-                "error" => #%error,
-                "retry_after" => ?delay,
-            );
-        };
-        retry_notify(
-            retry_policy_internal_service_aggressive(),
-            storage_put,
-            log_failure,
-        )
-        .await?;
-
-        Ok(())
-    }
-
-    /// Requests that the specified sled configure datasets as described
-    /// by `storage_config`.
-    async fn initialize_datasets_on_sled(
-        &self,
-        sled_address: SocketAddrV6,
-        storage_config: DatasetsConfig,
-    ) -> Result<(), SetupServiceError> {
-        let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(dur)
-            .build()
-            .map_err(SetupServiceError::HttpClient)?;
-        let log = self.log.new(o!("sled_address" => sled_address.to_string()));
-        let client = SledAgentClient::new_with_client(
-            &format!("http://{}", sled_address),
-            client,
-            log.clone(),
-        );
-
-        let storage_put = || async {
-            info!(
-                log,
-                "attempting to set up sled's datasets: {:?}", storage_config,
-            );
-            let result = client.datasets_put(&storage_config.clone()).await;
-            let Err(error) = result else {
-                return Ok(());
-            };
-
-            if let sled_agent_client::Error::ErrorResponse(response) = &error {
-                if response.status() == http::StatusCode::CONFLICT {
-                    warn!(
-                        log,
-                        "ignoring attempt to initialize datasets because \
-                        the server seems to be newer";
-                        "attempted_generation" => i64::from(&storage_config.generation),
-                        "req_id" => &response.request_id,
-                        "server_message" => &response.message,
-                    );
-
-                    return Err(BackoffError::permanent(
-                        SetupServiceError::SledInitialization(format!(
-                            "Conflict initializing datasets {}",
-                            response.message
-                        )),
-                    ));
-                }
-            }
-
-            // TODO Many other codes here should not be retried.  See
-            // omicron#4578.
-            return Err(BackoffError::transient(SetupServiceError::SledApi(
-                error,
-            )));
-        };
-        let log_failure = |error, delay| {
-            warn!(
-                log,
-                "failed to initialize Omicron datasets";
-                "error" => #%error,
-                "retry_after" => ?delay,
-            );
-        };
-        retry_notify(
-            retry_policy_internal_service_aggressive(),
-            storage_put,
-            log_failure,
-        )
-        .await?;
-
-        Ok(())
-    }
-
-    /// Requests that the specified sled configure zones as described by
-    /// `zones_config`
-    ///
-    /// This function succeeds even if the sled fails to apply the configuration
-    /// if the reason is that the sled is already running a newer configuration.
-    /// This might sound oddly specific but it's what our sole caller wants.
-    /// In particular, the caller is going to call this function a few times
-    /// with successive generation numbers.  If we crash and go through the
-    /// process again, we might run into this case, and it's simplest to just
-    /// ignore it and proceed.
-    async fn initialize_zones_on_sled(
-        &self,
-        sled_address: SocketAddrV6,
-        zones_config: &OmicronZonesConfig,
-    ) -> Result<(), SetupServiceError> {
-        let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(dur)
-            .build()
-            .map_err(SetupServiceError::HttpClient)?;
-        let log = self.log.new(o!("sled_address" => sled_address.to_string()));
-        let client = SledAgentClient::new_with_client(
-            &format!("http://{}", sled_address),
-            client,
-            log.clone(),
-        );
-
-        let services_put = || async {
-            info!(
-                log,
-                "attempting to set up sled's Omicron zones: {:?}", zones_config
-            );
-            let result = client.omicron_zones_put(zones_config).await;
-            let Err(error) = result else {
-                return Ok::<
-                    (),
-                    BackoffError<SledAgentError<SledAgentTypes::Error>>,
-                >(());
-            };
-
-            if let sled_agent_client::Error::ErrorResponse(response) = &error {
-                if response.status() == http::StatusCode::CONFLICT {
-                    warn!(
-                        log,
-                        "ignoring attempt to initialize zones because \
-                        the server seems to be newer";
-                        "attempted_generation" =>
-                            i64::from(&zones_config.generation),
-                        "req_id" => &response.request_id,
-                        "server_message" => &response.message,
-                    );
-
-                    // If we attempt to initialize zones at generation X, and
-                    // the server refuses because it's at some generation newer
-                    // than X, then we treat that as success.  See the doc
-                    // comment on this function.
-                    return Ok(());
-                }
-            }
-
-            // TODO Many other codes here should not be retried.  See
-            // omicron#4578.
-            return Err(BackoffError::transient(error));
-        };
-        let log_failure = |error, delay| {
-            warn!(
-                log,
-                "failed to initialize Omicron zones";
-                "error" => #%error,
-                "retry_after" => ?delay,
-            );
-        };
-        retry_notify(
-            retry_policy_internal_service_aggressive(),
-            services_put,
-            log_failure,
-        )
-        .await?;
-
-        Ok(())
-    }
-
-    // Ensure that all services for a particular version are running.
-    //
-    // This is useful in a rack-setup context, where initial boot ordering
-    // can matter for first-time-setup.
-    //
-    // Note that after first-time setup, the initialization order of
-    // services should not matter.
-    //
-    // Further, it's possible that the target sled is already running a newer
-    // version.  That's not an error here.
-    async fn ensure_zone_config_at_least(
-        &self,
-        configs: &HashMap<SocketAddrV6, OmicronZonesConfig>,
-    ) -> Result<(), SetupServiceError> {
-        cancel_safe_futures::future::join_all_then_try(configs.iter().map(
-            |(sled_address, zones_config)| async move {
-                self.initialize_zones_on_sled(*sled_address, zones_config).await
-            },
-        ))
         .await?;
         Ok(())
     }
@@ -833,9 +763,9 @@ impl ServiceInner {
         // field -- the coupling of datasets with addresses is linked
         // to usage by specific zones.
         for dataset in blueprint
-            .blueprint_datasets
+            .sleds
             .values()
-            .flat_map(|config| config.datasets.iter())
+            .flat_map(|config| config.datasets_config.datasets.iter())
             .filter(|dataset| dataset.kind == DatasetKind::Crucible)
         {
             let address = match dataset.address {
@@ -1323,11 +1253,6 @@ impl ServiceInner {
         let service_plan =
             ServicePlan::create(&self.log, &config, &sled_plan.sleds).await?;
 
-        rss_step.update(RssStep::EnsureStorage);
-        // Before we can ask for any services, we need to ensure that storage is
-        // operational.
-        self.ensure_storage_config_at_least(&service_plan).await?;
-
         // Set up internal DNS services first and write the initial
         // DNS configuration to the internal DNS servers.
         let v1generator = OmicronZonesConfigGenerator::initial_version(
@@ -1341,7 +1266,11 @@ impl ServiceInner {
             },
         );
         rss_step.update(RssStep::InitDns);
-        self.ensure_zone_config_at_least(v2generator.sled_configs()).await?;
+        self.ensure_sled_config_at_least(
+            &service_plan,
+            v2generator.sled_configs(),
+        )
+        .await?;
         rss_step.update(RssStep::ConfigureDns);
         self.initialize_internal_dns_records(&service_plan).await?;
 
@@ -1362,7 +1291,11 @@ impl ServiceInner {
                 )
             },
         );
-        self.ensure_zone_config_at_least(v3generator.sled_configs()).await?;
+        self.ensure_sled_config_at_least(
+            &service_plan,
+            v3generator.sled_configs(),
+        )
+        .await?;
 
         // Wait until time is synchronized on all sleds before proceeding.
         rss_step.update(RssStep::WaitForTimeSync);
@@ -1385,7 +1318,11 @@ impl ServiceInner {
                 matches!(zone_type, OmicronZoneType::CockroachDb { .. })
             },
         );
-        self.ensure_zone_config_at_least(v4generator.sled_configs()).await?;
+        self.ensure_sled_config_at_least(
+            &service_plan,
+            v4generator.sled_configs(),
+        )
+        .await?;
 
         // Now that datasets and zones have started for CockroachDB,
         // perform one-time initialization of the cluster.
@@ -1396,7 +1333,11 @@ impl ServiceInner {
         rss_step.update(RssStep::ZonesInit);
         let v5generator = v4generator
             .new_version_with(DeployStepVersion::V5_EVERYTHING, &|_| true);
-        self.ensure_zone_config_at_least(v5generator.sled_configs()).await?;
+        self.ensure_sled_config_at_least(
+            &service_plan,
+            v5generator.sled_configs(),
+        )
+        .await?;
 
         info!(self.log, "Finished setting up services");
 
@@ -1517,12 +1458,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
     sled_configs_by_id: &BTreeMap<SledUuid, SledConfig>,
     internal_dns_version: Generation,
 ) -> anyhow::Result<Blueprint> {
-    let blueprint_disks: BTreeMap<_, _> = sled_configs_by_id
-        .iter()
-        .map(|(sled_id, sled_config)| (*sled_id, sled_config.disks.clone()))
-        .collect();
-
-    let mut blueprint_datasets = BTreeMap::new();
+    let mut blueprint_sleds = BTreeMap::new();
     for (sled_id, sled_config) in sled_configs_by_id {
         let mut datasets = IdMap::new();
         for d in sled_config.datasets.datasets.values() {
@@ -1563,43 +1499,36 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
             });
         }
 
-        blueprint_datasets.insert(
+        blueprint_sleds.insert(
             *sled_id,
-            BlueprintDatasetsConfig {
-                generation: sled_config.datasets.generation,
-                datasets,
+            BlueprintSledConfig {
+                state: SledState::Active,
+                disks_config: sled_config.disks.clone(),
+                datasets_config: BlueprintDatasetsConfig {
+                    generation: sled_config.datasets.generation,
+                    datasets,
+                },
+                // This is a bit of a hack. We only construct a blueprint after
+                // completing RSS, so we need to know the final generation value
+                // sent to all sleds. Arguably, we should record this in the
+                // serialized RSS plan; however, we have already deployed
+                // systems that did not. We know that every such system used
+                // `V5_EVERYTHING` as the final generation count, so we can just
+                // use that value here. If we ever change this, in particular in
+                // a way where newly-deployed systems will have a different
+                // value, we will need to revisit storing this in the serialized
+                // RSS plan.
+                zones_config: BlueprintZonesConfig {
+                    generation: DeployStepVersion::V5_EVERYTHING,
+                    zones: sled_config.zones.iter().cloned().collect(),
+                },
             },
         );
     }
 
-    let mut blueprint_zones = BTreeMap::new();
-    let mut sled_state = BTreeMap::new();
-    for (sled_id, sled_config) in sled_configs_by_id {
-        let zones_config = BlueprintZonesConfig {
-            // This is a bit of a hack. We only construct a blueprint after
-            // completing RSS, so we need to know the final generation value
-            // sent to all sleds. Arguably, we should record this in the
-            // serialized RSS plan; however, we have already deployed
-            // systems that did not. We know that every such system used
-            // `V5_EVERYTHING` as the final generation count, so we can just
-            // use that value here. If we ever change this, in particular in
-            // a way where newly-deployed systems will have a different
-            // value, we will need to revisit storing this in the serialized
-            // RSS plan.
-            generation: DeployStepVersion::V5_EVERYTHING,
-            zones: sled_config.zones.iter().cloned().collect(),
-        };
-
-        blueprint_zones.insert(*sled_id, zones_config);
-        sled_state.insert(*sled_id, SledState::Active);
-    }
-
     Ok(Blueprint {
         id: BlueprintUuid::new_v4(),
-        blueprint_zones,
-        blueprint_disks,
-        blueprint_datasets,
-        sled_state,
+        sleds: blueprint_sleds,
         parent_blueprint_id: None,
         internal_dns_version,
         // We don't configure external DNS during RSS, so set it to an initial
@@ -1722,7 +1651,7 @@ mod test {
         OmicronZonesConfig, SledRole,
     };
     use omicron_common::{
-        address::{get_sled_address, Ipv6Subnet, SLED_PREFIX},
+        address::{Ipv6Subnet, SLED_PREFIX, get_sled_address},
         api::external::{ByteCount, Generation},
         disk::{DiskIdentity, DiskVariant},
     };

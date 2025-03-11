@@ -341,12 +341,12 @@
 //!     tasks, as appropriate.
 
 use super::{
-    ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
-    ACTION_GENERATE_ID,
+    ACTION_GENERATE_ID, ActionRegistry, NexusActionContext, NexusSaga,
+    SagaInitError,
 };
-use crate::app::db::datastore::instance;
 use crate::app::db::datastore::InstanceGestalt;
 use crate::app::db::datastore::VmmStateUpdateResult;
+use crate::app::db::datastore::instance;
 use crate::app::db::lookup::LookupPath;
 use crate::app::db::model::ByteCount;
 use crate::app::db::model::Generation;
@@ -698,7 +698,7 @@ impl UpdatesRequired {
             // that the instance's oximeter producer should be cleaned up.
             Some(Deprovision {
                 project_id: snapshot.instance.project_id,
-                cpus_diff: i64::from(snapshot.instance.ncpus.0 .0),
+                cpus_diff: i64::from(snapshot.instance.ncpus.0.0),
                 ram_diff: snapshot.instance.memory,
             })
         } else {
@@ -1372,7 +1372,7 @@ async fn unwind_instance_lock(
     // - fails *because the instance doesn't exist*, in which case we can die
     //   happily because it doesn't matter if the instance is actually unlocked.
     use dropshot::HttpError;
-    use futures::{future, TryFutureExt};
+    use futures::{TryFutureExt, future};
     use omicron_common::backoff;
 
     let osagactx = sagactx.user_data();
@@ -1470,11 +1470,11 @@ async fn unwind_instance_lock(
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::app::OpContext;
     use crate::app::db::model::Instance;
     use crate::app::db::model::VmmRuntimeState;
     use crate::app::saga::create_saga_dag;
     use crate::app::sagas::test_helpers;
-    use crate::app::OpContext;
     use crate::external_api::params;
     use chrono::Utc;
     use dropshot::test_util::ClientTestContext;
@@ -1876,8 +1876,7 @@ mod test {
              virtual provisioning records if none exist!",
         );
         assert!(
-            !test_helpers::no_sled_resource_instance_records_exist(cptestctx)
-                .await,
+            !test_helpers::no_sled_resource_vmm_records_exist(cptestctx).await,
             "we can't assert that a destroyed VMM instance update deallocates \
              sled resource records if none exist!"
         );
@@ -1936,8 +1935,7 @@ mod test {
         );
         assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx).await);
         assert!(
-            test_helpers::no_sled_resource_instance_records_exist(cptestctx)
-                .await
+            test_helpers::no_sled_resource_vmm_records_exist(cptestctx).await
         );
     }
 
@@ -2818,7 +2816,7 @@ mod test {
             &self,
             cptestctx: &ControlPlaneTestContext,
         ) -> bool {
-            test_helpers::sled_resources_exist_for_vmm(
+            test_helpers::sled_resource_vmms_exist_for_vmm(
                 cptestctx,
                 PropolisUuid::from_untyped_uuid(self.src_vmm_id()),
             )
@@ -2829,7 +2827,7 @@ mod test {
             &self,
             cptestctx: &ControlPlaneTestContext,
         ) -> bool {
-            test_helpers::sled_resources_exist_for_vmm(
+            test_helpers::sled_resource_vmms_exist_for_vmm(
                 cptestctx,
                 PropolisUuid::from_untyped_uuid(self.target_vmm_id()),
             )

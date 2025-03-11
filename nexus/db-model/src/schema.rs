@@ -954,13 +954,12 @@ table! {
 }
 
 table! {
-    sled_resource (id) {
+    sled_resource_vmm (id) {
         id -> Uuid,
         sled_id -> Uuid,
         hardware_threads -> Int8,
         rss_ram -> Int8,
         reservoir_ram -> Int8,
-        kind -> crate::SledResourceKindEnum,
         instance_id -> Nullable<Uuid>,
     }
 }
@@ -1413,6 +1412,15 @@ joinable!(tuf_repo_artifact -> tuf_repo (tuf_repo_id));
 joinable!(tuf_repo_artifact -> tuf_artifact (tuf_artifact_id));
 
 table! {
+    target_release (generation) {
+        generation -> Int8,
+        time_requested -> Timestamptz,
+        release_source -> crate::TargetReleaseSourceEnum,
+        tuf_repo_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
     support_bundle {
         id -> Uuid,
         time_created -> Timestamptz,
@@ -1729,6 +1737,8 @@ table! {
         pool_id -> Uuid,
 
         disposition -> crate::DbBpPhysicalDiskDispositionEnum,
+        disposition_expunged_as_of_generation -> Nullable<Int8>,
+        disposition_expunged_ready_for_cleanup -> Bool,
     }
 }
 
@@ -2103,7 +2113,7 @@ allow_tables_to_appear_in_same_query!(
     identity_provider,
     console_session,
     sled,
-    sled_resource,
+    sled_resource_vmm,
     support_bundle,
     router_route,
     vmm,

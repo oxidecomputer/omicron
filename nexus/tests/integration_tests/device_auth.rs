@@ -11,7 +11,7 @@ use nexus_types::external_api::{
     },
 };
 
-use http::{header, method::Method, StatusCode};
+use http::{StatusCode, header, method::Method};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -81,14 +81,16 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to redirect to login on auth failure");
 
     // Authenticated requests get the console verification page.
-    assert!(NexusRequest::object_get(testctx, "/device/verify")
-        .console_asset()
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("failed to get verification page")
-        .body
-        .starts_with(b"<html>"));
+    assert!(
+        NexusRequest::object_get(testctx, "/device/verify")
+            .console_asset()
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("failed to get verification page")
+            .body
+            .starts_with(b"<html>")
+    );
 
     let confirm_params = DeviceAuthVerify { user_code };
 

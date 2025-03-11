@@ -12,13 +12,13 @@
 use crate::saga_interface::SagaContext;
 use std::sync::Arc;
 use std::sync::LazyLock;
-use steno::new_action_noop_undo;
 use steno::ActionContext;
 use steno::ActionError;
 use steno::DagBuilder;
 use steno::SagaDag;
 use steno::SagaName;
 use steno::SagaType;
+use steno::new_action_noop_undo;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -26,6 +26,7 @@ pub mod demo;
 pub mod disk_create;
 pub mod disk_delete;
 pub mod finalize_disk;
+pub mod image_create;
 pub mod image_delete;
 pub(crate) mod instance_common;
 pub mod instance_create;
@@ -182,7 +183,8 @@ fn make_action_registry() -> ActionRegistry {
         region_snapshot_replacement_garbage_collect::SagaRegionSnapshotReplacementGarbageCollect,
         region_snapshot_replacement_step::SagaRegionSnapshotReplacementStep,
         region_snapshot_replacement_step_garbage_collect::SagaRegionSnapshotReplacementStepGarbageCollect,
-        region_snapshot_replacement_finish::SagaRegionSnapshotReplacementFinish
+        region_snapshot_replacement_finish::SagaRegionSnapshotReplacementFinish,
+        image_create::SagaImageCreate
     ];
 
     #[cfg(test)]

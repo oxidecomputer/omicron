@@ -8,12 +8,12 @@ use std::net::IpAddr;
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::datastore::UpdatePrecondition;
 use crate::db::datastore::address_lot::{
     ReserveBlockError, ReserveBlockTxnError,
 };
-use crate::db::datastore::UpdatePrecondition;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::model::{
     LldpLinkConfig, Name, SwitchInterfaceConfig, SwitchPort,
     SwitchPortAddressConfig, SwitchPortBgpPeerConfig, SwitchPortConfig,
@@ -31,7 +31,7 @@ use diesel::{
 use diesel_dtrace::DTraceConnection;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{
-    BgpConfig, SqlU16, SqlU32, SqlU8, SwitchPortBgpPeerConfigAllowExport,
+    BgpConfig, SqlU8, SqlU16, SqlU32, SwitchPortBgpPeerConfigAllowExport,
     SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity,
 };
 use nexus_types::external_api::params;
@@ -380,7 +380,7 @@ impl DataStore {
     ) -> LookupResult<SwitchPortSettingsCombinedResult> {
         #[derive(Debug)]
         enum SwitchPortSettingsGetError {
-            NotFound(external::Name),
+            NotFound(NameOrId),
         }
 
         let err = OptionalError::new();
@@ -403,7 +403,23 @@ impl DataStore {
                 };
 
                 let id = match name_or_id {
-                    NameOrId::Id(id) => *id,
+                    NameOrId::Id(id) => {
+                        switch_port_settings::table
+                            .filter(switch_port_settings::time_deleted.is_null())
+                            .filter(switch_port_settings::id.eq(*id))
+                            .select(switch_port_settings::id)
+                            .limit(1)
+                            .first_async::<Uuid>(&conn)
+                            .await
+                            .map_err(|diesel_error| {
+                                err.bail_retryable_or_else(diesel_error, |_| {
+                                    SwitchPortSettingsGetError::NotFound(
+                                        name_or_id.clone()
+                                    )
+                                })
+                            })?
+
+                    }
                     NameOrId::Name(name) => {
                         let name_str = name.to_string();
                         port_settings_dsl::switch_port_settings
@@ -416,7 +432,7 @@ impl DataStore {
                             .map_err(|diesel_error| {
                                 err.bail_retryable_or_else(diesel_error, |_| {
                                     SwitchPortSettingsGetError::NotFound(
-                                        name.clone(),
+                                        name_or_id.clone()
                                     )
                                 })
                             })?
@@ -639,11 +655,11 @@ impl DataStore {
         .map_err(|e| {
             if let Some(err) = err.take() {
                 match err {
-                    SwitchPortSettingsGetError::NotFound(name) => {
-                        Error::not_found_by_name(
-                            ResourceType::SwitchPortSettings,
-                            &name,
-                        )
+                    SwitchPortSettingsGetError::NotFound(name_or_id) => {
+                        match name_or_id {
+                            NameOrId::Id(uuid) => Error::not_found_by_id(ResourceType::SwitchPortSettings, &uuid),
+                            NameOrId::Name(name) => Error::not_found_by_name(ResourceType::SwitchPortSettings, &name),
+                        }
                     }
                 }
             } else {
@@ -1134,7 +1150,6 @@ async fn do_switch_port_settings_create(
     err: OptionalError<SwitchPortSettingsCreateError>,
 ) -> Result<SwitchPortSettingsCombinedResult, diesel::result::Error> {
     use db::schema::{
-        address_lot::dsl as address_lot_dsl, bgp_config::dsl as bgp_config_dsl,
         lldp_link_config::dsl as lldp_link_config_dsl,
         switch_port_settings::dsl as port_settings_dsl,
         switch_port_settings_address_config::dsl as address_config_dsl,
@@ -1321,10 +1336,22 @@ async fn do_switch_port_settings_create(
             peer_by_addr.insert(p.addr, &p);
             use db::schema::bgp_config;
             let bgp_config_id = match &p.bgp_config {
-                NameOrId::Id(id) => *id,
+                NameOrId::Id(id) => bgp_config::table
+                    .filter(bgp_config::time_deleted.is_null())
+                    .filter(bgp_config::id.eq(*id))
+                    .select(bgp_config::id)
+                    .limit(1)
+                    .first_async::<Uuid>(conn)
+                    .await
+                    .map_err(|diesel_error| {
+                        err.bail_retryable_or(
+                            diesel_error,
+                            SwitchPortSettingsCreateError::BgpConfigNotFound,
+                        )
+                    })?,
                 NameOrId::Name(name) => {
                     let name = name.to_string();
-                    bgp_config_dsl::bgp_config
+                    bgp_config::table
                         .filter(bgp_config::time_deleted.is_null())
                         .filter(bgp_config::name.eq(name))
                         .select(bgp_config::id)
@@ -1456,10 +1483,22 @@ async fn do_switch_port_settings_create(
     for (interface_name, a) in &params.addresses {
         for address in &a.addresses {
             let address_lot_id = match &address.address_lot {
-                NameOrId::Id(id) => *id,
+                NameOrId::Id(id) => address_lot::table
+                    .filter(address_lot::time_deleted.is_null())
+                    .filter(address_lot::id.eq(*id))
+                    .select(address_lot::id)
+                    .limit(1)
+                    .first_async::<Uuid>(conn)
+                    .await
+                    .map_err(|diesel_error| {
+                        err.bail_retryable_or(
+                            diesel_error,
+                            SwitchPortSettingsCreateError::AddressLotNotFound,
+                        )
+                    })?,
                 NameOrId::Name(name) => {
                     let name = name.to_string();
-                    address_lot_dsl::address_lot
+                    address_lot::table
                         .filter(address_lot::time_deleted.is_null())
                         .filter(address_lot::name.eq(name))
                         .select(address_lot::id)
@@ -1527,10 +1566,22 @@ async fn do_switch_port_settings_delete(
     use db::schema::switch_port_settings;
     use db::schema::switch_port_settings::dsl as port_settings_dsl;
     let id = match selector {
-        NameOrId::Id(id) => *id,
+        NameOrId::Id(id) => switch_port_settings::table
+            .filter(switch_port_settings::time_deleted.is_null())
+            .filter(switch_port_settings::id.eq(*id))
+            .select(switch_port_settings::id)
+            .limit(1)
+            .first_async::<Uuid>(conn)
+            .await
+            .map_err(|diesel_error| {
+                err.bail_retryable_or(
+                    diesel_error,
+                    SwitchPortSettingsDeleteError::SwitchPortSettingsNotFound,
+                )
+            })?,
         NameOrId::Name(name) => {
             let name = name.to_string();
-            port_settings_dsl::switch_port_settings
+            switch_port_settings::table
                 .filter(switch_port_settings::time_deleted.is_null())
                 .filter(switch_port_settings::name.eq(name))
                 .select(switch_port_settings::id)

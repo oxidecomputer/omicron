@@ -8,17 +8,17 @@ use illumos_utils::running_zone::RunningZone;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::SledIdentifiers;
-use oximeter_instruments::kstat::link::SledDataLink;
-use oximeter_instruments::kstat::link::SledDataLinkTarget;
 use oximeter_instruments::kstat::CollectionDetails;
 use oximeter_instruments::kstat::Error as KstatError;
 use oximeter_instruments::kstat::KstatSampler;
 use oximeter_instruments::kstat::TargetId;
+use oximeter_instruments::kstat::link::SledDataLink;
+use oximeter_instruments::kstat::link::SledDataLinkTarget;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use slog::Logger;
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -196,7 +196,10 @@ async fn metrics_task(
                     .await
             }
             Message::TimeSynced { sled_id } => {
-                assert!(!sled_time_synced, "This message should only be sent once (on first synchronization with NTP)");
+                assert!(
+                    !sled_time_synced,
+                    "This message should only be sent once (on first synchronization with NTP)"
+                );
                 if sled_id == sled_identifiers.sled_id {
                     sled_time_synced = true;
                     sync_sled_datalinks(

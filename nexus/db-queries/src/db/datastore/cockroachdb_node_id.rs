@@ -6,16 +6,16 @@
 
 use super::DataStore;
 use crate::db;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::ExpressionMethods;
 use diesel::OptionalExtension;
 use diesel::QueryDsl;
 use nexus_auth::authz;
 use nexus_auth::context::OpContext;
-use nexus_db_model::to_db_typed_uuid;
 use nexus_db_model::CockroachZoneIdToNodeId;
+use nexus_db_model::to_db_typed_uuid;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
 use omicron_uuid_kinds::OmicronZoneUuid;

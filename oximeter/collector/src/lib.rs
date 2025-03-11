@@ -13,11 +13,11 @@ use dropshot::HttpError;
 use dropshot::HttpServer;
 use dropshot::ServerBuilder;
 use internal_dns_types::names::ServiceName;
-use omicron_common::address::get_internal_dns_server_addresses;
+use omicron_common::FileKv;
 use omicron_common::address::DNS_PORT;
+use omicron_common::address::get_internal_dns_server_addresses;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::backoff;
-use omicron_common::FileKv;
 use qorb::backend;
 use qorb::resolver::BoxedResolver;
 use qorb::resolvers::dns::DnsResolver;
@@ -26,13 +26,13 @@ use qorb::resolvers::single_host::SingleHostResolver;
 use qorb::service;
 use serde::Deserialize;
 use serde::Serialize;
+use slog::Drain;
+use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::info;
 use slog::o;
 use slog::warn;
-use slog::Drain;
-use slog::Logger;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::path::Path;
@@ -50,8 +50,8 @@ mod standalone;
 
 pub use agent::OximeterAgent;
 pub use http_entrypoints::oximeter_api;
-pub use standalone::standalone_nexus_api;
 pub use standalone::Server as StandaloneNexus;
+pub use standalone::standalone_nexus_api;
 
 /// Errors collecting metric data
 #[derive(Debug, Error)]
@@ -263,6 +263,14 @@ impl Oximeter {
             debug!(log, "creating ClickHouse client");
             let resolver =
                 make_resolver(config.db.address, ServiceName::ClickhouseNative);
+            let cluster_resolver = Box::new(DnsResolver::new(
+                service::Name(ServiceName::ClickhouseClusterNative.srv_name()),
+                bootstrap_dns.clone(),
+                DnsResolverConfig {
+                    hardcoded_ttl: Some(tokio::time::Duration::MAX),
+                    ..Default::default()
+                },
+            ));
             Ok(Arc::new(
                 OximeterAgent::with_id(
                     args.id,
@@ -270,6 +278,7 @@ impl Oximeter {
                     config.refresh_interval,
                     config.db,
                     resolver,
+                    cluster_resolver,
                     &log,
                     config.db.replicated,
                 )

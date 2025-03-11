@@ -24,8 +24,10 @@ use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use omicron_common::api::external::AddressLotKind;
+use omicron_common::api::external::AffinityPolicy;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::FailureDomain;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::InstanceCpuCount;
@@ -36,6 +38,7 @@ use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::UserId;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_test_utils::certificates::CertificateChain;
+use semver::Version;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
@@ -139,13 +142,14 @@ pub static DEMO_SILO_USER_ID_DELETE_URL: LazyLock<String> =
             DEFAULT_SILO.identity().name,
         )
     });
-pub static DEMO_SILO_USER_ID_SET_PASSWORD_URL: LazyLock<String> =
-    LazyLock::new(|| {
+pub static DEMO_SILO_USER_ID_SET_PASSWORD_URL: LazyLock<String> = LazyLock::new(
+    || {
         format!(
-        "/v1/system/identity-providers/local/users/{{id}}/set-password?silo={}",
-        DEFAULT_SILO.identity().name,
-    )
-    });
+            "/v1/system/identity-providers/local/users/{{id}}/set-password?silo={}",
+            DEFAULT_SILO.identity().name,
+        )
+    },
+);
 
 // Project used for testing
 pub static DEMO_PROJECT_NAME: LazyLock<Name> =
@@ -160,6 +164,14 @@ pub static DEMO_PROJECT_URL_IMAGES: LazyLock<String> =
     LazyLock::new(|| format!("/v1/images?project={}", *DEMO_PROJECT_NAME));
 pub static DEMO_PROJECT_URL_INSTANCES: LazyLock<String> =
     LazyLock::new(|| format!("/v1/instances?project={}", *DEMO_PROJECT_NAME));
+pub static DEMO_PROJECT_URL_AFFINITY_GROUPS: LazyLock<String> =
+    LazyLock::new(|| {
+        format!("/v1/affinity-groups?project={}", *DEMO_PROJECT_NAME)
+    });
+pub static DEMO_PROJECT_URL_ANTI_AFFINITY_GROUPS: LazyLock<String> =
+    LazyLock::new(|| {
+        format!("/v1/anti-affinity-groups?project={}", *DEMO_PROJECT_NAME)
+    });
 pub static DEMO_PROJECT_URL_SNAPSHOTS: LazyLock<String> =
     LazyLock::new(|| format!("/v1/snapshots?project={}", *DEMO_PROJECT_NAME));
 pub static DEMO_PROJECT_URL_VPCS: LazyLock<String> =
@@ -434,9 +446,102 @@ pub static DEMO_IMPORT_DISK_FINALIZE_URL: LazyLock<String> =
         )
     });
 
+// Affinity/Anti- group used for testing
+
+pub static DEMO_AFFINITY_GROUP_NAME: LazyLock<Name> =
+    LazyLock::new(|| "demo-affinity-group".parse().unwrap());
+pub static DEMO_AFFINITY_GROUP_URL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "/v1/affinity-groups/{}?{}",
+        *DEMO_AFFINITY_GROUP_NAME, *DEMO_PROJECT_SELECTOR
+    )
+});
+pub static DEMO_AFFINITY_GROUP_MEMBERS_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/affinity-groups/{}/members?{}",
+            *DEMO_AFFINITY_GROUP_NAME, *DEMO_PROJECT_SELECTOR
+        )
+    });
+pub static DEMO_AFFINITY_GROUP_INSTANCE_MEMBER_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/affinity-groups/{}/members/instance/{}?{}",
+            *DEMO_AFFINITY_GROUP_NAME,
+            *DEMO_STOPPED_INSTANCE_NAME,
+            *DEMO_PROJECT_SELECTOR
+        )
+    });
+pub static DEMO_AFFINITY_GROUP_CREATE: LazyLock<params::AffinityGroupCreate> =
+    LazyLock::new(|| params::AffinityGroupCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DEMO_AFFINITY_GROUP_NAME.clone(),
+            description: String::from(""),
+        },
+        policy: AffinityPolicy::Allow,
+        failure_domain: FailureDomain::Sled,
+    });
+pub static DEMO_AFFINITY_GROUP_UPDATE: LazyLock<params::AffinityGroupUpdate> =
+    LazyLock::new(|| params::AffinityGroupUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: None,
+            description: Some(String::from("an updated description")),
+        },
+    });
+
+pub static DEMO_ANTI_AFFINITY_GROUP_NAME: LazyLock<Name> =
+    LazyLock::new(|| "demo-anti-affinity-group".parse().unwrap());
+pub static DEMO_ANTI_AFFINITY_GROUPS_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!("/v1/anti-affinity-groups?{}", *DEMO_PROJECT_SELECTOR)
+    });
+pub static DEMO_ANTI_AFFINITY_GROUP_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/anti-affinity-groups/{}?{}",
+            *DEMO_ANTI_AFFINITY_GROUP_NAME, *DEMO_PROJECT_SELECTOR
+        )
+    });
+pub static DEMO_ANTI_AFFINITY_GROUP_MEMBERS_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/anti-affinity-groups/{}/members?{}",
+            *DEMO_ANTI_AFFINITY_GROUP_NAME, *DEMO_PROJECT_SELECTOR
+        )
+    });
+pub static DEMO_ANTI_AFFINITY_GROUP_INSTANCE_MEMBER_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/anti-affinity-groups/{}/members/instance/{}?{}",
+            *DEMO_ANTI_AFFINITY_GROUP_NAME,
+            *DEMO_STOPPED_INSTANCE_NAME,
+            *DEMO_PROJECT_SELECTOR
+        )
+    });
+pub static DEMO_ANTI_AFFINITY_GROUP_CREATE: LazyLock<
+    params::AntiAffinityGroupCreate,
+> = LazyLock::new(|| params::AntiAffinityGroupCreate {
+    identity: IdentityMetadataCreateParams {
+        name: DEMO_ANTI_AFFINITY_GROUP_NAME.clone(),
+        description: String::from(""),
+    },
+    policy: AffinityPolicy::Allow,
+    failure_domain: FailureDomain::Sled,
+});
+pub static DEMO_ANTI_AFFINITY_GROUP_UPDATE: LazyLock<
+    params::AntiAffinityGroupUpdate,
+> = LazyLock::new(|| params::AntiAffinityGroupUpdate {
+    identity: IdentityMetadataUpdateParams {
+        name: None,
+        description: Some(String::from("an updated description")),
+    },
+});
+
 // Instance used for testing
 pub static DEMO_INSTANCE_NAME: LazyLock<Name> =
     LazyLock::new(|| "demo-instance".parse().unwrap());
+pub static DEMO_STOPPED_INSTANCE_NAME: LazyLock<Name> =
+    LazyLock::new(|| "demo-stopped-instance".parse().unwrap());
 pub static DEMO_INSTANCE_URL: LazyLock<String> = LazyLock::new(|| {
     format!("/v1/instances/{}?{}", *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR)
 });
@@ -537,6 +642,26 @@ pub static DEMO_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         start: true,
         auto_restart_policy: Default::default(),
     });
+pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
+    LazyLock::new(|| params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DEMO_STOPPED_INSTANCE_NAME.clone(),
+            description: String::from(""),
+        },
+        ncpus: InstanceCpuCount(1),
+        memory: ByteCount::from_gibibytes_u32(16),
+        hostname: "demo-instance".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: Some(Vec::new()),
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![params::ExternalIpCreate::Ephemeral {
+            pool: Some(DEMO_IP_POOL_NAME.clone().into()),
+        }],
+        disks: vec![],
+        boot_disk: None,
+        start: true,
+        auto_restart_policy: Default::default(),
+    });
 pub static DEMO_INSTANCE_UPDATE: LazyLock<params::InstanceUpdate> =
     LazyLock::new(|| params::InstanceUpdate {
         boot_disk: None,
@@ -600,10 +725,10 @@ pub const DEMO_SWITCH_PORT_URL: &'static str =
 pub static DEMO_SWITCH_PORT_SETTINGS_APPLY_URL: LazyLock<String> =
     LazyLock::new(|| {
         format!(
-        "/v1/system/hardware/switch-port/qsfp7/settings?rack_id={}&switch_location={}",
-        uuid::Uuid::new_v4(),
-        "switch0",
-    )
+            "/v1/system/hardware/switch-port/qsfp7/settings?rack_id={}&switch_location={}",
+            uuid::Uuid::new_v4(),
+            "switch0",
+        )
     });
 pub static DEMO_SWITCH_PORT_SETTINGS: LazyLock<
     params::SwitchPortApplySettings,
@@ -1013,6 +1138,12 @@ pub static ALLOW_LIST_UPDATE: LazyLock<params::AllowListUpdate> =
         allowed_ips: AllowedSourceIps::Any,
     });
 
+// Updates
+pub static DEMO_TARGET_RELEASE: LazyLock<params::SetTargetReleaseParams> =
+    LazyLock::new(|| params::SetTargetReleaseParams {
+        system_version: Version::new(0, 0, 0),
+    });
+
 /// Describes an API endpoint to be verified by the "unauthorized" test
 ///
 /// These structs are also used to check whether we're covering all endpoints in
@@ -1162,1520 +1293,1425 @@ pub static URL_USERS_DB_INIT: LazyLock<String> = LazyLock::new(|| {
 });
 
 /// List of endpoints to be verified
-pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
-    || {
+pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
+    LazyLock::new(|| {
         vec![
-        // Global IAM policy
-        VerifyEndpoint {
-            url: &SYSTEM_POLICY_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Put(
-                    serde_json::to_value(
-                        &shared::Policy::<shared::FleetRole> {
-                            role_assignments: vec![]
-                        }
-                    ).unwrap()
-                ),
-            ],
-        },
-        // IP Pools top-level endpoint
-        VerifyEndpoint {
-            url: &DEMO_IP_POOLS_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_IP_POOL_CREATE).unwrap()
-                ),
-            ],
-        },
-        VerifyEndpoint {
-            url: &DEMO_IP_POOLS_PROJ_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![
-                AllowedMethod::Get
-            ],
-        },
-
-        // Single IP Pool endpoint
-        VerifyEndpoint {
-            url: &DEMO_IP_POOL_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Put(
-                    serde_json::to_value(&*DEMO_IP_POOL_UPDATE).unwrap()
-                ),
-                AllowedMethod::Delete,
-            ],
-        },
-        VerifyEndpoint {
-            url: &DEMO_IP_POOL_PROJ_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![
-                AllowedMethod::Get
-            ],
-        },
-
-        // IP pool silos endpoint
-        VerifyEndpoint {
-            url: &DEMO_IP_POOL_SILOS_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(serde_json::to_value(&*DEMO_IP_POOL_SILOS_BODY).unwrap()),
-            ],
-        },
-        VerifyEndpoint {
-            url: &DEMO_IP_POOL_SILO_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Delete,
-                AllowedMethod::Put(serde_json::to_value(&*DEMO_IP_POOL_SILO_UPDATE_BODY).unwrap()),
-            ],
-        },
-
-        // IP Pool ranges endpoint
-        VerifyEndpoint {
-            url: &DEMO_IP_POOL_RANGES_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get
-            ],
-        },
-
-        // IP Pool ranges/add endpoint
-        VerifyEndpoint {
-            url: &DEMO_IP_POOL_RANGES_ADD_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap()
-                ),
-            ],
-        },
-
-        // IP Pool ranges/delete endpoint
-        VerifyEndpoint {
-            url: &DEMO_IP_POOL_RANGES_DEL_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap()
-                ),
-            ],
-        },
-
-        // IP pool utilization
-        VerifyEndpoint {
-            url: &DEMO_IP_POOL_UTILIZATION_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-            ],
-        },
-
-        // IP Pool endpoint (Oxide services)
-        VerifyEndpoint {
-            url: &DEMO_IP_POOL_SERVICE_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get
-            ],
-        },
-
-        // IP Pool ranges endpoint (Oxide services)
-        VerifyEndpoint {
-            url: &DEMO_IP_POOL_SERVICE_RANGES_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get
-            ],
-        },
-
-        // IP Pool ranges/add endpoint (Oxide services)
-        VerifyEndpoint {
-            url: &DEMO_IP_POOL_SERVICE_RANGES_ADD_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap()
-                ),
-            ],
-        },
-
-        // IP Pool ranges/delete endpoint (Oxide services)
-        VerifyEndpoint {
-            url: &DEMO_IP_POOL_SERVICE_RANGES_DEL_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap()
-                ),
-            ],
-        },
-
-        /* Silos */
-        VerifyEndpoint {
-            url: "/v1/system/silos",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_SILO_CREATE).unwrap()
-                )
-            ],
-        },
-        VerifyEndpoint {
-            url: &DEMO_SILO_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Delete,
-            ],
-        },
-        VerifyEndpoint {
-            url: &DEMO_SILO_IP_POOLS_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-            ],
-        },
-        VerifyEndpoint {
-            url: &DEMO_SILO_POLICY_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Put(
-                    serde_json::to_value(
-                        &shared::Policy::<shared::SiloRole> {
-                            role_assignments: vec![]
-                        }
-                    ).unwrap()
-                ),
-            ],
-        },
-        VerifyEndpoint {
-            url: &DEMO_SILO_QUOTAS_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Put(
-                    serde_json::to_value(
-                        params::SiloQuotasCreate::empty()
-                    ).unwrap()
-                )
-            ],
-        },
-        VerifyEndpoint {
-            url: "/v1/system/silo-quotas",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get
-            ],
-        },
-        VerifyEndpoint {
-            url: "/v1/system/utilization/silos",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get
-            ]
-        },
-        VerifyEndpoint {
-            url: &DEMO_SILO_UTIL_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get
-            ]
-        },
-        VerifyEndpoint {
-            url: "/v1/utilization",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![
-                AllowedMethod::Get
-            ]
-        },
-        VerifyEndpoint {
-            url: "/v1/policy",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Put(
-                    serde_json::to_value(
-                        &shared::Policy::<shared::SiloRole> {
-                            role_assignments: vec![]
-                        }
-                    ).unwrap()
-                ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/users",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/groups",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-            ],
-        },
-
-        VerifyEndpoint {
-            // non-existent UUID that will 404
-            url: "/v1/groups/8d90b9a5-1cea-4a2b-9af4-71467dd33a04",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![
-                AllowedMethod::GetNonexistent,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_SILO_USERS_LIST_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![ AllowedMethod::Get ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_SILO_USERS_CREATE_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(
-                        &*DEMO_USER_CREATE
-                    ).unwrap()
-                ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_SILO_USER_ID_GET_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_SILO_USER_ID_DELETE_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![
-                AllowedMethod::Delete,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_SILO_USER_ID_SET_PASSWORD_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![
-                AllowedMethod::Post(serde_json::to_value(
-                    params::UserPassword::LoginDisallowed
-                ).unwrap()),
-            ],
-        },
-
-        /* Projects */
-
-        // TODO-security TODO-correctness One thing that's a little strange
-        // here: we currently return a 404 if you attempt to create a Project
-        // inside an Organization and you're not authorized to do that.  In an
-        // ideal world, we'd return a 403 if you can _see_ the Organization and
-        // a 404 if not.  But we don't really know if you should be able to see
-        // the Organization.  Right now, the only real way to tell that is if
-        // you have permissions on anything _inside_ the Organization, which is
-        // incredibly expensive to determine in general.
-        // TODO: reevaluate the above comment and the change to unprivileged_access below
-        VerifyEndpoint {
-            url: "/v1/projects",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_PROJECT_CREATE).unwrap()
-                ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_PROJECT_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Delete,
-                AllowedMethod::Put(
-                    serde_json::to_value(params::ProjectUpdate{
-                        identity: IdentityMetadataUpdateParams {
-                            name: None,
-                            description: Some("different".to_string())
-                        },
-                    }).unwrap()
-                ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_PROJECT_POLICY_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Put(
-                    serde_json::to_value(
-                        &shared::Policy::<shared::ProjectRole> {
-                            role_assignments: vec![]
-                        }
-                    ).unwrap()
-                ),
-            ],
-        },
-
-        /* VPCs */
-        VerifyEndpoint {
-            url: &DEMO_PROJECT_URL_VPCS,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_VPC_CREATE).unwrap()
-                ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_VPC_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Put(
-                    serde_json::to_value(&params::VpcUpdate {
-                        identity: IdentityMetadataUpdateParams {
-                            name: None,
-                            description: Some("different".to_string())
-                        },
-                        dns_name: None,
-                    }).unwrap()
-                ),
-                AllowedMethod::Delete,
-            ],
-        },
-
-        /* Firewall rules */
-        VerifyEndpoint {
-            url: &DEMO_VPC_URL_FIREWALL_RULES,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Put(
-                    serde_json::to_value(VpcFirewallRuleUpdateParams {
-                        rules: vec![],
-                    }).unwrap()
-                ),
-            ],
-        },
-
-        /* VPC Subnets */
-        VerifyEndpoint {
-            url: &DEMO_VPC_URL_SUBNETS,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_VPC_SUBNET_CREATE).unwrap()
-                ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_VPC_SUBNET_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Put(
-                    serde_json::to_value(&params::VpcSubnetUpdate {
-                        identity: IdentityMetadataUpdateParams {
-                            name: None,
-                            description: Some("different".to_string())
-                        },
-                        custom_router: None,
-                    }).unwrap()
-                ),
-                AllowedMethod::Delete,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_VPC_SUBNET_INTERFACES_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-            ],
-        },
-
-        /* VPC Routers */
-
-        VerifyEndpoint {
-            url: &DEMO_VPC_URL_ROUTERS,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_VPC_ROUTER_CREATE).unwrap()
-                ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_VPC_ROUTER_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Put(
-                    serde_json::to_value(&params::VpcRouterUpdate {
-                        identity: IdentityMetadataUpdateParams {
-                            name: None,
-                            description: Some("different".to_string())
-                        },
-                    }).unwrap()
-                ),
-                AllowedMethod::Delete,
-            ],
-        },
-
-        /* Router Routes */
-
-        VerifyEndpoint {
-            url: &DEMO_VPC_ROUTER_URL_ROUTES,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_ROUTER_ROUTE_CREATE).unwrap()
-                ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_ROUTER_ROUTE_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Put(
-                    serde_json::to_value(&params::RouterRouteUpdate {
-                        identity: IdentityMetadataUpdateParams {
-                            name: None,
-                            description: Some("different".to_string())
-                        },
-                        target: RouteTarget::Ip(
-                            IpAddr::from(Ipv4Addr::new(127, 0, 0, 1))),
-                        destination: RouteDestination::Subnet(
-                            "loopback".parse().unwrap()),
-                    }).unwrap()
-                ),
-                AllowedMethod::Delete,
-            ],
-        },
-
-        /* Internet Gateways */
-
-        VerifyEndpoint {
-            url: &DEMO_INTERNET_GATEWAYS_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::GetNonexistent,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_INTERNET_GATEWAY_CREATE).unwrap()
-                ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_INTERNET_GATEWAY_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::GetNonexistent,
-                AllowedMethod::Delete,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_INTERNET_GATEWAY_IP_POOLS_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::GetNonexistent,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_INTERNET_GATEWAY_IP_POOL_CREATE).unwrap()
-                ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_INTERNET_GATEWAY_IP_POOL_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Delete,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_INTERNET_GATEWAY_IP_ADDRS_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::GetNonexistent,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_INTERNET_GATEWAY_IP_ADDRESS_CREATE).unwrap()
-                ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_INTERNET_GATEWAY_IP_ADDR_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Delete,
-            ],
-        },
-
-        /* Disks */
-
-        VerifyEndpoint {
-            url: &DEMO_DISKS_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_DISK_CREATE).unwrap()
-                ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_DISK_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Delete,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_DISK_METRICS_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_INSTANCE_DISKS_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-            ]
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_INSTANCE_DISKS_ATTACH_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(
+            // Global IAM policy
+            VerifyEndpoint {
+                url: &SYSTEM_POLICY_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&shared::Policy::<
+                            shared::FleetRole,
+                        > {
+                            role_assignments: vec![],
+                        })
+                        .unwrap(),
+                    ),
+                ],
+            },
+            // IP Pools top-level endpoint
+            VerifyEndpoint {
+                url: &DEMO_IP_POOLS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_IP_POOL_CREATE).unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_IP_POOLS_PROJ_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            // Single IP Pool endpoint
+            VerifyEndpoint {
+                url: &DEMO_IP_POOL_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_IP_POOL_UPDATE).unwrap(),
+                    ),
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_IP_POOL_PROJ_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            // IP pool silos endpoint
+            VerifyEndpoint {
+                url: &DEMO_IP_POOL_SILOS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_IP_POOL_SILOS_BODY)
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_IP_POOL_SILO_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Delete,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_IP_POOL_SILO_UPDATE_BODY)
+                            .unwrap(),
+                    ),
+                ],
+            },
+            // IP Pool ranges endpoint
+            VerifyEndpoint {
+                url: &DEMO_IP_POOL_RANGES_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            // IP Pool ranges/add endpoint
+            VerifyEndpoint {
+                url: &DEMO_IP_POOL_RANGES_ADD_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap(),
+                )],
+            },
+            // IP Pool ranges/delete endpoint
+            VerifyEndpoint {
+                url: &DEMO_IP_POOL_RANGES_DEL_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap(),
+                )],
+            },
+            // IP pool utilization
+            VerifyEndpoint {
+                url: &DEMO_IP_POOL_UTILIZATION_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            // IP Pool endpoint (Oxide services)
+            VerifyEndpoint {
+                url: &DEMO_IP_POOL_SERVICE_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            // IP Pool ranges endpoint (Oxide services)
+            VerifyEndpoint {
+                url: &DEMO_IP_POOL_SERVICE_RANGES_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            // IP Pool ranges/add endpoint (Oxide services)
+            VerifyEndpoint {
+                url: &DEMO_IP_POOL_SERVICE_RANGES_ADD_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap(),
+                )],
+            },
+            // IP Pool ranges/delete endpoint (Oxide services)
+            VerifyEndpoint {
+                url: &DEMO_IP_POOL_SERVICE_RANGES_DEL_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap(),
+                )],
+            },
+            /* Silos */
+            VerifyEndpoint {
+                url: "/v1/system/silos",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_SILO_CREATE).unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SILO_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SILO_IP_POOLS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SILO_POLICY_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&shared::Policy::<
+                            shared::SiloRole,
+                        > {
+                            role_assignments: vec![],
+                        })
+                        .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SILO_QUOTAS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(params::SiloQuotasCreate::empty())
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: "/v1/system/silo-quotas",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: "/v1/system/utilization/silos",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SILO_UTIL_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: "/v1/utilization",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: "/v1/policy",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&shared::Policy::<
+                            shared::SiloRole,
+                        > {
+                            role_assignments: vec![],
+                        })
+                        .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: "/v1/users",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: "/v1/groups",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                // non-existent UUID that will 404
+                url: "/v1/groups/8d90b9a5-1cea-4a2b-9af4-71467dd33a04",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SILO_USERS_LIST_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SILO_USERS_CREATE_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_USER_CREATE).unwrap(),
+                )],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SILO_USER_ID_GET_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SILO_USER_ID_DELETE_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![AllowedMethod::Delete],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SILO_USER_ID_SET_PASSWORD_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::to_value(params::UserPassword::LoginDisallowed)
+                        .unwrap(),
+                )],
+            },
+            /* Projects */
+            // TODO-security TODO-correctness One thing that's a little strange
+            // here: we currently return a 404 if you attempt to create a Project
+            // inside an Organization and you're not authorized to do that.  In an
+            // ideal world, we'd return a 403 if you can _see_ the Organization and
+            // a 404 if not.  But we don't really know if you should be able to see
+            // the Organization.  Right now, the only real way to tell that is if
+            // you have permissions on anything _inside_ the Organization, which is
+            // incredibly expensive to determine in general.
+            // TODO: reevaluate the above comment and the change to unprivileged_access below
+            VerifyEndpoint {
+                url: "/v1/projects",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_PROJECT_CREATE).unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_PROJECT_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                    AllowedMethod::Put(
+                        serde_json::to_value(params::ProjectUpdate {
+                            identity: IdentityMetadataUpdateParams {
+                                name: None,
+                                description: Some("different".to_string()),
+                            },
+                        })
+                        .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_PROJECT_POLICY_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&shared::Policy::<
+                            shared::ProjectRole,
+                        > {
+                            role_assignments: vec![],
+                        })
+                        .unwrap(),
+                    ),
+                ],
+            },
+            /* VPCs */
+            VerifyEndpoint {
+                url: &DEMO_PROJECT_URL_VPCS,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_VPC_CREATE).unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_VPC_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&params::VpcUpdate {
+                            identity: IdentityMetadataUpdateParams {
+                                name: None,
+                                description: Some("different".to_string()),
+                            },
+                            dns_name: None,
+                        })
+                        .unwrap(),
+                    ),
+                    AllowedMethod::Delete,
+                ],
+            },
+            /* Firewall rules */
+            VerifyEndpoint {
+                url: &DEMO_VPC_URL_FIREWALL_RULES,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(VpcFirewallRuleUpdateParams {
+                            rules: vec![],
+                        })
+                        .unwrap(),
+                    ),
+                ],
+            },
+            /* VPC Subnets */
+            VerifyEndpoint {
+                url: &DEMO_VPC_URL_SUBNETS,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_VPC_SUBNET_CREATE).unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_VPC_SUBNET_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&params::VpcSubnetUpdate {
+                            identity: IdentityMetadataUpdateParams {
+                                name: None,
+                                description: Some("different".to_string()),
+                            },
+                            custom_router: None,
+                        })
+                        .unwrap(),
+                    ),
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_VPC_SUBNET_INTERFACES_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            /* VPC Routers */
+            VerifyEndpoint {
+                url: &DEMO_VPC_URL_ROUTERS,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_VPC_ROUTER_CREATE).unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_VPC_ROUTER_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&params::VpcRouterUpdate {
+                            identity: IdentityMetadataUpdateParams {
+                                name: None,
+                                description: Some("different".to_string()),
+                            },
+                        })
+                        .unwrap(),
+                    ),
+                    AllowedMethod::Delete,
+                ],
+            },
+            /* Router Routes */
+            VerifyEndpoint {
+                url: &DEMO_VPC_ROUTER_URL_ROUTES,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_ROUTER_ROUTE_CREATE)
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_ROUTER_ROUTE_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&params::RouterRouteUpdate {
+                            identity: IdentityMetadataUpdateParams {
+                                name: None,
+                                description: Some("different".to_string()),
+                            },
+                            target: RouteTarget::Ip(IpAddr::from(
+                                Ipv4Addr::new(127, 0, 0, 1),
+                            )),
+                            destination: RouteDestination::Subnet(
+                                "loopback".parse().unwrap(),
+                            ),
+                        })
+                        .unwrap(),
+                    ),
+                    AllowedMethod::Delete,
+                ],
+            },
+            /* Internet Gateways */
+            VerifyEndpoint {
+                url: &DEMO_INTERNET_GATEWAYS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_INTERNET_GATEWAY_CREATE)
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_INTERNET_GATEWAY_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_INTERNET_GATEWAY_IP_POOLS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Post(
+                        serde_json::to_value(
+                            &*DEMO_INTERNET_GATEWAY_IP_POOL_CREATE,
+                        )
+                        .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_INTERNET_GATEWAY_IP_POOL_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Delete],
+            },
+            VerifyEndpoint {
+                url: &DEMO_INTERNET_GATEWAY_IP_ADDRS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent,
+                    AllowedMethod::Post(
+                        serde_json::to_value(
+                            &*DEMO_INTERNET_GATEWAY_IP_ADDRESS_CREATE,
+                        )
+                        .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_INTERNET_GATEWAY_IP_ADDR_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Delete],
+            },
+            /* Disks */
+            VerifyEndpoint {
+                url: &DEMO_DISKS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_DISK_CREATE).unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_DISK_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_DISK_METRICS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_INSTANCE_DISKS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_INSTANCE_DISKS_ATTACH_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
                     serde_json::to_value(params::DiskPath {
-                        disk: DEMO_DISK_NAME.clone().into()
-                    }).unwrap()
-                )
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_INSTANCE_DISKS_DETACH_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(
+                        disk: DEMO_DISK_NAME.clone().into(),
+                    })
+                    .unwrap(),
+                )],
+            },
+            VerifyEndpoint {
+                url: &DEMO_INSTANCE_DISKS_DETACH_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
                     serde_json::to_value(params::DiskPath {
-                        disk: DEMO_DISK_NAME.clone().into()
-                    }).unwrap()
-                )
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_IMPORT_DISK_BULK_WRITE_START_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(serde_json::value::Value::Null),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_IMPORT_DISK_BULK_WRITE_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(params::ImportBlocksBulkWrite {
-                        offset: 0,
-                        base64_encoded_data: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==".into(),
-                    }).unwrap()),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_IMPORT_DISK_BULK_WRITE_STOP_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(serde_json::value::Value::Null),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_IMPORT_DISK_FINALIZE_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(serde_json::from_str("{}").unwrap()),
-            ],
-        },
-
-        /* Project images */
-
-        VerifyEndpoint {
-            url: &DEMO_PROJECT_URL_IMAGES,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap()
-                ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_PROJECT_IMAGE_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Delete,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_PROJECT_PROMOTE_IMAGE_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(serde_json::value::Value::Null),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_SILO_DEMOTE_IMAGE_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(serde_json::value::Value::Null),
-            ],
-        },
-
-        /* Snapshots */
-
-        VerifyEndpoint {
-            url: &DEMO_PROJECT_URL_SNAPSHOTS,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(DEMO_SNAPSHOT_CREATE.clone()).unwrap(),
-                )
-            ]
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_SNAPSHOT_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Delete,
-            ]
-        },
-
-        /* Instances */
-        VerifyEndpoint {
-            url: &DEMO_PROJECT_URL_INSTANCES,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_INSTANCE_CREATE).unwrap()
-                ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_INSTANCE_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Delete,
-                AllowedMethod::Put(
-                    serde_json::to_value(&*DEMO_INSTANCE_UPDATE).unwrap()
-                ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_INSTANCE_START_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(serde_json::Value::Null)
-            ],
-        },
-        VerifyEndpoint {
-            url: &DEMO_INSTANCE_STOP_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(serde_json::Value::Null)
-            ],
-        },
-        VerifyEndpoint {
-            url: &DEMO_INSTANCE_REBOOT_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(serde_json::Value::Null)
-            ],
-        },
-        VerifyEndpoint {
-            url: &DEMO_INSTANCE_SERIAL_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::GetNonexistent // has required query parameters
-            ],
-        },
-        VerifyEndpoint {
-            url: &DEMO_INSTANCE_SERIAL_STREAM_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::GetWebsocket
-            ],
-        },
-        /* Instance NICs */
-        VerifyEndpoint {
-            url: &DEMO_INSTANCE_NICS_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_INSTANCE_NIC_CREATE).unwrap()
-                ),
-            ],
-        },
-        VerifyEndpoint {
-            url: &DEMO_INSTANCE_NIC_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Delete,
-                AllowedMethod::Put(
-                    serde_json::to_value(&*DEMO_INSTANCE_NIC_PUT).unwrap()
-                ),
-            ],
-        },
-
-        /* Instance external IP addresses */
-        VerifyEndpoint {
-            url: &DEMO_INSTANCE_EXTERNAL_IPS_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_INSTANCE_EPHEMERAL_IP_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_EPHEMERAL_IP_ATTACH).unwrap()
-                ),
-                AllowedMethod::Delete,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_INSTANCE_SSH_KEYS_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get]
-        },
-
-        /* IAM */
-
-        VerifyEndpoint {
-            url: "/v1/system/roles",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-        VerifyEndpoint {
-            url: "/v1/system/roles/fleet.admin",
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/users-builtin",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-        VerifyEndpoint {
-            url: &URL_USERS_DB_INIT,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        /* Hardware */
-
-        VerifyEndpoint {
-            url: "/v1/system/hardware/racks",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
-            url: &HARDWARE_RACK_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
-            url: &HARDWARE_UNINITIALIZED_SLEDS,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/hardware/sleds",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get, AllowedMethod::Post(
-                serde_json::to_value(&*DEMO_UNINITIALIZED_SLED).unwrap()
-            )],
-        },
-
-        VerifyEndpoint {
-            url: &SLED_INSTANCES_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
-            url: &HARDWARE_SLED_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
-            url: &HARDWARE_SLED_PROVISION_POLICY_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Put(
-                serde_json::to_value(&*DEMO_SLED_PROVISION_POLICY).unwrap()
-            )],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/hardware/switches",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        // TODO: Switches should be configured alongside sled agents during test setup
-        VerifyEndpoint {
-            url: &HARDWARE_SWITCH_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::GetNonexistent],
-        },
-
-        VerifyEndpoint {
-            url: &HARDWARE_DISKS_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
-            url: &HARDWARE_DISK_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-
-        VerifyEndpoint {
-            url: &HARDWARE_SLED_DISK_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        /* Support Bundles */
-
-        VerifyEndpoint {
-            url: &SUPPORT_BUNDLES_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(serde_json::to_value(()).unwrap())
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &SUPPORT_BUNDLE_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Delete,
-            ],
-        },
-
-        /* Updates */
-
-        VerifyEndpoint {
-            url: "/v1/system/update/repository?file_name=demo-repo.zip",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Put(
-                // In reality this is the contents of a zip file.
-                serde_json::Value::Null,
-            )],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/update/repository/1.0.0",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            // The update system is disabled, which causes a 500 error even for
-            // privileged users. That is captured by GetUnimplemented.
-            allowed_methods: vec![AllowedMethod::GetUnimplemented],
-        },
-
-        /* Metrics */
-
-        VerifyEndpoint {
-            url: &DEMO_SYSTEM_METRICS_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_SILO_METRICS_URL,
-            visibility: Visibility::Public,
-            // unprivileged user has silo read, otherwise they wouldn't be able
-            // to do anything
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &TIMESERIES_QUERY_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_TIMESERIES_QUERY).unwrap()
-                ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &SYSTEM_TIMESERIES_LIST_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::GetVolatile,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &SYSTEM_TIMESERIES_QUERY_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_TIMESERIES_QUERY).unwrap()
-                ),
-            ],
-        },
-
-        /* Silo identity providers */
-
-        VerifyEndpoint {
-            url: &IDENTITY_PROVIDERS_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &SAML_IDENTITY_PROVIDERS_URL,
-            // The visibility here deserves some explanation.  In order to
-            // create a real SAML identity provider for doing tests, we have to
-            // do it in a non-default Silo (because the default one does not
-            // support creating a SAML identity provider).  But unprivileged
-            // users won't be able to see that Silo.  So from their perspective,
-            // it's like an object in a container they can't see (which is what
-            // Visibility::Protected means).
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Post(
-                serde_json::to_value(&*SAML_IDENTITY_PROVIDER).unwrap(),
-            )],
-        },
-        VerifyEndpoint {
-            url: &SPECIFIC_SAML_IDENTITY_PROVIDER_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-        /* Misc */
-
-        VerifyEndpoint {
-            url: "/v1/me",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-            ],
-        },
-        VerifyEndpoint {
-            url: "/v1/me/groups",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::ReadOnly,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-            ],
-        },
-
-        /* SSH keys */
-
-        VerifyEndpoint {
-            url: &DEMO_SSHKEYS_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::Full,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_SSHKEY_CREATE).unwrap(),
-                ),
-            ],
-        },
-        VerifyEndpoint {
-            url: &DEMO_SPECIFIC_SSHKEY_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::Full,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Delete,
-            ],
-        },
-
-        /* Certificates */
-        VerifyEndpoint {
-            url: &DEMO_CERTIFICATES_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_CERTIFICATE_CREATE).unwrap(),
-                ),
-            ],
-        },
-        VerifyEndpoint {
-            url: &DEMO_CERTIFICATE_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Delete,
-            ],
-        },
-
-        /* External Networking */
-
-        VerifyEndpoint {
-            url: &DEMO_SWITCH_PORT_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-            ],
-        },
-
-        /* TODO requires dpd access
-        VerifyEndpoint {
-            url: &DEMO_SWITCH_PORT_STATUS_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-            ],
-        },
-        */
-
-
-        VerifyEndpoint {
-            url: &DEMO_SWITCH_PORT_SETTINGS_APPLY_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Delete,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_SWITCH_PORT_SETTINGS).unwrap(),
-                ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_ADDRESS_LOTS_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_ADDRESS_LOT_CREATE).unwrap(),
-                ),
-                AllowedMethod::Get
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_ADDRESS_LOT_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Delete,
-            ]
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_ADDRESS_LOT_BLOCKS_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::GetNonexistent
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_LOOPBACK_CREATE_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_LOOPBACK_CREATE).unwrap(),
-                ),
-                AllowedMethod::Get,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_LOOPBACK_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Delete
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_SWITCH_PORT_SETTINGS_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(
-                        &*DEMO_SWITCH_PORT_SETTINGS_CREATE).unwrap(),
-                ),
-                AllowedMethod::Get,
-                AllowedMethod::Delete
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_SWITCH_PORT_SETTINGS_INFO_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::GetNonexistent
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_BGP_CONFIG_CREATE_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_BGP_CONFIG).unwrap(),
-                ),
-                AllowedMethod::Get,
-                AllowedMethod::Delete
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_BGP_ANNOUNCE_SET_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Put(
-                    serde_json::to_value(&*DEMO_BGP_ANNOUNCE).unwrap(),
-                ),
-                AllowedMethod::Get,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_BGP_ANNOUNCE_SET_DELETE_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Delete
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_BGP_ANNOUNCEMENT_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::GetNonexistent,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_BGP_STATUS_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::GetNonexistent,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_BGP_EXPORTED_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::GetNonexistent,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_BGP_ROUTES_IPV4_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::GetNonexistent,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_BGP_MESSAGE_HISTORY_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::GetNonexistent,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_BFD_STATUS_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::GetNonexistent,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_BFD_ENABLE_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_BFD_ENABLE).unwrap()
-                )
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_BFD_DISABLE_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_BFD_DISABLE).unwrap()
-                )
-            ],
-        },
-
-        // Floating IPs
-        VerifyEndpoint {
-            url: &DEMO_PROJECT_URL_FIPS,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_FLOAT_IP_CREATE).unwrap(),
-                ),
-                AllowedMethod::Get,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_FLOAT_IP_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Put(
-                    serde_json::to_value(&*DEMO_FLOAT_IP_UPDATE).unwrap()
-                  ),
-                AllowedMethod::Delete,
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_FLOATING_IP_ATTACH_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(
+                        disk: DEMO_DISK_NAME.clone().into(),
+                    })
+                    .unwrap(),
+                )],
+            },
+            /* Affinity Groups */
+            VerifyEndpoint {
+                url: &DEMO_PROJECT_URL_AFFINITY_GROUPS,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+
+                allowed_methods: vec![
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_AFFINITY_GROUP_CREATE)
+                            .unwrap(),
+                    ),
+                    AllowedMethod::Get,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_AFFINITY_GROUP_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_AFFINITY_GROUP_UPDATE)
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_AFFINITY_GROUP_MEMBERS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_AFFINITY_GROUP_INSTANCE_MEMBER_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                    AllowedMethod::Post(serde_json::Value::Null),
+                ],
+            },
+            /* Anti-Affinity Groups */
+            VerifyEndpoint {
+                url: &DEMO_ANTI_AFFINITY_GROUPS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+
+                allowed_methods: vec![
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_ANTI_AFFINITY_GROUP_CREATE)
+                            .unwrap(),
+                    ),
+                    AllowedMethod::Get,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_ANTI_AFFINITY_GROUP_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_ANTI_AFFINITY_GROUP_UPDATE)
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_ANTI_AFFINITY_GROUP_MEMBERS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_ANTI_AFFINITY_GROUP_INSTANCE_MEMBER_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                    AllowedMethod::Post(serde_json::Value::Null),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_IMPORT_DISK_BULK_WRITE_START_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::value::Value::Null,
+                )],
+            },
+            VerifyEndpoint {
+                url: &DEMO_IMPORT_DISK_BULK_WRITE_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: {
+                    use base64::prelude::*;
+                    vec![AllowedMethod::Post(
+                        serde_json::to_value(params::ImportBlocksBulkWrite {
+                            offset: 0,
+                            base64_encoded_data: BASE64_STANDARD
+                                .encode([0; 4096]),
+                        })
+                        .unwrap(),
+                    )]
+                },
+            },
+            VerifyEndpoint {
+                url: &DEMO_IMPORT_DISK_BULK_WRITE_STOP_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::value::Value::Null,
+                )],
+            },
+            VerifyEndpoint {
+                url: &DEMO_IMPORT_DISK_FINALIZE_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::from_str("{}").unwrap(),
+                )],
+            },
+            /* Project images */
+            VerifyEndpoint {
+                url: &DEMO_PROJECT_URL_IMAGES,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_PROJECT_IMAGE_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_PROJECT_PROMOTE_IMAGE_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::value::Value::Null,
+                )],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SILO_DEMOTE_IMAGE_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::value::Value::Null,
+                )],
+            },
+            /* Snapshots */
+            VerifyEndpoint {
+                url: &DEMO_PROJECT_URL_SNAPSHOTS,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(DEMO_SNAPSHOT_CREATE.clone())
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SNAPSHOT_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                ],
+            },
+            /* Instances */
+            VerifyEndpoint {
+                url: &DEMO_PROJECT_URL_INSTANCES,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_INSTANCE_CREATE).unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_INSTANCE_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_INSTANCE_UPDATE).unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_INSTANCE_START_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::Value::Null,
+                )],
+            },
+            VerifyEndpoint {
+                url: &DEMO_INSTANCE_STOP_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::Value::Null,
+                )],
+            },
+            VerifyEndpoint {
+                url: &DEMO_INSTANCE_REBOOT_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::Value::Null,
+                )],
+            },
+            VerifyEndpoint {
+                url: &DEMO_INSTANCE_SERIAL_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::GetNonexistent, // has required query parameters
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_INSTANCE_SERIAL_STREAM_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetWebsocket],
+            },
+            /* Instance NICs */
+            VerifyEndpoint {
+                url: &DEMO_INSTANCE_NICS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_INSTANCE_NIC_CREATE)
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_INSTANCE_NIC_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_INSTANCE_NIC_PUT).unwrap(),
+                    ),
+                ],
+            },
+            /* Instance external IP addresses */
+            VerifyEndpoint {
+                url: &DEMO_INSTANCE_EXTERNAL_IPS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_INSTANCE_EPHEMERAL_IP_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_EPHEMERAL_IP_ATTACH)
+                            .unwrap(),
+                    ),
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_INSTANCE_SSH_KEYS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            /* IAM */
+            VerifyEndpoint {
+                url: "/v1/system/roles",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: "/v1/system/roles/fleet.admin",
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: "/v1/system/users-builtin",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &URL_USERS_DB_INIT,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            /* Hardware */
+            VerifyEndpoint {
+                url: "/v1/system/hardware/racks",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &HARDWARE_RACK_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &HARDWARE_UNINITIALIZED_SLEDS,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: "/v1/system/hardware/sleds",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_UNINITIALIZED_SLED)
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &SLED_INSTANCES_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &HARDWARE_SLED_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &HARDWARE_SLED_PROVISION_POLICY_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Put(
+                    serde_json::to_value(&*DEMO_SLED_PROVISION_POLICY).unwrap(),
+                )],
+            },
+            VerifyEndpoint {
+                url: "/v1/system/hardware/switches",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            // TODO: Switches should be configured alongside sled agents during test setup
+            VerifyEndpoint {
+                url: &HARDWARE_SWITCH_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &HARDWARE_DISKS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &HARDWARE_DISK_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &HARDWARE_SLED_DISK_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            /* Support Bundles */
+            VerifyEndpoint {
+                url: &SUPPORT_BUNDLES_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(serde_json::to_value(()).unwrap()),
+                ],
+            },
+            VerifyEndpoint {
+                url: &SUPPORT_BUNDLE_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                ],
+            },
+            /* Updates */
+            VerifyEndpoint {
+                url: "/v1/system/update/repository?file_name=demo-repo.zip",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Put(
+                    // In reality this is the contents of a zip file.
+                    serde_json::Value::Null,
+                )],
+            },
+            VerifyEndpoint {
+                url: "/v1/system/update/repository/1.0.0",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                // The update system is disabled, which causes a 500 error even for
+                // privileged users. That is captured by GetUnimplemented.
+                allowed_methods: vec![AllowedMethod::GetUnimplemented],
+            },
+            VerifyEndpoint {
+                url: "/v1/system/update/target-release",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_TARGET_RELEASE).unwrap(),
+                    ),
+                ],
+            },
+            /* Metrics */
+            VerifyEndpoint {
+                url: &DEMO_SYSTEM_METRICS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SILO_METRICS_URL,
+                visibility: Visibility::Public,
+                // unprivileged user has silo read, otherwise they wouldn't be able
+                // to do anything
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &TIMESERIES_QUERY_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_TIMESERIES_QUERY).unwrap(),
+                )],
+            },
+            VerifyEndpoint {
+                url: &SYSTEM_TIMESERIES_LIST_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetVolatile],
+            },
+            VerifyEndpoint {
+                url: &SYSTEM_TIMESERIES_QUERY_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_TIMESERIES_QUERY).unwrap(),
+                )],
+            },
+            /* Silo identity providers */
+            VerifyEndpoint {
+                url: &IDENTITY_PROVIDERS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &SAML_IDENTITY_PROVIDERS_URL,
+                // The visibility here deserves some explanation.  In order to
+                // create a real SAML identity provider for doing tests, we have to
+                // do it in a non-default Silo (because the default one does not
+                // support creating a SAML identity provider).  But unprivileged
+                // users won't be able to see that Silo.  So from their perspective,
+                // it's like an object in a container they can't see (which is what
+                // Visibility::Protected means).
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::to_value(&*SAML_IDENTITY_PROVIDER).unwrap(),
+                )],
+            },
+            VerifyEndpoint {
+                url: &SPECIFIC_SAML_IDENTITY_PROVIDER_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            /* Misc */
+            VerifyEndpoint {
+                url: "/v1/me",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: "/v1/me/groups",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            /* SSH keys */
+            VerifyEndpoint {
+                url: &DEMO_SSHKEYS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::Full,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_SSHKEY_CREATE).unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SPECIFIC_SSHKEY_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::Full,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                ],
+            },
+            /* Certificates */
+            VerifyEndpoint {
+                url: &DEMO_CERTIFICATES_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_CERTIFICATE_CREATE)
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_CERTIFICATE_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                ],
+            },
+            /* External Networking */
+            VerifyEndpoint {
+                url: &DEMO_SWITCH_PORT_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            /* TODO requires dpd access
+            VerifyEndpoint {
+                url: &DEMO_SWITCH_PORT_STATUS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                ],
+            },
+            */
+            VerifyEndpoint {
+                url: &DEMO_SWITCH_PORT_SETTINGS_APPLY_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Delete,
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_SWITCH_PORT_SETTINGS)
+                            .unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_ADDRESS_LOTS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_ADDRESS_LOT_CREATE)
+                            .unwrap(),
+                    ),
+                    AllowedMethod::Get,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_ADDRESS_LOT_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Delete],
+            },
+            VerifyEndpoint {
+                url: &DEMO_ADDRESS_LOT_BLOCKS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_LOOPBACK_CREATE_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_LOOPBACK_CREATE).unwrap(),
+                    ),
+                    AllowedMethod::Get,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_LOOPBACK_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Delete],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SWITCH_PORT_SETTINGS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Post(
+                        serde_json::to_value(
+                            &*DEMO_SWITCH_PORT_SETTINGS_CREATE,
+                        )
+                        .unwrap(),
+                    ),
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SWITCH_PORT_SETTINGS_INFO_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_BGP_CONFIG_CREATE_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_BGP_CONFIG).unwrap(),
+                    ),
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_BGP_ANNOUNCE_SET_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_BGP_ANNOUNCE).unwrap(),
+                    ),
+                    AllowedMethod::Get,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_BGP_ANNOUNCE_SET_DELETE_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Delete],
+            },
+            VerifyEndpoint {
+                url: &DEMO_BGP_ANNOUNCEMENT_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_BGP_STATUS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_BGP_EXPORTED_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_BGP_ROUTES_IPV4_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_BGP_MESSAGE_HISTORY_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_BFD_STATUS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::GetNonexistent],
+            },
+            VerifyEndpoint {
+                url: &DEMO_BFD_ENABLE_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_BFD_ENABLE).unwrap(),
+                )],
+            },
+            VerifyEndpoint {
+                url: &DEMO_BFD_DISABLE_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_BFD_DISABLE).unwrap(),
+                )],
+            },
+            // Floating IPs
+            VerifyEndpoint {
+                url: &DEMO_PROJECT_URL_FIPS,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_FLOAT_IP_CREATE).unwrap(),
+                    ),
+                    AllowedMethod::Get,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_FLOAT_IP_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*DEMO_FLOAT_IP_UPDATE).unwrap(),
+                    ),
+                    AllowedMethod::Delete,
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_FLOATING_IP_ATTACH_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_FLOAT_IP_ATTACH).unwrap(),
-                ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_FLOATING_IP_DETACH_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Post(
+                )],
+            },
+            VerifyEndpoint {
+                url: &DEMO_FLOATING_IP_DETACH_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Post(
                     serde_json::to_value(&()).unwrap(),
-                ),
-            ],
-        },
-
-        // User-facing services IP allowlist
-        VerifyEndpoint {
-            url: &ALLOW_LIST_URL,
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Put(
-                    serde_json::to_value(&*ALLOW_LIST_UPDATE).unwrap(),
-                ),
-            ],
-        },
-    ]
-    },
-);
+                )],
+            },
+            // User-facing services IP allowlist
+            VerifyEndpoint {
+                url: &ALLOW_LIST_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Put(
+                        serde_json::to_value(&*ALLOW_LIST_UPDATE).unwrap(),
+                    ),
+                ],
+            },
+        ]
+    });

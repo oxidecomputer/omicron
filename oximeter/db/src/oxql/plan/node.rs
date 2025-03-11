@@ -6,6 +6,7 @@
 
 // Copyright 2024 Oxide Computer Company
 
+use crate::oxql::plan::Plan;
 use crate::oxql::plan::align::Align;
 use crate::oxql::plan::delta::Delta;
 use crate::oxql::plan::filter::Filter;
@@ -15,7 +16,6 @@ use crate::oxql::plan::join::Join;
 use crate::oxql::plan::limit::Limit;
 use crate::oxql::plan::plan::TableOpData;
 use crate::oxql::plan::plan::TableOpOutput;
-use crate::oxql::plan::Plan;
 
 /// A node in the query plan.
 ///

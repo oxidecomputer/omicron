@@ -1,8 +1,8 @@
 use super::Generation;
+use crate::DatastoreCollectionConfig;
 use crate::schema::{
     internet_gateway, internet_gateway_ip_address, internet_gateway_ip_pool,
 };
-use crate::DatastoreCollectionConfig;
 use db_macros::Resource;
 use ipnetwork::IpNetwork;
 use nexus_types::external_api::{params, views};

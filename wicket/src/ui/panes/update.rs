@@ -5,11 +5,11 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use super::{align_by, help_text, push_text_lines, Control, PendingScroll};
+use super::{Control, PendingScroll, align_by, help_text, push_text_lines};
 use crate::keymap::ShowPopupCmd;
 use crate::state::{
-    update_component_title, ArtifactVersions, ComponentId, Inventory,
-    UpdateItemState, ALL_COMPONENT_IDS,
+    ALL_COMPONENT_IDS, ArtifactVersions, ComponentId, Inventory,
+    UpdateItemState, update_component_title,
 };
 use crate::ui::defaults::style;
 use crate::ui::widgets::{
@@ -19,15 +19,15 @@ use crate::ui::widgets::{
 use crate::ui::wrap::wrap_text;
 use crate::{Action, Cmd, State};
 use indexmap::IndexMap;
-use omicron_common::api::internal::nexus::KnownArtifactKind;
+use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
     Block, BorderType, Borders, Cell, List, ListItem, ListState, Paragraph,
     Row, Table,
 };
-use ratatui::Frame;
-use slog::{info, o, Logger};
+use slog::{Logger, info, o};
+use tufaceous_artifact::KnownArtifactKind;
 use tui_tree_widget::{Tree, TreeItem, TreeState};
 use update_engine::display::ProgressRatioDisplay;
 use update_engine::{
@@ -1306,11 +1306,11 @@ impl UpdatePane {
                                 // state.rack_state.selected be changed in the
                                 // meantime) so log this.
                                 slog::warn!(
-                            self.log,
-                            "currently waiting on start update response \
+                                    self.log,
+                                    "currently waiting on start update response \
                              for {} but received response for {component_id}",
-                             state.rack_state.selected
-                        );
+                                    state.rack_state.selected
+                                );
                                 None
                             }
                         }
@@ -2435,7 +2435,7 @@ fn artifact_version(
         // Switches and PSCs do not have a host.
         (ComponentId::Switch(_), UpdateComponent::Host)
         | (ComponentId::Psc(_), UpdateComponent::Host) => {
-            return "N/A".to_string()
+            return "N/A".to_string();
         }
     };
     match versions.get(&artifact) {

@@ -5,13 +5,15 @@
 //! Background task for managing Support Bundles
 
 use crate::app::background::BackgroundTask;
+use anyhow::Context;
 use camino::Utf8DirEntry;
 use camino::Utf8Path;
+use camino_tempfile::Utf8TempDir;
 use camino_tempfile::tempdir_in;
 use camino_tempfile::tempfile_in;
-use camino_tempfile::Utf8TempDir;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::StreamExt;
+use futures::future::BoxFuture;
 use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
 use nexus_db_queries::authz;
@@ -34,13 +36,14 @@ use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use std::future::Future;
 use std::io::Write;
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
 use tokio::io::SeekFrom;
-use zip::write::FullFileOptions;
 use zip::ZipWriter;
+use zip::write::FullFileOptions;
 
 // We use "/var/tmp" to use Nexus' filesystem for temporary storage,
 // rather than "/tmp", which would keep this collected data in-memory.
@@ -599,24 +602,65 @@ impl BundleCollection<'_> {
                     continue;
                 };
 
-                write_command_result_or_error(
-                    &sled_path,
-                    "dladm",
-                    sled_client.support_dladm_info().await,
-                )
-                .await?;
-                write_command_result_or_error(
-                    &sled_path,
-                    "ipadm",
-                    sled_client.support_ipadm_info().await,
-                )
-                .await?;
-                write_command_result_or_error(
-                    &sled_path,
-                    "zoneadm",
-                    sled_client.support_zoneadm_info().await,
-                )
-                .await?;
+                // NB: As new sled-diagnostic commands are added they should
+                // be added to this array so that their output can be saved
+                // within the support bundle.
+                let mut diag_cmds = futures::stream::iter([
+                    save_diag_cmd_output_or_error(
+                        &sled_path,
+                        "zoneadm",
+                        sled_client.support_zoneadm_info(),
+                    )
+                    .boxed(),
+                    save_diag_cmd_output_or_error(
+                        &sled_path,
+                        "dladm",
+                        sled_client.support_dladm_info(),
+                    )
+                    .boxed(),
+                    save_diag_cmd_output_or_error(
+                        &sled_path,
+                        "ipadm",
+                        sled_client.support_ipadm_info(),
+                    )
+                    .boxed(),
+                    save_diag_cmd_output_or_error(
+                        &sled_path,
+                        "pargs",
+                        sled_client.support_pargs_info(),
+                    )
+                    .boxed(),
+                    save_diag_cmd_output_or_error(
+                        &sled_path,
+                        "pfiles",
+                        sled_client.support_pfiles_info(),
+                    )
+                    .boxed(),
+                    save_diag_cmd_output_or_error(
+                        &sled_path,
+                        "pstack",
+                        sled_client.support_pstack_info(),
+                    )
+                    .boxed(),
+                ])
+                // Currently we execute up to 10 commands concurrently which
+                // might be doing their own concurrent work, for example
+                // collectiong `pstack` output of every Oxide process that is
+                // found on a sled.
+                .buffer_unordered(10);
+
+                while let Some(result) = diag_cmds.next().await {
+                    // Log that we failed to write the diag command output to a
+                    // file but don't return early as we wish to get as much
+                    // information as we can.
+                    if let Err(e) = result {
+                        error!(
+                            &self.log,
+                            "failed to write diagnostic command output to \
+                            file: {e}"
+                        );
+                    }
+                }
             }
         }
 
@@ -728,22 +772,32 @@ async fn sha2_hash(file: &mut tokio::fs::File) -> anyhow::Result<ArtifactHash> {
     Ok(ArtifactHash(digest.as_slice().try_into()?))
 }
 
-async fn write_command_result_or_error<D: std::fmt::Debug>(
+/// Run a `sled-dianostics` future and save its output to a corresponding file.
+async fn save_diag_cmd_output_or_error<F, S: serde::Serialize>(
     path: &Utf8Path,
     command: &str,
-    result: Result<
-        sled_agent_client::ResponseValue<D>,
-        sled_agent_client::Error<sled_agent_client::types::Error>,
-    >,
-) -> anyhow::Result<()> {
+    future: F,
+) -> anyhow::Result<()>
+where
+    F: Future<
+            Output = Result<
+                sled_agent_client::ResponseValue<S>,
+                sled_agent_client::Error<sled_agent_client::types::Error>,
+            >,
+        > + Send,
+{
+    let result = future.await;
     match result {
         Ok(result) => {
             let output = result.into_inner();
-            tokio::fs::write(
-                path.join(format!("{command}.txt")),
-                format!("{output:?}"),
-            )
-            .await?;
+            let json = serde_json::to_string(&output).with_context(|| {
+                format!("failed to serialize {command} output as json")
+            })?;
+            tokio::fs::write(path.join(format!("{command}.json")), json)
+                .await
+                .with_context(|| {
+                    format!("failed to write output of {command} to file")
+                })?;
         }
         Err(err) => {
             tokio::fs::write(
@@ -968,8 +1022,10 @@ mod test {
                     )
                 })
                 .collect();
-            let dataset_config =
-                DatasetsConfig { generation: Generation::new(), datasets };
+            let dataset_config = DatasetsConfig {
+                generation: Generation::new().next(),
+                datasets,
+            };
 
             let res = cptestctx
                 .first_sled_agent()

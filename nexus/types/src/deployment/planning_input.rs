@@ -33,8 +33,8 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::error;
 use std::fmt;
 use strum::IntoEnumIterator;
@@ -508,9 +508,6 @@ pub enum DiskFilter {
 
     /// All disks which are in-service.
     InService,
-
-    /// All disks which are expunged but still active.
-    ExpungedButActive,
 }
 
 impl DiskFilter {
@@ -530,12 +527,10 @@ impl PhysicalDiskPolicy {
             PhysicalDiskPolicy::InService => match filter {
                 DiskFilter::All => true,
                 DiskFilter::InService => true,
-                DiskFilter::ExpungedButActive => false,
             },
             PhysicalDiskPolicy::Expunged => match filter {
                 DiskFilter::All => true,
                 DiskFilter::InService => false,
-                DiskFilter::ExpungedButActive => true,
             },
         }
     }
@@ -557,12 +552,10 @@ impl PhysicalDiskState {
             PhysicalDiskState::Active => match filter {
                 DiskFilter::All => true,
                 DiskFilter::InService => true,
-                DiskFilter::ExpungedButActive => true,
             },
             PhysicalDiskState::Decommissioned => match filter {
                 DiskFilter::All => true,
                 DiskFilter::InService => false,
-                DiskFilter::ExpungedButActive => false,
             },
         }
     }
@@ -976,7 +969,9 @@ pub struct SledDetails {
 pub enum PlanningInputBuildError {
     #[error("duplicate sled ID: {0}")]
     DuplicateSledId(SledUuid),
-    #[error("Omicron zone {zone_id} has a range of IPs ({ip:?}), only a single IP is supported")]
+    #[error(
+        "Omicron zone {zone_id} has a range of IPs ({ip:?}), only a single IP is supported"
+    )]
     NotSingleIp { zone_id: OmicronZoneUuid, ip: IpNetwork },
     #[error(transparent)]
     AddNetworkResource(#[from] AddNetworkResourceError),
@@ -988,6 +983,8 @@ pub enum PlanningInputBuildError {
         #[source]
         err: SourceNatConfigError,
     },
+    #[error("sled not found: {0}")]
+    SledNotFound(SledUuid),
 }
 
 /// Constructor for [`PlanningInput`].
@@ -1055,6 +1052,26 @@ impl PlanningInputBuilder {
                 Err(PlanningInputBuildError::DuplicateSledId(sled_id))
             }
         }
+    }
+
+    /// Expunge a sled and all its disks
+    ///
+    /// In the real code, the `PlanningInput` comes from the database. In this
+    /// case all disks in a sled are marked expunged when the sled is expunged
+    /// inside a transaction. We do the same thing here for testing purposes.
+    pub fn expunge_sled(
+        &mut self,
+        sled_id: &SledUuid,
+    ) -> Result<(), PlanningInputBuildError> {
+        let sled_details = self
+            .sleds_mut()
+            .get_mut(&sled_id)
+            .ok_or(PlanningInputBuildError::SledNotFound(*sled_id))?;
+        sled_details.policy = SledPolicy::Expunged;
+        for (_, sled_disk) in sled_details.resources.zpools.iter_mut() {
+            sled_disk.policy = PhysicalDiskPolicy::Expunged;
+        }
+        Ok(())
     }
 
     pub fn add_omicron_zone_external_ip(

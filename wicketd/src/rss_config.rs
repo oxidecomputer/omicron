@@ -5,10 +5,10 @@
 //! Support for user-provided RSS configuration options.
 
 use crate::bootstrap_addrs::BootstrapPeers;
-use anyhow::anyhow;
-use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
+use anyhow::anyhow;
+use anyhow::bail;
 use bootstrap_agent_client::types::BootstrapAddressDiscovery;
 use bootstrap_agent_client::types::Certificate;
 use bootstrap_agent_client::types::Name;
@@ -27,15 +27,15 @@ use omicron_common::api::external::SwitchLocation;
 use sled_hardware_types::Baseboard;
 use slog::debug;
 use slog::warn;
-use std::collections::btree_map;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::btree_map;
 use std::mem;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::sync::LazyLock;
 use thiserror::Error;
-use wicket_common::inventory::RackV1Inventory;
+use wicket_common::inventory::MgsV1Inventory;
 use wicket_common::inventory::SpType;
 use wicket_common::rack_setup::BgpAuthKey;
 use wicket_common::rack_setup::BgpAuthKeyId;
@@ -114,7 +114,7 @@ impl CurrentRssConfig {
 
     pub(crate) fn update_with_inventory_and_bootstrap_peers(
         &mut self,
-        inventory: &RackV1Inventory,
+        inventory: &MgsV1Inventory,
         bootstrap_peers: &BootstrapPeers,
         log: &slog::Logger,
     ) {
@@ -645,9 +645,9 @@ fn validate_rack_network_config(
                 || addr.addr() > infra_ip_range.last
             {
                 bail!(
-                "`uplink_cidr`'s IP address must be in the range defined by \
+                    "`uplink_cidr`'s IP address must be in the range defined by \
                 `infra_ip_first` and `infra_ip_last`"
-            );
+                );
             }
         }
     }

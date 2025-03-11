@@ -13,8 +13,8 @@ use nexus_db_model::Ipv4NatValues;
 use nexus_db_model::Vni as DbVni;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::SwitchLocation;
@@ -26,8 +26,8 @@ use std::collections::HashSet;
 use std::str::FromStr;
 use uuid::Uuid;
 
-use super::background::BackgroundTasks;
 use super::Nexus;
+use super::background::BackgroundTasks;
 
 impl Nexus {
     /// Returns the set of switches with uplinks configured and boundary

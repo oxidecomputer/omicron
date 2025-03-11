@@ -7,6 +7,7 @@
 use super::column_walker::ColumnWalker;
 use super::pool::DbConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use diesel::QuerySource;
 use diesel::associations::HasTable;
 use diesel::pg::Pg;
 use diesel::prelude::*;
@@ -15,7 +16,6 @@ use diesel::query_dsl::methods::LoadQuery;
 use diesel::query_source::Table;
 use diesel::result::Error as DieselError;
 use diesel::sql_types::Nullable;
-use diesel::QuerySource;
 use std::marker::PhantomData;
 
 /// A simple wrapper type for Diesel's [`UpdateStatement`], which

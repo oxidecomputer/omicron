@@ -4,20 +4,22 @@
 
 //! Implementation of client methods that write to the ClickHouse database.
 
-// Copyright 2024 Oxide Computer Company
+// Copyright 2025 Oxide Computer Company
 
+use crate::Error;
 use crate::client::Client;
 use crate::model;
 use crate::model::to_block::ToBlock as _;
 use crate::native::block::Block;
-use crate::Error;
 use camino::Utf8PathBuf;
 use oximeter::Sample;
 use oximeter::TimeseriesSchema;
 use slog::debug;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::btree_map::Entry;
+
+use super::Handle;
 
 #[derive(Debug)]
 pub(super) struct UnrolledSampleRows {
@@ -55,11 +57,12 @@ pub trait DbWrite {
 impl DbWrite for Client {
     /// Insert the given samples into the database.
     async fn insert_samples(&self, samples: &[Sample]) -> Result<(), Error> {
+        let mut handle = self.claim_connection().await?;
         debug!(self.log, "unrolling {} total samples", samples.len());
         let UnrolledSampleRows { new_schema, blocks } =
-            self.unroll_samples(samples).await;
-        self.save_new_schema_or_remove(new_schema).await?;
-        self.insert_unrolled_samples(blocks).await
+            self.unroll_samples(&mut handle, samples).await;
+        self.save_new_schema_or_remove(&mut handle, new_schema).await?;
+        self.insert_unrolled_samples(&mut handle, blocks).await
     }
 
     /// Initialize the replicated telemetry database, creating tables as needed.
@@ -68,46 +71,62 @@ impl DbWrite for Client {
     /// These files are intentionally disjoint so that we don't have to
     /// duplicate any setup.
     async fn init_replicated_db(&self) -> Result<(), Error> {
+        let mut handle = self.claim_connection().await?;
         debug!(self.log, "initializing ClickHouse database");
-        self.run_many_sql_statements(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/schema/replicated/db-init-1.sql"
-        )))
+        self.run_many_sql_statements(
+            &mut handle,
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/schema/replicated/db-init-1.sql"
+            )),
+        )
         .await?;
-        self.run_many_sql_statements(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/schema/replicated/db-init-2.sql"
-        )))
+        self.run_many_sql_statements(
+            &mut handle,
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/schema/replicated/db-init-2.sql"
+            )),
+        )
         .await
     }
 
     /// Wipe the ClickHouse database entirely from a replicated set up.
     async fn wipe_replicated_db(&self) -> Result<(), Error> {
         debug!(self.log, "wiping ClickHouse database");
-        self.run_many_sql_statements(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/schema/replicated/db-wipe.sql"
-        )))
+        self.run_many_sql_statements(
+            &mut self.claim_connection().await?,
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/schema/replicated/db-wipe.sql"
+            )),
+        )
         .await
     }
 
     /// Initialize a single node telemetry database, creating tables as needed.
     async fn init_single_node_db(&self) -> Result<(), Error> {
         debug!(self.log, "initializing ClickHouse database");
-        self.run_many_sql_statements(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/schema/single-node/db-init.sql"
-        )))
+        self.run_many_sql_statements(
+            &mut self.claim_connection().await?,
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/schema/single-node/db-init.sql"
+            )),
+        )
         .await
     }
 
     /// Wipe the ClickHouse database entirely from a single node set up.
     async fn wipe_single_node_db(&self) -> Result<(), Error> {
         debug!(self.log, "wiping ClickHouse database");
-        self.run_many_sql_statements(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/schema/single-node/db-wipe.sql"
-        )))
+        self.run_many_sql_statements(
+            &mut self.claim_connection().await?,
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/schema/single-node/db-wipe.sql"
+            )),
+        )
         .await
     }
 }
@@ -134,10 +153,13 @@ impl TestDbWrite for Client {
     /// of tables required for replication/cluster tests.
     async fn init_test_minimal_replicated_db(&self) -> Result<(), Error> {
         debug!(self.log, "initializing ClickHouse database");
-        self.run_many_sql_statements(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/schema/replicated/db-init-1.sql"
-        )))
+        self.run_many_sql_statements(
+            &mut self.claim_connection().await?,
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/schema/replicated/db-init-1.sql"
+            )),
+        )
         .await
     }
 
@@ -160,7 +182,8 @@ impl TestDbWrite for Client {
                 err,
             }
         })?;
-        self.run_many_sql_statements(sql).await
+        self.run_many_sql_statements(&mut self.claim_connection().await?, sql)
+            .await
     }
 }
 
@@ -171,6 +194,7 @@ impl Client {
     // does not already exist there.
     pub(super) async fn unroll_samples(
         &self,
+        handle: &mut Handle,
         samples: &[Sample],
     ) -> UnrolledSampleRows {
         let mut seen_timeseries = BTreeSet::new();
@@ -178,7 +202,7 @@ impl Client {
         let mut new_schema = BTreeMap::new();
 
         for sample in samples.iter() {
-            match self.verify_or_cache_sample_schema(sample).await {
+            match self.verify_or_cache_sample_schema(handle, sample).await {
                 Err(_) => {
                     // Skip the sample, but otherwise do nothing. The error is logged in the above
                     // call.
@@ -239,6 +263,7 @@ impl Client {
     // Insert unrolled sample rows into the corresponding tables.
     async fn insert_unrolled_samples(
         &self,
+        handle: &mut Handle,
         blocks: BTreeMap<String, Block>,
     ) -> Result<(), Error> {
         for (table_name, block) in blocks {
@@ -251,7 +276,7 @@ impl Client {
             // TODO-robustness We've verified the schema, so this is likely a transient failure.
             // But we may want to check the actual error condition, and, if possible, continue
             // inserting any remaining data.
-            self.insert_native(&query, block).await?;
+            self.insert_native(handle, &query, block).await?;
             debug!(
                 self.log,
                 "inserted rows into table";
@@ -285,6 +310,7 @@ impl Client {
     // receive a sample with a new schema, and both would then try to insert that schema.
     pub(super) async fn save_new_schema_or_remove(
         &self,
+        handle: &mut Handle,
         new_schema: Vec<TimeseriesSchema>,
     ) -> Result<(), Error> {
         if !new_schema.is_empty() {
@@ -305,7 +331,7 @@ impl Client {
             // internal cache. Since we check the internal cache first for
             // schema, if we fail here but _don't_ remove the schema, we'll
             // never end up inserting the schema, but we will insert samples.
-            if let Err(e) = self.insert_native(&body, block).await {
+            if let Err(e) = self.insert_native(handle, &body, block).await {
                 debug!(
                     self.log,
                     "failed to insert new schema, removing from cache";
@@ -332,10 +358,11 @@ impl Client {
     // statements.
     async fn run_many_sql_statements(
         &self,
+        handle: &mut Handle,
         sql: impl AsRef<str>,
     ) -> Result<(), Error> {
         for stmt in sql.as_ref().split(';').filter(|s| !s.trim().is_empty()) {
-            self.execute_native(stmt).await?;
+            self.execute_native(handle, stmt).await?;
         }
         Ok(())
     }

@@ -559,7 +559,8 @@
             "type": "string"
           },
           "version": {
-            "$ref": "#/components/schemas/SemverVersion"
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
           }
         },
         "required": [
@@ -1400,20 +1401,6 @@
               "status": {
                 "type": "string",
                 "enum": [
-                  "ensure_storage"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
                   "init_dns"
                 ]
               }
@@ -1521,10 +1508,6 @@
             ]
           }
         ]
-      },
-      "SemverVersion": {
-        "type": "string",
-        "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
       },
       "SwitchLocation": {
         "description": "Identifies switch physical location",

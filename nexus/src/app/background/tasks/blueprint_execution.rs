@@ -5,14 +5,14 @@
 //! Background task for realizing a plan blueprint
 
 use crate::app::background::{Activator, BackgroundTask};
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_execution::RealizeBlueprintOutput;
 use nexus_types::deployment::{
-    execution::EventBuffer, Blueprint, BlueprintTarget,
+    Blueprint, BlueprintTarget, execution::EventBuffer,
 };
 use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
@@ -165,9 +165,10 @@ impl BackgroundTask for BlueprintExecutor {
 mod test {
     use super::BlueprintExecutor;
     use crate::app::background::{Activator, BackgroundTask};
+    use httptest::Expectation;
     use httptest::matchers::{not, request};
     use httptest::responders::status_code;
-    use httptest::Expectation;
+    use itertools::Itertools as _;
     use nexus_db_model::{
         ByteCount, SledBaseboard, SledSystemHardware, SledUpdate, Zpool,
     };
@@ -178,13 +179,14 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::execution::{
         EventBuffer, EventReport, ExecutionComponent, ExecutionStepId,
-        ReconfiguratorExecutionSpec, StepInfo,
+        StepOutcome, StepStatus,
     };
     use nexus_types::deployment::{
-        blueprint_zone_type, Blueprint, BlueprintDatasetsConfig,
-        BlueprintPhysicalDisksConfig, BlueprintTarget, BlueprintZoneConfig,
-        BlueprintZoneDisposition, BlueprintZoneType, BlueprintZonesConfig,
-        CockroachDbPreserveDowngrade,
+        Blueprint, BlueprintDatasetsConfig, BlueprintPhysicalDisksConfig,
+        BlueprintSledConfig, BlueprintTarget, BlueprintZoneConfig,
+        BlueprintZoneDisposition, BlueprintZoneImageSource, BlueprintZoneType,
+        BlueprintZonesConfig, CockroachDbPreserveDowngrade,
+        blueprint_zone_type,
     };
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external::Generation;
@@ -195,13 +197,12 @@ mod test {
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use serde::Deserialize;
     use serde_json::json;
     use std::collections::BTreeMap;
     use std::net::SocketAddr;
     use std::sync::Arc;
     use tokio::sync::watch;
-    use update_engine::{NestedError, TerminalKind};
+    use update_engine::{CompletionReason, NestedError, TerminalKind};
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -211,17 +212,24 @@ mod test {
         datastore: &DataStore,
         opctx: &OpContext,
         blueprint_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
-        blueprint_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
-        blueprint_datasets: BTreeMap<SledUuid, BlueprintDatasetsConfig>,
         dns_version: Generation,
     ) -> (BlueprintTarget, Blueprint) {
         let id = BlueprintUuid::new_v4();
-        // Assume all sleds are active.
-        let sled_state = blueprint_zones
-            .keys()
-            .copied()
-            .map(|sled_id| (sled_id, SledState::Active))
-            .collect::<BTreeMap<_, _>>();
+        // Assume all sleds are active with no disks or datasets.
+        let blueprint_sleds = blueprint_zones
+            .into_iter()
+            .map(|(sled_id, zones_config)| {
+                (
+                    sled_id,
+                    BlueprintSledConfig {
+                        state: SledState::Active,
+                        zones_config,
+                        disks_config: BlueprintPhysicalDisksConfig::default(),
+                        datasets_config: BlueprintDatasetsConfig::default(),
+                    },
+                )
+            })
+            .collect();
 
         // Ensure the blueprint we're creating is the current target (required
         // for successful blueprint realization). This requires its parent to be
@@ -238,10 +246,7 @@ mod test {
         };
         let blueprint = Blueprint {
             id,
-            blueprint_zones,
-            blueprint_disks,
-            blueprint_datasets,
-            sled_state,
+            sleds: blueprint_sleds,
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: Some(current_target.target_id),
@@ -267,7 +272,7 @@ mod test {
     }
 
     #[nexus_test(server = crate::Server)]
-    async fn test_deploy_omicron_zones(cptestctx: &ControlPlaneTestContext) {
+    async fn test_deploy_omicron_config(cptestctx: &ControlPlaneTestContext) {
         // Set up the test.
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
@@ -285,14 +290,14 @@ mod test {
         let mut s2 = httptest::Server::run();
 
         // The only sled-agent endpoint we care about in this test is `PUT
-        // /omicron-zones`. Add a closure to avoid repeating it multiple times
+        // /omicron-config`. Add a closure to avoid repeating it multiple times
         // below. We don't do a careful check of the _contents_ of what's being
         // sent; for that, see the tests in nexus-reconfigurator-execution.
-        let match_put_omicron_zones =
-            || request::method_path("PUT", "/omicron-zones");
+        let match_put_omicron_config =
+            || request::method_path("PUT", "/omicron-config");
 
         // Helper for our mock sled-agent http servers to blanket ignore and
-        // return 200 OK for anything _except_ `PUT /omciron-zones`, which is
+        // return 200 OK for anything _except_ `PUT /omicron-config`, which is
         // the endpoint we care about in this test.
         //
         // Other Nexus background tasks created by our test context may notice
@@ -303,7 +308,7 @@ mod test {
         let mock_server_ignore_spurious_http_requests =
             |s: &mut httptest::Server| {
                 s.expect(
-                    Expectation::matching(not(match_put_omicron_zones()))
+                    Expectation::matching(not(match_put_omicron_config()))
                         .times(..)
                         .respond_with(status_code(200)),
                 );
@@ -365,15 +370,8 @@ mod test {
         // complete and report a successful (empty) summary.
         let generation = Generation::new();
         let blueprint = Arc::new(
-            create_blueprint(
-                &datastore,
-                &opctx,
-                BTreeMap::new(),
-                BTreeMap::new(),
-                BTreeMap::new(),
-                generation,
-            )
-            .await,
+            create_blueprint(&datastore, &opctx, BTreeMap::new(), generation)
+                .await,
         );
         let blueprint_id = blueprint.1.id;
         blueprint_tx.send(Some(blueprint)).unwrap();
@@ -421,6 +419,7 @@ mod test {
                             http_address: "[::1]:12345".parse().unwrap(),
                         },
                     ),
+                    image_source: BlueprintZoneImageSource::InstallDataset,
                 }]
                 .into_iter()
                 .collect(),
@@ -439,8 +438,6 @@ mod test {
                 (sled_id1, make_zones(BlueprintZoneDisposition::InService)),
                 (sled_id2, make_zones(BlueprintZoneDisposition::InService)),
             ]),
-            BTreeMap::new(),
-            BTreeMap::new(),
             generation,
         )
         .await;
@@ -470,7 +467,7 @@ mod test {
         // Make sure that requests get made to the sled agent.
         for s in [&mut s1, &mut s2] {
             s.expect(
-                Expectation::matching(match_put_omicron_zones())
+                Expectation::matching(match_put_omicron_config())
                     .respond_with(status_code(204)),
             );
             mock_server_ignore_spurious_http_requests(s);
@@ -504,7 +501,7 @@ mod test {
 
         // Now, disable the target and make sure that we _don't_ invoke the sled
         // agent. It's enough to just not set expectations on
-        // match_put_omicron_zones().
+        // match_put_omicron_config().
         blueprint.1.internal_dns_version =
             blueprint.1.internal_dns_version.next();
         blueprint.0.enabled = false;
@@ -533,34 +530,60 @@ mod test {
         blueprint.0.enabled = true;
         blueprint_tx.send(Some(Arc::new(blueprint))).unwrap();
         s1.expect(
-            Expectation::matching(match_put_omicron_zones())
+            Expectation::matching(match_put_omicron_config())
                 .respond_with(status_code(204)),
         );
         s2.expect(
-            Expectation::matching(match_put_omicron_zones())
+            Expectation::matching(match_put_omicron_config())
                 .respond_with(status_code(500)),
         );
-
-        #[derive(Deserialize)]
-        struct ErrorResult {
-            execution_error: NestedError,
-        }
 
         let mut value = task.activate(&opctx).await;
         let event_buffer = extract_event_buffer(&mut value);
 
-        println!("after failure: {:?}", value);
-        let result: ErrorResult = serde_json::from_value(value).unwrap();
-        assert_eq!(
-            result.execution_error.message(),
-            "step failed: Deploy Omicron zones"
-        );
+        let ensure_configs_outcome = {
+            let ensure_id =
+                serde_json::to_value(ExecutionStepId::Ensure).unwrap();
+            let sled_agent_component =
+                serde_json::to_value(ExecutionComponent::SledAgent).unwrap();
+            match event_buffer
+                .iter_steps_recursive()
+                .filter_map(|(_, step)| {
+                    let info = step.step_info();
+                    if info.id == ensure_id
+                        && info.component == sled_agent_component
+                    {
+                        match step.step_status() {
+                            StepStatus::Completed {
+                                reason: CompletionReason::StepCompleted(info),
+                            } => Some(&info.outcome),
+                            status => {
+                                panic!("unexpected step status: {status:?}")
+                            }
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .exactly_one()
+            {
+                Ok(outcome) => outcome,
+                Err(outcomes) => panic!(
+                    "expected exactly one step outcome, but found {}",
+                    outcomes.count()
+                ),
+            }
+        };
 
-        assert_event_buffer_failed_at(
-            &event_buffer,
-            ExecutionComponent::OmicronZones,
-            ExecutionStepId::Ensure,
-        );
+        match ensure_configs_outcome {
+            StepOutcome::Warning { message, .. } => {
+                assert!(
+                    message.contains("Failed to put OmicronSledConfig"),
+                    "unexpected warning message: {message}"
+                );
+            }
+            other => panic!("unexpected outcome: {other:?}"),
+        }
 
         s1.verify_and_clear();
         s2.verify_and_clear();
@@ -598,40 +621,6 @@ mod test {
             terminal_info.kind,
             TerminalKind::Completed,
             "execution should have completed successfully"
-        );
-    }
-
-    fn assert_event_buffer_failed_at(
-        event_buffer: &EventBuffer,
-        component: ExecutionComponent,
-        step_id: ExecutionStepId,
-    ) {
-        let execution_status = event_buffer
-            .root_execution_summary()
-            .expect("event buffer has root execution summary")
-            .execution_status;
-        let terminal_info =
-            execution_status.terminal_info().unwrap_or_else(|| {
-                panic!(
-                    "execution status has terminal info: {:?}",
-                    execution_status
-                );
-            });
-        assert_eq!(
-            terminal_info.kind,
-            TerminalKind::Failed,
-            "execution should have failed"
-        );
-        let step =
-            event_buffer.get(&terminal_info.step_key).expect("step exists");
-        let step_info = StepInfo::<ReconfiguratorExecutionSpec>::from_generic(
-            step.step_info().clone(),
-        )
-        .expect("step info follows ReconfiguratorExecutionSpec");
-        assert_eq!(
-            (step_info.component, step_info.id),
-            (component, step_id),
-            "component and step id matches expected"
         );
     }
 }

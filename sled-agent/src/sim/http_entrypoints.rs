@@ -7,7 +7,6 @@
 use super::collection::PokeMode;
 use crate::support_bundle::storage::SupportBundleQueryType;
 use camino::Utf8PathBuf;
-use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::ErrorStatusCode;
 use dropshot::FreeformBody;
@@ -23,8 +22,11 @@ use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::StreamingBody;
 use dropshot::TypedBody;
+use dropshot::endpoint;
+use nexus_sled_agent_shared::inventory::Inventory;
+use nexus_sled_agent_shared::inventory::OmicronSledConfig;
+use nexus_sled_agent_shared::inventory::OmicronSledConfigResult;
 use nexus_sled_agent_shared::inventory::SledRole;
-use nexus_sled_agent_shared::inventory::{Inventory, OmicronZonesConfig};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::api::internal::shared::ExternalIpGatewayMap;
@@ -34,8 +36,6 @@ use omicron_common::api::internal::shared::{
     ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
 };
 use omicron_common::disk::DatasetsConfig;
-use omicron_common::disk::DatasetsManagementResult;
-use omicron_common::disk::DisksManagementResult;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_common::update::ArtifactHash;
 use range_requests::RequestContextEx;
@@ -321,31 +321,11 @@ impl SledAgentApi for SledAgentSimImpl {
         ))
     }
 
-    async fn datasets_put(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<DatasetsConfig>,
-    ) -> Result<HttpResponseOk<DatasetsManagementResult>, HttpError> {
-        let sa = rqctx.context();
-        let body_args = body.into_inner();
-        let result = sa.datasets_ensure(body_args)?;
-        Ok(HttpResponseOk(result))
-    }
-
     async fn datasets_get(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<DatasetsConfig>, HttpError> {
         let sa = rqctx.context();
         Ok(HttpResponseOk(sa.datasets_config_list()?))
-    }
-
-    async fn omicron_physical_disks_put(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<OmicronPhysicalDisksConfig>,
-    ) -> Result<HttpResponseOk<DisksManagementResult>, HttpError> {
-        let sa = rqctx.context();
-        let body_args = body.into_inner();
-        let result = sa.omicron_physical_disks_ensure(body_args)?;
-        Ok(HttpResponseOk(result))
     }
 
     async fn omicron_physical_disks_get(
@@ -355,14 +335,14 @@ impl SledAgentApi for SledAgentSimImpl {
         Ok(HttpResponseOk(sa.omicron_physical_disks_list()?))
     }
 
-    async fn omicron_zones_put(
+    async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<OmicronZonesConfig>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        body: TypedBody<OmicronSledConfig>,
+    ) -> Result<HttpResponseOk<OmicronSledConfigResult>, HttpError> {
         let sa = rqctx.context();
         let body_args = body.into_inner();
-        sa.omicron_zones_ensure(body_args);
-        Ok(HttpResponseUpdatedNoContent())
+        let result = sa.set_omicron_config(body_args)?;
+        Ok(HttpResponseOk(result))
     }
 
     async fn sled_add(

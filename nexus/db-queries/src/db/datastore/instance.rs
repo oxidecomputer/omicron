@@ -14,8 +14,8 @@ use crate::db::collection_detach_many::DetachManyError;
 use crate::db::collection_detach_many::DetachManyFromCollectionStatement;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
 use crate::db::model::ByteCount;
@@ -48,7 +48,6 @@ use nexus_db_model::Disk;
 use nexus_types::internal_api::background::ReincarnationReason;
 use omicron_common::api;
 use omicron_common::api::external;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -59,6 +58,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::MessagePair;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -1365,6 +1365,13 @@ impl DataStore {
         // Note that due to idempotency of this function, it's possible that
         // "authz_instance.id()" has already been deleted.
         let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
+        self.instance_affinity_group_memberships_delete(opctx, instance_id)
+            .await?;
+        self.instance_anti_affinity_group_memberships_delete(
+            opctx,
+            instance_id,
+        )
+        .await?;
         self.instance_ssh_keys_delete(opctx, instance_id).await?;
         self.instance_mark_migrations_deleted(opctx, instance_id).await?;
 
@@ -2020,8 +2027,7 @@ impl DataStore {
             // did not match.
             UpdateAndQueryResult { ref found, .. } => match found.updater_id {
                 Some(actual_id) => {
-                    const MSG: &'static str =
-                        "cannot commit instance updates: the instance is \
+                    const MSG: &'static str = "cannot commit instance updates: the instance is \
                          locked by another saga!";
                     error!(
                         &opctx.log,
@@ -2035,8 +2041,7 @@ impl DataStore {
                     Err(Error::internal_error(MSG))
                 }
                 None => {
-                    const MSG: &'static str =
-                        "cannot commit instance updates: the instance is \
+                    const MSG: &'static str = "cannot commit instance updates: the instance is \
                          not locked";
                     error!(
                         &opctx.log,
@@ -3144,7 +3149,8 @@ mod tests {
         );
 
         // Now, mark the previous migration as Failed.
-        let updated = dbg!(datastore
+        let updated =
+            dbg!(datastore
             .migration_mark_failed(&opctx, migration.id)
             .await
             .expect(

@@ -6,13 +6,9 @@
 //!
 //! For details, see schema/crdb/README.adoc in the root of this repository.
 
-use anyhow::{bail, ensure, Context};
+use anyhow::{Context, bail, ensure};
 use camino::Utf8Path;
-use diesel::expression::AsExpression;
-use diesel::pg::{Pg, PgValue};
-use diesel::sql_types::Text;
-use diesel::{deserialize, serialize};
-use omicron_common::api::external::SemverVersion;
+use semver::Version;
 use std::{collections::BTreeMap, sync::LazyLock};
 
 /// The version of the database schema this particular version of Nexus was
@@ -20,19 +16,18 @@ use std::{collections::BTreeMap, sync::LazyLock};
 ///
 /// This must be updated when you change the database schema.  Refer to
 /// schema/crdb/README.adoc in the root of this repository for details.
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(127, 0, 0);
+pub const SCHEMA_VERSION: Version = Version::new(129, 0, 0);
 
 /// List of all past database schema versions, in *reverse* order
 ///
-/// If you want to change the Omicron database schema, you must update this.
-static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
-    vec![
         // +- The next version goes here!  Duplicate this line, uncomment
-        // |  the *second* copy, then update that copy for your version,
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(127, "webhooks"),
+        KnownVersion::new(130, "webhooks"),
+        KnownVersion::new(129, "create-target-release"),
+        KnownVersion::new(128, "sled-resource-for-vmm"),
+        KnownVersion::new(127, "bp-disk-disposition-expunged-cleanup"),
         KnownVersion::new(126, "affinity"),
         KnownVersion::new(125, "blueprint-disposition-expunged-cleanup"),
         KnownVersion::new(124, "support-read-only-region-replacement"),
@@ -173,15 +168,14 @@ static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
 });
 
 /// The earliest supported schema version.
-pub const EARLIEST_SUPPORTED_VERSION: SemverVersion =
-    SemverVersion::new(1, 0, 0);
+pub const EARLIEST_SUPPORTED_VERSION: Version = Version::new(1, 0, 0);
 
 /// Describes one version of the database schema
 #[derive(Debug, Clone)]
 struct KnownVersion {
     /// All versions have an associated SemVer.  We only use the major number in
     /// terms of determining compatibility.
-    semver: SemverVersion,
+    semver: Version,
 
     /// Path relative to the root of the schema ("schema/crdb" in the root of
     /// this repo) where this version's update SQL files are stored
@@ -198,7 +192,7 @@ impl KnownVersion {
     /// this repository) where the SQL files live that will update the schema
     /// from the previous version to this version.
     fn new(major: u64, relative_path: &str) -> KnownVersion {
-        let semver = SemverVersion::new(major, 0, 0);
+        let semver = Version::new(major, 0, 0);
         KnownVersion { semver, relative_path: relative_path.to_owned() }
     }
 
@@ -210,7 +204,7 @@ impl KnownVersion {
     ///
     /// **This should not be used for new schema versions.**
     fn legacy(major: u64, patch: u64) -> KnownVersion {
-        let semver = SemverVersion::new(major, 0, patch);
+        let semver = Version::new(major, 0, patch);
         let relative_path = semver.to_string();
         KnownVersion { semver, relative_path }
     }
@@ -225,7 +219,7 @@ impl std::fmt::Display for KnownVersion {
 /// Load and inspect the set of all known schema versions
 #[derive(Debug, Clone)]
 pub struct AllSchemaVersions {
-    versions: BTreeMap<SemverVersion, SchemaVersion>,
+    versions: BTreeMap<Version, SchemaVersion>,
 }
 
 impl AllSchemaVersions {
@@ -248,12 +242,12 @@ impl AllSchemaVersions {
     #[doc(hidden)]
     pub fn load_specific_legacy_versions<'a>(
         schema_directory: &Utf8Path,
-        versions: impl Iterator<Item = &'a SemverVersion>,
+        versions: impl Iterator<Item = &'a Version>,
     ) -> Result<AllSchemaVersions, anyhow::Error> {
         let known_versions: Vec<_> = versions
             .map(|v| {
-                assert_eq!(v.0.minor, 0);
-                KnownVersion::legacy(v.0.major, v.0.patch)
+                assert_eq!(v.minor, 0);
+                KnownVersion::legacy(v.major, v.patch)
             })
             .collect();
 
@@ -292,7 +286,7 @@ impl AllSchemaVersions {
     }
 
     /// Return whether `version` is a known schema version
-    pub fn contains_version(&self, version: &SemverVersion) -> bool {
+    pub fn contains_version(&self, version: &Version) -> bool {
         self.versions.contains_key(version)
     }
 
@@ -305,7 +299,7 @@ impl AllSchemaVersions {
         bounds: R,
     ) -> impl Iterator<Item = &'_ SchemaVersion>
     where
-        R: std::ops::RangeBounds<SemverVersion>,
+        R: std::ops::RangeBounds<Version>,
     {
         self.versions.range(bounds).map(|(_, v)| v)
     }
@@ -315,7 +309,7 @@ impl AllSchemaVersions {
 /// from the previous version to the current one
 #[derive(Debug, Clone)]
 pub struct SchemaVersion {
-    semver: SemverVersion,
+    semver: Version,
     upgrade_from_previous: Vec<SchemaUpgradeStep>,
 }
 
@@ -336,7 +330,7 @@ impl SchemaVersion {
     /// Any violation of these two rules will result in an error. Collections of
     /// the second form (`up1.sql`, ...) will be sorted numerically.
     fn load_from_directory(
-        semver: SemverVersion,
+        semver: Version,
         directory: &Utf8Path,
     ) -> Result<SchemaVersion, anyhow::Error> {
         let mut up_sqls = vec![];
@@ -438,7 +432,7 @@ impl SchemaVersion {
     }
 
     /// Returns the semver for this schema version
-    pub fn semver(&self) -> &SemverVersion {
+    pub fn semver(&self) -> &Version {
         &self.semver
     }
 
@@ -558,8 +552,8 @@ mod test {
         // EARLIEST_SUPPORTED_VERSION is somehow wrong
         let error = verify_known_versions(
             [&KnownVersion::legacy(2, 0), &KnownVersion::legacy(3, 0)],
-            &SemverVersion::new(1, 0, 0),
-            &SemverVersion::new(3, 0, 0),
+            &Version::new(1, 0, 0),
+            &Version::new(3, 0, 0),
             100,
         )
         .unwrap_err();
@@ -571,8 +565,8 @@ mod test {
         // SCHEMA_VERSION was not updated
         let error = verify_known_versions(
             [&KnownVersion::legacy(1, 0), &KnownVersion::legacy(2, 0)],
-            &SemverVersion::new(1, 0, 0),
-            &SemverVersion::new(1, 0, 0),
+            &Version::new(1, 0, 0),
+            &Version::new(1, 0, 0),
             100,
         )
         .unwrap_err();
@@ -589,7 +583,7 @@ mod test {
                 &KnownVersion::legacy(2, 0),
             ],
             &EARLIEST_SUPPORTED_VERSION,
-            &SemverVersion::new(2, 0, 0),
+            &Version::new(2, 0, 0),
             100,
         )
         .unwrap_err();
@@ -606,7 +600,7 @@ mod test {
                 &KnownVersion::new(2, "dir2"),
             ],
             &EARLIEST_SUPPORTED_VERSION,
-            &SemverVersion::new(2, 0, 0),
+            &Version::new(2, 0, 0),
             100,
         )
         .unwrap_err();
@@ -623,7 +617,7 @@ mod test {
                 &KnownVersion::legacy(1, 3),
             ],
             &EARLIEST_SUPPORTED_VERSION,
-            &SemverVersion::new(3, 0, 0),
+            &Version::new(3, 0, 0),
             100,
         )
         .unwrap_err();
@@ -640,7 +634,7 @@ mod test {
                 &KnownVersion::legacy(4, 0),
             ],
             &EARLIEST_SUPPORTED_VERSION,
-            &SemverVersion::new(4, 0, 0),
+            &Version::new(4, 0, 0),
             100,
         )
         .unwrap_err();
@@ -660,7 +654,7 @@ mod test {
                 &KnownVersion::legacy(3, 2),
             ],
             &EARLIEST_SUPPORTED_VERSION,
-            &SemverVersion::new(3, 0, 2),
+            &Version::new(3, 0, 2),
             2,
         )
         .unwrap_err();
@@ -676,7 +670,7 @@ mod test {
                 &KnownVersion::legacy(3, 0),
             ],
             &EARLIEST_SUPPORTED_VERSION,
-            &SemverVersion::new(3, 0, 0),
+            &Version::new(3, 0, 0),
             2,
         )
         .unwrap_err();
@@ -690,8 +684,8 @@ mod test {
     fn verify_known_versions<'a, I>(
         // list of known versions in order from earliest to latest
         known_versions: I,
-        earliest: &SemverVersion,
-        latest: &SemverVersion,
+        earliest: &Version,
+        latest: &Version,
         min_strict_major: u64,
     ) -> Result<(), anyhow::Error>
     where
@@ -725,8 +719,8 @@ mod test {
             // past schema versions only bumped the patch number for whatever
             // reason.
             ensure!(
-                v.semver.0.major == prev.semver.0.major
-                    || v.semver.0.major == prev.semver.0.major + 1,
+                v.semver.major == prev.semver.major
+                    || v.semver.major == prev.semver.major + 1,
                 "KNOWN_VERSION {} appears directly after {}, but its major \
                 number is neither the same nor one greater",
                 v,
@@ -736,7 +730,7 @@ mod test {
             // We never allowed minor versions to be zero and it is not
             // currently possible to even construct one that had a non-zero
             // minor number.
-            ensure!(v.semver.0.minor == 0, "new minor versions must be zero");
+            ensure!(v.semver.minor == 0, "new minor versions must be zero");
 
             // We changed things after version 45 to require that:
             //
@@ -746,11 +740,8 @@ mod test {
             //
             // After version 45, we do not allow non-zero minor or patch
             // numbers.
-            if v.semver.0.major > min_strict_major {
-                ensure!(
-                    v.semver.0.patch == 0,
-                    "new patch versions must be zero"
-                );
+            if v.semver.major > min_strict_major {
+                ensure!(v.semver.patch == 0, "new patch versions must be zero");
                 ensure!(
                     !v.relative_path.contains(&v.semver.to_string()),
                     "the relative path for a version should not contain the \
@@ -797,7 +788,7 @@ mod test {
             let filename = tempdir.path().join(invalid_filename);
             _ = tokio::fs::File::create(&filename).await.unwrap();
             let maybe_schema = SchemaVersion::load_from_directory(
-                SemverVersion::new(12, 0, 0),
+                Version::new(12, 0, 0),
                 tempdir.path(),
             );
             match maybe_schema {
@@ -835,7 +826,7 @@ mod test {
             }
 
             let maybe_schema = SchemaVersion::load_from_directory(
-                SemverVersion::new(12, 0, 0),
+                Version::new(12, 0, 0),
                 tempdir.path(),
             );
             match maybe_schema {
@@ -874,7 +865,7 @@ mod test {
             }
 
             let maybe_schema = SchemaVersion::load_from_directory(
-                SemverVersion::new(12, 0, 0),
+                Version::new(12, 0, 0),
                 tempdir.path(),
             );
             match maybe_schema {
@@ -918,7 +909,7 @@ mod test {
             }
 
             let maybe_schema = SchemaVersion::load_from_directory(
-                SemverVersion::new(12, 0, 0),
+                Version::new(12, 0, 0),
                 tempdir.path(),
             );
             match maybe_schema {

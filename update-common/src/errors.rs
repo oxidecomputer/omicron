@@ -7,11 +7,11 @@
 use camino::Utf8PathBuf;
 use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
-use omicron_common::api::external::SemverVersion;
-use omicron_common::api::internal::nexus::KnownArtifactKind;
-use omicron_common::update::{ArtifactHashId, ArtifactId, ArtifactKind};
+use omicron_common::update::{ArtifactHashId, ArtifactId};
+use semver::Version;
 use slog::error;
 use thiserror::Error;
+use tufaceous_artifact::{ArtifactKind, KnownArtifactKind};
 
 #[derive(Debug, Error)]
 pub enum RepositoryError {
@@ -130,9 +130,7 @@ pub enum RepositoryError {
         error: hubtools::CabooseError,
     },
 
-    #[error(
-        "error reading board from hubris caboose of {0:?}: non-utf8 value"
-    )]
+    #[error("error reading board from hubris caboose of {0:?}: non-utf8 value")]
     ReadHubrisCabooseBoardUtf8(ArtifactId),
 
     #[error("error reading name from hubris caboose of {0:?}: non-utf8 value")]
@@ -146,8 +144,8 @@ pub enum RepositoryError {
     )]
     MultipleVersionsPresent {
         kind: KnownArtifactKind,
-        v1: SemverVersion,
-        v2: SemverVersion,
+        v1: Version,
+        v2: Version,
     },
     #[error("Caboose mismatch between A {a:?} and B {b:?}")]
     CabooseMismatch { a: String, b: String },

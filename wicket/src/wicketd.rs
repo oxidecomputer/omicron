@@ -4,16 +4,16 @@
 
 //! Code for talking to wicketd
 
-use slog::{o, warn, Logger};
+use slog::{Logger, o, warn};
 use std::convert::From;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc::{self, Sender, UnboundedSender};
-use tokio::time::{interval, Duration, MissedTickBehavior};
+use tokio::time::{Duration, MissedTickBehavior, interval};
+use wicket_common::WICKETD_TIMEOUT;
 use wicket_common::inventory::{SpIdentifier, SpType};
 use wicket_common::rack_update::{
     AbortUpdateOptions, ClearUpdateStateOptions, StartUpdateOptions,
 };
-use wicket_common::WICKETD_TIMEOUT;
 use wicketd_client::types::{
     ClearUpdateStateParams, GetInventoryParams, GetInventoryResponse,
     GetLocationResponse, IgnitionCommand, StartUpdateParams,
@@ -496,14 +496,8 @@ impl WicketdManager {
                 // TODO: We should really be using ETAGs here
                 match client.get_inventory(&params).await {
                     Ok(val) => match val.into_inner() {
-                        GetInventoryResponse::Response {
-                            inventory,
-                            mgs_last_seen,
-                        } => {
-                            let _ = tx.send(Event::Inventory {
-                                inventory,
-                                mgs_last_seen,
-                            });
+                        GetInventoryResponse::Response { inventory } => {
+                            let _ = tx.send(Event::Inventory { inventory });
                         }
                         GetInventoryResponse::Unavailable => {
                             // Nothing to do here. We keep a running total from

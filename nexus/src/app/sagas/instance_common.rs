@@ -9,7 +9,7 @@ use std::net::{IpAddr, Ipv6Addr};
 use crate::Nexus;
 use nexus_db_model::{
     ByteCount, ExternalIp, InstanceState, IpAttachState, Ipv4NatEntry,
-    SledReservationConstraints, SledResource, VmmState,
+    SledReservationConstraints, SledResourceVmm, VmmState,
 };
 use nexus_db_queries::authz;
 use nexus_db_queries::db::lookup::LookupPath;
@@ -43,7 +43,7 @@ pub async fn reserve_vmm_resources(
     ncpus: u32,
     guest_memory: ByteCount,
     constraints: SledReservationConstraints,
-) -> Result<SledResource, ActionError> {
+) -> Result<SledResourceVmm, ActionError> {
     // ALLOCATION POLICY
     //
     // NOTE: This policy can - and should! - be changed.
@@ -285,18 +285,18 @@ pub(super) async fn instance_ip_get_instance_state(
             return Err(ActionError::action_failed(Error::not_found_by_id(
                 omicron_common::api::external::ResourceType::Instance,
                 &authz_instance.id(),
-            )))
+            )));
         }
         (InstanceState::Creating, _) => {
             return Err(ActionError::action_failed(Error::invalid_request(
                 "cannot modify instance IPs, instance is still being created",
-            )))
+            )));
         }
         (InstanceState::Failed, _)
         | (InstanceState::Vmm, Some(VmmState::Failed)) => {
             return Err(ActionError::action_failed(Error::invalid_request(
                 "cannot modify instance IPs, instance is in unhealthy state",
-            )))
+            )));
         }
 
         // This case represents an inconsistency in the database. It should

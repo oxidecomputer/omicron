@@ -165,6 +165,7 @@ tufaceous-lib.workspace = true
 httptest.workspace = true
 httpmock.workspace = true
 strum.workspace = true
+tufaceous-artifact.workspace = true
 
 [[bench]]
 name = "setup_benchmark"

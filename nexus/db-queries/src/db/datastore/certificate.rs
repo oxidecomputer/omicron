@@ -8,8 +8,8 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::model::Certificate;
 use crate::db::model::Name;
 use crate::db::model::ServiceKind;
@@ -18,12 +18,12 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_types::identity::Resource;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use ref_cast::RefCast;
 
 impl DataStore {

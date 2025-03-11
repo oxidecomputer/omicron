@@ -33,7 +33,7 @@ oxnet.workspace = true
 proptest = { workspace = true, optional = true }
 rand.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
-schemars = { workspace = true, features = ["chrono", "uuid1"] }
+schemars = { workspace = true, features = ["chrono", "semver", "uuid1"] }
 semver.workspace = true
 serde.workspace = true
 serde_human_bytes.workspace = true
@@ -50,6 +50,7 @@ parse-display.workspace = true
 progenitor-client.workspace = true
 omicron-workspace-hack.workspace = true
 regress.workspace = true
+tufaceous-artifact.workspace = true
 
 [dev-dependencies]
 camino-tempfile.workspace = true

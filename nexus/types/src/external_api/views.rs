@@ -20,6 +20,7 @@ use omicron_common::api::external::{
 use omicron_uuid_kinds::{WebhookEventUuid, WebhookReceiverUuid};
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -116,18 +117,22 @@ impl SimpleIdentityOrName for SiloUtilization {
 
 // AFFINITY GROUPS
 
+/// View of an Affinity Group
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AffinityGroup {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
+    pub project_id: Uuid,
     pub policy: AffinityPolicy,
     pub failure_domain: FailureDomain,
 }
 
+/// View of an Anti-Affinity Group
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AntiAffinityGroup {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
+    pub project_id: Uuid,
     pub policy: AffinityPolicy,
     pub failure_domain: FailureDomain,
 }
@@ -870,6 +875,7 @@ impl fmt::Display for PhysicalDiskPolicy {
     PartialEq,
     Eq,
     EnumIter,
+    Diffable,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum PhysicalDiskState {
@@ -1282,4 +1288,30 @@ pub struct WebhookProbeResult {
     /// Note that this may be 0, if there were no events found which had not
     /// been delivered successfully to this receiver.
     pub resends_started: Option<usize>,
+}
+
+// UPDATE
+
+/// Source of a system software target release.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, JsonSchema, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TargetReleaseSource {
+    /// Unspecified or unknown source (probably MUPdate).
+    Unspecified,
+
+    /// The specified release of the rack's system software.
+    SystemVersion { version: Version },
+}
+
+/// View of a system software target release.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct TargetRelease {
+    /// The target-release generation number.
+    pub generation: i64,
+
+    /// The time it was set as the target release.
+    pub time_requested: DateTime<Utc>,
+
+    /// The source of the target release.
+    pub release_source: TargetReleaseSource,
 }

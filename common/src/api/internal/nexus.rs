@@ -5,21 +5,18 @@
 //! APIs exposed by Nexus.
 
 use crate::api::external::{
-    ByteCount, DiskState, Generation, Hostname, InstanceCpuCount,
-    SemverVersion, Vni,
+    ByteCount, DiskState, Generation, Hostname, InstanceCpuCount, Vni,
 };
 use chrono::{DateTime, Utc};
 use omicron_uuid_kinds::DownstairsRegionKind;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsRepairKind;
 use omicron_uuid_kinds::UpstairsSessionKind;
-use parse_display::{Display, FromStr};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::net::SocketAddr;
 use std::time::Duration;
-use strum::{EnumIter, IntoEnumIterator};
 use uuid::Uuid;
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -239,112 +236,6 @@ pub struct ProducerRegistrationResponse {
     /// Producers are required to periodically re-register with Nexus, to ensure
     /// that they are still collected from by `oximeter`.
     pub lease_duration: Duration,
-}
-
-/// An identifier for a single update artifact.
-#[derive(
-    Clone,
-    Debug,
-    Eq,
-    PartialEq,
-    Hash,
-    Ord,
-    PartialOrd,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-)]
-pub struct UpdateArtifactId {
-    /// The artifact's name.
-    pub name: String,
-
-    /// The artifact's version.
-    pub version: SemverVersion,
-
-    /// The kind of update artifact this is.
-    pub kind: KnownArtifactKind,
-}
-
-// Adding a new KnownArtifactKind
-// ===============================
-//
-// To add a new kind of update artifact:
-//
-// 1. Add it here.
-// 2. Regenerate OpenAPI documents with `cargo xtask openapi generate` -- this
-//    should work without any compile errors.
-// 3. Run `cargo check --all-targets` to resolve compile errors.
-//
-// NOTE: KnownArtifactKind has to be in snake_case due to openapi-lint
-// requirements.
-
-/// Kinds of update artifacts, as used by Nexus to determine what updates are available and by
-/// sled-agent to determine how to apply an update when asked.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Hash,
-    Ord,
-    PartialOrd,
-    Display,
-    FromStr,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    EnumIter,
-)]
-#[display(style = "snake_case")]
-#[serde(rename_all = "snake_case")]
-pub enum KnownArtifactKind {
-    // Sled Artifacts
-    GimletSp,
-    GimletRot,
-    GimletRotBootloader,
-    Host,
-    Trampoline,
-    /// Composite artifact of all control plane zones
-    ControlPlane,
-    /// Individual control plane zone
-    Zone,
-
-    // PSC Artifacts
-    PscSp,
-    PscRot,
-    PscRotBootloader,
-
-    // Switch Artifacts
-    SwitchSp,
-    SwitchRot,
-    SwitchRotBootloader,
-}
-
-impl KnownArtifactKind {
-    /// Returns an iterator over all the variants in this struct.
-    ///
-    /// This is provided as a helper so dependent packages don't have to pull in
-    /// strum explicitly.
-    pub fn iter() -> KnownArtifactKindIter {
-        <Self as IntoEnumIterator>::iter()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn known_artifact_kind_roundtrip() {
-        for kind in KnownArtifactKind::iter() {
-            let as_string = kind.to_string();
-            let kind2 = as_string.parse::<KnownArtifactKind>().unwrap_or_else(
-                |error| panic!("error parsing kind {as_string}: {error}"),
-            );
-            assert_eq!(kind, kind2);
-        }
-    }
 }
 
 /// A `HostIdentifier` represents either an IP host or network (v4 or v6),

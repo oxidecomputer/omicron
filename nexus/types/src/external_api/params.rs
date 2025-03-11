@@ -14,15 +14,16 @@ use omicron_common::api::external::{
     ByteCount, FailureDomain, Hostname, IdentityMetadataCreateParams,
     IdentityMetadataUpdateParams, InstanceAutoRestartPolicy, InstanceCpuCount,
     LinkFec, LinkSpeed, Name, NameOrId, PaginationOrder, RouteDestination,
-    RouteTarget, SemverVersion, TxEqConfig, UserId,
+    RouteTarget, TxEqConfig, UserId,
 };
 use omicron_common::disk::DiskVariant;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use parse_display::Display;
 use schemars::JsonSchema;
+use semver::Version;
 use serde::{
-    de::{self, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
+    de::{self, Visitor},
 };
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -2232,11 +2233,17 @@ pub struct UpdatesPutRepositoryParams {
 }
 
 /// Parameters for GET requests for `/v1/system/update/repository`.
-
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 pub struct UpdatesGetRepositoryParams {
     /// The version to get.
-    pub system_version: SemverVersion,
+    pub system_version: Version,
+}
+
+/// Parameters for PUT requests to `/v1/system/update/target-release`.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct SetTargetReleaseParams {
+    /// Version of the system software to make the target release.
+    pub system_version: Version,
 }
 
 // Probes

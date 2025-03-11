@@ -6,11 +6,11 @@
 //! required for blueprint realization
 
 use crate::context::OpContext;
+use crate::db::DataStore;
+use crate::db::DbConnection;
 use crate::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
 use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
 use crate::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
-use crate::db::DataStore;
-use crate::db::DbConnection;
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::IpPool;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -22,11 +22,11 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::info;
 use slog::warn;
-use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 
 impl DataStore {
@@ -417,18 +417,19 @@ mod tests {
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_model::SqlU16;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-    use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
+    use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::identity::Resource;
     use nexus_types::inventory::SourceNatConfig;
+    use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
     use omicron_common::address::IpRange;
     use omicron_common::address::IpRangeIter;
-    use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
     use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
@@ -618,6 +619,7 @@ mod tests {
                             external_dns_servers: Vec::new(),
                         },
                     ),
+                    image_source: BlueprintZoneImageSource::InstallDataset,
                 },
                 BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
@@ -637,6 +639,7 @@ mod tests {
                             nic: self.dns_nic.clone(),
                         },
                     ),
+                    image_source: BlueprintZoneImageSource::InstallDataset,
                 },
                 BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
@@ -654,6 +657,7 @@ mod tests {
                             external_ip: self.ntp_external_ip,
                         },
                     ),
+                    image_source: BlueprintZoneImageSource::InstallDataset,
                 },
             ]
         }
@@ -886,9 +890,9 @@ mod tests {
             assert!(nics.iter().any(|(id, _)| *id == self.ntp_nic.id));
 
             // All rows should indicate deleted records.
-            assert!(nics
-                .iter()
-                .all(|(_, time_deleted)| time_deleted.is_some()));
+            assert!(
+                nics.iter().all(|(_, time_deleted)| time_deleted.is_some())
+            );
         }
     }
 

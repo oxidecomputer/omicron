@@ -1283,7 +1283,7 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
     ) -> Result<HttpResponseOk<ResultsPage<views::AffinityGroup>>, HttpError>;
 
-    /// Fetch an affinity group
+    /// Fetch affinity group
     #[endpoint {
         method = GET,
         path = "/v1/affinity-groups/{affinity_group}",
@@ -1295,7 +1295,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::AffinityGroupPath>,
     ) -> Result<HttpResponseOk<views::AffinityGroup>, HttpError>;
 
-    /// List members of an affinity group
+    /// List affinity group members
     #[endpoint {
         method = GET,
         path = "/v1/affinity-groups/{affinity_group}/members",
@@ -1307,7 +1307,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::AffinityGroupPath>,
     ) -> Result<HttpResponseOk<ResultsPage<AffinityGroupMember>>, HttpError>;
 
-    /// Fetch an affinity group member
+    /// Fetch affinity group member
     #[endpoint {
         method = GET,
         path = "/v1/affinity-groups/{affinity_group}/members/instance/{instance}",
@@ -1319,7 +1319,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::AffinityInstanceGroupMemberPath>,
     ) -> Result<HttpResponseOk<AffinityGroupMember>, HttpError>;
 
-    /// Add a member to an affinity group
+    /// Add member to affinity group
     #[endpoint {
         method = POST,
         path = "/v1/affinity-groups/{affinity_group}/members/instance/{instance}",
@@ -1331,7 +1331,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::AffinityInstanceGroupMemberPath>,
     ) -> Result<HttpResponseCreated<AffinityGroupMember>, HttpError>;
 
-    /// Remove a member from an affinity group
+    /// Remove member from affinity group
     #[endpoint {
         method = DELETE,
         path = "/v1/affinity-groups/{affinity_group}/members/instance/{instance}",
@@ -1343,7 +1343,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::AffinityInstanceGroupMemberPath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    /// Create an affinity group
+    /// Create affinity group
     #[endpoint {
         method = POST,
         path = "/v1/affinity-groups",
@@ -1355,7 +1355,7 @@ pub trait NexusExternalApi {
         new_affinity_group_params: TypedBody<params::AffinityGroupCreate>,
     ) -> Result<HttpResponseCreated<views::AffinityGroup>, HttpError>;
 
-    /// Update an affinity group
+    /// Update affinity group
     #[endpoint {
         method = PUT,
         path = "/v1/affinity-groups/{affinity_group}",
@@ -1368,7 +1368,7 @@ pub trait NexusExternalApi {
         updated_group: TypedBody<params::AffinityGroupUpdate>,
     ) -> Result<HttpResponseOk<views::AffinityGroup>, HttpError>;
 
-    /// Delete an affinity group
+    /// Delete affinity group
     #[endpoint {
         method = DELETE,
         path = "/v1/affinity-groups/{affinity_group}",
@@ -1391,7 +1391,7 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
     ) -> Result<HttpResponseOk<ResultsPage<views::AntiAffinityGroup>>, HttpError>;
 
-    /// Fetch an anti-affinity group
+    /// Fetch anti-affinity group
     #[endpoint {
         method = GET,
         path = "/v1/anti-affinity-groups/{anti_affinity_group}",
@@ -1403,7 +1403,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::AntiAffinityGroupPath>,
     ) -> Result<HttpResponseOk<views::AntiAffinityGroup>, HttpError>;
 
-    /// List members of an anti-affinity group
+    /// List anti-affinity group members
     #[endpoint {
         method = GET,
         path = "/v1/anti-affinity-groups/{anti_affinity_group}/members",
@@ -1415,7 +1415,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::AntiAffinityGroupPath>,
     ) -> Result<HttpResponseOk<ResultsPage<AntiAffinityGroupMember>>, HttpError>;
 
-    /// Fetch an anti-affinity group member
+    /// Fetch anti-affinity group member
     #[endpoint {
         method = GET,
         path = "/v1/anti-affinity-groups/{anti_affinity_group}/members/instance/{instance}",
@@ -1427,7 +1427,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::AntiAffinityInstanceGroupMemberPath>,
     ) -> Result<HttpResponseOk<AntiAffinityGroupMember>, HttpError>;
 
-    /// Add a member to an anti-affinity group
+    /// Add member to anti-affinity group
     #[endpoint {
         method = POST,
         path = "/v1/anti-affinity-groups/{anti_affinity_group}/members/instance/{instance}",
@@ -1439,7 +1439,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::AntiAffinityInstanceGroupMemberPath>,
     ) -> Result<HttpResponseCreated<AntiAffinityGroupMember>, HttpError>;
 
-    /// Remove a member from an anti-affinity group
+    /// Remove member from anti-affinity group
     #[endpoint {
         method = DELETE,
         path = "/v1/anti-affinity-groups/{anti_affinity_group}/members/instance/{instance}",
@@ -1451,7 +1451,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::AntiAffinityInstanceGroupMemberPath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    /// Create an anti-affinity group
+    /// Create anti-affinity group
     #[endpoint {
         method = POST,
         path = "/v1/anti-affinity-groups",
@@ -1463,7 +1463,7 @@ pub trait NexusExternalApi {
         new_affinity_group_params: TypedBody<params::AntiAffinityGroupCreate>,
     ) -> Result<HttpResponseCreated<views::AntiAffinityGroup>, HttpError>;
 
-    /// Update an anti-affinity group
+    /// Update anti-affinity group
     #[endpoint {
         method = PUT,
         path = "/v1/anti-affinity-groups/{anti_affinity_group}",
@@ -1476,7 +1476,7 @@ pub trait NexusExternalApi {
         updated_group: TypedBody<params::AntiAffinityGroupUpdate>,
     ) -> Result<HttpResponseOk<views::AntiAffinityGroup>, HttpError>;
 
-    /// Delete an anti-affinity group
+    /// Delete anti-affinity group
     #[endpoint {
         method = DELETE,
         path = "/v1/anti-affinity-groups/{anti_affinity_group}",
@@ -2892,6 +2892,37 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::UpdatesGetRepositoryParams>,
     ) -> Result<HttpResponseOk<TufRepoGetResponse>, HttpError>;
+
+    /// Get the current target release of the rack's system software
+    ///
+    /// This may not correspond to the actual software running on the rack
+    /// at the time of request; it is instead the release that the rack
+    /// reconfigurator should be moving towards as a goal state. After some
+    /// number of planning and execution phases, the software running on the
+    /// rack should eventually correspond to the release described here.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/update/target-release",
+        tags = ["hidden"], // "system/update"
+    }]
+    async fn target_release_view(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<views::TargetRelease>, HttpError>;
+
+    /// Set the current target release of the rack's system software
+    ///
+    /// The rack reconfigurator will treat the software specified here as
+    /// a goal state for the rack's software, and attempt to asynchronously
+    /// update to that release.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/system/update/target-release",
+        tags = ["hidden"], // "system/update"
+    }]
+    async fn target_release_update(
+        rqctx: RequestContext<Self::Context>,
+        params: TypedBody<params::SetTargetReleaseParams>,
+    ) -> Result<HttpResponseCreated<views::TargetRelease>, HttpError>;
 
     // Silo users
 

@@ -13,19 +13,19 @@ use super::storage::CrucibleData;
 use super::storage::Storage;
 use crate::artifact_store::ArtifactStore;
 use crate::nexus::NexusClient;
-use crate::sim::simulatable::Simulatable;
 use crate::sim::SimulatedUpstairs;
+use crate::sim::simulatable::Simulatable;
 use crate::support_bundle::storage::SupportBundleQueryType;
 use crate::updates::UpdateManager;
-use anyhow::bail;
 use anyhow::Context;
+use anyhow::bail;
 use bytes::Bytes;
 use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
 use nexus_sled_agent_shared::inventory::{
     Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
-    OmicronZonesConfig, SledRole,
+    OmicronSledConfig, OmicronSledConfigResult, OmicronZonesConfig, SledRole,
 };
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
@@ -49,11 +49,11 @@ use omicron_uuid_kinds::{
 };
 use oxnet::Ipv6Net;
 use propolis_client::{
+    Client as PropolisClient,
     types::{
         Board, Chipset, ComponentV0, InstanceInitializationMethod,
         InstanceSpecV0, SerialPort, SerialPortNumber,
     },
-    Client as PropolisClient,
 };
 use range_requests::PotentialRange;
 use sled_agent_api::SupportBundleMetadata;
@@ -370,7 +370,7 @@ impl SledAgent {
         {
             Ok(instance) => instance,
             Err(Error::ObjectNotFound { .. }) => {
-                return Ok(VmmUnregisterResponse { updated_runtime: None })
+                return Ok(VmmUnregisterResponse { updated_runtime: None });
             }
             Err(e) => return Err(e),
         };
@@ -658,7 +658,9 @@ impl SledAgent {
                     false
                 }
             }) {
-                return Err(Error::invalid_request("cannot replace existing ephemeral IP without explicit removal"));
+                return Err(Error::invalid_request(
+                    "cannot replace existing ephemeral IP without explicit removal",
+                ));
             }
         }
 
@@ -896,6 +898,22 @@ impl SledAgent {
         config: OmicronPhysicalDisksConfig,
     ) -> Result<DisksManagementResult, HttpError> {
         self.storage.lock().omicron_physical_disks_ensure(config)
+    }
+
+    pub fn set_omicron_config(
+        &self,
+        config: OmicronSledConfig,
+    ) -> Result<OmicronSledConfigResult, HttpError> {
+        let (disks, datasets) = {
+            let mut storage = self.storage.lock();
+            let DisksManagementResult { status: disks } =
+                storage.omicron_physical_disks_ensure(config.disks_config)?;
+            let DatasetsManagementResult { status: datasets } =
+                storage.datasets_ensure(config.datasets_config)?;
+            (disks, datasets)
+        };
+        *self.fake_zones.lock().unwrap() = config.zones_config;
+        Ok(OmicronSledConfigResult { disks, datasets })
     }
 
     pub fn omicron_zones_list(&self) -> OmicronZonesConfig {

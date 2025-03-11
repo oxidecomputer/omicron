@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{NexusActionContext, NexusSaga, SagaInitError, ACTION_GENERATE_ID};
+use super::{ACTION_GENERATE_ID, NexusActionContext, NexusSaga, SagaInitError};
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::disk_create::{self, SagaDiskCreate};
 use crate::app::{
@@ -763,9 +763,11 @@ async fn sic_allocate_instance_external_ip(
             .map_err(ActionError::action_failed)?;
 
             if authz_project.id() != saga_params.project_id {
-                return Err(ActionError::action_failed(Error::invalid_request(
-                    "floating IP must be in the same project as the instance"
-                )));
+                return Err(ActionError::action_failed(
+                    Error::invalid_request(
+                        "floating IP must be in the same project as the instance",
+                    ),
+                ));
             }
 
             datastore
@@ -1157,10 +1159,10 @@ pub mod test {
     use nexus_db_queries::authn::saga::Serialized;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::datastore::DataStore;
+    use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils::resource_helpers::create_default_ip_pool;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
-    use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
@@ -1320,8 +1322,7 @@ pub mod test {
         assert!(no_network_interface_records_exist(datastore).await);
         assert!(no_external_ip_records_exist(datastore).await);
         assert!(
-            test_helpers::no_sled_resource_instance_records_exist(cptestctx)
-                .await
+            test_helpers::no_sled_resource_vmm_records_exist(cptestctx).await
         );
         assert!(
             test_helpers::no_virtual_provisioning_resource_records_exist(

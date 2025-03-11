@@ -4,11 +4,11 @@
 
 //! Server API for bootstrap-related functionality.
 
+use super::BootstrapError;
+use super::RssAccessError;
 use super::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use super::http_entrypoints;
 use super::views::SledAgentResponse;
-use super::BootstrapError;
-use super::RssAccessError;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::http_entrypoints::BootstrapServerContext;
 use crate::bootstrap::maghemite;
@@ -32,12 +32,10 @@ use illumos_utils::dladm;
 use illumos_utils::zfs;
 use illumos_utils::zone;
 use illumos_utils::zone::Zones;
-use internal_dns_resolver::Resolver;
-use omicron_common::address::{Ipv6Subnet, AZ_PREFIX};
 use omicron_common::ledger;
 use omicron_common::ledger::Ledger;
-use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_ddm_admin_client::DdmError;
+use omicron_ddm_admin_client::types::EnableStatsRequest;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackInitUuid;
 use sled_agent_types::rack_init::RackInitializeRequest;
@@ -176,7 +174,6 @@ impl Server {
         let BootstrapAgentStartup {
             config,
             global_zone_bootstrap_ip,
-            ddm_admin_localhost_client,
             base_log,
             startup_log,
             service_manager,
@@ -247,7 +244,6 @@ impl Server {
                 start_sled_agent_request,
                 long_running_task_handles.clone(),
                 service_manager.clone(),
-                &ddm_admin_localhost_client,
                 &base_log,
                 &startup_log,
             )
@@ -278,7 +274,6 @@ impl Server {
             state,
             sled_init_rx,
             sled_reset_rx,
-            ddm_admin_localhost_client,
             long_running_task_handles,
             service_manager,
             _sprockets_server_handle: sprockets_server_handle,
@@ -355,7 +350,6 @@ async fn start_sled_agent(
     request: StartSledAgentRequest,
     long_running_task_handles: LongRunningTaskHandles,
     service_manager: ServiceManager,
-    ddmd_client: &DdmAdminClient,
     base_log: &Logger,
     log: &Logger,
 ) -> Result<SledAgentServer, SledAgentServerStartError> {
@@ -394,29 +388,14 @@ async fn start_sled_agent(
     // Inform the storage service that the key manager is available
     long_running_task_handles.storage_manager.key_manager_ready().await;
 
-    // Start trying to notify ddmd of our sled prefix so it can
-    // advertise it to other sleds.
-    //
-    // TODO-security This ddmd_client is used to advertise both this
-    // (underlay) address and our bootstrap address. Bootstrap addresses are
-    // unauthenticated (connections made on them are auth'd via sprockets),
-    // but underlay addresses should be exchanged via authenticated channels
-    // between ddmd instances. It's TBD how that will work, but presumably
-    // we'll need to do something different here for underlay vs bootstrap
-    // addrs (either talk to a differently-configured ddmd, or include info
-    // indicating which kind of address we're advertising).
-    ddmd_client.advertise_prefix(request.body.subnet);
-
-    let az_prefix =
-        Ipv6Subnet::<AZ_PREFIX>::new(request.body.subnet.net().addr());
-    let addr = request.body.subnet.net().iter().nth(1).unwrap();
-    let dns_servers = Resolver::servers_from_subnet(az_prefix);
-    ddmd_client.enable_stats(
-        addr.into(),
-        dns_servers,
-        request.body.rack_id,
-        request.body.id.into_untyped_uuid(),
-    );
+    // Inform our DDM reconciler of our underlay subnet and the information it
+    // needs for maghemite to enable Oximeter stats.
+    let ddm_reconciler = service_manager.ddm_reconciler();
+    ddm_reconciler.set_underlay_subnet(request.body.subnet);
+    ddm_reconciler.enable_stats(EnableStatsRequest {
+        rack_id: request.body.rack_id,
+        sled_id: request.body.id.into_untyped_uuid(),
+    });
 
     // Server does not exist, initialize it.
     let server = SledAgentServer::start(
@@ -511,7 +490,6 @@ struct Inner {
         oneshot::Sender<Result<SledAgentResponse, String>>,
     )>,
     sled_reset_rx: mpsc::Receiver<oneshot::Sender<Result<(), BootstrapError>>>,
-    ddm_admin_localhost_client: DdmAdminClient,
     long_running_task_handles: LongRunningTaskHandles,
     service_manager: ServiceManager,
     _sprockets_server_handle: JoinHandle<()>,
@@ -574,7 +552,6 @@ impl Inner {
                     request,
                     self.long_running_task_handles.clone(),
                     self.service_manager.clone(),
-                    &self.ddm_admin_localhost_client,
                     &self.base_log,
                     &log,
                 )

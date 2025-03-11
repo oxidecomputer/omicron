@@ -4,8 +4,8 @@
 
 //! Prototype code for collecting information from systems in the rack
 
-use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::Omdb;
+use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use anyhow::Context;
 use clap::Args;
 use clap::Subcommand;

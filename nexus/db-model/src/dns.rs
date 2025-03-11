@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{impl_enum_type, Generation};
+use super::{Generation, impl_enum_type};
 use crate::schema::{dns_name, dns_version, dns_zone};
 use chrono::{DateTime, Utc};
 use nexus_types::internal_api::params;

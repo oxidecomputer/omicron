@@ -11,7 +11,7 @@ use crate::{
 use daft::Diffable;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -575,6 +575,16 @@ pub enum SwitchLocation {
     Switch0,
     /// Switch in lower slot
     Switch1,
+}
+
+impl SwitchLocation {
+    /// Return the location of the other switch, not ourself.
+    pub const fn other(&self) -> Self {
+        match self {
+            SwitchLocation::Switch0 => SwitchLocation::Switch1,
+            SwitchLocation::Switch1 => SwitchLocation::Switch0,
+        }
+    }
 }
 
 impl fmt::Display for SwitchLocation {

@@ -2,15 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::http_testing::RequestBuilder;
 use crate::ControlPlaneTestContext;
+use crate::http_testing::RequestBuilder;
 
 use super::http_testing::AuthnMode;
 use super::http_testing::NexusRequest;
 use crucible_agent_client::types::State as RegionState;
-use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
+use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_interface::NexusServer;
@@ -21,6 +21,8 @@ use nexus_types::external_api::shared::Baseboard;
 use nexus_types::external_api::shared::IdentityType;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::views;
+use nexus_types::external_api::views::AffinityGroup;
+use nexus_types::external_api::views::AntiAffinityGroup;
 use nexus_types::external_api::views::Certificate;
 use nexus_types::external_api::views::FloatingIp;
 use nexus_types::external_api::views::InternetGateway;
@@ -33,9 +35,11 @@ use nexus_types::external_api::views::VpcSubnet;
 use nexus_types::external_api::views::{Project, Silo, Vpc, VpcRouter};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
+use omicron_common::api::external::AffinityPolicy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::FailureDomain;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
@@ -55,8 +59,8 @@ use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim::SledAgent;
-use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
+use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -579,6 +583,46 @@ where
 {
     let url = format!("/v1/instances?project={project_name}");
     object_create_error(client, &url, body, status).await
+}
+
+pub async fn create_affinity_group(
+    client: &ClientTestContext,
+    project_name: &str,
+    group_name: &str,
+) -> AffinityGroup {
+    object_create(
+        &client,
+        format!("/v1/affinity-groups?project={}", &project_name).as_str(),
+        &params::AffinityGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: group_name.parse().unwrap(),
+                description: String::from("affinity group description"),
+            },
+            policy: AffinityPolicy::Fail,
+            failure_domain: FailureDomain::Sled,
+        },
+    )
+    .await
+}
+
+pub async fn create_anti_affinity_group(
+    client: &ClientTestContext,
+    project_name: &str,
+    group_name: &str,
+) -> AntiAffinityGroup {
+    object_create(
+        &client,
+        format!("/v1/anti-affinity-groups?project={}", &project_name).as_str(),
+        &params::AntiAffinityGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: group_name.parse().unwrap(),
+                description: String::from("anti-affinity group description"),
+            },
+            policy: AffinityPolicy::Fail,
+            failure_domain: FailureDomain::Sled,
+        },
+    )
+    .await
 }
 
 pub async fn create_vpc(
@@ -1188,8 +1232,8 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     }
 
     pub async fn add_blueprint_disks(&mut self, blueprint: &Blueprint) {
-        for (sled_id, disks_config) in blueprint.blueprint_disks.iter() {
-            for disk in &disks_config.disks {
+        for (sled_id, sled_config) in blueprint.sleds.iter() {
+            for disk in &sled_config.disks_config.disks {
                 self.add_zpool_with_dataset_ext(
                     *sled_id,
                     disk.id,
@@ -1270,7 +1314,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 })
                 .collect();
 
-            let generation = Generation::new();
+            let generation = Generation::new().next();
             let dataset_config = DatasetsConfig { generation, datasets };
             let res = sled_agent.datasets_ensure(dataset_config).expect(
                 "Should have been able to ensure datasets, but could not.

@@ -6,18 +6,18 @@
 
 use anyhow::Error;
 use futures::stream::{self, StreamExt, TryStreamExt};
-use illumos_utils::dladm::Dladm;
+use illumos_utils::ExecutionError;
 use illumos_utils::dladm::BOOTSTRAP_ETHERSTUB_NAME;
 use illumos_utils::dladm::BOOTSTRAP_ETHERSTUB_VNIC_NAME;
+use illumos_utils::dladm::Dladm;
 use illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME;
 use illumos_utils::dladm::UNDERLAY_ETHERSTUB_VNIC_NAME;
 use illumos_utils::link::LinkKind;
 use illumos_utils::opte;
 use illumos_utils::zone::IPADM;
-use illumos_utils::ExecutionError;
-use illumos_utils::{execute, PFEXEC};
-use slog::warn;
+use illumos_utils::{PFEXEC, execute};
 use slog::Logger;
+use slog::warn;
 use slog_error_chain::InlineErrorChain;
 use std::process::Command;
 

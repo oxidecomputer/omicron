@@ -27,17 +27,17 @@ use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use derive_more::From;
 use dropshot::HttpError;
-use futures::stream::FuturesUnordered;
 use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use illumos_utils::opte::PortManager;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zone::ZONE_PREFIX;
 use nexus_sled_agent_shared::inventory::{
     Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
-    OmicronZonesConfig, SledRole,
+    OmicronSledConfig, OmicronSledConfigResult, OmicronZonesConfig, SledRole,
 };
 use omicron_common::address::{
-    get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
+    Ipv6Subnet, SLED_PREFIX, get_sled_address, get_switch_zone_address,
 };
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
@@ -47,7 +47,7 @@ use omicron_common::api::internal::shared::{
     SledIdentifiers, VirtualNetworkInterfaceHost,
 };
 use omicron_common::backoff::{
-    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
+    BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
 use omicron_common::disk::{
     DatasetsConfig, DatasetsManagementResult, DisksManagementResult,
@@ -69,9 +69,9 @@ use sled_agent_types::zone_bundle::{
     PriorityOrder, StorageLimit, ZoneBundleMetadata,
 };
 use sled_diagnostics::{SledDiagnosticsCmdError, SledDiagnosticsCmdOutput};
-use sled_hardware::{underlay, HardwareManager};
-use sled_hardware_types::underlay::BootstrapInterface;
+use sled_hardware::{HardwareManager, underlay};
 use sled_hardware_types::Baseboard;
+use sled_hardware_types::underlay::BootstrapInterface;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use sprockets_tls::keys::SprocketsConfig;
@@ -854,7 +854,7 @@ impl SledAgent {
         Ok(self.storage().datasets_config_list().await?)
     }
 
-    pub async fn datasets_ensure(
+    async fn datasets_ensure(
         &self,
         config: DatasetsConfig,
     ) -> Result<DatasetsManagementResult, Error> {
@@ -888,7 +888,7 @@ impl SledAgent {
     /// on this sled, and that no other disks are being used by the control
     /// plane (with the exception of M.2s, which are always automatically
     /// in-use).
-    pub async fn omicron_physical_disks_ensure(
+    async fn omicron_physical_disks_ensure(
         &self,
         config: OmicronPhysicalDisksConfig,
     ) -> Result<DisksManagementResult, Error> {
@@ -948,9 +948,48 @@ impl SledAgent {
         Ok(disk_result)
     }
 
+    /// Ensures that the specific sets of disks, datasets, and zones specified
+    /// by `config` are running.
+    ///
+    /// This method currently blocks while each of disks, datasets, and zones
+    /// are ensured in that order; a failure on one prevents any attempt to
+    /// ensure the subsequent step(s).
+    pub async fn set_omicron_config(
+        &self,
+        config: OmicronSledConfig,
+    ) -> Result<OmicronSledConfigResult, Error> {
+        let disks =
+            self.omicron_physical_disks_ensure(config.disks_config).await?;
+
+        // If we only had partial success deploying disks, don't proceed.
+        if disks.has_error() {
+            return Ok(OmicronSledConfigResult {
+                disks: disks.status,
+                datasets: Vec::new(),
+            });
+        }
+
+        let datasets = self.datasets_ensure(config.datasets_config).await?;
+
+        // If we only had partial success deploying datasets, don't proceed.
+        if datasets.has_error() {
+            return Ok(OmicronSledConfigResult {
+                disks: disks.status,
+                datasets: datasets.status,
+            });
+        }
+
+        self.omicron_zones_ensure(config.zones_config).await?;
+
+        Ok(OmicronSledConfigResult {
+            disks: disks.status,
+            datasets: datasets.status,
+        })
+    }
+
     /// Ensures that the specific set of Omicron zones are running as configured
     /// (and that no other zones are running)
-    pub async fn omicron_zones_ensure(
+    async fn omicron_zones_ensure(
         &self,
         requested_zones: OmicronZonesConfig,
     ) -> Result<(), Error> {

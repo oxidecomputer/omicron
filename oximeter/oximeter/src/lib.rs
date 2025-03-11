@@ -192,8 +192,8 @@ pub use oximeter_types::*;
 #[cfg(test)]
 mod test {
     use oximeter_schema::ir::load_schema;
-    use oximeter_types::schema::{FieldSource, SCHEMA_DIRECTORY};
     use oximeter_types::TimeseriesSchema;
+    use oximeter_types::schema::{FieldSource, SCHEMA_DIRECTORY};
     use std::collections::BTreeMap;
     use std::fs;
 

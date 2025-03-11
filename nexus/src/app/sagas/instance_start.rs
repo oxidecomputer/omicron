@@ -7,8 +7,8 @@
 use std::net::Ipv6Addr;
 
 use super::{
-    instance_common::allocate_vmm_ipv6, NexusActionContext, NexusSaga,
-    SagaInitError,
+    NexusActionContext, NexusSaga, SagaInitError,
+    instance_common::allocate_vmm_ipv6,
 };
 use crate::app::instance::{
     InstanceEnsureRegisteredApiResources, InstanceRegisterReason,
@@ -180,10 +180,7 @@ async fn sis_alloc_server_undo(
     let osagactx = sagactx.user_data();
     let propolis_id = sagactx.lookup::<PropolisUuid>("propolis_id")?;
 
-    osagactx
-        .nexus()
-        .delete_sled_reservation(propolis_id.into_untyped_uuid())
-        .await?;
+    osagactx.nexus().delete_sled_reservation(propolis_id).await?;
     Ok(())
 }
 
@@ -438,7 +435,7 @@ async fn sis_account_virtual_resources(
             &opctx,
             instance_id,
             params.db_instance.project_id,
-            i64::from(params.db_instance.ncpus.0 .0),
+            i64::from(params.db_instance.ncpus.0.0),
             nexus_db_model::ByteCount(*params.db_instance.memory),
         )
         .await
@@ -464,7 +461,7 @@ async fn sis_account_virtual_resources_undo(
             &opctx,
             instance_id,
             params.db_instance.project_id,
-            i64::from(params.db_instance.ncpus.0 .0),
+            i64::from(params.db_instance.ncpus.0.0),
             nexus_db_model::ByteCount(*params.db_instance.memory),
         )
         .await

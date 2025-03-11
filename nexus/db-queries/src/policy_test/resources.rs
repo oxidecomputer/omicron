@@ -73,6 +73,7 @@ pub async fn make_resources(
     builder.new_resource(authz::DEVICE_AUTH_REQUEST_LIST);
     builder.new_resource(authz::INVENTORY);
     builder.new_resource(authz::IP_POOL_LIST);
+    builder.new_resource(authz::TARGET_RELEASE_CONFIG);
 
     // Silo/organization/project hierarchy
     make_silo(&mut builder, "silo1", main_silo_id, true).await;
@@ -300,6 +301,21 @@ async fn make_project(
         LookupType::ByName(vpc1_name.clone()),
     );
 
+    let affinity_group_name = format!("{}-affinity-group1", project_name);
+    let affinity_group = authz::AffinityGroup::new(
+        project.clone(),
+        Uuid::new_v4(),
+        LookupType::ByName(affinity_group_name.clone()),
+    );
+
+    let anti_affinity_group_name =
+        format!("{}-anti-affinity-group1", project_name);
+    let anti_affinity_group = authz::AntiAffinityGroup::new(
+        project.clone(),
+        Uuid::new_v4(),
+        LookupType::ByName(anti_affinity_group_name.clone()),
+    );
+
     let instance_name = format!("{}-instance1", project_name);
     let instance = authz::Instance::new(
         project.clone(),
@@ -313,6 +329,8 @@ async fn make_project(
         Uuid::new_v4(),
         LookupType::ByName(disk_name.clone()),
     ));
+    builder.new_resource(affinity_group.clone());
+    builder.new_resource(anti_affinity_group.clone());
     builder.new_resource(instance.clone());
     builder.new_resource(authz::InstanceNetworkInterface::new(
         instance,

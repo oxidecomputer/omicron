@@ -12,9 +12,9 @@ use std::sync::LazyLock;
 use std::time::Duration;
 use std::time::Instant;
 
-use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
+use anyhow::bail;
 use camino::Utf8PathBuf;
 use chrono::Utc;
 use clap::Parser;
@@ -22,11 +22,11 @@ use fs_err::tokio as fs;
 use omicron_zone_package::config::Config;
 use omicron_zone_package::config::PackageName;
 use semver::Version;
+use slog::Drain;
+use slog::Logger;
 use slog::debug;
 use slog::error;
 use slog::info;
-use slog::Drain;
-use slog::Logger;
 use slog_term::FullFormat;
 use slog_term::TermDecorator;
 use tokio::sync::Semaphore;
@@ -426,18 +426,6 @@ async fn main() -> Result<()> {
             .env_remove("CARGO")
             .env_remove("RUSTUP_TOOLCHAIN"),
     );
-
-    // Download the toolchain for phbl before we get to the image build steps.
-    // (This is possibly a micro-optimization.)
-    jobs.push_command(
-        "phbl-toolchain",
-        Command::new(&rustup_cargo)
-            .arg("--version")
-            .current_dir(args.helios_dir.join("projects/phbl"))
-            .env_remove("CARGO")
-            .env_remove("RUSTUP_TOOLCHAIN"),
-    )
-    .after("helios-setup");
 
     let omicron_package = if let Some(path) = &args.omicron_package_bin {
         // omicron-package is provided, so don't build it.

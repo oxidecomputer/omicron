@@ -9,10 +9,10 @@ use crate::helpers::sps_to_string;
 use crate::installinator_progress::IprStartReceiver;
 use crate::installinator_progress::IprUpdateTracker;
 use crate::mgs::make_mgs_client;
+use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::ensure;
-use anyhow::Context;
 use base64::Engine;
 use bytes::Bytes;
 use display_error_chain::DisplayErrorChain;
@@ -30,43 +30,43 @@ use gateway_client::types::RotImageError;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpUpdateStatus;
-use gateway_messages::SpComponent;
 use gateway_messages::ROT_PAGE_SIZE;
+use gateway_messages::SpComponent;
 use hubtools::RawHubrisArchive;
 use installinator_common::InstallinatorCompletionMetadata;
 use installinator_common::InstallinatorSpec;
 use installinator_common::WriteOutput;
-use omicron_common::api::external::SemverVersion;
 use omicron_common::disk::M2Slot;
 use omicron_common::update::ArtifactHash;
+use semver::Version;
+use slog::Logger;
 use slog::error;
 use slog::info;
 use slog::o;
 use slog::warn;
-use slog::Logger;
-use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::btree_map::Entry;
 use std::net::SocketAddrV6;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 use std::time::Instant;
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
+use tokio::sync::Mutex;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
-use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio_util::io::StreamReader;
 use update_common::artifacts::ArtifactIdData;
 use update_common::artifacts::ArtifactsWithPlan;
 use update_common::artifacts::ControlPlaneZonesMode;
 use update_common::artifacts::UpdatePlan;
-use update_engine::events::ProgressUnits;
 use update_engine::AbortHandle;
 use update_engine::StepSpec;
+use update_engine::events::ProgressUnits;
 use uuid::Uuid;
 use wicket_common::inventory::SpComponentCaboose;
 use wicket_common::inventory::SpIdentifier;
@@ -961,7 +961,7 @@ impl UpdateDriver {
                         "SP board {}, version {} (git commit {})",
                         caboose.board, caboose.version, caboose.git_commit
                     );
-                    match caboose.version.parse::<SemverVersion>() {
+                    match caboose.version.parse::<Version>() {
                         Ok(version) => {
                             StepSuccess::new((sp_artifact, Some(version)))
                                 .with_message(message)
@@ -1683,7 +1683,7 @@ struct RotInterrogation {
     sp: SpIdentifier,
     // Version reported by the target RoT.
     artifact_to_apply: ArtifactIdData,
-    active_version: Option<SemverVersion>,
+    active_version: Option<Version>,
 }
 
 impl RotInterrogation {
@@ -1705,15 +1705,15 @@ impl RotInterrogation {
         // Older versions of the SP have a bug that prevents setting
         // the active slot for the RoT bootloader. Check for these
         // and skip the update until the SP gets updated
-        const MIN_GIMLET_VERSION: SemverVersion = SemverVersion::new(1, 0, 21);
-        const MIN_SWITCH_VERSION: SemverVersion = SemverVersion::new(1, 0, 21);
-        const MIN_PSC_VERSION: SemverVersion = SemverVersion::new(1, 0, 20);
+        const MIN_GIMLET_VERSION: Version = Version::new(1, 0, 21);
+        const MIN_SWITCH_VERSION: Version = Version::new(1, 0, 21);
+        const MIN_PSC_VERSION: Version = Version::new(1, 0, 20);
 
         match sp_caboose {
             // If we can't get the SP caboose for whatever reason don't risk
             // trying an update
             None => false,
-            Some(caboose) => match caboose.version.parse::<SemverVersion>() {
+            Some(caboose) => match caboose.version.parse::<Version>() {
                 Ok(vers) => match self.sp.type_ {
                     SpType::Sled => vers >= MIN_GIMLET_VERSION,
                     SpType::Switch => vers >= MIN_SWITCH_VERSION,
@@ -1918,7 +1918,7 @@ impl UpdateContext {
                     c.version, c.git_commit
                 );
 
-                match c.version.parse::<SemverVersion>() {
+                match c.version.parse::<Version>() {
                     Ok(version) => StepSuccess::new(make_result(Some(version)))
                         .with_message(message)
                         .into(),
@@ -1976,7 +1976,7 @@ impl UpdateContext {
                         error: anyhow!(
                             "unexpected RoT active slot {rot_active_slot}"
                         ),
-                    })
+                    });
                 }
             };
 
@@ -2012,7 +2012,7 @@ impl UpdateContext {
             active_version,
         };
 
-        match caboose.version.parse::<SemverVersion>() {
+        match caboose.version.parse::<Version>() {
             Ok(version) => StepSuccess::new(make_result(Some(version)))
                 .with_message(message)
                 .into(),
@@ -2255,7 +2255,7 @@ impl UpdateContext {
                     // the minimum we will ever return is 3
                     RotState::V2 { .. } => unreachable!(),
                     RotState::V3 { stage0_error, stage0next_error, .. } => {
-                        return Ok((stage0_error, stage0next_error))
+                        return Ok((stage0_error, stage0next_error));
                     }
                     // ugh
                     RotState::CommunicationFailed { message } => {

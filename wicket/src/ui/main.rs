@@ -9,12 +9,12 @@ use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
 use crate::ui::widgets::Fade;
 use crate::{Action, Cmd, State, Term};
+use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph};
-use ratatui::Frame;
-use slog::{o, Logger};
+use slog::{Logger, o};
 use wicketd_client::types::GetLocationResponse;
 
 /// The [`MainScreen`] is the primary UI element of the terminal, covers the
@@ -197,6 +197,7 @@ impl MainScreen {
         let location_spans = location_spans(&state.wicketd_location);
         let wicketd_spans = state.service_status.wicketd_liveness().to_spans();
         let mgs_spans = state.service_status.mgs_liveness().to_spans();
+        let xcvr_spans = state.service_status.transceiver_liveness().to_spans();
         let mut spans = vec![Span::styled("You are here: ", style::service())];
         spans.extend_from_slice(&location_spans);
         spans.push(Span::styled(" | ", style::divider()));
@@ -205,6 +206,9 @@ impl MainScreen {
         spans.push(Span::styled(" | ", style::divider()));
         spans.push(Span::styled("MGS: ", style::service()));
         spans.extend_from_slice(&mgs_spans);
+        spans.push(Span::styled(" | ", style::divider()));
+        spans.push(Span::styled("XCVRS: ", style::service()));
+        spans.extend_from_slice(&xcvr_spans);
         let main = Paragraph::new(Line::from(spans));
         frame.render_widget(main, rect);
 
