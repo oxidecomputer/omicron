@@ -1118,8 +1118,9 @@ impl<'a> ZoneBuilder<'a> {
         self
     }
 
-    /// The file name of the zone image to search for in [`Self::zone_image_paths`].
-    /// If unset, defaults to `{zone_type}.tar.gz`.
+    /// The file name of the zone image to search for in the zone image
+    /// paths ([`Self::with_zone_image_paths`]). If unset, defaults to
+    /// `{zone_type}.tar.gz`.
     pub fn with_zone_image_file_name(
         mut self,
         image_file_name: &'a str,
