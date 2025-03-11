@@ -7,8 +7,8 @@
 
 use clickhouse_admin_types::{ClickhouseKeeperClusterMembership, KeeperId};
 use nexus_types::deployment::{
-    Blueprint, BlueprintZoneDisposition, BlueprintZoneType,
-    BlueprintSledConfig, ClickhouseClusterConfig,
+    Blueprint, BlueprintSledConfig, BlueprintZoneDisposition,
+    BlueprintZoneType, ClickhouseClusterConfig,
 };
 use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
 use slog::{Logger, error};

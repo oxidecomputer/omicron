@@ -697,7 +697,7 @@ impl<'a> BlueprintBuilder<'a> {
         // is returned then log it and carry over the parent_config.
         let clickhouse_cluster_config = clickhouse_allocator.map(|a| {
             let should_be_running = ClickhouseZonesThatShouldBeRunning::new(
-                sleds.iter().map(|(id, c)| (*id, c))
+                sleds.iter().map(|(id, c)| (*id, c)),
             );
             match a.plan(&should_be_running) {
                 Ok(config) => config,
@@ -2315,11 +2315,8 @@ pub mod test {
         builder.sleds_mut().get_mut(&decommision_sled_id).unwrap().state =
             SledState::Decommissioned;
         let input = builder.build();
-        for mut z in &mut blueprint2
-            .sleds
-            .get_mut(&decommision_sled_id)
-            .unwrap()
-            .zones
+        for mut z in
+            &mut blueprint2.sleds.get_mut(&decommision_sled_id).unwrap().zones
         {
             z.disposition = BlueprintZoneDisposition::Expunged {
                 as_of_generation: Generation::new(),
@@ -2417,10 +2414,9 @@ pub mod test {
             }
 
             // We should have disks and a generation bump for every sled.
-            let parent_gens =
-                parent.sleds.iter().map(|(&sled_id, config)| {
-                    (sled_id, config.sled_agent_generation)
-                });
+            let parent_gens = parent.sleds.iter().map(|(&sled_id, config)| {
+                (sled_id, config.sled_agent_generation)
+            });
             for (sled_id, parent_gen) in parent_gens {
                 let EditedSled { config, .. } =
                     builder.sled_editors.remove(&sled_id).unwrap().finalize();
@@ -2968,8 +2964,7 @@ pub mod test {
             let sled_config =
                 blueprint1.sleds.get(&sled_id).expect("found sled");
             assert_eq!(
-                sled_config.sled_agent_generation,
-                expected_zones_config_gen[i],
+                sled_config.sled_agent_generation, expected_zones_config_gen[i],
                 "unexpected generation on sled {i}"
             );
 
@@ -3084,8 +3079,7 @@ pub mod test {
             let sled_config =
                 blueprint2.sleds.get(&sled_id).expect("found sled");
             assert_eq!(
-                sled_config.sled_agent_generation,
-                expected_zones_config_gen[i],
+                sled_config.sled_agent_generation, expected_zones_config_gen[i],
                 "unexpected generation on sled {i}"
             );
 

@@ -106,9 +106,7 @@ pub mod test {
         // `ExampleSystem` adds an internal DNS server to every sled. Manually
         // prune out all but the first of them to give us space to add more.
         for (_, sled_config) in blueprint1.sleds.iter_mut().skip(1) {
-            sled_config
-                .zones
-                .retain(|z| !z.zone_type.is_internal_dns());
+            sled_config.zones.retain(|z| !z.zone_type.is_internal_dns());
         }
         let npruned = blueprint1.sleds.len() - 1;
         assert!(npruned > 0);
