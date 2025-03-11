@@ -2,6 +2,10 @@
 
 use anyhow::Result;
 use clap::Subcommand;
+use std::env;
+use std::ffi::OsStr;
+use xshell::Cmd;
+use crate::common::SANITIZED_ENV_VARS;
 
 mod a4x2_deploy;
 mod a4x2_package;
@@ -14,6 +18,10 @@ static LIVE_TEST_BUNDLE_DIR: &str = "live-tests-bundle";
 
 /// script within the bundle directory
 static LIVE_TEST_BUNDLE_SCRIPT: &str = "run-live-tests";
+
+/// These environment variables are set to statically defined values for
+/// commands executed by the xtask.
+const STATIC_ENV_VARS: &[(&str, &str)] = &[("LANG", "C.UTF-8"), ("TZ", "UTC")];
 
 #[derive(Subcommand)]
 pub enum A4x2Cmds {
@@ -30,3 +38,29 @@ pub fn run_cmd(args: A4x2Cmds) -> Result<()> {
         A4x2Cmds::Deploy(args) => a4x2_deploy::run_cmd(args),
     }
 }
+
+/// Removes unwanted variables from the environment. Also sets some variables to
+/// static values according to [STATIC_ENV_VARS]
+fn scrub_env(cmd: Cmd<'_>) -> Cmd<'_> {
+    let passthru = env::vars_os().filter(|(varname, _)| {
+        // LC_* is removed because it can change command output in unexpected
+        // ways, and we may be doing some parsing.
+        //
+        // SANITIZED_ENV_VARS deals in variables known to cause unnecessary
+        // recompilation.
+        varname.to_str().map_or(true, |varname|
+            !varname.starts_with("LC_") && !SANITIZED_ENV_VARS.matches(varname)
+        )
+    });
+    let static_vars =
+        STATIC_ENV_VARS.iter().map(|(k, v)| (OsStr::new(k), OsStr::new(v)));
+    cmd.env_clear().envs(passthru).envs(static_vars)
+}
+
+/// Drop-in shim for xshell::cmd!() that scrubs environment with [scrub_env]
+macro_rules! cmd {
+    ($($tt:tt)*) => {
+        crate::a4x2::scrub_env(xshell::cmd!($($tt)*))
+    }
+}
+pub(crate) use cmd;
