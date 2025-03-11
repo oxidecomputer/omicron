@@ -7,13 +7,13 @@
 use crate::app::background::Activator;
 use crate::app::background::BackgroundTask;
 use futures::future::BoxFuture;
+use nexus_db_model::SCHEMA_VERSION;
 use nexus_db_model::WebhookDelivery;
 use nexus_db_model::WebhookDeliveryTrigger;
-use nexus_db_model::SCHEMA_VERSION;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
-use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::{
@@ -301,7 +301,6 @@ mod test {
     use nexus_db_queries::db;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::IdentityMetadataCreateParams;
-    use omicron_common::api::external::SemverVersion;
     use omicron_uuid_kinds::WebhookEventUuid;
     use omicron_uuid_kinds::WebhookReceiverUuid;
 
@@ -355,7 +354,7 @@ mod test {
             .expect("'test.*.bar should be an acceptable glob");
         let mut glob = db::model::WebhookRxEventGlob::new(rx_id, glob);
         // Just make something up that's obviously outdated...
-        glob.schema_version = SemverVersion::new(100, 0, 0).into();
+        glob.schema_version = db::model::SemverVersion::new(100, 0, 0);
         diesel::insert_into(glob_dsl::webhook_rx_event_glob)
             .values(glob.clone())
             .execute_async(&*conn)
