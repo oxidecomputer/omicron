@@ -8,14 +8,16 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::TransactionError;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::datastore::RunnableQuery;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::model::DbSemverVersion;
+use crate::db::error::public_error_from_diesel;
 use crate::db::model::Generation;
 use crate::db::model::Name;
+use crate::db::model::SCHEMA_VERSION;
+use crate::db::model::SemverVersion;
 use crate::db::model::WebhookEventClass;
 use crate::db::model::WebhookGlob;
 use crate::db::model::WebhookReceiver;
@@ -25,7 +27,6 @@ use crate::db::model::WebhookRxEventGlob;
 use crate::db::model::WebhookRxSubscription;
 use crate::db::model::WebhookSecret;
 use crate::db::model::WebhookSubscriptionKind;
-use crate::db::model::SCHEMA_VERSION;
 use crate::db::pagination::paginated;
 use crate::db::pagination::paginated_multicolumn;
 use crate::db::pool::DbConnection;
@@ -36,14 +37,12 @@ use crate::db::schema::webhook_receiver::dsl as rx_dsl;
 use crate::db::schema::webhook_rx_event_glob::dsl as glob_dsl;
 use crate::db::schema::webhook_rx_subscription::dsl as subscription_dsl;
 use crate::db::schema::webhook_secret::dsl as secret_dsl;
-use crate::db::TransactionError;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::WebhookGlobStatus;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -51,6 +50,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::WebhookReceiverUuid;
 use ref_cast::RefCast;
@@ -763,7 +763,7 @@ impl DataStore {
             pagparams,
         )
         .filter(
-            glob_dsl::schema_version.ne(DbSemverVersion::from(SCHEMA_VERSION)),
+            glob_dsl::schema_version.ne(SemverVersion::from(SCHEMA_VERSION)),
         )
         .select(WebhookRxEventGlob::as_select())
         .load_async(&*self.pool_connection_authorized(&opctx).await?)
@@ -821,7 +821,7 @@ impl DataStore {
                             )
                             .set(
                                 glob_dsl::schema_version
-                                    .eq(DbSemverVersion::from(SCHEMA_VERSION)),
+                                    .eq(SemverVersion::from(SCHEMA_VERSION)),
                             )
                             .execute_async(&conn)
                             .await;

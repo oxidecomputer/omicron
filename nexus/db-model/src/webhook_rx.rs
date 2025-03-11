@@ -2,6 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::EventClassParseError;
+use crate::Generation;
+use crate::Name;
+use crate::SemverVersion;
+use crate::WebhookEventClass;
 use crate::collection::DatastoreCollectionConfig;
 use crate::schema::{
     webhook_receiver, webhook_rx_event_glob, webhook_rx_subscription,
@@ -9,10 +14,6 @@ use crate::schema::{
 };
 use crate::schema_versions;
 use crate::typed_uuid::DbTypedUuid;
-use crate::EventClassParseError;
-use crate::Generation;
-use crate::Name;
-use crate::WebhookEventClass;
 use chrono::{DateTime, Utc};
 use db_macros::{Asset, Resource};
 use nexus_types::external_api::views;
@@ -171,7 +172,7 @@ pub struct WebhookRxEventGlob {
     #[diesel(embed)]
     pub glob: WebhookGlob,
     pub time_created: DateTime<Utc>,
-    pub schema_version: schema_versions::DbSemverVersion,
+    pub schema_version: SemverVersion,
 }
 
 impl WebhookRxEventGlob {
@@ -259,10 +260,10 @@ impl WebhookGlob {
                         "event_class",
                         "invalid event class {glob:?}: all segments must be \
                         either '*', '**', or any sequence of non-'*' characters",
-                    ))
+                    ));
                 }
                 // Match the literal segment.
-                s =>  regex.push_str(s),
+                s => regex.push_str(s),
             }
             Ok(())
         };

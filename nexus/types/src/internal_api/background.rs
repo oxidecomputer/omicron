@@ -5,7 +5,6 @@
 use crate::external_api::views;
 use chrono::DateTime;
 use chrono::Utc;
-use omicron_common::api::external::SemverVersion;
 use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
@@ -460,7 +459,7 @@ impl slog::KV for DebugDatasetsRendezvousStats {
 pub struct WebhookDispatcherStatus {
     pub globs_reprocessed: BTreeMap<WebhookReceiverUuid, ReprocessedGlobs>,
 
-    pub glob_version: SemverVersion,
+    pub glob_version: semver::Version,
 
     /// The webhook events dispatched on this activation.
     pub dispatched: Vec<WebhookDispatched>,
@@ -477,7 +476,11 @@ type ReprocessedGlobs = BTreeMap<String, Result<WebhookGlobStatus, String>>;
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum WebhookGlobStatus {
     AlreadyReprocessed,
-    Reprocessed { created: usize, deleted: usize, prev_version: SemverVersion },
+    Reprocessed {
+        created: usize,
+        deleted: usize,
+        prev_version: semver::Version,
+    },
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
