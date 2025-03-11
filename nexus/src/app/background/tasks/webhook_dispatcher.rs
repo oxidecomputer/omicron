@@ -342,7 +342,8 @@ mod test {
                 ),
 
                 endpoint: "http://webhooks.elizas.website".parse().unwrap(),
-                rcgen: db::model::Generation::new(),
+                secret_gen: db::model::Generation::new(),
+                subscription_gen: db::model::Generation::new(),
             })
             .execute_async(&*conn)
             .await
