@@ -48,6 +48,8 @@ progenitor::generate_api!(
         NewPasswordHash = omicron_passwords::NewPasswordHash,
         OmicronPhysicalDiskConfig = omicron_common::disk::OmicronPhysicalDiskConfig,
         OmicronPhysicalDisksConfig = omicron_common::disk::OmicronPhysicalDisksConfig,
+        OximeterReadMode = nexus_types::deployment::OximeterReadMode,
+        OximeterReadPolicy = nexus_types::deployment::OximeterReadPolicy,
         RecoverySiloConfig = nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
         Srv = nexus_types::internal_api::params::Srv,
         TypedUuidForBlueprintKind = omicron_uuid_kinds::BlueprintUuid,
