@@ -46,6 +46,7 @@ use omicron_common::address::Ipv6Subnet;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use tokio::net::TcpSocket;
+use uuid::Uuid;
 
 mod crucible_agent;
 mod db;
@@ -56,6 +57,8 @@ mod oximeter;
 mod oxql;
 mod reconfigurator;
 mod sled_agent;
+
+const OMDB_UUID: Uuid = Uuid::from_u128(0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAu128);
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {

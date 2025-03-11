@@ -385,6 +385,19 @@ impl Resolver {
             })
             .flatten()
     }
+
+    pub async fn ipv6_lookup(
+        &self,
+        query: &str,
+    ) -> Result<Option<Ipv6Addr>, ResolveError> {
+        Ok(self
+            .resolver
+            .ipv6_lookup(query)
+            .await?
+            .into_iter()
+            .next()
+            .map(move |aaaa| aaaa.into()))
+    }
 }
 
 #[cfg(test)]

@@ -8,10 +8,12 @@ use crate::Omdb;
 use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::db::datetime_rfc3339_concise;
 use anyhow::Context;
+use anyhow::bail;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use clap::Args;
 use clap::Subcommand;
 use diesel::prelude::*;
+use internal_dns_types::names::ServiceName;
 use nexus_db_model::Saga;
 use nexus_db_model::SagaNodeEvent;
 use nexus_db_queries::context::OpContext;
@@ -21,8 +23,14 @@ use nexus_db_queries::db::datastore::DataStoreConnection;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
+use std::collections::HashSet;
+use std::sync::Arc;
 use tabled::Tabled;
 use uuid::Uuid;
+
+use steno::ActionError;
+use steno::SagaCachedState;
+use steno::SagaNodeEventType;
 
 /// `omdb db saga` subcommand
 #[derive(Debug, Args, Clone)]
@@ -36,13 +44,17 @@ enum SagaCommands {
     /// List running sagas
     Running,
 
-    /// Inject an error into a saga's currently running node
-    Fault(SagaFaultArgs),
+    /// Inject an error into a saga's currently running node(s)
+    InjectError(SagaInjectErrorArgs),
 }
 
 #[derive(Clone, Debug, Args)]
-struct SagaFaultArgs {
+struct SagaInjectErrorArgs {
     saga_id: Uuid,
+
+    /// Skip checking if the SEC is up
+    #[clap(long, default_value_t = false)]
+    bypass_sec_check: bool,
 }
 
 impl SagaArgs {
@@ -55,9 +67,10 @@ impl SagaArgs {
         match &self.command {
             SagaCommands::Running => cmd_sagas_running(opctx, datastore).await,
 
-            SagaCommands::Fault(args) => {
+            SagaCommands::InjectError(args) => {
                 let token = omdb.check_allow_destructive()?;
-                cmd_sagas_fault(opctx, datastore, args, token).await
+                cmd_sagas_inject_error(omdb, opctx, datastore, args, token)
+                    .await
             }
         }
     }
@@ -69,13 +82,12 @@ async fn cmd_sagas_running(
 ) -> Result<(), anyhow::Error> {
     let conn = datastore.pool_connection_for_tests().await?;
 
-    let sagas =
-        get_all_sagas_in_state(&conn, steno::SagaCachedState::Running).await?;
+    let sagas = get_all_sagas_in_state(&conn, SagaCachedState::Running).await?;
 
     #[derive(Tabled)]
     struct SagaRow {
         id: Uuid,
-        creator_id: Uuid,
+        current_sec: String,
         time_created: String,
         name: String,
         state: String,
@@ -85,7 +97,11 @@ async fn cmd_sagas_running(
         .into_iter()
         .map(|saga: Saga| SagaRow {
             id: saga.id.0.into(),
-            creator_id: saga.creator.0,
+            current_sec: if let Some(current_sec) = saga.current_sec {
+                current_sec.0.to_string()
+            } else {
+                String::from("-")
+            },
             time_created: datetime_rfc3339_concise(&saga.time_created),
             name: saga.name,
             state: format!("{:?}", saga.saga_state),
@@ -101,49 +117,173 @@ async fn cmd_sagas_running(
     Ok(())
 }
 
-async fn cmd_sagas_fault(
-    _opctx: &OpContext,
+async fn cmd_sagas_inject_error(
+    omdb: &Omdb,
+    opctx: &OpContext,
     datastore: &DataStore,
-    args: &SagaFaultArgs,
+    args: &SagaInjectErrorArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     let conn = datastore.pool_connection_for_tests().await?;
 
-    // Find the most recent node for a given saga
-    let most_recent_node: SagaNodeEvent = {
+    // Find all the nodes where there is a started record but not a done record
+
+    let started_nodes: Vec<SagaNodeEvent> = {
         use db::schema::saga_node_event::dsl;
 
         dsl::saga_node_event
             .filter(dsl::saga_id.eq(args.saga_id))
-            .order(dsl::event_time.desc())
-            .limit(1)
-            .first_async(&*conn)
+            .filter(dsl::event_type.eq(SagaNodeEventType::Started.label()))
+            .load_async(&*conn)
             .await?
     };
 
-    // Inject a fault for that node, which will cause the saga to unwind
-    let action_error = steno::ActionError::action_failed(String::from(
-        "error injected with omdb",
-    ));
-
-    let fault = SagaNodeEvent {
-        saga_id: most_recent_node.saga_id,
-        node_id: most_recent_node.node_id,
-        event_type: steno::SagaNodeEventType::Failed(action_error.clone())
-            .label()
-            .to_string(),
-        data: Some(serde_json::to_value(action_error)?),
-        event_time: chrono::Utc::now(),
-        creator: most_recent_node.creator,
-    };
-
-    {
+    let complete_nodes: Vec<SagaNodeEvent> = {
         use db::schema::saga_node_event::dsl;
 
-        diesel::insert_into(dsl::saga_node_event)
-            .values(fault.clone())
-            .execute_async(&*conn)
-            .await?;
+        // Note the actual enum contents don't matter in both these cases, it
+        // won't affect the label string
+        let succeeded_label =
+            SagaNodeEventType::Succeeded(Arc::new(serde_json::Value::Null))
+                .label();
+
+        let failed_label =
+            SagaNodeEventType::Failed(ActionError::InjectedError).label();
+
+        dsl::saga_node_event
+            .filter(dsl::saga_id.eq(args.saga_id))
+            .filter(
+                dsl::event_type
+                    .eq(succeeded_label)
+                    .or(dsl::event_type.eq(failed_label)),
+            )
+            .load_async(&*conn)
+            .await?
+    };
+
+    let incomplete_nodes: HashSet<u32> = {
+        let started_node_ids: HashSet<u32> =
+            started_nodes.iter().map(|node| node.node_id.0.into()).collect();
+        let complete_node_ids: HashSet<u32> =
+            complete_nodes.iter().map(|node| node.node_id.0.into()).collect();
+
+        started_node_ids.difference(&complete_node_ids).cloned().collect()
+    };
+
+    let incomplete_nodes: Vec<&SagaNodeEvent> = {
+        let mut result = vec![];
+
+        for node_id in incomplete_nodes {
+            let Some(node) = started_nodes
+                .iter()
+                .find(|node| node.node_id.0 == node_id.into())
+            else {
+                bail!("could not find node?");
+            };
+
+            result.push(node);
+        }
+
+        result
+    };
+
+    // For each incomplete node, find the current SEC, and ping it to ensure
+    // that the Nexus is down.
+    if !args.bypass_sec_check {
+        for node in &incomplete_nodes {
+            let saga: Saga = {
+                use db::schema::saga::dsl;
+                dsl::saga
+                    .filter(dsl::id.eq(node.saga_id))
+                    .first_async(&*conn)
+                    .await?
+            };
+
+            let Some(current_sec) = saga.current_sec else {
+                // If there's no current SEC, then we don't need to check if
+                // it's up. Would we see this if the saga was Requested but not
+                // started?
+                continue;
+            };
+
+            let resolver = omdb.dns_resolver(opctx.log.clone()).await?;
+            let srv = resolver.lookup_srv(ServiceName::Nexus).await?;
+
+            let Some((target, port)) = srv
+                .iter()
+                .find(|(name, _)| name.contains(&current_sec.to_string()))
+            else {
+                bail!("dns lookup for {current_sec} found nothing");
+            };
+
+            let Some(addr) = resolver.ipv6_lookup(&target).await? else {
+                bail!("dns lookup for {target} found nothing");
+            };
+
+            let client = nexus_client::Client::new(
+                &format!("http://[{addr}]:{port}/"),
+                opctx.log.clone(),
+            );
+
+            match client.ping().await {
+                Ok(_) => {
+                    bail!("{current_sec} answered a ping");
+                }
+
+                Err(e) => match e {
+                    nexus_client::Error::InvalidRequest(_)
+                    | nexus_client::Error::InvalidUpgrade(_)
+                    | nexus_client::Error::ErrorResponse(_)
+                    | nexus_client::Error::ResponseBodyError(_)
+                    | nexus_client::Error::InvalidResponsePayload(_, _)
+                    | nexus_client::Error::UnexpectedResponse(_)
+                    | nexus_client::Error::PreHookError(_)
+                    | nexus_client::Error::PostHookError(_) => {
+                        bail!("{current_sec} failed a ping with {e}");
+                    }
+
+                    nexus_client::Error::CommunicationError(_) => {
+                        // Assume communication error means that it could not be
+                        // contacted.
+                        //
+                        // Note: this could be seen if Nexus is up but
+                        // unreachable from where omdb is run!
+                    }
+                },
+            }
+        }
+    }
+
+    // Inject an error for those nodes, which will cause the saga to unwind
+    for node in incomplete_nodes {
+        let action_error = ActionError::action_failed(String::from(
+            "error injected with omdb",
+        ));
+
+        let fault = SagaNodeEvent {
+            saga_id: node.saga_id,
+            node_id: node.node_id,
+            event_type: SagaNodeEventType::Failed(action_error.clone())
+                .label()
+                .to_string(),
+            data: Some(serde_json::to_value(action_error)?),
+            event_time: chrono::Utc::now(),
+            creator: crate::OMDB_UUID.into(),
+        };
+
+        eprintln!(
+            "injecting error for saga {:?} node {:?}",
+            node.saga_id, node.node_id,
+        );
+
+        {
+            use db::schema::saga_node_event::dsl;
+
+            diesel::insert_into(dsl::saga_node_event)
+                .values(fault.clone())
+                .execute_async(&*conn)
+                .await?;
+        }
     }
 
     Ok(())
@@ -153,7 +293,7 @@ async fn cmd_sagas_fault(
 
 async fn get_all_sagas_in_state(
     conn: &DataStoreConnection,
-    state: steno::SagaCachedState,
+    state: SagaCachedState,
 ) -> Result<Vec<Saga>, anyhow::Error> {
     let mut sagas = Vec::new();
     let mut paginator = Paginator::new(SQL_BATCH_SIZE);
