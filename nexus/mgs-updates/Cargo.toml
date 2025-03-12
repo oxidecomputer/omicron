@@ -9,8 +9,10 @@ workspace = true
 [dependencies]
 futures.workspace = true
 gateway-client.workspace = true
+nexus-types.workspace = true
 reqwest.workspace = true
 slog.workspace = true
+slog-error-chain.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 uuid.workspace = true

@@ -7,13 +7,18 @@
 
 use super::MgsClients;
 use super::UpdateProgress;
+use futures::future::BoxFuture;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
+use nexus_types::deployment::PendingMgsUpdate;
 use slog::Logger;
 use slog::{debug, error, info, warn};
 use std::time::Duration;
 use tokio::sync::watch;
 use uuid::Uuid;
+
+/// How frequently do we poll MGS for the update progress?
+pub(crate) const STATUS_POLL_INTERVAL: Duration = Duration::from_secs(3);
 
 type GatewayClientError = gateway_client::Error<gateway_client::types::Error>;
 
@@ -45,7 +50,7 @@ pub enum SpComponentUpdateError {
     UpdateFailedWithMessage(String),
 }
 
-pub(super) trait SpComponentUpdater {
+pub trait SpComponentUpdater {
     /// The target component.
     ///
     /// Should be produced via `SpComponent::const_as_str()`.
@@ -77,13 +82,39 @@ pub(super) trait SpComponentUpdater {
     fn logger(&self) -> &Logger;
 }
 
+pub trait ReconfiguratorSpComponentUpdater: SpComponentUpdater {
+    /// Checks if the component is already updated or ready for update
+    fn version_status<'a>(
+        &'a self,
+        _mgs_clients: &'a MgsClients,
+        _update: &'a PendingMgsUpdate,
+    ) -> BoxFuture<'a, Result<VersionStatus, GatewayClientError>> {
+        // XXX-dap
+        todo!();
+    }
+
+    /// Attempts once to perform any post-update actions (e.g., reset the
+    /// device)
+    fn post_update<'a>(
+        &'a self,
+        _mgs_clients: &'a MgsClients,
+        _update: &'a PendingMgsUpdate,
+    ) -> BoxFuture<'a, Result<(), GatewayClientError>> {
+        // XXX-dap
+        todo!();
+    }
+}
+
+pub enum VersionStatus {
+    ReadyForUpdate,
+    NotReadyForUpdate,
+    UpdateComplete,
+}
+
 pub(super) async fn deliver_update(
     updater: &(dyn SpComponentUpdater + Send + Sync),
     mgs_clients: &mut MgsClients,
 ) -> Result<(), SpComponentUpdateError> {
-    // How frequently do we poll MGS for the update progress?
-    const STATUS_POLL_INTERVAL: Duration = Duration::from_secs(3);
-
     // Start the update.
     mgs_clients
         .try_all_serially(updater.logger(), |client| async move {
