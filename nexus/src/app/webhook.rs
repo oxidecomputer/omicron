@@ -55,6 +55,36 @@ use std::time::Instant;
 use uuid::Uuid;
 
 impl super::Nexus {
+    pub async fn webhook_event_publish(
+        &self,
+        opctx: &OpContext,
+        id: WebhookEventUuid,
+        event_class: WebhookEventClass,
+        event: serde_json::Value,
+    ) -> Result<WebhookEvent, Error> {
+        let event = self
+            .datastore()
+            .webhook_event_create(opctx, id, event_class, event)
+            .await?;
+        slog::debug!(
+            &opctx.log,
+            "enqueued webhook event";
+            "event_id" => ?id,
+            "event_class" => %event.event_class,
+            "time_created" => ?event.identity.time_created,
+        );
+
+        // Once the event has been isnerted, activate the dispatcher task to
+        // ensure its propagated to receivers.
+        self.background_tasks.task_webhook_dispatcher.activate();
+
+        Ok(event)
+    }
+
+    //
+    // Lookups
+    //
+
     pub fn webhook_receiver_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
@@ -85,6 +115,10 @@ impl super::Nexus {
             .webhook_event_id(WebhookEventUuid::from_untyped_uuid(event_id));
         Ok(event)
     }
+
+    //
+    // Receiver configuration API methods
+    //
 
     pub async fn webhook_receiver_list(
         &self,
@@ -139,6 +173,10 @@ impl super::Nexus {
         self.datastore().webhook_rx_delete(&opctx, &authz_rx, &db_rx).await
     }
 
+    //
+    // Receiver secret API methods
+    //
+
     pub async fn webhook_receiver_secrets_list(
         &self,
         opctx: &OpContext,
@@ -148,132 +186,31 @@ impl super::Nexus {
         self.datastore().webhook_rx_secret_list(opctx, &authz_rx).await
     }
 
-    pub async fn webhook_receiver_event_resend(
+    pub async fn webhook_receiver_secret_add(
         &self,
         opctx: &OpContext,
         rx: lookup::WebhookReceiver<'_>,
-        event: lookup::WebhookEvent<'_>,
-    ) -> CreateResult<WebhookDeliveryUuid> {
+        secret: String,
+    ) -> Result<views::WebhookSecretId, Error> {
         let (authz_rx,) = rx.lookup_for(authz::Action::CreateChild).await?;
-        let (authz_event, event) = event.fetch().await?;
-        let datastore = self.datastore();
-
-        let is_subscribed = datastore
-            .webhook_rx_is_subscribed_to_event(opctx, &authz_rx, &authz_event)
+        let secret = WebhookSecret::new(authz_rx.id(), secret);
+        let WebhookSecret { identity, .. } = self
+            .datastore()
+            .webhook_rx_secret_create(opctx, &authz_rx, secret)
             .await?;
-        if !is_subscribed {
-            return Err(Error::invalid_request(format!(
-                "cannot resend event: receiver is not subscribed to the '{}' \
-                 event class",
-                event.event_class,
-            )));
-        }
-
-        let delivery = WebhookDelivery::new(
-            &event,
-            &authz_rx.id(),
-            WebhookDeliveryTrigger::Resend,
-        );
-        let delivery_id = delivery.id.into();
-
-        if let Err(e) =
-            datastore.webhook_delivery_create_batch(opctx, vec![delivery]).await
-        {
-            slog::error!(
-                &opctx.log,
-                "failed to create new delivery to resend webhook event";
-                "rx_id" => ?authz_rx.id(),
-                "event_id" => ?authz_event.id(),
-                "event_class" => %event.event_class,
-                "delivery_id" => ?delivery_id,
-                "error" => %e,
-            );
-            return Err(e);
-        }
-
+        let secret_id = identity.id;
         slog::info!(
             &opctx.log,
-            "resending webhook event";
+            "added secret to webhook receiver";
             "rx_id" => ?authz_rx.id(),
-            "event_id" => ?authz_event.id(),
-            "event_class" => %event.event_class,
-            "delivery_id" => ?delivery_id,
+            "secret_id" => ?secret_id,
         );
-
-        self.background_tasks.task_webhook_deliverator.activate();
-        Ok(delivery_id)
+        Ok(views::WebhookSecretId { id: secret_id.into_untyped_uuid() })
     }
 
-    pub async fn webhook_event_publish(
-        &self,
-        opctx: &OpContext,
-        id: WebhookEventUuid,
-        event_class: WebhookEventClass,
-        event: serde_json::Value,
-    ) -> Result<WebhookEvent, Error> {
-        let event = self
-            .datastore()
-            .webhook_event_create(opctx, id, event_class, event)
-            .await?;
-        slog::debug!(
-            &opctx.log,
-            "enqueued webhook event";
-            "event_id" => ?id,
-            "event_class" => %event.event_class,
-            "time_created" => ?event.identity.time_created,
-        );
-
-        // Once the event has been isnerted, activate the dispatcher task to
-        // ensure its propagated to receivers.
-        self.background_tasks.task_webhook_dispatcher.activate();
-
-        Ok(event)
-    }
-
-    pub async fn webhook_receiver_delivery_list(
-        &self,
-        opctx: &OpContext,
-        rx: lookup::WebhookReceiver<'_>,
-        filter: params::WebhookDeliveryStateFilter,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<views::WebhookDelivery> {
-        let (authz_rx,) = rx.lookup_for(authz::Action::ListChildren).await?;
-        let only_states = if filter.include_all() {
-            Vec::new()
-        } else {
-            let mut states = Vec::with_capacity(3);
-            if filter.include_failed() {
-                states.push(WebhookDeliveryState::Failed);
-            }
-            if filter.include_pending() {
-                states.push(WebhookDeliveryState::Pending);
-            }
-            if filter.include_delivered() {
-                states.push(WebhookDeliveryState::Delivered);
-            }
-            states
-        };
-        let deliveries = self
-            .datastore()
-            .webhook_rx_delivery_list(
-                opctx,
-                &authz_rx.id(),
-                // No probes; they could have their own list endpoint later...
-                &[
-                    WebhookDeliveryTrigger::Event,
-                    WebhookDeliveryTrigger::Resend,
-                ],
-                only_states,
-                pagparams,
-            )
-            .await?
-            .into_iter()
-            .map(|(delivery, class, attempts)| {
-                delivery.to_api_delivery(class, &attempts)
-            })
-            .collect();
-        Ok(deliveries)
-    }
+    //
+    // Receiver event delivery API methods
+    //
 
     pub async fn webhook_receiver_probe(
         &self,
@@ -388,26 +325,105 @@ impl super::Nexus {
         })
     }
 
-    pub async fn webhook_receiver_secret_add(
+    pub async fn webhook_receiver_event_resend(
         &self,
         opctx: &OpContext,
         rx: lookup::WebhookReceiver<'_>,
-        secret: String,
-    ) -> Result<views::WebhookSecretId, Error> {
+        event: lookup::WebhookEvent<'_>,
+    ) -> CreateResult<WebhookDeliveryUuid> {
         let (authz_rx,) = rx.lookup_for(authz::Action::CreateChild).await?;
-        let secret = WebhookSecret::new(authz_rx.id(), secret);
-        let WebhookSecret { identity, .. } = self
-            .datastore()
-            .webhook_rx_secret_create(opctx, &authz_rx, secret)
+        let (authz_event, event) = event.fetch().await?;
+        let datastore = self.datastore();
+
+        let is_subscribed = datastore
+            .webhook_rx_is_subscribed_to_event(opctx, &authz_rx, &authz_event)
             .await?;
-        let secret_id = identity.id;
+        if !is_subscribed {
+            return Err(Error::invalid_request(format!(
+                "cannot resend event: receiver is not subscribed to the '{}' \
+                 event class",
+                event.event_class,
+            )));
+        }
+
+        let delivery = WebhookDelivery::new(
+            &event,
+            &authz_rx.id(),
+            WebhookDeliveryTrigger::Resend,
+        );
+        let delivery_id = delivery.id.into();
+
+        if let Err(e) =
+            datastore.webhook_delivery_create_batch(opctx, vec![delivery]).await
+        {
+            slog::error!(
+                &opctx.log,
+                "failed to create new delivery to resend webhook event";
+                "rx_id" => ?authz_rx.id(),
+                "event_id" => ?authz_event.id(),
+                "event_class" => %event.event_class,
+                "delivery_id" => ?delivery_id,
+                "error" => %e,
+            );
+            return Err(e);
+        }
+
         slog::info!(
             &opctx.log,
-            "added secret to webhook receiver";
+            "resending webhook event";
             "rx_id" => ?authz_rx.id(),
-            "secret_id" => ?secret_id,
+            "event_id" => ?authz_event.id(),
+            "event_class" => %event.event_class,
+            "delivery_id" => ?delivery_id,
         );
-        Ok(views::WebhookSecretId { id: secret_id.into_untyped_uuid() })
+
+        self.background_tasks.task_webhook_deliverator.activate();
+        Ok(delivery_id)
+    }
+
+    pub async fn webhook_receiver_delivery_list(
+        &self,
+        opctx: &OpContext,
+        rx: lookup::WebhookReceiver<'_>,
+        filter: params::WebhookDeliveryStateFilter,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<views::WebhookDelivery> {
+        let (authz_rx,) = rx.lookup_for(authz::Action::ListChildren).await?;
+        let only_states = if filter.include_all() {
+            Vec::new()
+        } else {
+            let mut states = Vec::with_capacity(3);
+            if filter.include_failed() {
+                states.push(WebhookDeliveryState::Failed);
+            }
+            if filter.include_pending() {
+                states.push(WebhookDeliveryState::Pending);
+            }
+            if filter.include_delivered() {
+                states.push(WebhookDeliveryState::Delivered);
+            }
+            states
+        };
+        let deliveries = self
+            .datastore()
+            .webhook_rx_delivery_list(
+                opctx,
+                &authz_rx.id(),
+                // No probes; they could have their own list endpoint later...
+                &[
+                    WebhookDeliveryTrigger::Event,
+                    WebhookDeliveryTrigger::Resend,
+                ],
+                only_states,
+                pagparams,
+            )
+            .await?
+            .into_iter()
+            .map(|(delivery, class, attempts)| {
+                delivery.to_api_delivery(class, &attempts)
+            })
+            .collect();
+        Ok(deliveries)
     }
 }
 
