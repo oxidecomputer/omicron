@@ -390,6 +390,7 @@ Usage: omdb db saga [OPTIONS] <COMMAND>
 Commands:
   running       List running sagas
   inject-error  Inject an error into a saga's currently running node(s)
+  abandon       Abandon a previously-running saga so that it won't be run again
   help          Print this message or the help of the given subcommand(s)
 
 Options:

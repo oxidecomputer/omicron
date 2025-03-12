@@ -16,6 +16,7 @@ use diesel::prelude::*;
 use internal_dns_types::names::ServiceName;
 use nexus_db_model::Saga;
 use nexus_db_model::SagaNodeEvent;
+use nexus_db_model::SagaState;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
@@ -29,7 +30,6 @@ use tabled::Tabled;
 use uuid::Uuid;
 
 use steno::ActionError;
-use steno::SagaCachedState;
 use steno::SagaNodeEventType;
 
 /// `omdb db saga` subcommand
@@ -46,10 +46,36 @@ enum SagaCommands {
 
     /// Inject an error into a saga's currently running node(s)
     InjectError(SagaInjectErrorArgs),
+
+    /// Abandon a previously-running saga so that it won't be run again.
+    ///
+    /// On startup, and periodically thereafter, each Nexus checks the database
+    /// for sagas that are assigned to that Nexus that it is not currently
+    /// executing so that it can begin to execute them. Abandoning a saga causes
+    /// it never to appear in a recovery candidate set: it will be ignored by
+    /// any Nexus that asks for a list of sagas to resume executing.
+    ///
+    /// WARNING: It is best to use the `running` command to identify the saga's
+    /// current executor and verify that it is offline before proceeding. If the
+    /// saga's assigned Nexus is running, it can continue executing the saga and
+    /// may clobber the Abandoned state. By default, this subcommand verifies
+    /// that the saga's assigned Nexus is unreachable before proceeding, but
+    /// while all inactive Nexuses are unreachable, an unreachable Nexus is not
+    /// necessarily inactive.
+    Abandon(SagaAbandonArgs),
 }
 
 #[derive(Clone, Debug, Args)]
 struct SagaInjectErrorArgs {
+    saga_id: Uuid,
+
+    /// Skip checking if the SEC is up
+    #[clap(long, default_value_t = false)]
+    bypass_sec_check: bool,
+}
+
+#[derive(Clone, Copy, Debug, Args)]
+struct SagaAbandonArgs {
     saga_id: Uuid,
 
     /// Skip checking if the SEC is up
@@ -72,6 +98,11 @@ impl SagaArgs {
                 cmd_sagas_inject_error(omdb, opctx, datastore, args, token)
                     .await
             }
+
+            SagaCommands::Abandon(args) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_sagas_abandon(omdb, opctx, datastore, *args, token).await
+            }
         }
     }
 }
@@ -82,7 +113,7 @@ async fn cmd_sagas_running(
 ) -> Result<(), anyhow::Error> {
     let conn = datastore.pool_connection_for_tests().await?;
 
-    let sagas = get_all_sagas_in_state(&conn, SagaCachedState::Running).await?;
+    let sagas = get_all_sagas_in_state(&conn, SagaState::Running).await?;
 
     #[derive(Tabled)]
     struct SagaRow {
@@ -125,6 +156,20 @@ async fn cmd_sagas_inject_error(
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     let conn = datastore.pool_connection_for_tests().await?;
+
+    // Before doing anything: find the current SEC for the saga, and ping it to
+    // ensure that the Nexus is down.
+    if !args.bypass_sec_check {
+        let saga: Saga = {
+            use db::schema::saga::dsl;
+            dsl::saga
+                .filter(dsl::id.eq(args.saga_id))
+                .first_async(&*conn)
+                .await?
+        };
+
+        saga_sec_inactive(omdb, opctx, &saga).await?;
+    }
 
     // Find all the nodes where there is a started record but not a done record
 
@@ -187,73 +232,6 @@ async fn cmd_sagas_inject_error(
         result
     };
 
-    // For each incomplete node, find the current SEC, and ping it to ensure
-    // that the Nexus is down.
-    if !args.bypass_sec_check {
-        for node in &incomplete_nodes {
-            let saga: Saga = {
-                use db::schema::saga::dsl;
-                dsl::saga
-                    .filter(dsl::id.eq(node.saga_id))
-                    .first_async(&*conn)
-                    .await?
-            };
-
-            let Some(current_sec) = saga.current_sec else {
-                // If there's no current SEC, then we don't need to check if
-                // it's up. Would we see this if the saga was Requested but not
-                // started?
-                continue;
-            };
-
-            let resolver = omdb.dns_resolver(opctx.log.clone()).await?;
-            let srv = resolver.lookup_srv(ServiceName::Nexus).await?;
-
-            let Some((target, port)) = srv
-                .iter()
-                .find(|(name, _)| name.contains(&current_sec.to_string()))
-            else {
-                bail!("dns lookup for {current_sec} found nothing");
-            };
-
-            let Some(addr) = resolver.ipv6_lookup(&target).await? else {
-                bail!("dns lookup for {target} found nothing");
-            };
-
-            let client = nexus_client::Client::new(
-                &format!("http://[{addr}]:{port}/"),
-                opctx.log.clone(),
-            );
-
-            match client.ping().await {
-                Ok(_) => {
-                    bail!("{current_sec} answered a ping");
-                }
-
-                Err(e) => match e {
-                    nexus_client::Error::InvalidRequest(_)
-                    | nexus_client::Error::InvalidUpgrade(_)
-                    | nexus_client::Error::ErrorResponse(_)
-                    | nexus_client::Error::ResponseBodyError(_)
-                    | nexus_client::Error::InvalidResponsePayload(_, _)
-                    | nexus_client::Error::UnexpectedResponse(_)
-                    | nexus_client::Error::PreHookError(_)
-                    | nexus_client::Error::PostHookError(_) => {
-                        bail!("{current_sec} failed a ping with {e}");
-                    }
-
-                    nexus_client::Error::CommunicationError(_) => {
-                        // Assume communication error means that it could not be
-                        // contacted.
-                        //
-                        // Note: this could be seen if Nexus is up but
-                        // unreachable from where omdb is run!
-                    }
-                },
-            }
-        }
-    }
-
     // Inject an error for those nodes, which will cause the saga to unwind
     for node in incomplete_nodes {
         let action_error = ActionError::action_failed(String::from(
@@ -289,11 +267,53 @@ async fn cmd_sagas_inject_error(
     Ok(())
 }
 
+async fn cmd_sagas_abandon(
+    omdb: &Omdb,
+    opctx: &OpContext,
+    datastore: &DataStore,
+    SagaAbandonArgs { saga_id, bypass_sec_check }: SagaAbandonArgs,
+    _destruction_token: DestructiveOperationToken,
+) -> anyhow::Result<()> {
+    use db::schema::saga::dsl;
+    let conn = datastore.pool_connection_for_tests().await?;
+    let saga: Saga =
+        { dsl::saga.filter(dsl::id.eq(saga_id)).first_async(&*conn).await? };
+
+    match saga.saga_state {
+        SagaState::Done => {
+            bail!("saga {saga_id} is already done executing");
+        }
+        SagaState::Abandoned => {
+            bail!("saga {saga_id} is already abandoned");
+        }
+        SagaState::Running | SagaState::Unwinding => {}
+    }
+
+    // Get the current execution coordinator for this saga and try to ascertain
+    // whether it is active. If it is, bail--it's definitely not safe to try to
+    // edit the states of nodes that are actively being executed.
+    //
+    // Note that a successful check does not *guarantee* that the SEC is
+    // inactive--it merely shows that the SEC is not reachable from this
+    // process.
+    if !bypass_sec_check {
+        saga_sec_inactive(omdb, opctx, &saga).await?;
+    }
+
+    diesel::update(dsl::saga)
+        .filter(dsl::id.eq(saga_id))
+        .set(dsl::saga_state.eq(SagaState::Abandoned))
+        .execute_async(&*conn)
+        .await?;
+
+    Ok(())
+}
+
 // helper functions
 
 async fn get_all_sagas_in_state(
     conn: &DataStoreConnection,
-    state: SagaCachedState,
+    state: SagaState,
 ) -> Result<Vec<Saga>, anyhow::Error> {
     let mut sagas = Vec::new();
     let mut paginator = Paginator::new(SQL_BATCH_SIZE);
@@ -301,9 +321,7 @@ async fn get_all_sagas_in_state(
         use db::schema::saga::dsl;
         let records_batch =
             paginated(dsl::saga, dsl::id, &p.current_pagparams())
-                .filter(
-                    dsl::saga_state.eq(nexus_db_model::SagaCachedState(state)),
-                )
+                .filter(dsl::saga_state.eq(state))
                 .select(Saga::as_select())
                 .load_async(&**conn)
                 .await
@@ -319,4 +337,68 @@ async fn get_all_sagas_in_state(
     sagas.reverse();
 
     Ok(sagas)
+}
+
+/// Attempts to determine whether the supplied `Saga` is being managed by an
+/// active saga execution coordinator.
+///
+/// # Return value
+///
+/// - `Ok` if the saga does not belong to an apparently-active SEC. This
+///   includes the case where the saga has no SEC at all.
+/// - `Err` if an error occurred during Nexus lookup or the saga's assigned
+///   Nexus appears to be running.
+async fn saga_sec_inactive(
+    omdb: &Omdb,
+    opctx: &OpContext,
+    saga: &Saga,
+) -> anyhow::Result<()> {
+    let Some(current_sec) = saga.current_sec else {
+        return Ok(());
+    };
+
+    let resolver = omdb.dns_resolver(opctx.log.clone()).await?;
+    let srv = resolver.lookup_srv(ServiceName::Nexus).await?;
+    let Some((target, port)) =
+        srv.iter().find(|(name, _)| name.contains(&current_sec.to_string()))
+    else {
+        bail!("dns lookup for {current_sec} found nothing");
+    };
+
+    let Some(addr) = resolver.ipv6_lookup(&target).await? else {
+        bail!("dns lookup for {target} found nothing");
+    };
+
+    let client = nexus_client::Client::new(
+        &format!("http://[{addr}]:{port}/"),
+        opctx.log.clone(),
+    );
+
+    match client.ping().await {
+        Ok(_) => {
+            bail!("{current_sec} answered a ping");
+        }
+
+        Err(e) => match e {
+            nexus_client::Error::InvalidRequest(_)
+            | nexus_client::Error::InvalidUpgrade(_)
+            | nexus_client::Error::ErrorResponse(_)
+            | nexus_client::Error::ResponseBodyError(_)
+            | nexus_client::Error::InvalidResponsePayload(_, _)
+            | nexus_client::Error::UnexpectedResponse(_)
+            | nexus_client::Error::PreHookError(_)
+            | nexus_client::Error::PostHookError(_) => {
+                bail!("{current_sec} failed a ping with {e}");
+            }
+
+            nexus_client::Error::CommunicationError(_) => {
+                // Assume communication error means that it could not be
+                // contacted.
+                //
+                // Note: this could be seen if Nexus is up but
+                // unreachable from where omdb is run!
+                Ok(())
+            }
+        },
+    }
 }
