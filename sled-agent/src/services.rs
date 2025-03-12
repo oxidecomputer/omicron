@@ -111,6 +111,7 @@ use sled_storage::config::MountConfig;
 use sled_storage::dataset::{CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
@@ -188,11 +189,18 @@ pub enum Error {
     #[error("Cannot list zones")]
     ZoneList(#[source] illumos_utils::zone::AdmError),
 
-    #[error("Cannot remove zone")]
+    #[error("Cannot remove zone {zone_name}")]
     ZoneRemoval {
         zone_name: String,
         #[source]
         err: illumos_utils::zone::AdmError,
+    },
+
+    #[error("Cannot clean up after removal of zone {zone_name}")]
+    ZoneCleanup {
+        zone_name: String,
+        #[source]
+        err: illumos_utils::zone::DeleteAddressError,
     },
 
     #[error("Failed to boot zone: {0}")]
@@ -2334,7 +2342,7 @@ impl ServiceManager {
                 // the same machine (which is effectively a
                 // developer-only environment -- we wouldn't want this
                 // in prod!), they need to be given distinct names.
-                let addr_name = format!("internaldns{gz_address_index}");
+                let addr_name = internal_dns_addrobj_name(*gz_address_index);
                 Zones::ensure_has_global_zone_v6_address(
                     self.inner.underlay_vnic.clone(),
                     *gz_address,
@@ -2347,6 +2355,17 @@ impl ServiceManager {
                     ),
                     err,
                 })?;
+
+                // Tell DDM to start advertising our address. This may be
+                // premature: we haven't yet started the internal DNS server.
+                // However, the existence of the `internaldns{gz_address_index}`
+                // interface we just created means processes in the gz
+                // (including ourselves!) may use that as a _source_ address, so
+                // we need to go ahead and advertise this prefix so other sleds
+                // know how to route responses back to us. See
+                // <https://github.com/oxidecomputer/omicron/issues/7782>.
+                self.ddm_reconciler()
+                    .add_internal_dns_subnet(Ipv6Subnet::new(*gz_address));
 
                 let internal_dns_config = PropertyGroupBuilder::new("config")
                     .add_property(
@@ -3600,20 +3619,6 @@ impl ServiceManager {
             new_zones.into_iter().map(|zone| (zone.name().to_string(), zone)),
         );
 
-        // Update our DDM reconciler with the set of all internal DNS global
-        // zone addresses we need maghemite to advertise on our behalf.
-        self.ddm_reconciler().set_internal_dns_subnets(
-            existing_zones
-                .values()
-                .filter_map(|z| match z.config.zone.zone_type {
-                    OmicronZoneType::InternalDns { gz_address, .. } => {
-                        Some(Ipv6Subnet::new(gz_address))
-                    }
-                    _ => None,
-                })
-                .collect(),
-        );
-
         // If any zones failed to start, exit with an error
         if !errors.is_empty() {
             return Err(Error::ZoneEnsure { errors });
@@ -3659,20 +3664,29 @@ impl ServiceManager {
                 log,
                 "Failed to take bundle of unexpected zone";
                 "zone_name" => &expected_zone_name,
-                "reason" => ?e,
+                InlineErrorChain::new(&e),
             );
         }
         if let Err(e) = zone.runtime.stop().await {
             error!(log, "Failed to stop zone {}: {e}", zone.name());
+        }
+        if let Err(e) =
+            self.clean_up_after_zone_shutdown(&zone.config.zone).await
+        {
+            error!(
+                log,
+                "Failed to clean up after stopping zone {}", zone.name();
+                InlineErrorChain::new(&e),
+            );
         }
     }
 
     // Ensures that if a zone is about to be installed, it does not exist.
     async fn ensure_removed(
         &self,
-        zone: &OmicronZoneConfig,
+        zone_config: &OmicronZoneConfig,
     ) -> Result<(), Error> {
-        let zone_name = zone.zone_name();
+        let zone_name = zone_config.zone_name();
         match Zones::find(&zone_name).await {
             Ok(Some(zone)) => {
                 warn!(
@@ -3695,18 +3709,59 @@ impl ServiceManager {
                         self.inner.log,
                         "Failed to remove zone";
                         "zone" => &zone_name,
-                        "error" => %e,
+                        InlineErrorChain::new(&e),
                     );
                     return Err(Error::ZoneRemoval {
                         zone_name: zone_name.to_string(),
                         err: e,
                     });
                 }
-                return Ok(());
+                if let Err(e) =
+                    self.clean_up_after_zone_shutdown(zone_config).await
+                {
+                    error!(
+                        self.inner.log,
+                        "Failed to clean up after removing zone";
+                        "zone" => &zone_name,
+                        InlineErrorChain::new(&e),
+                    );
+                    return Err(e);
+                }
+                Ok(())
             }
-            Ok(None) => return Ok(()),
-            Err(err) => return Err(Error::ZoneList(err)),
+            Ok(None) => Ok(()),
+            Err(err) => Err(Error::ZoneList(err)),
         }
+    }
+
+    // Perform any outside-the-zone cleanup required after shutting down a zone.
+    async fn clean_up_after_zone_shutdown(
+        &self,
+        zone: &OmicronZoneConfig,
+    ) -> Result<(), Error> {
+        // Special teardown for internal DNS zones: delete the global zone
+        // address we created for it, and tell DDM to stop advertising the
+        // prefix of that address.
+        if let OmicronZoneType::InternalDns {
+            gz_address,
+            gz_address_index,
+            ..
+        } = &zone.zone_type
+        {
+            let addrobj = AddrObject::new(
+                &self.inner.underlay_vnic.0,
+                &internal_dns_addrobj_name(*gz_address_index),
+            )
+            .expect("internal DNS address object name is well-formed");
+            Zones::delete_address(None, &addrobj).map_err(|err| {
+                Error::ZoneCleanup { zone_name: zone.zone_name(), err }
+            })?;
+
+            self.ddm_reconciler()
+                .remove_internal_dns_subnet(Ipv6Subnet::new(*gz_address));
+        }
+
+        Ok(())
     }
 
     // Returns a zone filesystem mountpoint, after ensuring that U.2 storage
@@ -4781,6 +4836,10 @@ impl ServiceManager {
             };
         }
     }
+}
+
+fn internal_dns_addrobj_name(gz_address_index: u32) -> String {
+    format!("internaldns{gz_address_index}")
 }
 
 #[derive(Debug)]
