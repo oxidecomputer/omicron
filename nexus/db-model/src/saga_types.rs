@@ -169,6 +169,16 @@ impl_enum_type!(
     Abandoned => b"abandoned"
 );
 
+impl SagaState {
+    /// A saga must be in this set of states to be a candidate for saga
+    /// recovery.
+    ///
+    /// Sagas that are Done don't need to be run anymore. Sagas that are
+    /// Abandoned have been explicitly opted out of being recovered.
+    pub const RECOVERY_CANDIDATE_STATES: &'static [Self] =
+        &[Self::Running, Self::Unwinding];
+}
+
 impl From<steno::SagaCachedState> for SagaState {
     fn from(value: steno::SagaCachedState) -> Self {
         match value {
