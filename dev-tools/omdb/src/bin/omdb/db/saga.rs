@@ -18,6 +18,7 @@ use diesel::prelude::*;
 use internal_dns_types::names::ServiceName;
 use nexus_db_model::Saga;
 use nexus_db_model::SagaNodeEvent;
+use nexus_db_model::SagaState;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::DataStoreConnection;
@@ -31,7 +32,6 @@ use tabled::Tabled;
 use uuid::Uuid;
 
 use steno::ActionError;
-use steno::SagaCachedState;
 use steno::SagaNodeEventType;
 
 /// OMDB's SEC id, used when inserting errors into running sagas. There should
@@ -91,7 +91,7 @@ async fn cmd_sagas_running(
 ) -> Result<(), anyhow::Error> {
     let conn = datastore.pool_connection_for_tests().await?;
 
-    let sagas = get_all_sagas_in_state(&conn, SagaCachedState::Running).await?;
+    let sagas = get_all_sagas_in_state(&conn, SagaState::Running).await?;
 
     #[derive(Tabled)]
     struct SagaRow {
@@ -410,7 +410,7 @@ You should only do this if:
 
 async fn get_all_sagas_in_state(
     conn: &DataStoreConnection,
-    state: SagaCachedState,
+    state: SagaState,
 ) -> Result<Vec<Saga>, anyhow::Error> {
     let mut sagas = Vec::new();
     let mut paginator = Paginator::new(SQL_BATCH_SIZE);
@@ -418,9 +418,7 @@ async fn get_all_sagas_in_state(
         use nexus_db_schema::schema::saga::dsl;
         let records_batch =
             paginated(dsl::saga, dsl::id, &p.current_pagparams())
-                .filter(
-                    dsl::saga_state.eq(nexus_db_model::SagaCachedState(state)),
-                )
+                .filter(dsl::saga_state.eq(state))
                 .select(Saga::as_select())
                 .load_async(&**conn)
                 .await
