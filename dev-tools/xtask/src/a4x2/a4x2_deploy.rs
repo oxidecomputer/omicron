@@ -95,19 +95,12 @@ struct Environment {
     /// Directory in `work_dir` where presently nothing actually happens because
     /// we don't have any output artifacts yet lol YYY/XXX
     out_dir: Utf8PathBuf,
-
-    /// Are we taking the CI codepaths?
-    in_ci: bool,
 }
 
 pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
     let sh = Shell::new()?;
 
     let env = {
-        // Buildomat sets the CI environment variable. We'll work a bit
-        // differently in that case (no cleanup, use /work)
-        let in_ci = env::var("CI").is_ok();
-
         let a4x2_package_tar = match &args.command {
             DeployCommand::Start(args) => args.package.clone(),
             DeployCommand::RunTests(args) => args.package.clone(),
@@ -118,11 +111,7 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
         let a4x2_package_tar = a4x2_package_tar.canonicalize_utf8()?;
 
         let home_dir = Utf8PathBuf::from(env::var("HOME")?);
-        let work_dir = if in_ci {
-            Utf8PathBuf::from("/work/a4x2-deploy")
-        } else {
-            home_dir.join(".cache/a4x2-deploy")
-        };
+        let work_dir = home_dir.join(".cache/a4x2-deploy");
 
         // a4x2 dir. will be created by the unpack step
         let a4x2_dir = work_dir.join("a4x2-package-out");
@@ -130,7 +119,7 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
         // Output. Maybe in CI we want this to be /out
         let out_dir = work_dir.join("a4x2-deploy-out");
 
-        Environment { a4x2_package_tar, work_dir, a4x2_dir, out_dir, in_ci }
+        Environment { a4x2_package_tar, work_dir, a4x2_dir, out_dir }
     };
 
     match args.command {
