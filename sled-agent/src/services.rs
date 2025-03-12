@@ -200,7 +200,7 @@ pub enum Error {
     ZoneCleanup {
         zone_name: String,
         #[source]
-        err: illumos_utils::zone::DeleteAddressError,
+        err: Box<illumos_utils::zone::DeleteAddressError>,
     },
 
     #[error("Failed to boot zone: {0}")]
@@ -3754,7 +3754,10 @@ impl ServiceManager {
             )
             .expect("internal DNS address object name is well-formed");
             Zones::delete_address(None, &addrobj).map_err(|err| {
-                Error::ZoneCleanup { zone_name: zone.zone_name(), err }
+                Error::ZoneCleanup {
+                    zone_name: zone.zone_name(),
+                    err: Box::new(err),
+                }
             })?;
 
             self.ddm_reconciler()
