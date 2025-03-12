@@ -688,6 +688,10 @@ impl Zones {
         Ok(())
     }
 
+    /// Delete an address object.
+    ///
+    /// This method attempts to be idempotent: deleting a nonexistent address
+    /// object returns `Ok(())`.
     #[allow(clippy::needless_lifetimes)]
     pub fn delete_address<'a>(
         zone: Option<&'a str>,
