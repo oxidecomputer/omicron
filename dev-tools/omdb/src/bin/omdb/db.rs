@@ -73,6 +73,7 @@ use nexus_db_model::VpcSubnet;
 use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
 use nexus_db_queries::db::datastore::CrucibleTargets;
 use nexus_db_queries::db::datastore::DataStoreConnection;
@@ -81,6 +82,8 @@ use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::ServiceKind;
+use nexus_db_queries::db::paginated;
+use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_preparation::policy_from_db;
@@ -2893,38 +2896,44 @@ async fn cmd_db_sagas_list(
     fetch_opts: &DbFetchOptions,
     args: &SagaListArgs,
 ) -> Result<(), anyhow::Error> {
-    let sagas = datastore
+    let mut sagas: Vec<Saga> = datastore
         .pool_connection_for_tests()
         .await?
         .transaction_async(|conn| async move {
-            use db::schema::saga::dsl;
-
             // Sorting by time_created requires a full table scan with the
             // current index definitions.
             conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
-            if let Some(after) = fetch_opts.after {
-                dsl::saga
-                    .filter(dsl::time_created.gt(after))
-                    .order_by(dsl::time_created)
-                    .load_async(&conn)
-                    .await
-            } else {
-                db::paginated(
-                    dsl::saga,
-                    dsl::time_created,
-                    &first_page::<dsl::time_created>(fetch_opts.fetch_limit),
-                )
-                .order_by(dsl::time_created)
-                .load_async(&conn)
-                .await
-            }
-        })
-        .await?;
+            let mut sagas = Vec::new();
+            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            while let Some(p) = paginator.next() {
+                use db::schema::saga::dsl;
 
-    check_limit(&sagas, fetch_opts.fetch_limit, || {
-        String::from("listing sagas")
-    });
+                let records_batch = if let Some(after) = fetch_opts.after {
+                    paginated(dsl::saga, dsl::id, &p.current_pagparams())
+                        .filter(dsl::time_created.gt(after))
+                        .select(Saga::as_select())
+                        .load_async(&conn)
+                        .await?
+                } else {
+                    paginated(dsl::saga, dsl::id, &p.current_pagparams())
+                        .select(Saga::as_select())
+                        .load_async(&conn)
+                        .await?
+                };
+
+                paginator = p.found_batch(&records_batch, &|s: &Saga| s.id);
+                sagas.extend(records_batch);
+            }
+
+            Ok(sagas)
+        })
+        .await
+        .map_err(|e: db::TransactionError<u32>| anyhow!(e))?;
+
+    // Sort them by creation time (equivalently: how long they've been running)
+    sagas.sort_by_key(|s| s.time_created);
+    sagas.reverse();
 
     print_sagas(sagas, args.show_params);
 
