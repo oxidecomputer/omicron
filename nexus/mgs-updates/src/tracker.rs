@@ -5,19 +5,25 @@
 //! Drive one or more in-progress MGS-managed updates
 
 use crate::{
-    MgsClients,
+    MgsClients, RotUpdater, SpUpdater,
     common_sp_update::{
         ReconfiguratorSpComponentUpdater, STATUS_POLL_INTERVAL, VersionStatus,
     },
     mgs_clients::GatewayClientError,
 };
+use futures::{StreamExt, future::BoxFuture, stream::FuturesUnordered};
 use gateway_client::types::SpUpdateStatus;
-use nexus_types::deployment::PendingMgsUpdate;
+use nexus_types::{deployment::PendingMgsUpdate, inventory::BaseboardId};
 use slog::error;
 use slog::{debug, info, warn};
 use slog_error_chain::InlineErrorChain;
-use std::time::{Duration, Instant};
+use std::{
+    collections::{BTreeMap, btree_map::Entry},
+    time::{Duration, Instant},
+};
 use thiserror::Error;
+use tokio::sync::watch;
+use tufaceous_artifact::KnownArtifactKind;
 use uuid::Uuid;
 
 /// How long may the status remain unchanged without us treating this as a
@@ -346,5 +352,231 @@ async fn wait_for_update_done(
                 };
             }
         }
+    }
+}
+
+struct UpdateAttemptResult {
+    baseboard_id: BaseboardId,
+    update: PendingMgsUpdate,
+    result: Result<ApplyUpdateResult, ApplyUpdateError>,
+}
+
+// XXX-dap
+type InProgressUpdateStatus = ();
+
+struct InProgressUpdate {
+    log: slog::Logger,
+    update: PendingMgsUpdate,
+    status_tx: watch::Sender<InProgressUpdateStatus>,
+    status_rx: watch::Receiver<InProgressUpdateStatus>,
+}
+
+pub struct MgsUpdateDriver {
+    log: slog::Logger,
+    requests: watch::Receiver<BTreeMap<BaseboardId, PendingMgsUpdate>>,
+    // XXX-dap fill in status here
+    in_progress: BTreeMap<BaseboardId, watch::Receiver<()>>,
+    futures: FuturesUnordered<BoxFuture<'static, UpdateAttemptResult>>,
+}
+
+impl MgsUpdateDriver {
+    pub fn new(
+        log: slog::Logger,
+        rx: watch::Receiver<BTreeMap<BaseboardId, PendingMgsUpdate>>,
+    ) -> MgsUpdateDriver {
+        MgsUpdateDriver {
+            log,
+            requests: rx,
+            in_progress: BTreeMap::new(),
+            futures: FuturesUnordered::new(),
+        }
+    }
+
+    pub async fn run(mut self) {
+        info!(&self.log, "starting MgsUpdateDriver");
+        loop {
+            tokio::select! {
+                // XXX-dap copy comment from steno sec.rs L831 or so
+                maybe_work_done = self.futures.next(),
+                    if !self.futures.is_empty() => {
+                    match maybe_work_done {
+                        Some(result) => self.attempt_done(result),
+                        None => {
+                            error!(
+                                &self.log,
+                                "FutureUnordered unexpectedly ended"
+                            );
+                            break;
+                        }
+                    };
+                },
+
+                maybe_update = self.requests.changed() => {
+                    match maybe_update {
+                        Ok(()) => {
+                            self.update_requests();
+                        }
+                        Err(error) => {
+                            error!(
+                                &self.log,
+                                "failed to read from input channel";
+                                InlineErrorChain::new(&error)
+                            );
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn attempt_done(&mut self, result: UpdateAttemptResult) {
+        let in_progress = self
+            .in_progress
+            .remove(&result.baseboard_id)
+            .expect("in-progress record for attempt that just completed");
+
+        // XXX-dap record ringbuffer of attempts
+        info!(
+            &in_progress.log,
+            "update attempt done";
+            "result" => ?result.result
+        );
+
+        // Re-dispatch this update if either of these is true:
+        //
+        // - the request is unchanged and the attempt was not successful
+        // - the request is changed and not `None`
+        let requests = self.requests.borrow();
+        let maybe_new_plan = requests.get(&result.baseboard_id);
+        match (maybe_new_plan, result.result) {
+            (None, _) => {
+                info!(
+                    &in_progress.log,
+                    "no retry needed (update no longer wanted)"
+                );
+            }
+            (Some(new_plan), Ok(ApplyUpdateResult::Completed))
+                if new_plan == result.update =>
+            {
+                info!(&in_progress.log, "no retry needed (converged)");
+            }
+            (Some(new_plan), _) => {
+                info!(
+                    &in_progress.log,
+                    "retry needed (plan changed or last attempt did not succeed)"
+                );
+                self.dispatch_update(new_plan);
+            }
+        };
+    }
+
+    fn update_requests(&mut self) {
+        // Kick off updates for any newly-added requests.
+        //
+        // We don't need to do anything with newly-removed requests because
+        // we're not going to cancel them.  Once the current attempt completes,
+        // we'll stop working on them.
+        let new_requests = self.requests.borrow_and_update();
+        for (baseboard_id, request) in new_requests {
+            match self.in_progress.entry(baseboard_id.clone()) {
+                Entry::Occupied(_) => {
+                    // We don't need to do anything here.  When the in-progress
+                    // request finishes, it will look for the latest request for
+                    // this baseboard and re-dispatch if needed.
+                    info!(
+                        &self.log,
+                        "update requested for baseboard with update already \
+                         in progress";
+                        &baseboard_id
+                        ?request,
+                    );
+                }
+                Entry::Vacant(vacant) => {
+                    self.dispatch_update(request);
+                }
+            }
+        }
+    }
+
+    fn dispatch_update(&mut self, update: PendingMgsUpdate) {
+        // XXX-dap add pending update info?
+        let log = self.log.new(o!(baseboard_id.clone()));
+        let Some(known_kind) = update.artifact_hash_id.kind().to_known() else {
+            error!(
+                &log,
+                "ignoring update requested for unknown artifact kind: {:?}",
+                update.artifact_hash_id.kind()
+            );
+            return;
+        };
+
+        // XXX-dap the data needs to come in with each request, which probably
+        // means we want some wrapper type here instead of PendingMgsUpdate
+        let data: Vec<u8> = todo!(); // XXX-dap
+
+        // XXX-dap check sp_type against artifact kind
+        let update_id = Uuid::new_v4();
+        let updater = match known_kind {
+            KnownArtifactKind::GimletSp
+            | KnownArtifactKind::PscSp
+            | KnownArtifactKind::SwitchSp => Box::new(SpUpdater::new(
+                update.sp_type,
+                update.slot_id,
+                update_id,
+                data,
+                log,
+            )),
+
+            KnownArtifactKind::GimletRot
+            | KnownArtifactKind::PscRot
+            | KnownArtifactKind::SwitchRot => {
+                Box::new(RotUpdater::new(
+                    update.sp_type,
+                    update.slot_id,
+                    todo!(), // XXX-dap when do we figure out the RoT slot
+                    update_id,
+                    log,
+                ))
+            }
+
+            // XXX-dap should we have checked this earlier?
+            KnownArtifactKind::GimletRotBootloader
+            | KnownArtifactKind::Host
+            | KnownArtifactKind::Trampoline
+            | KnownArtifactKind::ControlPlane
+            | KnownArtifactKind::Zone
+            | KnownArtifactKind::PscRotBootloader
+            | KnownArtifactKind::SwitchRotBootloader => {
+                error!(
+                    &log,
+                    "ignoring update requested for unsupported artifact kind: \
+                     {:?}",
+                    %known_kind,
+                );
+                return;
+            }
+        };
+
+        info!(
+            &log,
+            "update requested for baseboard";
+            ?request
+        );
+
+        let (status_tx, status_rx) = watch::channel(());
+        self.in_progress.insert(
+            update.baseboard_id.clone(),
+            InProgressUpdate { log, update, status_tx, status_rx },
+        );
+        self.futures.push(async move {
+            let result =
+                apply_update(&updater, mgs_clients, update.clone()).await;
+            UpdateAttemptResult {
+                baseboard_id: update.baseboard_id,
+                update,
+                result,
+            }
+        })
     }
 }

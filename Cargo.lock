@@ -6059,6 +6059,7 @@ dependencies = [
  "sp-sim",
  "thiserror 1.0.69",
  "tokio",
+ "tufaceous-artifact",
  "uuid",
 ]
 

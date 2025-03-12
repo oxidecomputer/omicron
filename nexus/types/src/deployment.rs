@@ -950,14 +950,14 @@ impl fmt::Display for BlueprintZoneImageSource {
 )]
 pub struct PendingMgsUpdate {
     /// id of the baseboard that we're going to update
-    baseboard_id: BaseboardId,
+    pub baseboard_id: BaseboardId,
     /// what type of baseboard this is
-    sp_type: SpType,
+    pub sp_type: SpType,
     /// last known MGS slot (cubby number) of the baseboard
-    slot_id: u16,
+    pub slot_id: u16,
     /// which artifact to apply to this device
     /// (implies which component is being updated)
-    artifact_hash_id: ArtifactHashId,
+    pub artifact_hash_id: ArtifactHashId,
 }
 
 /// The desired state of an Omicron-managed physical disk in a blueprint.
