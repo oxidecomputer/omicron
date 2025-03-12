@@ -2550,6 +2550,20 @@ impl VolumeLockHolder {
             VolumeLockHolder::Unknown => String::from("n/a"),
         }
     }
+
+    pub fn id(&self) -> Option<Uuid> {
+        match self {
+            VolumeLockHolder::RegionReplacement { id } => Some(*id),
+
+            VolumeLockHolder::RegionSnapshotReplacement { id } => Some(*id),
+
+            VolumeLockHolder::RegionSnapshotReplacementStep { id, .. } => {
+                Some(*id)
+            }
+
+            VolumeLockHolder::Unknown => None,
+        }
+    }
 }
 
 async fn get_volume_lock_holder(
@@ -4844,9 +4858,11 @@ async fn cmd_db_region_snapshot_replacement_waiting(
         volume_id: String,
         holder_type: String,
         holder_details: String,
+        edges: String,
     }
 
     let mut rows = vec![];
+    let mut edges = vec![];
 
     let running_replacements =
         datastore.get_running_region_snapshot_replacements(opctx).await?;
@@ -4929,14 +4945,52 @@ async fn cmd_db_region_snapshot_replacement_waiting(
                     VolumeLockHolder::Unknown => {}
                 }
 
-                rows.push(HolderRow {
-                    region_snapshot_replacement_id: replacement.id.to_string(),
-                    volume_id: reference.volume_id.to_string(),
-                    holder_type: lock_holder.type_string(),
-                    holder_details: lock_holder.details(),
-                });
+                edges.push((replacement.id, lock_holder, reference.volume_id));
             }
         }
+    }
+
+    // A node with only one outgoing edges is what is holding up replacements
+    // (it's waiting on only one thing, where many others might be waiting for
+    // it)
+    let mut g = petgraph::graph::DiGraph::new();
+    let mut node_indices: HashMap<Uuid, petgraph::graph::NodeIndex> =
+        HashMap::new();
+
+    for (replacement_id, lock_holder, _) in &edges {
+        node_indices.entry(*replacement_id).or_insert_with(|| g.add_node(1));
+
+        if let Some(lock_holder_id) = lock_holder.id() {
+            node_indices.entry(lock_holder_id).or_insert_with(|| g.add_node(1));
+
+            let from_ix = node_indices[&replacement_id];
+            let to_ix = node_indices[&lock_holder_id];
+
+            g.add_edge(from_ix, to_ix, 1);
+        }
+    }
+
+    for (replacement_id, lock_holder, reference_volume_id) in edges {
+        let number_of_outgoing_edges = g
+            .edges_directed(
+                node_indices[&replacement_id],
+                petgraph::Direction::Outgoing,
+            )
+            .count();
+
+        rows.push(HolderRow {
+            region_snapshot_replacement_id: replacement_id.to_string(),
+            volume_id: reference_volume_id.to_string(),
+            holder_type: lock_holder.type_string(),
+            holder_details: lock_holder.details(),
+            // whatever is backed up behind only one thing is probably holding
+            // everything else up, so mark that
+            edges: if number_of_outgoing_edges == 1 {
+                format!("******** {number_of_outgoing_edges}")
+            } else {
+                format!("         {number_of_outgoing_edges}")
+            },
+        });
     }
 
     let table = tabled::Table::new(rows)
