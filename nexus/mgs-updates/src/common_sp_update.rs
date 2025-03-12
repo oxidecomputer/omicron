@@ -10,6 +10,7 @@ use super::UpdateProgress;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
 use slog::Logger;
+use slog::{debug, error, info, warn};
 use std::time::Duration;
 use tokio::sync::watch;
 use uuid::Uuid;

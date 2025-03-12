@@ -877,7 +877,7 @@ table! {
         time_created -> Timestamptz,
         name -> Text,
         saga_dag -> Jsonb,
-        saga_state -> crate::saga_types::SagaCachedStateEnum,
+        saga_state -> crate::saga_types::SagaStateEnum,
         current_sec -> Nullable<Uuid>,
         adopt_generation -> Int8,
         adopt_time -> Timestamptz,
@@ -1410,6 +1410,15 @@ allow_tables_to_appear_in_same_query!(
 );
 joinable!(tuf_repo_artifact -> tuf_repo (tuf_repo_id));
 joinable!(tuf_repo_artifact -> tuf_artifact (tuf_artifact_id));
+
+table! {
+    target_release (generation) {
+        generation -> Int8,
+        time_requested -> Timestamptz,
+        release_source -> crate::TargetReleaseSourceEnum,
+        tuf_repo_id -> Nullable<Uuid>,
+    }
+}
 
 table! {
     support_bundle {

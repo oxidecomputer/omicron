@@ -11,13 +11,6 @@ use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
 
-pub use super::update::HostPhase1Updater;
-pub use super::update::MgsClients;
-pub use super::update::RotUpdater;
-pub use super::update::SpUpdater;
-pub use super::update::UpdateProgress;
-pub use gateway_client::types::SpType;
-
 /// The information needed to talk to a sled agent about an instance that is
 /// active on that sled.
 pub struct InstanceSledAgentInfo {

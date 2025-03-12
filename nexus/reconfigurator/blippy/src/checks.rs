@@ -7,7 +7,7 @@ use crate::blippy::Severity;
 use crate::blippy::SledKind;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintDatasetConfig;
-use nexus_types::deployment::BlueprintDatasetFilter;
+use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
@@ -491,7 +491,7 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
     // should have been referenced by either a zone or a disk above.
     for (sled_id, dataset) in blippy
         .blueprint()
-        .all_omicron_datasets(BlueprintDatasetFilter::InService)
+        .all_omicron_datasets(BlueprintDatasetDisposition::is_in_service)
     {
         if !expected_datasets.contains(&dataset.id) {
             blippy.push_sled_note(
@@ -520,7 +520,7 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
     // not have addresses.
     for (sled_id, dataset) in blippy
         .blueprint()
-        .all_omicron_datasets(BlueprintDatasetFilter::InService)
+        .all_omicron_datasets(BlueprintDatasetDisposition::is_in_service)
     {
         match dataset.kind {
             DatasetKind::Crucible => {

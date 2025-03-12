@@ -33,8 +33,12 @@ pub enum ServiceName {
     ClickhouseAdminSingleServer,
     /// The native TCP interface to a ClickHouse server.
     ///
-    /// NOTE: This is used for either single-node or a replicated cluster.
+    /// NOTE: This is used for a single-node ClickHouse installation.
     ClickhouseNative,
+    /// The native TCP interface to a ClickHouse server.
+    ///
+    /// NOTE: This is used for a replicated cluster ClickHouse installation.
+    ClickhouseClusterNative,
     /// The TCP interface to a ClickHouse Keeper server.
     ClickhouseKeeper,
     /// The HTTP interface to a replicated ClickHouse server.
@@ -67,6 +71,7 @@ impl ServiceName {
                 "clickhouse-admin-single-server"
             }
             ServiceName::ClickhouseNative => "clickhouse-native",
+            ServiceName::ClickhouseClusterNative => "clickhouse-cluster-native",
             ServiceName::ClickhouseKeeper => "clickhouse-keeper",
             ServiceName::ClickhouseServer => "clickhouse-server",
             ServiceName::Cockroach => "cockroach",
@@ -97,6 +102,7 @@ impl ServiceName {
             | ServiceName::ClickhouseAdminServer
             | ServiceName::ClickhouseAdminSingleServer
             | ServiceName::ClickhouseNative
+            | ServiceName::ClickhouseClusterNative
             | ServiceName::ClickhouseKeeper
             | ServiceName::ClickhouseServer
             | ServiceName::Cockroach

@@ -4,7 +4,7 @@
 #: variety = "basic"
 #: target = "lab-2.0-opte-0.34"
 #: output_rules = [
-#:  "%/var/svc/log/oxide-sled-agent:default.log*",
+#:  "%/var/svc/log/oxide-*.log*",
 #:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log*",
 #:  "%/pool/ext/*/crypt/zone/oxz_*/root/var/svc/log/oxide-*.log*",
 #:  "%/pool/ext/*/crypt/zone/oxz_*/root/var/svc/log/system-illumos-*.log*",

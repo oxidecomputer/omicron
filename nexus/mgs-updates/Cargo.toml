@@ -1,0 +1,25 @@
+[package]
+name = "nexus-mgs-updates"
+version = "0.1.0"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[dependencies]
+futures.workspace = true
+gateway-client.workspace = true
+reqwest.workspace = true
+slog.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+gateway-messages.workspace = true
+gateway-test-utils.workspace = true
+hubtools.workspace = true
+rand.workspace = true
+sp-sim.workspace = true

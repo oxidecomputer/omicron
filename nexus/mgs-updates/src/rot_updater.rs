@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Module containing types for updating host OS phase1 images via MGS.
+//! Module containing types for updating RoTs via MGS.
 
 use super::MgsClients;
 use super::SpComponentUpdateError;
@@ -10,40 +10,42 @@ use super::UpdateProgress;
 use super::common_sp_update::SpComponentUpdater;
 use super::common_sp_update::deliver_update;
 use gateway_client::SpComponent;
+use gateway_client::types::RotSlot;
 use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpType;
 use slog::Logger;
+use slog::info;
 use tokio::sync::watch;
 use uuid::Uuid;
 
 type GatewayClientError = gateway_client::Error<gateway_client::types::Error>;
 
-pub struct HostPhase1Updater {
+pub struct RotUpdater {
     log: Logger,
     progress: watch::Sender<Option<UpdateProgress>>,
     sp_type: SpType,
     sp_slot: u32,
-    target_host_slot: u16,
+    target_rot_slot: RotSlot,
     update_id: Uuid,
     // TODO-clarity maybe a newtype for this? TBD how we get this from
     // wherever it's stored, which might give us a stronger type already.
-    phase1_data: Vec<u8>,
+    rot_hubris_archive: Vec<u8>,
 }
 
-impl HostPhase1Updater {
+impl RotUpdater {
     pub fn new(
         sp_type: SpType,
         sp_slot: u32,
-        target_host_slot: u16,
+        target_rot_slot: RotSlot,
         update_id: Uuid,
-        phase1_data: Vec<u8>,
+        rot_hubris_archive: Vec<u8>,
         log: &Logger,
     ) -> Self {
         let log = log.new(slog::o!(
-            "component" => "HostPhase1Updater",
+            "component" => "RotUpdater",
             "sp_type" => format!("{sp_type:?}"),
             "sp_slot" => sp_slot,
-            "target_host_slot" => target_host_slot,
+            "target_rot_slot" => format!("{target_rot_slot:?}"),
             "update_id" => format!("{update_id}"),
         ));
         let progress = watch::Sender::new(None);
@@ -52,9 +54,9 @@ impl HostPhase1Updater {
             progress,
             sp_type,
             sp_slot,
-            target_host_slot,
+            target_rot_slot,
             update_id,
-            phase1_data,
+            rot_hubris_archive,
         }
     }
 
@@ -62,39 +64,38 @@ impl HostPhase1Updater {
         self.progress.subscribe()
     }
 
-    /// Drive this host phase 1 update to completion (or failure).
+    /// Drive this RoT update to completion (or failure).
     ///
     /// Only one MGS instance is required to drive an update; however, if
     /// multiple MGS instances are available and passed to this method and an
-    /// error occurs communicating with one instance, `HostPhase1Updater` will
-    /// try the remaining instances before failing.
+    /// error occurs communicating with one instance, `RotUpdater` will try the
+    /// remaining instances before failing.
     pub async fn update(
         mut self,
         mgs_clients: &mut MgsClients,
     ) -> Result<(), SpComponentUpdateError> {
-        // The async block below wants a `&self` reference, but we take `self`
+        // Deliver and drive the update to "completion" (which isn't really
+        // complete for the RoT, since we still have to do the steps below after
+        // the delivery of the update completes).
+        deliver_update(&mut self, mgs_clients).await?;
+
+        // The async blocks below want `&self` references, but we take `self`
         // for API clarity (to start a new update, the caller should construct a
-        // new instance of the updater). Create a `&self` ref that we use
-        // through the remainder of this method.
+        // new updater). Create a `&self` ref that we use through the remainder
+        // of this method.
         let me = &self;
 
-        // Prior to delivering the update, ensure the correct target slot is
-        // activated.
-        //
-        // TODO-correctness Should we be doing this, or should a higher level
-        // executor set this up before calling us?
         mgs_clients
             .try_all_serially(&self.log, |client| async move {
                 me.mark_target_slot_active(&client).await
             })
             .await?;
 
-        // Deliver and drive the update to completion
-        deliver_update(&mut self, mgs_clients).await?;
-
-        // Unlike SP and RoT updates, we have nothing to do after delivery of
-        // the update completes; signal to any watchers that we're done.
-        self.progress.send_replace(Some(UpdateProgress::Complete));
+        mgs_clients
+            .try_all_serially(&self.log, |client| async move {
+                me.finalize_update_via_reset(&client).await
+            })
+            .await?;
 
         // wait for any progress watchers to be dropped before we return;
         // otherwise, they'll get `RecvError`s when trying to check the current
@@ -108,16 +109,12 @@ impl HostPhase1Updater {
         &self,
         client: &gateway_client::Client,
     ) -> Result<(), GatewayClientError> {
-        // TODO-correctness Should we always persist this choice?
+        // RoT currently doesn't support non-persistent slot swapping, so always
+        // tell it to persist our choice.
         let persist = true;
 
         let slot = self.firmware_slot();
 
-        // TODO-correctness Until
-        // https://github.com/oxidecomputer/hubris/issues/1172 is fixed, the
-        // host must be in A2 for this operation to succeed. After it is fixed,
-        // there will still be a window while a host is booting where this
-        // operation can fail. How do we handle this?
         client
             .sp_component_active_slot_set(
                 self.sp_type,
@@ -129,12 +126,29 @@ impl HostPhase1Updater {
             .await?;
 
         // TODO-correctness Should we send some kind of update to
-        // `self.progress`? We haven't actually started delivering an update
-        // yet, but it seems weird to give no indication that we have
-        // successfully (potentially) modified the state of the target sled.
+        // `self.progress`? We already sent `InProgress(1.0)` when the update
+        // finished delivering. Or perhaps we shouldn't even be doing this step
+        // and the reset, and let our caller handle the finalization?
 
         info!(
-            self.log, "host phase1 target slot marked active";
+            self.log, "RoT target slot marked active";
+            "mgs_addr" => client.baseurl(),
+        );
+
+        Ok(())
+    }
+
+    async fn finalize_update_via_reset(
+        &self,
+        client: &gateway_client::Client,
+    ) -> Result<(), GatewayClientError> {
+        client
+            .sp_component_reset(self.sp_type, self.sp_slot, self.component())
+            .await?;
+
+        self.progress.send_replace(Some(UpdateProgress::Complete));
+        info!(
+            self.log, "RoT update complete";
             "mgs_addr" => client.baseurl(),
         );
 
@@ -142,9 +156,9 @@ impl HostPhase1Updater {
     }
 }
 
-impl SpComponentUpdater for HostPhase1Updater {
+impl SpComponentUpdater for RotUpdater {
     fn component(&self) -> &'static str {
-        SpComponent::HOST_CPU_BOOT_FLASH.const_as_str()
+        SpComponent::ROT.const_as_str()
     }
 
     fn target_sp_type(&self) -> SpType {
@@ -156,7 +170,10 @@ impl SpComponentUpdater for HostPhase1Updater {
     }
 
     fn firmware_slot(&self) -> u16 {
-        self.target_host_slot
+        match self.target_rot_slot {
+            RotSlot::A => 0,
+            RotSlot::B => 1,
+        }
     }
 
     fn update_id(&self) -> Uuid {
@@ -164,7 +181,7 @@ impl SpComponentUpdater for HostPhase1Updater {
     }
 
     fn update_data(&self) -> Vec<u8> {
-        self.phase1_data.clone()
+        self.rot_hubris_archive.clone()
     }
 
     fn progress(&self) -> &watch::Sender<Option<UpdateProgress>> {

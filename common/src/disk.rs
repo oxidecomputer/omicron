@@ -375,7 +375,7 @@ impl Ledgerable for DatasetsConfig {
 
 /// Identifies how a single dataset management operation may have succeeded or
 /// failed.
-#[derive(Debug, JsonSchema, Serialize, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct DatasetManagementStatus {
     pub dataset_name: DatasetName,
@@ -450,7 +450,7 @@ impl From<ZpoolKind> for DiskVariant {
 
 /// Identifies how a single disk management operation may have succeeded or
 /// failed.
-#[derive(Debug, JsonSchema, Serialize, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct DiskManagementStatus {
     pub identity: DiskIdentity,
@@ -493,7 +493,9 @@ impl DisksManagementResult {
     }
 }
 
-#[derive(Debug, thiserror::Error, JsonSchema, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, thiserror::Error, JsonSchema, Serialize, Deserialize,
+)]
 #[serde(rename_all = "snake_case", tag = "type", content = "value")]
 pub enum DiskManagementError {
     #[error("Disk requested by control plane, but not found on device")]

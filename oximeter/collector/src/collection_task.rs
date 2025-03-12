@@ -7,6 +7,7 @@
 // Copyright 2024 Oxide Computer Company
 
 use crate::Error;
+use crate::agent::CollectionTaskSenderWrapper;
 use crate::self_stats;
 use chrono::DateTime;
 use chrono::Utc;
@@ -307,6 +308,7 @@ async fn collection_loop(
 }
 
 /// Type of each output sent from a collection task to the results sink.
+#[derive(Debug, Clone)]
 pub(crate) struct CollectionTaskOutput {
     pub(crate) was_forced_collection: bool,
     pub(crate) results: ProducerResults,
@@ -334,7 +336,7 @@ impl CollectionTaskHandle {
         log: &Logger,
         collector: self_stats::OximeterCollector,
         producer: ProducerEndpoint,
-        outbox: mpsc::Sender<CollectionTaskOutput>,
+        outbox: CollectionTaskSenderWrapper,
     ) -> Self {
         let (task, task_tx) =
             CollectionTask::new(log, collector, producer, outbox).await;
@@ -480,7 +482,7 @@ struct CollectionTask {
     result_rx: mpsc::Receiver<CollectionResponse>,
 
     // Outbox for forwarding the results to the sink.
-    outbox: mpsc::Sender<CollectionTaskOutput>,
+    outbox: CollectionTaskSenderWrapper,
 
     // Timer for making collections periodically.
     collection_timer: Interval,
@@ -499,7 +501,7 @@ impl CollectionTask {
         log: &Logger,
         collector: self_stats::OximeterCollector,
         producer: ProducerEndpoint,
-        outbox: mpsc::Sender<CollectionTaskOutput>,
+        outbox: CollectionTaskSenderWrapper,
     ) -> (Self, mpsc::Sender<CollectionMessage>) {
         // Create our own logger.
         let log = log.new(o!(
@@ -593,7 +595,7 @@ impl CollectionTask {
                     self.outbox.send(CollectionTaskOutput {
                         was_forced_collection: false,
                         results: self.stats.sample(),
-                    }).await.unwrap();
+                    }, &self.log).await.unwrap();
                 }
                 _ = self.collection_timer.tick() => {
                     self.handle_collection_timer_tick().await?;
@@ -786,10 +788,10 @@ impl CollectionTask {
                 self.details.on_success(success);
                 if self
                     .outbox
-                    .send(CollectionTaskOutput {
-                        was_forced_collection,
-                        results,
-                    })
+                    .send(
+                        CollectionTaskOutput { was_forced_collection, results },
+                        &self.log,
+                    )
                     .await
                     .is_err()
                 {

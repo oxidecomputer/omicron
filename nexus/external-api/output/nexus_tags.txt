@@ -60,6 +60,8 @@ support_bundle_head_file                 HEAD     /experimental/v1/system/suppor
 support_bundle_index                     GET      /experimental/v1/system/support-bundles/{support_bundle}/index
 support_bundle_list                      GET      /experimental/v1/system/support-bundles
 support_bundle_view                      GET      /experimental/v1/system/support-bundles/{support_bundle}
+target_release_update                    PUT      /v1/system/update/target-release
+target_release_view                      GET      /v1/system/update/target-release
 timeseries_query                         POST     /v1/timeseries/query
 
 API operations found with tag "images"

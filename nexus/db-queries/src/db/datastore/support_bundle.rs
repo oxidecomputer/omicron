@@ -20,6 +20,7 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use futures::FutureExt;
+use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
@@ -231,9 +232,7 @@ impl DataStore {
 
         // For this blueprint: The set of expunged debug datasets
         let invalid_datasets = blueprint
-            .all_omicron_datasets(
-                nexus_types::deployment::BlueprintDatasetFilter::Expunged,
-            )
+            .all_omicron_datasets(BlueprintDatasetDisposition::is_expunged)
             .filter_map(|(_sled_id, dataset_config)| {
                 if matches!(
                     dataset_config.kind,
@@ -479,8 +478,6 @@ mod test {
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::example::SimRngState;
     use nexus_types::deployment::Blueprint;
-    use nexus_types::deployment::BlueprintDatasetDisposition;
-    use nexus_types::deployment::BlueprintDatasetFilter;
     use nexus_types::deployment::BlueprintZoneType;
     use omicron_common::api::external::LookupType;
     use omicron_common::api::internal::shared::DatasetKind::Debug as DebugDatasetKind;
@@ -536,9 +533,7 @@ mod test {
                     .iter()
                     .filter_map(|dataset| {
                         if !matches!(dataset.kind, DebugDatasetKind)
-                            || !dataset
-                                .disposition
-                                .matches(BlueprintDatasetFilter::InService)
+                            || !dataset.disposition.is_in_service()
                         {
                             return None;
                         };
@@ -945,9 +940,8 @@ mod test {
             .collect()
     }
 
-    fn get_debug_datasets_from_blueprint(
+    fn get_in_service_debug_datasets_from_blueprint(
         bp: &Blueprint,
-        filter: BlueprintDatasetFilter,
     ) -> Vec<DatasetUuid> {
         bp.sleds
             .values()
@@ -955,7 +949,7 @@ mod test {
                 let mut debug_datasets = vec![];
                 for dataset in sled_config.datasets_config.datasets.iter() {
                     if matches!(dataset.kind, DebugDatasetKind)
-                        && dataset.disposition.matches(filter)
+                        && dataset.disposition.is_in_service()
                     {
                         debug_datasets.push(dataset.id);
                     }
@@ -1026,10 +1020,7 @@ mod test {
             .get(0)
             .map(|id| *id)
             .expect("There should be a Nexus in the example blueprint");
-        let debug_datasets = get_debug_datasets_from_blueprint(
-            &bp1,
-            BlueprintDatasetFilter::InService,
-        );
+        let debug_datasets = get_in_service_debug_datasets_from_blueprint(&bp1);
         assert!(!debug_datasets.is_empty());
 
         // When we create a bundle, it should exist on a dataset provisioned by
@@ -1134,10 +1125,7 @@ mod test {
             .get(0)
             .map(|id| *id)
             .expect("There should be a Nexus in the example blueprint");
-        let debug_datasets = get_debug_datasets_from_blueprint(
-            &bp1,
-            BlueprintDatasetFilter::InService,
-        );
+        let debug_datasets = get_in_service_debug_datasets_from_blueprint(&bp1);
         assert!(!debug_datasets.is_empty());
 
         // When we create a bundle, it should exist on a dataset provisioned by
@@ -1238,10 +1226,7 @@ mod test {
 
         // Extract Nexus and Dataset information from the generated blueprint.
         let nexus_ids = get_in_service_nexuses_from_blueprint(&bp1);
-        let debug_datasets = get_debug_datasets_from_blueprint(
-            &bp1,
-            BlueprintDatasetFilter::InService,
-        );
+        let debug_datasets = get_in_service_debug_datasets_from_blueprint(&bp1);
         assert!(!debug_datasets.is_empty());
 
         // When we create a bundle, it should exist on a dataset provisioned by
@@ -1362,10 +1347,7 @@ mod test {
 
         // Extract Nexus and Dataset information from the generated blueprint.
         let nexus_ids = get_in_service_nexuses_from_blueprint(&bp1);
-        let debug_datasets = get_debug_datasets_from_blueprint(
-            &bp1,
-            BlueprintDatasetFilter::InService,
-        );
+        let debug_datasets = get_in_service_debug_datasets_from_blueprint(&bp1);
         assert!(!debug_datasets.is_empty());
 
         // When we create a bundle, it should exist on a dataset provisioned by
