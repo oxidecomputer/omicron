@@ -7,6 +7,7 @@ edition = "2021"
 workspace = true
 
 [dependencies]
+debug-ignore.workspace = true
 futures.workspace = true
 gateway-client.workspace = true
 nexus-types.workspace = true

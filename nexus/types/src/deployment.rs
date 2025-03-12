@@ -949,12 +949,20 @@ impl fmt::Display for BlueprintZoneImageSource {
     Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
 )]
 pub struct PendingMgsUpdate {
+    // identify of the baseboard
     /// id of the baseboard that we're going to update
     pub baseboard_id: BaseboardId,
+
+    // location of the baseboard (that we'd pass to MGS)
     /// what type of baseboard this is
     pub sp_type: SpType,
     /// last known MGS slot (cubby number) of the baseboard
-    pub slot_id: u16,
+    pub slot_id: u32,
+
+    // component/slot being updated
+    pub component: String,
+    pub firmware_slot: u16,
+
     /// which artifact to apply to this device
     /// (implies which component is being updated)
     pub artifact_hash_id: ArtifactHashId,

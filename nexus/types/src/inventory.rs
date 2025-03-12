@@ -241,7 +241,7 @@ impl slog::KV for BaseboardId {
     fn serialize(
         &self,
         _record: &slog::Record,
-        serializer: &mut slog::Serializer,
+        serializer: &mut dyn slog::Serializer,
     ) -> slog::Result {
         serializer.emit_str("part_number".into(), &self.part_number)?;
         serializer.emit_str("serial_number".into(), &self.serial_number)

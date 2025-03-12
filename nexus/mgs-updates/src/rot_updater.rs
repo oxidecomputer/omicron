@@ -9,6 +9,7 @@ use super::SpComponentUpdateError;
 use super::UpdateProgress;
 use super::common_sp_update::SpComponentUpdater;
 use super::common_sp_update::deliver_update;
+use crate::ReconfiguratorSpComponentUpdater;
 use gateway_client::SpComponent;
 use gateway_client::types::RotSlot;
 use gateway_client::types::SpComponentFirmwareSlot;
@@ -192,3 +193,6 @@ impl SpComponentUpdater for RotUpdater {
         &self.log
     }
 }
+
+// XXX-dap replace with real impl
+impl ReconfiguratorSpComponentUpdater for RotUpdater {}
