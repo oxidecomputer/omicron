@@ -2512,7 +2512,7 @@ enum VolumeLockHolder {
     RegionReplacement { id: Uuid },
     RegionSnapshotReplacement { id: Uuid },
     RegionSnapshotReplacementStep { id: Uuid, request_id: Uuid },
-    UnknownMaybeSnapshot,
+    Unknown,
 }
 
 impl VolumeLockHolder {
@@ -2530,9 +2530,7 @@ impl VolumeLockHolder {
                 String::from("region snapshot replacement step")
             }
 
-            VolumeLockHolder::UnknownMaybeSnapshot => {
-                String::from("unknown (could be snapshot?)")
-            }
+            VolumeLockHolder::Unknown => String::from("unknown"),
         }
     }
 
@@ -2549,7 +2547,7 @@ impl VolumeLockHolder {
                 request_id,
             } => format!("{id} (request {request_id})"),
 
-            VolumeLockHolder::UnknownMaybeSnapshot => String::from("n/a"),
+            VolumeLockHolder::Unknown => String::from("n/a"),
         }
     }
 }
@@ -2616,7 +2614,7 @@ async fn get_volume_lock_holder(
     // - deserialize the output (if it's there) of the "lock_id" nodes
     // - match against that
 
-    Ok(VolumeLockHolder::UnknownMaybeSnapshot)
+    Ok(VolumeLockHolder::Unknown)
 }
 
 /// What is holding the volume lock?
@@ -4928,7 +4926,7 @@ async fn cmd_db_region_snapshot_replacement_waiting(
                         }
                     }
 
-                    VolumeLockHolder::UnknownMaybeSnapshot => {}
+                    VolumeLockHolder::Unknown => {}
                 }
 
                 rows.push(HolderRow {
