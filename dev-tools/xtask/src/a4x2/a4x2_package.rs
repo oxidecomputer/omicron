@@ -114,20 +114,45 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
     Ok(())
 }
 
-/// Clone local working tree into work dir. This is nabbed from
-/// buildomat-at-home
+/// Clone local working tree into work dir, and download necessary build deps
 fn prepare_source(sh: &Shell, env: &Environment) -> Result<()> {
     cmd!(sh, "banner 'prepare'").run()?;
+
+    // We use a `git clone` here. The primary benefits are
+    // - Source tree is guaranteed to look like a fresh clone of omicron,
+    //   because it *is* a fresh clone
+    // - Git handles file permissions, symlinks, and other complicated
+    //   filesystem attributes of that sort.
+    //
+    // The main downside: this only works for files that are tracked by git.
+    // That means a file needs to be at minimum staged with `git add`, or else
+    // it won't be considered.
+    //
+    // There are two potential paths for improvement:
+    // 1. Walk the source tree, following `.gitignore` rules as necessary. Copy
+    //    files over, being sure to carefully respect file types and
+    //    permissions. This might be best done by generating a file list, and
+    //    providing it to another tool like `tar`.
+    // 2. Remove the need for a separate copy of the omicron source tree
+    //    entirely. The primary reason we make a separate copy is because a4x2
+    //    modifies certain files in the omicron work tree in-place while it is
+    //    packaging omicron. If we can make it stop doing that, a separate copy
+    //    may be unnecessary.
 
     let git = &env.git;
 
     // Get a ref we can checkout from the local working tree
     let treeish = {
         let _popdir = sh.push_dir(&env.src_dir);
+
+        // Note: `git stash create` does not modify the stash stack. It will not
+        // appear in `git stash list`, not affect `git stash pop`, etc. More
+        // technically, it is not stored "anywhere in the ref namespace" (per
+        // `man git-stash`). Its purpose is to be used in scripts like this one.
         let mut treeish = cmd!(sh, "{git} stash create").read()?;
         if treeish.is_empty() {
             // nothing to stash
-            eprintln!("Nothing to stash, using most recent commit for clone");
+            eprintln!("No changes staged, using most recent commit for clone");
             treeish = cmd!(sh, "{git} rev-parse HEAD").read()?;
         }
         assert_eq!(
@@ -151,6 +176,9 @@ fn prepare_source(sh: &Shell, env: &Environment) -> Result<()> {
 
     cmd!(sh, "{git} fetch origin {treeish}").run()?;
     cmd!(sh, "{git} checkout {treeish}").run()?;
+
+    // Remove the .git folder so we're `cargo clean`-able
+    fs::remove_dir_all(env.omicron_dir.join(".git"))?;
 
     cmd!(sh, "./tools/install_builder_prerequisites.sh -yp").run()?;
 
