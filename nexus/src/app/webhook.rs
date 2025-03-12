@@ -132,8 +132,23 @@ impl super::Nexus {
     //
     // Event class API
     //
+    pub async fn webhook_event_class_list(
+        &self,
+        opctx: &OpContext,
+        filter: params::EventClassFilter,
+        pagparams: DataPageParams<'_, params::EventClassPage>,
+    ) -> ListResultVec<views::EventClass> {
+        opctx
+            .authorize(
+                authz::Action::ListChildren,
+                &authz::WEBHOOK_EVENT_CLASS_LIST,
+            )
+            .await?;
+        Self::actually_list_event_classes(filter, pagparams)
+    }
 
-    pub fn webhook_event_class_list(
+    // This is factored out to avoid having to make a whole Nexus to test it.
+    fn actually_list_event_classes(
         params::EventClassFilter { filter }: params::EventClassFilter,
         pagparams: DataPageParams<'_, params::EventClassPage>,
     ) -> ListResultVec<views::EventClass> {
@@ -824,7 +839,7 @@ mod tests {
             let marker = dbg!(last_seen).map(|last_seen| {
                 params::EventClassPage { last_seen: last_seen.to_string() }
             });
-            let result = Nexus::webhook_event_class_list(
+            let result = Nexus::actually_list_event_classes(
                 filter,
                 DataPageParams {
                     marker: marker.as_ref(),

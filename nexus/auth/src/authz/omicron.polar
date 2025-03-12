@@ -604,3 +604,13 @@ resource WebhookSecret {
 
 has_relation(rx: WebhookReceiver, "parent_webhook_receiver", secret: WebhookSecret)
 	if secret.webhook_receiver = rx;
+
+resource WebhookEventClassList {
+	permissions = [ "list_children" ];
+	relations = { parent_fleet: Fleet };
+
+	"list_children" if "viewer" on "parent_fleet";
+}
+
+has_relation(fleet: Fleet, "parent_fleet", collection: WebhookEventClassList)
+	if collection.fleet = fleet;

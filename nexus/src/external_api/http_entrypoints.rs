@@ -7677,7 +7677,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<HttpResponseOk<ResultsPage<views::EventClass>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
-            let _opctx =
+            let nexus = &apictx.context.nexus;
+            let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
             let query = pag_params.into_inner();
@@ -7691,8 +7692,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 direction: PaginationOrder::Ascending,
                 marker,
             };
-            let event_classes =
-                crate::Nexus::webhook_event_class_list(filter, pag_params)?;
+            let event_classes = nexus
+                .webhook_event_class_list(&opctx, filter, pag_params)
+                .await?;
             Ok(HttpResponseOk(ResultsPage::new(
                 event_classes,
                 &EmptyScanParams {},
@@ -7713,6 +7715,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let apictx = rqctx.context();
         let handler = async {
             let params::EventClassSelector { name } = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            opctx
+                .authorize(
+                    authz::Action::ListChildren,
+                    &authz::WEBHOOK_EVENT_CLASS_LIST,
+                )
+                .await?;
 
             let event_class = name
                 .parse::<nexus_db_queries::db::model::WebhookEventClass>()
