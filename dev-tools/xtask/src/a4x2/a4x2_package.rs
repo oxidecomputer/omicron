@@ -67,17 +67,14 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
             std::env::var("GIT").unwrap_or(String::from("git")),
         );
 
-        let home_dir = Utf8PathBuf::from(std::env::var("HOME")?);
-        let work_dir = if in_ci {
-            Utf8PathBuf::from("/work/a4x2-package")
-        } else {
-            home_dir.join(".cache/a4x2-package")
-        };
-
         let src_dir = Utf8PathBuf::try_from(env::current_dir()?)?;
+        let work_dir = src_dir.join("target").join("a4x2");
 
-        // Delete any results from previous runs. We don't mind if there's errors.
-        fs::remove_dir_all(&work_dir).ok();
+        // Delete any results from previous runs.
+        if work_dir.try_exists()? {
+            fs::remove_dir_all(&work_dir)?;
+        }
+
         // Create work dir
         fs::create_dir_all(&work_dir)?;
         sh.change_dir(&work_dir);
