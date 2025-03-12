@@ -103,8 +103,6 @@ struct Environment {
 pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
     let sh = Shell::new()?;
 
-    // TODO: do we want to have a configurable falcon dataset?
-
     let env = {
         // Buildomat sets the CI environment variable. We'll work a bit
         // differently in that case (no cleanup, use /work)
