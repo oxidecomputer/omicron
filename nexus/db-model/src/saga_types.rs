@@ -12,7 +12,10 @@
 //! actually serialize them to and from SQL take care of the necessary
 //! conversions.
 
-use super::schema::{saga, saga_node_event};
+use super::{
+    impl_enum_type,
+    schema::{saga, saga_node_event},
+};
 use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
@@ -21,8 +24,8 @@ use diesel::sql_types;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
+use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
-use std::io::Write;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -146,44 +149,37 @@ where
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, SqlType)]
-#[diesel(postgres_type(name = "saga_state", schema = "public"))]
-pub struct SagaCachedStateEnum;
+impl_enum_type!(
+    #[derive(Clone, Copy, Debug, PartialEq, SqlType)]
+    #[diesel(postgres_type(name = "saga_state", schema = "public"))]
+    pub struct SagaStateEnum;
 
-/// Newtype wrapper around [`steno::SagaCachedState`] which implements
-/// Diesel traits.
-///
-/// This exists because Omicron cannot implement foreign traits
-/// for foreign types.
-#[derive(AsExpression, FromSqlRow, Clone, Copy, Debug, PartialEq)]
-#[diesel(sql_type = SagaCachedStateEnum)]
-pub struct SagaCachedState(pub steno::SagaCachedState);
+    #[derive(
+        Copy,
+        Clone,
+        Debug,
+        PartialEq,
+        AsExpression,
+        FromSqlRow,
+        Serialize,
+        Deserialize,
+    )]
+    #[diesel(sql_type = SagaStateEnum)]
+    pub enum SagaState;
 
-NewtypeFrom! { () pub struct SagaCachedState(steno::SagaCachedState); }
+    Running => b"running"
+    Unwinding => b"unwinding"
+    Done => b"done"
+    Abandoned => b"abandoned"
+);
 
-impl ToSql<SagaCachedStateEnum, Pg> for SagaCachedState {
-    fn to_sql<'a>(
-        &'a self,
-        out: &mut serialize::Output<'a, '_, Pg>,
-    ) -> serialize::Result {
-        use steno::SagaCachedState;
-        out.write_all(match self.0 {
-            SagaCachedState::Running => b"running",
-            SagaCachedState::Unwinding => b"unwinding",
-            SagaCachedState::Done => b"done",
-        })?;
-        Ok(serialize::IsNull::No)
-    }
-}
-
-impl FromSql<SagaCachedStateEnum, Pg> for SagaCachedState {
-    fn from_sql(
-        bytes: <Pg as Backend>::RawValue<'_>,
-    ) -> deserialize::Result<Self> {
-        let bytes = <Pg as Backend>::RawValue::as_bytes(&bytes);
-        let s = std::str::from_utf8(bytes)?;
-        let state = steno::SagaCachedState::try_from(s)?;
-        Ok(Self(state))
+impl From<steno::SagaCachedState> for SagaState {
+    fn from(value: steno::SagaCachedState) -> Self {
+        match value {
+            steno::SagaCachedState::Running => Self::Running,
+            steno::SagaCachedState::Unwinding => Self::Unwinding,
+            steno::SagaCachedState::Done => Self::Done,
+        }
     }
 }
 
@@ -196,7 +192,7 @@ pub struct Saga {
     pub time_created: chrono::DateTime<chrono::Utc>,
     pub name: String,
     pub saga_dag: serde_json::Value,
-    pub saga_state: SagaCachedState,
+    pub saga_state: SagaState,
     pub current_sec: Option<SecId>,
     pub adopt_generation: super::Generation,
     pub adopt_time: chrono::DateTime<chrono::Utc>,
