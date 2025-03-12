@@ -47,19 +47,12 @@ struct Environment {
 
     /// Path within `work_dir` containing a copy of the omicron source tree
     omicron_dir: Utf8PathBuf,
-
-    /// Are we taking the CI codepaths?
-    in_ci: bool,
 }
 
 pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
     let sh = Shell::new()?;
 
     let env = {
-        // Buildomat sets the CI environment variable. We'll work a bit
-        // differently in that case (no cleanup, use /work)
-        let in_ci = env::var("CI").is_ok();
-
         let cargo = Utf8PathBuf::from(
             std::env::var("CARGO").unwrap_or(String::from("cargo")),
         );
@@ -94,7 +87,6 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
             src_dir,
             out_dir,
             omicron_dir,
-            in_ci,
         }
     };
 
@@ -367,13 +359,7 @@ fn create_output_artifact(sh: &Shell, env: &Environment) -> Result<()> {
     let _popdir = sh.push_dir(&env.work_dir);
     let pkg_dir_name = env.out_dir.file_name().unwrap();
 
-    // Place output in `out/` when running locally, or leave in work dir for CI
-    let artifact = Utf8PathBuf::from("a4x2-package-out.tgz");
-    let artifact = if env.in_ci {
-        env.work_dir.join(artifact)
-    } else {
-        env.src_dir.join("out").join(artifact)
-    };
+    let artifact = env.src_dir.join("out").join(Utf8PathBuf::from("a4x2-package-out.tgz"));
 
     cmd!(sh, "tar -czf {artifact} {pkg_dir_name}/").run()?;
 
