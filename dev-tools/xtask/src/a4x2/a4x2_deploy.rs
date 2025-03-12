@@ -142,19 +142,17 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
             print_a4x2_access_info(&sh, &env);
         }
         DeployCommand::Start(_) | DeployCommand::RunTests(_) => {
-            if !env.in_ci {
-                // Teardown previous deploy if it exists, before wiping the data
-                // for it. If this errors, we assume the deploy doesn't exist
-                // and carry on.
-                let result = teardown_a4x2(&sh, &env);
-                eprintln!("teardown result: {:?}", result);
-                eprintln!("continuing regardless of whether there were errors");
+            // Teardown previous deploy if it exists, before wiping the data
+            // for it. If this errors, we assume the deploy doesn't exist
+            // and carry on.
+            let result = teardown_a4x2(&sh, &env);
+            eprintln!("teardown result: {:?}", result);
+            eprintln!("continuing regardless of whether there were errors");
 
-                // Delete any results from previous runs. We don't mind if
-                // there's errors. This needs to run as root in case there are
-                // artifacts owned by root left around from the deploy.
-                cmd!(sh, "pfexec rm -rf").arg(&env.work_dir).run()?;
-            }
+            // Delete any results from previous runs. We don't mind if
+            // there's errors. This needs to run as root in case there are
+            // artifacts owned by root left around from the deploy.
+            cmd!(sh, "pfexec rm -rf").arg(&env.work_dir).run()?;
 
             // Create work dir
             fs::create_dir_all(&env.out_dir)?;
