@@ -319,16 +319,20 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 let rack_id = rack.id().to_string();
                 let log = log.new(o!("rack_id" => rack_id));
 
+                // lookup switch zones via DNS
+                // TODO https://github.com/oxidecomputer/omicron/issues/5201
                 let mappings = match
-					 switch_zone_address_mappings(&self.resolver, &log).await
-				{
-					Ok(mappings) => mappings,
-					Err(e) => {
-						error!(log, "failed to resolve addresses for Dendrite services";
-							"error" => %e);
-						continue;
-					},
-				};
+                    switch_zone_address_mappings(&self.resolver, &log).await
+                {
+                    Ok(mappings) => mappings,
+                    Err(e) => {
+                        error!(
+                            log,
+                            "failed to resolve addresses for Dendrite services";
+                            "error" => %e);
+                        continue;
+                    },
+                };
 
                 // TODO https://github.com/oxidecomputer/omicron/issues/5201
                 // build sled agent clients

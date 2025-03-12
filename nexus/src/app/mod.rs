@@ -366,6 +366,10 @@ impl Nexus {
                                     log,
                                     "Failed to map switch zone addr: {e}"
                                 );
+                                tokio::time::sleep(
+                                    std::time::Duration::from_secs(2),
+                                )
+                                .await;
                                 continue;
                             }
                         };
@@ -411,6 +415,10 @@ impl Nexus {
                                     log,
                                     "Failed to map switch zone addr: {e}"
                                 );
+                                tokio::time::sleep(
+                                    std::time::Duration::from_secs(2),
+                                )
+                                .await;
                                 continue;
                             }
                         };
@@ -1158,8 +1166,10 @@ pub(crate) async fn lldpd_clients(
     Ok(clients)
 }
 
-// ZZZ This becomes what everyone calls, as it will retry forever.
-// Before, the loop was inside map_switch_zone_addr
+// Look up Dendrite addresses in DNS then determine the switch location for
+// each address DNS returns.  If we fail to lookup ServiceName::Dendrite, we
+// return error, otherwise we keep looping until we can determine the switch
+// location of all addresses returned to us from the lookup.
 async fn switch_zone_address_mappings(
     resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
@@ -1181,6 +1191,7 @@ async fn switch_zone_address_mappings(
             }
             Err(e) => {
                 warn!(log, "Failed to map switch zone addr: {e}, retrying");
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             }
         }
     }
@@ -1225,8 +1236,6 @@ async fn map_switch_zone_addrs(
                     "zone_address" => #?addr,
                     "reason" => #?e
                 );
-                // ZZZ Where should the delay/retry live?
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 return Err(e.to_string());
             }
         };

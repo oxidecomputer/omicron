@@ -318,20 +318,20 @@ impl BackgroundTask for ServiceZoneNatTracker {
             if result > 0 {
 
                 let mappings = match
-					 switch_zone_address_mappings(&self.resolver, log).await
+                    switch_zone_address_mappings(&self.resolver, log).await
                 {
-					Ok(mappings) => mappings,
-					Err(e) => {
-						error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
-						return json!({
-							"error":
-								format!(
-									"failed to resolve addresses for Dendrite services: {:#}",
-									e
-								)
-						});
-					},
-				};
+                    Ok(mappings) => mappings,
+                    Err(e) => {
+                        error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
+                        return json!({
+                            "error":
+                                format!(
+                                    "failed to resolve addresses for Dendrite services: {:#}",
+                                    e
+                                )
+                        });
+                    },
+                };
 
                 let dpd_clients = build_dpd_clients(&mappings, log);
 
