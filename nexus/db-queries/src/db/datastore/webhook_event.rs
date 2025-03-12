@@ -6,8 +6,8 @@
 
 use super::DataStore;
 use crate::context::OpContext;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::model::WebhookEvent;
 use crate::db::model::WebhookEventClass;
 use crate::db::model::WebhookEventIdentity;

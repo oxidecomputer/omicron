@@ -2,15 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::schema::{webhook_delivery, webhook_delivery_attempt};
-use crate::serde_time_delta::optional_time_delta;
-use crate::typed_uuid::DbTypedUuid;
 use crate::SqlU8;
 use crate::WebhookDeliveryAttemptResult;
 use crate::WebhookDeliveryState;
 use crate::WebhookDeliveryTrigger;
 use crate::WebhookEvent;
 use crate::WebhookEventClass;
+use crate::schema::{webhook_delivery, webhook_delivery_attempt};
+use crate::serde_time_delta::optional_time_delta;
+use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, TimeDelta, Utc};
 use nexus_types::external_api::views;
 use nexus_types::identity::Asset;

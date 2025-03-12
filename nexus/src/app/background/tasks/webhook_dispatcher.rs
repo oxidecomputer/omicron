@@ -247,7 +247,7 @@ impl WebhookDispatcher {
                     }
                 };
                 status.dispatched.push(WebhookDispatched {
-                    event_id: event.id().into(),
+                    event_id: event.id(),
                     subscribed,
                     dispatched,
                 });
@@ -267,17 +267,13 @@ impl WebhookDispatcher {
                     "event_id" => ?event.id(),
                     "event_class" => %event.event_class,
                 );
-                status.no_receivers.push(event.id().into());
+                status.no_receivers.push(event.id());
                 0
             };
 
             if let Err(error) = self
                 .datastore
-                .webhook_event_mark_dispatched(
-                    &opctx,
-                    &event.id().into(),
-                    subscribed,
-                )
+                .webhook_event_mark_dispatched(&opctx, &event.id(), subscribed)
                 .await
             {
                 slog::error!(&opctx.log, "failed to mark webhook event as dispatched";

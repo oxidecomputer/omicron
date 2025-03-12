@@ -256,7 +256,9 @@ fn signature_verifies(
             // prefix.
             hdr.strip_prefix("&s=")
         }) else {
-            panic!("no x-oxide-signature header for secret with ID {secret_id} found");
+            panic!(
+                "no x-oxide-signature header for secret with ID {secret_id} found"
+            );
         };
         let sig_bytes = hex::decode(sig_hdr)
             .expect("x-oxide-signature signature value should be a hex string");
@@ -1054,24 +1056,28 @@ async fn test_probe_resends_failed_deliveries(
     };
 
     // Publish both events
-    dbg!(nexus
-        .webhook_event_publish(
-            &opctx,
-            event1_id,
-            WebhookEventClass::TestFoo,
-            serde_json::json!({"hello": "world"}),
-        )
-        .await
-        .expect("event1 should be published successfully"));
-    dbg!(nexus
-        .webhook_event_publish(
-            &opctx,
-            event2_id,
-            WebhookEventClass::TestFoo,
-            serde_json::json!({"hello": "emeryville"}),
-        )
-        .await
-        .expect("event2 should be published successfully"));
+    dbg!(
+        nexus
+            .webhook_event_publish(
+                &opctx,
+                event1_id,
+                WebhookEventClass::TestFoo,
+                serde_json::json!({"hello": "world"}),
+            )
+            .await
+            .expect("event1 should be published successfully")
+    );
+    dbg!(
+        nexus
+            .webhook_event_publish(
+                &opctx,
+                event2_id,
+                WebhookEventClass::TestFoo,
+                serde_json::json!({"hello": "emeryville"}),
+            )
+            .await
+            .expect("event2 should be published successfully")
+    );
 
     dbg!(activate_background_task(internal_client, "webhook_dispatcher").await);
     dbg!(

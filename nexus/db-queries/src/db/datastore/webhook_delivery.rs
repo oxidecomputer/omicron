@@ -7,8 +7,8 @@
 use super::DataStore;
 use crate::context::OpContext;
 use crate::db::datastore::RunnableQuery;
-use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::error::public_error_from_diesel;
 use crate::db::model::SqlU8;
 use crate::db::model::WebhookDelivery;
 use crate::db::model::WebhookDeliveryAttempt;
@@ -310,7 +310,9 @@ impl DataStore {
                     });
                 }
 
-                Err(Error::internal_error("couldn't start delivery attempt for some secret third reason???"))
+                Err(Error::internal_error(
+                    "couldn't start delivery attempt for some secret third reason???",
+                ))
             }
         }
     }
@@ -411,7 +413,7 @@ impl DataStore {
         }
 
         Err(Error::internal_error(
-            "couldn't update delivery for some other reason i didn't think of here..."
+            "couldn't update delivery for some other reason i didn't think of here...",
         ))
     }
 }
