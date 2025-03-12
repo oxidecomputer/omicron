@@ -3515,9 +3515,10 @@ pub trait NexusExternalApi {
     }]
     async fn webhook_event_class_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<
-            PaginationParams<params::EventClassFilter, params::EventClassPage>,
+        pag_params: Query<
+            PaginationParams<EmptyScanParams, params::EventClassPage>,
         >,
+        filter: Query<params::EventClassFilter>,
     ) -> Result<HttpResponseOk<ResultsPage<views::EventClass>>, HttpError>;
 
     /// Fetch details on an event class by name.

@@ -18,6 +18,7 @@ use http::HeaderValue;
 use nexus_db_model::WebhookReceiver;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::SqlU8;
@@ -126,6 +127,64 @@ impl super::Nexus {
         let event = LookupPath::new(opctx, &self.db_datastore)
             .webhook_event_id(WebhookEventUuid::from_untyped_uuid(event_id));
         Ok(event)
+    }
+
+    //
+    // Event class API
+    //
+
+    pub fn webhook_event_class_list(
+        params::EventClassFilter { filter }: params::EventClassFilter,
+        pagparams: DataPageParams<'_, params::EventClassPage>,
+    ) -> ListResultVec<views::EventClass> {
+        let regex = if let Some(glob) = filter {
+            let glob = db::model::WebhookGlob::try_from(glob)?;
+            let re = regex::Regex::new(&glob.regex)
+                .map_err(|e| Error::InternalError { internal_message: format!(
+                    "valid event class globs ({glob:?}) should always produce a valid regex: {e:?}"
+                )})?;
+            Some(re)
+        } else {
+            None
+        };
+        let start = if let Some(params::EventClassPage { last_seen }) =
+            pagparams.marker
+        {
+            let start = WebhookEventClass::ALL_CLASSES
+                .iter()
+                .enumerate()
+                .find_map(|(idx, class)| {
+                    if class.as_str() == last_seen { Some(idx) } else { None }
+                });
+            match start {
+                Some(start) => start + 1,
+                None => return Ok(Vec::new()),
+            }
+        } else {
+            0
+        };
+        if start > WebhookEventClass::ALL_CLASSES.len() {
+            return Ok(Vec::new());
+        }
+        let result = WebhookEventClass::ALL_CLASSES[start..]
+            .iter()
+            .filter_map(|&class| {
+                // Skip test classes, as they should not be used in the public
+                // API, except in test builds, where we need them
+                // for, you know... testing...
+                if !cfg!(test) && class.is_test() {
+                    return None;
+                }
+                if let Some(ref regex) = regex {
+                    if !regex.is_match(class.as_str()) {
+                        return None;
+                    }
+                }
+                Some(class.into())
+            })
+            .take(pagparams.limit.get() as usize)
+            .collect::<Vec<_>>();
+        Ok(result)
     }
 
     //
@@ -742,5 +801,66 @@ impl<'a> ReceiverClient<'a> {
             time_created: chrono::Utc::now(),
             deliverator_id: self.nexus_id.into(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Nexus;
+    use std::num::NonZeroU32;
+
+    #[test]
+    fn test_event_class_list() {
+        #[track_caller]
+        fn list(
+            filter: Option<&str>,
+            last_seen: Option<&str>,
+            limit: u32,
+        ) -> Vec<String> {
+            let filter = params::EventClassFilter {
+                filter: dbg!(filter).map(ToString::to_string),
+            };
+            let marker = dbg!(last_seen).map(|last_seen| {
+                params::EventClassPage { last_seen: last_seen.to_string() }
+            });
+            let result = Nexus::webhook_event_class_list(
+                filter,
+                DataPageParams {
+                    marker: marker.as_ref(),
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: NonZeroU32::new(dbg!(limit)).unwrap(),
+                },
+            );
+
+            // Throw away the description fields
+            dbg!(result)
+                .unwrap()
+                .into_iter()
+                .map(|view| view.name)
+                .collect::<Vec<_>>()
+        }
+
+        // Paginated class list, without a glob filter.
+        let classes = list(None, None, 3);
+        assert_eq!(classes, &["probe", "test.foo", "test.foo.bar"]);
+        let classes = list(None, Some("test.foo.bar"), 3);
+        assert_eq!(
+            classes,
+            &["test.foo.baz", "test.quux.bar", "test.quux.bar.baz"]
+        );
+        // Don't assert that a third list will return no more results, since
+        // more events may be added in the future, and we don't have a filter.
+
+        // Try a filter for only `test.**` events.
+        let filter = Some("test.**");
+        let classes = list(filter, None, 2);
+        assert_eq!(classes, &["test.foo", "test.foo.bar"]);
+        let classes = list(filter, Some("test.foo.bar"), 2);
+        assert_eq!(classes, &["test.foo.baz", "test.quux.bar"]);
+        let classes = list(filter, Some("test.quux.bar"), 2);
+        assert_eq!(classes, &["test.quux.bar.baz"]);
+        let classes = list(filter, Some("test.quux.bar.baz"), 2);
+        assert_eq!(classes, Vec::<String>::new());
     }
 }

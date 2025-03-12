@@ -12079,15 +12079,6 @@
         "parameters": [
           {
             "in": "query",
-            "name": "filter",
-            "description": "An optional glob pattern for filtering event class names.",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
             "name": "limit",
             "description": "Maximum number of items returned by a single call",
             "schema": {
@@ -12101,6 +12092,15 @@
             "in": "query",
             "name": "page_token",
             "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filter",
+            "description": "An optional glob pattern for filtering event class names.",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -12320,7 +12320,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/WebhookUpdate"
+                "$ref": "#/components/schemas/WebhookReceiverUpdate"
               }
             }
           },
@@ -25659,6 +25659,38 @@
           "items"
         ]
       },
+      "WebhookReceiverUpdate": {
+        "description": "Parameters to update a webhook configuration.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "endpoint": {
+            "nullable": true,
+            "description": "The URL that webhook notification requests should be sent to",
+            "type": "string",
+            "format": "uri"
+          },
+          "events": {
+            "nullable": true,
+            "description": "A list of webhook event classes to subscribe to.\n\nIf this list is empty, the webhook will not be subscribed to any events.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        }
+      },
       "WebhookSecretCreate": {
         "type": "object",
         "properties": {
@@ -25696,40 +25728,6 @@
         },
         "required": [
           "secrets"
-        ]
-      },
-      "WebhookUpdate": {
-        "description": "Parameters to update a webhook configuration.",
-        "type": "object",
-        "properties": {
-          "description": {
-            "nullable": true,
-            "type": "string"
-          },
-          "endpoint": {
-            "description": "The URL that webhook notification requests should be sent to",
-            "type": "string",
-            "format": "uri"
-          },
-          "events": {
-            "description": "A list of webhook event classes to subscribe to.\n\nIf this list is empty, the webhook will not be subscribed to any events.",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          }
-        },
-        "required": [
-          "endpoint",
-          "events"
         ]
       },
       "NameOrIdSortMode": {

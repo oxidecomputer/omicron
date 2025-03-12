@@ -76,6 +76,7 @@ qorb.workspace = true
 rand.workspace = true
 range-requests.workspace = true
 ref-cast.workspace = true
+regex.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 ring.workspace = true
 samael.workspace = true

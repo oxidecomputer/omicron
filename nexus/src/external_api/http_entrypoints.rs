@@ -7670,21 +7670,34 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn webhook_event_class_list(
         rqctx: RequestContext<Self::Context>,
-        _query_params: Query<
-            PaginationParams<params::EventClassFilter, params::EventClassPage>,
+        pag_params: Query<
+            PaginationParams<EmptyScanParams, params::EventClassPage>,
         >,
+        filter: Query<params::EventClassFilter>,
     ) -> Result<HttpResponseOk<ResultsPage<views::EventClass>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
-            let nexus = &apictx.context.nexus;
-
-            let opctx =
+            let _opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
-            Err(nexus
-                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
-                .await
-                .into())
+            let query = pag_params.into_inner();
+            let filter = filter.into_inner();
+            let marker = match query.page {
+                WhichPage::First(_) => None,
+                WhichPage::Next(ref addr) => Some(addr),
+            };
+            let pag_params = DataPageParams {
+                limit: rqctx.page_limit(&query)?,
+                direction: PaginationOrder::Ascending,
+                marker,
+            };
+            let event_classes =
+                crate::Nexus::webhook_event_class_list(filter, pag_params)?;
+            Ok(HttpResponseOk(ResultsPage::new(
+                event_classes,
+                &EmptyScanParams {},
+                |class: &views::EventClass, _| class.name.clone(),
+            )?))
         };
         apictx
             .context
@@ -7695,19 +7708,21 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn webhook_event_class_view(
         rqctx: RequestContext<Self::Context>,
-        _path_params: Path<params::EventClassSelector>,
+        path_params: Path<params::EventClassSelector>,
     ) -> Result<HttpResponseOk<views::EventClass>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
-            let nexus = &apictx.context.nexus;
+            let params::EventClassSelector { name } = path_params.into_inner();
 
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-
-            Err(nexus
-                .unimplemented_todo(&opctx, crate::app::Unimpl::Public)
-                .await
-                .into())
+            let event_class = name
+                .parse::<nexus_db_queries::db::model::WebhookEventClass>()
+                .map_err(|_| {
+                    Error::non_resourcetype_not_found(format!(
+                        "{name:?} is not a webhook event class"
+                    ))
+                })?
+                .into();
+            Ok(HttpResponseOk(event_class))
         };
         apictx
             .context

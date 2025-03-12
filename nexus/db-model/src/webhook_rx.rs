@@ -245,6 +245,14 @@ impl FromStr for WebhookGlob {
     }
 }
 
+impl TryFrom<String> for WebhookGlob {
+    type Error = Error;
+    fn try_from(glob: String) -> Result<Self, Self::Error> {
+        let regex = Self::regex_from_glob(&glob)?;
+        Ok(Self { glob, regex })
+    }
+}
+
 impl WebhookGlob {
     fn regex_from_glob(glob: &str) -> Result<String, Error> {
         let seg2regex = |segment: &str,
