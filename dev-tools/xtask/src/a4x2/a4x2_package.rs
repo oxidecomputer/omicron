@@ -17,14 +17,6 @@ use xshell::Shell;
 
 #[derive(Parser)]
 pub struct A4x2PackageArgs {
-    /// Bundle omicron live tests into the output tarball
-    #[clap(long)]
-    live_tests: bool,
-
-    /// Bundle omicron end-to-end-tests package into the output tarball
-    #[clap(long)]
-    end_to_end_tests: bool,
-
     /// Choose which source of oxidecomputer/testbed to build into the output.
     #[clap(long, default_value_t = String::from("https://github.com/oxidecomputer/testbed"))]
     testbed_source: String,
@@ -110,14 +102,8 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
     };
 
     prepare_source(&sh, &env)?;
-
-    if args.end_to_end_tests {
-        build_end_to_end_tests(&sh, &env)?;
-    }
-
-    if args.live_tests {
-        build_live_tests(&sh, &env)?;
-    }
+    build_end_to_end_tests(&sh, &env)?;
+    build_live_tests(&sh, &env)?;
 
     // This needs to happen last because it messes with the working tree in a
     // way that end-to-end tests doesnt like when building
