@@ -2933,7 +2933,6 @@ async fn cmd_db_sagas_list(
 
     // Sort them by creation time (equivalently: how long they've been running)
     sagas.sort_by_key(|s| s.time_created);
-    sagas.reverse();
 
     print_sagas(sagas, args.show_params);
 
