@@ -7936,9 +7936,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::WebhookSecretSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
-        use nexus_db_queries::db::lookup::LookupPath;
-        use omicron_uuid_kinds::WebhookSecretUuid;
-
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -7946,20 +7943,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
 
-            let params::WebhookSecretSelector { secret_id } =
-                path_params.into_inner();
+            let secret_selector = path_params.into_inner();
+            let secret =
+                nexus.webhook_secret_lookup(&opctx, secret_selector)?;
+            nexus.webhook_receiver_secret_delete(&opctx, secret).await?;
 
-            let (authz_rx, authz_secret) =
-                LookupPath::new(&opctx, nexus.datastore())
-                    .webhook_secret_id(WebhookSecretUuid::from_untyped_uuid(
-                        secret_id,
-                    ))
-                    .lookup_for(authz::Action::Delete)
-                    .await?;
-            nexus
-                .datastore()
-                .webhook_rx_secret_delete(&opctx, &authz_rx, &authz_secret)
-                .await?;
             Ok(HttpResponseDeleted())
         };
         apictx

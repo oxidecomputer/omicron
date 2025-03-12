@@ -106,6 +106,18 @@ impl super::Nexus {
         }
     }
 
+    pub fn webhook_secret_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        secret_selector: params::WebhookSecretSelector,
+    ) -> LookupResult<lookup::WebhookSecret<'a>> {
+        let lookup = LookupPath::new(&opctx, self.datastore())
+            .webhook_secret_id(WebhookSecretUuid::from_untyped_uuid(
+                secret_selector.secret_id,
+            ));
+        Ok(lookup)
+    }
+
     pub fn webhook_event_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
@@ -206,6 +218,25 @@ impl super::Nexus {
             "secret_id" => ?secret_id,
         );
         Ok(views::WebhookSecretId { id: secret_id.into_untyped_uuid() })
+    }
+
+    pub async fn webhook_receiver_secret_delete(
+        &self,
+        opctx: &OpContext,
+        secret: lookup::WebhookSecret<'_>,
+    ) -> DeleteResult {
+        let (authz_rx, authz_secret) =
+            secret.lookup_for(authz::Action::Delete).await?;
+        self.datastore()
+            .webhook_rx_secret_delete(&opctx, &authz_rx, &authz_secret)
+            .await?;
+        slog::info!(
+            &opctx.log,
+            "deleted secret from webhook receiver";
+            "rx_id" => ?authz_rx.id(),
+            "secret_id" => ?authz_secret.id(),
+        );
+        Ok(())
     }
 
     //
