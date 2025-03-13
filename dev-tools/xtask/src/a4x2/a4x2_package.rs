@@ -61,7 +61,7 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
         );
 
         let src_dir = Utf8PathBuf::try_from(env::current_dir()?)?;
-        let work_dir = src_dir.join("target").join("a4x2");
+        let work_dir = src_dir.join("target").join("a4x2").join("package");
 
         // Delete any results from previous runs.
         if work_dir.try_exists()? {
