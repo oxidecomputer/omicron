@@ -224,7 +224,7 @@ pub struct StorageResources {
     // The last set of disks the control plane explicitly told us to manage.
     //
     // Only includes external storage (U.2s).
-    control_plane_disks: BTreeMap<DiskIdentity, OmicronPhysicalDiskConfig>,
+    control_plane_config: ControlPlaneDisks,
 
     // Many clients are interested when changes in the set of [AllDisks]
     // might occur. This watch channel is updated once these disks get updated.
@@ -246,7 +246,7 @@ impl StorageResources {
             log: log.new(o!("component" => "StorageResources")),
             key_requester,
             disks: disks.clone(),
-            control_plane_disks: BTreeMap::new(),
+            control_plane_config: ControlPlaneDisks::new(),
             disk_updates: watch::Sender::new(disks),
         }
     }
@@ -267,22 +267,16 @@ impl StorageResources {
     /// observed. To synchronize the "set of requested disks" with the "set of
     /// observed disks", call [Self::synchronize_disk_management].
     pub fn set_config(&mut self, config: &OmicronPhysicalDisksConfig) {
-        let our_gen = &mut self.disks.generation;
-        if *our_gen > config.generation {
+        if self.control_plane_config.generation > config.generation {
             return;
         }
-        *our_gen = config.generation;
-        self.control_plane_disks = config
-            .disks
-            .iter()
-            .map(|disk| (disk.identity.clone(), disk.clone()))
-            .collect();
+        self.control_plane_config = ControlPlaneDisks::from_config(config);
     }
 
     pub fn get_config(
         &self,
     ) -> &BTreeMap<DiskIdentity, OmicronPhysicalDiskConfig> {
-        &self.control_plane_disks
+        &self.control_plane_config.disks
     }
 
     /// Attempts to "manage" all the U.2 disks requested by the control plane.
@@ -310,7 +304,7 @@ impl StorageResources {
                 // This leaves the presence of the disk still in "Self", but
                 // downgrades the disk to an unmanaged status.
                 ManagedDisk::ExplicitlyManaged(disk) => {
-                    if !self.control_plane_disks.contains_key(identity) {
+                    if !self.control_plane_config.disks.contains_key(identity) {
                         *managed_disk =
                             ManagedDisk::Unmanaged(RawDisk::from(disk.clone()));
                         updated = true;
@@ -326,7 +320,7 @@ impl StorageResources {
         // formatted with a zpool identified by the Nexus-specified
         // configuration.
         let mut result = DisksManagementResult::default();
-        for (identity, config) in &self.control_plane_disks {
+        for (identity, config) in &self.control_plane_config.disks {
             let Some(managed_disk) = disks.values.get_mut(identity) else {
                 warn!(
                     self.log,
@@ -558,5 +552,28 @@ impl StorageResources {
         disks.values.remove(id).unwrap();
 
         self.disk_updates.send_replace(self.disks.clone());
+    }
+}
+
+#[derive(Debug)]
+struct ControlPlaneDisks {
+    generation: Generation,
+    disks: BTreeMap<DiskIdentity, OmicronPhysicalDiskConfig>,
+}
+
+impl ControlPlaneDisks {
+    fn new() -> Self {
+        Self { generation: Generation::new(), disks: BTreeMap::new() }
+    }
+
+    fn from_config(config: &OmicronPhysicalDisksConfig) -> Self {
+        Self {
+            generation: config.generation,
+            disks: config
+                .disks
+                .iter()
+                .map(|disk| (disk.identity.clone(), disk.clone()))
+                .collect(),
+        }
     }
 }
