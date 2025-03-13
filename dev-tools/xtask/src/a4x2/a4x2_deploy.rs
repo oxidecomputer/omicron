@@ -68,10 +68,6 @@ pub struct StartArgs {
 
 #[derive(Args, Clone)]
 pub struct RunTestsArgs {
-    /// Execute omicron live tests
-    #[clap(long)]
-    live_tests: bool,
-
     /// Leave a4x2 running after tests. Useful for investigating test
     /// failures.
     #[clap(long)]
@@ -158,8 +154,8 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
             // launching a4x2 succeeds but the tests themselves fail.
             let result =
                 try_launch_a4x2(&sh, &env).and_then(|_| match &args.command {
-                    DeployCommand::RunTests(test_args) => {
-                        run_tests(&sh, &env, &test_args)
+                    DeployCommand::RunTests(_) => {
+                        run_tests(&sh, &env)
                     }
                     _ => Ok(()),
                 });
@@ -332,9 +328,8 @@ fn try_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
     // - Then inspect the result of launching a4x2.
     //
     // This is not ideal circumstances. It would be nice if falcon created files
-    // owned by the user running `pfexec`, rather than by root. Or better, if
-    // falcon did not need to be pfexec'd, and elevated permissions only as
-    // necessary. We should make falcon better, and then remove this workaround.
+    // owned by the user running `pfexec`, rather than by root. Revisit this if
+    // these files stop being created by root.
     {
         let uid = cmd!(sh, "/usr/bin/id -u").read()?;
         let gid = cmd!(sh, "/usr/bin/id -g").read()?;
@@ -374,17 +369,23 @@ fn try_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
         })?
         .local;
 
+    // Add a route so we can access the omicron subnet through the customer
+    // edge router. This is necessary to be able to reach nexus from outside the
+    // virtual machines. Presently this is required, because we use nexus's
+    // responses to API requests as an indicator of control plane liveness.
+    // If we check liveness through a different method, it may still be good
+    // to leave this in, either unconditionally or gated by a command line flag,
+    // so the user can interact with the control plane.
     cmd!(
         sh,
         "pfexec route -n add {DEFAULT_OMICRON_SUBNET} {customer_edge_addr}"
     )
     .run()?;
 
-    // Not sure how this IP is fixed, but it is
     let api_url = DEFAULT_OMICRON_NEXUS_ADDR;
 
     // Timeout = (retries / 2) minutes
-    // XXX this is an arbitrary timeout. Should it be configurable? Skippable?
+    // This is an arbitrary timeout. Should it be configurable? Skippable?
     let mut retries = 40;
     println!(
         "polling control plane @ {api_url} for signs of life for up to {} minutes",
@@ -432,46 +433,45 @@ fn try_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
     Ok(())
 }
 
-fn run_tests(sh: &Shell, env: &Environment, args: &RunTestsArgs) -> Result<()> {
-    // TODO: support running end to end tests
-    if args.live_tests {
-        cmd!(sh, "banner 'live tests'").run()?;
-        let _popdir = sh.push_dir(&env.a4x2_dir);
-        let g0ip = get_node_ip(&sh, env, "g0")?;
+fn run_tests(sh: &Shell, env: &Environment) -> Result<()> {
+    cmd!(sh, "banner 'live tests'").run()?;
+    let _popdir = sh.push_dir(&env.a4x2_dir);
+    let g0ip = get_node_ip(&sh, env, "g0")?;
 
-        let ssh_host = format!("root@{g0ip}");
-        let mut ssh_args_owned = vec!["-i", "../a4x2-ssh-key"];
-        ssh_args_owned.extend_from_slice(&INSECURE_SSH_ARGS);
-        let ssh_args = &ssh_args_owned;
-        use super::{
-            LIVE_TEST_BUNDLE_DIR, LIVE_TEST_BUNDLE_NAME,
-            LIVE_TEST_BUNDLE_SCRIPT,
-        };
+    let mut ssh_args = vec!["-i", "../a4x2-ssh-key"];
+    ssh_args.extend_from_slice(&INSECURE_SSH_ARGS);
+    let ssh_args = &ssh_args;
+    let ssh_host = format!("root@{g0ip}");
 
-        cmd!(sh, "scp {ssh_args...} {LIVE_TEST_BUNDLE_NAME} {ssh_host}:/zone/oxz_switch/root/root").run()?;
+    // Bring various file path constants into scope for interpolation below
+    use super::{
+        LIVE_TEST_BUNDLE_DIR, LIVE_TEST_BUNDLE_NAME,
+        LIVE_TEST_BUNDLE_SCRIPT,
+    };
 
-        // If you want any change in functionality for the test runner, update
-        // run-live-tests over in a4x2_package.rs. Don't add it here!
-        //
-        // The weird replace() is for quote-escaping, as we shove this into a
-        // single-quote string right below when creating the script to run over
-        // ssh.
-        let switch_zone_script = format!(
-            r#"
-            set -euxo pipefail
-            tar xvzf '{LIVE_TEST_BUNDLE_NAME}'
-            cd '{LIVE_TEST_BUNDLE_DIR}'
-            ./'{LIVE_TEST_BUNDLE_SCRIPT}'
-        "#
-        )
-        .replace("'", "'\"'\"'");
+    cmd!(sh, "scp {ssh_args...} {LIVE_TEST_BUNDLE_NAME} {ssh_host}:/zone/oxz_switch/root/root").run()?;
 
-        let remote_script =
-            format!("zlogin oxz_switch bash -c '{switch_zone_script}'");
+    // If you want any change in functionality for the test runner, update
+    // run-live-tests over in a4x2_package.rs. Don't add it here!
+    //
+    // The weird replace() is for quote-escaping, as we shove this into a
+    // single-quote string right below when creating the script to run over
+    // ssh.
+    let switch_zone_script = format!(
+        r#"
+        set -euxo pipefail
+        tar xvzf '{LIVE_TEST_BUNDLE_NAME}'
+        cd '{LIVE_TEST_BUNDLE_DIR}'
+        ./'{LIVE_TEST_BUNDLE_SCRIPT}'
+    "#
+    )
+    .replace("'", "'\"'\"'");
 
-        // Will error if the live tests fail. This is desired.
-        cmd!(sh, "ssh {ssh_args...} {ssh_host} {remote_script}").run()?;
-    }
+    let remote_script =
+        format!("zlogin oxz_switch bash -c '{switch_zone_script}'");
+
+    // Will error if the live tests fail. This is desired.
+    cmd!(sh, "ssh {ssh_args...} {ssh_host} {remote_script}").run()?;
 
     Ok(())
 }
