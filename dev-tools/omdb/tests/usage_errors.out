@@ -137,6 +137,7 @@ Commands:
   vmm                          Print information about Propolis virtual machine manager (VMM)
                                processes
   vmms                         Alias to `omdb db vmm list`
+  oximeter                     Print information about the oximeter collector
   help                         Print this message or the help of the given subcommand(s)
 
 Options:
@@ -190,6 +191,7 @@ Commands:
   vmm                          Print information about Propolis virtual machine manager (VMM)
                                processes
   vmms                         Alias to `omdb db vmm list`
+  oximeter                     Print information about the oximeter collector
   help                         Print this message or the help of the given subcommand(s)
 
 Options:
@@ -388,6 +390,7 @@ Usage: omdb db saga [OPTIONS] <COMMAND>
 Commands:
   running       List running sagas
   inject-error  Inject an error into a saga's currently running node(s)
+  abandon       Abandon a previously-running saga so that it won't be run again
   help          Print this message or the help of the given subcommand(s)
 
 Options:

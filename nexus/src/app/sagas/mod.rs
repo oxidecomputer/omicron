@@ -26,6 +26,7 @@ pub mod demo;
 pub mod disk_create;
 pub mod disk_delete;
 pub mod finalize_disk;
+pub mod image_create;
 pub mod image_delete;
 pub(crate) mod instance_common;
 pub mod instance_create;
@@ -182,7 +183,8 @@ fn make_action_registry() -> ActionRegistry {
         region_snapshot_replacement_garbage_collect::SagaRegionSnapshotReplacementGarbageCollect,
         region_snapshot_replacement_step::SagaRegionSnapshotReplacementStep,
         region_snapshot_replacement_step_garbage_collect::SagaRegionSnapshotReplacementStepGarbageCollect,
-        region_snapshot_replacement_finish::SagaRegionSnapshotReplacementFinish
+        region_snapshot_replacement_finish::SagaRegionSnapshotReplacementFinish,
+        image_create::SagaImageCreate
     ];
 
     #[cfg(test)]

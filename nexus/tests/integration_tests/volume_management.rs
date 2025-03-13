@@ -27,11 +27,13 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::CrucibleResources;
+use nexus_db_queries::db::datastore::DestVolume;
 use nexus_db_queries::db::datastore::ExistingTarget;
 use nexus_db_queries::db::datastore::RegionAllocationFor;
 use nexus_db_queries::db::datastore::RegionAllocationParameters;
 use nexus_db_queries::db::datastore::ReplacementTarget;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
+use nexus_db_queries::db::datastore::SourceVolume;
 use nexus_db_queries::db::datastore::VolumeReplaceResult;
 use nexus_db_queries::db::datastore::VolumeToDelete;
 use nexus_db_queries::db::datastore::VolumeWithTarget;
@@ -2159,7 +2161,8 @@ async fn test_volume_checkout_randomize_ids_only_read_only(
     // volume_checkout_randomize_ids should fail
     let r = datastore
         .volume_checkout_randomize_ids(
-            volume_id,
+            SourceVolume(volume_id),
+            DestVolume(VolumeUuid::new_v4()),
             db::datastore::VolumeCheckoutReason::CopyAndModify,
         )
         .await;
@@ -5339,7 +5342,7 @@ async fn test_migrate_to_ref_count_with_records_soft_delete_volume(
 
     let params = params::ImageCreate {
         identity: IdentityMetadataCreateParams {
-            name: "windows99".parse().unwrap(),
+            name: "windows98".parse().unwrap(),
             description: String::from("as soon as we get CSM support!"),
         },
         source: params::ImageSource::Snapshot { id: snapshot.identity.id },

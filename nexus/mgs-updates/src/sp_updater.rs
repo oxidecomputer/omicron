@@ -12,6 +12,7 @@ use super::common_sp_update::deliver_update;
 use gateway_client::SpComponent;
 use gateway_client::types::SpType;
 use slog::Logger;
+use slog::info;
 use tokio::sync::watch;
 use uuid::Uuid;
 

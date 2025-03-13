@@ -8,10 +8,9 @@
 use gateway_client::types::SpType;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as mgs_setup;
-use omicron_nexus::app::test_interfaces::{
-    HostPhase1Updater, MgsClients, UpdateProgress,
-};
+use nexus_mgs_updates::{HostPhase1Updater, MgsClients, UpdateProgress};
 use rand::RngCore;
+use slog::debug;
 use sp_sim::SimulatedSp;
 use std::mem;
 use std::sync::Arc;

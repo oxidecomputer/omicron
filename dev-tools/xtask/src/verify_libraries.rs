@@ -15,6 +15,7 @@ use std::{
 };
 use swrite::{SWrite, swriteln};
 
+use crate::common::cargo_command;
 use crate::load_workspace;
 
 #[derive(Parser)]
@@ -98,8 +99,7 @@ pub fn run_cmd(args: Args) -> Result<()> {
     config_path.push(".cargo/xtask.toml");
     let config = read_xtask_toml(&config_path)?;
 
-    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
-    let mut command = Command::new(cargo);
+    let mut command = cargo_command();
     command.args([
         "build",
         "--bins",

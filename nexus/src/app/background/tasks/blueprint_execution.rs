@@ -272,7 +272,7 @@ mod test {
     }
 
     #[nexus_test(server = crate::Server)]
-    async fn test_deploy_omicron_zones(cptestctx: &ControlPlaneTestContext) {
+    async fn test_deploy_omicron_config(cptestctx: &ControlPlaneTestContext) {
         // Set up the test.
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
@@ -290,14 +290,14 @@ mod test {
         let mut s2 = httptest::Server::run();
 
         // The only sled-agent endpoint we care about in this test is `PUT
-        // /omicron-zones`. Add a closure to avoid repeating it multiple times
+        // /omicron-config`. Add a closure to avoid repeating it multiple times
         // below. We don't do a careful check of the _contents_ of what's being
         // sent; for that, see the tests in nexus-reconfigurator-execution.
-        let match_put_omicron_zones =
-            || request::method_path("PUT", "/omicron-zones");
+        let match_put_omicron_config =
+            || request::method_path("PUT", "/omicron-config");
 
         // Helper for our mock sled-agent http servers to blanket ignore and
-        // return 200 OK for anything _except_ `PUT /omciron-zones`, which is
+        // return 200 OK for anything _except_ `PUT /omicron-config`, which is
         // the endpoint we care about in this test.
         //
         // Other Nexus background tasks created by our test context may notice
@@ -308,7 +308,7 @@ mod test {
         let mock_server_ignore_spurious_http_requests =
             |s: &mut httptest::Server| {
                 s.expect(
-                    Expectation::matching(not(match_put_omicron_zones()))
+                    Expectation::matching(not(match_put_omicron_config()))
                         .times(..)
                         .respond_with(status_code(200)),
                 );
@@ -467,7 +467,7 @@ mod test {
         // Make sure that requests get made to the sled agent.
         for s in [&mut s1, &mut s2] {
             s.expect(
-                Expectation::matching(match_put_omicron_zones())
+                Expectation::matching(match_put_omicron_config())
                     .respond_with(status_code(204)),
             );
             mock_server_ignore_spurious_http_requests(s);
@@ -501,7 +501,7 @@ mod test {
 
         // Now, disable the target and make sure that we _don't_ invoke the sled
         // agent. It's enough to just not set expectations on
-        // match_put_omicron_zones().
+        // match_put_omicron_config().
         blueprint.1.internal_dns_version =
             blueprint.1.internal_dns_version.next();
         blueprint.0.enabled = false;
@@ -530,27 +530,28 @@ mod test {
         blueprint.0.enabled = true;
         blueprint_tx.send(Some(Arc::new(blueprint))).unwrap();
         s1.expect(
-            Expectation::matching(match_put_omicron_zones())
+            Expectation::matching(match_put_omicron_config())
                 .respond_with(status_code(204)),
         );
         s2.expect(
-            Expectation::matching(match_put_omicron_zones())
+            Expectation::matching(match_put_omicron_config())
                 .respond_with(status_code(500)),
         );
 
         let mut value = task.activate(&opctx).await;
         let event_buffer = extract_event_buffer(&mut value);
 
-        let ensure_zones_outcome = {
+        let ensure_configs_outcome = {
             let ensure_id =
                 serde_json::to_value(ExecutionStepId::Ensure).unwrap();
-            let zones_component =
-                serde_json::to_value(ExecutionComponent::OmicronZones).unwrap();
+            let sled_agent_component =
+                serde_json::to_value(ExecutionComponent::SledAgent).unwrap();
             match event_buffer
                 .iter_steps_recursive()
                 .filter_map(|(_, step)| {
                     let info = step.step_info();
-                    if info.id == ensure_id && info.component == zones_component
+                    if info.id == ensure_id
+                        && info.component == sled_agent_component
                     {
                         match step.step_status() {
                             StepStatus::Completed {
@@ -574,14 +575,14 @@ mod test {
             }
         };
 
-        match ensure_zones_outcome {
+        match ensure_configs_outcome {
             StepOutcome::Warning { message, .. } => {
                 assert!(
-                    message.contains("Failed to put OmicronZonesConfig"),
+                    message.contains("Failed to put OmicronSledConfig"),
                     "unexpected warning message: {message}"
                 );
             }
-            other => panic!("unexpected zones outcome: {other:?}"),
+            other => panic!("unexpected outcome: {other:?}"),
         }
 
         s1.verify_and_clear();

@@ -969,6 +969,7 @@ impl InstanceRunner {
             types::{
                 BlobStorageBackend, Board, BootOrderEntry, BootSettings,
                 Chipset, ComponentV0, CrucibleStorageBackend,
+                GuestHypervisorInterface, HyperVFeatureFlag,
                 InstanceInitializationMethod, NvmeDisk, QemuPvpanic,
                 ReplacementComponent, SerialPort, SerialPortNumber, VirtioDisk,
                 VirtioNetworkBackend, VirtioNic,
@@ -1175,7 +1176,11 @@ impl InstanceRunner {
                     cpus: self.vcpus,
                     memory_mb: self.memory_mib,
                     cpuid: None,
-                    guest_hv_interface: None,
+                    guest_hv_interface: Some(
+                        GuestHypervisorInterface::HyperV {
+                            features: vec![HyperVFeatureFlag::ReferenceTsc],
+                        },
+                    ),
                 },
                 components: Default::default(),
             };

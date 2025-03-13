@@ -1273,7 +1273,7 @@ impl Client {
                         self.log,
                         "failed to delete some timeseries";
                         "error" => InlineErrorChain::new(&e),
-                        "call_count" => call_count,
+                        "call_count" => ?call_count,
                         "retry_after" => ?delay,
                     );
                     tokio::time::sleep(delay).await;

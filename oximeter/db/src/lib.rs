@@ -237,6 +237,7 @@ pub async fn make_client(
     log: &Logger,
 ) -> Result<Client, anyhow::Error> {
     let client = Client::new(SocketAddr::new(address, port), &log);
+    // TODO https://github.com/oxidecomputer/omicron/issues/7488: There is a db being initialised here as well.
     client
         .init_single_node_db()
         .await

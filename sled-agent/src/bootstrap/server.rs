@@ -32,8 +32,6 @@ use illumos_utils::dladm;
 use illumos_utils::zfs;
 use illumos_utils::zone;
 use illumos_utils::zone::Zones;
-use internal_dns_resolver::Resolver;
-use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
 use omicron_common::ledger;
 use omicron_common::ledger::Ledger;
 use omicron_ddm_admin_client::DdmError;
@@ -392,22 +390,12 @@ async fn start_sled_agent(
 
     // Inform our DDM reconciler of our underlay subnet and the information it
     // needs for maghemite to enable Oximeter stats.
-    {
-        let ddm_reconciler = service_manager.ddm_reconciler();
-
-        let az_prefix =
-            Ipv6Subnet::<AZ_PREFIX>::new(request.body.subnet.net().addr());
-        let addr = request.body.subnet.net().iter().nth(1).unwrap();
-        let dns_servers = Resolver::servers_from_subnet(az_prefix);
-
-        ddm_reconciler.set_underlay_subnet(request.body.subnet);
-        ddm_reconciler.enable_stats(EnableStatsRequest {
-            addr: addr.into(),
-            dns_servers: dns_servers.iter().map(|x| x.to_string()).collect(),
-            rack_id: request.body.rack_id,
-            sled_id: request.body.id.into_untyped_uuid(),
-        });
-    }
+    let ddm_reconciler = service_manager.ddm_reconciler();
+    ddm_reconciler.set_underlay_subnet(request.body.subnet);
+    ddm_reconciler.enable_stats(EnableStatsRequest {
+        rack_id: request.body.rack_id,
+        sled_id: request.body.id.into_untyped_uuid(),
+    });
 
     // Server does not exist, initialize it.
     let server = SledAgentServer::start(

@@ -11,6 +11,8 @@ use std::process::Command;
 use anyhow::{Context, Result};
 use clap::Parser;
 
+use crate::common::cargo_command;
+
 /// Argument parser for external xtasks.
 ///
 /// In general we want all developer tasks to be discoverable simply by running
@@ -72,8 +74,7 @@ impl External {
 }
 
 fn new_command() -> Command {
-    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let mut command = Command::new(cargo);
+    let mut command = cargo_command();
     command.arg("run");
     command
 }

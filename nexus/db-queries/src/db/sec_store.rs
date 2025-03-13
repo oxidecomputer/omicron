@@ -102,7 +102,7 @@ impl steno::SecStore for CockroachDbSecStore {
             &log,
             || {
                 self.datastore
-                    .saga_update_state(id, update, self.sec_id)
+                    .saga_update_state(id, update.into(), self.sec_id)
                     .map_err(backoff::BackoffError::transient)
             },
             "updating saga state",

@@ -7,7 +7,6 @@ use crate::planner::SledPlannerRng;
 use illumos_utils::zpool::ZpoolName;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
-use nexus_types::deployment::BlueprintDatasetFilter;
 use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::id_map::{self, IdMap};
 use omicron_common::api::external::ByteCount;
@@ -184,14 +183,17 @@ impl DatasetsEditor {
         self.counts
     }
 
-    pub fn datasets(
+    pub fn datasets<F>(
         &self,
-        filter: BlueprintDatasetFilter,
-    ) -> impl Iterator<Item = &BlueprintDatasetConfig> {
+        mut filter: F,
+    ) -> impl Iterator<Item = &BlueprintDatasetConfig>
+    where
+        F: FnMut(BlueprintDatasetDisposition) -> bool,
+    {
         self.config
             .datasets
             .iter()
-            .filter(move |dataset| dataset.disposition.matches(filter))
+            .filter(move |dataset| filter(dataset.disposition))
     }
 
     // Private method; panics if given an ID that isn't present in
@@ -508,9 +510,11 @@ mod tests {
         // 1. Expunge that dataset
         // 2. Add a new dataset of the same kind
         // 3. Ensure the new dataset ID is freshly-generated
-        for dataset in config.datasets.iter().filter(|dataset| {
-            dataset.disposition.matches(BlueprintDatasetFilter::InService)
-        }) {
+        for dataset in config
+            .datasets
+            .iter()
+            .filter(|dataset| dataset.disposition.is_in_service())
+        {
             editor
                 .expunge(&dataset.pool.id(), &dataset.kind)
                 .expect("expunged dataset");
@@ -563,7 +567,7 @@ mod tests {
             // There should no longer be any in-service datasets on this zpool.
             assert!(
                 !editor
-                    .datasets(BlueprintDatasetFilter::InService)
+                    .datasets(BlueprintDatasetDisposition::is_in_service)
                     .any(|dataset| dataset.pool.id() == *zpool_id),
                 "in-service dataset remains after expunging zpool"
             );
@@ -573,9 +577,11 @@ mod tests {
         //
         // 1. Add a new dataset of the same kind
         // 2. Ensure the new dataset ID is freshly-generated
-        for dataset in config.datasets.iter().filter(|dataset| {
-            dataset.disposition.matches(BlueprintDatasetFilter::InService)
-        }) {
+        for dataset in config
+            .datasets
+            .iter()
+            .filter(|dataset| dataset.disposition.is_in_service())
+        {
             let new_dataset = PartialDatasetConfig {
                 name: DatasetName::new(
                     dataset.pool.clone(),

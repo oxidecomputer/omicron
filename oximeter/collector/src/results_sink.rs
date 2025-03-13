@@ -91,11 +91,12 @@ pub async fn database_inserter(
                 Err(e) => {
                     warn!(
                         log,
-                        "failed to insert some results into metric DB: {}",
-                        e.to_string()
+                        "failed to insert some results into metric DB";
+                        InlineErrorChain::new(&e)
                     );
                 }
             }
+
             // TODO-correctness The `insert_samples` call above may fail. The method itself needs
             // better handling of partially-inserted results in that case, but we may need to retry
             // or otherwise handle an error here as well.
