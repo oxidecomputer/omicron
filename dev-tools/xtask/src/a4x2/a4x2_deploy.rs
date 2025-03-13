@@ -253,23 +253,68 @@ fn prepare_to_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
 
     // Generate an ssh key we will use to log into the sleds.
     cmd!(sh, "ssh-keygen -t ed25519 -N '' -f a4x2-ssh-key").run()?;
+    let mut authorized_keys = vec![sh.read_file("a4x2-ssh-key.pub")?];
 
-    // Copy the public side into the cargo bay
-    sh.copy_file(
-        "a4x2-ssh-key.pub",
+    // Attempt to collect the user's pubkeys, so they can connect more easily.
+    // Because this is purely a convenience, we should not generate any errors
+    // during this step. We don't need the user's pubkeys to proceed, so the
+    // state of their .ssh folder should not be load-bearing.
+    env::var("HOME")
+        .ok()
+        .and_then(|home_dir| {
+            // Attempt to traverse .ssh directory
+            let home_dir = Utf8PathBuf::from(home_dir);
+            fs::read_dir(home_dir.join(".ssh")).ok()
+        })
+        .map(|dir_ents| {
+            let user_keys = dir_ents
+                .filter_map(|ent| {
+                    // Collect contents of `.pub` files within .ssh directory.
+                    // Ignore files that aren't pubkeys, unreadable files,
+                    // non-utf8 files.
+                    ent.ok()
+                        .and_then(|ent| {
+                            ent.file_name().into_string().ok().and_then(
+                                |fname| {
+                                    if fname.ends_with(".pub") {
+                                        return Some(ent.path());
+                                    }
+                                    None
+                                },
+                            )
+                        })
+                        .and_then(|path| fs::read(path).ok())
+                        .and_then(|contents| String::from_utf8(contents).ok())
+                })
+                .filter(|key| {
+                    // Extra safety to make sure we're only looking at
+                    // probably-correctly-formed ssh pubkeys.
+                    key.starts_with("ssh-")
+                });
+
+            // Add them all to our list of pubkeys
+            for key in user_keys {
+                authorized_keys.push(key);
+            }
+        });
+
+    // Write the public keys into the cargo bay
+    let authorized_keys = authorized_keys.join("\n");
+    sh.write_file(
         env.a4x2_dir.join("cargo-bay/g0/root_authorized_keys"),
+        &authorized_keys,
     )?;
-    sh.copy_file(
-        "a4x2-ssh-key.pub",
+    sh.write_file(
         env.a4x2_dir.join("cargo-bay/g1/root_authorized_keys"),
+        &authorized_keys,
     )?;
-    sh.copy_file(
-        "a4x2-ssh-key.pub",
+    sh.write_file(
         env.a4x2_dir.join("cargo-bay/g2/root_authorized_keys"),
+        &authorized_keys,
     )?;
-    sh.copy_file(
-        "a4x2-ssh-key.pub",
+    sh.write_file(
         env.a4x2_dir.join("cargo-bay/g3/root_authorized_keys"),
+        &authorized_keys,
     )?;
 
     Ok(())
