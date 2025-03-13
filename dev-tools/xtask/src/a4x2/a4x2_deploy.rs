@@ -12,7 +12,7 @@ use fs_err as fs;
 use serde::Deserialize;
 use std::env;
 use std::{thread, time};
-use xshell::{Shell, TempDir};
+use xshell::Shell;
 
 /// Args for sshing in without checking/storing the remote host key. Every time
 /// we start a4x2, it will have new keys.
@@ -95,9 +95,6 @@ struct Environment {
     /// Directory in `work_dir` where presently nothing actually happens because
     /// we don't have any output artifacts yet lol YYY/XXX
     out_dir: Utf8PathBuf,
-
-    /// temp directory storing files created by falcon (owned by root)
-    falcon_dir: TempDir,
 }
 
 pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
@@ -122,15 +119,7 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
         // Output. Maybe in CI we want this to be /out
         let out_dir = work_dir.join("a4x2-deploy-out");
 
-        let falcon_dir = sh.create_temp_dir()?;
-
-        Environment {
-            a4x2_package_tar,
-            work_dir,
-            a4x2_dir,
-            out_dir,
-            falcon_dir,
-        }
+        Environment { a4x2_package_tar, work_dir, a4x2_dir, out_dir }
     };
 
     match args.command {
@@ -331,34 +320,30 @@ fn prepare_to_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
         &authorized_keys,
     )?;
 
-    // Create a symlink for the falcon dir. This directory will contain files
-    // owned by root, so to ensure we are `cargo clean`-able, we put them in
-    // a temp directory outside the work directory.
-    //
-    // Specifically, the directory will have log output from creating each VM,
-    // and PID files used to tear them down later. The logs will be captured as
-    // output artifacts from the deploy task, and the PIDs don't need to persist
-    // across reboots since the processes won't persist.
-    let falcon_vm_dir = env.falcon_dir.path().join(".falcon");
-    fs::create_dir_all(&falcon_vm_dir)?;
-    fs::os::unix::fs::symlink(&falcon_vm_dir, env.a4x2_dir.join(".falcon"))?;
-
-    // falcon also writes to a "debug.out" file, which also becomes owned by
-    // root. we symlink this into our temp dir as well.
-    fs::os::unix::fs::symlink(
-        env.falcon_dir.path().join("debug.out"),
-        env.a4x2_dir.join("debug.out"),
-    )?;
-
     Ok(())
 }
 
 fn try_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
     let _popdir = sh.push_dir(&env.a4x2_dir);
 
-    cmd!(sh, "pfexec ./a4x2 launch").run()?;
+    // - First, launch a4x2.
+    // - Then chown falcon files to the executing user regardless of whether
+    //   a4x2 succeeded, so we are cargo-cleanable, even if a4x2 failed.
+    // - Then inspect the result of launching a4x2.
+    //
+    // This is not ideal circumstances. It would be nice if falcon created files
+    // owned by the user running `pfexec`, rather than by root. Or better, if
+    // falcon did not need to be pfexec'd, and elevated permissions only as
+    // necessary. We should make falcon better, and then remove this workaround.
+    {
+        let uid = cmd!(sh, "/usr/bin/id -u").read()?;
+        let gid = cmd!(sh, "/usr/bin/id -g").read()?;
+        let a4x2_launch_result = cmd!(sh, "pfexec ./a4x2 launch").run();
+        cmd!(sh, "pfexec chown -R {uid}:{gid} .falcon/").run()?;
+        cmd!(sh, "pfexec chown    {uid}:{gid} debug.out").run()?;
+        a4x2_launch_result?;
+    }
 
-    // XXX Is there a better way to do this?
     let ce_addr_json =
         cmd!(sh, "./a4x2 exec ce 'ip -4 -j addr show enp0s10'").read()?;
 
