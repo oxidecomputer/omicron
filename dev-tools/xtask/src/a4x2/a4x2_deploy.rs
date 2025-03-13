@@ -147,10 +147,10 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
             eprintln!("teardown result: {:?}", result);
             eprintln!("continuing regardless of whether there were errors");
 
-            // Delete any results from previous runs. We don't mind if
-            // there's errors. This needs to run as root in case there are
-            // artifacts owned by root left around from the deploy.
-            cmd!(sh, "pfexec rm -rf").arg(&env.work_dir).run()?;
+            // Delete any results from previous runs.
+            if env.work_dir.try_exists()? {
+                fs::remove_dir_all(&env.work_dir)?;
+            }
 
             // Create work dir
             fs::create_dir_all(&env.out_dir)?;
