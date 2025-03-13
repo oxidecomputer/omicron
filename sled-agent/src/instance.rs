@@ -315,6 +315,7 @@ struct TerminateRequest {
 // This task communicates with the "InstanceRunner" task to report status.
 struct InstanceMonitorRunner {
     client: Arc<PropolisClient>,
+    zone_name: String,
     tx_monitor: mpsc::Sender<InstanceMonitorRequest>,
     log: slog::Logger,
 }
@@ -382,6 +383,44 @@ impl InstanceMonitorRunner {
             Err(e) if self.tx_monitor.is_closed() => {
                 Err(BackoffError::permanent(e))
             }
+            // If we couldn't communicate with propolis-server, let's make sure
+            // the zone is still there...
+            Err(e @ PropolisClientError::CommunicationError(_)) => {
+                let zone = match Zones::find(&self.zone_name).await {
+                    Ok(zone) => zone,
+                    Err(zoneadm_error) => {
+                        // If we couldn't figure out whether the zone is still
+                        // there, just keep polling normally.
+                        error!(
+                            self.log,
+                            "error checking if Propolis zone still exists after \
+                             commuication error";
+                            "error" => %zoneadm_error,
+                            "zone" => %self.zone_name,
+                        );
+                        return Err(BackoffError::transient(e));
+                    }
+                };
+
+                // OH IT'S GONE
+                if zone.is_none() {
+                    info!(
+                        self.log,
+                        "Propolis zone is Way Gone!";
+                        "zone" => %self.zone_name,
+                    );
+                    return Ok(InstanceMonitorUpdate::ZoneGone);
+                }
+
+                warn!(
+                    self.log,
+                    "communication error checking up on Propolis, but the \
+                     zone still exists...";
+                    "error" => %e,
+                    "zone" => %self.zone_name,
+                );
+                Err(BackoffError::transient(e))
+            }
             // Otherwise, was there a known error code from Propolis?
             Err(e) => propolis_error_code(&self.log, &e)
                 // If we were able to parse a known error code, send it along to
@@ -396,6 +435,7 @@ impl InstanceMonitorRunner {
 
 enum InstanceMonitorUpdate {
     State(propolis_client::types::InstanceStateMonitorResponse),
+    ZoneGone,
     Error(PropolisErrorCode),
 }
 
@@ -520,7 +560,20 @@ impl InstanceRunner {
                                 warn!(self.log, "InstanceRunner failed to send to InstanceMonitorRunner");
                             }
                         },
-                         Some(InstanceMonitorRequest { update: Error(code), tx }) => {
+                        // The Propolis zone has abruptly vanished. It's not supposed
+                        // to do that! Move it to failed.
+                        Some(InstanceMonitorRequest { update: ZoneGone, tx }) => {
+                            warn!(
+                                self.log,
+                                "Propolis zone has gone away entirely! Moving \
+                                 to Failed"
+                            );
+                            self.terminate(true).await;
+                            if let Err(_) = tx.send(Reaction::Terminate) {
+                                warn!(self.log, "InstanceRunner failed to send to InstanceMonitorRunner");
+                            }
+                        }
+                        Some(InstanceMonitorRequest { update: Error(code), tx }) => {
                             let reaction = if code == PropolisErrorCode::NoInstance {
                                 // If we see a `NoInstance` error code from
                                 // Propolis after the instance has been ensured,
@@ -1307,6 +1360,7 @@ impl InstanceRunner {
         // it exited or because the Propolis server was terminated by other
         // means).
         let runner = InstanceMonitorRunner {
+            zone_name: running_zone.name().to_string(),
             client: client.clone(),
             tx_monitor: self.tx_monitor.clone(),
             log: self.log.clone(),
