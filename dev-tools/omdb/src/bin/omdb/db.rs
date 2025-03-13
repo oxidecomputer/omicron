@@ -105,10 +105,12 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::CrucibleTargets;
 use nexus_db_queries::db::datastore::DataStoreConnection;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
+use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::ServiceKind;
+use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_types::deployment::Blueprint;
@@ -132,6 +134,7 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::MacAddr;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::DownstairsRegionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -847,6 +850,10 @@ enum VolumeCommands {
     List,
     /// What is holding the lock?
     LockHolder(VolumeLockHolderArgs),
+    /// What volumes are cooked (read: cannot activate)?
+    Cooked,
+    /// What volumes reference a thing?
+    Reference(VolumeReferenceArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -859,6 +866,22 @@ struct VolumeInfoArgs {
 struct VolumeLockHolderArgs {
     /// The UUID of the volume
     uuid: Uuid,
+}
+
+#[derive(Debug, Args, Clone)]
+struct VolumeReferenceArgs {
+    #[clap(long, conflicts_with_all = ["net", "read_only_region", "region_snapshot"])]
+    ip: Option<std::net::Ipv6Addr>,
+
+    #[clap(long, conflicts_with_all = ["ip", "read_only_region", "region_snapshot"])]
+    net: Option<oxnet::Ipv6Net>,
+
+    #[clap(long, conflicts_with_all = ["ip", "net", "region_snapshot"])]
+    read_only_region: Option<Uuid>,
+
+    /// Dataset, region, and snapshot ID.
+    #[clap(long, conflicts_with_all = ["ip", "net", "read_only_region"], value_delimiter = ' ')]
+    region_snapshot: Option<Vec<Uuid>>,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -971,7 +994,7 @@ impl DbArgs {
                     }
                     DbCommands::Region(RegionArgs {
                         command: RegionCommands::ListRegionsMissingPorts,
-                    }) => cmd_db_region_missing_porst(&opctx, &datastore).await,
+                    }) => cmd_db_region_missing_ports(&opctx, &datastore).await,
                     DbCommands::Region(RegionArgs {
                         command: RegionCommands::List(region_list_args),
                     }) => {
@@ -1166,6 +1189,12 @@ impl DbArgs {
                     DbCommands::Volumes(VolumeArgs {
                         command: VolumeCommands::LockHolder(args),
                     }) => cmd_db_volume_lock_holder(&datastore, args).await,
+                    DbCommands::Volumes(VolumeArgs {
+                        command: VolumeCommands::Cooked,
+                    }) => cmd_db_volume_cooked(&opctx, &datastore).await,
+                    DbCommands::Volumes(VolumeArgs {
+                        command: VolumeCommands::Reference(args),
+                    }) => cmd_db_volume_reference(&opctx, &datastore, &fetch_opts, &args).await,
 
                     DbCommands::Vmm(VmmArgs { command: VmmCommands::Info(args) }) => {
                         cmd_db_vmm_info(&opctx, &datastore, &fetch_opts, &args)
@@ -1452,9 +1481,12 @@ async fn replacements_to_do(
         id: String,
         dataset_id: String,
         resource: String,
+        #[tabled(display_with = "option_datetime_rfc3339_concise")]
+        existing_request_time: Option<DateTime<Utc>>,
+        existing_request: String,
     }
 
-    let region_rows: Vec<RegionRow> = vec![
+    let regions: Vec<Region> = vec![
         datastore
             .find_read_only_regions_on_expunged_physical_disks(opctx)
             .await?,
@@ -1464,18 +1496,44 @@ async fn replacements_to_do(
     ]
     .into_iter()
     .flatten()
-    .map(|region| RegionRow {
-        id: region.id().to_string(),
-        dataset_id: region.dataset_id().to_string(),
-        resource: if region.read_only() {
-            String::from("read-only region")
-        } else {
-            String::from("read/write region")
-        },
-    })
     .collect();
 
-    let table = tabled::Table::new(region_rows)
+    let mut table_rows: Vec<RegionRow> = vec![];
+    for region in regions {
+        let maybe_request = datastore
+            .lookup_region_replacement_request_by_old_region_id(
+                opctx,
+                DownstairsRegionUuid::from_untyped_uuid(region.id()),
+            )
+            .await?;
+
+        table_rows.push(RegionRow {
+            id: region.id().to_string(),
+            dataset_id: region.dataset_id().to_string(),
+            resource: if region.read_only() {
+                String::from("read-only region")
+            } else {
+                String::from("read/write region")
+            },
+            existing_request_time: maybe_request
+                .as_ref()
+                .map(|x| x.request_time),
+            existing_request: {
+                if let Some(request) = &maybe_request {
+                    format!(
+                        "{} (state {:?})",
+                        request.id, request.replacement_state
+                    )
+                } else {
+                    String::from("")
+                }
+            },
+        });
+    }
+
+    table_rows.sort_by_key(|x| x.existing_request_time);
+
+    let table = tabled::Table::new(table_rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
         .to_string();
@@ -1490,20 +1548,44 @@ async fn replacements_to_do(
         dataset_id: String,
         region_id: String,
         snapshot_id: String,
+        #[tabled(display_with = "option_datetime_rfc3339_concise")]
+        existing_request_time: Option<DateTime<Utc>>,
+        existing_request: String,
     }
 
-    let rs_rows: Vec<RegionSnapshotRow> = datastore
+    let rs_rows: Vec<RegionSnapshot> = datastore
         .find_region_snapshots_on_expunged_physical_disks(opctx)
-        .await?
-        .into_iter()
-        .map(|rs| RegionSnapshotRow {
+        .await?;
+
+    let mut table_rows: Vec<RegionSnapshotRow> = vec![];
+    for rs in rs_rows {
+        let maybe_request = datastore
+            .lookup_region_snapshot_replacement_request(opctx, &rs)
+            .await?;
+
+        table_rows.push(RegionSnapshotRow {
             dataset_id: rs.dataset_id().to_string(),
             region_id: rs.region_id.to_string(),
             snapshot_id: rs.snapshot_id.to_string(),
-        })
-        .collect();
+            existing_request_time: maybe_request
+                .as_ref()
+                .map(|x| x.request_time),
+            existing_request: {
+                if let Some(request) = maybe_request {
+                    format!(
+                        "{} (state {:?})",
+                        request.id, request.replacement_state
+                    )
+                } else {
+                    String::from("")
+                }
+            },
+        });
+    }
 
-    let table = tabled::Table::new(rs_rows)
+    table_rows.sort_by_key(|x| x.existing_request_time);
+
+    let table = tabled::Table::new(table_rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
         .to_string();
@@ -2696,8 +2778,109 @@ async fn cmd_db_volume_lock_holder(
     Ok(())
 }
 
+/// What volumes cannot activate?
+async fn cmd_db_volume_cooked(
+    opctx: &OpContext,
+    datastore: &DataStore,
+) -> Result<(), anyhow::Error> {
+    let conn = datastore.pool_connection_for_tests().await?;
+
+    let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+    while let Some(p) = paginator.next() {
+        use db::schema::volume::dsl;
+        let batch = paginated(dsl::volume, dsl::id, &p.current_pagparams())
+            .filter(dsl::time_deleted.is_null())
+            .select(Volume::as_select())
+            .load_async(&*conn)
+            .await
+            .context("fetching volumes")?;
+
+        paginator =
+            p.found_batch(&batch, &|v: &Volume| v.id().into_untyped_uuid());
+
+        for volume in batch {
+            match datastore.volume_cooked(opctx, volume.id()).await? {
+                Some(true) => {
+                    println!("{}", volume.id());
+                }
+
+                Some(false) | None => {}
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// What volumes are referenced an IP, netmask, region, or region snapshot?
+async fn cmd_db_volume_reference(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &VolumeReferenceArgs,
+) -> Result<(), anyhow::Error> {
+    let volume_ids: Vec<Uuid> = if let Some(ip) = args.ip {
+        datastore
+            .find_volumes_referencing_ipv6_addr(opctx, ip)
+            .await?
+            .into_iter()
+            .map(|v| v.id().into_untyped_uuid())
+            .collect()
+    } else if let Some(net) = args.net {
+        datastore
+            .find_volumes_referencing_ipv6_net(opctx, net)
+            .await?
+            .into_iter()
+            .map(|v| v.id().into_untyped_uuid())
+            .collect()
+    } else if let Some(region_id) = args.read_only_region {
+        datastore
+            .volume_usage_records_for_resource(
+                VolumeResourceUsage::ReadOnlyRegion { region_id },
+            )
+            .await?
+            .into_iter()
+            .map(|vrur| vrur.volume_id.into_untyped_uuid())
+            .collect()
+    } else if let Some(region_snapshot_ids) = &args.region_snapshot {
+        if region_snapshot_ids.len() != 3 {
+            bail!("three IDs required: dataset, region, and snapshot");
+        }
+
+        datastore
+            .volume_usage_records_for_resource(
+                VolumeResourceUsage::RegionSnapshot {
+                    dataset_id: DatasetUuid::from_untyped_uuid(
+                        region_snapshot_ids[0],
+                    ),
+                    region_id: region_snapshot_ids[1],
+                    snapshot_id: region_snapshot_ids[2],
+                },
+            )
+            .await?
+            .into_iter()
+            .map(|vrur| vrur.volume_id.into_untyped_uuid())
+            .collect()
+    } else {
+        bail!("clap should not allow us to reach here!");
+    };
+
+    let volumes_used_by =
+        volume_used_by(datastore, fetch_opts, &volume_ids).await?;
+
+    let table = tabled::Table::new(volumes_used_by)
+        .with(tabled::settings::Style::psql())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .with(tabled::settings::Panel::header("Referenced volumes"))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
 /// List all regions still missing ports
-async fn cmd_db_region_missing_porst(
+async fn cmd_db_region_missing_ports(
     opctx: &OpContext,
     datastore: &DataStore,
 ) -> Result<(), anyhow::Error> {
@@ -2772,33 +2955,22 @@ async fn cmd_db_region_list(
     Ok(())
 }
 
-/// Find what is using a region
-async fn cmd_db_region_used_by(
+#[derive(Tabled)]
+struct VolumeUsedBy {
+    volume_id: VolumeUuid,
+    usage_type: String,
+    usage_id: String,
+    usage_name: String,
+    deleted: bool,
+}
+
+async fn volume_used_by(
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
-    args: &RegionUsedByArgs,
-) -> Result<(), anyhow::Error> {
-    use db::schema::region::dsl;
-
-    let regions: Vec<Region> = paginated(
-        dsl::region,
-        dsl::id,
-        &first_page::<dsl::id>(fetch_opts.fetch_limit),
-    )
-    .filter(dsl::id.eq_any(args.region_id.clone()))
-    .select(Region::as_select())
-    .load_async(&*datastore.pool_connection_for_tests().await?)
-    .await?;
-
-    check_limit(&regions, fetch_opts.fetch_limit, || {
-        String::from("listing regions")
-    });
-
-    let volumes: Vec<Uuid> =
-        regions.iter().map(|x| x.volume_id().into_untyped_uuid()).collect();
-
+    volumes: &[Uuid],
+) -> Result<Vec<VolumeUsedBy>, anyhow::Error> {
     let disks_used: Vec<Disk> = {
-        let volumes = volumes.clone();
+        let volumes = volumes.to_vec();
         datastore
             .pool_connection_for_tests()
             .await?
@@ -2825,7 +2997,7 @@ async fn cmd_db_region_used_by(
     });
 
     let snapshots_used: Vec<Snapshot> = {
-        let volumes = volumes.clone();
+        let volumes = volumes.to_vec();
         datastore
             .pool_connection_for_tests()
             .await?
@@ -2856,7 +3028,7 @@ async fn cmd_db_region_used_by(
     });
 
     let images_used: Vec<Image> = {
-        let volumes = volumes.clone();
+        let volumes = volumes.to_vec();
         datastore
             .pool_connection_for_tests()
             .await?
@@ -2882,6 +3054,97 @@ async fn cmd_db_region_used_by(
         String::from("listing images used")
     });
 
+    Ok(volumes
+        .iter()
+        .map(|volume_id| {
+            let volume_id = VolumeUuid::from_untyped_uuid(*volume_id);
+
+            let maybe_image =
+                images_used.iter().find(|x| x.volume_id() == volume_id);
+
+            let maybe_snapshot =
+                snapshots_used.iter().find(|x| x.volume_id() == volume_id);
+
+            let maybe_snapshot_dest = snapshots_used
+                .iter()
+                .find(|x| x.destination_volume_id() == volume_id);
+
+            let maybe_disk =
+                disks_used.iter().find(|x| x.volume_id() == volume_id);
+
+            if let Some(image) = maybe_image {
+                VolumeUsedBy {
+                    volume_id,
+                    usage_type: String::from("image"),
+                    usage_id: image.id().to_string(),
+                    usage_name: image.name().to_string(),
+                    deleted: image.time_deleted().is_some(),
+                }
+            } else if let Some(snapshot) = maybe_snapshot {
+                VolumeUsedBy {
+                    volume_id,
+                    usage_type: String::from("snapshot"),
+                    usage_id: snapshot.id().to_string(),
+                    usage_name: snapshot.name().to_string(),
+                    deleted: snapshot.time_deleted().is_some(),
+                }
+            } else if let Some(snapshot) = maybe_snapshot_dest {
+                VolumeUsedBy {
+                    volume_id,
+                    usage_type: String::from("snapshot dest"),
+                    usage_id: snapshot.id().to_string(),
+                    usage_name: snapshot.name().to_string(),
+                    deleted: snapshot.time_deleted().is_some(),
+                }
+            } else if let Some(disk) = maybe_disk {
+                VolumeUsedBy {
+                    volume_id,
+                    usage_type: String::from("disk"),
+                    usage_id: disk.id().to_string(),
+                    usage_name: disk.name().to_string(),
+                    deleted: disk.time_deleted().is_some(),
+                }
+            } else {
+                VolumeUsedBy {
+                    volume_id,
+                    usage_type: String::from("unknown!"),
+                    usage_id: String::from(""),
+                    usage_name: String::from(""),
+                    deleted: false,
+                }
+            }
+        })
+        .collect())
+}
+
+/// Find what is using a region
+async fn cmd_db_region_used_by(
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &RegionUsedByArgs,
+) -> Result<(), anyhow::Error> {
+    use db::schema::region::dsl;
+
+    let regions: Vec<Region> = paginated(
+        dsl::region,
+        dsl::id,
+        &first_page::<dsl::id>(fetch_opts.fetch_limit),
+    )
+    .filter(dsl::id.eq_any(args.region_id.clone()))
+    .select(Region::as_select())
+    .load_async(&*datastore.pool_connection_for_tests().await?)
+    .await?;
+
+    check_limit(&regions, fetch_opts.fetch_limit, || {
+        String::from("listing regions")
+    });
+
+    let volumes: Vec<Uuid> =
+        regions.iter().map(|x| x.volume_id().into_untyped_uuid()).collect();
+
+    let volumes_used_by =
+        volume_used_by(datastore, fetch_opts, &volumes).await?;
+
     #[derive(Tabled)]
     struct RegionRow {
         id: Uuid,
@@ -2894,68 +3157,14 @@ async fn cmd_db_region_used_by(
 
     let rows: Vec<_> = regions
         .into_iter()
-        .map(|region: Region| {
-            if let Some(image) =
-                images_used.iter().find(|x| x.volume_id() == region.volume_id())
-            {
-                RegionRow {
-                    id: region.id(),
-                    volume_id: region.volume_id(),
-
-                    usage_type: String::from("image"),
-                    usage_id: image.id().to_string(),
-                    usage_name: image.name().to_string(),
-                    deleted: image.time_deleted().is_some(),
-                }
-            } else if let Some(snapshot) = snapshots_used
-                .iter()
-                .find(|x| x.volume_id() == region.volume_id())
-            {
-                RegionRow {
-                    id: region.id(),
-                    volume_id: region.volume_id(),
-
-                    usage_type: String::from("snapshot"),
-                    usage_id: snapshot.id().to_string(),
-                    usage_name: snapshot.name().to_string(),
-                    deleted: snapshot.time_deleted().is_some(),
-                }
-            } else if let Some(snapshot) = snapshots_used
-                .iter()
-                .find(|x| x.destination_volume_id() == region.volume_id())
-            {
-                RegionRow {
-                    id: region.id(),
-                    volume_id: region.volume_id(),
-
-                    usage_type: String::from("snapshot dest"),
-                    usage_id: snapshot.id().to_string(),
-                    usage_name: snapshot.name().to_string(),
-                    deleted: snapshot.time_deleted().is_some(),
-                }
-            } else if let Some(disk) =
-                disks_used.iter().find(|x| x.volume_id() == region.volume_id())
-            {
-                RegionRow {
-                    id: region.id(),
-                    volume_id: region.volume_id(),
-
-                    usage_type: String::from("disk"),
-                    usage_id: disk.id().to_string(),
-                    usage_name: disk.name().to_string(),
-                    deleted: disk.time_deleted().is_some(),
-                }
-            } else {
-                RegionRow {
-                    id: region.id(),
-                    volume_id: region.volume_id(),
-
-                    usage_type: String::from("unknown!"),
-                    usage_id: String::from(""),
-                    usage_name: String::from(""),
-                    deleted: false,
-                }
-            }
+        .zip(volumes_used_by.into_iter())
+        .map(|(region, volume_used_by)| RegionRow {
+            id: region.id(),
+            volume_id: volume_used_by.volume_id,
+            usage_type: volume_used_by.usage_type,
+            usage_id: volume_used_by.usage_id,
+            usage_name: volume_used_by.usage_name,
+            deleted: volume_used_by.deleted,
         })
         .collect();
 
@@ -5010,7 +5219,7 @@ async fn cmd_db_region_snapshot_replacement_waiting(
 
 // VALIDATION
 
-/// Validate the `volume_references` column of the region snapshots table
+/// Validate the volume resource usage table
 async fn cmd_db_validate_volume_references(
     datastore: &DataStore,
 ) -> Result<(), anyhow::Error> {
@@ -5096,14 +5305,25 @@ async fn cmd_db_validate_volume_references(
             })
             .count();
 
-        if matching_volumes != region_snapshot.volume_references as usize {
+        let volume_usage_records = datastore
+            .volume_usage_records_for_resource(
+                VolumeResourceUsage::RegionSnapshot {
+                    dataset_id: region_snapshot.dataset_id.into(),
+                    region_id: region_snapshot.region_id,
+                    snapshot_id: region_snapshot.snapshot_id,
+                },
+            )
+            .await?;
+
+        if matching_volumes != volume_usage_records.len() {
             rows.push(Row {
                 dataset_id: region_snapshot.dataset_id.into(),
                 region_id: region_snapshot.region_id,
                 snapshot_id: region_snapshot.snapshot_id,
                 error: format!(
-                    "record has {} volume references when it should be {}!",
-                    region_snapshot.volume_references, matching_volumes,
+                    "record has {} volume usage records when it should be {}!",
+                    volume_usage_records.len(),
+                    matching_volumes,
                 ),
             });
         } else {
@@ -5607,6 +5827,26 @@ async fn cmd_db_validate_region_snapshots(
                 }
             }
         }
+
+        let snapshot: Snapshot = {
+            use db::schema::snapshot::dsl;
+
+            dsl::snapshot
+                .filter(dsl::id.eq(region_snapshot.snapshot_id))
+                .select(Snapshot::as_select())
+                .first_async(&*datastore.pool_connection_for_tests().await?)
+                .await?
+        };
+
+        if datastore.volume_get(snapshot.volume_id()).await?.is_none() {
+            rows.push(Row {
+                dataset_id: region_snapshot.dataset_id.into(),
+                region_id: region_snapshot.region_id,
+                snapshot_id: region_snapshot.snapshot_id,
+                dataset_addr,
+                error: format!("volume {} hard deleted!", snapshot.volume_id,),
+            });
+        }
     }
 
     // Second, get all regions
@@ -5719,7 +5959,7 @@ async fn cmd_db_validate_region_snapshots(
     }
 
     let table = tabled::Table::new(rows)
-        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Style::psql())
         .to_string();
 
     println!("{}", table);
@@ -7136,6 +7376,13 @@ fn display_option_blank<T: Display>(opt: &Option<T>) -> String {
 // of line width in tabular output.
 fn datetime_rfc3339_concise(t: &DateTime<Utc>) -> String {
     t.to_rfc3339_opts(chrono::format::SecondsFormat::Millis, true)
+}
+fn option_datetime_rfc3339_concise(t: &Option<DateTime<Utc>>) -> String {
+    if let Some(t) = t {
+        t.to_rfc3339_opts(chrono::format::SecondsFormat::Millis, true)
+    } else {
+        String::from("")
+    }
 }
 
 // Format an optional `chrono::DateTime` in RFC3339 with milliseconds precision

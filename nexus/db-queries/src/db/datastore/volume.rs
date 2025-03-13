@@ -3781,6 +3781,159 @@ fn find_matching_rw_regions_in_volume(
     Ok(())
 }
 
+fn region_sets(
+    vcr: &VolumeConstructionRequest,
+    region_sets: &mut Vec<Vec<SocketAddrV6>>,
+) {
+    let mut parts: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
+    parts.push_back(vcr);
+
+    while let Some(work) = parts.pop_front() {
+        match work {
+            VolumeConstructionRequest::Volume {
+                sub_volumes,
+                read_only_parent,
+                ..
+            } => {
+                for sub_volume in sub_volumes {
+                    parts.push_back(&sub_volume);
+                }
+
+                if let Some(read_only_parent) = read_only_parent {
+                    parts.push_back(&read_only_parent);
+                }
+            }
+
+            VolumeConstructionRequest::Url { .. } => {
+                // nothing required
+            }
+
+            VolumeConstructionRequest::Region { opts, .. } => {
+                let mut targets = vec![];
+
+                for target in &opts.target {
+                    match target {
+                        SocketAddr::V6(v6) => {
+                            targets.push(*v6);
+                        }
+                        SocketAddr::V4(_) => {}
+                    }
+                }
+
+                if targets.len() == opts.target.len() {
+                    region_sets.push(targets);
+                }
+            }
+
+            VolumeConstructionRequest::File { .. } => {
+                // nothing required
+            }
+        }
+    }
+}
+
+/// Check if an ipv6 address is referenced in a Volume Construction Request
+fn ipv6_addr_referenced_in_vcr(
+    vcr: &VolumeConstructionRequest,
+    ip: &std::net::Ipv6Addr,
+) -> bool {
+    let mut parts: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
+    parts.push_back(vcr);
+
+    while let Some(vcr_part) = parts.pop_front() {
+        match vcr_part {
+            VolumeConstructionRequest::Volume {
+                sub_volumes,
+                read_only_parent,
+                ..
+            } => {
+                for sub_volume in sub_volumes {
+                    parts.push_back(sub_volume);
+                }
+
+                if let Some(read_only_parent) = read_only_parent {
+                    parts.push_back(read_only_parent);
+                }
+            }
+
+            VolumeConstructionRequest::Url { .. } => {
+                // nothing required
+            }
+
+            VolumeConstructionRequest::Region { opts, .. } => {
+                for target in &opts.target {
+                    match target {
+                        SocketAddr::V6(t) => {
+                            if t.ip() == ip {
+                                return true;
+                            }
+                        }
+
+                        SocketAddr::V4(_) => {}
+                    }
+                }
+            }
+
+            VolumeConstructionRequest::File { .. } => {
+                // nothing required
+            }
+        }
+    }
+
+    false
+}
+
+/// Check if an ipv6 net is referenced in a Volume Construction Request
+fn ipv6_net_referenced_in_vcr(
+    vcr: &VolumeConstructionRequest,
+    net: &oxnet::Ipv6Net,
+) -> bool {
+    let mut parts: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
+    parts.push_back(vcr);
+
+    while let Some(vcr_part) = parts.pop_front() {
+        match vcr_part {
+            VolumeConstructionRequest::Volume {
+                sub_volumes,
+                read_only_parent,
+                ..
+            } => {
+                for sub_volume in sub_volumes {
+                    parts.push_back(sub_volume);
+                }
+
+                if let Some(read_only_parent) = read_only_parent {
+                    parts.push_back(read_only_parent);
+                }
+            }
+
+            VolumeConstructionRequest::Url { .. } => {
+                // nothing required
+            }
+
+            VolumeConstructionRequest::Region { opts, .. } => {
+                for target in &opts.target {
+                    match target {
+                        SocketAddr::V6(t) => {
+                            if net.contains(*t.ip()) {
+                                return true;
+                            }
+                        }
+
+                        SocketAddr::V4(_) => {}
+                    }
+                }
+            }
+
+            VolumeConstructionRequest::File { .. } => {
+                // nothing required
+            }
+        }
+    }
+
+    false
+}
+
 impl DataStore {
     pub async fn find_volumes_referencing_socket_addr(
         &self,
@@ -3844,6 +3997,100 @@ impl DataStore {
         Ok(volumes)
     }
 
+    pub async fn find_volumes_referencing_ipv6_addr(
+        &self,
+        opctx: &OpContext,
+        needle: std::net::Ipv6Addr,
+    ) -> ListResultVec<Volume> {
+        opctx.check_complex_operations_allowed()?;
+
+        let mut volumes = Vec::new();
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        while let Some(p) = paginator.next() {
+            use db::schema::volume::dsl;
+
+            let haystack =
+                paginated(dsl::volume, dsl::id, &p.current_pagparams())
+                    .select(Volume::as_select())
+                    .get_results_async::<Volume>(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+
+            paginator =
+                p.found_batch(&haystack, &|r| *r.id().as_untyped_uuid());
+
+            for volume in haystack {
+                let vcr: VolumeConstructionRequest =
+                    match serde_json::from_str(&volume.data()) {
+                        Ok(vcr) => vcr,
+                        Err(e) => {
+                            return Err(Error::internal_error(&format!(
+                                "cannot deserialize volume data for {}: {e}",
+                                volume.id(),
+                            )));
+                        }
+                    };
+
+                if ipv6_addr_referenced_in_vcr(&vcr, &needle) {
+                    volumes.push(volume);
+                }
+            }
+        }
+
+        Ok(volumes)
+    }
+
+    pub async fn find_volumes_referencing_ipv6_net(
+        &self,
+        opctx: &OpContext,
+        needle: oxnet::Ipv6Net,
+    ) -> ListResultVec<Volume> {
+        opctx.check_complex_operations_allowed()?;
+
+        let mut volumes = Vec::new();
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        while let Some(p) = paginator.next() {
+            use db::schema::volume::dsl;
+
+            let haystack =
+                paginated(dsl::volume, dsl::id, &p.current_pagparams())
+                    .select(Volume::as_select())
+                    .get_results_async::<Volume>(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+
+            paginator =
+                p.found_batch(&haystack, &|r| *r.id().as_untyped_uuid());
+
+            for volume in haystack {
+                let vcr: VolumeConstructionRequest =
+                    match serde_json::from_str(&volume.data()) {
+                        Ok(vcr) => vcr,
+                        Err(e) => {
+                            return Err(Error::internal_error(&format!(
+                                "cannot deserialize volume data for {}: {e}",
+                                volume.id(),
+                            )));
+                        }
+                    };
+
+                if ipv6_net_referenced_in_vcr(&vcr, &needle) {
+                    volumes.push(volume);
+                }
+            }
+        }
+
+        Ok(volumes)
+    }
+
     /// Returns Some(bool) depending on if a read-only target exists in a
     /// volume, None if the volume was deleted, or an error otherwise.
     pub async fn volume_references_read_only_target(
@@ -3876,6 +4123,154 @@ impl DataStore {
             })?;
 
         Ok(Some(reference))
+    }
+
+    /// Returns Some(bool) depending if a volume contains a region set with all
+    /// expunged members, None if the volume was deleted, or an error otherwise.
+    pub async fn volume_cooked(
+        &self,
+        opctx: &OpContext,
+        volume_id: VolumeUuid,
+    ) -> LookupResult<Option<bool>> {
+        let Some(volume) = self.volume_get(volume_id).await? else {
+            return Ok(None);
+        };
+
+        let vcr: VolumeConstructionRequest =
+            match serde_json::from_str(&volume.data()) {
+                Ok(vcr) => vcr,
+
+                Err(e) => {
+                    return Err(Error::internal_error(&format!(
+                        "cannot deserialize volume data for {}: {e}",
+                        volume.id(),
+                    )));
+                }
+            };
+
+        let expunged_regions: Vec<Region> = vec![
+            self.find_read_only_regions_on_expunged_physical_disks(opctx)
+                .await?,
+            self.find_read_write_regions_on_expunged_physical_disks(opctx)
+                .await?,
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        let expunged_region_snapshots: Vec<RegionSnapshot> = self
+            .find_region_snapshots_on_expunged_physical_disks(opctx)
+            .await?;
+
+        let region_sets = {
+            let mut result = vec![];
+            region_sets(&vcr, &mut result);
+            result
+        };
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        #[derive(PartialEq)]
+        enum Checked {
+            Expunged,
+            Ok,
+        }
+
+        for region_set in region_sets {
+            let mut checked_region_set = Vec::with_capacity(region_set.len());
+
+            for target in region_set {
+                let maybe_ro_usage =
+                    Self::read_only_target_to_volume_resource_usage(
+                        &conn, &target,
+                    )
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+
+                let maybe_region = Self::target_to_region(
+                    &conn,
+                    &target,
+                    RegionType::ReadWrite,
+                )
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+                let check = match (maybe_ro_usage, maybe_region) {
+                    (Some(usage), None) => match usage {
+                        VolumeResourceUsage::ReadOnlyRegion { region_id } => {
+                            if expunged_regions
+                                .iter()
+                                .any(|region| region.id() == region_id)
+                            {
+                                Checked::Expunged
+                            } else {
+                                Checked::Ok
+                            }
+                        }
+
+                        VolumeResourceUsage::RegionSnapshot {
+                            dataset_id,
+                            region_id,
+                            snapshot_id,
+                        } => {
+                            if expunged_region_snapshots.iter().any(
+                                |region_snapshot| {
+                                    region_snapshot.dataset_id
+                                        == dataset_id.into()
+                                        && region_snapshot.region_id
+                                            == region_id
+                                        && region_snapshot.snapshot_id
+                                            == snapshot_id
+                                },
+                            ) {
+                                Checked::Expunged
+                            } else {
+                                Checked::Ok
+                            }
+                        }
+                    },
+
+                    (None, Some(region)) => {
+                        let region_id = region.id();
+                        if expunged_regions
+                            .iter()
+                            .any(|region| region.id() == region_id)
+                        {
+                            Checked::Expunged
+                        } else {
+                            Checked::Ok
+                        }
+                    }
+
+                    (Some(_), Some(_)) => {
+                        return Err(Error::internal_error(&String::from(
+                            "multiple Some returned!",
+                        )));
+                    }
+
+                    // volume may have been deleted after `volume_get` at
+                    // beginning of function, and before grabbing the expunged
+                    // resources
+                    (None, None) => {
+                        return Err(Error::conflict(String::from(
+                            "volume may have been deleted concurrently",
+                        )));
+                    }
+                };
+
+                checked_region_set.push(check);
+            }
+
+            if checked_region_set.iter().all(|x| *x == Checked::Expunged) {
+                return Ok(Some(true));
+            }
+        }
+
+        Ok(Some(false))
     }
 }
 
