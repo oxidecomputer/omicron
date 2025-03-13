@@ -19,7 +19,7 @@ use omicron_common::disk::{
     OmicronPhysicalDisksConfig,
 };
 use sled_hardware::DiskFirmware;
-use slog::{Logger, info, o, warn};
+use slog::{error, info, o, warn, Logger};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -311,13 +311,17 @@ impl StorageResources {
             all_disks.generation = control_plane_config.generation;
         } else if all_disks.generation > control_plane_config.generation {
             // This should never happen; `set_config()` rejects updates to
-            // `control_plane_config` that go backwards.
-            warn!(
+            // `control_plane_config` that go backwards. This could probably be
+            // an `assert!`, but there's enough action-at-a-distance between
+            // `set_config` and this function that I'm worried we could actually
+            // see this; we'll log an error and return an empty set of results.
+            error!(
                 log,
                 "refusing to downgrade disk config generation";
                 "in-memory generation" => %all_disks.generation,
                 "incoming generation" => %control_plane_config.generation,
             );
+            return DisksManagementResult::default();
         }
 
         // "Unmanage" all disks no longer requested by the control plane.
