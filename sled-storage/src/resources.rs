@@ -19,7 +19,7 @@ use omicron_common::disk::{
     OmicronPhysicalDisksConfig,
 };
 use sled_hardware::DiskFirmware;
-use slog::{error, info, o, warn, Logger};
+use slog::{Logger, error, info, o, warn};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::watch;
