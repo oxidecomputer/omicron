@@ -22,9 +22,9 @@
 //!   resources of the [`WebhookReceiver`] API resource.
 //!
 //! + **Webhook events** represent events in the system for which webhook
-//!   notifications are generated and sent to receivers.  The
-//!   [`Nexus::webhook_event_publish`] is called to record a new event and
-//!   publish it to receivers.
+//!   notifications are generated and sent to receivers.  The control plane
+//!   calls the [`Nexus::webhook_event_publish`] method to record a new event
+//!   and publish it to receivers.
 //!
 //!   Events are categorized into [event classes], as described in RFD
 //!   538.  Receivers *subscribe* to these classes, indicating that they wish to
@@ -116,20 +116,21 @@
 //! endpoint, or by a *liveness probe* succeeding.  Liveness probes are
 //! synthetic delivery requests sent to a webhook receiver to check whether it's
 //! actually able to receive an event.  They are triggered via the
-//! [`webhook_receiver_probe`] API endpoint.  A probe may optionally request
-//! that any events for which all past deliveries have failed be resent if it
-//! succeeds.  Delivery records are also created to represent the outcome of a
-//! probe.
+//! [`Nexus::webhook_receiver_probe`] API endpoint.  A probe may optionally
+//! request that any events for which all past deliveries have failed be resent
+//! if it succeeds.  Delivery records are also created to represent the outcome
+//! of a probe.
 //!
 //! [RFD 538]: https://rfd.shared.oxide.computer/538
 //! [event classes]: https://rfd.shared.oxide.computer/rfd/538#_event_classes
 //!
 //! [^1]: Read _Snow Crash_, if you haven't already.
-//! [^1]: Presently, all weebhook receivers have the fleet.viewer role, so
+//! [^2]: Presently, all weebhook receivers have the fleet.viewer role, so
 //!     this "filtering" doesn't actually do anything. When webhook receivers
 //!     with more restrictive permissions are implemented, please rememvber to
 //!     delete this footnote.
 
+use crate::Nexus;
 use crate::app::external_dns;
 use anyhow::Context;
 use chrono::TimeDelta;
@@ -137,7 +138,6 @@ use chrono::Utc;
 use hmac::{Hmac, Mac};
 use http::HeaderName;
 use http::HeaderValue;
-use nexus_db_model::WebhookReceiver;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -151,6 +151,7 @@ use nexus_db_queries::db::model::WebhookDeliveryState;
 use nexus_db_queries::db::model::WebhookDeliveryTrigger;
 use nexus_db_queries::db::model::WebhookEvent;
 use nexus_db_queries::db::model::WebhookEventClass;
+use nexus_db_queries::db::model::WebhookReceiver;
 use nexus_db_queries::db::model::WebhookReceiverConfig;
 use nexus_db_queries::db::model::WebhookSecret;
 use nexus_types::external_api::params;
@@ -177,7 +178,7 @@ use std::time::Duration;
 use std::time::Instant;
 use uuid::Uuid;
 
-impl super::Nexus {
+impl Nexus {
     /// Publish a new webhook event, with the provided `id`, `event_class`, and
     /// JSON data payload.
     ///
