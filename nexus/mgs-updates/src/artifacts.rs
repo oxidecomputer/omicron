@@ -28,7 +28,7 @@ impl ArtifactCache {
 
     pub async fn artifact_contents(
         &self,
-        hash: ArtifactHash,
+        hash: &ArtifactHash,
     ) -> Result<Vec<u8>, ArtifactCacheError> {
         // XXX-dap want a mechanism to avoid fetching multiple times
         // concurrently.

@@ -660,8 +660,6 @@ fn register_mgs_update_step<'a>(
                             MgsUpdateRequest::new(
                                 requested_update.clone(),
                                 // XXX-dap-blocks-test
-                                Arc::new(Vec::new()),
-                                // XXX-dap-blocks-test
                                 MgsClients::from_clients(Vec::new()),
                             ),
                         )

@@ -82,7 +82,7 @@ pub trait SpComponentUpdater {
     fn logger(&self) -> &Logger;
 }
 
-pub trait ReconfiguratorSpComponentUpdater: SpComponentUpdater {
+pub trait ReconfiguratorSpComponentUpdater {
     /// Checks if the component is already updated or ready for update
     fn version_status<'a>(
         &'a self,

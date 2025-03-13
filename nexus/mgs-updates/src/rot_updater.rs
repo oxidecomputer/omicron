@@ -195,4 +195,5 @@ impl SpComponentUpdater for RotUpdater {
 }
 
 // XXX-dap replace with real impl
-impl ReconfiguratorSpComponentUpdater for RotUpdater {}
+pub struct ReconfiguratorRotUpdater;
+impl ReconfiguratorSpComponentUpdater for ReconfiguratorRotUpdater {}

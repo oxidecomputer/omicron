@@ -5,17 +5,21 @@
 //! Drive one or more in-progress MGS-managed updates
 
 use crate::{
-    MgsClients, RotUpdater, SpUpdater,
+    ArtifactCache, ArtifactCacheError, MgsClients,
     common_sp_update::{
         ReconfiguratorSpComponentUpdater, STATUS_POLL_INTERVAL, VersionStatus,
     },
     mgs_clients::GatewayClientError,
+    rot_updater::ReconfiguratorRotUpdater,
+    sp_updater::ReconfiguratorSpUpdater,
 };
-use debug_ignore::DebugIgnore;
 use futures::{
     FutureExt, StreamExt, future::BoxFuture, stream::FuturesUnordered,
 };
-use gateway_client::types::{RotSlot, SpUpdateStatus};
+use gateway_client::{
+    SpComponent,
+    types::{SpType, SpUpdateStatus},
+};
 use nexus_types::{deployment::PendingMgsUpdate, inventory::BaseboardId};
 use slog::{debug, error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
@@ -36,6 +40,23 @@ const PROGRESS_TIMEOUT: Duration = Duration::from_secs(120);
 /// How long to wait between failed attempts to reset the device
 const RESET_DELAY_INTERVAL: Duration = Duration::from_secs(10);
 
+// XXX-dap TODO-doc this is very similar to SpComponentUpdater but it uses a
+// struct-based interface instead of a trait.
+pub struct SpComponentUpdate {
+    log: slog::Logger,
+    component: SpComponent,
+    target_sp_type: SpType,
+    target_sp_slot: u32,
+    firmware_slot: u16,
+    update_id: Uuid,
+}
+
+impl SpComponentUpdate {
+    fn component(&self) -> &str {
+        self.component.const_as_str()
+    }
+}
+
 enum DeliveryWaitStatus {
     NotRunning,
     Aborted(Uuid),
@@ -52,14 +73,14 @@ enum DeliveryWaitError {
 
 async fn wait_for_delivery(
     mgs_clients: &mut MgsClients,
-    updater: &(dyn ReconfiguratorSpComponentUpdater + Send + Sync),
+    update: &SpComponentUpdate,
 ) -> Result<DeliveryWaitStatus, DeliveryWaitError> {
     let mut last_status = None;
     let mut last_progress = Instant::now();
-    let log = updater.logger();
-    let sp_type = updater.target_sp_type();
-    let sp_slot = updater.target_sp_slot();
-    let component = updater.component();
+    let log = &update.log;
+    let sp_type = update.target_sp_type;
+    let sp_slot = update.target_sp_slot;
+    let component = update.component();
 
     loop {
         // XXX-dap don't want to bail out if all MgsClients fail?
@@ -70,7 +91,8 @@ async fn wait_for_delivery(
                     .await?;
 
                 debug!(
-                    updater.logger(), "got update status";
+                    log,
+                    "got update status";
                     "mgs_addr" => client.baseurl(),
                     "status" => ?update_status,
                 );
@@ -147,6 +169,8 @@ pub enum ApplyUpdateResult {
 
 #[derive(Debug, Error)]
 pub enum ApplyUpdateError {
+    #[error("failed to fetch artifact")]
+    FetchArtifact(#[from] ArtifactCacheError),
     #[error("error communicating with MGS")]
     MgsCommunication(#[from] GatewayClientError),
     #[error(
@@ -168,10 +192,16 @@ impl From<DeliveryWaitError> for ApplyUpdateError {
 }
 
 pub async fn apply_update(
+    artifacts: Arc<ArtifactCache>,
+    sp_update: &SpComponentUpdate,
     updater: &(dyn ReconfiguratorSpComponentUpdater + Send + Sync),
     mgs_clients: &mut MgsClients,
     update: &PendingMgsUpdate,
 ) -> Result<ApplyUpdateResult, ApplyUpdateError> {
+    // Obtain the contents of the artifact that we need.
+    let data =
+        artifacts.artifact_contents(&update.artifact_hash_id.hash).await?;
+
     // XXX-dap need some component-specific way to determine:
     // - this is not yet updated but ready for update
     // - this is updated
@@ -194,29 +224,33 @@ pub async fn apply_update(
     };
 
     // Start the update.
-    let log = updater.logger();
-    let sp_type = updater.target_sp_type();
-    let sp_slot = updater.target_sp_slot();
-    let component = updater.component();
-    let my_update_id = updater.update_id();
+    let log = &sp_update.log;
+    let sp_type = sp_update.target_sp_type;
+    let sp_slot = sp_update.target_sp_slot;
+    let component = sp_update.component();
+    let my_update_id = sp_update.update_id;
 
     let update_start = mgs_clients
-        .try_all_serially(log, |client| async move {
-            client
-                .sp_component_update(
-                    sp_type,
-                    sp_slot,
-                    component,
-                    updater.firmware_slot(),
-                    &updater.update_id(),
-                    reqwest::Body::from(updater.update_data()),
-                )
-                .await?;
-            info!(
-                updater.logger(), "update started";
-                "mgs_addr" => client.baseurl(),
-            );
-            Ok(())
+        .try_all_serially(log, |client| {
+            let data = data.clone();
+            async move {
+                client
+                    .sp_component_update(
+                        sp_type,
+                        sp_slot,
+                        component,
+                        sp_update.firmware_slot,
+                        &sp_update.update_id,
+                        reqwest::Body::from(data.clone()),
+                    )
+                    .await?;
+                info!(
+                    log,
+                    "update started";
+                    "mgs_addr" => client.baseurl(),
+                );
+                Ok(())
+            }
         })
         .await;
 
@@ -232,7 +266,7 @@ pub async fn apply_update(
         Err(_) => todo!(),
     };
 
-    let our_update = match wait_for_delivery(mgs_clients, updater).await? {
+    let our_update = match wait_for_delivery(mgs_clients, sp_update).await? {
         DeliveryWaitStatus::NotRunning => return Ok(ApplyUpdateResult::Lost),
         DeliveryWaitStatus::Aborted(id) => {
             return Ok(ApplyUpdateResult::Aborted(id));
@@ -312,8 +346,7 @@ pub async fn apply_update(
         }
     }
 
-    // XXX-dap then wrap this whole thing with a wrapper that runs it in a loop,
-    // aborting the failure cases, and finishing when it's done
+    // XXX-dap something needs to abort after failure cases
 }
 
 #[derive(Debug, Error)]
@@ -367,7 +400,6 @@ struct UpdateAttemptResult {
 #[derive(Debug)]
 pub struct MgsUpdateRequest {
     requested_update: PendingMgsUpdate,
-    data: DebugIgnore<Arc<Vec<u8>>>,
     // XXX-dap rather than this, MgsClients probably ought to have a mode where
     // it accepts a qorb pool and continually try all clients forever on
     // transient issues
@@ -377,14 +409,9 @@ pub struct MgsUpdateRequest {
 impl MgsUpdateRequest {
     pub fn new(
         requested_update: PendingMgsUpdate,
-        data: Arc<Vec<u8>>,
         mgs_clients: MgsClients,
     ) -> MgsUpdateRequest {
-        MgsUpdateRequest {
-            requested_update,
-            data: DebugIgnore(data),
-            mgs_clients,
-        }
+        MgsUpdateRequest { requested_update, mgs_clients }
     }
 }
 
@@ -399,6 +426,7 @@ struct InProgressUpdate {
 
 pub struct MgsUpdateDriver {
     log: slog::Logger,
+    artifacts: Arc<ArtifactCache>,
     requests: watch::Receiver<BTreeMap<BaseboardId, MgsUpdateRequest>>,
     // XXX-dap fill in status here
     in_progress: BTreeMap<BaseboardId, InProgressUpdate>,
@@ -408,10 +436,12 @@ pub struct MgsUpdateDriver {
 impl MgsUpdateDriver {
     pub fn new(
         log: slog::Logger,
+        artifacts: Arc<ArtifactCache>,
         rx: watch::Receiver<BTreeMap<BaseboardId, MgsUpdateRequest>>,
     ) -> MgsUpdateDriver {
         MgsUpdateDriver {
             log,
+            artifacts,
             requests: rx,
             in_progress: BTreeMap::new(),
             futures: FuturesUnordered::new(),
@@ -493,7 +523,11 @@ impl MgsUpdateDriver {
                     &in_progress.log,
                     "retry needed (plan changed or last attempt did not succeed)"
                 );
-                let work = Self::dispatch_update(self.log.clone(), new_plan);
+                let work = Self::dispatch_update(
+                    self.log.clone(),
+                    self.artifacts.clone(),
+                    new_plan,
+                );
                 drop(requests);
                 self.do_dispatch(
                     result.requested_update.baseboard_id.clone(),
@@ -525,7 +559,11 @@ impl MgsUpdateDriver {
                 Entry::Vacant(_) => {
                     work_items.push((
                         baseboard_id.clone(),
-                        Self::dispatch_update(self.log.clone(), request),
+                        Self::dispatch_update(
+                            self.log.clone(),
+                            self.artifacts.clone(),
+                            request,
+                        ),
                     ));
                 }
             }
@@ -553,6 +591,7 @@ impl MgsUpdateDriver {
 
     fn dispatch_update(
         log: slog::Logger,
+        artifacts: Arc<ArtifactCache>,
         request: &MgsUpdateRequest,
     ) -> Option<(InProgressUpdate, BoxFuture<'static, UpdateAttemptResult>)>
     {
@@ -571,63 +610,60 @@ impl MgsUpdateDriver {
 
         // XXX-dap check sp_type against artifact kind
         let update_id = Uuid::new_v4();
-        let data: Vec<u8> = (*request.data.0).clone();
-        let updater: Box<dyn ReconfiguratorSpComponentUpdater + Send + Sync> =
-            match known_kind {
-                KnownArtifactKind::GimletSp
-                | KnownArtifactKind::PscSp
-                | KnownArtifactKind::SwitchSp => Box::new(SpUpdater::new(
-                    update.sp_type,
-                    update.slot_id,
+        let (sp_update, updater): (
+            SpComponentUpdate,
+            Box<dyn ReconfiguratorSpComponentUpdater + Send + Sync>,
+        ) = match known_kind {
+            KnownArtifactKind::GimletSp
+            | KnownArtifactKind::PscSp
+            | KnownArtifactKind::SwitchSp => {
+                let sp_update = SpComponentUpdate {
+                    log: log.clone(),
+                    component: SpComponent::SP_ITSELF,
+                    target_sp_type: update.sp_type,
+                    target_sp_slot: update.slot_id,
+                    // The SP has two firmware slots, but they're aren't
+                    // individually labled. We always request an update to slot
+                    // 0, which means "the inactive slot".
+                    firmware_slot: 0,
                     update_id,
-                    data,
+                };
+
+                (sp_update, Box::new(ReconfiguratorSpUpdater {}))
+            }
+
+            KnownArtifactKind::GimletRot
+            | KnownArtifactKind::PscRot
+            | KnownArtifactKind::SwitchRot => {
+                let sp_update = SpComponentUpdate {
+                    log: log.clone(),
+                    component: SpComponent::ROT,
+                    target_sp_type: update.sp_type,
+                    target_sp_slot: update.slot_id,
+                    firmware_slot: update.firmware_slot,
+                    update_id,
+                };
+
+                (sp_update, Box::new(ReconfiguratorRotUpdater {}))
+            }
+
+            // XXX-dap should we have checked this earlier?
+            KnownArtifactKind::GimletRotBootloader
+            | KnownArtifactKind::Host
+            | KnownArtifactKind::Trampoline
+            | KnownArtifactKind::ControlPlane
+            | KnownArtifactKind::Zone
+            | KnownArtifactKind::PscRotBootloader
+            | KnownArtifactKind::SwitchRotBootloader => {
+                error!(
                     &log,
-                )),
-
-                KnownArtifactKind::GimletRot
-                | KnownArtifactKind::PscRot
-                | KnownArtifactKind::SwitchRot => {
-                    // XXX-dap should this be done at planning-time?
-                    let slot = match update.firmware_slot {
-                        0 => RotSlot::A,
-                        1 => RotSlot::B,
-                        _ => {
-                            error!(
-                                &log,
-                                "ignoring update requested for unknown RoT slot: \
-                             {:?}",
-                                update
-                            );
-                            return None;
-                        }
-                    };
-                    Box::new(RotUpdater::new(
-                        update.sp_type,
-                        update.slot_id,
-                        slot,
-                        update_id,
-                        data,
-                        &log,
-                    ))
-                }
-
-                // XXX-dap should we have checked this earlier?
-                KnownArtifactKind::GimletRotBootloader
-                | KnownArtifactKind::Host
-                | KnownArtifactKind::Trampoline
-                | KnownArtifactKind::ControlPlane
-                | KnownArtifactKind::Zone
-                | KnownArtifactKind::PscRotBootloader
-                | KnownArtifactKind::SwitchRotBootloader => {
-                    error!(
-                        &log,
-                        "ignoring update requested for unsupported artifact \
+                    "ignoring update requested for unsupported artifact \
                          kind: {:?}",
-                        known_kind,
-                    );
-                    return None;
-                }
-            };
+                    known_kind,
+                );
+                return None;
+            }
+        };
 
         info!(
             &log,
@@ -641,8 +677,14 @@ impl MgsUpdateDriver {
         let update = update.clone();
         let future = async move {
             // XXX-dap clones
-            let result =
-                apply_update(&*updater, &mut mgs_clients, &update).await;
+            let result = apply_update(
+                artifacts,
+                &sp_update,
+                &*updater,
+                &mut mgs_clients,
+                &update,
+            )
+            .await;
             UpdateAttemptResult { requested_update: update, result }
         }
         .boxed();

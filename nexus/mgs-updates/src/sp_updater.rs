@@ -143,4 +143,5 @@ impl SpComponentUpdater for SpUpdater {
 }
 
 // XXX-dap replace with real impl
-impl ReconfiguratorSpComponentUpdater for SpUpdater {}
+pub struct ReconfiguratorSpUpdater;
+impl ReconfiguratorSpComponentUpdater for ReconfiguratorSpUpdater {}
