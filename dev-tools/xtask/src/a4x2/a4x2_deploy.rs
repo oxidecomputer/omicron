@@ -12,7 +12,7 @@ use fs_err as fs;
 use serde::Deserialize;
 use std::env;
 use std::{thread, time};
-use xshell::Shell;
+use xshell::{Shell, TempDir};
 
 /// Args for sshing in without checking/storing the remote host key. Every time
 /// we start a4x2, it will have new keys.
@@ -95,6 +95,9 @@ struct Environment {
     /// Directory in `work_dir` where presently nothing actually happens because
     /// we don't have any output artifacts yet lol YYY/XXX
     out_dir: Utf8PathBuf,
+
+    /// temp directory storing files created by falcon (owned by root)
+    falcon_dir: TempDir,
 }
 
 pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
@@ -110,8 +113,8 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
         };
         let a4x2_package_tar = a4x2_package_tar.canonicalize_utf8()?;
 
-        let home_dir = Utf8PathBuf::from(env::var("HOME")?);
-        let work_dir = home_dir.join(".cache/a4x2-deploy");
+        let pwd = Utf8PathBuf::try_from(env::current_dir()?)?;
+        let work_dir = pwd.join("target/a4x2/deploy");
 
         // a4x2 dir. will be created by the unpack step
         let a4x2_dir = work_dir.join("a4x2-package-out");
@@ -119,7 +122,15 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
         // Output. Maybe in CI we want this to be /out
         let out_dir = work_dir.join("a4x2-deploy-out");
 
-        Environment { a4x2_package_tar, work_dir, a4x2_dir, out_dir }
+        let falcon_dir = sh.create_temp_dir()?;
+
+        Environment {
+            a4x2_package_tar,
+            work_dir,
+            a4x2_dir,
+            out_dir,
+            falcon_dir,
+        }
     };
 
     match args.command {
@@ -229,6 +240,9 @@ fn unpack_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
         );
     }
 
+    // sled-common.tar contains files that were deduplicated (by sha256 hash)
+    // between the cargo bays. A file is deduplicated only if it is present and
+    // the same in *all* bays, so we unconditonally extract to all bays here.
     let a4x2_dir = &env.a4x2_dir;
     cmd!(sh, "tar -cf sled-common.tar -C {a4x2_dir}/cargo-bay/sled-common ./")
         .run()?;
@@ -317,6 +331,25 @@ fn prepare_to_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
         &authorized_keys,
     )?;
 
+    // Create a symlink for the falcon dir. This directory will contain files
+    // owned by root, so to ensure we are `cargo clean`-able, we put them in
+    // a temp directory outside the work directory.
+    //
+    // Specifically, the directory will have log output from creating each VM,
+    // and PID files used to tear them down later. The logs will be captured as
+    // output artifacts from the deploy task, and the PIDs don't need to persist
+    // across reboots since the processes won't persist.
+    let falcon_vm_dir = env.falcon_dir.path().join(".falcon");
+    fs::create_dir_all(&falcon_vm_dir)?;
+    fs::os::unix::fs::symlink(&falcon_vm_dir, env.a4x2_dir.join(".falcon"))?;
+
+    // falcon also writes to a "debug.out" file, which also becomes owned by
+    // root. we symlink this into our temp dir as well.
+    fs::os::unix::fs::symlink(
+        env.falcon_dir.path().join("debug.out"),
+        env.a4x2_dir.join("debug.out"),
+    )?;
+
     Ok(())
 }
 
@@ -369,7 +402,8 @@ fn try_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
     // XXX this is an arbitrary timeout. Should it be configurable? Skippable?
     let mut retries = 40;
     println!(
-        "polling control plane @ {api_url} for signs of life for up to {} minutes", retries * 30 / 60
+        "polling control plane @ {api_url} for signs of life for up to {} minutes",
+        retries * 30 / 60
     );
 
     // Print the date for the logs' benefit
