@@ -43,6 +43,7 @@ members = [
     "dev-tools/oxlog",
     "dev-tools/pins",
     "dev-tools/reconfigurator-cli",
+    "dev-tools/reconfigurator-exec",
     "dev-tools/releng",
     "dev-tools/xtask",
     "dns-server",
@@ -177,6 +178,7 @@ default-members = [
     "dev-tools/oxlog",
     "dev-tools/pins",
     "dev-tools/reconfigurator-cli",
+    "dev-tools/reconfigurator-exec",
     "dev-tools/releng",
     # Do not include xtask in the list of default members, because this causes
     # hakari to not work as well and build times to be longer.
