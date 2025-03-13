@@ -581,7 +581,7 @@ a4x2 workdir: {a4x2_dir}
 
 ---
 
-If network setup succeeded, you should also be able to ssh/scp into the sleds as
+If network setup succeeded, you should be able to ssh/scp into the sleds as
 root. Use the ssh key at:
 
     {ssh_key_path}
@@ -589,6 +589,9 @@ root. Use the ssh key at:
 i.e.
 
     ssh -i {ssh_key_path} root@<ip>
+
+We have also attempted to add your pubkeys from ~/.ssh, so you may be able to
+connect in without specifying an ssh key.
 
 Virtual Sled IP addresses:
 - g0: {g0ip}
