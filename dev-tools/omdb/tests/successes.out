@@ -788,14 +788,20 @@ task: "webhook_deliverator"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "webhook_deliverator" (don't know how to interpret details: Object {"by_rx": Object {}, "error": Null})
+    receivers:                            0
+    successful deliveries:                0
+    failed deliveries:                    0
+    internal delivery errors:             0
+    already delivered by another Nexus:   0
+    in progress by another Nexus:         0
 
 task: "webhook_dispatcher"
   configured period: every <REDACTED_DURATION>m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "webhook_dispatcher" (don't know how to interpret details: Object {"dispatched": Array [], "errors": Array [], "glob_version": String("130.0.0"), "globs_reprocessed": Object {}, "no_receivers": Array []})
+    events dispatched:                            0
+    events with no receivers subscribed:          0
 
 ---------------------------------------------
 stderr:
@@ -1301,14 +1307,20 @@ task: "webhook_deliverator"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "webhook_deliverator" (don't know how to interpret details: Object {"by_rx": Object {}, "error": Null})
+    receivers:                            0
+    successful deliveries:                0
+    failed deliveries:                    0
+    internal delivery errors:             0
+    already delivered by another Nexus:   0
+    in progress by another Nexus:         0
 
 task: "webhook_dispatcher"
   configured period: every <REDACTED_DURATION>m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "webhook_dispatcher" (don't know how to interpret details: Object {"dispatched": Array [], "errors": Array [], "glob_version": String("130.0.0"), "globs_reprocessed": Object {}, "no_receivers": Array []})
+    events dispatched:                            0
+    events with no receivers subscribed:          0
 
 ---------------------------------------------
 stderr:

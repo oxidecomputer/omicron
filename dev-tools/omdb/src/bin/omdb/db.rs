@@ -22,6 +22,7 @@ use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::DATABASE_OPTIONS_HEADING;
 use crate::helpers::const_max_len;
+use crate::helpers::display_option_blank;
 use anyhow::Context;
 use anyhow::bail;
 use async_bb8_diesel::AsyncConnection;
@@ -6774,11 +6775,6 @@ async fn cmd_db_vmm_list(
     println!("{table}");
 
     Ok(())
-}
-
-// Display an empty cell for an Option<T> if it's None.
-fn display_option_blank<T: Display>(opt: &Option<T>) -> String {
-    opt.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "".to_string())
 }
 
 // Format a `chrono::DateTime` in RFC3339 with milliseconds precision and using

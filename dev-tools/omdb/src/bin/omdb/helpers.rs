@@ -31,3 +31,9 @@ pub(crate) const fn const_max_len(strs: &[&str]) -> usize {
     }
     max
 }
+// Display an empty cell for an Option<T> if it's None.
+pub(crate) fn display_option_blank<T: std::fmt::Display>(
+    opt: &Option<T>,
+) -> String {
+    opt.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "".to_string())
+}
