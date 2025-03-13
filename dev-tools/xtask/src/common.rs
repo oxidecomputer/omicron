@@ -76,4 +76,5 @@ impl SanitizedEnvVars {
     }
 }
 
-pub(crate) static SANITIZED_ENV_VARS: SanitizedEnvVars = SanitizedEnvVars::new();
+pub(crate) static SANITIZED_ENV_VARS: SanitizedEnvVars =
+    SanitizedEnvVars::new();

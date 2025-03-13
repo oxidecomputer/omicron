@@ -80,14 +80,7 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
         let omicron_dir = work_dir.join("omicron");
         fs::create_dir_all(&omicron_dir)?;
 
-        Environment {
-            cargo,
-            git,
-            work_dir,
-            src_dir,
-            out_dir,
-            omicron_dir,
-        }
+        Environment { cargo, git, work_dir, src_dir, out_dir, omicron_dir }
     };
 
     prepare_source(&sh, &env)?;
@@ -359,7 +352,8 @@ fn create_output_artifact(sh: &Shell, env: &Environment) -> Result<()> {
     let _popdir = sh.push_dir(&env.work_dir);
     let pkg_dir_name = env.out_dir.file_name().unwrap();
 
-    let artifact = env.src_dir.join("out").join(Utf8PathBuf::from("a4x2-package-out.tgz"));
+    let artifact =
+        env.src_dir.join("out").join(Utf8PathBuf::from("a4x2-package-out.tgz"));
 
     cmd!(sh, "tar -czf {artifact} {pkg_dir_name}/").run()?;
 

@@ -1,11 +1,11 @@
 #![cfg(target_os = "illumos")]
 
+use crate::common::SANITIZED_ENV_VARS;
 use anyhow::Result;
 use clap::Subcommand;
 use std::env;
 use std::ffi::OsStr;
 use xshell::Cmd;
-use crate::common::SANITIZED_ENV_VARS;
 
 mod a4x2_deploy;
 mod a4x2_package;
@@ -48,9 +48,9 @@ fn scrub_env(cmd: Cmd<'_>) -> Cmd<'_> {
         //
         // SANITIZED_ENV_VARS deals in variables known to cause unnecessary
         // recompilation.
-        varname.to_str().map_or(true, |varname|
+        varname.to_str().map_or(true, |varname| {
             !varname.starts_with("LC_") && !SANITIZED_ENV_VARS.matches(varname)
-        )
+        })
     });
     let static_vars =
         STATIC_ENV_VARS.iter().map(|(k, v)| (OsStr::new(k), OsStr::new(v)));
