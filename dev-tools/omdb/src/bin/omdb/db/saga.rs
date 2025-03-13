@@ -126,6 +126,74 @@ async fn cmd_sagas_inject_error(
 ) -> Result<(), anyhow::Error> {
     let conn = datastore.pool_connection_for_tests().await?;
 
+    // Before doing anything: find the current SEC for the saga, and ping it to
+    // ensure that the Nexus is down.
+    if !args.bypass_sec_check {
+        let saga: Saga = {
+            use db::schema::saga::dsl;
+            dsl::saga
+                .filter(dsl::id.eq(args.saga_id))
+                .first_async(&*conn)
+                .await?
+        };
+
+        match saga.current_sec {
+            None => {
+                // If there's no current SEC, then we don't need to check if
+                // it's up. Would we see this if the saga was Requested but not
+                // started?
+            }
+
+            Some(current_sec) => {
+                let resolver = omdb.dns_resolver(opctx.log.clone()).await?;
+                let srv = resolver.lookup_srv(ServiceName::Nexus).await?;
+
+                let Some((target, port)) = srv
+                    .iter()
+                    .find(|(name, _)| name.contains(&current_sec.to_string()))
+                else {
+                    bail!("dns lookup for {current_sec} found nothing");
+                };
+
+                let Some(addr) = resolver.ipv6_lookup(&target).await? else {
+                    bail!("dns lookup for {target} found nothing");
+                };
+
+                let client = nexus_client::Client::new(
+                    &format!("http://[{addr}]:{port}/"),
+                    opctx.log.clone(),
+                );
+
+                match client.ping().await {
+                    Ok(_) => {
+                        bail!("{current_sec} answered a ping");
+                    }
+
+                    Err(e) => match e {
+                        nexus_client::Error::InvalidRequest(_)
+                        | nexus_client::Error::InvalidUpgrade(_)
+                        | nexus_client::Error::ErrorResponse(_)
+                        | nexus_client::Error::ResponseBodyError(_)
+                        | nexus_client::Error::InvalidResponsePayload(_, _)
+                        | nexus_client::Error::UnexpectedResponse(_)
+                        | nexus_client::Error::PreHookError(_)
+                        | nexus_client::Error::PostHookError(_) => {
+                            bail!("{current_sec} failed a ping with {e}");
+                        }
+
+                        nexus_client::Error::CommunicationError(_) => {
+                            // Assume communication error means that it could
+                            // not be contacted.
+                            //
+                            // Note: this could be seen if Nexus is up but
+                            // unreachable from where omdb is run!
+                        }
+                    },
+                }
+            }
+        }
+    }
+
     // Find all the nodes where there is a started record but not a done record
 
     let started_nodes: Vec<SagaNodeEvent> = {
@@ -186,73 +254,6 @@ async fn cmd_sagas_inject_error(
 
         result
     };
-
-    // For each incomplete node, find the current SEC, and ping it to ensure
-    // that the Nexus is down.
-    if !args.bypass_sec_check {
-        for node in &incomplete_nodes {
-            let saga: Saga = {
-                use db::schema::saga::dsl;
-                dsl::saga
-                    .filter(dsl::id.eq(node.saga_id))
-                    .first_async(&*conn)
-                    .await?
-            };
-
-            let Some(current_sec) = saga.current_sec else {
-                // If there's no current SEC, then we don't need to check if
-                // it's up. Would we see this if the saga was Requested but not
-                // started?
-                continue;
-            };
-
-            let resolver = omdb.dns_resolver(opctx.log.clone()).await?;
-            let srv = resolver.lookup_srv(ServiceName::Nexus).await?;
-
-            let Some((target, port)) = srv
-                .iter()
-                .find(|(name, _)| name.contains(&current_sec.to_string()))
-            else {
-                bail!("dns lookup for {current_sec} found nothing");
-            };
-
-            let Some(addr) = resolver.ipv6_lookup(&target).await? else {
-                bail!("dns lookup for {target} found nothing");
-            };
-
-            let client = nexus_client::Client::new(
-                &format!("http://[{addr}]:{port}/"),
-                opctx.log.clone(),
-            );
-
-            match client.ping().await {
-                Ok(_) => {
-                    bail!("{current_sec} answered a ping");
-                }
-
-                Err(e) => match e {
-                    nexus_client::Error::InvalidRequest(_)
-                    | nexus_client::Error::InvalidUpgrade(_)
-                    | nexus_client::Error::ErrorResponse(_)
-                    | nexus_client::Error::ResponseBodyError(_)
-                    | nexus_client::Error::InvalidResponsePayload(_, _)
-                    | nexus_client::Error::UnexpectedResponse(_)
-                    | nexus_client::Error::PreHookError(_)
-                    | nexus_client::Error::PostHookError(_) => {
-                        bail!("{current_sec} failed a ping with {e}");
-                    }
-
-                    nexus_client::Error::CommunicationError(_) => {
-                        // Assume communication error means that it could not be
-                        // contacted.
-                        //
-                        // Note: this could be seen if Nexus is up but
-                        // unreachable from where omdb is run!
-                    }
-                },
-            }
-        }
-    }
 
     // Inject an error for those nodes, which will cause the saga to unwind
     for node in incomplete_nodes {
