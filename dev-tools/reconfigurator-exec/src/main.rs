@@ -85,6 +85,16 @@ impl ReconfiguratorExec {
                 .context("creating datastore")?,
         );
 
+        let result = self.do_exec(log, &datastore).await;
+        datastore.terminate().await;
+        result
+    }
+
+    async fn do_exec(
+        &self,
+        log: slog::Logger,
+        datastore: &Arc<DataStore>,
+    ) -> Result<(), anyhow::Error> {
         info!(&log, "setting up arguments for execution");
         let opctx = OpContext::for_tests(log.clone(), datastore.clone());
         let resolver = internal_dns_resolver::Resolver::new_from_addrs(
@@ -159,8 +169,6 @@ impl ReconfiguratorExec {
         line_display.set_styles(LineDisplayStyles::colorized());
         // }
         line_display.write_event_buffer(&event_buffer)?;
-
-        datastore.terminate().await;
 
         rv.map(|_| ())
     }
