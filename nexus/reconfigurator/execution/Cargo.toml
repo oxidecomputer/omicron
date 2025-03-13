@@ -25,6 +25,7 @@ newtype-uuid.workspace = true
 nexus-config.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
+nexus-mgs-updates.workspace = true
 nexus-networking.workspace = true
 nexus-sled-agent-shared.workspace = true
 nexus-types.workspace = true

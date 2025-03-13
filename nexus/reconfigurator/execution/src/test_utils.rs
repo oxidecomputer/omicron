@@ -4,7 +4,7 @@
 
 //! Test utilities for reconfigurator execution.
 
-use std::net::Ipv6Addr;
+use std::{collections::BTreeMap, net::Ipv6Addr};
 
 use internal_dns_resolver::Resolver;
 use nexus_db_queries::{context::OpContext, db::DataStore};
@@ -16,6 +16,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use update_engine::TerminalKind;
 
 use crate::RealizeBlueprintOutput;
+use tokio::sync::watch;
 
 pub(crate) async fn realize_blueprint_and_expect(
     opctx: &OpContext,
@@ -34,12 +35,15 @@ pub(crate) async fn realize_blueprint_and_expect(
         buffer
     });
 
+    // XXX-dap
+    let (tx, _rx) = watch::channel(BTreeMap::new());
     let output = crate::realize_blueprint_with_overrides(
         opctx,
         datastore,
         resolver,
         blueprint,
         OmicronZoneUuid::new_v4(),
+        tx,
         overrides,
         sender,
     )

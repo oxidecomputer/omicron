@@ -16,7 +16,7 @@ use nexus_types::deployment::{
 };
 use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::watch;
 use update_engine::NestedError;
 
@@ -99,12 +99,15 @@ impl BlueprintExecutor {
             event_buffer.generate_report()
         });
 
+        // XXX-dap
+        let (tx, _rx) = watch::channel(BTreeMap::new());
         let result = nexus_reconfigurator_execution::realize_blueprint(
             opctx,
             &self.datastore,
             &self.resolver,
             blueprint,
             self.nexus_id,
+            tx,
             sender,
         )
         .await;

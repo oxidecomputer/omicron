@@ -374,6 +374,20 @@ pub struct MgsUpdateRequest {
     mgs_clients: MgsClients,
 }
 
+impl MgsUpdateRequest {
+    pub fn new(
+        requested_update: PendingMgsUpdate,
+        data: Arc<Vec<u8>>,
+        mgs_clients: MgsClients,
+    ) -> MgsUpdateRequest {
+        MgsUpdateRequest {
+            requested_update,
+            data: DebugIgnore(data),
+            mgs_clients,
+        }
+    }
+}
+
 // XXX-dap
 type InProgressUpdateStatus = ();
 

@@ -10,10 +10,17 @@ use anyhow::{Context, anyhow};
 use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_mgs_updates::MgsClients;
+use nexus_mgs_updates::MgsUpdateRequest;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
-use nexus_types::deployment::execution::*;
+use nexus_types::deployment::execution::{
+    ComponentRegistrar, Event, ExecutionComponent, ExecutionStepId,
+    Overridables, ReconfiguratorExecutionSpec, SharedStepHandle, Sled,
+    StepHandle, StepResult, UpdateEngine,
+};
 use nexus_types::identity::Asset;
+use nexus_types::inventory::BaseboardId;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -22,6 +29,7 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tokio::sync::watch;
 use update_engine::StepSuccess;
 use update_engine::StepWarning;
 use update_engine::merge_anyhow_list;
@@ -57,6 +65,8 @@ pub async fn realize_blueprint(
     resolver: &Resolver,
     blueprint: &Blueprint,
     nexus_id: OmicronZoneUuid,
+    // XXX-dap all these BaseboardIds in maps ought to be Arcs
+    mgs_updates: watch::Sender<BTreeMap<BaseboardId, MgsUpdateRequest>>,
     sender: mpsc::Sender<Event>,
 ) -> Result<RealizeBlueprintOutput, anyhow::Error> {
     realize_blueprint_with_overrides(
@@ -65,6 +75,7 @@ pub async fn realize_blueprint(
         resolver,
         blueprint,
         nexus_id,
+        mgs_updates,
         &Default::default(),
         sender,
     )
@@ -77,6 +88,7 @@ pub async fn realize_blueprint_with_overrides(
     resolver: &Resolver,
     blueprint: &Blueprint,
     nexus_id: OmicronZoneUuid,
+    mgs_updates: watch::Sender<BTreeMap<BaseboardId, MgsUpdateRequest>>,
     overrides: &Overridables,
     sender: mpsc::Sender<Event>,
 ) -> Result<RealizeBlueprintOutput, anyhow::Error> {
@@ -199,6 +211,12 @@ pub async fn realize_blueprint_with_overrides(
         &opctx,
         datastore,
         blueprint,
+    );
+
+    register_mgs_update_step(
+        &engine.for_component(ExecutionComponent::MgsUpdates),
+        blueprint,
+        mgs_updates,
     );
 
     // All steps are registered, so execute the engine.
@@ -618,6 +636,41 @@ fn register_cockroachdb_settings_step<'a>(
                     cockroachdb::ensure_settings(opctx, datastore, blueprint)
                         .await;
                 Ok(map_err_to_step_warning(res))
+            },
+        )
+        .register();
+}
+
+fn register_mgs_update_step<'a>(
+    registrar: &ComponentRegistrar<'_, 'a>,
+    blueprint: &'a Blueprint,
+    sender: watch::Sender<BTreeMap<BaseboardId, MgsUpdateRequest>>,
+) {
+    registrar
+        .new_step(
+            ExecutionStepId::Ensure,
+            "Kick off MGS-managed updates",
+            move |_cx| async move {
+                let map = blueprint
+                    .pending_mgs_updates
+                    .iter()
+                    .map(|(baseboard_id, requested_update)| {
+                        (
+                            baseboard_id.clone(),
+                            MgsUpdateRequest::new(
+                                requested_update.clone(),
+                                // XXX-dap-blocks-test
+                                Arc::new(Vec::new()),
+                                // XXX-dap-blocks-test
+                                MgsClients::from_clients(Vec::new()),
+                            ),
+                        )
+                    })
+                    .collect();
+                let result = sender.send(map).context(
+                    "failed to send to MgsUpdateDriver on watch channel",
+                );
+                Ok(map_err_to_step_warning(result))
             },
         )
         .register();

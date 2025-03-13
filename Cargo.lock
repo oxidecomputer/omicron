@@ -6117,6 +6117,7 @@ dependencies = [
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-inventory",
+ "nexus-mgs-updates",
  "nexus-networking",
  "nexus-reconfigurator-planning",
  "nexus-reconfigurator-preparation",
