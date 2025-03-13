@@ -224,7 +224,7 @@ pub struct StorageResources {
     // The last set of disks the control plane explicitly told us to manage.
     //
     // Only includes external storage (U.2s).
-    control_plane_config: ControlPlaneDisks,
+    control_plane_config: ControlPlaneConfig,
 }
 
 impl StorageResources {
@@ -242,7 +242,7 @@ impl StorageResources {
             log: log.new(o!("component" => "StorageResources")),
             key_requester,
             disks: watch::Sender::new(disks),
-            control_plane_config: ControlPlaneDisks::new(),
+            control_plane_config: ControlPlaneConfig::new(),
         }
     }
 
@@ -265,7 +265,7 @@ impl StorageResources {
         if self.control_plane_config.generation > config.generation {
             return;
         }
-        self.control_plane_config = ControlPlaneDisks::from_config(config);
+        self.control_plane_config = ControlPlaneConfig::from_config(config);
     }
 
     pub fn get_config(
@@ -300,7 +300,7 @@ impl StorageResources {
 
     async fn synchronize_disk_management_impl(
         all_disks: &mut AllDisks,
-        control_plane_config: &mut ControlPlaneDisks,
+        control_plane_config: &mut ControlPlaneConfig,
         key_requester: &StorageKeyRequester,
         log: &Logger,
     ) -> DisksManagementResult {
@@ -595,14 +595,19 @@ impl StorageResources {
         true
     }
 
+    // This is a wrapper around `self.disks.send_if_modified()` with two
+    // nontrivial changes:
+    //
+    // 1. We take an async closure instead of a sync closure
+    // 2. The closure does not have to return a `bool` indicating whether or not
+    //    it made changes; instead, we compare the `AllDisks` value before and
+    //    after the closure is called to see if any changes were made.
     async fn disks_send_if_modified<F, T>(&mut self, op: F) -> T
     where
         F: AsyncFnOnce(&mut StorageResources, &mut AllDisks) -> T,
     {
         // Make a clone of our disks (held in a watch channel). We'll do all our
-        // modifications to that clone, then update the channel. We can't
-        // operate on the channel directly via `send_if_modified()` because the
-        // closure it accepts doesn't allow us to run async operations.
+        // modifications to that clone, then update the channel if needed.
         let mut all_disks = self.disks();
         let result = op(self, &mut all_disks).await;
 
@@ -621,12 +626,12 @@ impl StorageResources {
 }
 
 #[derive(Debug)]
-struct ControlPlaneDisks {
+struct ControlPlaneConfig {
     generation: Generation,
     disks: BTreeMap<DiskIdentity, OmicronPhysicalDiskConfig>,
 }
 
-impl ControlPlaneDisks {
+impl ControlPlaneConfig {
     fn new() -> Self {
         Self { generation: Generation::new(), disks: BTreeMap::new() }
     }
