@@ -364,16 +364,16 @@ fn try_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
 
     // Not sure how this IP is fixed, but it is
     let api_url = DEFAULT_OMICRON_NEXUS_ADDR;
-    println!(
-        "polling control plane @ {api_url} for signs of life for up to 25 minutes"
-    );
-
-    // Print the date for the logs' benefit
-    let _ = cmd!(sh, "date").run();
 
     // Timeout = (retries / 2) minutes
     // XXX this is an arbitrary timeout. Should it be configurable? Skippable?
     let mut retries = 40;
+    println!(
+        "polling control plane @ {api_url} for signs of life for up to {} minutes", retries * 30 / 60
+    );
+
+    // Print the date for the logs' benefit
+    let _ = cmd!(sh, "date").run();
 
     // The important thing here is to do an HTTP request with timeout to the
     // control plane API endpoint. If the server is up, we'll get the page you'd
