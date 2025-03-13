@@ -17,10 +17,6 @@ use thiserror::Error;
 
 // The set of clickhouse server and keeper zones that should be running as
 // constructed by the `BlueprintBuilder` in the current planning iteration.
-//
-// Will be removed once the planner starts using this code
-// See: https://github.com/oxidecomputer/omicron/issues/6577
-#[allow(unused)]
 pub struct ClickhouseZonesThatShouldBeRunning {
     pub keepers: BTreeSet<OmicronZoneUuid>,
     pub servers: BTreeSet<OmicronZoneUuid>,
@@ -56,10 +52,6 @@ impl ClickhouseZonesThatShouldBeRunning {
 ///
 /// This is to be used as part of the `BlueprintBuilder` after zones have been
 /// allocated.
-//
-// Will be removed once the planner starts using this code
-// See: https://github.com/oxidecomputer/omicron/issues/6577
-#[allow(unused)]
 pub struct ClickhouseAllocator {
     log: Logger,
     parent_config: ClickhouseClusterConfig,
@@ -68,19 +60,12 @@ pub struct ClickhouseAllocator {
 }
 
 /// Errors encountered when trying to plan keeper deployments
-//
-// Will be removed once the planner starts using this code
-// See: https://github.com/oxidecomputer/omicron/issues/6577
-#[allow(unused)]
 #[derive(Debug, Error)]
 pub enum KeeperAllocationError {
     #[error("cannot add more than one keeper at a time: {added_keepers:?}")]
     BadMembershipChange { added_keepers: BTreeSet<KeeperId> },
 }
 
-// Will be removed once the planner starts using this code
-// https://github.com/oxidecomputer/omicron/issues/6577
-#[allow(unused)]
 impl ClickhouseAllocator {
     pub fn new(
         log: Logger,
