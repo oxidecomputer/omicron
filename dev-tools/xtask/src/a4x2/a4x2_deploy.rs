@@ -154,9 +154,7 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
             // launching a4x2 succeeds but the tests themselves fail.
             let result =
                 try_launch_a4x2(&sh, &env).and_then(|_| match &args.command {
-                    DeployCommand::RunTests(_) => {
-                        run_tests(&sh, &env)
-                    }
+                    DeployCommand::RunTests(_) => run_tests(&sh, &env),
                     _ => Ok(()),
                 });
 
@@ -261,8 +259,17 @@ fn prepare_to_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
     env::var("HOME")
         .ok()
         .and_then(|home_dir| {
-            // Attempt to traverse .ssh directory
             let home_dir = Utf8PathBuf::from(home_dir);
+
+            // Attempt to read authorized_keys- user may not have their pubkeys
+            // on this device, if it is a device they typically only remote to.
+            if let Ok(keys) =
+                fs::read_to_string(home_dir.join(".ssh/authorized_keys"))
+            {
+                authorized_keys.extend(keys.lines().map(|s| s.to_string()));
+            }
+
+            // Attempt to scan .ssh directory for addition pubkeys.
             fs::read_dir(home_dir.join(".ssh")).ok()
         })
         .map(|dir_ents| {
@@ -282,8 +289,7 @@ fn prepare_to_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
                                 },
                             )
                         })
-                        .and_then(|path| fs::read(path).ok())
-                        .and_then(|contents| String::from_utf8(contents).ok())
+                        .and_then(|path| fs::read_to_string(path).ok())
                 })
                 .filter(|key| {
                     // Extra safety to make sure we're only looking at
@@ -292,9 +298,7 @@ fn prepare_to_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
                 });
 
             // Add them all to our list of pubkeys
-            for key in user_keys {
-                authorized_keys.push(key);
-            }
+            authorized_keys.extend(user_keys);
         });
 
     // Write the public keys into the cargo bay
@@ -445,8 +449,7 @@ fn run_tests(sh: &Shell, env: &Environment) -> Result<()> {
 
     // Bring various file path constants into scope for interpolation below
     use super::{
-        LIVE_TEST_BUNDLE_DIR, LIVE_TEST_BUNDLE_NAME,
-        LIVE_TEST_BUNDLE_SCRIPT,
+        LIVE_TEST_BUNDLE_DIR, LIVE_TEST_BUNDLE_NAME, LIVE_TEST_BUNDLE_SCRIPT,
     };
 
     cmd!(sh, "scp {ssh_args...} {LIVE_TEST_BUNDLE_NAME} {ssh_host}:/zone/oxz_switch/root/root").run()?;
