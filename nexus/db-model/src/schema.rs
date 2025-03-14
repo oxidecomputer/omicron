@@ -877,7 +877,7 @@ table! {
         time_created -> Timestamptz,
         name -> Text,
         saga_dag -> Jsonb,
-        saga_state -> crate::saga_types::SagaCachedStateEnum,
+        saga_state -> crate::saga_types::SagaStateEnum,
         current_sec -> Nullable<Uuid>,
         adopt_generation -> Int8,
         adopt_time -> Timestamptz,
