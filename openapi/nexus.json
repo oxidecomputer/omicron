@@ -18224,6 +18224,13 @@
               }
             ]
           },
+          "transit_ips": {
+            "description": "A set of additional networks that this interface may send and receive traffic on",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNet"
+            }
+          },
           "vpc_name": {
             "description": "The VPC in which to create the interface.",
             "allOf": [
@@ -18237,6 +18244,7 @@
           "description",
           "name",
           "subnet_name",
+          "transit_ips",
           "vpc_name"
         ]
       },
@@ -18283,7 +18291,7 @@
             "type": "boolean"
           },
           "transit_ips": {
-            "description": "A set of additional networks that this interface may send and receive traffic on.",
+            "description": "A set of additional networks that this interface may send and receive traffic on",
             "default": [],
             "type": "array",
             "items": {
