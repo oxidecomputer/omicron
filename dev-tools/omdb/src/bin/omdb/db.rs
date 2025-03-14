@@ -84,6 +84,7 @@ use nexus_db_model::RegionReplacementStepType;
 use nexus_db_model::RegionSnapshot;
 use nexus_db_model::RegionSnapshotReplacement;
 use nexus_db_model::RegionSnapshotReplacementState;
+use nexus_db_model::RegionSnapshotReplacementStep;
 use nexus_db_model::Sled;
 use nexus_db_model::Snapshot;
 use nexus_db_model::SnapshotState;
@@ -94,6 +95,7 @@ use nexus_db_model::UpstairsRepairProgress;
 use nexus_db_model::Vmm;
 use nexus_db_model::Volume;
 use nexus_db_model::VolumeRepair;
+use nexus_db_model::VolumeResourceUsage;
 use nexus_db_model::VpcSubnet;
 use nexus_db_model::Zpool;
 use nexus_db_model::to_db_typed_uuid;
@@ -770,6 +772,8 @@ enum RegionSnapshotReplacementCommands {
     Info(RegionSnapshotReplacementInfoArgs),
     /// Manually request a region snapshot replacement
     Request(RegionSnapshotReplacementRequestArgs),
+    /// Try to determine what replacements are waiting on
+    Waiting,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1120,6 +1124,16 @@ impl DbArgs {
                         let token = omdb.check_allow_destructive()?;
                         cmd_db_region_snapshot_replacement_request(
                             &opctx, &datastore, args, token,
+                        )
+                        .await
+                    }
+                    DbCommands::RegionSnapshotReplacement(
+                        RegionSnapshotReplacementArgs {
+                            command: RegionSnapshotReplacementCommands::Waiting,
+                        },
+                    ) => {
+                        cmd_db_region_snapshot_replacement_waiting(
+                            &opctx, &datastore
                         )
                         .await
                     }
@@ -2499,6 +2513,129 @@ fn print_vcr(vcr: VolumeConstructionRequest, pad: usize) {
     }
 }
 
+enum VolumeLockHolder {
+    RegionReplacement { id: Uuid },
+    RegionSnapshotReplacement { id: Uuid },
+    RegionSnapshotReplacementStep { id: Uuid, request_id: Uuid },
+    Unknown,
+}
+
+impl VolumeLockHolder {
+    pub fn type_string(&self) -> String {
+        match self {
+            VolumeLockHolder::RegionReplacement { .. } => {
+                String::from("region replacement")
+            }
+
+            VolumeLockHolder::RegionSnapshotReplacement { .. } => {
+                String::from("region snapshot replacement")
+            }
+
+            VolumeLockHolder::RegionSnapshotReplacementStep { .. } => {
+                String::from("region snapshot replacement step")
+            }
+
+            VolumeLockHolder::Unknown => String::from("unknown"),
+        }
+    }
+
+    pub fn details(&self) -> String {
+        match self {
+            VolumeLockHolder::RegionReplacement { id } => id.to_string(),
+
+            VolumeLockHolder::RegionSnapshotReplacement { id } => {
+                id.to_string()
+            }
+
+            VolumeLockHolder::RegionSnapshotReplacementStep {
+                id,
+                request_id,
+            } => format!("{id} (request {request_id})"),
+
+            VolumeLockHolder::Unknown => String::from("n/a"),
+        }
+    }
+
+    pub fn id(&self) -> Option<Uuid> {
+        match self {
+            VolumeLockHolder::RegionReplacement { id } => Some(*id),
+
+            VolumeLockHolder::RegionSnapshotReplacement { id } => Some(*id),
+
+            VolumeLockHolder::RegionSnapshotReplacementStep { id, .. } => {
+                Some(*id)
+            }
+
+            VolumeLockHolder::Unknown => None,
+        }
+    }
+}
+
+async fn get_volume_lock_holder(
+    conn: &DataStoreConnection,
+    repair_id: Uuid,
+) -> Result<VolumeLockHolder, anyhow::Error> {
+    let maybe_region_replacement = {
+        use db::schema::region_replacement::dsl;
+
+        dsl::region_replacement
+            .filter(dsl::id.eq(repair_id))
+            .select(RegionReplacement::as_select())
+            .first_async(&**conn)
+            .await
+            .optional()?
+    };
+
+    if let Some(r) = maybe_region_replacement {
+        return Ok(VolumeLockHolder::RegionReplacement { id: r.id });
+    }
+
+    let maybe_region_snapshot_replacement = {
+        use db::schema::region_snapshot_replacement::dsl;
+
+        dsl::region_snapshot_replacement
+            .filter(dsl::id.eq(repair_id))
+            .select(RegionSnapshotReplacement::as_select())
+            .first_async(&**conn)
+            .await
+            .optional()?
+    };
+
+    if let Some(r) = maybe_region_snapshot_replacement {
+        return Ok(VolumeLockHolder::RegionSnapshotReplacement { id: r.id });
+    }
+
+    let maybe_region_snapshot_replacement_step = {
+        use db::schema::region_snapshot_replacement_step::dsl;
+
+        dsl::region_snapshot_replacement_step
+            .filter(dsl::id.eq(repair_id))
+            .select(RegionSnapshotReplacementStep::as_select())
+            .first_async(&**conn)
+            .await
+            .optional()?
+    };
+
+    if let Some(s) = maybe_region_snapshot_replacement_step {
+        return Ok(VolumeLockHolder::RegionSnapshotReplacementStep {
+            id: s.id,
+            request_id: s.request_id,
+        });
+    }
+
+    // It's possible that the `snapshot_create` saga has taken the lock, but
+    // there's no way to know what that lock id is as it is randomly
+    // generated during the saga.
+    //
+    // TODO with a better interface for querying sagas, one could:
+    //
+    // - scan for all the currently running `snapshot_create` sagas
+    // - deserialize the output (if it's there) of the "lock_id" nodes
+    // - match against that
+
+    Ok(VolumeLockHolder::Unknown)
+}
+
 /// What is holding the volume lock?
 async fn cmd_db_volume_lock_holder(
     datastore: &DataStore,
@@ -2510,6 +2647,7 @@ async fn cmd_db_volume_lock_holder(
         volume_id: String,
         lock_id: String,
         holder_type: String,
+        holder_details: String,
     }
 
     let mut rows = vec![];
@@ -2536,52 +2674,15 @@ async fn cmd_db_volume_lock_holder(
     if let Some(volume_repair_record) = maybe_volume_repair_record {
         let conn = datastore.pool_connection_for_tests().await?;
 
-        let is_region_replacement = {
-            use db::schema::region_replacement::dsl;
-
-            dsl::region_replacement
-                .filter(dsl::id.eq(volume_repair_record.repair_id))
-                .select(RegionReplacement::as_select())
-                .load_async(&*conn)
-                .await
-                .optional()?
-                .is_some()
-        };
-
-        let is_region_snapshot_replacement = {
-            use db::schema::region_snapshot_replacement::dsl;
-
-            dsl::region_snapshot_replacement
-                .filter(dsl::id.eq(volume_repair_record.repair_id))
-                .select(RegionSnapshotReplacement::as_select())
-                .load_async(&*conn)
-                .await
-                .optional()?
-                .is_some()
-        };
-
-        let holder_type = if is_region_replacement {
-            String::from("region replacement")
-        } else if is_region_snapshot_replacement {
-            String::from("region snapshot replacement")
-        } else {
-            // It's possible that the `snapshot_create` saga has taken the lock,
-            // but there's no way to know what that lock id is as it is randomly
-            // generated during the saga.
-            //
-            // TODO with a better interface for querying sagas, one could:
-            //
-            // - scan for all the currently running `snapshot_create` sagas
-            // - deserialize the output (if it's there) of the "lock_id" nodes
-            // - match against that
-            //
-            String::from("unknown (could be snapshot?)")
-        };
+        let lock_holder =
+            get_volume_lock_holder(&conn, volume_repair_record.repair_id)
+                .await?;
 
         rows.push(HolderRow {
             volume_id: volume_id.to_string(),
             lock_id: volume_repair_record.repair_id.to_string(),
-            holder_type,
+            holder_type: lock_holder.type_string(),
+            holder_details: lock_holder.details(),
         });
     }
 
@@ -4740,6 +4841,169 @@ async fn cmd_db_region_snapshot_replacement_request(
         .await?;
 
     println!("region snapshot replacement {request_id} created");
+
+    Ok(())
+}
+
+async fn cmd_db_region_snapshot_replacement_waiting(
+    opctx: &OpContext,
+    datastore: &DataStore,
+) -> Result<(), anyhow::Error> {
+    // A region snapshot replacement is "stuck" if:
+    //
+    // 1. it is in state "Running", meaning that region snapshot replacement
+    //    steps should be created for each volume that references the read-only
+    //    target being replaced, and
+    //
+    // 2. something else has locked one of those volumes
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct HolderRow {
+        region_snapshot_replacement_id: String,
+        volume_id: String,
+        holder_type: String,
+        holder_details: String,
+        edges: String,
+    }
+
+    let mut rows = vec![];
+    let mut edges = vec![];
+
+    let running_replacements =
+        datastore.get_running_region_snapshot_replacements(opctx).await?;
+
+    for replacement in running_replacements {
+        let read_only_target_volume_references =
+            match replacement.replacement_type() {
+                ReadOnlyTargetReplacement::RegionSnapshot {
+                    dataset_id,
+                    region_id,
+                    snapshot_id,
+                } => {
+                    datastore
+                        .volume_usage_records_for_resource(
+                            VolumeResourceUsage::RegionSnapshot {
+                                dataset_id: dataset_id.into(),
+                                region_id,
+                                snapshot_id,
+                            },
+                        )
+                        .await?
+                }
+
+                ReadOnlyTargetReplacement::ReadOnlyRegion { region_id } => {
+                    datastore
+                        .volume_usage_records_for_resource(
+                            VolumeResourceUsage::ReadOnlyRegion { region_id },
+                        )
+                        .await?
+                }
+            };
+
+        // There should be a step record created for each of these referenced
+        // volumes. Check if there's a lock holder for these volumes that isn't
+        // the replacement itself.
+
+        let conn = datastore.pool_connection_for_tests().await?;
+
+        for reference in read_only_target_volume_references {
+            let maybe_volume_repair_record = {
+                use db::schema::volume_repair::dsl;
+
+                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+
+                dsl::volume_repair
+                    .filter(dsl::volume_id.eq(reference.volume_id))
+                    .select(VolumeRepair::as_select())
+                    .first_async(&*conn)
+                    .await
+                    .optional()?
+            };
+
+            if let Some(volume_repair_record) = maybe_volume_repair_record {
+                let lock_holder = get_volume_lock_holder(
+                    &conn,
+                    volume_repair_record.repair_id,
+                )
+                .await?;
+
+                match lock_holder {
+                    VolumeLockHolder::RegionReplacement { .. } => {}
+
+                    VolumeLockHolder::RegionSnapshotReplacement { id } => {
+                        if replacement.id == id {
+                            // It's us, skip to the next reference
+                            continue;
+                        }
+                    }
+
+                    VolumeLockHolder::RegionSnapshotReplacementStep {
+                        request_id,
+                        ..
+                    } => {
+                        if replacement.id == request_id {
+                            // It's us, skip to the next reference
+                            continue;
+                        }
+                    }
+
+                    VolumeLockHolder::Unknown => {}
+                }
+
+                edges.push((replacement.id, lock_holder, reference.volume_id));
+            }
+        }
+    }
+
+    // A node with only one outgoing edges is what is holding up replacements
+    // (it's waiting on only one thing, where many others might be waiting for
+    // it)
+    let mut g = petgraph::graph::DiGraph::new();
+    let mut node_indices: HashMap<Uuid, petgraph::graph::NodeIndex> =
+        HashMap::new();
+
+    for (replacement_id, lock_holder, _) in &edges {
+        node_indices.entry(*replacement_id).or_insert_with(|| g.add_node(1));
+
+        if let Some(lock_holder_id) = lock_holder.id() {
+            node_indices.entry(lock_holder_id).or_insert_with(|| g.add_node(1));
+
+            let from_ix = node_indices[&replacement_id];
+            let to_ix = node_indices[&lock_holder_id];
+
+            g.add_edge(from_ix, to_ix, 1);
+        }
+    }
+
+    for (replacement_id, lock_holder, reference_volume_id) in edges {
+        let number_of_outgoing_edges = g
+            .edges_directed(
+                node_indices[&replacement_id],
+                petgraph::Direction::Outgoing,
+            )
+            .count();
+
+        rows.push(HolderRow {
+            region_snapshot_replacement_id: replacement_id.to_string(),
+            volume_id: reference_volume_id.to_string(),
+            holder_type: lock_holder.type_string(),
+            holder_details: lock_holder.details(),
+            // whatever is backed up behind only one thing is probably holding
+            // everything else up, so mark that
+            edges: if number_of_outgoing_edges == 1 {
+                format!("******** {number_of_outgoing_edges}")
+            } else {
+                format!("         {number_of_outgoing_edges}")
+            },
+        });
+    }
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
 
     Ok(())
 }

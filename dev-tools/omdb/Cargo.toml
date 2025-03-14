@@ -65,6 +65,7 @@ ipnetwork.workspace = true
 omicron-workspace-hack.workspace = true
 multimap.workspace = true
 indicatif.workspace = true
+petgraph.workspace = true
 
 [dev-dependencies]
 camino-tempfile.workspace = true
