@@ -3,9 +3,9 @@ to:   blueprint 31ef2071-2ec9-49d9-8827-fd83b17a0e3d
 
  MODIFIED SLEDS:
 
-  sled 164d275d-a936-4f06-ad53-a32cb3c8d3c8 (active):
+  sled 164d275d-a936-4f06-ad53-a32cb3c8d3c8 (active, config generation 2 -> 3):
 
-    physical disks at generation 2:
+    physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
     ------------------------------------------------------------------------------------
@@ -21,7 +21,7 @@ to:   blueprint 31ef2071-2ec9-49d9-8827-fd83b17a0e3d
     fake-vendor   fake-model   serial-fbf997ef-52d3-438a-b036-b9117322e569   in service 
 
 
-    datasets generation 2 -> 3:
+    datasets:
     ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                     dataset id                             disposition   quota     reservation   compression
     ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -76,7 +76,7 @@ to:   blueprint 31ef2071-2ec9-49d9-8827-fd83b17a0e3d
 +   oxp_60e6b021-79d6-4a6b-917c-6637e0769558/crypt/zone/oxz_clickhouse_keeper_dd5ab8b1-e6e7-40e0-9ea6-b6a16f485b52   a51fb98f-3fff-4c0a-82f0-7a4aad82096b   in service    none      none          off        
 
 
-    omicron zones generation 2 -> 3:
+    omicron zones:
     -----------------------------------------------------------------------------------------------------------------
     zone type           zone id                                image source      disposition   underlay IP           
     -----------------------------------------------------------------------------------------------------------------
@@ -98,9 +98,9 @@ to:   blueprint 31ef2071-2ec9-49d9-8827-fd83b17a0e3d
 +   clickhouse_keeper   dd5ab8b1-e6e7-40e0-9ea6-b6a16f485b52   install dataset   in service    fd00:1122:3344:101::2f
 
 
-  sled 6a4c45f6-e02f-490c-bbfa-b32fb89e8e86 (active):
+  sled 6a4c45f6-e02f-490c-bbfa-b32fb89e8e86 (active, config generation 2 -> 3):
 
-    physical disks at generation 2:
+    physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
     ------------------------------------------------------------------------------------
@@ -116,7 +116,7 @@ to:   blueprint 31ef2071-2ec9-49d9-8827-fd83b17a0e3d
     fake-vendor   fake-model   serial-f635c28a-e5ca-4d22-ac94-d8f278a6ea0e   in service 
 
 
-    datasets generation 2 -> 3:
+    datasets:
     ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                     dataset id                             disposition   quota     reservation   compression
     ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -171,7 +171,7 @@ to:   blueprint 31ef2071-2ec9-49d9-8827-fd83b17a0e3d
 +   oxp_0bf9d028-2b4a-4bff-82a1-6eb5fcefd985/crypt/zone/oxz_clickhouse_server_6fedfc94-2ae6-4cc7-a968-5185207284f4   f1143eb2-0685-4708-a471-968a58f93bad   in service    none      none          off        
 
 
-    omicron zones generation 2 -> 3:
+    omicron zones:
     -----------------------------------------------------------------------------------------------------------------
     zone type           zone id                                image source      disposition   underlay IP           
     -----------------------------------------------------------------------------------------------------------------
@@ -193,9 +193,9 @@ to:   blueprint 31ef2071-2ec9-49d9-8827-fd83b17a0e3d
 +   clickhouse_server   6fedfc94-2ae6-4cc7-a968-5185207284f4   install dataset   in service    fd00:1122:3344:103::2f
 
 
-  sled be531a62-9897-430d-acd2-ce14b4632627 (active):
+  sled be531a62-9897-430d-acd2-ce14b4632627 (active, config generation 2 -> 3):
 
-    physical disks at generation 2:
+    physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
     ------------------------------------------------------------------------------------
@@ -211,7 +211,7 @@ to:   blueprint 31ef2071-2ec9-49d9-8827-fd83b17a0e3d
     fake-vendor   fake-model   serial-e3b45593-8f0c-47b2-a381-802a7dad1f54   in service 
 
 
-    datasets generation 2 -> 3:
+    datasets:
     ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                     dataset id                             disposition   quota     reservation   compression
     ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -266,7 +266,7 @@ to:   blueprint 31ef2071-2ec9-49d9-8827-fd83b17a0e3d
 +   oxp_2a76ab1a-fb16-412d-93f9-b8cd9aa94e85/crypt/zone/oxz_clickhouse_server_812be70a-f237-47d5-ab49-f9450fe948db   292f53fc-27bb-4cc4-a61b-7d02c978149c   in service    none      none          off        
 
 
-    omicron zones generation 2 -> 3:
+    omicron zones:
     -----------------------------------------------------------------------------------------------------------------
     zone type           zone id                                image source      disposition   underlay IP           
     -----------------------------------------------------------------------------------------------------------------

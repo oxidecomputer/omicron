@@ -41,16 +41,13 @@ use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
-use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
-use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
-use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
@@ -858,7 +855,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 let mut disks = IdMap::new();
                 let mut datasets = IdMap::new();
 
-                let zones_config = if let Some(zones) = maybe_zones {
+                let zones = if let Some(zones) = maybe_zones {
                     for zone in zones {
                         if let Some(zpool) = &zone.filesystem_pool {
                             disks.insert(BlueprintPhysicalDiskConfig {
@@ -894,15 +891,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                             });
                         }
                     }
-                    BlueprintZonesConfig {
-                        generation: Generation::new().next(),
-                        zones: zones.iter().cloned().collect(),
-                    }
+                    zones.iter().cloned().collect()
                 } else {
-                    BlueprintZonesConfig {
-                        generation: Generation::new().next(),
-                        zones: IdMap::new(),
-                    }
+                    IdMap::new()
                 };
 
                 // Populate extra fake disks, giving each sled 10 total.
@@ -927,15 +918,10 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     sled_id,
                     BlueprintSledConfig {
                         state: SledState::Active,
-                        disks_config: BlueprintPhysicalDisksConfig {
-                            generation: Generation::new().next(),
-                            disks,
-                        },
-                        datasets_config: BlueprintDatasetsConfig {
-                            generation: Generation::new().next(),
-                            datasets,
-                        },
-                        zones_config,
+                        sled_agent_generation: Generation::new().next(),
+                        disks,
+                        datasets,
+                        zones,
                     },
                 );
             }

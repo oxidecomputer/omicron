@@ -458,8 +458,7 @@ impl ExampleSystemBuilder {
 
         let blueprint = builder.build();
         for sled_cfg in blueprint.sleds.values() {
-            let zones = &sled_cfg.zones_config;
-            for zone in zones.zones.iter() {
+            for zone in sled_cfg.zones.iter() {
                 let service_id = zone.id;
                 if let Some((external_ip, nic)) =
                     zone.zone_type.external_networking()
@@ -488,10 +487,7 @@ impl ExampleSystemBuilder {
             system
                 .sled_set_omicron_zones(
                     *sled_id,
-                    sled_cfg
-                        .zones_config
-                        .clone()
-                        .into_running_omicron_zones_config(),
+                    sled_cfg.clone().into_in_service_sled_config().zones_config,
                 )
                 .unwrap();
         }
@@ -504,7 +500,7 @@ impl ExampleSystemBuilder {
         for (sled_id, sled_cfg) in &blueprint.sleds {
             let sled = system.get_sled_mut(*sled_id).unwrap();
 
-            for dataset_config in sled_cfg.datasets_config.datasets.iter() {
+            for dataset_config in sled_cfg.datasets.iter() {
                 let config = dataset_config.clone().try_into().unwrap();
                 sled.add_synthetic_dataset(config);
             }

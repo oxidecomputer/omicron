@@ -14,8 +14,6 @@ pub use allocators::ExternalNetworkingError;
 pub use allocators::NoAvailableDnsSubnets;
 pub use sled_editor::DatasetsEditError;
 pub use sled_editor::DisksEditError;
-pub use sled_editor::DuplicateDiskId;
-pub use sled_editor::DuplicateZoneId;
 pub use sled_editor::MultipleDatasetsOfKind;
 pub use sled_editor::SledEditError;
 pub use sled_editor::SledInputError;
