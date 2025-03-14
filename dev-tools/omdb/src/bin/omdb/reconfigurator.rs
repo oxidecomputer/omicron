@@ -272,12 +272,18 @@ async fn cmd_reconfigurator_history(
         println!("... (earlier history omitted)");
     }
 
-    let mut prev: Option<BlueprintUuid> = None;
+    // prev_blueprint_id is `None` only during the first iteration.
+    let mut prev_blueprint_id: Option<BlueprintUuid> = None;
+
+    // prev_blueprint is `None` if any of these is true:
+    // - if we're not printing diffs
+    // - if this is the first iteration of the loop
+    // - if the previous blueprint had been pruned from the database
     let mut prev_blueprint: Option<Blueprint> = None;
+
     for t in targets {
         let target_id = BlueprintUuid::from(t.blueprint_id);
         let this_previous = prev_blueprint.take();
-        prev_blueprint = None;
 
         print!(
             "{:>5} {} {} {:>8}",
@@ -287,10 +293,7 @@ async fn cmd_reconfigurator_history(
             if t.enabled { "enabled" } else { "disabled" },
         );
 
-        let same_blueprint = matches!(prev,
-            Some(prev_id) if prev_id == target_id
-        );
-        if same_blueprint {
+        if prev_blueprint_id == Some(target_id) {
             // The only change here could be to the enable/disable bit.
             // There's nothing else to say.
             println!();
@@ -304,7 +307,8 @@ async fn cmd_reconfigurator_history(
 
             match (
                 history_args.diff,
-                prev.and_then(|prev_id| all_blueprints.get(&prev_id)),
+                prev_blueprint_id
+                    .and_then(|prev_id| all_blueprints.get(&prev_id)),
                 all_blueprints.get(&target_id),
             ) {
                 (true, Some(previous), Some(_)) => {
@@ -327,7 +331,7 @@ async fn cmd_reconfigurator_history(
             };
         }
 
-        prev = Some(target_id);
+        prev_blueprint_id = Some(target_id);
     }
 
     Ok(())
