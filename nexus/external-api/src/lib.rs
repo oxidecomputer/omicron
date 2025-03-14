@@ -3557,7 +3557,7 @@ pub trait NexusExternalApi {
     /// Update webhook receiver
     ///
     /// Note that receiver secrets are NOT added or removed using this endpoint.
-    /// Instead, use the `/v1/webhooks/{secrets}/?receiver={receiver}`` endpoint
+    /// Instead, use the `/v1/webhooks/{secrets}/?receiver={receiver}` endpoint
     /// to add and remove secrets.
     #[endpoint {
         method = PUT,
