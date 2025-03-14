@@ -3726,7 +3726,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_clickhouse_keeper_membership (
  * will eventually prune old blueprint targets, so it will not always be
  * possible to view the entire history.
  *
- * `bp_omicron_zone`, and `bp_omicron_zone_nic` are nearly identical to their
+ * `bp_omicron_zone` and `bp_omicron_zone_nic` are nearly identical to their
  * `inv_*` counterparts, and record the `OmicronZoneConfig`s for each sled.
  */
 
