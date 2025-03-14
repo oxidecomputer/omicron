@@ -22,6 +22,7 @@ use hickory_resolver::config::NameServerConfig;
 use hickory_resolver::config::Protocol;
 use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::config::ResolverOpts;
+use id_map::IdMap;
 use internal_dns_types::config::DnsConfigBuilder;
 use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
 use internal_dns_types::names::ServiceName;
@@ -32,6 +33,7 @@ use nexus_config::MgdConfig;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_config::NexusConfig;
 use nexus_db_queries::db::pub_test_utils::crdb;
+use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
@@ -53,7 +55,6 @@ use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::blueprint_zone_type;
-use nexus_types::deployment::id_map::IdMap;
 use nexus_types::external_api::views::SledState;
 use nexus_types::internal_api::params::DnsConfigParams;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
@@ -71,6 +72,8 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::disk::CompressionAlgorithm;
+use omicron_common::disk::DatasetsConfig;
+use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
@@ -105,6 +108,7 @@ pub mod background;
 pub mod db;
 pub mod http_testing;
 pub mod resource_helpers;
+pub mod sql;
 
 pub const SLED_AGENT_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";
 pub const SLED_AGENT2_UUID: &str = "039be560-54cc-49e3-88df-1a29dadbf913";
@@ -1070,14 +1074,20 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         );
 
         client
-            .omicron_zones_put(&OmicronZonesConfig {
-                zones: self
-                    .blueprint_zones
-                    .clone()
-                    .into_iter()
-                    .map(From::from)
-                    .collect(),
-                generation: Generation::new().next(),
+            .omicron_config_put(&OmicronSledConfig {
+                // Sending no disks or datasets is probably wrong, but there are
+                // a lot of inconsistencies with this in nexus-test.
+                disks_config: OmicronPhysicalDisksConfig::default(),
+                datasets_config: DatasetsConfig::default(),
+                zones_config: OmicronZonesConfig {
+                    zones: self
+                        .blueprint_zones
+                        .clone()
+                        .into_iter()
+                        .map(From::from)
+                        .collect(),
+                    generation: Generation::new().next(),
+                },
             })
             .await
             .expect("Failed to configure sled agent with our zones");
@@ -1110,9 +1120,14 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             );
 
             client
-                .omicron_zones_put(&OmicronZonesConfig {
-                    zones: vec![],
-                    generation: Generation::new().next(),
+                .omicron_config_put(&OmicronSledConfig {
+                    // As above, sending no disks or datasets is probably wrong
+                    disks_config: OmicronPhysicalDisksConfig::default(),
+                    datasets_config: DatasetsConfig::default(),
+                    zones_config: OmicronZonesConfig {
+                        zones: vec![],
+                        generation: Generation::new().next(),
+                    },
                 })
                 .await
                 .expect("Failed to configure sled agent with our zones");

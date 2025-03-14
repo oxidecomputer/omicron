@@ -30,11 +30,10 @@ pub enum ExecutionComponent {
     ExternalNetworking,
     SupportBundles,
     SledList,
+    SledAgent,
     PhysicalDisks,
     OmicronZones,
     FirewallRules,
-    DatasetRecords,
-    Datasets,
     Dns,
     Cockroach,
     Clickhouse,
@@ -47,11 +46,9 @@ pub enum ExecutionComponent {
 pub enum ExecutionStepId {
     /// Fetch information that will be used in subsequent steps.
     Fetch,
-    Add,
-    Remove,
+    /// Perform cleanup actions on removed items.
+    Cleanup,
     /// Idempotent "ensure" or "deploy" step that delegates removes and adds to
     /// other parts of the system.
     Ensure,
-    /// Finalize the blueprint and check for errors at the end of execution.
-    Finalize,
 }

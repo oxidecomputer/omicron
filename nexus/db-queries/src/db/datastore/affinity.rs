@@ -876,7 +876,8 @@ mod tests {
 
     use crate::db::lookup::LookupPath;
     use crate::db::pub_test_utils::TestDatabase;
-    use nexus_db_model::Instance;
+    use crate::db::pub_test_utils::helpers::create_project;
+    use crate::db::pub_test_utils::helpers::create_stopped_instance_record;
     use nexus_db_model::Resources;
     use nexus_db_model::SledResourceVmm;
     use nexus_types::external_api::params;
@@ -884,29 +885,11 @@ mod tests {
         self, ByteCount, DataPageParams, IdentityMetadataCreateParams,
     };
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
     use omicron_uuid_kinds::PropolisUuid;
     use omicron_uuid_kinds::SledUuid;
     use std::num::NonZeroU32;
-
-    // Helper function for creating a project
-    async fn create_project(
-        opctx: &OpContext,
-        datastore: &DataStore,
-        name: &str,
-    ) -> (authz::Project, Project) {
-        let authz_silo = opctx.authn.silo_required().unwrap();
-        let project = Project::new(
-            authz_silo.id(),
-            params::ProjectCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: name.parse().unwrap(),
-                    description: "".to_string(),
-                },
-            },
-        );
-        datastore.project_create(&opctx, project).await.unwrap()
-    }
 
     // Helper function for creating an affinity group with
     // arbitrary configuration.
@@ -952,64 +935,6 @@ mod tests {
         datastore
             .anti_affinity_group_create(&opctx, &authz_project, group)
             .await
-    }
-
-    // Helper function for creating an instance without a VMM.
-    async fn create_instance_record(
-        opctx: &OpContext,
-        datastore: &DataStore,
-        authz_project: &authz::Project,
-        name: &str,
-    ) -> Instance {
-        let instance = Instance::new(
-            InstanceUuid::new_v4(),
-            authz_project.id(),
-            &params::InstanceCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: name.parse().unwrap(),
-                    description: "".to_string(),
-                },
-                ncpus: 2i64.try_into().unwrap(),
-                memory: ByteCount::from_gibibytes_u32(16),
-                hostname: "myhostname".try_into().unwrap(),
-                user_data: Vec::new(),
-                network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::None,
-                external_ips: Vec::new(),
-                disks: Vec::new(),
-                boot_disk: None,
-                ssh_public_keys: None,
-                start: false,
-                auto_restart_policy: Default::default(),
-            },
-        );
-
-        let instance = datastore
-            .project_create_instance(&opctx, &authz_project, instance)
-            .await
-            .unwrap();
-
-        set_instance_state_stopped(&datastore, instance.id()).await;
-
-        instance
-    }
-
-    async fn set_instance_state_stopped(
-        datastore: &DataStore,
-        instance: uuid::Uuid,
-    ) {
-        use db::schema::instance::dsl;
-        diesel::update(dsl::instance)
-            .filter(dsl::id.eq(instance))
-            .set((
-                dsl::state.eq(db::model::InstanceState::NoVmm),
-                dsl::active_propolis_id.eq(None::<uuid::Uuid>),
-            ))
-            .execute_async(
-                &*datastore.pool_connection_for_tests().await.unwrap(),
-            )
-            .await
-            .unwrap();
     }
 
     // Helper for explicitly modifying sled resource usage
@@ -1480,7 +1405,7 @@ mod tests {
         assert!(members.is_empty());
 
         // Create an instance without a VMM.
-        let instance = create_instance_record(
+        let instance = create_stopped_instance_record(
             &opctx,
             &datastore,
             &authz_project,
@@ -1493,9 +1418,7 @@ mod tests {
             .affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(
-                    InstanceUuid::from_untyped_uuid(instance.id()),
-                ),
+                external::AffinityGroupMember::Instance(instance),
             )
             .await
             .unwrap();
@@ -1507,9 +1430,7 @@ mod tests {
             .unwrap();
         assert_eq!(members.len(), 1);
         assert_eq!(
-            external::AffinityGroupMember::Instance(
-                InstanceUuid::from_untyped_uuid(instance.id())
-            ),
+            external::AffinityGroupMember::Instance(instance,),
             members[0].clone().into()
         );
 
@@ -1518,9 +1439,7 @@ mod tests {
             .affinity_group_member_delete(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(
-                    InstanceUuid::from_untyped_uuid(instance.id()),
-                ),
+                external::AffinityGroupMember::Instance(instance),
             )
             .await
             .unwrap();
@@ -1576,7 +1495,7 @@ mod tests {
         assert!(members.is_empty());
 
         // Create an instance without a VMM.
-        let instance = create_instance_record(
+        let instance = create_stopped_instance_record(
             &opctx,
             &datastore,
             &authz_project,
@@ -1589,9 +1508,7 @@ mod tests {
             .anti_affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(
-                    InstanceUuid::from_untyped_uuid(instance.id()),
-                ),
+                external::AntiAffinityGroupMember::Instance(instance),
             )
             .await
             .unwrap();
@@ -1603,9 +1520,7 @@ mod tests {
             .unwrap();
         assert_eq!(members.len(), 1);
         assert_eq!(
-            external::AntiAffinityGroupMember::Instance(
-                InstanceUuid::from_untyped_uuid(instance.id())
-            ),
+            external::AntiAffinityGroupMember::Instance(instance,),
             members[0].clone().into()
         );
 
@@ -1614,9 +1529,7 @@ mod tests {
             .anti_affinity_group_member_delete(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(
-                    InstanceUuid::from_untyped_uuid(instance.id()),
-                ),
+                external::AntiAffinityGroupMember::Instance(instance),
             )
             .await
             .unwrap();
@@ -1672,7 +1585,7 @@ mod tests {
         assert!(members.is_empty());
 
         // Create an instance with a VMM.
-        let instance = create_instance_record(
+        let instance = create_stopped_instance_record(
             &opctx,
             &datastore,
             &authz_project,
@@ -1680,20 +1593,14 @@ mod tests {
         )
         .await;
 
-        allocate_instance_reservation(
-            &datastore,
-            InstanceUuid::from_untyped_uuid(instance.id()),
-        )
-        .await;
+        allocate_instance_reservation(&datastore, instance).await;
 
         // Cannot add the instance to the group while it's running.
         let err = datastore
             .affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(
-                    InstanceUuid::from_untyped_uuid(instance.id()),
-                ),
+                external::AffinityGroupMember::Instance(instance),
             )
             .await
             .expect_err(
@@ -1708,28 +1615,18 @@ mod tests {
         );
 
         // If we have no reservation for the instance, we can add it to the group.
-        delete_instance_reservation(
-            &datastore,
-            InstanceUuid::from_untyped_uuid(instance.id()),
-        )
-        .await;
+        delete_instance_reservation(&datastore, instance).await;
         datastore
             .affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(
-                    InstanceUuid::from_untyped_uuid(instance.id()),
-                ),
+                external::AffinityGroupMember::Instance(instance),
             )
             .await
             .unwrap();
 
         // Now we can reserve a sled for the instance once more.
-        allocate_instance_reservation(
-            &datastore,
-            InstanceUuid::from_untyped_uuid(instance.id()),
-        )
-        .await;
+        allocate_instance_reservation(&datastore, instance).await;
 
         // We should now be able to list the new member
         let members = datastore
@@ -1738,9 +1635,7 @@ mod tests {
             .unwrap();
         assert_eq!(members.len(), 1);
         assert_eq!(
-            external::AffinityGroupMember::Instance(
-                InstanceUuid::from_untyped_uuid(instance.id())
-            ),
+            external::AffinityGroupMember::Instance(instance,),
             members[0].clone().into()
         );
 
@@ -1750,9 +1645,7 @@ mod tests {
             .affinity_group_member_delete(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(
-                    InstanceUuid::from_untyped_uuid(instance.id()),
-                ),
+                external::AffinityGroupMember::Instance(instance),
             )
             .await
             .unwrap();
@@ -1808,25 +1701,21 @@ mod tests {
         assert!(members.is_empty());
 
         // Create an instance with a VMM.
-        let instance = create_instance_record(
+        let instance = create_stopped_instance_record(
             &opctx,
             &datastore,
             &authz_project,
             "my-instance",
         )
         .await;
-        allocate_instance_reservation(
-            &datastore,
-            InstanceUuid::from_untyped_uuid(instance.id()),
-        )
-        .await;
+        allocate_instance_reservation(&datastore, instance).await;
 
         // Cannot add the instance to the group while it's running.
         let err = datastore
             .anti_affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(InstanceUuid::from_untyped_uuid(instance.id())),
+                external::AntiAffinityGroupMember::Instance(instance),
             )
             .await
             .expect_err(
@@ -1841,28 +1730,18 @@ mod tests {
         );
 
         // If we have no reservation for the instance, we can add it to the group.
-        delete_instance_reservation(
-            &datastore,
-            InstanceUuid::from_untyped_uuid(instance.id()),
-        )
-        .await;
+        delete_instance_reservation(&datastore, instance).await;
         datastore
             .anti_affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(
-                    InstanceUuid::from_untyped_uuid(instance.id()),
-                ),
+                external::AntiAffinityGroupMember::Instance(instance),
             )
             .await
             .unwrap();
 
         // Now we can reserve a sled for the instance once more.
-        allocate_instance_reservation(
-            &datastore,
-            InstanceUuid::from_untyped_uuid(instance.id()),
-        )
-        .await;
+        allocate_instance_reservation(&datastore, instance).await;
 
         // We should now be able to list the new member
         let members = datastore
@@ -1871,9 +1750,7 @@ mod tests {
             .unwrap();
         assert_eq!(members.len(), 1);
         assert_eq!(
-            external::AntiAffinityGroupMember::Instance(
-                InstanceUuid::from_untyped_uuid(instance.id())
-            ),
+            external::AntiAffinityGroupMember::Instance(instance,),
             members[0].clone().into()
         );
 
@@ -1883,9 +1760,7 @@ mod tests {
             .anti_affinity_group_member_delete(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(
-                    InstanceUuid::from_untyped_uuid(instance.id()),
-                ),
+                external::AntiAffinityGroupMember::Instance(instance),
             )
             .await
             .unwrap();
@@ -1940,7 +1815,7 @@ mod tests {
         assert!(members.is_empty());
 
         // Create an instance without a VMM, add it to the group.
-        let instance = create_instance_record(
+        let instance = create_stopped_instance_record(
             &opctx,
             &datastore,
             &authz_project,
@@ -1951,9 +1826,7 @@ mod tests {
             .affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(
-                    InstanceUuid::from_untyped_uuid(instance.id()),
-                ),
+                external::AffinityGroupMember::Instance(instance),
             )
             .await
             .unwrap();
@@ -2014,7 +1887,7 @@ mod tests {
         assert!(members.is_empty());
 
         // Create an instance without a VMM, add it to the group.
-        let instance = create_instance_record(
+        let instance = create_stopped_instance_record(
             &opctx,
             &datastore,
             &authz_project,
@@ -2025,9 +1898,7 @@ mod tests {
             .anti_affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(
-                    InstanceUuid::from_untyped_uuid(instance.id()),
-                ),
+                external::AntiAffinityGroupMember::Instance(instance),
             )
             .await
             .unwrap();
@@ -2091,7 +1962,7 @@ mod tests {
         assert!(members.is_empty());
 
         // Create an instance without a VMM, add it to the group.
-        let instance = create_instance_record(
+        let instance = create_stopped_instance_record(
             &opctx,
             &datastore,
             &authz_project,
@@ -2102,16 +1973,14 @@ mod tests {
             .affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(
-                    InstanceUuid::from_untyped_uuid(instance.id()),
-                ),
+                external::AffinityGroupMember::Instance(instance),
             )
             .await
             .unwrap();
 
         // Delete the instance
         let (.., authz_instance) = LookupPath::new(opctx, datastore)
-            .instance_id(instance.id())
+            .instance_id(instance.into_untyped_uuid())
             .lookup_for(authz::Action::Delete)
             .await
             .unwrap();
@@ -2173,7 +2042,7 @@ mod tests {
         assert!(members.is_empty());
 
         // Create an instance without a VMM, add it to the group.
-        let instance = create_instance_record(
+        let instance = create_stopped_instance_record(
             &opctx,
             &datastore,
             &authz_project,
@@ -2184,16 +2053,14 @@ mod tests {
             .anti_affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(
-                    InstanceUuid::from_untyped_uuid(instance.id()),
-                ),
+                external::AntiAffinityGroupMember::Instance(instance),
             )
             .await
             .unwrap();
 
         // Delete the instance
         let (.., authz_instance) = LookupPath::new(opctx, datastore)
-            .instance_id(instance.id())
+            .instance_id(instance.into_untyped_uuid())
             .lookup_for(authz::Action::Delete)
             .await
             .unwrap();
@@ -2265,7 +2132,7 @@ mod tests {
             }
 
             // Create an instance, and maybe delete it.
-            let instance = create_instance_record(
+            let instance = create_stopped_instance_record(
                 &opctx,
                 &datastore,
                 &authz_project,
@@ -2273,7 +2140,7 @@ mod tests {
             )
             .await;
             let (.., authz_instance) = LookupPath::new(opctx, datastore)
-                .instance_id(instance.id())
+                .instance_id(instance.into_untyped_uuid())
                 .lookup_for(authz::Action::Modify)
                 .await
                 .unwrap();
@@ -2292,9 +2159,7 @@ mod tests {
                 .affinity_group_member_add(
                     &opctx,
                     &authz_group,
-                    external::AffinityGroupMember::Instance(
-                        InstanceUuid::from_untyped_uuid(instance.id()),
-                    ),
+                    external::AffinityGroupMember::Instance(instance),
                 )
                 .await
                 .expect_err("Should have failed");
@@ -2326,9 +2191,7 @@ mod tests {
                 .affinity_group_member_delete(
                     &opctx,
                     &authz_group,
-                    external::AffinityGroupMember::Instance(
-                        InstanceUuid::from_untyped_uuid(instance.id()),
-                    ),
+                    external::AffinityGroupMember::Instance(instance),
                 )
                 .await
                 .expect_err("Should have failed");
@@ -2425,7 +2288,7 @@ mod tests {
             }
 
             // Create an instance, and maybe delete it.
-            let instance = create_instance_record(
+            let instance = create_stopped_instance_record(
                 &opctx,
                 &datastore,
                 &authz_project,
@@ -2433,7 +2296,7 @@ mod tests {
             )
             .await;
             let (.., authz_instance) = LookupPath::new(opctx, datastore)
-                .instance_id(instance.id())
+                .instance_id(instance.into_untyped_uuid())
                 .lookup_for(authz::Action::Modify)
                 .await
                 .unwrap();
@@ -2452,9 +2315,7 @@ mod tests {
                 .anti_affinity_group_member_add(
                     &opctx,
                     &authz_group,
-                    external::AntiAffinityGroupMember::Instance(
-                        InstanceUuid::from_untyped_uuid(instance.id()),
-                    ),
+                    external::AntiAffinityGroupMember::Instance(instance),
                 )
                 .await
                 .expect_err("Should have failed");
@@ -2486,9 +2347,7 @@ mod tests {
                 .anti_affinity_group_member_delete(
                     &opctx,
                     &authz_group,
-                    external::AntiAffinityGroupMember::Instance(
-                        InstanceUuid::from_untyped_uuid(instance.id()),
-                    ),
+                    external::AntiAffinityGroupMember::Instance(instance),
                 )
                 .await
                 .expect_err("Should have failed");
@@ -2560,7 +2419,7 @@ mod tests {
             .unwrap();
 
         // Create an instance
-        let instance = create_instance_record(
+        let instance = create_stopped_instance_record(
             &opctx,
             &datastore,
             &authz_project,
@@ -2573,9 +2432,7 @@ mod tests {
             .affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(
-                    InstanceUuid::from_untyped_uuid(instance.id()),
-                ),
+                external::AffinityGroupMember::Instance(instance),
             )
             .await
             .unwrap();
@@ -2585,9 +2442,7 @@ mod tests {
             .affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(
-                    InstanceUuid::from_untyped_uuid(instance.id()),
-                ),
+                external::AffinityGroupMember::Instance(instance),
             )
             .await
             .unwrap_err();
@@ -2623,9 +2478,7 @@ mod tests {
             .affinity_group_member_delete(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(
-                    InstanceUuid::from_untyped_uuid(instance.id()),
-                ),
+                external::AffinityGroupMember::Instance(instance),
             )
             .await
             .unwrap();
@@ -2633,9 +2486,7 @@ mod tests {
             .affinity_group_member_delete(
                 &opctx,
                 &authz_group,
-                external::AffinityGroupMember::Instance(
-                    InstanceUuid::from_untyped_uuid(instance.id()),
-                ),
+                external::AffinityGroupMember::Instance(instance),
             )
             .await
             .unwrap_err();
@@ -2687,7 +2538,7 @@ mod tests {
             .unwrap();
 
         // Create an instance
-        let instance = create_instance_record(
+        let instance = create_stopped_instance_record(
             &opctx,
             &datastore,
             &authz_project,
@@ -2700,9 +2551,7 @@ mod tests {
             .anti_affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(
-                    InstanceUuid::from_untyped_uuid(instance.id()),
-                ),
+                external::AntiAffinityGroupMember::Instance(instance),
             )
             .await
             .unwrap();
@@ -2712,9 +2561,7 @@ mod tests {
             .anti_affinity_group_member_add(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(
-                    InstanceUuid::from_untyped_uuid(instance.id()),
-                ),
+                external::AntiAffinityGroupMember::Instance(instance),
             )
             .await
             .unwrap_err();
@@ -2750,9 +2597,7 @@ mod tests {
             .anti_affinity_group_member_delete(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(
-                    InstanceUuid::from_untyped_uuid(instance.id()),
-                ),
+                external::AntiAffinityGroupMember::Instance(instance),
             )
             .await
             .unwrap();
@@ -2760,9 +2605,7 @@ mod tests {
             .anti_affinity_group_member_delete(
                 &opctx,
                 &authz_group,
-                external::AntiAffinityGroupMember::Instance(
-                    InstanceUuid::from_untyped_uuid(instance.id()),
-                ),
+                external::AntiAffinityGroupMember::Instance(instance),
             )
             .await
             .unwrap_err();

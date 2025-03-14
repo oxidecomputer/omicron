@@ -2867,16 +2867,14 @@ fn is_services_vpc_gateway(igw: &InternetGateway) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::datastore::test::sled_baseboard_for_test;
-    use crate::db::datastore::test::sled_system_hardware_for_test;
     use crate::db::datastore::test_utils::IneligibleSleds;
     use crate::db::model::Project;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use crate::db::queries::vpc::MAX_VNI_SEARCH_RANGE_SIZE;
     use nexus_db_fixed_data::silo::DEFAULT_SILO;
     use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use nexus_db_model::IncompleteNetworkInterface;
-    use nexus_db_model::SledUpdate;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::system::SledBuilder;
     use nexus_reconfigurator_planning::system::SystemDescription;
@@ -3169,18 +3167,11 @@ mod tests {
             let sled_id = SledUuid::new_v4();
             sled_ids.push(sled_id);
             system.sled(SledBuilder::new().id(sled_id)).expect("adding sled");
-            datastore
-                .sled_upsert(SledUpdate::new(
-                    sled_id.into_untyped_uuid(),
-                    "[::1]:0".parse().unwrap(),
-                    0,
-                    sled_baseboard_for_test(),
-                    sled_system_hardware_for_test(),
-                    rack_id,
-                    Generation::new().into(),
-                ))
-                .await
-                .expect("upserting sled");
+            let sled_update = SledUpdateBuilder::new()
+                .sled_id(sled_id)
+                .rack_id(rack_id)
+                .build();
+            datastore.sled_upsert(sled_update).await.expect("upserting sled");
         }
         sled_ids.sort_unstable();
         let planning_input = system
