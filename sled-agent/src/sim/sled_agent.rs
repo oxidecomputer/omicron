@@ -905,15 +905,30 @@ impl SledAgent {
         &self,
         config: OmicronSledConfig,
     ) -> Result<OmicronSledConfigResult, HttpError> {
+        // TODO We should ledger and operate on OmicronSledConfig directly, but
+        // we don't yet; for now break this out into three separate configs.
+        // Tracked by https://github.com/oxidecomputer/omicron/issues/7774
+        let disks_config = OmicronPhysicalDisksConfig {
+            generation: config.generation,
+            disks: config.disks.into_iter().collect(),
+        };
+        let datasets_config = DatasetsConfig {
+            generation: config.generation,
+            datasets: config.datasets.into_iter().map(|d| (d.id, d)).collect(),
+        };
+        let zones_config = OmicronZonesConfig {
+            generation: config.generation,
+            zones: config.zones.into_iter().collect(),
+        };
         let (disks, datasets) = {
             let mut storage = self.storage.lock();
             let DisksManagementResult { status: disks } =
-                storage.omicron_physical_disks_ensure(config.disks_config)?;
+                storage.omicron_physical_disks_ensure(disks_config)?;
             let DatasetsManagementResult { status: datasets } =
-                storage.datasets_ensure(config.datasets_config)?;
+                storage.datasets_ensure(datasets_config)?;
             (disks, datasets)
         };
-        *self.fake_zones.lock().unwrap() = config.zones_config;
+        *self.fake_zones.lock().unwrap() = zones_config;
         Ok(OmicronSledConfigResult { disks, datasets })
     }
 

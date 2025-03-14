@@ -969,8 +969,15 @@ impl SledAgent {
         &self,
         config: OmicronSledConfig,
     ) -> Result<OmicronSledConfigResult, Error> {
-        let disks =
-            self.omicron_physical_disks_ensure(config.disks_config).await?;
+        // TODO We should ledger and operate on OmicronSledConfig directly, but
+        // we don't yet; for now break this out into three separate configs.
+        // Tracked by https://github.com/oxidecomputer/omicron/issues/7774
+        let disks_config = OmicronPhysicalDisksConfig {
+            generation: config.generation,
+            disks: config.disks.into_iter().collect(),
+        };
+
+        let disks = self.omicron_physical_disks_ensure(disks_config).await?;
 
         // If we only had partial success deploying disks, don't proceed.
         if disks.has_error() {
@@ -980,7 +987,11 @@ impl SledAgent {
             });
         }
 
-        let datasets = self.datasets_ensure(config.datasets_config).await?;
+        let datasets_config = DatasetsConfig {
+            generation: config.generation,
+            datasets: config.datasets.into_iter().map(|d| (d.id, d)).collect(),
+        };
+        let datasets = self.datasets_ensure(datasets_config).await?;
 
         // If we only had partial success deploying datasets, don't proceed.
         if datasets.has_error() {
@@ -990,7 +1001,11 @@ impl SledAgent {
             });
         }
 
-        self.omicron_zones_ensure(config.zones_config).await?;
+        let zones_config = OmicronZonesConfig {
+            generation: config.generation,
+            zones: config.zones.into_iter().collect(),
+        };
+        self.omicron_zones_ensure(zones_config).await?;
 
         Ok(OmicronSledConfigResult {
             disks: disks.status,
