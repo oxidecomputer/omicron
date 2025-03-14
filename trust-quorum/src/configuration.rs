@@ -22,8 +22,6 @@ pub struct Configuration {
     /// There is no last epoch for epoch 0
     pub last_committed_epoch: Option<Epoch>,
 
-    /// We pick the first member of epoch 0 as coordinator when initializing from
-    /// lrtq so we don't have to use an option
     pub coordinator: PlatformId,
     pub members: BTreeMap<PlatformId, ShareDigest>,
     pub threshold: Threshold,

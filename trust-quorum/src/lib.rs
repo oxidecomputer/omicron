@@ -74,7 +74,6 @@ pub struct Envelope {
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Output {
     Envelope(Envelope),
-    NexusRsp(NexusRsp),
     PersistPrepare(PrepareMsg),
     PersistCommit(CommitMsg),
     PersistDecommissioned { from: PlatformId, epoch: Epoch },
@@ -196,7 +195,6 @@ impl PersistentState {
 /// prepares, nexus will  skip the epoch and start a new reconfiguration. This
 /// allows progress to always be made with a full linearization of epochs.
 pub struct CoordinatorState {
-    nexus_request_id: Uuid,
     start_time: Instant,
     // We copy the last committed reconfiguration here so that decisions
     // can be made with only the state local to this `CoordinatorState`.
@@ -223,14 +221,12 @@ pub struct CoordinatorState {
 
 impl CoordinatorState {
     pub fn new(
-        nexus_request_id: Uuid,
         now: Instant,
         reconfigure: Reconfigure,
         last_committed_configuration: Option<Configuration>,
     ) -> CoordinatorState {
         let retry_deadline = now + reconfigure.retry_timeout;
         CoordinatorState {
-            nexus_request_id,
             start_time: now,
             last_committed_configuration,
             reconfigure,
@@ -245,11 +241,6 @@ impl CoordinatorState {
     pub fn is_preparing(&self) -> bool {
         self.last_committed_configuration.is_none()
             || self.last_committed_rack_secret.is_some()
-    }
-
-    /// Has the entire coordination timed out?
-    pub fn is_expired(&self, now: Instant) -> bool {
-        now > self.start_time + self.reconfigure.timeout
     }
 
     /// Do we have a key share for the given node?
@@ -290,28 +281,57 @@ impl Node {
         &self.id
     }
 
-    pub fn handle_nexus_request(
+    /// Become a coordinator of a reconfiguration for a given epoch.
+    ///
+    /// Generate a new rack secret for the given epoch, encrypt the old one with
+    /// a key derived from the new rack secret, split the rack secret, create a
+    /// bunch of `PrepareMsgs` and send them to peer nodes.
+    pub fn coordinate_reconfiguration(
         &mut self,
         now: Instant,
-        NexusReq { id, kind }: NexusReq,
-    ) -> impl Iterator<Item = Output> + '_ {
-        // All errors are solely for early return purposes.
-        // The actual errors are sent to nexus as replies.
-        let _ = match kind {
-            NexusReqKind::Reconfigure(msg) => {
-                self.coordinate_reconfiguration(id, now, msg)
+        msg: Reconfigure,
+    ) -> Result<(), Error> {
+        self.check_membership_constraints(msg.members.len(), msg.threshold)?;
+        self.check_in_service()?;
+
+        let last_committed_epoch = self.persistent_state.last_committed_epoch();
+
+        // We can only reconfigure if the current epoch matches the last
+        // committed epoch in the `Reconfigure` request.
+        if msg.last_committed_epoch != last_committed_epoch {
+            return Err(Error::LastCommittedEpochMismatch {
+                node_epoch: last_committed_epoch,
+                msg_epoch: msg.last_committed_epoch,
+            });
+        }
+
+        // We must not have seen a prepare for this epoch or any greater epoch
+        if let Some(last_prepared_epoch) =
+            self.persistent_state.last_prepared_epoch()
+        {
+            if msg.epoch <= last_prepared_epoch {
+                return Err(Error::PreparedEpochMismatch {
+                    existing: last_prepared_epoch,
+                    new: msg.epoch,
+                });
             }
-            NexusReqKind::Commit(msg) => todo!(),
-            NexusReqKind::GetCommitted(epoch) => todo!(),
-            NexusReqKind::GetLrtqShareHash => self.get_lrtq_share_digest(id),
-            NexusReqKind::UpgradeFromLrtq(msg) => {
-                self.upgrade_from_lrtq(id, msg)
-            }
-            NexusReqKind::CancelUpgradeFromLrtq(msg) => {
-                self.cancel_upgrade_from_lrtq(id, msg)
-            }
-        };
-        self.outgoing.drain(..)
+        }
+
+        // If we are already coordinating, we must abandon that coordination.
+        // TODO: Logging?
+        let mut coordinator_state = CoordinatorState::new(
+            now,
+            msg,
+            self.persistent_state.last_committed_reconfiguration().cloned(),
+        );
+
+        // Start collecting shares for `last_committed_epoch`
+        self.collect_shares_as_coordinator(&mut coordinator_state);
+
+        // Save the coordinator state in `self`
+        self.coordinator_state = Some(coordinator_state);
+
+        Ok(())
     }
 
     pub fn handle_peer_msg(
@@ -346,82 +366,12 @@ impl Node {
         };
         if coordinator_state.reconfigure.epoch == epoch {
             coordinator_state.prepares.remove(&from);
-            if coordinator_state.prepares.is_empty() {
-                // We are done. Inform nexus of the success.
-                self.reply_to_nexus(
-                    coordinator_state.nexus_request_id,
-                    NexusRspKind::Prepared(epoch),
-                );
-                // Do not put the coordinator_state back. We are done.
-                return;
-            }
+            // TODO: Keep track of acks, rather than just removing prepares
+            // Nexus polls us, so we need to tell it who acked explicitly
+            // It will wait for K+Z acks as described in RFD 238 sec 5.
         }
 
         self.coordinator_state = Some(coordinator_state);
-    }
-
-    /// Become a coordinator of a reconfiguration for a given epoch.
-    ///
-    /// Generate a new rack secret for the given epoch, encrypt the old one with
-    /// a key derived from the new rack secret, split the rack secret, create a
-    /// bunch of `PrepareMsgs` and send them to peer nodes.
-    fn coordinate_reconfiguration(
-        &mut self,
-        request_id: Uuid,
-        now: Instant,
-        msg: Reconfigure,
-    ) -> Result<(), ()> {
-        self.check_in_service(request_id)?;
-
-        let last_committed_epoch = self.persistent_state.last_committed_epoch();
-
-        // We can only reconfigure if the current epoch matches the last
-        // committed epoch in the `Reconfigure` request.
-        if msg.last_committed_epoch != last_committed_epoch {
-            self.reply_to_nexus(
-                request_id,
-                NexusRspKind::Error(
-                    NexusRspError::LastCommittedEpochMismatch {
-                        node_epoch: last_committed_epoch,
-                        msg_epoch: msg.last_committed_epoch,
-                    },
-                ),
-            );
-            return Err(());
-        }
-
-        // We must not have seen a prepare for this epoch or any greater epoch
-        if let Some(last_prepared_epoch) =
-            self.persistent_state.last_prepared_epoch()
-        {
-            if msg.epoch <= last_prepared_epoch {
-                self.reply_to_nexus(
-                    request_id,
-                    NexusRspKind::Error(NexusRspError::PreparedEpochMismatch {
-                        existing: last_prepared_epoch,
-                        new: msg.epoch,
-                    }),
-                );
-            }
-            return Err(());
-        }
-
-        // If we are already coordinating, we must abandon that coordination.
-        // TODO: Logging?
-        let mut coordinator_state = CoordinatorState::new(
-            request_id,
-            now,
-            msg,
-            self.persistent_state.last_committed_reconfiguration().cloned(),
-        );
-
-        // Start collecting shares for `last_committed_epoch`
-        self.collect_shares_as_coordinator(&mut coordinator_state);
-
-        // Save the coordinator state in `self`
-        self.coordinator_state = Some(coordinator_state);
-
-        Ok(())
     }
 
     /// Send a `GetShare` request for every member in the last committed epoch
@@ -456,14 +406,8 @@ impl Node {
         };
         self.tick_coordinator_impl(now, &mut coordinator_state);
 
-        // Put the coordinator state back into `self`, unless it has expired
-        // We perform this inexpensive check twice for safety purposes, so that
-        // we never forget to put the coordinator state back if we need to. We
-        // don't rely on the return value from the tick to indicate whether it
-        // should be put back or not.
-        if !coordinator_state.is_expired(now) {
-            self.coordinator_state = Some(coordinator_state);
-        }
+        // Put the coordinator state back into `self`.
+        self.coordinator_state = Some(coordinator_state);
     }
 
     // A helper method that operates directly on the coordinator state without
@@ -474,16 +418,6 @@ impl Node {
         now: Instant,
         coordinator_state: &mut CoordinatorState,
     ) {
-        // Did the coordination timeout? If so, inform nexus.
-        if coordinator_state.is_expired(now) {
-            // TODO: logging?
-            self.reply_to_nexus(
-                coordinator_state.nexus_request_id,
-                NexusRspKind::Timeout,
-            );
-            return;
-        }
-
         if now < coordinator_state.retry_deadline {
             // Nothing to do.
             return;
@@ -508,232 +442,40 @@ impl Node {
             now + coordinator_state.reconfigure.retry_timeout;
     }
 
-    /// If an LRTQ upgrade has not yet taken place, and this is an lrtq node
-    /// then calculate the digest of this nodes lrtq share and send it to nexus.
-    /// Otherwise send an error to nexus.
-    fn get_lrtq_share_digest(&mut self, request_id: Uuid) -> Result<(), ()> {
-        self.check_in_service(request_id)?;
-        // We only allow retrieval of the lrtq share digest before an lrtq
-        // upgrade has been attempted. Nexus can try again, but first it must
-        // attempt to cancel the current outstanding reconfiguration. There is
-        // no reason to leak any information, even a hash, if its unnecessary
-        // for the application to have that information.
-        self.check_no_prepares(request_id)?;
-        let lrtq_ledger_data = self.get_lrtq_ledger_data(request_id)?;
-
-        self.reply_to_nexus(
-            request_id,
-            NexusRspKind::LrtqShareDigest(ShareDigest::from(
-                &lrtq_ledger_data.share,
-            )),
-        );
-
-        Ok(())
-    }
-
-    /// Perform an upgrade from lrtq into v1 of the trust-quorum protocol
-    fn upgrade_from_lrtq(
-        &mut self,
-        request_id: Uuid,
-        msg: UpgradeFromLrtqMsg,
-    ) -> Result<(), ()> {
-        self.check_in_service(request_id)?;
-        self.check_no_prepares(request_id)?;
-
-        // Return early if we are not an lrtq node
-        let lrtq_ledger_data = self.get_lrtq_ledger_data(request_id)?;
-
-        self.check_membership_constraints(
-            request_id,
-            msg.members.len(),
-            lrtq_ledger_data.threshold,
-        )?;
-
-        // Create and persist a prepare, and ack to Nexus
-        let config = Configuration {
-            rack_uuid: lrtq_ledger_data.rack_uuid,
-            epoch: Epoch(0),
-            last_committed_epoch: None,
-            coordinator: msg.members.keys().next().unwrap().clone(),
-            members: msg.members,
-            threshold: lrtq_ledger_data.threshold,
-            encrypted: None,
-            lrtq_upgrade_id: Some(msg.upgrade_id),
-        };
-
-        let prepare = PrepareMsg { config, share: lrtq_ledger_data.share };
-        self.persistent_state.prepares.insert(Epoch(0), prepare.clone());
-        self.persist_prepare(prepare);
-        self.reply_to_nexus(
-            request_id,
-            NexusRspKind::UpgradeFromLrtqAck { upgrade_id: msg.upgrade_id },
-        );
-
-        Ok(())
-    }
-
-    fn cancel_upgrade_from_lrtq(
-        &mut self,
-        request_id: Uuid,
-        msg: CancelUpgradeFromLrtqMsg,
-    ) -> Result<(), ()> {
-        self.check_in_service(request_id)?;
-        self.check_only_epoch_zero_prepared(request_id)?;
-
-        if let Some(config) = self.persistent_state.configuration(Epoch(0)) {
-            if config.lrtq_upgrade_id == Some(msg.upgrade_id) {
-                // Success!
-                self.persistent_state.prepares.remove(&Epoch(0));
-                self.persist_lrtq_cancelled(msg.upgrade_id);
-            } else {
-                // Stale reconfiguration Id.
-                // TODO: What should we do here?
-                // Log this?
-                // Replying to nexus doesn't seem to make much sense as the
-                // request could be stale
-            }
-        }
-
-        // No prepares or anything. Just consider this idempotent.
-        Ok(())
-    }
-
-    /// Get the lrtq ledger data if this node is an lrtq node
-    ///
-    /// Send an error reply to nexus if not an lrtq node, and return an error.
-    ///
-    /// Note: The error is simply to allow early return, and conveys no
-    /// information, as that is already in the reply to nexus.
-    fn get_lrtq_ledger_data(
-        &mut self,
-        request_id: Uuid,
-    ) -> Result<LrtqLedgerData, ()> {
-        if let Some(lrtq_ledger_data) = &self.lrtq_ledger_data {
-            Ok(lrtq_ledger_data.clone())
-        } else {
-            self.reply_to_nexus(
-                request_id,
-                NexusRspKind::Error(NexusRspError::NotAnLrtqMember),
-            );
-            return Err(());
-        }
-    }
-
     /// Verify that the node is not decommissioned
-    ///
-    /// Send a reply to nexus if it is, and return an error.
-    ///
-    /// Note: The error is simply to allow early return, and conveys no
-    /// information, as that is already in the reply to nexus.
-    fn check_in_service(&mut self, request_id: Uuid) -> Result<(), ()> {
+    fn check_in_service(&mut self) -> Result<(), Error> {
         if let Some(decommissioned) = &self.persistent_state.decommissioned {
-            self.reply_to_nexus(
-                request_id,
-                NexusRspKind::Error(NexusRspError::SledDecommissioned {
-                    from: decommissioned.from.clone(),
-                    epoch: decommissioned.epoch,
-                    last_prepared_epoch: self
-                        .persistent_state
-                        .last_prepared_epoch(),
-                }),
-            );
-            return Err(());
+            return Err(Error::SledDecommissioned {
+                from: decommissioned.from.clone(),
+                epoch: decommissioned.epoch,
+                last_prepared_epoch: self
+                    .persistent_state
+                    .last_prepared_epoch(),
+            });
         }
-        Ok(())
-    }
-
-    /// Verify that no configurations have been prepared yet
-    ///
-    /// Send a reply to nexus if there are any prepares, and return an error.
-    ///
-    /// Note: The error is simply to allow early return, and conveys no
-    /// information, as that is already in the reply to nexus.
-    fn check_no_prepares(&mut self, request_id: Uuid) -> Result<(), ()> {
-        if let Some(epoch) = self.persistent_state.last_prepared_epoch() {
-            self.reply_to_nexus(
-                request_id,
-                NexusRspKind::Error(NexusRspError::AlreadyPrepared(epoch)),
-            );
-            return Err(());
-        }
-        Ok(())
-    }
-
-    /// Verify that so far this node has only prepared epoch 0 and not yet
-    /// committed it.
-    ///
-    /// Send a reply to nexus if this is false, and return an error.
-    ///
-    /// Note: The error is simply to allow early return, and conveys no
-    /// information, as that is already in the reply to nexus.
-    fn check_only_epoch_zero_prepared(
-        &mut self,
-        request_id: Uuid,
-    ) -> Result<(), ()> {
-        if let Some(epoch) = self.persistent_state.last_committed_epoch() {
-            self.reply_to_nexus(
-                request_id,
-                NexusRspKind::Error(NexusRspError::AlreadyCommitted(epoch)),
-            );
-            return Err(());
-        }
-
-        if let Some(epoch) = self.persistent_state.last_prepared_epoch() {
-            if epoch > Epoch(0) {
-                self.reply_to_nexus(
-                    request_id,
-                    NexusRspKind::Error(NexusRspError::AlreadyPrepared(epoch)),
-                );
-            }
-            return Err(());
-        }
-
         Ok(())
     }
 
     /// Verify that the cluster membership and threshold sizes are within
     /// constraints
-    ///
-    /// Send a reply to nexus if the constraints are invalid and return an
-    /// error.
-    ///
-    /// Note: The error is simply to allow early return, and conveys no
-    /// information, as that is already in the reply to nexus.
     fn check_membership_constraints(
         &mut self,
-        request_id: Uuid,
         num_members: usize,
         threshold: Threshold,
-    ) -> Result<(), ()> {
+    ) -> Result<(), Error> {
         if num_members <= threshold.0 as usize {
-            self.reply_to_nexus(
-                request_id,
-                NexusRspKind::Error(
-                    NexusRspError::MembershipThresholdMismatch {
-                        num_members,
-                        threshold,
-                    },
-                ),
-            );
-            return Err(());
+            return Err(Error::MembershipThresholdMismatch {
+                num_members,
+                threshold,
+            });
         }
 
         if num_members < 3 || num_members > 32 {
-            self.reply_to_nexus(
-                request_id,
-                NexusRspKind::Error(NexusRspError::InvalidMembershipSize(
-                    num_members,
-                )),
-            );
-            return Err(());
+            return Err(Error::InvalidMembershipSize(num_members));
         }
 
         if threshold.0 < 2 || threshold.0 > 31 {
-            self.reply_to_nexus(
-                request_id,
-                NexusRspKind::Error(NexusRspError::InvalidThreshold(threshold)),
-            );
-            return Err(());
+            return Err(Error::InvalidThreshold(threshold));
         }
 
         Ok(())
@@ -744,14 +486,6 @@ impl Node {
             to,
             from: self.id.clone(),
             msg,
-        }));
-    }
-
-    fn reply_to_nexus(&mut self, request_id: Uuid, rsp: NexusRspKind) {
-        self.outgoing.push(Output::NexusRsp(NexusRsp {
-            request_id,
-            from: self.id.clone(),
-            kind: rsp,
         }));
     }
 

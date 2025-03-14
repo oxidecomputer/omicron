@@ -24,68 +24,8 @@ pub struct Reconfigure {
     pub members: BTreeSet<PlatformId>,
     pub threshold: Threshold,
 
-    // The total timeout for the operation
-    pub timeout: Duration,
-
     // The timeout before we send a follow up request to a peer
     pub retry_timeout: Duration,
-}
-
-/// Requests received from Nexus
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct NexusReq {
-    pub id: Uuid,
-    pub kind: NexusReqKind,
-}
-
-/// Data for a message sent from Nexus and proxied via the sled-agent
-///
-/// As this is a "no io" implementation, appropriate ledger data is
-/// read and loaded in by sled-agent.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum NexusReqKind {
-    /// Start a reconfiguration
-    Reconfigure(Reconfigure),
-
-    /// Nexus seeds a few nodes with commits and then they get gossiped around
-    Commit(CommitMsg),
-
-    /// Get the bitmap of which members have seen a commit for a given epoch
-    GetCommitted(Epoch),
-
-    /// Retrieve the hash of a share for an LRTQ node
-    ///
-    /// This is necessary when coordinating upgrades from LRTQ
-    GetLrtqShareHash,
-
-    /// Inform a member to upgrade from LRTQ by creating a new PrepareMsg for
-    /// epoch 0 and persisting it
-    UpgradeFromLrtq(UpgradeFromLrtqMsg),
-
-    /// If the upgrade has not yet been activated, then it can be cancelled
-    /// and tried again
-    CancelUpgradeFromLrtq(CancelUpgradeFromLrtqMsg),
-}
-
-/// Responses to Nexus Requests
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct NexusRsp {
-    pub request_id: Uuid,
-    pub from: PlatformId,
-    pub kind: NexusRspKind,
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum NexusRspKind {
-    CommitAck(Epoch),
-    LrtqShareDigest(ShareDigest),
-    UpgradeFromLrtqAck { upgrade_id: Uuid },
-    CancelUpgradeFromLrtqAck { upgrade_id: Uuid },
-    // A `PrepareMsg` was sent from the coordinator and all nodes ack'd
-    Prepared(Epoch),
-    Committed(CommittedMsg),
-    Error(NexusRspError),
-    Timeout,
 }
 
 #[derive(
@@ -99,7 +39,7 @@ pub enum NexusRspKind {
     Serialize,
     Deserialize,
 )]
-pub enum NexusRspError {
+pub enum Error {
     #[error("sled was decommissioned on msg from {from:?} at epoch {epoch:?}: last prepared epoch = {last_prepared_epoch:?}")]
     SledDecommissioned {
         from: PlatformId,
@@ -157,17 +97,6 @@ pub struct CommittedMsg {
     /// configuration for `epoch`. Members fill in their own
     /// bit after they have committed.
     pub committed_bitmap: u32,
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct UpgradeFromLrtqMsg {
-    pub upgrade_id: Uuid,
-    pub members: BTreeMap<PlatformId, ShareDigest>,
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct CancelUpgradeFromLrtqMsg {
-    pub upgrade_id: Uuid,
 }
 
 /// Messages sent between trust quorum members over a sprockets channel
