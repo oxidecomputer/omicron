@@ -3557,7 +3557,7 @@ pub trait NexusExternalApi {
     /// Update webhook receiver
     ///
     /// Note that receiver secrets are NOT added or removed using this endpoint.
-    /// Instead, use the /v1/webhooks/{secrets}/?receiver={receiver} endpoint
+    /// Instead, use the `/v1/webhooks/{secrets}/?receiver={receiver}`` endpoint
     /// to add and remove secrets.
     #[endpoint {
         method = PUT,
@@ -3588,14 +3588,14 @@ pub trait NexusExternalApi {
     /// the probe request: either the response from the receiver endpoint, or an
     /// indication of why the probe failed.
     ///
-    /// Note that the response status is 200 OK as long as a probe request was
+    /// Note that the response status is `200 OK` as long as a probe request was
     /// able to be sent to the receiver endpoint. If the receiver responds with
     /// another status code, including an error, this will be indicated by the
-    /// response body, NOT the status of the response.
+    /// response body, *not* the status of the response.
     ///
-    /// The "resend" query parameter can be used to request re-delivery of
+    /// The `resend` query parameter can be used to request re-delivery of
     /// failed events if the liveness probe succeeds. If it is set to true and
-    /// the webhook receiver responds to the probe request with a 2xx status
+    /// the webhook receiver responds to the probe request with a `2xx` status
     /// code, any events for which delivery to this receiver has failed will be
     /// queued for re-delivery.
     #[endpoint {
@@ -3646,7 +3646,7 @@ pub trait NexusExternalApi {
     /// List delivery attempts to a webhook receiver
     ///
     /// Optional query parameters to this endpoint may be used to filter
-    /// deliveries by state. If none of the "failed", "pending", or "delivered"
+    /// deliveries by state. If none of the `failed`, `pending` or `delivered`
     /// query parameters are present, all deliveries are returned. If one or
     /// more of these parameters are provided, only those which are set to
     /// "true" are included in the response.

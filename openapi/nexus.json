@@ -11936,7 +11936,7 @@
           "system/webhooks"
         ],
         "summary": "List delivery attempts to a webhook receiver",
-        "description": "Optional query parameters to this endpoint may be used to filter deliveries by state. If none of the \"failed\", \"pending\", or \"delivered\" query parameters are present, all deliveries are returned. If one or more of these parameters are provided, only those which are set to \"true\" are included in the response.",
+        "description": "Optional query parameters to this endpoint may be used to filter deliveries by state. If none of the `failed`, `pending` or `delivered` query parameters are present, all deliveries are returned. If one or more of these parameters are provided, only those which are set to \"true\" are included in the response.",
         "operationId": "webhook_delivery_list",
         "parameters": [
           {
@@ -12271,7 +12271,7 @@
           "system/webhooks"
         ],
         "summary": "Update webhook receiver",
-        "description": "Note that receiver secrets are NOT added or removed using this endpoint. Instead, use the /v1/webhooks/{secrets}/?receiver={receiver} endpoint to add and remove secrets.",
+        "description": "Note that receiver secrets are NOT added or removed using this endpoint. Instead, use the `/v1/webhooks/{secrets}/?receiver={receiver}`` endpoint to add and remove secrets.",
         "operationId": "webhook_receiver_update",
         "parameters": [
           {
@@ -12342,7 +12342,7 @@
           "system/webhooks"
         ],
         "summary": "Send liveness probe to webhook receiver",
-        "description": "This endpoint synchronously sends a liveness probe request to the selected webhook receiver. The response message describes the outcome of the probe request: either the response from the receiver endpoint, or an indication of why the probe failed.\n\nNote that the response status is 200 OK as long as a probe request was able to be sent to the receiver endpoint. If the receiver responds with another status code, including an error, this will be indicated by the response body, NOT the status of the response.\n\nThe \"resend\" query parameter can be used to request re-delivery of failed events if the liveness probe succeeds. If it is set to true and the webhook receiver responds to the probe request with a 2xx status code, any events for which delivery to this receiver has failed will be queued for re-delivery.",
+        "description": "This endpoint synchronously sends a liveness probe request to the selected webhook receiver. The response message describes the outcome of the probe request: either the response from the receiver endpoint, or an indication of why the probe failed.\n\nNote that the response status is `200 OK` as long as a probe request was able to be sent to the receiver endpoint. If the receiver responds with another status code, including an error, this will be indicated by the response body, *not* the status of the response.\n\nThe `resend` query parameter can be used to request re-delivery of failed events if the liveness probe succeeds. If it is set to true and the webhook receiver responds to the probe request with a `2xx` status code, any events for which delivery to this receiver has failed will be queued for re-delivery.",
         "operationId": "webhook_receiver_probe",
         "parameters": [
           {
