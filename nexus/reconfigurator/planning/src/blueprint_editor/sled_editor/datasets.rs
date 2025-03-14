@@ -4,11 +4,11 @@
 
 use crate::blueprint_builder::EditCounts;
 use crate::planner::SledPlannerRng;
+use id_map::IdMap;
 use illumos_utils::zpool::ZpoolName;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintDatasetsConfig;
-use nexus_types::deployment::id_map::{self, IdMap};
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::CompressionAlgorithm;

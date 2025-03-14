@@ -152,6 +152,7 @@ fn parse_config_result(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use id_map::IdMap;
     use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::BlueprintDatasetConfig;
@@ -166,7 +167,6 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::blueprint_zone_type;
-    use nexus_types::deployment::id_map::IdMap;
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::DatasetKind;
