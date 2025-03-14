@@ -2391,12 +2391,6 @@ pub struct EventClassPage {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct EventClassSelector {
-    /// The name of the event class.
-    pub name: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookReceiverSelector {
     /// The name or ID of the webhook receiver.
     pub receiver: NameOrId,

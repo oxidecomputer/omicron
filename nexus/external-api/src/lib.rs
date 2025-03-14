@@ -3521,17 +3521,6 @@ pub trait NexusExternalApi {
         filter: Query<params::EventClassFilter>,
     ) -> Result<HttpResponseOk<ResultsPage<views::EventClass>>, HttpError>;
 
-    /// Fetch details on an event class by name.
-    #[endpoint {
-        method = GET,
-        path ="/v1/webhooks/event-classes/{name}",
-        tags = ["system/webhooks"],
-    }]
-    async fn webhook_event_class_view(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::EventClassSelector>,
-    ) -> Result<HttpResponseOk<views::EventClass>, HttpError>;
-
     /// List webhook receivers.
     #[endpoint {
         method = GET,

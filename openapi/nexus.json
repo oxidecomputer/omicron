@@ -12130,44 +12130,6 @@
         }
       }
     },
-    "/v1/webhooks/event-classes/{name}": {
-      "get": {
-        "tags": [
-          "system/webhooks"
-        ],
-        "summary": "Fetch details on an event class by name.",
-        "operationId": "webhook_event_class_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "description": "The name of the event class.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EventClass"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/v1/webhooks/receivers": {
       "get": {
         "tags": [

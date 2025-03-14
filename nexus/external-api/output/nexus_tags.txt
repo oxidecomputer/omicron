@@ -271,7 +271,6 @@ OPERATION ID                             METHOD   URL PATH
 webhook_delivery_list                    GET      /v1/webhooks/deliveries
 webhook_delivery_resend                  POST     /v1/webhooks/deliveries/{event_id}/resend
 webhook_event_class_list                 GET      /v1/webhooks/event-classes
-webhook_event_class_view                 GET      /v1/webhooks/event-classes/{name}
 webhook_receiver_create                  POST     /v1/webhooks/receivers
 webhook_receiver_delete                  DELETE   /v1/webhooks/receivers/{receiver}
 webhook_receiver_list                    GET      /v1/webhooks/receivers

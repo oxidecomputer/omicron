@@ -7708,39 +7708,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn webhook_event_class_view(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::EventClassSelector>,
-    ) -> Result<HttpResponseOk<views::EventClass>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let params::EventClassSelector { name } = path_params.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            opctx
-                .authorize(
-                    authz::Action::ListChildren,
-                    &authz::WEBHOOK_EVENT_CLASS_LIST,
-                )
-                .await?;
-
-            let event_class = name
-                .parse::<nexus_db_queries::db::model::WebhookEventClass>()
-                .map_err(|_| {
-                    Error::non_resourcetype_not_found(format!(
-                        "{name:?} is not a webhook event class"
-                    ))
-                })?
-                .into();
-            Ok(HttpResponseOk(event_class))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
     async fn webhook_receiver_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
