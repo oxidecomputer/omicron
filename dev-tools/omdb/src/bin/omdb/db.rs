@@ -8123,20 +8123,22 @@ async fn cmd_db_webhook_rx_list(
         #[tabled(display_with = "datetime_rfc3339_concise")]
         modified: chrono::DateTime<Utc>,
         secrets: usize,
-        events: usize,
+        subscriptions: usize,
         name: String,
         endpoint: String,
     }
 
     let rows = rxs.into_iter().map(
-        |db::model::WebhookReceiverConfig { rx, secrets, events }| RxRow {
-            id: rx.id().into_untyped_uuid(),
-            name: rx.identity.name.to_string(),
-            created: rx.time_created(),
-            modified: rx.time_modified(),
-            secrets: secrets.len(),
-            events: events.len(),
-            endpoint: rx.endpoint,
+        |db::model::WebhookReceiverConfig { rx, secrets, subscriptions }| {
+            RxRow {
+                id: rx.id().into_untyped_uuid(),
+                name: rx.identity.name.to_string(),
+                created: rx.time_created(),
+                modified: rx.time_modified(),
+                secrets: secrets.len(),
+                subscriptions: subscriptions.len(),
+                endpoint: rx.endpoint,
+            }
         },
     );
 
