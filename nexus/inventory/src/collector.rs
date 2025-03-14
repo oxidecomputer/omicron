@@ -408,15 +408,13 @@ mod test {
     use super::Collector;
     use crate::StaticSledAgentEnumerator;
     use gateway_messages::SpPort;
+    use id_map::IdMap;
     use nexus_sled_agent_shared::inventory::OmicronSledConfig;
     use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use nexus_sled_agent_shared::inventory::OmicronZoneType;
-    use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
     use nexus_types::inventory::Collection;
     use omicron_common::api::external::Generation;
-    use omicron_common::disk::DatasetsConfig;
-    use omicron_common::disk::OmicronPhysicalDisksConfig;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_sled_agent::sim;
     use omicron_uuid_kinds::OmicronZoneUuid;
@@ -595,19 +593,19 @@ mod test {
         let zone_address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0);
         client
             .omicron_config_put(&OmicronSledConfig {
-                disks_config: OmicronPhysicalDisksConfig::default(),
-                datasets_config: DatasetsConfig::default(),
-                zones_config: OmicronZonesConfig {
-                    generation: Generation::from(3),
-                    zones: vec![OmicronZoneConfig {
-                        id: zone_id,
-                        zone_type: OmicronZoneType::Oximeter {
-                            address: zone_address,
-                        },
-                        filesystem_pool: Some(filesystem_pool),
-                        image_source: OmicronZoneImageSource::InstallDataset,
-                    }],
-                },
+                generation: Generation::from(3),
+                disks: IdMap::default(),
+                datasets: IdMap::default(),
+                zones: [OmicronZoneConfig {
+                    id: zone_id,
+                    zone_type: OmicronZoneType::Oximeter {
+                        address: zone_address,
+                    },
+                    filesystem_pool: Some(filesystem_pool),
+                    image_source: OmicronZoneImageSource::InstallDataset,
+                }]
+                .into_iter()
+                .collect(),
             })
             .await
             .expect("failed to write initial zone version to fake sled agent");
