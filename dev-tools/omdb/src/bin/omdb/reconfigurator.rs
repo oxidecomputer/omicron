@@ -278,7 +278,9 @@ async fn cmd_reconfigurator_history(
     // prev_blueprint is `None` if any of these is true:
     // - if we're not printing diffs
     // - if this is the first iteration of the loop
-    // - if the previous blueprint was missing from the database
+    // - if the previous blueprint was missing from the database or we didn't
+    //   load it because _it_ was the first iteration of the loop or _its_
+    //   parent was missing from the database
     let mut prev_blueprint: Option<Blueprint> = None;
 
     for t in targets {
