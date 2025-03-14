@@ -5788,6 +5788,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "pretty_assertions",
  "schemars",
  "serde",
  "serde_json",

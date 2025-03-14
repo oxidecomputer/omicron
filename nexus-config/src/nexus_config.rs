@@ -830,6 +830,7 @@ mod test {
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;
     use dropshot::ConfigLoggingLevel;
+    use pretty_assertions::assert_eq;
     use std::collections::HashMap;
     use std::fs;
     use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
