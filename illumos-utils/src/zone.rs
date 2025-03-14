@@ -12,6 +12,7 @@ use slog::Logger;
 use slog::info;
 use std::net::{IpAddr, Ipv6Addr};
 
+use crate::ExecutionError;
 use crate::addrobj::AddrObject;
 use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
 use crate::zpool::PathInPool;
@@ -687,11 +688,21 @@ impl Zones {
         Ok(())
     }
 
+    /// Delete an address object.
+    ///
+    /// This method attempts to be idempotent: deleting a nonexistent address
+    /// object returns `Ok(())`.
     #[allow(clippy::needless_lifetimes)]
     pub fn delete_address<'a>(
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<(), DeleteAddressError> {
+        // Expected output on stderr if we try to delete an address that doesn't
+        // exist. (We look for this error and return `Ok(_)`, making this method
+        // idempotent.)
+        const OBJECT_NOT_FOUND: &str =
+            "could not delete address: Object not found";
+
         let mut command = std::process::Command::new(PFEXEC);
         let mut args = vec![];
         if let Some(zone) = zone {
@@ -704,12 +715,19 @@ impl Zones {
         args.push(addrobj.to_string());
 
         let cmd = command.args(args);
-        execute(cmd).map_err(|err| DeleteAddressError {
-            zone: zone.unwrap_or("global").to_string(),
-            addrobj: addrobj.clone(),
-            err,
-        })?;
-        Ok(())
+        match execute(cmd) {
+            Ok(_) => Ok(()),
+            Err(ExecutionError::CommandFailure(err))
+                if err.stderr.contains(OBJECT_NOT_FOUND) =>
+            {
+                Ok(())
+            }
+            Err(err) => Err(DeleteAddressError {
+                zone: zone.unwrap_or("global").to_string(),
+                addrobj: addrobj.clone(),
+                err,
+            }),
+        }
     }
 
     /// Ensures a link-local IPv6 exists with the name provided in `addrobj`.
@@ -877,6 +895,22 @@ mod tests {
             let parsed = parse_ip_network(s).unwrap();
             assert_eq!(parsed.ip(), ip);
             assert_eq!(parsed.prefix(), prefix);
+        }
+    }
+
+    // This test validates that we correctly detect an attempt to delete an
+    // address that does not exist and return `Ok(())`.
+    #[cfg(target_os = "illumos")]
+    #[test]
+    fn delete_nonexistent_address() {
+        // We'll pick a name that hopefully no system actually has...
+        let addr = AddrObject::new("nonsense", "shouldnotexist").unwrap();
+        match Zones::delete_address(None, &addr) {
+            Ok(()) => (),
+            Err(err) => panic!(
+                "unexpected error deleting nonexistent address: {}",
+                slog_error_chain::InlineErrorChain::new(&err)
+            ),
         }
     }
 }
