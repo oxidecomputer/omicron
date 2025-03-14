@@ -68,7 +68,8 @@ use internal_dns_types::names::DNS_ZONE;
 use itertools::Itertools;
 use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
 use nexus_sled_agent_shared::inventory::{
-    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig, ZoneKind,
+    OmicronZoneConfig, OmicronZoneImageSource, OmicronZoneType,
+    OmicronZonesConfig, ZoneKind,
 };
 use omicron_common::address::AZ_PREFIX;
 use omicron_common::address::COCKROACH_PORT;
@@ -108,7 +109,9 @@ use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
 use sled_hardware_types::Baseboard;
 use sled_storage::config::MountConfig;
-use sled_storage::dataset::{CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET};
+use sled_storage::dataset::{
+    CONFIG_DATASET, INSTALL_DATASET, M2_ARTIFACT_DATASET, ZONE_DATASET,
+};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -1539,22 +1542,64 @@ impl ServiceManager {
             .map(|d| zone::Device { name: d.to_string() })
             .collect();
 
-        // Look for the image in the ramdisk first
-        let mut zone_image_paths = vec![Utf8PathBuf::from("/opt/oxide")];
-        // Inject an image path if requested by a test.
-        if let Some(path) = self.inner.image_directory_override.get() {
-            zone_image_paths.push(path.clone());
+        // TODO: `InstallDataset` should be renamed to something more accurate
+        // when all the major changes here have landed. Some zones are
+        // distributed from the host OS image and are never placed in the
+        // install dataset; that enum variant more accurately reflects that we
+        // are falling back to searching `/opt/oxide` in addition to the install
+        // datasets.
+        let image_source = match &request {
+            ZoneArgs::Omicron(zone_config) => &zone_config.zone.image_source,
+            ZoneArgs::Switch(_) => &OmicronZoneImageSource::InstallDataset,
         };
-
-        // If the boot disk exists, look for the image in the "install" dataset
-        // there too.
+        let zone_image_file_name = match image_source {
+            OmicronZoneImageSource::InstallDataset => None,
+            OmicronZoneImageSource::Artifact { hash } => Some(hash.to_string()),
+        };
         let all_disks = self.inner.storage.get_latest_disks().await;
-        if let Some((_, boot_zpool)) = all_disks.boot_disk() {
-            zone_image_paths.push(boot_zpool.dataset_mountpoint(
-                &all_disks.mount_config().root,
-                INSTALL_DATASET,
-            ));
-        }
+        let zone_image_paths = match image_source {
+            OmicronZoneImageSource::InstallDataset => {
+                // Look for the image in the ramdisk first
+                let mut zone_image_paths =
+                    vec![Utf8PathBuf::from("/opt/oxide")];
+                // Inject an image path if requested by a test.
+                if let Some(path) = self.inner.image_directory_override.get() {
+                    zone_image_paths.push(path.clone());
+                };
+
+                // If the boot disk exists, look for the image in the "install"
+                // dataset there too.
+                if let Some((_, boot_zpool)) = all_disks.boot_disk() {
+                    zone_image_paths.push(boot_zpool.dataset_mountpoint(
+                        &all_disks.mount_config().root,
+                        INSTALL_DATASET,
+                    ));
+                }
+
+                zone_image_paths
+            }
+            OmicronZoneImageSource::Artifact { .. } => {
+                // Search both artifact datasets, but look on the boot disk first.
+                let boot_zpool =
+                    all_disks.boot_disk().map(|(_, boot_zpool)| boot_zpool);
+                // This iterator starts with the zpool for the boot disk (if it
+                // exists), and then is followed by all other zpools.
+                let zpool_iter = boot_zpool.clone().into_iter().chain(
+                    all_disks
+                        .all_m2_zpools()
+                        .into_iter()
+                        .filter(|zpool| Some(zpool) != boot_zpool.as_ref()),
+                );
+                zpool_iter
+                    .map(|zpool| {
+                        zpool.dataset_mountpoint(
+                            &all_disks.mount_config().root,
+                            M2_ARTIFACT_DATASET,
+                        )
+                    })
+                    .collect()
+            }
+        };
 
         let zone_type_str = match &request {
             ZoneArgs::Omicron(zone_config) => {
@@ -1573,6 +1618,9 @@ impl ServiceManager {
         }
         if let Some(vnic) = bootstrap_vnic {
             zone_builder = zone_builder.with_bootstrap_vnic(vnic);
+        }
+        if let Some(file_name) = &zone_image_file_name {
+            zone_builder = zone_builder.with_zone_image_file_name(file_name);
         }
         let installed_zone = zone_builder
             .with_log(self.inner.log.clone())
