@@ -6,14 +6,14 @@
 //! (BFD) sessions.
 
 use crate::app::{
-    background::tasks::networking::build_mgd_clients, map_switch_zone_addrs,
+    background::tasks::networking::build_mgd_clients,
+    switch_zone_address_mappings,
 };
 
 use crate::app::background::BackgroundTask;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
-use internal_dns_types::names::ServiceName;
 use mg_admin_client::types::{BfdPeerConfig, SessionMode};
 use nexus_db_model::{BfdMode, BfdSession};
 use nexus_db_queries::{context::OpContext, db::DataStore};
@@ -117,12 +117,8 @@ impl BackgroundTask for BfdManager {
 
             let mut current: HashSet<BfdSessionKey> = HashSet::new();
 
-            let switch_zone_addresses = match self
-                .resolver
-                .lookup_all_ipv6(ServiceName::Dendrite)
-                .await
-            {
-                Ok(addrs) => addrs,
+            let mappings = match switch_zone_address_mappings(&self.resolver, log).await {
+                Ok(mappings) => mappings,
                 Err(e) => {
                     error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
                     return json!({
@@ -131,12 +127,9 @@ impl BackgroundTask for BfdManager {
                                 "failed to resolve addresses for Dendrite services: {:#}",
                                 e
                             )
-                        });
+                    });
                 },
             };
-
-            let mappings =
-                map_switch_zone_addrs(log, switch_zone_addresses).await;
 
             let mgd_clients = build_mgd_clients(mappings, log);
 
