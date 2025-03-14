@@ -256,50 +256,52 @@ fn prepare_to_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
     // Because this is purely a convenience, we should not generate any errors
     // during this step. We don't need the user's pubkeys to proceed, so the
     // state of their .ssh folder should not be load-bearing.
-    env::var("HOME")
-        .ok()
-        .and_then(|home_dir| {
-            let home_dir = Utf8PathBuf::from(home_dir);
+    if let Ok(home_dir) = env::var("HOME") {
+        let home_dir = Utf8PathBuf::from(home_dir);
 
-            // Attempt to read authorized_keys- user may not have their pubkeys
-            // on this device, if it is a device they typically only remote to.
-            if let Ok(keys) =
-                fs::read_to_string(home_dir.join(".ssh/authorized_keys"))
-            {
-                authorized_keys.extend(keys.lines().map(|s| s.to_string()));
+        // Attempt to read authorized_keys- user may not have their pubkeys
+        // on this device, if it is a device they typically only remote to.
+        if let Ok(keys) =
+            fs::read_to_string(home_dir.join(".ssh/authorized_keys"))
+        {
+            authorized_keys.extend(keys.lines().map(|s| s.to_string()));
+        }
+
+        // Attempt to scan .ssh directory for additional pubkeys.
+        if let Ok(dir_ents) = fs::read_dir(home_dir.join(".ssh")) {
+            // Collect contents of `.pub` files within .ssh directory.
+            for ent in dir_ents {
+                // Reject unreadable directory entries
+                let Ok(ent) = ent else {
+                    continue;
+                };
+
+                // Reject non-utf8 filenames
+                let Ok(fname) = ent.file_name().into_string() else {
+                    continue;
+                };
+
+                // Allow only .pub files - most likely to be public keys
+                if !fname.ends_with(".pub") {
+                    continue;
+                }
+
+                // Reject unreadable files
+                let Ok(key) = fs::read_to_string(ent.path()) else {
+                    continue;
+                };
+
+                // SSH pubkeys all start with `ssh-`
+                if !key.starts_with("ssh-") {
+                    continue;
+                }
+
+                // At this point we have read a key, we are confident it is a
+                // pubkey. Add it to the authorized keys
+                authorized_keys.push(key);
             }
-
-            // Attempt to scan .ssh directory for addition pubkeys.
-            fs::read_dir(home_dir.join(".ssh")).ok()
-        })
-        .map(|dir_ents| {
-            let user_keys = dir_ents
-                .filter_map(|ent| {
-                    // Collect contents of `.pub` files within .ssh directory.
-                    // Ignore files that aren't pubkeys, unreadable files,
-                    // non-utf8 files.
-                    ent.ok()
-                        .and_then(|ent| {
-                            ent.file_name().into_string().ok().and_then(
-                                |fname| {
-                                    if fname.ends_with(".pub") {
-                                        return Some(ent.path());
-                                    }
-                                    None
-                                },
-                            )
-                        })
-                        .and_then(|path| fs::read_to_string(path).ok())
-                })
-                .filter(|key| {
-                    // Extra safety to make sure we're only looking at
-                    // probably-correctly-formed ssh pubkeys.
-                    key.starts_with("ssh-")
-                });
-
-            // Add them all to our list of pubkeys
-            authorized_keys.extend(user_keys);
-        });
+        }
+    }
 
     // Write the public keys into the cargo bay
     let authorized_keys = authorized_keys.join("\n");
