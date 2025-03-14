@@ -2381,6 +2381,9 @@ pub struct DeviceAccessTokenRequest {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct EventClassFilter {
     /// An optional glob pattern for filtering event class names.
+    ///
+    /// If provided, only event classes which match this glob pattern will be
+    /// included in the response.
     pub filter: Option<String>,
 }
 
@@ -2432,6 +2435,7 @@ pub struct WebhookReceiverUpdate {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookSecretCreate {
+    /// The value of the shared secret key.
     pub secret: String,
 }
 
@@ -2443,13 +2447,24 @@ pub struct WebhookSecretSelector {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct WebhookEventSelector {
+    /// UUID of the event
     pub event_id: Uuid,
 }
 
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct WebhookDeliveryStateFilter {
+    /// If true, include only deliveries which are currently in progress.
+    ///
+    /// A delivery is considered "pending" if  it has not yet been sent at all,
+    /// or if a delivery attempt has failed but the delivery has retries
+    /// remaining.
     pub pending: Option<bool>,
+    /// If true, include only deliveries which have failed permanently.
+    ///
+    /// A delivery fails permanently when the retry limit of three total
+    /// attempts is reached without a successful delivery.
     pub failed: Option<bool>,
+    /// If true, include only deliveries which have succeeded.
     pub delivered: Option<bool>,
 }
 

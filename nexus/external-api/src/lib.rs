@@ -3532,7 +3532,7 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<views::WebhookReceiver>>, HttpError>;
 
-    /// Get the configuration for a webhook receiver.
+    /// Fetch webhook receiver
     #[endpoint {
         method = GET,
         path = "/v1/webhooks/receivers/{receiver}",
@@ -3543,7 +3543,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::WebhookReceiverSelector>,
     ) -> Result<HttpResponseOk<views::WebhookReceiver>, HttpError>;
 
-    /// Create a new webhook receiver.
+    /// Create webhook receiver.
     #[endpoint {
         method = POST,
         path = "/v1/webhooks/receivers",
@@ -3554,7 +3554,11 @@ pub trait NexusExternalApi {
         params: TypedBody<params::WebhookCreate>,
     ) -> Result<HttpResponseCreated<views::WebhookReceiver>, HttpError>;
 
-    /// Update the configuration of an existing webhook receiver.
+    /// Update webhook receiver
+    ///
+    /// Note that receiver secrets are NOT added or removed using this endpoint.
+    /// Instead, use the /v1/webhooks/{secrets}/?receiver={receiver} endpoint
+    /// to add and remove secrets.
     #[endpoint {
         method = PUT,
         path = "/v1/webhooks/receivers/{receiver}",
@@ -3566,7 +3570,7 @@ pub trait NexusExternalApi {
         params: TypedBody<params::WebhookReceiverUpdate>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// Delete a webhook receiver.
+    /// Delete webhook receiver.
     #[endpoint {
         method = DELETE,
         path = "/v1/webhooks/receivers/{receiver}",
@@ -3577,10 +3581,23 @@ pub trait NexusExternalApi {
         path_params: Path<params::WebhookReceiverSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    /// Send a liveness probe request to a webhook receiver.
-    // TODO(eliza): this return type isn't quite right, as the response should
-    // have a typed body, but any status code, as we return a resposne with the
-    // status code from the webhook endpoint...
+    /// Send liveness probe to webhook receiver
+    ///
+    /// This endpoint synchronously sends a liveness probe request to the
+    /// selected webhook receiver. The response message describes the outcome of
+    /// the probe request: either the response from the receiver endpoint, or an
+    /// indication of why the probe failed.
+    ///
+    /// Note that the response status is 200 OK as long as a probe request was
+    /// able to be sent to the receiver endpoint. If the receiver responds with
+    /// another status code, including an error, this will be indicated by the
+    /// response body, NOT the status of the response.
+    ///
+    /// The "resend" query parameter can be used to request re-delivery of
+    /// failed events if the liveness probe succeeds. If it is set to true and
+    /// the webhook receiver responds to the probe request with a 2xx status
+    /// code, any events for which delivery to this receiver has failed will be
+    /// queued for re-delivery.
     #[endpoint {
         method = POST,
         path = "/v1/webhooks/receivers/{receiver}/probe",
@@ -3592,7 +3609,7 @@ pub trait NexusExternalApi {
         query_params: Query<params::WebhookProbe>,
     ) -> Result<HttpResponseOk<views::WebhookProbeResult>, HttpError>;
 
-    /// List the IDs of secrets for a webhook receiver.
+    /// List webhook receiver secret IDs
     #[endpoint {
         method = GET,
         path = "/v1/webhooks/secrets",
@@ -3603,7 +3620,7 @@ pub trait NexusExternalApi {
         query_params: Query<params::WebhookReceiverSelector>,
     ) -> Result<HttpResponseOk<views::WebhookSecrets>, HttpError>;
 
-    /// Add a secret to a webhook receiver.
+    /// Add secret to webhook receiver
     #[endpoint {
         method = POST,
         path = "/v1/webhooks/secrets",
@@ -3615,7 +3632,7 @@ pub trait NexusExternalApi {
         params: TypedBody<params::WebhookSecretCreate>,
     ) -> Result<HttpResponseCreated<views::WebhookSecretId>, HttpError>;
 
-    /// Delete a secret associated with a webhook receiver by ID.
+    /// Remove secret from webhook receiver
     #[endpoint {
         method = DELETE,
         path = "/v1/webhooks/secrets/{secret_id}",
@@ -3626,7 +3643,13 @@ pub trait NexusExternalApi {
         path_params: Path<params::WebhookSecretSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    /// List delivery attempts to a webhook receiver.
+    /// List delivery attempts to a webhook receiver
+    ///
+    /// Optional query parameters to this endpoint may be used to filter
+    /// deliveries by state. If none of the "failed", "pending", or "delivered"
+    /// query parameters are present, all deliveries are returned. If one or
+    /// more of these parameters are provided, only those which are set to
+    /// "true" are included in the response.
     #[endpoint {
         method = GET,
         path = "/v1/webhooks/deliveries",
@@ -3639,7 +3662,7 @@ pub trait NexusExternalApi {
         pagination: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<views::WebhookDelivery>>, HttpError>;
 
-    /// Request re-delivery of a webhook event.
+    /// Request re-delivery of webhook event
     #[endpoint {
         method = POST,
         path = "/v1/webhooks/deliveries/{event_id}/resend",

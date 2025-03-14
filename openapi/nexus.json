@@ -11935,7 +11935,8 @@
         "tags": [
           "system/webhooks"
         ],
-        "summary": "List delivery attempts to a webhook receiver.",
+        "summary": "List delivery attempts to a webhook receiver",
+        "description": "Optional query parameters to this endpoint may be used to filter deliveries by state. If none of the \"failed\", \"pending\", or \"delivered\" query parameters are present, all deliveries are returned. If one or more of these parameters are provided, only those which are set to \"true\" are included in the response.",
         "operationId": "webhook_delivery_list",
         "parameters": [
           {
@@ -11950,6 +11951,7 @@
           {
             "in": "query",
             "name": "delivered",
+            "description": "If true, include only deliveries which have succeeded.",
             "schema": {
               "nullable": true,
               "type": "boolean"
@@ -11958,6 +11960,7 @@
           {
             "in": "query",
             "name": "failed",
+            "description": "If true, include only deliveries which have failed permanently.\n\nA delivery fails permanently when the retry limit of three total attempts is reached without a successful delivery.",
             "schema": {
               "nullable": true,
               "type": "boolean"
@@ -11966,6 +11969,7 @@
           {
             "in": "query",
             "name": "pending",
+            "description": "If true, include only deliveries which are currently in progress.\n\nA delivery is considered \"pending\" if  it has not yet been sent at all, or if a delivery attempt has failed but the delivery has retries remaining.",
             "schema": {
               "nullable": true,
               "type": "boolean"
@@ -12027,12 +12031,13 @@
         "tags": [
           "system/webhooks"
         ],
-        "summary": "Request re-delivery of a webhook event.",
+        "summary": "Request re-delivery of webhook event",
         "operationId": "webhook_delivery_resend",
         "parameters": [
           {
             "in": "path",
             "name": "event_id",
+            "description": "UUID of the event",
             "required": true,
             "schema": {
               "type": "string",
@@ -12100,7 +12105,7 @@
           {
             "in": "query",
             "name": "filter",
-            "description": "An optional glob pattern for filtering event class names.",
+            "description": "An optional glob pattern for filtering event class names.\n\nIf provided, only event classes which match this glob pattern will be included in the response.",
             "schema": {
               "nullable": true,
               "type": "string"
@@ -12192,7 +12197,7 @@
         "tags": [
           "system/webhooks"
         ],
-        "summary": "Create a new webhook receiver.",
+        "summary": "Create webhook receiver.",
         "operationId": "webhook_receiver_create",
         "requestBody": {
           "content": {
@@ -12229,7 +12234,7 @@
         "tags": [
           "system/webhooks"
         ],
-        "summary": "Get the configuration for a webhook receiver.",
+        "summary": "Fetch webhook receiver",
         "operationId": "webhook_receiver_view",
         "parameters": [
           {
@@ -12265,7 +12270,8 @@
         "tags": [
           "system/webhooks"
         ],
-        "summary": "Update the configuration of an existing webhook receiver.",
+        "summary": "Update webhook receiver",
+        "description": "Note that receiver secrets are NOT added or removed using this endpoint. Instead, use the /v1/webhooks/{secrets}/?receiver={receiver} endpoint to add and remove secrets.",
         "operationId": "webhook_receiver_update",
         "parameters": [
           {
@@ -12304,7 +12310,7 @@
         "tags": [
           "system/webhooks"
         ],
-        "summary": "Delete a webhook receiver.",
+        "summary": "Delete webhook receiver.",
         "operationId": "webhook_receiver_delete",
         "parameters": [
           {
@@ -12335,7 +12341,8 @@
         "tags": [
           "system/webhooks"
         ],
-        "summary": "Send a liveness probe request to a webhook receiver.",
+        "summary": "Send liveness probe to webhook receiver",
+        "description": "This endpoint synchronously sends a liveness probe request to the selected webhook receiver. The response message describes the outcome of the probe request: either the response from the receiver endpoint, or an indication of why the probe failed.\n\nNote that the response status is 200 OK as long as a probe request was able to be sent to the receiver endpoint. If the receiver responds with another status code, including an error, this will be indicated by the response body, NOT the status of the response.\n\nThe \"resend\" query parameter can be used to request re-delivery of failed events if the liveness probe succeeds. If it is set to true and the webhook receiver responds to the probe request with a 2xx status code, any events for which delivery to this receiver has failed will be queued for re-delivery.",
         "operationId": "webhook_receiver_probe",
         "parameters": [
           {
@@ -12381,7 +12388,7 @@
         "tags": [
           "system/webhooks"
         ],
-        "summary": "List the IDs of secrets for a webhook receiver.",
+        "summary": "List webhook receiver secret IDs",
         "operationId": "webhook_secrets_list",
         "parameters": [
           {
@@ -12417,7 +12424,7 @@
         "tags": [
           "system/webhooks"
         ],
-        "summary": "Add a secret to a webhook receiver.",
+        "summary": "Add secret to webhook receiver",
         "operationId": "webhook_secrets_add",
         "parameters": [
           {
@@ -12465,7 +12472,7 @@
         "tags": [
           "system/webhooks"
         ],
-        "summary": "Delete a secret associated with a webhook receiver by ID.",
+        "summary": "Remove secret from webhook receiver",
         "operationId": "webhook_secrets_delete",
         "parameters": [
           {
@@ -25657,6 +25664,7 @@
         "type": "object",
         "properties": {
           "secret": {
+            "description": "The value of the shared secret key.",
             "type": "string"
           }
         },
