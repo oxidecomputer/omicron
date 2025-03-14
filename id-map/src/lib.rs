@@ -21,16 +21,8 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-pub trait IdMappable:
-    JsonSchema + Serialize + for<'de> Deserialize<'de> + Diffable
-{
-    type Id: Ord
-        + Copy
-        + fmt::Display
-        + fmt::Debug
-        + JsonSchema
-        + Serialize
-        + for<'de> Deserialize<'de>;
+pub trait IdMappable {
+    type Id: Ord + Copy + fmt::Debug;
 
     fn id(&self) -> Self::Id;
 }
@@ -179,7 +171,11 @@ impl<'a, T: IdMappable> IntoIterator for &'a mut IdMap<T> {
     }
 }
 
-impl<T: IdMappable> JsonSchema for IdMap<T> {
+impl<T> JsonSchema for IdMap<T>
+where
+    T: IdMappable + JsonSchema,
+    T::Id: JsonSchema,
+{
     fn schema_name() -> String {
         format!("IdMap{}", T::schema_name())
     }
@@ -191,7 +187,11 @@ impl<T: IdMappable> JsonSchema for IdMap<T> {
     }
 }
 
-impl<T: IdMappable> Serialize for IdMap<T> {
+impl<T> Serialize for IdMap<T>
+where
+    T: IdMappable + Serialize,
+    T::Id: Serialize,
+{
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -200,14 +200,22 @@ impl<T: IdMappable> Serialize for IdMap<T> {
     }
 }
 
-impl<'de, T: IdMappable> Deserialize<'de> for IdMap<T> {
+impl<'de, T> Deserialize<'de> for IdMap<T>
+where
+    T: IdMappable + Deserialize<'de>,
+    T::Id: Deserialize<'de>,
+{
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         struct IdCheckVisitor<T>(PhantomData<T>);
 
-        impl<'d, T: IdMappable> Visitor<'d> for IdCheckVisitor<T> {
+        impl<'d, T> Visitor<'d> for IdCheckVisitor<T>
+        where
+            T: IdMappable + Deserialize<'d>,
+            T::Id: Deserialize<'d>,
+        {
             type Value = IdMap<T>;
 
             fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -222,14 +230,14 @@ impl<'de, T: IdMappable> Deserialize<'de> for IdMap<T> {
                 while let Some((key, value)) = map.next_entry::<T::Id, T>()? {
                     if key != value.id() {
                         return Err(A::Error::custom(format!(
-                            "invalid map: key {} maps to value with ID {}",
+                            "invalid map: key {:?} maps to value with ID {:?}",
                             key,
                             value.id()
                         )));
                     }
                     if let Some(old) = inner.insert(key, value) {
                         return Err(A::Error::custom(format!(
-                            "invalid map: duplicate key {}",
+                            "invalid map: duplicate key {:?}",
                             old.id()
                         )));
                     }
