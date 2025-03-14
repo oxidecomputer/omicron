@@ -300,6 +300,7 @@ mod test {
     use crate::Sled;
     use crate::test_utils::overridables_for_test;
     use crate::test_utils::realize_blueprint_and_expect;
+    use id_map::IdMap;
     use internal_dns_resolver::Resolver;
     use internal_dns_types::config::Host;
     use internal_dns_types::config::Zone;
@@ -340,7 +341,6 @@ mod test {
     pub use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::blueprint_zone_type;
-    use nexus_types::deployment::id_map::IdMap;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
     use nexus_types::external_api::views::SledState;

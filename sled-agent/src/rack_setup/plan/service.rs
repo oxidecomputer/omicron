@@ -4,6 +4,7 @@
 
 //! Plan generation for "where should services be initialized".
 
+use id_map::IdMap;
 use illumos_utils::zpool::ZpoolName;
 use internal_dns_types::config::{
     DnsConfigBuilder, DnsConfigParams, Host, Zone,
@@ -12,7 +13,6 @@ use internal_dns_types::names::ServiceName;
 use nexus_sled_agent_shared::inventory::{
     Inventory, OmicronZoneDataset, SledRole,
 };
-use nexus_types::deployment::id_map::IdMap;
 use nexus_types::deployment::{
     BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneImageSource,

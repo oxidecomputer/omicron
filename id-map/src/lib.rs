@@ -2,6 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! Provides [`IdMap`], a collection of values that are able to uniquely
+//! identify themselves.
+
 use daft::BTreeMapDiff;
 use daft::Diffable;
 use derive_where::derive_where;
@@ -182,9 +185,9 @@ impl<T: IdMappable> JsonSchema for IdMap<T> {
     }
 
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        generator: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
-        Inner::<T>::json_schema(gen)
+        Inner::<T>::json_schema(generator)
     }
 }
 

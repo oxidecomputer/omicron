@@ -18,6 +18,7 @@ use crate::rack_setup::{
 use crate::sim::SimulatedUpstairs;
 use anyhow::{Context as _, anyhow};
 use crucible_agent_client::types::State as RegionState;
+use id_map::IdMap;
 use illumos_utils::zpool::ZpoolName;
 use internal_dns_types::config::DnsConfigBuilder;
 use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
@@ -26,7 +27,6 @@ use nexus_client::types as NexusTypes;
 use nexus_client::types::{IpRange, Ipv4Range, Ipv6Range};
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_types::deployment::id_map::IdMap;
 use nexus_types::deployment::{
     BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
     BlueprintZoneImageSource, blueprint_zone_type,

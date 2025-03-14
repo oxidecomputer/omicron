@@ -168,6 +168,7 @@ mod test {
     use httptest::Expectation;
     use httptest::matchers::{not, request};
     use httptest::responders::status_code;
+    use id_map::IdMap;
     use itertools::Itertools as _;
     use nexus_db_model::{
         ByteCount, SledBaseboard, SledSystemHardware, SledUpdate, Zpool,
@@ -181,7 +182,6 @@ mod test {
         EventBuffer, EventReport, ExecutionComponent, ExecutionStepId,
         StepOutcome, StepStatus,
     };
-    use nexus_types::deployment::id_map::IdMap;
     use nexus_types::deployment::{
         Blueprint, BlueprintSledConfig, BlueprintTarget, BlueprintZoneConfig,
         BlueprintZoneDisposition, BlueprintZoneImageSource, BlueprintZoneType,

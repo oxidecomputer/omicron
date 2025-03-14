@@ -1001,6 +1001,7 @@ mod test {
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use async_bb8_diesel::AsyncSimpleConnection;
+    use id_map::IdMap;
     use internal_dns_types::names::DNS_ZONE;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_model::{DnsGroup, Generation, InitialDnsGroup};
@@ -1011,7 +1012,6 @@ mod test {
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_types::deployment::BlueprintSledConfig;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
-    use nexus_types::deployment::id_map::IdMap;
     use nexus_types::deployment::{
         BlueprintZoneConfig, OmicronZoneExternalFloatingAddr,
         OmicronZoneExternalFloatingIp,

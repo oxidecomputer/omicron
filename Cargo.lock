@@ -4449,6 +4449,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "id-map"
+version = "0.1.0"
+dependencies = [
+ "daft",
+ "derive-where",
+ "omicron-workspace-hack",
+ "proptest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "test-strategy",
+]
+
+[[package]]
 name = "ident_case"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5866,6 +5880,7 @@ dependencies = [
  "futures",
  "gateway-client",
  "hyper-rustls 0.26.0",
+ "id-map",
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -6104,6 +6119,7 @@ dependencies = [
  "diesel",
  "futures",
  "httptest",
+ "id-map",
  "internal-dns-resolver",
  "internal-dns-types",
  "ipnet",
@@ -6147,6 +6163,7 @@ dependencies = [
  "debug-ignore",
  "expectorate",
  "gateway-client",
+ "id-map",
  "illumos-utils",
  "indexmap 2.7.1",
  "internal-dns-resolver",
@@ -6322,6 +6339,7 @@ dependencies = [
  "http",
  "http-body-util",
  "hyper",
+ "id-map",
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -6382,6 +6400,7 @@ dependencies = [
  "gateway-client",
  "http",
  "humantime",
+ "id-map",
  "illumos-utils",
  "internal-dns-types",
  "ipnetwork",
@@ -7032,6 +7051,7 @@ dependencies = [
  "hyper",
  "hyper-rustls 0.26.0",
  "hyper-staticfile",
+ "id-map",
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -7347,6 +7367,7 @@ dependencies = [
  "http-range",
  "hyper",
  "hyper-staticfile",
+ "id-map",
  "illumos-utils",
  "installinator-common",
  "internal-dns-resolver",
@@ -7538,6 +7559,7 @@ dependencies = [
  "indexmap 2.7.1",
  "indicatif",
  "inout",
+ "ipnetwork",
  "itertools 0.10.5",
  "itertools 0.12.1",
  "lalrpop-util",
@@ -7555,6 +7577,7 @@ dependencies = [
  "num-integer",
  "num-iter",
  "num-traits",
+ "once_cell",
  "openapiv3",
  "peg-runtime",
  "pem-rfc7468",
