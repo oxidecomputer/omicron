@@ -100,69 +100,40 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
 fn prepare_source(sh: &Shell, env: &Environment) -> Result<()> {
     cmd!(sh, "banner 'prepare'").run()?;
 
-    // We use a `git clone` here. The primary benefits are
-    // - Source tree is guaranteed to look like a fresh clone of omicron,
-    //   because it *is* a fresh clone
-    // - Git handles file permissions, symlinks, and other complicated
-    //   filesystem attributes of that sort.
+    // We copy the source directory into another work directory to do the build.
+    // We do this because a4x2 modifies some files in-place in the omicron tree
+    // before running omicron-package.
     //
-    // The main downside: this only works for files that are tracked by git.
-    // That means a file needs to be at minimum staged with `git add`, or else
-    // it won't be considered.
+    // We decided rsync was the best way to do this, while correctly
+    // excluding big folders that dont need to be duplicated, and preserving
+    // file permissions / symlinks.
     //
-    // There are two potential paths for improvement:
-    // 1. Walk the source tree, following `.gitignore` rules as necessary. Copy
-    //    files over, being sure to carefully respect file types and
-    //    permissions. This might be best done by generating a file list, and
-    //    providing it to another tool like `tar`.
-    // 2. Remove the need for a separate copy of the omicron source tree
-    //    entirely. The primary reason we make a separate copy is because a4x2
-    //    modifies certain files in the omicron work tree in-place while it is
-    //    packaging omicron. If we can make it stop doing that, a separate copy
-    //    may be unnecessary.
-
-    let git = &env.git;
-
-    // Get a ref we can checkout from the local working tree
-    let treeish = {
-        let _popdir = sh.push_dir(&env.src_dir);
-
-        // Note: `git stash create` does not modify the stash stack. It will not
-        // appear in `git stash list`, not affect `git stash pop`, etc. More
-        // technically, it is not stored "anywhere in the ref namespace" (per
-        // `man git-stash`). Its purpose is to be used in scripts like this one.
-        let mut treeish = cmd!(sh, "{git} stash create").read()?;
-        if treeish.is_empty() {
-            // nothing to stash
-            eprintln!("No changes staged, using most recent commit for clone");
-            treeish = cmd!(sh, "{git} rev-parse HEAD").read()?;
-        }
-        assert_eq!(
-            treeish.len(),
-            40,
-            "treeish should be a 40-character commit hash"
-        );
-        assert!(
-            treeish.chars().all(|c| c.is_ascii_hexdigit()),
-            "treeish should be a 40-character commit hash"
-        );
-        treeish
-    };
-
-    // Clone the local source tree into the packaging work dir
-    let _popdir = sh.push_dir(&env.omicron_dir);
-    cmd!(sh, "{git} init").run()?;
-
+    // .git/ is excluded because we duplicate this into the `target/` of the
+    // source dir. If it was included, we would not be `cargo clean`-able.
+    //
+    // With rsync, trailing slashes are load-bearing. Please always have them.
     let src_dir = &env.src_dir;
-    cmd!(sh, "{git} remote add origin {src_dir}").run()?;
+    let omicron_dir = &env.omicron_dir;
+    cmd!(sh, "rsync")
+        .arg("--recursive")
+        .arg("--links")
+        .arg("--perms")
+        .arg("--times")
+        .arg("--group")
+        .arg("--owner")
+        .arg("--verbose")
+        .arg("--delete-during")
+        .arg("--delete-excluded")
+        .arg("--exclude=/.git/")
+        .arg("--exclude=/target/")
+        .arg("--exclude=/out/")
+        .arg(format!("{src_dir}/"))
+        .arg(format!("{omicron_dir}/"))
+        .run()?;
 
-    cmd!(sh, "{git} fetch origin {treeish}").run()?;
-    cmd!(sh, "{git} checkout {treeish}").run()?;
-
-    // Remove the .git folder so we're `cargo clean`-able
-    fs::remove_dir_all(env.omicron_dir.join(".git"))?;
-
-    cmd!(sh, "./tools/install_builder_prerequisites.sh -yp").run()?;
+    let cargo = &env.cargo;
+    let _popdir = sh.push_dir(omicron_dir);
+    cmd!(sh, "{cargo} xtask download all").run()?;
 
     Ok(())
 }
