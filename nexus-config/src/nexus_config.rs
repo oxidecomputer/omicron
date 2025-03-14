@@ -1066,7 +1066,7 @@ mod test {
             webhook_deliverator.period_secs = 43
             webhook_deliverator.lease_timeout_secs = 44
             webhook_deliverator.first_retry_backoff_secs = 45
-            webhook_deliverator.second_retry_backoff_secs = 45
+            webhook_deliverator.second_retry_backoff_secs = 46
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
