@@ -421,6 +421,10 @@ pub struct BackgroundTaskConfig {
     /// configuration for read-only region replacement start task
     pub read_only_region_replacement_start:
         ReadOnlyRegionReplacementStartConfig,
+    /// configuration for webhook dispatcher task
+    pub webhook_dispatcher: WebhookDispatcherConfig,
+    /// configuration for webhook deliverator task
+    pub webhook_deliverator: WebhookDeliveratorConfig,
 }
 
 #[serde_as]
@@ -745,6 +749,46 @@ pub struct ReadOnlyRegionReplacementStartConfig {
     pub period_secs: Duration,
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct WebhookDispatcherConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct WebhookDeliveratorConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// duration after which another Nexus' lease on a delivery attempt is
+    /// considered expired.
+    ///
+    /// this is tuneable to allow testing lease expiration without having to
+    /// wait a long time.
+    #[serde(default = "WebhookDeliveratorConfig::default_lease_timeout_secs")]
+    pub lease_timeout_secs: u64,
+
+    /// backoff period for the first retry of a failed delivery attempt.
+    ///
+    /// this is tuneable to allow testing delivery retries without having to
+    /// wait a long time.
+    #[serde(default = "WebhookDeliveratorConfig::default_first_retry_backoff")]
+    pub first_retry_backoff_secs: u64,
+
+    /// backoff period for the seecond retry of a failed delivery attempt.
+    ///
+    /// this is tuneable to allow testing delivery retries without having to
+    /// wait a long time.
+    #[serde(
+        default = "WebhookDeliveratorConfig::default_second_retry_backoff"
+    )]
+    pub second_retry_backoff_secs: u64,
+}
+
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PackageConfig {
@@ -813,6 +857,20 @@ impl std::fmt::Display for SchemeName {
             SchemeName::SessionCookie => "session_cookie",
             SchemeName::AccessToken => "access_token",
         })
+    }
+}
+
+impl WebhookDeliveratorConfig {
+    const fn default_lease_timeout_secs() -> u64 {
+        60 // one minute
+    }
+
+    const fn default_first_retry_backoff() -> u64 {
+        60 // one minute
+    }
+
+    const fn default_second_retry_backoff() -> u64 {
+        60 * 5 // five minutes
     }
 }
 
@@ -1005,6 +1063,11 @@ mod test {
             tuf_artifact_replication.period_secs = 300
             tuf_artifact_replication.min_sled_replication = 3
             read_only_region_replacement_start.period_secs = 30
+            webhook_dispatcher.period_secs = 42
+            webhook_deliverator.period_secs = 43
+            webhook_deliverator.lease_timeout_secs = 44
+            webhook_deliverator.first_retry_backoff_secs = 45
+            webhook_deliverator.second_retry_backoff_secs = 46
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1210,6 +1273,15 @@ mod test {
                             ReadOnlyRegionReplacementStartConfig {
                                 period_secs: Duration::from_secs(30),
                             },
+                        webhook_dispatcher: WebhookDispatcherConfig {
+                            period_secs: Duration::from_secs(42),
+                        },
+                        webhook_deliverator: WebhookDeliveratorConfig {
+                            period_secs: Duration::from_secs(43),
+                            lease_timeout_secs: 44,
+                            first_retry_backoff_secs: 45,
+                            second_retry_backoff_secs: 46,
+                        },
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -1296,6 +1368,8 @@ mod test {
             tuf_artifact_replication.period_secs = 300
             tuf_artifact_replication.min_sled_replication = 3
             read_only_region_replacement_start.period_secs = 30
+            webhook_dispatcher.period_secs = 42
+            webhook_deliverator.period_secs = 43
             [default_region_allocation_strategy]
             type = "random"
             "##,

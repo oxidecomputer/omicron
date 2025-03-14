@@ -21,7 +21,7 @@
 // these are valid v4 uuids, and they're as unlikely to collide with a future
 // uuid as any random uuid is.)
 //
-// The specific kinds of resources to which we've assigned uuids:
+// The specific kinds of resources to which we've assigned uuids:|
 //
 //    UUID PREFIX     RESOURCE
 //    001de000-05e4   built-in users ("05e4" looks a bit like "user")
@@ -31,6 +31,8 @@
 //    001de000-074c   built-in services vpc
 //    001de000-c470   built-in services vpc subnets
 //    001de000-all0   singleton ID for source IP allowlist ("all0" is like "allow")
+//    001de000-7768   singleton ID for webhook probe event ('wh' for 'webhook'
+//                    is ascii 0x77 0x68).
 
 use std::sync::LazyLock;
 
