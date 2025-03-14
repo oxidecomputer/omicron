@@ -7,6 +7,7 @@
 use anyhow::bail;
 use camino::{Utf8Path, Utf8PathBuf};
 use daft::Diffable;
+use id_map::IdMappable;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -40,6 +41,14 @@ pub struct OmicronPhysicalDiskConfig {
     pub identity: DiskIdentity,
     pub id: PhysicalDiskUuid,
     pub pool_id: ZpoolUuid,
+}
+
+impl IdMappable for OmicronPhysicalDiskConfig {
+    type Id = PhysicalDiskUuid;
+
+    fn id(&self) -> Self::Id {
+        self.id
+    }
 }
 
 #[derive(
@@ -335,6 +344,14 @@ pub struct DatasetConfig {
 
     #[serde(flatten)]
     pub inner: SharedDatasetConfig,
+}
+
+impl IdMappable for DatasetConfig {
+    type Id = DatasetUuid;
+
+    fn id(&self) -> Self::Id {
+        self.id
+    }
 }
 
 #[derive(

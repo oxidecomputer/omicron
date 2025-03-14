@@ -6001,6 +6001,7 @@ dependencies = [
  "gateway-client",
  "gateway-messages",
  "gateway-test-utils",
+ "id-map",
  "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
@@ -6290,6 +6291,7 @@ name = "nexus-sled-agent-shared"
 version = "0.1.0"
 dependencies = [
  "daft",
+ "id-map",
  "illumos-utils",
  "omicron-common",
  "omicron-passwords",
@@ -6819,6 +6821,7 @@ dependencies = [
  "futures",
  "hex",
  "http",
+ "id-map",
  "ipnetwork",
  "libc",
  "macaddr",
