@@ -278,12 +278,11 @@ async fn cmd_reconfigurator_history(
     // prev_blueprint is `None` if any of these is true:
     // - if we're not printing diffs
     // - if this is the first iteration of the loop
-    // - if the previous blueprint had been pruned from the database
+    // - if the previous blueprint was missing from the database
     let mut prev_blueprint: Option<Blueprint> = None;
 
     for t in targets {
         let target_id = BlueprintUuid::from(t.blueprint_id);
-        let this_previous = prev_blueprint.take();
 
         print!(
             "{:>5} {} {} {:>8}",
@@ -306,13 +305,23 @@ async fn cmd_reconfigurator_history(
             println!(": {}", comment);
 
             match (
+                // are we printing diffs?
                 history_args.diff,
+                // was the previous blueprint (if any) in the database?
                 prev_blueprint_id
                     .and_then(|prev_id| all_blueprints.get(&prev_id)),
+                // is this blueprint in the database?
                 all_blueprints.get(&target_id),
             ) {
                 (true, Some(previous), Some(_)) => {
-                    let previous_blueprint = match this_previous {
+                    // In this case, we are printing diffs and both the previous
+                    // and current blueprints are in the database.
+                    //
+                    // We might already have loaded the full previous blueprint,
+                    // if we took this branch on the last iteration.  But we
+                    // might not have, if that blueprint's parent was absent
+                    // from the database.
+                    let previous_blueprint = match prev_blueprint {
                         Some(p) => p,
                         None => {
                             blueprint_load(opctx, datastore, previous.id)
@@ -327,7 +336,9 @@ async fn cmd_reconfigurator_history(
                     println!("{}", diff.display());
                     prev_blueprint = Some(current_blueprint);
                 }
-                _ => (),
+                _ => {
+                    prev_blueprint = None;
+                }
             };
         }
 
