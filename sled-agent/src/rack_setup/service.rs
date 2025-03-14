@@ -82,6 +82,7 @@ use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use chrono::Utc;
 use dns_service_client::DnsError;
+use id_map::IdMap;
 use internal_dns_resolver::Resolver as DnsResolver;
 use internal_dns_types::names::ServiceName;
 use nexus_client::{
@@ -94,7 +95,7 @@ use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::{
     Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
     BlueprintDatasetsConfig, BlueprintZoneType, BlueprintZonesConfig,
-    CockroachDbPreserveDowngrade, blueprint_zone_type, id_map::IdMap,
+    CockroachDbPreserveDowngrade, blueprint_zone_type,
 };
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::get_sled_address;

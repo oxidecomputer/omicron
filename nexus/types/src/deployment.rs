@@ -58,7 +58,6 @@ mod blueprint_diff;
 mod blueprint_display;
 mod clickhouse;
 pub mod execution;
-pub mod id_map;
 mod network_resources;
 mod planning_input;
 mod tri_map;
