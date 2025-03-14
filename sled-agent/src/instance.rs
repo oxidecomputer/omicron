@@ -386,11 +386,39 @@ impl InstanceMonitorRunner {
             // If we couldn't communicate with propolis-server, let's make sure
             // the zone is still there...
             Err(e @ PropolisClientError::CommunicationError(_)) => {
-                let zone = match Zones::find(&self.zone_name).await {
-                    Ok(zone) => zone,
+                match Zones::find(&self.zone_name).await {
+                    Ok(None) => {
+                        // Oh it's GONE!
+                        info!(
+                            self.log,
+                            "Propolis zone is Way Gone!";
+                            "zone" => %self.zone_name,
+                        );
+                        Ok(InstanceMonitorUpdate::ZoneGone)
+                    }
+                    Ok(Some(zone)) if zone.state() == zone::State::Running => {
+                        warn!(
+                            self.log,
+                            "communication error checking up on Propolis, but \
+                             the zone is still running...";
+                            "error" => %e,
+                            "zone" => %self.zone_name,
+                        );
+                        Err(BackoffError::transient(e))
+                    }
+                    Ok(Some(zone)) => {
+                        info!(
+                            self.log,
+                            "Propolis zone is no longer running!";
+                            "error" => %e,
+                            "zone" => %self.zone_name,
+                            "zone_state" => ?zone.state(),
+                        );
+                        Ok(InstanceMonitorUpdate::ZoneGone)
+                    }
                     Err(zoneadm_error) => {
                         // If we couldn't figure out whether the zone is still
-                        // there, just keep polling normally.
+                        // running, just keep retrying
                         error!(
                             self.log,
                             "error checking if Propolis zone still exists after \
@@ -398,28 +426,9 @@ impl InstanceMonitorRunner {
                             "error" => %zoneadm_error,
                             "zone" => %self.zone_name,
                         );
-                        return Err(BackoffError::transient(e));
+                        Err(BackoffError::transient(e))
                     }
-                };
-
-                // OH IT'S GONE
-                if zone.is_none() {
-                    info!(
-                        self.log,
-                        "Propolis zone is Way Gone!";
-                        "zone" => %self.zone_name,
-                    );
-                    return Ok(InstanceMonitorUpdate::ZoneGone);
                 }
-
-                warn!(
-                    self.log,
-                    "communication error checking up on Propolis, but the \
-                     zone still exists...";
-                    "error" => %e,
-                    "zone" => %self.zone_name,
-                );
-                Err(BackoffError::transient(e))
             }
             // Otherwise, was there a known error code from Propolis?
             Err(e) => propolis_error_code(&self.log, &e)
