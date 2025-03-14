@@ -77,7 +77,6 @@ pub enum Output {
     PersistPrepare(PrepareMsg),
     PersistCommit(CommitMsg),
     PersistDecommissioned { from: PlatformId, epoch: Epoch },
-    PersistLrtqCancelled { lrtq_upgrade_id: Uuid },
 }
 
 #[derive(
@@ -499,9 +498,5 @@ impl Node {
 
     fn persist_decomissioned(&mut self, from: PlatformId, epoch: Epoch) {
         self.outgoing.push(Output::PersistDecommissioned { from, epoch });
-    }
-
-    fn persist_lrtq_cancelled(&mut self, lrtq_upgrade_id: Uuid) {
-        self.outgoing.push(Output::PersistLrtqCancelled { lrtq_upgrade_id });
     }
 }
