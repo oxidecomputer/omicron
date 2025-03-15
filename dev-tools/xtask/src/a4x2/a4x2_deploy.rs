@@ -5,12 +5,13 @@
 //! Subcommand: cargo xtask a4x2-deploy
 
 use super::cmd;
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use fs_err as fs;
 use serde::Deserialize;
 use std::env;
+use std::process::{Command, Stdio};
 use std::{thread, time};
 use xshell::Shell;
 
@@ -430,9 +431,23 @@ fn try_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
 
 fn run_live_tests(sh: &Shell, env: &Environment) -> Result<()> {
     cmd!(sh, "banner 'live tests'").run()?;
-    let _popdir = sh.push_dir(&env.a4x2_dir);
-    let g0ip = get_node_ip(&sh, env, "g0")?;
 
+    // Ensure a4x2 state directory exists.
+    if !env.a4x2_dir.join(".falcon").try_exists()? {
+        bail!(
+            ".falcon state directory not found; a4x2 assumed not running. Please start a4x2 with `cargo xtask a4x2 deploy start`"
+        );
+    }
+
+    let _popdir = sh.push_dir(&env.a4x2_dir);
+
+    // Get IP of sled 0. Since we confirmed the falcon state directory exists
+    // before this, the most likely error state here is that the user launched
+    // a4x2 and then rebooted, which will leave the falcon state pointing at
+    // propolis servers that aren't running anymore.
+    let g0ip = get_node_ip(&sh, env, "g0").context("Failed to get ip address of a4x2 node g0. a4x2 may not be running. If you rebooted since the last time you launched a4x2, please relaunch it.")?;
+
+    // Prepare to ssh into sled 0
     let mut ssh_args = vec!["-i", "../a4x2-ssh-key"];
     ssh_args.extend_from_slice(&INSECURE_SSH_ARGS);
     let ssh_args = &ssh_args;
@@ -443,31 +458,74 @@ fn run_live_tests(sh: &Shell, env: &Environment) -> Result<()> {
         LIVE_TEST_BUNDLE_DIR, LIVE_TEST_BUNDLE_NAME, LIVE_TEST_BUNDLE_SCRIPT,
     };
 
+    // Send live tests to sled 0
     cmd!(sh, "scp {ssh_args...} {LIVE_TEST_BUNDLE_NAME} {ssh_host}:/zone/oxz_switch/root/root").run()?;
 
-    // If you want any change in functionality for the test runner, update
-    // run-live-tests over in a4x2_package.rs. Don't add it here!
-    //
-    // The weird replace() is for quote-escaping, as we shove this into a
-    // single-quote string right below when creating the script to run over
-    // ssh.
+    // NOTE! Below we do need to do string-escaping, because we are shuffling
+    // some scripts around and pushing them into shells on remote systems
+
+    // This script will execute within the switch zone. If you want any change
+    // in functionality for the test runner, update run-live-tests over in
+    // a4x2_package.rs. Don't add it here!
     let switch_zone_script = format!(
         r#"
-        set -euxo pipefail
-        tar xvzf '{LIVE_TEST_BUNDLE_NAME}'
-        cd '{LIVE_TEST_BUNDLE_DIR}'
-        ./'{LIVE_TEST_BUNDLE_SCRIPT}'
-    "#
-    )
-    .replace("'", "'\"'\"'");
+            set -euxo pipefail
+            tar xvzf {0}
+            cd {1}
+            bash ./{2}
+        "#,
+        escape_shell_arg(LIVE_TEST_BUNDLE_NAME),
+        escape_shell_arg(LIVE_TEST_BUNDLE_DIR),
+        escape_shell_arg(LIVE_TEST_BUNDLE_SCRIPT),
+    );
 
-    let remote_script =
-        format!("zlogin oxz_switch bash -c '{switch_zone_script}'");
+    // This script will execute within the global zone, and launch the switch
+    // zone script.
+    let ssh_script = format!(
+        "zlogin oxz_switch bash -c {}",
+        escape_shell_arg(&switch_zone_script)
+    );
+
+    // NOTE! No more escaping, we are back to the comfort of
+    // std::process::Command from now on.
+
+    // Log into a virtual sled, and run `ssh_script`.
+    let ssh_cmd = cmd!(sh, "ssh {ssh_args...} {ssh_host} {ssh_script}");
 
     // Will error if the live tests fail. This is desired.
-    cmd!(sh, "ssh {ssh_args...} {ssh_host} {remote_script}").run()?;
+    let live_tests_status = Command::from(ssh_cmd)
+        .stdin(Stdio::null())
+        .status()?
+        .code()
+        .with_context(|| "SSH command exited by signal unexpectedly")?;
 
-    Ok(())
+    match live_tests_status {
+        0 => Ok(()),
+
+        // SSH returns exit code 255 if any connection error occurred
+        255 => Err(anyhow!(
+            "SSH connection to a4x2 failed, no tests were run (exit 255)"
+        )),
+
+        // The rest of these are nextest exit codes
+        // https://github.com/nextest-rs/nextest/blob/main/nextest-metadata/src/exit_codes.rs
+
+        // TEST_RUN_FAILED
+        100 => Err(anyhow!(
+            "Test suite completed with some test failures. (exit 100)"
+        )),
+
+        // REQUIRED_VERSION_NOT_MET
+        92 => Err(anyhow!(
+            "Nextest version too old; please update nextest. (exit 92)"
+        )),
+
+        // Catch-all for errors we don't expect to encounter.
+        e => Err(anyhow!(
+            "Unhandled exit code from running live tests. (exit {})",
+            e
+        )),
+    }
 }
 
 fn teardown_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
@@ -641,4 +699,35 @@ fn get_node_ip(sh: &Shell, env: &Environment, node: &str) -> Result<String> {
 
     // Loop above here will return early if we successfully found the IP
     bail!("get_host_ip: could not locate IP for node {node}");
+}
+
+/// Escape a string so it will be interpreted as a single argument when placed
+/// into a shell script.
+fn escape_shell_arg(s: &str) -> String {
+    // The escape method we use here is very simple.
+    //
+    // Single-quote strings in shells are literal strings. There are *no*
+    // escape characters, no ways of terminating the string, except for the
+    // final terminating right-hand single quote. This means any character can
+    // be safely placed into a single quote string- except single quotes.
+    //
+    // To escape single quotes, we use the sequence:
+    //     '"'"'
+    // This reads as
+    // - terminate previous single-quote string.
+    // - create a double-quote string, containing one single-quote.
+    // - open a new single-quote string.
+    //
+    // Adjacent strings that are not separated by spaces are considered part of
+    // the same word during tokenization.
+    //
+    // This is portable across POSIX-compliant shells and can be nested.
+
+    // 1. Escape single-quotes within the string
+    let s = s.replace("'", "'\"'\"'");
+
+    // 2. Enclose the string within single-quotes
+    let s = ["'", &s, "'"].join("");
+
+    s
 }
