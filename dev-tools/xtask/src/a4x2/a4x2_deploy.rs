@@ -57,6 +57,10 @@ pub enum DeployCommand {
     /// Query the current state of a4x2, including node access information and
     /// whether the control plane is accessible.
     Status,
+
+    /// Download and install the propolis hypervisor and bootcode. Pre-requisite
+    /// for launching a4x2.
+    InstallPropolis,
 }
 
 #[derive(Args, Clone)]
@@ -164,7 +168,35 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
             print_a4x2_access_info(&sh, &env);
         }
         DeployCommand::RunLiveTests(_) => run_live_tests(&sh, &env)?,
+        DeployCommand::InstallPropolis => install_propolis(&sh)?,
     }
+
+    Ok(())
+}
+
+/// Download an appropriate version of propolis and OVMF code
+fn install_propolis(sh: &Shell) -> Result<()> {
+    let tmp = sh.create_temp_dir()?;
+    let _popdir = sh.push_dir(tmp.path());
+
+    // Download OVMF
+    cmd!(sh, "curl")
+        .arg("--remote-name")
+        .arg("--location")
+        .arg("https://oxide-falcon-assets.s3.us-west-2.amazonaws.com/OVMF_CODE.fd")
+        .run()?;
+    cmd!(sh, "pfexec mkdir -p /var/ovmf").run()?;
+    cmd!(sh, "pfexec cp OVMF_CODE.fd /var/ovmf/OVMF_CODE.fd").run()?;
+
+    // Download Propolis
+    // XXX this version is busted though
+    cmd!(sh, "curl")
+        .arg("--remote-name")
+        .arg("--location")
+        .arg("https://buildomat.eng.oxide.computer/wg/0/artefact/01J8TPA802A5SHWPY5K05ZH2J3/ucXqZK2nT2qxxgI0vY5iygOCdEwguBoe9fk3cFrm4IOs9TLX/01J8TPAVRJDHEYKPEG07AHG51H/01J8TQ0QB5M510N99RWD7X55HT/propolis-server")
+        .run()?;
+    cmd!(sh, "chmod +x propolis-server").run()?;
+    cmd!(sh, "pfexec mv propolis-server /usr/bin").run()?;
 
     Ok(())
 }
@@ -175,7 +207,7 @@ fn unpack_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
 
     if !tgz_path.try_exists()? {
         bail!(
-            "a4x2-package bundle does not exist at {}, did you run `cargo xtask a4x2-package`?",
+            "a4x2-package bundle does not exist at {}, did you run `cargo xtask a4x2 package`?",
             tgz_path
         );
     }
@@ -204,14 +236,6 @@ fn unpack_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
 
 fn prepare_to_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
     cmd!(sh, "banner 'prepare'").run()?;
-
-    // TODO could move these into the a4x2-package bundle.
-    // mostly of matter of having a consistent version of propolis.
-    exec_remote_script(
-        &sh,
-        "https://raw.githubusercontent.com/oxidecomputer/falcon/main/get-ovmf.sh",
-    )?;
-    exec_remote_script(&sh, "https://raw.githubusercontent.com/oxidecomputer/falcon/main/get-propolis.sh")?;
 
     // Generate an ssh key we will use to log into the sleds.
     cmd!(sh, "ssh-keygen -t ed25519 -N '' -f a4x2-ssh-key").run()?;
@@ -617,15 +641,4 @@ fn get_node_ip(sh: &Shell, env: &Environment, node: &str) -> Result<String> {
 
     // Loop above here will return early if we successfully found the IP
     bail!("get_host_ip: could not locate IP for node {node}");
-}
-
-/// effectively curl | bash, but reads the full script before running bash
-fn exec_remote_script(sh: &Shell, url: &str) -> Result<()> {
-    let script = cmd!(
-        sh,
-        "curl --silent --fail --show-error --location --retry 10 {url}"
-    )
-    .read()?;
-    cmd!(sh, "bash").stdin(&script).run()?;
-    Ok(())
 }
