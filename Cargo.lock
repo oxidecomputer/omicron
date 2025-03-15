@@ -4245,7 +4245,7 @@ dependencies = [
  "http",
  "hyper",
  "hyper-util",
- "rustls 0.23.19",
+ "rustls 0.23.23",
  "rustls-pki-types",
  "tokio",
  "tokio-rustls 0.26.0",
@@ -5919,7 +5919,7 @@ dependencies = [
  "rcgen",
  "ref-cast",
  "regex",
- "rustls 0.22.4",
+ "rustls 0.23.23",
  "schemars",
  "semver 1.0.25",
  "serde",
@@ -7117,7 +7117,7 @@ dependencies = [
  "regex",
  "reqwest",
  "ring",
- "rustls 0.22.4",
+ "rustls 0.23.23",
  "rustls-pemfile 2.2.0",
  "samael",
  "schemars",
@@ -7471,7 +7471,7 @@ dependencies = [
  "regex",
  "reqwest",
  "ring",
- "rustls 0.22.4",
+ "rustls 0.23.23",
  "serde",
  "slog",
  "subprocess",
@@ -7598,7 +7598,7 @@ dependencies = [
  "reqwest",
  "rsa",
  "rustix 0.38.37",
- "rustls 0.23.19",
+ "rustls 0.23.23",
  "rustls-webpki 0.102.8",
  "schemars",
  "scopeguard",
@@ -9436,7 +9436,7 @@ dependencies = [
  "quinn-proto",
  "quinn-udp",
  "rustc-hash 2.1.1",
- "rustls 0.23.19",
+ "rustls 0.23.23",
  "socket2",
  "thiserror 1.0.69",
  "tokio",
@@ -9453,7 +9453,7 @@ dependencies = [
  "rand 0.8.5",
  "ring",
  "rustc-hash 2.1.1",
- "rustls 0.23.19",
+ "rustls 0.23.23",
  "slab",
  "thiserror 1.0.69",
  "tinyvec",
@@ -9892,7 +9892,7 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "quinn",
- "rustls 0.23.19",
+ "rustls 0.23.23",
  "rustls-pemfile 2.2.0",
  "rustls-pki-types",
  "serde",
@@ -10264,9 +10264,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.19"
+version = "0.23.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "934b404430bb06b3fae2cba809eb45a1ab1aecd64491213d7c3301b88393f8d1"
+checksum = "47796c98c480fce5406ef69d1c76378375492c3b0a0de587be0c1d9feb12f395"
 dependencies = [
  "aws-lc-rs",
  "log",
@@ -11395,7 +11395,7 @@ dependencies = [
  "ed25519-dalek",
  "libipcc",
  "pem-rfc7468",
- "rustls 0.23.19",
+ "rustls 0.23.23",
  "secrecy",
  "serde",
  "sha2",
@@ -12255,7 +12255,7 @@ version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c7bc40d0e5a97695bb96e27995cd3a08538541b0a846f65bba7a359f36700d4"
 dependencies = [
- "rustls 0.23.19",
+ "rustls 0.23.23",
  "rustls-pki-types",
  "tokio",
 ]
@@ -12420,7 +12420,7 @@ dependencies = [
  "pem",
  "percent-encoding",
  "reqwest",
- "rustls 0.23.19",
+ "rustls 0.23.23",
  "serde",
  "serde_json",
  "serde_plain",
