@@ -482,7 +482,7 @@ fn run_live_tests(sh: &Shell, env: &Environment) -> Result<()> {
     // This script will execute within the global zone, and launch the switch
     // zone script.
     let ssh_script = format!(
-        "zlogin oxz_switch bash -c {}",
+        "zlogin oxz_switch {}",
         escape_shell_arg(&switch_zone_script)
     );
 
