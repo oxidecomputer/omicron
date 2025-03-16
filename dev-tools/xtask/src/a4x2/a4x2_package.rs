@@ -5,7 +5,7 @@
 //! Subcommand: cargo xtask a4x2-package
 
 use super::cmd;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
 use fs_err as fs;
@@ -24,6 +24,10 @@ pub struct A4x2PackageArgs {
     /// Choose which branch of oxidecomputer/testbed to build into the output.
     #[clap(long, default_value_t = String::from("main"))]
     testbed_branch: String,
+
+    /// Output package is written here.
+    #[clap(long, default_value_t = Utf8PathBuf::from(super::DEFAULT_A4X2_PKG_PATH))]
+    output: Utf8PathBuf,
 }
 
 struct Environment {
@@ -73,7 +77,7 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
         sh.change_dir(&work_dir);
 
         // Output. Maybe in CI we want this to be /out
-        let out_dir = work_dir.join("a4x2-package-out");
+        let out_dir = work_dir.join(super::A4X2_PACKAGE_DIR_NAME);
         fs::create_dir_all(&out_dir)?;
 
         // Clone of omicron that we can modify without causing trouble for anyone
@@ -83,22 +87,41 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
         Environment { cargo, git, work_dir, src_dir, out_dir, omicron_dir }
     };
 
-    prepare_source(&sh, &env)?;
-    build_end_to_end_tests(&sh, &env)?;
-    build_live_tests(&sh, &env)?;
+    let output_artifact = args.output.canonicalize_utf8()?;
+
+    prepare_source(&sh, &env, &args.testbed_source, &args.testbed_branch)
+        .context("preparing source for builds")?;
+    build_end_to_end_tests(&sh, &env).context("building end-to-end tests")?;
+    build_live_tests(&sh, &env).context("building live tests")?;
 
     // This needs to happen last because it messes with the working tree in a
     // way that end-to-end tests doesnt like when building
-    build_a4x2(&sh, &env, &args.testbed_source, &args.testbed_branch)?;
+    build_a4x2(&sh, &env).context("building a4x2")?;
 
-    create_output_artifact(&sh, &env)?;
+    create_output_artifact(&sh, &env, &output_artifact)
+        .context("compressing final output tarball")?;
 
     Ok(())
 }
 
 /// Clone local working tree into work dir, and download necessary build deps
-fn prepare_source(sh: &Shell, env: &Environment) -> Result<()> {
+fn prepare_source(
+    sh: &Shell,
+    env: &Environment,
+    testbed_source: &str,
+    testbed_branch: &str,
+) -> Result<()> {
     cmd!(sh, "banner 'prepare'").run()?;
+
+    // Clone testbed as our very first thing, so in buildomat we don't risk
+    // our git credentials expiring during the omicron build.
+    let testbed_dir = env.work_dir.join("testbed");
+    let git = &env.git;
+    cmd!(
+        sh,
+        "{git} clone {testbed_source} --branch {testbed_branch} {testbed_dir}"
+    )
+    .run()?;
 
     // We copy the source directory into another work directory to do the build.
     // We do this because a4x2 modifies some files in-place in the omicron tree
@@ -129,11 +152,14 @@ fn prepare_source(sh: &Shell, env: &Environment) -> Result<()> {
         .arg("--exclude=/out/")
         .arg(format!("{src_dir}/"))
         .arg(format!("{omicron_dir}/"))
-        .run()?;
+        .run()
+        .context("cloning omicron source tree into build directory")?;
 
     let cargo = &env.cargo;
     let _popdir = sh.push_dir(omicron_dir);
-    cmd!(sh, "{cargo} xtask download all").run()?;
+    cmd!(sh, "{cargo} xtask download all")
+        .run()
+        .context("downloading build dependencies")?;
 
     Ok(())
 }
@@ -163,11 +189,11 @@ fn build_live_tests(sh: &Shell, env: &Environment) -> Result<()> {
 
     // We need nextest available, both to generate the test bundle and to
     // include in the output tarball to execute the bundle on a4x2.
-    // XXX do we need to test nextest exists & is the right version? need to
-    // see if the incidental errors from stuff below already take care of
-    // telling someone outside of CI what they need to be doing.
-    let nextest_path =
-        Utf8PathBuf::from(cmd!(sh, "/usr/bin/which cargo-nextest").read()?);
+    let nextest_path = Utf8PathBuf::from(
+        cmd!(sh, "/usr/bin/which cargo-nextest")
+            .read()
+            .context("Ensuring nextest is installed to build live tests.")?,
+    );
 
     // Build and generate the live tests bundle
     // generates
@@ -218,26 +244,10 @@ fn build_live_tests(sh: &Shell, env: &Environment) -> Result<()> {
     Ok(())
 }
 
-fn build_a4x2(
-    sh: &Shell,
-    env: &Environment,
-    testbed_source: &str,
-    testbed_branch: &str,
-) -> Result<()> {
+fn build_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
     cmd!(sh, "banner testbed").run()?;
     let testbed_dir = env.work_dir.join("testbed");
     let a4x2_dir = testbed_dir.join("a4x2");
-
-    // TODO move this clone & build to prepare, so that if the omicron build
-    // takes awhile we wont have lost our git token when we get here. Relevant
-    // for CI but not for running locally.
-    // TODO: flag to set testbed branch
-    let git = &env.git;
-    cmd!(
-        sh,
-        "{git} clone {testbed_source} --branch {testbed_branch} {testbed_dir}"
-    )
-    .run()?;
 
     let _popdir = sh.push_dir(&a4x2_dir);
 
@@ -318,15 +328,15 @@ fn build_a4x2(
 }
 
 /// Create a tgz file with everything built during a4x2-package invocation
-fn create_output_artifact(sh: &Shell, env: &Environment) -> Result<()> {
+fn create_output_artifact(
+    sh: &Shell,
+    env: &Environment,
+    out_path: &Utf8PathBuf,
+) -> Result<()> {
     cmd!(sh, "banner bundle").run()?;
     let _popdir = sh.push_dir(&env.work_dir);
     let pkg_dir_name = env.out_dir.file_name().unwrap();
-
-    let artifact =
-        env.src_dir.join("out").join(Utf8PathBuf::from("a4x2-package-out.tgz"));
-
-    cmd!(sh, "tar -czf {artifact} {pkg_dir_name}/").run()?;
+    cmd!(sh, "tar -czf {out_path} {pkg_dir_name}/").run()?;
 
     Ok(())
 }

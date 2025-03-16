@@ -11,13 +11,19 @@ mod a4x2_deploy;
 mod a4x2_package;
 
 /// live-tests nextest bundle is named this.
-static LIVE_TEST_BUNDLE_NAME: &str = "live-tests-bundle.tgz";
+const LIVE_TEST_BUNDLE_NAME: &str = "live-tests-bundle.tgz";
 
 /// directory within the bundle tar
-static LIVE_TEST_BUNDLE_DIR: &str = "live-tests-bundle";
+const LIVE_TEST_BUNDLE_DIR: &str = "live-tests-bundle";
 
 /// script within the bundle directory
-static LIVE_TEST_BUNDLE_SCRIPT: &str = "run-live-tests";
+const LIVE_TEST_BUNDLE_SCRIPT: &str = "run-live-tests";
+
+/// Top level directory in a4x2 package bundles
+const A4X2_PACKAGE_DIR_NAME: &str = "a4x2-package";
+
+/// Default location where a4x2-package places output and a4x2-deploy reads it.
+const DEFAULT_A4X2_PKG_PATH: &str = "out/a4x2-package.tar.gz";
 
 /// These environment variables are set to statically defined values for
 /// commands executed by the xtask.
