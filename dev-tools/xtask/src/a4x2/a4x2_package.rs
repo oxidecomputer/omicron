@@ -87,7 +87,28 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
         Environment { cargo, git, work_dir, src_dir, out_dir, omicron_dir }
     };
 
-    let output_artifact = args.output.canonicalize_utf8()?;
+    // Canonicalizing fails if a file doesn't exist, so we need to instead
+    // canonicalize the *parent* of the output file (which should exist), and
+    // then join it with the output file name. We then have an absolute path to
+    // a file that may not exist yet, because we have not written it.
+    let output_artifact = if let Some(parent) = args.output.parent() {
+        let absolute_parent = parent.canonicalize_utf8().context(format!(
+            "canonicalizing output parent directory: `{}`",
+            parent
+        ))?;
+        let file_name = args.output.file_name().with_context(|| {
+            format!(
+                "output path should be a file, not a directory: `{}`",
+                args.output
+            )
+        })?;
+        absolute_parent.join(file_name)
+    } else {
+        Utf8PathBuf::try_from(env::current_dir()?)?
+            .canonicalize_utf8()
+            .context("canonicalizing the current directory")?
+            .join(args.output)
+    };
 
     prepare_source(&sh, &env, &args.testbed_source, &args.testbed_branch)
         .context("preparing source for builds")?;
@@ -336,7 +357,7 @@ fn create_output_artifact(
     cmd!(sh, "banner bundle").run()?;
     let _popdir = sh.push_dir(&env.work_dir);
     let pkg_dir_name = env.out_dir.file_name().unwrap();
-    cmd!(sh, "tar -czf {out_path} {pkg_dir_name}/").run()?;
+    cmd!(sh, "tar -czvf {out_path} {pkg_dir_name}/").run()?;
 
     Ok(())
 }

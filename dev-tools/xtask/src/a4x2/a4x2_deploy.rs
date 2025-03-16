@@ -110,7 +110,9 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
             // Unused by other commands, so harmless to fill in with a default
             _ => Utf8PathBuf::from(super::DEFAULT_A4X2_PKG_PATH),
         };
-        let a4x2_package_tar = a4x2_package_tar.canonicalize_utf8()?;
+        let a4x2_package_tar = a4x2_package_tar
+            .canonicalize_utf8()
+            .context("canonicalizing a4x2 package path")?;
 
         let pwd = Utf8PathBuf::try_from(env::current_dir()?)?;
         let work_dir = pwd.join("target/a4x2/deploy");
