@@ -15,6 +15,17 @@ use std::io::{Read, Write};
 use walkdir::WalkDir;
 use xshell::Shell;
 
+/// This script will be placed in the live tests bundle to run the live tests
+const LIVE_TESTS_EXECUTION_SCRIPT: &str = r#"
+    set -euxo pipefail
+    /opt/oxide/omdb/bin/omdb -w nexus blueprints target enable current
+
+    TMPDIR=/var/tmp ./cargo-nextest nextest run \
+        --profile=live-tests \
+        --archive-file live-tests-archive/omicron-live-tests.tar.zst \
+        --workspace-remap live-tests-archive
+"#;
+
 #[derive(Parser)]
 pub struct A4x2PackageArgs {
     /// Choose which source of oxidecomputer/testbed to build into the output.
@@ -87,28 +98,8 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
         Environment { cargo, git, work_dir, src_dir, out_dir, omicron_dir }
     };
 
-    // Canonicalizing fails if a file doesn't exist, so we need to instead
-    // canonicalize the *parent* of the output file (which should exist), and
-    // then join it with the output file name. We then have an absolute path to
-    // a file that may not exist yet, because we have not written it.
-    let output_artifact = if let Some(parent) = args.output.parent() {
-        let absolute_parent = parent.canonicalize_utf8().context(format!(
-            "canonicalizing output parent directory: `{}`",
-            parent
-        ))?;
-        let file_name = args.output.file_name().with_context(|| {
-            format!(
-                "output path should be a file, not a directory: `{}`",
-                args.output
-            )
-        })?;
-        absolute_parent.join(file_name)
-    } else {
-        Utf8PathBuf::try_from(env::current_dir()?)?
-            .canonicalize_utf8()
-            .context("canonicalizing the current directory")?
-            .join(args.output)
-    };
+    let output_artifact = canonicalize_parent(&args.output)
+        .context("finding absolute path to output artifact")?;
 
     prepare_source(&sh, &env, &args.testbed_source, &args.testbed_branch)
         .context("preparing source for builds")?;
@@ -186,9 +177,6 @@ fn prepare_source(
 }
 
 fn build_end_to_end_tests(sh: &Shell, env: &Environment) -> Result<()> {
-    // I'm not confident this does what it should, because I don't know much
-    // about the end to end tests. This is just going from what the shell script
-    // did.
     cmd!(sh, "banner 'end to end'").run()?;
     let _popdir = sh.push_dir(&env.omicron_dir);
 
@@ -235,30 +223,21 @@ fn build_live_tests(sh: &Shell, env: &Environment) -> Result<()> {
     // and we need nextest to execute it
     sh.copy_file(&nextest_path, &live_test_bundle_dir)?;
 
-    // Finally, the script that will run nextest
-    // TODO: should we make this into a rust program that runs in the VM?
+    // Finally, the script that will run nextest from the switch zone
     let switch_zone_script_path =
         live_test_bundle_dir.join(super::LIVE_TEST_BUNDLE_SCRIPT);
-    let switch_zone_script = r#"
-        set -euxo pipefail
-        /opt/oxide/omdb/bin/omdb -w nexus blueprints target enable current
-
-        TMPDIR=/var/tmp ./cargo-nextest nextest run \
-            --profile=live-tests \
-            --archive-file live-tests-archive/omicron-live-tests.tar.zst \
-            --workspace-remap live-tests-archive
-    "#;
-    sh.write_file(&switch_zone_script_path, switch_zone_script)?;
+    sh.write_file(&switch_zone_script_path, LIVE_TESTS_EXECUTION_SCRIPT)?;
     cmd!(sh, "chmod +x {switch_zone_script_path}").run()?;
 
     // output tar will have live-tests and nextest. this will get uploaded
     // into one of the a4x2 sleds, which is why it is a self contained tar
     let out_dir = &env.out_dir;
 
-    // intentionally relative path so the tarball gets relative paths
-    let _popdir = sh.push_dir(&env.work_dir);
+    // intentionally relative bundle_dir_name so the tarball gets relative paths
     let bundle_dir_name = live_test_bundle_dir.file_name().unwrap();
+
     use super::LIVE_TEST_BUNDLE_NAME;
+    let _popdir = sh.push_dir(&env.work_dir);
     cmd!(sh, "tar -czf {out_dir}/{LIVE_TEST_BUNDLE_NAME} {bundle_dir_name}/")
         .run()?;
 
@@ -284,7 +263,6 @@ fn build_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
         .env("OMICRON", &env.omicron_dir)
         .run()?;
 
-    // debatable whether this should happen in package or deploy
     cmd!(sh, "./config/fetch-softnpu-artifacts.sh").run()?;
 
     // Deduplicate cargo-bay output amongst g0-g3. They differ on a few
@@ -303,15 +281,23 @@ fn build_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
     ];
     for ent in WalkDir::new(&g0_dir) {
         let ent = ent?;
+
+        // deduplication only happens to files
         if !ent.file_type().is_file() {
             continue;
         }
 
         let g0_path =
             Utf8PathBuf::from_path_buf(ent.path().to_path_buf()).unwrap();
+
+        // reference hash. if g1/g2/g3 have this file, and it matches this hash,
+        // then we can dedupe.
         let g0_hash = sha256(&g0_path)?;
 
+        // path relative to the start of a cargo bay
         let base_path = g0_path.strip_prefix(&g0_dir)?;
+
+        // Look for proof that we cannot dedupe
         let mut can_dedupe = true;
         for prefix in &prefixes {
             let path = prefix.join(base_path);
@@ -321,6 +307,7 @@ fn build_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
                 break;
             }
 
+            // if the hashes don't match in all bays, we can't dedupe
             let hash = sha256(&path)?;
             if hash != g0_hash {
                 can_dedupe = false;
@@ -328,11 +315,13 @@ fn build_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
             }
         }
 
+        // We can dedupe, so remove this file from all the sled-specific bays
+        // and place it in the common directory.
         if can_dedupe {
-            // yay, extract out to the common dir.
             let dest = common_dir.join(base_path);
             sh.create_dir(&dest.parent().unwrap())?;
             sh.copy_file(&g0_path, &dest)?;
+
             sh.remove_path(&g0_path)?;
             for prefix in &prefixes {
                 sh.remove_path(&prefix.join(base_path))?;
@@ -352,7 +341,7 @@ fn build_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
 fn create_output_artifact(
     sh: &Shell,
     env: &Environment,
-    out_path: &Utf8PathBuf,
+    out_path: &Utf8Path,
 ) -> Result<()> {
     cmd!(sh, "banner bundle").run()?;
     let _popdir = sh.push_dir(&env.work_dir);
@@ -362,6 +351,35 @@ fn create_output_artifact(
     Ok(())
 }
 
+/// Canonicalizing fails if a file doesn't exist. This function instead
+/// canonicalizes the *parent* directory of the files, and rejoins it with the
+/// file name. This produces an absolute path to a file that may or may not
+/// exist.
+fn canonicalize_parent(path: &Utf8Path) -> Result<Utf8PathBuf> {
+    // If the path is just a filename with no parent, add an implicit `.` to
+    // match the current working dir.
+    let parent = path.parent().unwrap_or_else(|| {
+        // wouldn't want to turn an absolute path relative. this case is
+        // probably if path == "/"
+        if path.is_absolute() { path } else { Utf8Path::new(".") }
+    });
+
+    let parent = parent.canonicalize_utf8().with_context(|| {
+        format!("canonicalizing parent directory `{}`", parent)
+    })?;
+
+    let file = path
+        .components()
+        .last()
+        .with_context(|| {
+            format!("extracting last component of path `{}`", path)
+        })?
+        .as_str();
+
+    Ok(parent.join(file))
+}
+
+/// Fully read and hash a file
 fn sha256(path: &Utf8Path) -> Result<Vec<u8>> {
     let mut buf = vec![0u8; 65536];
     let mut file = fs::File::open(path)?;

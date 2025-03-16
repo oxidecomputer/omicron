@@ -27,7 +27,14 @@ const DEFAULT_A4X2_PKG_PATH: &str = "out/a4x2-package.tar.gz";
 
 /// These environment variables are set to statically defined values for
 /// commands executed by the xtask.
-const STATIC_ENV_VARS: &[(&str, &str)] = &[("LANG", "C.UTF-8"), ("TZ", "UTC")];
+const STATIC_ENV_VARS: &[(&str, &str)] = &[
+    // Consistent command output
+    ("LANG", "C.UTF-8"),
+
+    // Timestamps in logs outside the sleds consistent with timestamps inside
+    // the sleds
+    ("TZ", "UTC")
+];
 
 #[derive(Subcommand)]
 pub enum A4x2Cmds {
@@ -50,7 +57,7 @@ pub fn run_cmd(args: A4x2Cmds) -> Result<()> {
 fn scrub_env(cmd: Cmd<'_>) -> Cmd<'_> {
     let passthru = env::vars_os().filter(|(varname, _)| {
         // LC_* is removed because it can change command output in unexpected
-        // ways, and we may be doing some parsing.
+        // ways.
         //
         // SANITIZED_ENV_VARS deals in variables known to cause unnecessary
         // recompilation.
