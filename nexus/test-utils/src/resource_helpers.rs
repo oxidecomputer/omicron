@@ -1233,7 +1233,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
 
     pub async fn add_blueprint_disks(&mut self, blueprint: &Blueprint) {
         for (sled_id, sled_config) in blueprint.sleds.iter() {
-            for disk in &sled_config.disks_config.disks {
+            for disk in &sled_config.disks {
                 self.add_zpool_with_dataset_ext(
                     *sled_id,
                     disk.id,

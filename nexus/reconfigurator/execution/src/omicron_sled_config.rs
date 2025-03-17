@@ -31,12 +31,7 @@ pub(crate) async fn deploy_sled_configs(
         .filter_map(|(sled_id, config)| async move {
             let log = opctx.log.new(slog::o!(
                 "sled_id" => sled_id.to_string(),
-                "disks_generation" =>
-                    i64::from(&config.disks_config.generation),
-                "datasets_generation" =>
-                    i64::from(&config.datasets_config.generation),
-                "zones_generation" =>
-                    i64::from(&config.zones_config.generation),
+                "generation" => i64::from(&config.sled_agent_generation),
             ));
 
             let db_sled = match sleds_by_id.get(&sled_id) {
@@ -157,15 +152,12 @@ mod tests {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::BlueprintDatasetConfig;
     use nexus_types::deployment::BlueprintDatasetDisposition;
-    use nexus_types::deployment::BlueprintDatasetsConfig;
     use nexus_types::deployment::BlueprintPhysicalDiskConfig;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
-    use nexus_types::deployment::BlueprintPhysicalDisksConfig;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
-    use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::external_api::views::SledState;
     use omicron_common::api::external::Generation;
@@ -310,18 +302,10 @@ mod tests {
 
         let sled_config = BlueprintSledConfig {
             state: SledState::Active,
-            disks_config: BlueprintPhysicalDisksConfig {
-                generation: Generation::new().next(),
-                disks,
-            },
-            datasets_config: BlueprintDatasetsConfig {
-                generation: Generation::new().next(),
-                datasets,
-            },
-            zones_config: BlueprintZonesConfig {
-                generation: Generation::new().next(),
-                zones,
-            },
+            sled_agent_generation: Generation::new().next(),
+            disks,
+            datasets,
+            zones,
         };
         let sled_configs =
             [(sim_sled_agent.id, sled_config.clone())].into_iter().collect();
@@ -338,21 +322,11 @@ mod tests {
         let observed_datasets = sim_sled_agent.datasets_config_list().unwrap();
         let observed_zones = sim_sled_agent.omicron_zones_list();
 
-        assert_eq!(
-            observed_disks,
-            sled_config.disks_config.clone().into_in_service_disks()
-        );
-        assert_eq!(
-            observed_datasets,
-            sled_config.datasets_config.clone().into_in_service_datasets()
-        );
-        assert_eq!(
-            observed_zones,
-            sled_config
-                .zones_config
-                .clone()
-                .into_running_omicron_zones_config()
-        );
+        let in_service_config =
+            sled_config.clone().into_in_service_sled_config();
+        assert_eq!(observed_disks, in_service_config.disks_config);
+        assert_eq!(observed_datasets, in_service_config.datasets_config);
+        assert_eq!(observed_zones, in_service_config.zones_config);
 
         // We expect to see each single in-service item we supplied as input.
         assert_eq!(observed_disks.disks.len(), 1);
