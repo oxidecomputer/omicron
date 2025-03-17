@@ -21,9 +21,18 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
+/// Bounds required for a type to be stored in an [`IdMap`].
 pub trait IdMappable {
+    /// The identity type of this value.
     type Id: Ord + fmt::Debug;
 
+    /// Return an owned identity for this value.
+    ///
+    /// This method is called liberally by [`IdMap`]. For example, mutating a
+    /// value in an [`IdMap`] will call this method at least twice in service of
+    /// the runtime checks performed by [`RefMut`]. Getting owned `T::Id` values
+    /// is expected to be cheap. If your identity type is not `Copy`, it should
+    /// be cheap to `Clone`; e.g., `Arc<String>` may be preferable to `String`.
     fn id(&self) -> Self::Id;
 }
 
