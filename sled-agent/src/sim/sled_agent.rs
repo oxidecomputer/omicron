@@ -25,7 +25,7 @@ use dropshot::HttpError;
 use futures::Stream;
 use nexus_sled_agent_shared::inventory::{
     Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
-    OmicronZonesConfig, SledRole,
+    OmicronSledConfig, OmicronSledConfigResult, OmicronZonesConfig, SledRole,
 };
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
@@ -898,6 +898,22 @@ impl SledAgent {
         config: OmicronPhysicalDisksConfig,
     ) -> Result<DisksManagementResult, HttpError> {
         self.storage.lock().omicron_physical_disks_ensure(config)
+    }
+
+    pub fn set_omicron_config(
+        &self,
+        config: OmicronSledConfig,
+    ) -> Result<OmicronSledConfigResult, HttpError> {
+        let (disks, datasets) = {
+            let mut storage = self.storage.lock();
+            let DisksManagementResult { status: disks } =
+                storage.omicron_physical_disks_ensure(config.disks_config)?;
+            let DatasetsManagementResult { status: datasets } =
+                storage.datasets_ensure(config.datasets_config)?;
+            (disks, datasets)
+        };
+        *self.fake_zones.lock().unwrap() = config.zones_config;
+        Ok(OmicronSledConfigResult { disks, datasets })
     }
 
     pub fn omicron_zones_list(&self) -> OmicronZonesConfig {
