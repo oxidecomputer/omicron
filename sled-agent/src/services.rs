@@ -158,7 +158,7 @@ pub enum Error {
     #[error("Failed to find device {device}")]
     MissingDevice { device: String },
 
-    #[error("Failed to access ledger: {0}")]
+    #[error("Failed to access ledger")]
     Ledger(#[from] ledger::Error),
 
     #[error("Sled Agent not initialized yet")]

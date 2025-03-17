@@ -163,7 +163,7 @@ pub enum SetupServiceError {
         err: std::io::Error,
     },
 
-    #[error("Failed to access ledger: {0}")]
+    #[error("Failed to access ledger")]
     Ledger(#[from] ledger::Error),
 
     #[error("Cannot create plan for sled services: {0}")]

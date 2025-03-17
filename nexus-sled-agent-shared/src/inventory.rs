@@ -17,6 +17,7 @@ use omicron_common::{
         DatasetConfig, DatasetManagementStatus, DiskManagementStatus,
         DiskVariant, OmicronPhysicalDiskConfig,
     },
+    ledger::Ledgerable,
     zpool_name::ZpoolName,
 };
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
@@ -137,6 +138,19 @@ pub struct OmicronSledConfig {
     pub disks: IdMap<OmicronPhysicalDiskConfig>,
     pub datasets: IdMap<DatasetConfig>,
     pub zones: IdMap<OmicronZoneConfig>,
+}
+
+impl Ledgerable for OmicronSledConfig {
+    fn is_newer_than(&self, other: &Self) -> bool {
+        self.generation > other.generation
+    }
+
+    fn generation_bump(&mut self) {
+        // DO NOTHING!
+        //
+        // Generation bumps must only ever come from nexus and will be encoded
+        // in the struct itself
+    }
 }
 
 /// Result of the currently-synchronous `omicron_config_put` endpoint.
