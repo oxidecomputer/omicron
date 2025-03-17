@@ -357,6 +357,8 @@ enum DbCommands {
     Vmm(VmmArgs),
     /// Alias to `omdb db vmm list`.
     Vmms(VmmListArgs),
+    /// Print information about the oximeter collector.
+    Oximeter(OximeterArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1159,6 +1161,9 @@ impl DbArgs {
                     | DbCommands::Vmms(args) => {
                         cmd_db_vmm_list(&datastore, &fetch_opts, args).await
                     }
+                    DbCommands::Oximeter(OximeterArgs {
+                        command: OximeterCommands::ListProducers
+                    }) => cmd_db_oximeter_list_producers(&datastore, fetch_opts).await,
                 }
             }
         }).await
@@ -6772,6 +6777,87 @@ async fn cmd_db_vmm_list(
         .with(tabled::settings::Padding::new(0, 1, 0, 0));
 
     println!("{table}");
+
+    Ok(())
+}
+
+#[derive(Debug, Args, Clone)]
+struct OximeterArgs {
+    #[command(subcommand)]
+    command: OximeterCommands,
+}
+
+#[derive(Debug, Subcommand, Clone)]
+enum OximeterCommands {
+    /// List metric producers and their assigned collector.
+    ListProducers,
+}
+
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct ProducerRow {
+    oximeter_id: Uuid,
+    #[tabled(inline)]
+    identity: ProducerEndpointIdentity,
+    kind: String,
+    ip: std::net::IpAddr,
+    port: u16,
+    interval: f64,
+}
+
+impl From<&'_ db::model::ProducerEndpoint> for ProducerRow {
+    fn from(producer: &db::model::ProducerEndpoint) -> Self {
+        Self {
+            identity: producer.into(),
+            kind: format!("{:?}", producer.kind),
+            ip: producer.ip.ip(),
+            port: *producer.port,
+            interval: producer.interval,
+            oximeter_id: producer.oximeter_id,
+        }
+    }
+}
+
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct ProducerEndpointIdentity {
+    id: Uuid,
+    #[tabled(display_with = "datetime_rfc3339_concise")]
+    time_created: DateTime<Utc>,
+    #[tabled(display_with = "datetime_rfc3339_concise")]
+    time_modified: DateTime<Utc>,
+}
+
+impl From<&'_ db::model::ProducerEndpoint> for ProducerEndpointIdentity {
+    fn from(producer: &db::model::ProducerEndpoint) -> Self {
+        Self {
+            id: producer.id(),
+            time_created: producer.time_created(),
+            time_modified: producer.time_modified(),
+        }
+    }
+}
+
+async fn cmd_db_oximeter_list_producers(
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+) -> Result<(), anyhow::Error> {
+    use db::schema::metric_producer::dsl;
+    let rows = dsl::metric_producer
+        .order_by(dsl::oximeter_id)
+        .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
+        .select(nexus_db_model::ProducerEndpoint::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .context("loading metric producers")?;
+    check_limit(&rows, fetch_opts.fetch_limit, || "listing oximeter producers");
+    let rows = rows.iter().map(ProducerRow::from);
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
 
     Ok(())
 }

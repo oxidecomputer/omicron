@@ -10,9 +10,9 @@ loaded example system with:
 blueprint  971eeb12-1830-4fa0-a699-98ea0164505c
 parent:    1b013011-2062-4b48-b544-a32b23bce83a
 
-  sled: 868d5b02-7792-4fc0-b6a9-654afcae9ea0 (active)
+  sled: 868d5b02-7792-4fc0-b6a9-654afcae9ea0 (active, config generation 2)
 
-    physical disks at generation 2:
+    physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
     ------------------------------------------------------------------------------------
@@ -21,7 +21,7 @@ parent:    1b013011-2062-4b48-b544-a32b23bce83a
     fake-vendor   fake-model   serial-f7542671-95a1-4a26-ab08-d1e1de7a521d   in service 
 
 
-    datasets at generation 2:
+    datasets:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -60,7 +60,7 @@ parent:    1b013011-2062-4b48-b544-a32b23bce83a
     oxp_f7542671-95a1-4a26-ab08-d1e1de7a521d/crypt/debug                                                           d13e715c-2cc2-48fc-a5bd-23dc0035907a   in service    100 GiB   none          gzip-9     
 
 
-    omicron zones at generation 2:
+    omicron zones:
     ---------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition   underlay IP           
     ---------------------------------------------------------------------------------------------------------------
@@ -109,9 +109,9 @@ warn: no validation is done on the requested image source
 blueprint  9766ca20-38d4-4380-b005-e7c43c797e7c
 parent:    971eeb12-1830-4fa0-a699-98ea0164505c
 
-  sled: 868d5b02-7792-4fc0-b6a9-654afcae9ea0 (active)
+  sled: 868d5b02-7792-4fc0-b6a9-654afcae9ea0 (active, config generation 3)
 
-    physical disks at generation 2:
+    physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
     ------------------------------------------------------------------------------------
@@ -120,7 +120,7 @@ parent:    971eeb12-1830-4fa0-a699-98ea0164505c
     fake-vendor   fake-model   serial-f7542671-95a1-4a26-ab08-d1e1de7a521d   in service 
 
 
-    datasets at generation 2:
+    datasets:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -159,7 +159,7 @@ parent:    971eeb12-1830-4fa0-a699-98ea0164505c
     oxp_f7542671-95a1-4a26-ab08-d1e1de7a521d/crypt/debug                                                           d13e715c-2cc2-48fc-a5bd-23dc0035907a   in service    100 GiB   none          gzip-9     
 
 
-    omicron zones at generation 3:
+    omicron zones:
     -----------------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source              disposition   underlay IP           
     -----------------------------------------------------------------------------------------------------------------------
@@ -202,9 +202,9 @@ to:   blueprint 9766ca20-38d4-4380-b005-e7c43c797e7c
 
  MODIFIED SLEDS:
 
-  sled 868d5b02-7792-4fc0-b6a9-654afcae9ea0 (active):
+  sled 868d5b02-7792-4fc0-b6a9-654afcae9ea0 (active, config generation 2 -> 3):
 
-    physical disks at generation 2:
+    physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
     ------------------------------------------------------------------------------------
@@ -213,7 +213,7 @@ to:   blueprint 9766ca20-38d4-4380-b005-e7c43c797e7c
     fake-vendor   fake-model   serial-f7542671-95a1-4a26-ab08-d1e1de7a521d   in service 
 
 
-    datasets at generation 2:
+    datasets:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -252,7 +252,7 @@ to:   blueprint 9766ca20-38d4-4380-b005-e7c43c797e7c
     oxp_f7542671-95a1-4a26-ab08-d1e1de7a521d/crypt/debug                                                           d13e715c-2cc2-48fc-a5bd-23dc0035907a   in service    100 GiB   none          gzip-9     
 
 
-    omicron zones generation 2 -> 3:
+    omicron zones:
     -------------------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source                disposition   underlay IP           
     -------------------------------------------------------------------------------------------------------------------------
@@ -373,9 +373,9 @@ warn: no validation is done on the requested image source
 blueprint  f714e6ea-e85a-4d7d-93c2-a018744fe176
 parent:    9766ca20-38d4-4380-b005-e7c43c797e7c
 
-  sled: 868d5b02-7792-4fc0-b6a9-654afcae9ea0 (active)
+  sled: 868d5b02-7792-4fc0-b6a9-654afcae9ea0 (active, config generation 4)
 
-    physical disks at generation 2:
+    physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
     ------------------------------------------------------------------------------------
@@ -384,7 +384,7 @@ parent:    9766ca20-38d4-4380-b005-e7c43c797e7c
     fake-vendor   fake-model   serial-f7542671-95a1-4a26-ab08-d1e1de7a521d   in service 
 
 
-    datasets at generation 2:
+    datasets:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -423,7 +423,7 @@ parent:    9766ca20-38d4-4380-b005-e7c43c797e7c
     oxp_f7542671-95a1-4a26-ab08-d1e1de7a521d/crypt/debug                                                           d13e715c-2cc2-48fc-a5bd-23dc0035907a   in service    100 GiB   none          gzip-9     
 
 
-    omicron zones at generation 4:
+    omicron zones:
     ---------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition   underlay IP           
     ---------------------------------------------------------------------------------------------------------------
@@ -466,9 +466,9 @@ to:   blueprint f714e6ea-e85a-4d7d-93c2-a018744fe176
 
  MODIFIED SLEDS:
 
-  sled 868d5b02-7792-4fc0-b6a9-654afcae9ea0 (active):
+  sled 868d5b02-7792-4fc0-b6a9-654afcae9ea0 (active, config generation 3 -> 4):
 
-    physical disks at generation 2:
+    physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
     ------------------------------------------------------------------------------------
@@ -477,7 +477,7 @@ to:   blueprint f714e6ea-e85a-4d7d-93c2-a018744fe176
     fake-vendor   fake-model   serial-f7542671-95a1-4a26-ab08-d1e1de7a521d   in service 
 
 
-    datasets at generation 2:
+    datasets:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -516,7 +516,7 @@ to:   blueprint f714e6ea-e85a-4d7d-93c2-a018744fe176
     oxp_f7542671-95a1-4a26-ab08-d1e1de7a521d/crypt/debug                                                           d13e715c-2cc2-48fc-a5bd-23dc0035907a   in service    100 GiB   none          gzip-9     
 
 
-    omicron zones generation 3 -> 4:
+    omicron zones:
     -------------------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source                disposition   underlay IP           
     -------------------------------------------------------------------------------------------------------------------------
