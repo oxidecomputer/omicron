@@ -402,8 +402,7 @@ async fn make_project(
 /// Helper for `make_resources()` that constructs a webhook receiver and its
 /// very miniscule hierarchy (a secret).
 async fn make_webhook_rx(builder: &mut ResourceBuilder<'_>) {
-    let webhook_rx_id =
-        omicron_uuid_kinds::WebhookReceiverUuid::new_v4().into();
+    let webhook_rx_id = omicron_uuid_kinds::WebhookReceiverUuid::new_v4();
     let webhook_rx = authz::WebhookReceiver::new(
         authz::FLEET,
         webhook_rx_id,
@@ -411,8 +410,7 @@ async fn make_webhook_rx(builder: &mut ResourceBuilder<'_>) {
     );
     builder.new_resource(webhook_rx.clone());
 
-    let webhook_secret_id =
-        omicron_uuid_kinds::WebhookSecretUuid::new_v4().into();
+    let webhook_secret_id = omicron_uuid_kinds::WebhookSecretUuid::new_v4();
     builder.new_resource(authz::WebhookSecret::new(
         webhook_rx,
         webhook_secret_id,
