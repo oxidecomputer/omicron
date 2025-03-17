@@ -22,7 +22,7 @@ use std::ops::Deref;
 use std::ops::DerefMut;
 
 pub trait IdMappable {
-    type Id: Ord + Copy + fmt::Debug;
+    type Id: Ord + fmt::Debug;
 
     fn id(&self) -> Self::Id;
 }
@@ -55,8 +55,8 @@ type Inner<T> = BTreeMap<<T as IdMappable>::Id, T>;
 /// [`RefMut`] wrapper returned by `get_mut()` and `iter_mut()`. When the
 /// wrapper is dropped, it will induce a panic if the ID has changed from what
 /// the value had when it was retreived from the map.
-#[derive(Clone, Debug, Eq, PartialEq)]
 #[derive_where(Default)]
+#[derive_where(Clone, Debug, Eq, PartialEq; T, T::Id)]
 pub struct IdMap<T: IdMappable> {
     inner: Inner<T>,
 }
@@ -345,7 +345,7 @@ impl<'a, T: IdMappable> VacantEntry<'a, T> {
     /// `Entry`.
     pub fn insert(self, value: T) -> RefMut<'a, T> {
         assert_eq!(
-            self.key(),
+            *self.key(),
             value.id(),
             "VacantEntry::insert() must insert a value with the same ID \
              used to create the entry"
@@ -353,8 +353,8 @@ impl<'a, T: IdMappable> VacantEntry<'a, T> {
         RefMut::new(self.inner.insert(value))
     }
 
-    pub fn key(&self) -> T::Id {
-        *self.inner.key()
+    pub fn key(&self) -> &T::Id {
+        self.inner.key()
     }
 }
 
