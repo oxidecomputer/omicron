@@ -8083,7 +8083,7 @@ async fn cmd_db_webhook(
         } => cmd_db_webhook_rx_list(opctx, datastore, fetch_opts, args).await,
         WebhookCommands::Receiver {
             command: WebhookRxCommands::Info(args),
-        } => cmd_db_webhook_rx_info(opctx, datastore, fetch_opts, args).await,
+        } => cmd_db_webhook_rx_info(datastore, fetch_opts, args).await,
         WebhookCommands::Event => {
             Err(anyhow::anyhow!("not yet implemented, sorry!"))
         }
@@ -8152,12 +8152,224 @@ async fn cmd_db_webhook_rx_list(
 }
 
 async fn cmd_db_webhook_rx_info(
-    _opctx: &OpContext,
-    _datastore: &DataStore,
-    _fetch_opts: &DbFetchOptions,
-    _args: &WebhookRxInfoArgs,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &WebhookRxInfoArgs,
 ) -> anyhow::Result<()> {
-    anyhow::bail!("TODO: eliza, implement this one!")
+    use nexus_db_schema::schema::webhook_receiver::dsl as rx_dsl;
+    use nexus_db_schema::schema::webhook_rx_event_glob::dsl as glob_dsl;
+    use nexus_db_schema::schema::webhook_rx_subscription::dsl as subscription_dsl;
+    use nexus_db_schema::schema::webhook_secret::dsl as secret_dsl;
+
+    let conn = datastore.pool_connection_for_tests().await?;
+    let mut query = match args.receiver {
+        NameOrId::Id(id) => {
+            rx_dsl::webhook_receiver.filter(rx_dsl::id.eq(id)).into_boxed()
+        }
+        NameOrId::Name(ref name) => rx_dsl::webhook_receiver
+            .filter(rx_dsl::name.eq(name.to_string()))
+            .into_boxed(),
+    };
+    if !fetch_opts.include_deleted {
+        query = query.filter(rx_dsl::time_deleted.is_null());
+    }
+
+    let rx = query
+        .limit(1)
+        .select(db::model::WebhookReceiver::as_select())
+        .get_result_async(&*conn)
+        .await
+        .optional()
+        .with_context(|| format!("loading webhook receiver {}", args.receiver))?
+        .ok_or_else(|| {
+            anyhow::anyhow!("no instance {} exists", args.receiver)
+        })?;
+
+    const ID: &'static str = "ID";
+    const NAME: &'static str = "name";
+
+    const DESCRIPTION: &'static str = "description";
+    const CREATED: &'static str = "created at";
+    const DELETED: &'static str = "deleted at";
+    const MODIFIED: &'static str = "modified at";
+    const ENDPOINT: &'static str = "endpoint";
+    const GEN: &'static str = "generation";
+    const EXACT: &'static str = "exact subscriptions";
+    const GLOBS: &'static str = "glob subscriptions";
+    const GLOB_REGEX: &'static str = "  regex";
+    const GLOB_SCHEMA_VERSION: &'static str = "  schema version";
+    const GLOB_CREATED: &'static str = "  created at";
+    const GLOB_EXACT: &'static str = "  exact subscriptions";
+    const WIDTH: usize = const_max_len(&[
+        ID,
+        NAME,
+        DESCRIPTION,
+        CREATED,
+        DELETED,
+        MODIFIED,
+        ENDPOINT,
+        GEN,
+        EXACT,
+        GLOBS,
+        GLOB_REGEX,
+        GLOB_SCHEMA_VERSION,
+        GLOB_CREATED,
+        GLOB_EXACT,
+    ]);
+
+    let db::model::WebhookReceiver {
+        identity:
+            db::model::WebhookReceiverIdentity {
+                id,
+                name,
+                description,
+                time_created,
+                time_modified,
+                time_deleted,
+            },
+        endpoint,
+        secret_gen,
+        subscription_gen,
+    } = rx;
+
+    println!("\n{:=<80}", "== RECEIVER ");
+    println!("    {NAME:>WIDTH$}: {name}");
+    println!("    {ID:>WIDTH$}: {id}");
+    println!("    {DESCRIPTION:>WIDTH$}: {description}");
+    println!("    {ENDPOINT:>WIDTH$}: {endpoint}");
+    println!();
+    println!("    {CREATED:>WIDTH$}: {time_created}");
+    println!("    {MODIFIED:>WIDTH$}: {time_modified}");
+    if let Some(deleted) = time_deleted {
+        println!("    {DELETED:>WIDTH$}: {deleted}");
+    }
+
+    println!("\n{:=<80}", "== SECRETS ");
+    println!("    {GEN:>WIDTH$}: {}", secret_gen.0);
+
+    let query = secret_dsl::webhook_secret
+        .filter(secret_dsl::rx_id.eq(id.into_untyped_uuid()))
+        .select(db::model::WebhookSecret::as_select());
+    let secrets = if fetch_opts.include_deleted {
+        query.load_async(&*conn).await
+    } else {
+        query
+            .filter(secret_dsl::time_deleted.is_null())
+            .load_async(&*conn)
+            .await
+    };
+
+    match secrets {
+        Ok(secrets) => {
+            #[derive(Tabled)]
+            struct SecretRow {
+                id: Uuid,
+
+                #[tabled(display_with = "datetime_rfc3339_concise")]
+                created: chrono::DateTime<Utc>,
+
+                #[tabled(display_with = "datetime_opt_rfc3339_concise")]
+                deleted: Option<chrono::DateTime<Utc>>,
+            }
+            let rows = secrets.into_iter().map(
+                |db::model::WebhookSecret {
+                     identity:
+                         db::model::WebhookSecretIdentity {
+                             id,
+                             time_modified: _,
+                             time_created,
+                         },
+                     webhook_receiver_id: _,
+                     secret: _,
+                     time_deleted,
+                 }| SecretRow {
+                    id: id.into_untyped_uuid(),
+                    created: time_created,
+                    deleted: time_deleted,
+                },
+            );
+
+            let table = tabled::Table::new(rows)
+                .with(tabled::settings::Style::empty())
+                .with(tabled::settings::Padding::new(0, 1, 0, 0))
+                .to_string();
+            println!("{table}");
+        }
+        Err(e) => eprintln!("failed to list secrets: {e}"),
+    }
+
+    println!("\n{:=<80}", "== SUBSCRIPTIONS ");
+    println!("    {GEN:>WIDTH$}: {}", subscription_gen.0);
+
+    let exact = subscription_dsl::webhook_rx_subscription
+        .filter(subscription_dsl::rx_id.eq(id.into_untyped_uuid()))
+        .filter(subscription_dsl::glob.is_null())
+        .select(subscription_dsl::event_class)
+        .load_async::<db::model::WebhookEventClass>(&*conn)
+        .await;
+    match exact {
+        Ok(exact) => {
+            println!("    {EXACT:>WIDTH$}: {}", exact.len());
+            for event_class in exact {
+                println!("    - {event_class}");
+            }
+        }
+        Err(e) => {
+            eprintln!("failed to list exact subscriptions: {e}");
+        }
+    }
+
+    let globs = glob_dsl::webhook_rx_event_glob
+        .filter(glob_dsl::rx_id.eq(id.into_untyped_uuid()))
+        .select(db::model::WebhookRxEventGlob::as_select())
+        .load_async::<db::model::WebhookRxEventGlob>(&*conn)
+        .await;
+    match globs {
+        Ok(globs) => {
+            println!("    {GLOBS:>WIDTH$}: {}", globs.len());
+            for glob in globs {
+                let db::model::WebhookRxEventGlob {
+                    rx_id: _,
+                    glob: db::model::WebhookGlob { glob, regex },
+                    time_created,
+                    schema_version,
+                } = glob;
+                println!("    - {glob}");
+                println!("    {GLOB_CREATED:>WIDTH$}: {time_created}");
+                if let Some(v) = schema_version {
+                    println!("    {GLOB_SCHEMA_VERSION:>WIDTH$}: {v}")
+                } else {
+                    println!(
+                        "(i) {GLOB_SCHEMA_VERSION:>WIDTH$}: <not yet processed>",
+                    )
+                }
+
+                println!("    {GLOB_REGEX:>WIDTH$}: {regex}");
+                let exact = subscription_dsl::webhook_rx_subscription
+                    .filter(subscription_dsl::rx_id.eq(id.into_untyped_uuid()))
+                    .filter(subscription_dsl::glob.eq(glob))
+                    .select(subscription_dsl::event_class)
+                    .load_async::<db::model::WebhookEventClass>(&*conn)
+                    .await;
+                match exact {
+                    Ok(exact) => {
+                        println!("    {GLOB_EXACT:>WIDTH$}: {}", exact.len());
+                        for event_class in exact {
+                            println!("      - {event_class}")
+                        }
+                    }
+                    Err(e) => eprintln!(
+                        "failed to list exact subscriptions for glob: {e}"
+                    ),
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("failed to list glob subscriptions: {e}");
+        }
+    }
+
+    Ok(())
 }
 
 // Format a `chrono::DateTime` in RFC3339 with milliseconds precision and using
