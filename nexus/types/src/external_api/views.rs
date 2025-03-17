@@ -115,18 +115,22 @@ impl SimpleIdentityOrName for SiloUtilization {
 
 // AFFINITY GROUPS
 
+/// View of an Affinity Group
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AffinityGroup {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
+    pub project_id: Uuid,
     pub policy: AffinityPolicy,
     pub failure_domain: FailureDomain,
 }
 
+/// View of an Anti-Affinity Group
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AntiAffinityGroup {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
+    pub project_id: Uuid,
     pub policy: AffinityPolicy,
     pub failure_domain: FailureDomain,
 }
