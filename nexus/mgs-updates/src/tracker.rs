@@ -21,6 +21,7 @@ use gateway_client::{
     types::{SpType, SpUpdateStatus},
 };
 use nexus_types::{deployment::PendingMgsUpdate, inventory::BaseboardId};
+use qorb::resolver::BoxedResolver;
 use slog::{debug, error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
@@ -431,6 +432,7 @@ pub struct MgsUpdateDriver {
     // XXX-dap fill in status here
     in_progress: BTreeMap<BaseboardId, InProgressUpdate>,
     futures: FuturesUnordered<BoxFuture<'static, UpdateAttemptResult>>,
+    mgs_resolver: BoxedResolver,
 }
 
 impl MgsUpdateDriver {
@@ -438,6 +440,7 @@ impl MgsUpdateDriver {
         log: slog::Logger,
         artifacts: Arc<ArtifactCache>,
         rx: watch::Receiver<BTreeMap<BaseboardId, MgsUpdateRequest>>,
+        mgs_resolver: BoxedResolver,
     ) -> MgsUpdateDriver {
         MgsUpdateDriver {
             log,
@@ -445,6 +448,7 @@ impl MgsUpdateDriver {
             requests: rx,
             in_progress: BTreeMap::new(),
             futures: FuturesUnordered::new(),
+            mgs_resolver,
         }
     }
 

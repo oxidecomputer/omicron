@@ -9,8 +9,10 @@ workspace = true
 [dependencies]
 futures.workspace = true
 gateway-client.workspace = true
+internal-dns-resolver.workspace = true
 omicron-common.workspace = true
 nexus-types.workspace = true
+qorb.workspace = true
 repo-depot-client.workspace = true
 reqwest.workspace = true
 sha2.workspace = true
