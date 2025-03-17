@@ -86,7 +86,7 @@ pub trait ReconfiguratorSpComponentUpdater {
     /// Checks if the component is already updated or ready for update
     fn version_status<'a>(
         &'a self,
-        _mgs_clients: &'a MgsClients,
+        _mgs_clients: &'a mut MgsClients,
         _update: &'a PendingMgsUpdate,
     ) -> BoxFuture<'a, Result<VersionStatus, GatewayClientError>> {
         // XXX-dap
@@ -97,7 +97,7 @@ pub trait ReconfiguratorSpComponentUpdater {
     /// device)
     fn post_update<'a>(
         &'a self,
-        _mgs_clients: &'a MgsClients,
+        _mgs_clients: &'a mut MgsClients,
         _update: &'a PendingMgsUpdate,
     ) -> BoxFuture<'a, Result<(), GatewayClientError>> {
         // XXX-dap

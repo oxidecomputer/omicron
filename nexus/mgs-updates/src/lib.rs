@@ -32,7 +32,6 @@ pub use sp_updater::SpUpdater;
 pub use tracker::ApplyUpdateError;
 pub use tracker::ApplyUpdateResult;
 pub use tracker::MgsUpdateDriver;
-pub use tracker::MgsUpdateRequest;
 pub use tracker::apply_update;
 // XXX-dap add type definitions for the map of requests?  or maybe even a
 // struct to manage this?

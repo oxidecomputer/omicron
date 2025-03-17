@@ -21,7 +21,7 @@ use gateway_client::{
     types::{SpType, SpUpdateStatus},
 };
 use nexus_types::{deployment::PendingMgsUpdate, inventory::BaseboardId};
-use qorb::resolver::BoxedResolver;
+use qorb::resolver::{AllBackends, BoxedResolver};
 use slog::{debug, error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
@@ -170,6 +170,8 @@ pub enum ApplyUpdateResult {
 
 #[derive(Debug, Error)]
 pub enum ApplyUpdateError {
+    #[error("found no MGS backends in DNS")]
+    NoMgsBackends,
     #[error("failed to fetch artifact")]
     FetchArtifact(#[from] ArtifactCacheError),
     #[error("error communicating with MGS")]
@@ -196,9 +198,36 @@ pub async fn apply_update(
     artifacts: Arc<ArtifactCache>,
     sp_update: &SpComponentUpdate,
     updater: &(dyn ReconfiguratorSpComponentUpdater + Send + Sync),
-    mgs_clients: &mut MgsClients,
+    mgs_rx: watch::Receiver<AllBackends>,
     update: &PendingMgsUpdate,
 ) -> Result<ApplyUpdateResult, ApplyUpdateError> {
+    // Set up clients to talk to MGS.
+    // XXX-dap rather than this, MgsClients probably ought to have a mode where
+    // it accepts a qorb pool and continually try all clients forever on
+    // transient issues.
+    let log = &sp_update.log;
+    let mut mgs_clients = {
+        let backends = mgs_rx.borrow();
+        if backends.is_empty() {
+            return Err(ApplyUpdateError::NoMgsBackends);
+        }
+        MgsClients::from_clients(backends.iter().map(
+            |(backend_name, backend)| {
+                gateway_client::Client::new(
+                    &format!("http://{}", backend.address),
+                    log.new(o!(
+                        "mgs_backend_name" => backend_name.0.to_string(),
+                        "mgs_backend_addr" => backend.address.to_string(),
+                    )),
+                )
+            },
+        ))
+
+        // It's important that `backends` is dropped at this point.  Otherwise,
+        // we'll hold the watch channel lock while we do the long-running
+        // operations below.
+    };
+
     // Obtain the contents of the artifact that we need.
     let data =
         artifacts.artifact_contents(&update.artifact_hash_id.hash).await?;
@@ -214,7 +243,7 @@ pub async fn apply_update(
     // sp_component_caboose_get() + caboose parse (with some logic around other
     // stuff)
     // e.g., for host OS it's: unclear?
-    match updater.version_status(mgs_clients, update).await? {
+    match updater.version_status(&mut mgs_clients, update).await? {
         VersionStatus::UpdateComplete => {
             return Ok(ApplyUpdateResult::Completed);
         }
@@ -267,7 +296,9 @@ pub async fn apply_update(
         Err(_) => todo!(),
     };
 
-    let our_update = match wait_for_delivery(mgs_clients, sp_update).await? {
+    let our_update = match wait_for_delivery(&mut mgs_clients, sp_update)
+        .await?
+    {
         DeliveryWaitStatus::NotRunning => return Ok(ApplyUpdateResult::Lost),
         DeliveryWaitStatus::Aborted(id) => {
             return Ok(ApplyUpdateResult::Aborted(id));
@@ -297,7 +328,7 @@ pub async fn apply_update(
     } else {
         match wait_for_update_done(
             updater,
-            mgs_clients,
+            &mut mgs_clients,
             update,
             Some(PROGRESS_TIMEOUT),
         )
@@ -319,7 +350,9 @@ pub async fn apply_update(
         // error.  There is intentionally no timeout here.  If we've staged an
         // update but not managed to reset the device, there's no point where
         // we'd want to stop trying to do so.
-        while let Err(error) = updater.post_update(mgs_clients, update).await {
+        while let Err(error) =
+            updater.post_update(&mut mgs_clients, update).await
+        {
             if !matches!(error, gateway_client::Error::CommunicationError(_)) {
                 let error = InlineErrorChain::new(&error);
                 error!(log, "post_update failed"; &error);
@@ -335,7 +368,7 @@ pub async fn apply_update(
     //
     // There's no point where we'd want to give up here.  We know a reset was
     // sent.
-    match wait_for_update_done(updater, mgs_clients, update, None).await {
+    match wait_for_update_done(updater, &mut mgs_clients, update, None).await {
         // We did not specify a timeout so it should not time out.
         Err(UpdateWaitError::Timeout(_)) => unreachable!(),
         Ok(()) => {
@@ -398,24 +431,6 @@ struct UpdateAttemptResult {
     result: Result<ApplyUpdateResult, ApplyUpdateError>,
 }
 
-#[derive(Debug)]
-pub struct MgsUpdateRequest {
-    requested_update: PendingMgsUpdate,
-    // XXX-dap rather than this, MgsClients probably ought to have a mode where
-    // it accepts a qorb pool and continually try all clients forever on
-    // transient issues
-    mgs_clients: MgsClients,
-}
-
-impl MgsUpdateRequest {
-    pub fn new(
-        requested_update: PendingMgsUpdate,
-        mgs_clients: MgsClients,
-    ) -> MgsUpdateRequest {
-        MgsUpdateRequest { requested_update, mgs_clients }
-    }
-}
-
 // XXX-dap
 type InProgressUpdateStatus = ();
 
@@ -428,20 +443,24 @@ struct InProgressUpdate {
 pub struct MgsUpdateDriver {
     log: slog::Logger,
     artifacts: Arc<ArtifactCache>,
-    requests: watch::Receiver<BTreeMap<BaseboardId, MgsUpdateRequest>>,
+    requests: watch::Receiver<BTreeMap<BaseboardId, PendingMgsUpdate>>,
     // XXX-dap fill in status here
     in_progress: BTreeMap<BaseboardId, InProgressUpdate>,
     futures: FuturesUnordered<BoxFuture<'static, UpdateAttemptResult>>,
+    // XXX-dap who calls terminate on this?  when?
     mgs_resolver: BoxedResolver,
+    mgs_rx: watch::Receiver<AllBackends>,
 }
 
 impl MgsUpdateDriver {
     pub fn new(
         log: slog::Logger,
         artifacts: Arc<ArtifactCache>,
-        rx: watch::Receiver<BTreeMap<BaseboardId, MgsUpdateRequest>>,
-        mgs_resolver: BoxedResolver,
+        rx: watch::Receiver<BTreeMap<BaseboardId, PendingMgsUpdate>>,
+        mut mgs_resolver: BoxedResolver,
     ) -> MgsUpdateDriver {
+        let mgs_rx = mgs_resolver.monitor();
+
         MgsUpdateDriver {
             log,
             artifacts,
@@ -449,6 +468,7 @@ impl MgsUpdateDriver {
             in_progress: BTreeMap::new(),
             futures: FuturesUnordered::new(),
             mgs_resolver,
+            mgs_rx,
         }
     }
 
@@ -518,7 +538,7 @@ impl MgsUpdateDriver {
                 );
             }
             (Some(new_plan), Ok(ApplyUpdateResult::Completed))
-                if new_plan.requested_update == result.requested_update =>
+                if *new_plan == result.requested_update =>
             {
                 info!(&in_progress.log, "no retry needed (converged)");
             }
@@ -530,6 +550,7 @@ impl MgsUpdateDriver {
                 let work = Self::dispatch_update(
                     self.log.clone(),
                     self.artifacts.clone(),
+                    self.mgs_rx.clone(),
                     new_plan,
                 );
                 drop(requests);
@@ -566,6 +587,7 @@ impl MgsUpdateDriver {
                         Self::dispatch_update(
                             self.log.clone(),
                             self.artifacts.clone(),
+                            self.mgs_rx.clone(),
                             request,
                         ),
                     ));
@@ -596,12 +618,11 @@ impl MgsUpdateDriver {
     fn dispatch_update(
         log: slog::Logger,
         artifacts: Arc<ArtifactCache>,
-        request: &MgsUpdateRequest,
+        mgs_rx: watch::Receiver<AllBackends>,
+        update: &PendingMgsUpdate,
     ) -> Option<(InProgressUpdate, BoxFuture<'static, UpdateAttemptResult>)>
     {
-        let log =
-            log.new(o!("update" => format!("{:?}", request.requested_update)));
-        let update = &request.requested_update;
+        let log = log.new(o!("update" => format!("{:?}", update)));
         let raw_kind = &update.artifact_hash_id.kind;
         let Some(known_kind) = raw_kind.to_known() else {
             error!(
@@ -672,23 +693,17 @@ impl MgsUpdateDriver {
         info!(
             &log,
             "update requested for baseboard";
-            "request" => ?request
+            "request" => ?update,
         );
 
         let (status_tx, status_rx) = watch::channel(());
         let in_progress = InProgressUpdate { log, status_tx, status_rx };
-        let mut mgs_clients = request.mgs_clients.clone();
         let update = update.clone();
         let future = async move {
             // XXX-dap clones
-            let result = apply_update(
-                artifacts,
-                &sp_update,
-                &*updater,
-                &mut mgs_clients,
-                &update,
-            )
-            .await;
+            let result =
+                apply_update(artifacts, &sp_update, &*updater, mgs_rx, &update)
+                    .await;
             UpdateAttemptResult { requested_update: update, result }
         }
         .boxed();

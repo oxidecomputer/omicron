@@ -6067,6 +6067,7 @@ dependencies = [
  "gateway-test-utils",
  "hubtools",
  "internal-dns-resolver",
+ "internal-dns-types",
  "nexus-types",
  "omicron-common",
  "omicron-workspace-hack",

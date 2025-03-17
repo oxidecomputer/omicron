@@ -10,9 +10,8 @@ use anyhow::{Context, anyhow};
 use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_mgs_updates::MgsClients;
-use nexus_mgs_updates::MgsUpdateRequest;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::execution::{
     ComponentRegistrar, Event, ExecutionComponent, ExecutionStepId,
@@ -66,7 +65,7 @@ pub async fn realize_blueprint(
     blueprint: &Blueprint,
     nexus_id: OmicronZoneUuid,
     // XXX-dap all these BaseboardIds in maps ought to be Arcs
-    mgs_updates: watch::Sender<BTreeMap<BaseboardId, MgsUpdateRequest>>,
+    mgs_updates: watch::Sender<BTreeMap<BaseboardId, PendingMgsUpdate>>,
     sender: mpsc::Sender<Event>,
 ) -> Result<RealizeBlueprintOutput, anyhow::Error> {
     realize_blueprint_with_overrides(
@@ -88,7 +87,7 @@ pub async fn realize_blueprint_with_overrides(
     resolver: &Resolver,
     blueprint: &Blueprint,
     nexus_id: OmicronZoneUuid,
-    mgs_updates: watch::Sender<BTreeMap<BaseboardId, MgsUpdateRequest>>,
+    mgs_updates: watch::Sender<BTreeMap<BaseboardId, PendingMgsUpdate>>,
     overrides: &Overridables,
     sender: mpsc::Sender<Event>,
 ) -> Result<RealizeBlueprintOutput, anyhow::Error> {
@@ -577,30 +576,17 @@ fn register_cockroachdb_settings_step<'a>(
 fn register_mgs_update_step<'a>(
     registrar: &ComponentRegistrar<'_, 'a>,
     blueprint: &'a Blueprint,
-    sender: watch::Sender<BTreeMap<BaseboardId, MgsUpdateRequest>>,
+    sender: watch::Sender<BTreeMap<BaseboardId, PendingMgsUpdate>>,
 ) {
     registrar
         .new_step(
             ExecutionStepId::Ensure,
             "Kick off MGS-managed updates",
             move |_cx| async move {
-                let map = blueprint
-                    .pending_mgs_updates
-                    .iter()
-                    .map(|(baseboard_id, requested_update)| {
-                        (
-                            baseboard_id.clone(),
-                            MgsUpdateRequest::new(
-                                requested_update.clone(),
-                                // XXX-dap-blocks-test
-                                MgsClients::from_clients(Vec::new()),
-                            ),
-                        )
-                    })
-                    .collect();
-                let result = sender.send(map).context(
-                    "failed to send to MgsUpdateDriver on watch channel",
-                );
+                let result =
+                    sender.send(blueprint.pending_mgs_updates.clone()).context(
+                        "failed to send to MgsUpdateDriver on watch channel",
+                    );
                 Ok(map_err_to_step_warning(result))
             },
         )
