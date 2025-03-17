@@ -30,10 +30,9 @@ const DEFAULT_A4X2_PKG_PATH: &str = "out/a4x2-package.tar.gz";
 const STATIC_ENV_VARS: &[(&str, &str)] = &[
     // Consistent command output
     ("LANG", "C.UTF-8"),
-
     // Timestamps in logs outside the sleds consistent with timestamps inside
     // the sleds
-    ("TZ", "UTC")
+    ("TZ", "UTC"),
 ];
 
 #[derive(Subcommand)]
