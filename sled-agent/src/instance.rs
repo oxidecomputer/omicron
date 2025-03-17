@@ -1442,7 +1442,31 @@ impl InstanceRunner {
         // `RunningZone::stop` in case we're called between creating the
         // zone and assigning `running_state`.
         warn!(self.log, "Halting and removing zone: {}", zname);
-        Zones::halt_and_remove_logged(&self.log, &zname).await.unwrap();
+        let result = tokio::time::timeout(
+            Duration::from_secs(60 * 5),
+            omicron_common::backoff::retry(
+                omicron_common::backoff::retry_policy_local(),
+                || async {
+                    Zones::halt_and_remove_logged(&self.log, &zname)
+                        .await
+                        .map_err(|e| {
+                            if e.is_invalid_state() {
+                                BackoffError::transient(e)
+                            } else {
+                                BackoffError::permanent(e)
+                            }
+                        })
+                },
+            ),
+        )
+        .await;
+        match result {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => panic!("{e}"),
+            Err(_) => {
+                panic!("Zone {zname:?} could not be halted within 5 minutes")
+            }
+        }
 
         // Remove ourselves from the instance manager's map of instances.
         self.instance_ticket.deregister();
