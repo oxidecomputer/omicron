@@ -6442,14 +6442,30 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let params = body.into_inner();
             let system_version = params.system_version;
+
+            let current_target_release =
+                nexus.datastore().target_release_get_current(&opctx).await?;
+            let view = nexus
+                .datastore()
+                .target_release_view(&opctx, &current_target_release)
+                .await?;
+            if let views::TargetReleaseSource::SystemVersion { version } =
+                view.release_source
+            {
+                if version > system_version {
+                    return Err(HttpError::for_bad_request(
+                        None,
+                        "can't downgrade system".into(),
+                    ));
+                }
+            }
+
             let tuf_repo_id = nexus
                 .datastore()
                 .update_tuf_repo_get(&opctx, system_version.into())
                 .await?
                 .repo
                 .id;
-            let current_target_release =
-                nexus.datastore().target_release_get_current(&opctx).await?;
             let next_target_release =
                 nexus_db_model::TargetRelease::new_system_version(
                     &current_target_release,
