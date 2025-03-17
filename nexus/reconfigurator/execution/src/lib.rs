@@ -37,7 +37,10 @@ mod sled_state;
 #[cfg(test)]
 mod test_utils;
 
-/// Encapsulates arguments used for [`realize_blueprint`].
+/// Encapsulates arguments used for [`realize_blueprint`]
+///
+/// You probably want to start with `RequiredRealizeArgs` and use the
+/// builder-like methods to tweak it as required.
 pub struct RealizeArgs<'a> {
     pub opctx: &'a OpContext,
     pub datastore: &'a DataStore,
@@ -58,6 +61,11 @@ impl<'a> RealizeArgs<'a> {
     }
 }
 
+/// Encapsulates all of the required arguments for [`realize_blueprint`]
+///
+/// You'll need to convert this to a [`RealizeArgs`] to use it with
+/// `realize_blueprint()`.  You can also use the builder-like `with_*` methods
+/// to tweak this as you do so.
 pub struct RequiredRealizeArgs<'a> {
     pub opctx: &'a OpContext,
     pub datastore: &'a DataStore,
@@ -78,6 +86,15 @@ impl<'a> From<RequiredRealizeArgs<'a>> for RealizeArgs<'a> {
             sender: value.sender,
             overrides: None,
         }
+    }
+}
+
+impl<'a> RequiredRealizeArgs<'a> {
+    pub fn with_overrides(
+        self,
+        overrides: &'a Overridables,
+    ) -> RealizeArgs<'a> {
+        RealizeArgs::from(self).with_overrides(overrides)
     }
 }
 

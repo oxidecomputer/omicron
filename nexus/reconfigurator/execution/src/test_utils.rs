@@ -15,7 +15,7 @@ use nexus_types::deployment::{
 use omicron_uuid_kinds::OmicronZoneUuid;
 use update_engine::TerminalKind;
 
-use crate::{RealizeArgs, RealizeBlueprintOutput, RequiredRealizeArgs};
+use crate::{RealizeBlueprintOutput, RequiredRealizeArgs};
 
 pub(crate) async fn realize_blueprint_and_expect(
     opctx: &OpContext,
@@ -35,14 +35,14 @@ pub(crate) async fn realize_blueprint_and_expect(
     });
 
     let output = crate::realize_blueprint(
-        RealizeArgs::from(RequiredRealizeArgs {
+        RequiredRealizeArgs {
             opctx,
             datastore,
             resolver,
             blueprint,
             nexus_id: OmicronZoneUuid::new_v4(),
             sender,
-        })
+        }
         .with_overrides(overrides),
     )
     .await
