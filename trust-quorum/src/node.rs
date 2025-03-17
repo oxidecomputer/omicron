@@ -43,45 +43,11 @@ impl Node {
         now: Instant,
         msg: Reconfigure,
     ) -> Result<(), Error> {
-        self.check_membership_constraints(msg.members.len(), msg.threshold)?;
-        self.check_in_service()?;
+        self.validate_reconfigure_msg(&msg)?;
+        self.set_coordinator_state(now, msg)?;
 
-        let last_committed_epoch = self.persistent_state.last_committed_epoch();
-
-        // We can only reconfigure if the current epoch matches the last
-        // committed epoch in the `Reconfigure` request.
-        if msg.last_committed_epoch != last_committed_epoch {
-            return Err(Error::LastCommittedEpochMismatch {
-                node_epoch: last_committed_epoch,
-                msg_epoch: msg.last_committed_epoch,
-            });
-        }
-
-        // We must not have seen a prepare for this epoch or any greater epoch
-        if let Some(last_prepared_epoch) =
-            self.persistent_state.last_prepared_epoch()
-        {
-            if msg.epoch <= last_prepared_epoch {
-                return Err(Error::PreparedEpochMismatch {
-                    existing: last_prepared_epoch,
-                    new: msg.epoch,
-                });
-            }
-        }
-
-        // If we are already coordinating, we must abandon that coordination.
-        // TODO: Logging?
-        let mut coordinator_state = CoordinatorState::new(
-            now,
-            msg,
-            self.persistent_state.last_committed_reconfiguration().cloned(),
-        );
-
-        // Start collecting shares for `last_committed_epoch`
-        self.collect_shares_as_coordinator(&mut coordinator_state);
-
-        // Save the coordinator state in `self`
-        self.coordinator_state = Some(coordinator_state);
+        // Start collecting shares for `last_committed_epoch` if there are any
+        // self.collect_shares_as_coordinator();
 
         Ok(())
     }
@@ -194,8 +160,83 @@ impl Node {
             now + coordinator_state.reconfigure.retry_timeout;
     }
 
+    fn set_coordinator_state(
+        &mut self,
+        now: Instant,
+        msg: Reconfigure,
+    ) -> Result<(), Error> {
+        if let Some(coordinator_state) = &self.coordinator_state {
+            if coordinator_state.reconfigure.epoch > msg.epoch {
+                // TODO: Log that we are rejecting a stale configuration
+                return Err(Error::ReconfigurationInProgress {
+                    current_epoch: coordinator_state.reconfigure.epoch,
+                    msg_epoch: msg.epoch,
+                });
+            }
+
+            // TODO: Log that we are updating our configuration state
+        }
+
+        self.coordinator_state = Some(CoordinatorState::new(
+            now,
+            msg,
+            self.persistent_state.last_committed_reconfiguration().cloned(),
+        ));
+
+        Ok(())
+    }
+
+    fn validate_reconfigure_msg(&self, msg: &Reconfigure) -> Result<(), Error> {
+        self.check_membership_constraints(msg.members.len(), msg.threshold)?;
+        self.check_in_service()?;
+        self.check_reconfigure_msg_epochs(msg)?;
+        Ok(())
+    }
+
+    /// Ensure that epoch in the `Reconfigure` message is valid
+    /// given the current state of the node.
+    fn check_reconfigure_msg_epochs(
+        &self,
+        msg: &Reconfigure,
+    ) -> Result<(), Error> {
+        let last_committed_epoch = self.persistent_state.last_committed_epoch();
+        // We can only reconfigure if the current epoch matches the last
+        // committed epoch in the `Reconfigure` request.
+        //
+        // This provides us a total order over committed epochs.
+        if msg.last_committed_epoch != last_committed_epoch {
+            return Err(Error::LastCommittedEpochMismatch {
+                node_epoch: last_committed_epoch,
+                msg_epoch: msg.last_committed_epoch,
+            });
+        }
+
+        // Refuse to reconfigure if we don't have any commits and we have lrtq
+        // ledger data. This requires a call to `coordinate_upgrade_from_lrtq`
+        // instead.
+        if last_committed_epoch.is_none()
+            && self.persistent_state.lrtq_ledger_data.is_some()
+        {
+            return Err(Error::CannotReconfigureLrtqNode);
+        }
+
+        // We must not have seen a prepare for this epoch or any greater epoch
+        if let Some(last_prepared_epoch) =
+            self.persistent_state.last_prepared_epoch()
+        {
+            if msg.epoch <= last_prepared_epoch {
+                return Err(Error::PreparedEpochMismatch {
+                    existing: last_prepared_epoch,
+                    new: msg.epoch,
+                });
+            }
+        }
+
+        Ok(())
+    }
+
     /// Verify that the node is not decommissioned
-    fn check_in_service(&mut self) -> Result<(), Error> {
+    fn check_in_service(&self) -> Result<(), Error> {
         if let Some(decommissioned) = &self.persistent_state.decommissioned {
             return Err(Error::SledDecommissioned {
                 from: decommissioned.from.clone(),
@@ -211,7 +252,7 @@ impl Node {
     /// Verify that the cluster membership and threshold sizes are within
     /// constraints
     fn check_membership_constraints(
-        &mut self,
+        &self,
         num_members: usize,
         threshold: Threshold,
     ) -> Result<(), Error> {

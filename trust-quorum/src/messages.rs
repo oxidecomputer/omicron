@@ -69,6 +69,12 @@ pub enum Error {
 
     #[error("sled has already prepared a request at epoch {existing:?}, and cannot prepare another at a smaller or equivalent epoch {new:?}")]
     PreparedEpochMismatch { existing: Epoch, new: Epoch },
+
+    #[error("Cannot reconfigure directly from an lrtq node. Must upgrade.")]
+    CannotReconfigureLrtqNode,
+
+    #[error("reconfiguration in progress at epoch {current_epoch:?}: cannot reconfigure for older epoch {msg_epoch:?}")]
+    ReconfigurationInProgress { current_epoch: Epoch, msg_epoch: Epoch },
 }
 
 #[derive(

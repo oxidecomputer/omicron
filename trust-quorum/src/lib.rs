@@ -128,6 +128,10 @@ pub struct ShareDigest(Sha3_256Digest);
 )]
 pub struct Sha3_256Digest([u8; 32]);
 
+pub enum CoordinationStage {
+    CollectingKeySharesForLastCommittedEpoch,
+}
+
 /// The state of a reconfiguration coordinator.
 ///
 /// A coordinator can be any trust quorum node that is a member of both the old
@@ -139,29 +143,29 @@ pub struct Sha3_256Digest([u8; 32]);
 /// prepares, nexus will  skip the epoch and start a new reconfiguration. This
 /// allows progress to always be made with a full linearization of epochs.
 pub struct CoordinatorState {
-    start_time: Instant,
+    pub start_time: Instant,
     // We copy the last committed reconfiguration here so that decisions
     // can be made with only the state local to this `CoordinatorState`.
     // If we get a prepare message or commit message with a later epoch
     // we will abandon this coordinator state.
-    last_committed_configuration: Option<Configuration>,
-    reconfigure: Reconfigure,
+    pub last_committed_configuration: Option<Configuration>,
+    pub reconfigure: Reconfigure,
     // Received key shares for the last committed epoch
     // Only used if there actually is a last_committed_epoch
-    received_key_shares: BTreeMap<PlatformId, Share>,
+    pub received_key_shares: BTreeMap<PlatformId, Share>,
     // Once we've received enough key shares for the last committed epoch (if
     // there is one), we can reconstruct the rack secret and drop the shares.
-    last_committed_rack_secret: Option<RackSecret>,
+    pub last_committed_rack_secret: Option<RackSecret>,
     // Once we've recreated the rack secret for the last committed epoch
     // we will generate a rack secret and split it into key shares.
     // then populate a `PrepareMsg` for each member. When the member acknowledges
     // receipt, we will remove the prepare message. Once all members acknowledge
     // their prepare, we are done and can respond to nexus.
-    prepares: BTreeMap<PlatformId, PrepareMsg>,
-    prepare_acks: BTreeSet<PlatformId>,
+    pub prepares: BTreeMap<PlatformId, PrepareMsg>,
+    pub prepare_acks: BTreeSet<PlatformId>,
 
     // The next retry timeout deadline
-    retry_deadline: Instant,
+    pub retry_deadline: Instant,
 }
 
 impl CoordinatorState {
