@@ -106,7 +106,7 @@ impl BlueprintExecutor {
                 opctx,
                 datastore: &self.datastore,
                 resolver: &self.resolver,
-                blueprint: blueprint,
+                blueprint,
                 nexus_id: self.nexus_id,
                 sender,
             }
