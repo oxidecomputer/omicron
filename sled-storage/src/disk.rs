@@ -7,6 +7,7 @@
 use anyhow::bail;
 use camino::{Utf8Path, Utf8PathBuf};
 use derive_more::From;
+use id_map::IdMappable;
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::{DiskIdentity, DiskVariant};
 use omicron_common::zpool_name::{ZpoolKind, ZpoolName};
@@ -241,6 +242,16 @@ impl RawDisk {
     }
 }
 
+impl IdMappable for RawDisk {
+    type Id = DiskIdentity;
+
+    fn id(&self) -> Self::Id {
+        // TODO-performance This clones three `String`s; maybe we should use
+        // `Arc<DiskIdentity>` instead?
+        self.identity().clone()
+    }
+}
+
 /// A physical [`PooledDisk`] or a [`SyntheticDisk`] that contains or is backed
 /// by a single zpool and that has provisioned datasets. This disk is ready for
 /// usage by higher level software.
@@ -375,7 +386,7 @@ impl Disk {
         }
     }
 
-    pub(crate) fn update_firmware_metadata(&mut self, raw_disk: &RawDisk) {
+    pub fn update_firmware_metadata(&mut self, raw_disk: &RawDisk) {
         match self {
             Disk::Real(pooled_disk) => {
                 pooled_disk.firmware = raw_disk.firmware().clone();

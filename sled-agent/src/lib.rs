@@ -20,6 +20,8 @@ mod backing_fs;
 mod boot_disk_os_writer;
 pub mod bootstrap;
 pub mod config;
+// TODO-john remove `pub`? leave it for now to reduce r-a warnings
+pub mod config_reconciler;
 mod ddm_reconciler;
 pub(crate) mod dump_setup;
 pub(crate) mod hardware_monitor;

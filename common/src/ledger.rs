@@ -7,17 +7,26 @@
 use async_trait::async_trait;
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Serialize, de::DeserializeOwned};
-use slog::{Logger, debug, error, info, warn};
+use slog::{Logger, error, info, warn};
+use slog_error_chain::InlineErrorChain;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Cannot serialize JSON to file {path}: {err}")]
-    JsonSerialize { path: Utf8PathBuf, err: serde_json::error::Error },
+    #[error("Cannot serialize JSON to file {path}")]
+    JsonSerialize {
+        path: Utf8PathBuf,
+        #[source]
+        err: serde_json::error::Error,
+    },
 
-    #[error("Cannot deserialize JSON from file {path}: {err}")]
-    JsonDeserialize { path: Utf8PathBuf, err: serde_json::error::Error },
+    #[error("Cannot deserialize JSON from file {path}")]
+    JsonDeserialize {
+        path: Utf8PathBuf,
+        #[source]
+        err: serde_json::error::Error,
+    },
 
-    #[error("Failed to perform I/O: {message}: {err}")]
+    #[error("Failed to perform I/O: {message}")]
     Io {
         message: String,
         #[source]
@@ -89,8 +98,15 @@ impl<T: Ledgerable> Ledger<T> {
         for path in paths.iter() {
             match T::read_from(log, &path).await {
                 Ok(ledger) => ledgers.push(ledger),
+                Err(Error::NotFound) => {
+                    info!(log, "No ledger in {path}");
+                }
                 Err(err) => {
-                    debug!(log, "Failed to read ledger: {err}"; "path" => %path)
+                    error!(
+                        log, "Failed to read ledger";
+                        "path" => %path,
+                        InlineErrorChain::new(&err),
+                    );
                 }
             }
         }
@@ -183,7 +199,6 @@ pub trait Ledgerable: DeserializeOwned + Serialize + Send + Sync {
                 err,
             })
         } else {
-            info!(log, "No ledger in {path}");
             Err(Error::NotFound)
         }
     }

@@ -11200,6 +11200,7 @@ dependencies = [
  "expectorate",
  "futures",
  "glob",
+ "id-map",
  "illumos-utils",
  "key-manager",
  "omicron-common",
