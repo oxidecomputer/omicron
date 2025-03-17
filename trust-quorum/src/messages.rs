@@ -4,21 +4,15 @@
 
 //! Messsages for the trust quorum protocol
 
-use crate::{
-    Configuration, Epoch, PlatformId, RackId, Share, ShareDigest, Threshold,
-};
-use derive_more::From;
+use crate::{Configuration, Epoch, PlatformId, RackId, Share, Threshold};
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    time::Duration,
-};
-use uuid::Uuid;
+use std::{collections::BTreeSet, time::Duration};
 
 /// A request from nexus informing a node to start coordinating a
 /// reconfiguration
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Reconfigure {
+    pub rack_id: RackId,
     pub epoch: Epoch,
     pub last_committed_epoch: Option<Epoch>,
     pub members: BTreeSet<PlatformId>,
