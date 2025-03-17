@@ -98,6 +98,9 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
         Environment { cargo, git, work_dir, src_dir, out_dir, omicron_dir }
     };
 
+    if let Some(parent) = args.output.parent() {
+        fs::create_dir_all(parent)?;
+    }
     let output_artifact = canonicalize_parent(&args.output)
         .context("finding absolute path to output artifact")?;
 
