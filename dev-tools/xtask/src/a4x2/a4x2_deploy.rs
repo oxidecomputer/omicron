@@ -269,6 +269,7 @@ fn prepare_to_launch_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
     cmd!(sh, "banner 'prepare'").run()?;
 
     // Generate an ssh key we will use to log into the sleds.
+    // `-N ''` means "empty passphrase"
     cmd!(sh, "ssh-keygen -t ed25519 -N '' -f a4x2-ssh-key").run()?;
     let mut authorized_keys = vec![sh.read_file("a4x2-ssh-key.pub")?];
 
@@ -687,7 +688,7 @@ fn collect_evidence(sh: &Shell, env: &Environment) -> Result<()> {
     Ok(())
 }
 
-/// Collect logs from the given sled VM, and place them in [sled_dir]
+/// Collect logs from the given sled VM, and place them in `sled_dir`
 fn collect_sled_logs(
     sh: &Shell,
     env: &Environment,
@@ -849,7 +850,7 @@ fn get_node_ip(sh: &Shell, env: &Environment, node: &str) -> Result<String> {
             // Strip the subnet suffix by splitting on the "/" and taking
             // everything to the left of it.
             let ipv4 = ipv4.split("/")
-                .nth(0)
+                .next()
                 .with_context(|| format!("get_host_ip: could not extract IP for node {node} from line {ln}"))?;
 
             // Return the address since we have now matched the line
