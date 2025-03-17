@@ -284,9 +284,10 @@ pub enum Error {
     Simnet(#[from] GetSimnetError),
 
     #[error(
-        "Requested generation ({requested}) is older than current ({current})"
+        "Requested zone generation ({requested}) \
+        is older than current ({current})"
     )]
-    RequestedConfigOutdated { requested: Generation, current: Generation },
+    RequestedZoneConfigOutdated { requested: Generation, current: Generation },
 
     #[error("Requested generation {0} with different zones than before")]
     RequestedConfigConflicts(Generation),
@@ -327,7 +328,7 @@ impl From<Error> for omicron_common::api::external::Error {
                     &err.to_string(),
                 )
             }
-            Error::RequestedConfigOutdated { .. } => {
+            Error::RequestedZoneConfigOutdated { .. } => {
                 omicron_common::api::external::Error::conflict(&err.to_string())
             }
             Error::TimeNotSynchronized => {
@@ -3465,7 +3466,7 @@ impl ServiceManager {
 
         // Absolutely refuse to downgrade the configuration.
         if ledger_zone_config.omicron_generation > request.generation {
-            return Err(Error::RequestedConfigOutdated {
+            return Err(Error::RequestedZoneConfigOutdated {
                 requested: request.generation,
                 current: ledger_zone_config.omicron_generation,
             });
@@ -5843,7 +5844,7 @@ mod illumos_tests {
             .expect_err("unexpectedly went backwards in zones generation");
         assert!(matches!(
             error,
-            Error::RequestedConfigOutdated { requested, current }
+            Error::RequestedZoneConfigOutdated { requested, current }
             if requested == v1 && current == v2
         ));
         let found2 = mgr.omicron_zones_list().await;
