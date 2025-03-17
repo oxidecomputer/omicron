@@ -6,14 +6,14 @@
 
 use super::cmd;
 use anyhow::{Context, Result, anyhow, bail};
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
 use fs_err as fs;
 use serde::Deserialize;
 use std::env;
 use std::process::{Command, Stdio};
 use std::{thread, time};
-use xshell::Shell;
+use xshell::{Cmd, Shell};
 
 /// Args for sshing in without checking/storing the remote host key. Every time
 /// we start a4x2, it will have new keys.
@@ -43,7 +43,12 @@ pub struct A4x2DeployArgs {
 
 #[derive(Subcommand, Clone)]
 pub enum DeployCommand {
+    /// Download and install the propolis hypervisor and bootcode. Pre-requisite
+    /// for launching a4x2.
+    InstallPropolis,
+
     /// Start a4x2, deploy a control plane to it, and then leave it running.
+    /// Destroys any existing a4x2 deployment, unless --ensure is used.
     Start(StartArgs),
 
     /// Stop a4x2 that was previously launched with the `start` subcommand.
@@ -52,13 +57,12 @@ pub enum DeployCommand {
     /// Execute live-tests previously built by `xtask a4x2 package`.
     RunLiveTests(RunLiveTestsArgs),
 
+    /// Collect logs from a4x2, and services within the sleds.
+    CollectEvidence,
+
     /// Query the current state of a4x2, including node access information and
     /// whether the control plane is accessible.
     Status,
-
-    /// Download and install the propolis hypervisor and bootcode. Pre-requisite
-    /// for launching a4x2.
-    InstallPropolis,
 }
 
 #[derive(Args, Clone)]
@@ -95,8 +99,7 @@ struct Environment {
     /// Falcon state directory
     falcon_dir: Utf8PathBuf,
 
-    /// Directory in `work_dir` where presently nothing actually happens because
-    /// we don't have any output artifacts yet lol YYY/XXX
+    /// Directory in `work_dir` where logs are written by collect-evidence
     out_dir: Utf8PathBuf,
 }
 pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
@@ -124,7 +127,7 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
         let falcon_dir = a4x2_dir.join(".falcon");
 
         // Output logs go here
-        let out_dir = work_dir.join("output");
+        let out_dir = work_dir.join("output-logs");
 
         Environment {
             a4x2_package_tar,
@@ -191,6 +194,7 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
         }
         DeployCommand::RunLiveTests(_) => run_live_tests(&sh, &env)?,
         DeployCommand::InstallPropolis => install_propolis(&sh)?,
+        DeployCommand::CollectEvidence => collect_evidence(&sh, &env)?,
     }
 
     Ok(())
@@ -475,25 +479,13 @@ fn run_live_tests(sh: &Shell, env: &Environment) -> Result<()> {
 
     let _popdir = sh.push_dir(&env.a4x2_dir);
 
-    // Get IP of sled 0. Since we confirmed the falcon state directory exists
-    // before this, the most likely error state here is that the user launched
-    // a4x2 and then rebooted, which will leave the falcon state pointing at
-    // propolis servers that aren't running anymore.
-    let g0ip = get_node_ip(&sh, env, "g0").context("Failed to get ip address of a4x2 node g0. a4x2 may not be running. If you rebooted since the last time you launched a4x2, please relaunch it.")?;
-
-    // Prepare to ssh into sled 0
-    let mut ssh_args = vec!["-i", "../a4x2-ssh-key"];
-    ssh_args.extend_from_slice(&INSECURE_SSH_ARGS);
-    let ssh_args = &ssh_args;
-    let ssh_host = format!("root@{g0ip}");
-
-    // Bring various file path constants into scope for interpolation below
+    // Bring various file path constants into scope for use below
     use super::{
         LIVE_TEST_BUNDLE_DIR, LIVE_TEST_BUNDLE_NAME, LIVE_TEST_BUNDLE_SCRIPT,
     };
 
     // Send live tests to sled 0
-    cmd!(sh, "scp {ssh_args...} {LIVE_TEST_BUNDLE_NAME} {ssh_host}:/zone/oxz_switch/root/root").run()?;
+    scp_to_node(sh, env, "g0", &Utf8Path::new(LIVE_TEST_BUNDLE_NAME), &Utf8Path::new("/zone/oxz_switch/root/root"))?.run()?;
 
     // NOTE! Below we do need to do string-escaping, because we are shuffling
     // some scripts around and pushing them into shells on remote systems
@@ -521,10 +513,8 @@ fn run_live_tests(sh: &Shell, env: &Environment) -> Result<()> {
     // NOTE! No more escaping, we are back to the comfort of
     // std::process::Command from now on.
 
-    // Log into a virtual sled, and run `ssh_script`.
-    let ssh_cmd = cmd!(sh, "ssh {ssh_args...} {ssh_host} {ssh_script}");
-
-    // Will error if the live tests fail. This is desired.
+    // Unpack and execute the live tests
+    let ssh_cmd = ssh_into_node(sh, env, "g0")?.arg(ssh_script);
     let live_tests_status = Command::from(ssh_cmd)
         .stdin(Stdio::null())
         .status()?
@@ -563,16 +553,17 @@ fn run_live_tests(sh: &Shell, env: &Environment) -> Result<()> {
 fn teardown_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
     let _popdir = sh.push_dir(&env.a4x2_dir);
 
-    // destroy a4x2 stuff
     cmd!(sh, "pfexec ./a4x2 destroy").run()?;
 
-    // destroy the route we added (and any stale ones laying around) Each time
-    // we run `route get` we will get one gateway. If multiple routes have been
-    // added for this IP (by, say, multiple spinup commands without teardowns in
-    // between), then we will need to do this multiple times to fully tear down
-    // all of them. But, I don't like unbounded loops, so we will do at max 10,
-    // which is a number that seems unlikely enough to reach, to me.
-    for _ in 0..10 {
+    // Destroy the route we added (and any stale ones laying around).
+    //
+    // Each time we run `route get` we will get one gateway. If multiple routes
+    // have been added for this IP (by, say, multiple spinup commands without
+    // teardowns in between), then we will need to do this multiple times to
+    // fully tear down all of them. But, I don't like unbounded loops, so we
+    // will only make a reasonable number of attempts.
+    const MAX_TRIES: usize = 25;
+    for _ in 0..MAX_TRIES {
         let mut route_cmd = cmd!(sh, "route -n get {DEFAULT_OMICRON_SUBNET}");
 
         // We get an error code when there is no route (and thus, nothing for
@@ -605,7 +596,7 @@ fn teardown_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
             // None gateway: negative confirmation that there are no routes
             // This is the goal state: all routes gone and we know it.
             None if not_in_table => {
-                break;
+                return Ok(())
             }
 
             // Some(gateway): positive confirmation that there is a route
@@ -618,7 +609,8 @@ fn teardown_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
                 )
                 .run()?;
 
-                break;
+                // No break/return, we want another round in the loop to clear
+                // more routes
             }
 
             // Anything else is unexpected
@@ -627,6 +619,118 @@ fn teardown_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
             }
         }
     }
+
+    // It's not really an error to be here, just means the user had a lot of
+    // routes. So we will warn, but move on
+    eprintln!("Warning: deleted {MAX_TRIES} routes to the omicron subnet, but still more remain. That's a lot of routes!");
+    Ok(())
+}
+
+/// Collect a4x2 logs, both from the falcon directory and from services within
+/// the sleds.
+fn collect_evidence(sh: &Shell, env: &Environment) -> Result<()> {
+    let out_dir = &env.out_dir;
+
+    // avoid stale logs, one of the worst problems to unknowingly have while
+    // debugging
+    if out_dir.try_exists()? {
+        fs::remove_dir_all(out_dir)?;
+    }
+
+    // Collect falcon logs.
+    let falcon_out = out_dir.join("falcon");
+    fs::create_dir_all(&falcon_out)?;
+    for ent in fs::read_dir(&env.falcon_dir)? {
+        let ent = ent?;
+
+        let fname = ent.file_name();
+        let Some(fname) = fname.to_str() else {
+            continue;
+        };
+
+        // ignore the PID/PORT files, those are just tracking how to talk to the
+        // currently running propolis processes.
+        if !fname.ends_with(".pid") && !fname.ends_with(".port") {
+            fs::copy(ent.path(), falcon_out.join(fname))?;
+        }
+    }
+
+    // Each sled gets an output directory for its service logs
+    let sleds = [
+        ( "g0", out_dir.join("g0") ),
+        ( "g1", out_dir.join("g1") ),
+        ( "g2", out_dir.join("g2") ),
+        ( "g3", out_dir.join("g3") ),
+    ];
+
+    // Collect sled logs
+    for (sled, sled_dir) in &sleds {
+        // Permit errors when collecting sled logs, so we can lossily collect
+        // logs even if some sleds are unreachable
+        collect_sled_logs(sh, env, sled, sled_dir).unwrap_or_else(|e| {
+            eprintln!("Errors collecting logs from sled {sled}: {e}");
+        });
+    }
+
+    Ok(())
+}
+
+/// Collect logs from the given sled VM, and place them in [sled_dir]
+fn collect_sled_logs(sh: &Shell, env: &Environment, sled: &str, sled_dir: &Utf8Path) -> Result<()> {
+    // This script will run in the global zone of each sled VM to collect logs.
+    // It generates a tar stream of logs from the system.
+    const LOG_COLLECTION_SCRIPT: &str = r#"
+        # we are specifically not setting exit-on-error, so we can lossily get
+        # logs even if the presence of errors
+        set -x
+
+        # generate file list of logs. each command in this subshell should print
+        # file paths to stdout
+        (
+            # global zone logs.
+            svcs -L sled-agent mg-ddm
+
+            # zone service logs
+            /opt/oxide/oxlog/oxlog zones \
+                | xargs -n1 /opt/oxide/oxlog/oxlog logs -c -a -e
+        ) > /tmp/list-of-logs.txt
+
+        # tar all the files listed, stream tarfile to stdout
+        # don't use gzip, because we can't stream decompress it
+        #   (https://www.illumos.org/issues/15228)
+        # should not matter since the transfer is local anyway.
+        tar cEf - -I /tmp/list-of-logs.txt
+    "#;
+
+    fs::create_dir_all(sled_dir)?;
+
+    // Run tar on remote sled
+    let ssh_cmd = ssh_into_node(sh, env, sled)?.arg(LOG_COLLECTION_SCRIPT);
+    let mut ssh_cmd = Command::from(ssh_cmd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .spawn()
+        .context("executing log collection script")?;
+
+    // should be infallible because we set to piped above
+    let tar_stream = ssh_cmd.stdout.take().unwrap();
+
+    // Unpack tar locally
+    Command::from(cmd!(sh, "tar xf - -C {sled_dir}"))
+        .stdin(Stdio::from(tar_stream))
+        .stdout(Stdio::null())
+        .status()
+        .map_err(|err| anyhow!(err))
+        .and_then(|status| {
+            let code = status.code().unwrap();
+            if code == 0 {
+                Ok(())
+            } else {
+                Err(anyhow!("tar failed: {}", code))
+            }
+        })
+        .context("unpacking logs locally")?;
+    ssh_cmd.wait()?;
 
     Ok(())
 }
@@ -683,6 +787,9 @@ Virtual Sled IP addresses:
 - g2: {g2ip}
 - g3: {g3ip}
 
+Control plane IP address:
+- {DEFAULT_OMICRON_NEXUS_ADDR}
+
 "#
     );
 }
@@ -709,7 +816,10 @@ fn get_node_ip(sh: &Shell, env: &Environment, node: &str) -> Result<String> {
     // address, in this case "vioif3/v4". This is the IP address on the user's
     // local LAN, accessible from the machine running a4x2, and potentially
     // other devices on the same local network.
-    let ipadm = cmd!(sh, "pfexec ./a4x2 exec {node} ipadm").read()?;
+
+    let ipadm = cmd!(sh, "pfexec ./a4x2 exec {node} ipadm")
+        .read()
+        .with_context(|| format!("Failed to execute ipadm on {node}. a4x2 may not be running. If you rebooted since the last time you launched a4x2, please relaunch it."))?;
     for ln in ipadm.lines() {
         // Match the dhcp line
         if ln.contains("dhcp") {
@@ -730,7 +840,23 @@ fn get_node_ip(sh: &Shell, env: &Environment, node: &str) -> Result<String> {
     }
 
     // Loop above here will return early if we successfully found the IP
-    bail!("get_host_ip: could not locate IP for node {node}");
+    bail!("get_host_ip: could not locate IP for node {node}.");
+}
+
+fn ssh_into_node<'a>(sh: &'a Shell, env: &'a Environment, node: &str) -> Result<Cmd<'a>> {
+    let ssh_key = env.work_dir.join("a4x2-ssh-key");
+    let ip = get_node_ip(&sh, env, node)?;
+    let ssh_host = format!("root@{ip}");
+
+    Ok(cmd!(sh, "ssh -i {ssh_key} {INSECURE_SSH_ARGS...} {ssh_host}"))
+}
+
+fn scp_to_node<'a>(sh: &'a Shell, env: &'a Environment, node: &str, local_path: &'a Utf8Path, remote_path: &'a Utf8Path) -> Result<Cmd<'a>> {
+    let ssh_key = env.work_dir.join("a4x2-ssh-key");
+    let ip = get_node_ip(&sh, env, node)?;
+    let ssh_host = format!("root@{ip}");
+
+    Ok(cmd!(sh, "scp -i {ssh_key} {INSECURE_SSH_ARGS...} {local_path} {ssh_host}:{remote_path}"))
 }
 
 /// Escape a string so it will be interpreted as a single argument when placed
