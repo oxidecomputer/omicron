@@ -228,15 +228,32 @@ impl Zones {
         match Self::find(name).await? {
             None => Ok(None),
             Some(zone) => {
-                let state = zone.state();
-                let (halt, uninstall) = match state {
-                    // For states where we could be running, attempt to halt.
-                    zone::State::Running | zone::State::Ready => (true, true),
-                    // For zones where we never performed installation, simply
-                    // delete the zone - uninstallation is invalid.
-                    zone::State::Configured => (false, false),
-                    // For most zone states, perform uninstallation.
-                    _ => (false, true),
+                let mut state = zone.state();
+                let (halt, uninstall) = loop {
+                    let mut poll = tokio::time::interval(
+                        std::time::Duration::from_secs(1),
+                    );
+                    match state {
+                        // For states where we could be running, attempt to halt.
+                        zone::State::Running | zone::State::Ready => {
+                            break (true, true);
+                        }
+                        // For zones where we never performed installation, simply
+                        // delete the zone - uninstallation is invalid.
+                        zone::State::Configured => break (false, false),
+                        // Attempting to uninstall a zone in the "down" state will
+                        // fail. Instead, wait for it to finish shutting down and
+                        // then uninstall it.
+                        zone::State::Down | zone::State::ShuttingDown => {
+                            poll.tick().await;
+                            match Self::find(name).await? {
+                                None => return Ok(None),
+                                Some(zone) => state = zone.state(),
+                            }
+                        }
+                        // For most zone states, perform uninstallation.
+                        _ => break (false, true),
+                    }
                 };
 
                 if halt {
