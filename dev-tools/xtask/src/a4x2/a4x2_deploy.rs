@@ -216,7 +216,9 @@ fn install_propolis(sh: &Shell) -> Result<()> {
     eprintln!("Please retrieve `/staff/mike/propolis-server` from");
     eprintln!("`catacomb.eng.oxide.computer` and place it in `/usr/bin`.");
     eprintln!();
-    eprintln!("scp catacomb.eng.oxide.computer:/staff/mike/propolis-server /tmp/propolis-server");
+    eprintln!(
+        "scp catacomb.eng.oxide.computer:/staff/mike/propolis-server /tmp/propolis-server"
+    );
     eprintln!("chmod +x /tmp/propolis-server");
     eprintln!("pfexec mv /tmp/propolis-server /usr/bin");
 
