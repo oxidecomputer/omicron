@@ -70,7 +70,25 @@ pub struct AdmError {
     op: Operation,
     zone: String,
     #[source]
-    err: zone::ZoneError,
+    err: AdmErrorKind,
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum AdmErrorKind {
+    /// The zone is currently in a state in which it cannot be uninstalled.
+    /// These states are generally transient, so this error is likely to be
+    /// retryable.
+    #[error("this operation cannot be performed in the '{:?}' state", .0)]
+    InvalidState(zone::State),
+    /// Another zoneadm error occurred.
+    #[error(transparent)]
+    Zoneadm(#[from] zone::ZoneError),
+}
+
+impl AdmError {
+    pub fn is_invalid_state(&self) -> bool {
+        matches!(self.err, AdmErrorKind::InvalidState(_))
+    }
 }
 
 /// Errors which may be encountered when deleting addresses.
@@ -236,6 +254,16 @@ impl Zones {
                     // For zones where we never performed installation, simply
                     // delete the zone - uninstallation is invalid.
                     zone::State::Configured => (false, false),
+                    // Attempting to uninstall a zone in the "down" state will
+                    // fail. Instead, the caller must wait until the zone
+                    // transitions to "installed".
+                    zone::State::Down | zone::State::ShuttingDown => {
+                        return Err(AdmError {
+                            op: Operation::Uninstall,
+                            zone: name.to_string(),
+                            err: AdmErrorKind::InvalidState(state),
+                        });
+                    }
                     // For most zone states, perform uninstallation.
                     _ => (false, true),
                 };
@@ -245,7 +273,7 @@ impl Zones {
                         AdmError {
                             op: Operation::Halt,
                             zone: name.to_string(),
-                            err,
+                            err: err.into(),
                         }
                     })?;
                 }
@@ -256,7 +284,7 @@ impl Zones {
                         .map_err(|err| AdmError {
                             op: Operation::Uninstall,
                             zone: name.to_string(),
-                            err,
+                            err: err.into(),
                         })?;
                 }
                 zone::Config::new(name)
@@ -266,7 +294,7 @@ impl Zones {
                     .map_err(|err| AdmError {
                     op: Operation::Delete,
                     zone: name.to_string(),
-                    err,
+                    err: err.into(),
                 })?;
                 Ok(Some(state))
             }
@@ -360,7 +388,7 @@ impl Zones {
         cfg.run().await.map_err(|err| AdmError {
             op: Operation::Configure,
             zone: zone_name.to_string(),
-            err,
+            err: err.into(),
         })?;
 
         info!(log, "Installing Omicron zone: {}", zone_name);
@@ -374,7 +402,7 @@ impl Zones {
             .map_err(|err| AdmError {
                 op: Operation::Install,
                 zone: zone_name.to_string(),
-                err,
+                err: err.into(),
             })?;
         Ok(())
     }
@@ -384,7 +412,7 @@ impl Zones {
         zone::Adm::new(name).boot().await.map_err(|err| AdmError {
             op: Operation::Boot,
             zone: name.to_string(),
-            err,
+            err: err.into(),
         })?;
         Ok(())
     }
@@ -398,7 +426,7 @@ impl Zones {
             .map_err(|err| AdmError {
                 op: Operation::List,
                 zone: "<all>".to_string(),
-                err,
+                err: err.into(),
             })?
             .into_iter()
             .filter(|z| z.name().starts_with(ZONE_PREFIX))
