@@ -226,7 +226,7 @@ fn register_zone_external_networking_step<'a>(
         .new_step(
             ExecutionStepId::Ensure,
             "Ensure external networking resources",
-            move |_cx| async move {
+            async move |_cx| {
                 datastore
                     .blueprint_ensure_external_networking_resources(
                         opctx, blueprint,
@@ -252,7 +252,7 @@ fn register_support_bundle_failure_step<'a>(
             ExecutionStepId::Cleanup,
             "Mark support bundles as failed if they rely on \
              an expunged disk or sled",
-            move |_cx| async move {
+            async move |_cx| {
                 let res = match datastore
                     .support_bundle_fail_expunged(opctx, blueprint, nexus_id)
                     .await
@@ -276,26 +276,19 @@ fn register_sled_list_step<'a>(
     datastore: &'a DataStore,
 ) -> StepHandle<Arc<BTreeMap<SledUuid, Sled>>> {
     registrar
-        .new_step(
-            ExecutionStepId::Fetch,
-            "Fetch sled list",
-            move |_cx| async move {
-                let sleds_by_id: BTreeMap<SledUuid, _> = datastore
-                    .sled_list_all_batched(opctx, SledFilter::InService)
-                    .await
-                    .context("listing all sleds")?
-                    .into_iter()
-                    .map(|db_sled| {
-                        (
-                            SledUuid::from_untyped_uuid(db_sled.id()),
-                            db_sled.into(),
-                        )
-                    })
-                    .collect();
+        .new_step(ExecutionStepId::Fetch, "Fetch sled list", async move |_cx| {
+            let sleds_by_id: BTreeMap<SledUuid, _> = datastore
+                .sled_list_all_batched(opctx, SledFilter::InService)
+                .await
+                .context("listing all sleds")?
+                .into_iter()
+                .map(|db_sled| {
+                    (SledUuid::from_untyped_uuid(db_sled.id()), db_sled.into())
+                })
+                .collect();
 
-                StepSuccess::new(Arc::new(sleds_by_id)).into()
-            },
-        )
+            StepSuccess::new(Arc::new(sleds_by_id)).into()
+        })
         .register()
 }
 
@@ -309,7 +302,7 @@ fn register_deploy_sled_configs_step<'a>(
         .new_step(
             ExecutionStepId::Ensure,
             "Deploy sled configs",
-            move |cx| async move {
+            async move |cx| {
                 let sleds_by_id = sleds.into_value(cx.token()).await;
                 let res = omicron_sled_config::deploy_sled_configs(
                     opctx,
@@ -340,7 +333,7 @@ fn register_plumb_firewall_rules_step<'a>(
         .new_step(
             ExecutionStepId::Ensure,
             "Plumb service firewall rules",
-            move |_cx| async move {
+            async move |_cx| {
                 let res = nexus_networking::plumb_service_firewall_rules(
                     datastore,
                     opctx,
@@ -369,7 +362,7 @@ fn register_dns_records_step<'a>(
         .new_step(
             ExecutionStepId::Ensure,
             "Deploy DNS records",
-            move |cx| async move {
+            async move |cx| {
                 let sleds_by_id = sleds.into_value(cx.token()).await;
 
                 let res = dns::deploy_dns(
@@ -399,7 +392,7 @@ fn register_cleanup_expunged_zones_step<'a>(
         .new_step(
             ExecutionStepId::Cleanup,
             "Cleanup expunged zones",
-            move |_cx| async move {
+            async move |_cx| {
                 let res = omicron_zones::clean_up_expunged_zones(
                     opctx, datastore, resolver, blueprint,
                 )
@@ -421,7 +414,7 @@ fn register_decommission_sleds_step<'a>(
         .new_step(
             ExecutionStepId::Cleanup,
             "Decommission sleds",
-            move |_cx| async move {
+            async move |_cx| {
                 let res =
                     sled_state::decommission_sleds(opctx, datastore, blueprint)
                         .await
@@ -442,7 +435,7 @@ fn register_decommission_disks_step<'a>(
         .new_step(
             ExecutionStepId::Cleanup,
             "Decommission expunged disks",
-            move |_cx| async move {
+            async move |_cx| {
                 let res = omicron_physical_disks::decommission_expunged_disks(
                     opctx, datastore, blueprint,
                 )
@@ -463,7 +456,7 @@ fn register_deploy_clickhouse_cluster_nodes_step<'a>(
         .new_step(
             ExecutionStepId::Ensure,
             "Deploy clickhouse cluster nodes",
-            move |_cx| async move {
+            async move |_cx| {
                 if let Some(clickhouse_cluster_config) =
                     &blueprint.clickhouse_cluster_config
                 {
@@ -492,7 +485,7 @@ fn register_deploy_clickhouse_single_node_step<'a>(
         .new_step(
             ExecutionStepId::Ensure,
             "Deploy single-node clickhouse cluster",
-            move |_cx| async move {
+            async move |_cx| {
                 let res =
                     clickhouse::deploy_single_node(opctx, blueprint).await;
                 Ok(map_err_to_step_warning(res))
@@ -513,7 +506,7 @@ fn register_reassign_sagas_step<'a>(
         .new_step(
             ExecutionStepId::Cleanup,
             "Reassign sagas",
-            move |_cx| async move {
+            async move |_cx| {
                 // For any expunged Nexus zones, re-assign in-progress sagas to
                 // some other Nexus.  If this fails for some reason, it doesn't
                 // affect anything else.
@@ -546,7 +539,7 @@ fn register_cockroachdb_settings_step<'a>(
         .new_step(
             ExecutionStepId::Ensure,
             "Ensure CockroachDB settings",
-            move |_cx| async move {
+            async move |_cx| {
                 let res =
                     cockroachdb::ensure_settings(opctx, datastore, blueprint)
                         .await;
