@@ -511,13 +511,6 @@ table! {
 }
 
 table! {
-    anti_affinity_group_affinity_membership (anti_affinity_group_id, affinity_group_id) {
-        anti_affinity_group_id -> Uuid,
-        affinity_group_id -> Uuid,
-    }
-}
-
-table! {
     metric_producer (id) {
         id -> Uuid,
         time_created -> Timestamptz,
@@ -2064,7 +2057,6 @@ allow_tables_to_appear_in_same_query!(hw_baseboard_id, inv_sled_agent,);
 
 allow_tables_to_appear_in_same_query!(
     anti_affinity_group,
-    anti_affinity_group_affinity_membership,
     anti_affinity_group_instance_membership,
     affinity_group,
     affinity_group_instance_membership,

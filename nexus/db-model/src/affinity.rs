@@ -11,7 +11,6 @@ use super::impl_enum_type;
 use crate::schema::affinity_group;
 use crate::schema::affinity_group_instance_membership;
 use crate::schema::anti_affinity_group;
-use crate::schema::anti_affinity_group_affinity_membership;
 use crate::schema::anti_affinity_group_instance_membership;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
@@ -267,34 +266,6 @@ impl AntiAffinityGroupInstanceMembership {
             id: self.instance_id.into(),
             name: member_name,
             run_state,
-        }
-    }
-}
-
-#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
-#[diesel(table_name = anti_affinity_group_affinity_membership)]
-pub struct AntiAffinityGroupAffinityMembership {
-    pub anti_affinity_group_id: DbTypedUuid<AntiAffinityGroupKind>,
-    pub affinity_group_id: DbTypedUuid<AffinityGroupKind>,
-}
-
-impl AntiAffinityGroupAffinityMembership {
-    pub fn new(
-        anti_affinity_group_id: AntiAffinityGroupUuid,
-        affinity_group_id: AffinityGroupUuid,
-    ) -> Self {
-        Self {
-            anti_affinity_group_id: anti_affinity_group_id.into(),
-            affinity_group_id: affinity_group_id.into(),
-        }
-    }
-    pub fn to_external(
-        self,
-        member_name: external::Name,
-    ) -> external::AntiAffinityGroupMember {
-        external::AntiAffinityGroupMember::AffinityGroup {
-            id: self.affinity_group_id.into(),
-            name: member_name,
         }
     }
 }

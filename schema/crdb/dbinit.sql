@@ -4242,25 +4242,6 @@ CREATE INDEX IF NOT EXISTS lookup_anti_affinity_group_instance_membership_by_ins
     instance_id
 );
 
--- Describes an affinity group's membership within an anti-affinity group
---
--- Since the naming here is a little confusing:
--- This allows an anti-affinity group to contain affinity groups as members.
--- This is useful for saying "I want these groups of VMMs to be anti-affine from
--- one another", rather than "I want individual VMMs to be anti-affine from each other".
-CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group_affinity_membership (
-    anti_affinity_group_id UUID NOT NULL,
-    affinity_group_id UUID NOT NULL,
-
-    PRIMARY KEY (anti_affinity_group_id, affinity_group_id)
-);
-
--- We need to look up all memberships of an affinity group so we can revoke these
--- memberships efficiently when affinity groups are deleted
-CREATE INDEX IF NOT EXISTS lookup_anti_affinity_group_affinity_membership_by_affinity_group ON omicron.public.anti_affinity_group_affinity_membership (
-    affinity_group_id
-);
-
 -- Per-VMM state.
 CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     id UUID PRIMARY KEY,

@@ -57,69 +57,17 @@ pub fn sled_find_targets_query(
                 COALESCE(SUM(CAST(sled_resource_vmm.reservoir_ram AS INT8)), 0) + "
             ).param().sql(" <= sled.reservoir_size
         ),
-        our_a_groups AS (
-            SELECT group_id
-            FROM affinity_group_instance_membership
-            WHERE instance_id = ").param().sql("
-        ),
-        other_a_instances AS (
-            SELECT affinity_group_instance_membership.group_id,instance_id
-            FROM affinity_group_instance_membership
-            JOIN our_a_groups
-            ON affinity_group_instance_membership.group_id = our_a_groups.group_id
-            WHERE instance_id != ").param().sql("
-        ),
-        our_direct_aa_groups AS (
-            -- Anti-affinity groups to which our instance belongs
+        our_aa_groups AS (
             SELECT group_id
             FROM anti_affinity_group_instance_membership
             WHERE instance_id = ").param().sql("
-        ),
-        other_direct_aa_instances AS (
-            SELECT anti_affinity_group_instance_membership.group_id,instance_id
-            FROM anti_affinity_group_instance_membership
-            JOIN our_direct_aa_groups
-            ON anti_affinity_group_instance_membership.group_id = our_direct_aa_groups.group_id
-            WHERE instance_id != ").param().sql("
-        ),
-        our_indirect_aa_groups AS (
-            -- Anti-affinity groups to which our instance's affinity groups belong
-            SELECT
-                anti_affinity_group_id,
-                affinity_group_id,
-                CASE
-                    WHEN COUNT(*) OVER (PARTITION BY anti_affinity_group_id) = 1 THEN TRUE
-                    ELSE FALSE
-                END AS exactly_one_affinity_group
-            FROM anti_affinity_group_affinity_membership
-            WHERE affinity_group_id IN (SELECT group_id FROM our_a_groups)
-        ),
-        other_indirect_aa_instances_via_instances AS (
-            SELECT anti_affinity_group_id AS group_id,instance_id
-            FROM anti_affinity_group_instance_membership
-            JOIN our_indirect_aa_groups
-            ON anti_affinity_group_instance_membership.group_id = our_indirect_aa_groups.anti_affinity_group_id
-        ),
-        other_indirect_aa_instances_via_groups AS (
-            SELECT anti_affinity_group_id AS group_id,instance_id
-            FROM affinity_group_instance_membership
-            JOIN our_indirect_aa_groups
-            ON affinity_group_instance_membership.group_id = our_indirect_aa_groups.affinity_group_id
-            WHERE
-                -- If our instance belongs to exactly one of these groups...
-                CASE WHEN our_indirect_aa_groups.exactly_one_affinity_group
-                -- ... exclude that group from our anti-affinity
-                THEN affinity_group_instance_membership.group_id NOT IN (SELECT group_id FROM our_a_groups)
-                -- ... otherwise, consider all groups anti-affine
-                ELSE TRUE
-                END
         ),
         other_aa_instances AS (
-            SELECT * FROM other_direct_aa_instances
-            UNION
-            SELECT * FROM other_indirect_aa_instances_via_instances
-            UNION
-            SELECT * FROM other_indirect_aa_instances_via_groups
+            SELECT anti_affinity_group_instance_membership.group_id,instance_id
+            FROM anti_affinity_group_instance_membership
+            JOIN our_aa_groups
+            ON anti_affinity_group_instance_membership.group_id = our_aa_groups.group_id
+            WHERE instance_id != ").param().sql("
         ),
         other_aa_instances_by_policy AS (
             SELECT policy,instance_id
@@ -136,6 +84,18 @@ pub fn sled_find_targets_query(
             JOIN sled_resource_vmm
             ON
                 sled_resource_vmm.instance_id = other_aa_instances_by_policy.instance_id
+        ),
+        our_a_groups AS (
+            SELECT group_id
+            FROM affinity_group_instance_membership
+            WHERE instance_id = ").param().sql("
+        ),
+        other_a_instances AS (
+            SELECT affinity_group_instance_membership.group_id,instance_id
+            FROM affinity_group_instance_membership
+            JOIN our_a_groups
+            ON affinity_group_instance_membership.group_id = our_a_groups.group_id
+            WHERE instance_id != ").param().sql("
         ),
         other_a_instances_by_policy AS (
             SELECT policy,instance_id
@@ -212,69 +172,17 @@ pub fn sled_insert_resource_query(
                 COALESCE(SUM(CAST(sled_resource_vmm.reservoir_ram AS INT8)), 0) + "
             ).param().sql(" <= sled.reservoir_size
         ),
-        our_a_groups AS (
-            SELECT group_id
-            FROM affinity_group_instance_membership
-            WHERE instance_id = ").param().sql("
-        ),
-        other_a_instances AS (
-            SELECT affinity_group_instance_membership.group_id,instance_id
-            FROM affinity_group_instance_membership
-            JOIN our_a_groups
-            ON affinity_group_instance_membership.group_id = our_a_groups.group_id
-            WHERE instance_id != ").param().sql("
-        ),
-        our_direct_aa_groups AS (
-            -- Anti-affinity groups to which our instance belongs
+        our_aa_groups AS (
             SELECT group_id
             FROM anti_affinity_group_instance_membership
             WHERE instance_id = ").param().sql("
-        ),
-        other_direct_aa_instances AS (
-            SELECT anti_affinity_group_instance_membership.group_id,instance_id
-            FROM anti_affinity_group_instance_membership
-            JOIN our_direct_aa_groups
-            ON anti_affinity_group_instance_membership.group_id = our_direct_aa_groups.group_id
-            WHERE instance_id != ").param().sql("
-        ),
-        our_indirect_aa_groups AS (
-            -- Anti-affinity groups to which our instance's affinity groups belong
-            SELECT
-                anti_affinity_group_id,
-                affinity_group_id,
-                CASE
-                    WHEN COUNT(*) OVER (PARTITION BY anti_affinity_group_id) = 1 THEN TRUE
-                    ELSE FALSE
-                END AS only_one_affinity_group
-            FROM anti_affinity_group_affinity_membership
-            WHERE affinity_group_id IN (SELECT group_id FROM our_a_groups)
-        ),
-        other_indirect_aa_instances_via_instances AS (
-            SELECT anti_affinity_group_id AS group_id,instance_id
-            FROM anti_affinity_group_instance_membership
-            JOIN our_indirect_aa_groups
-            ON anti_affinity_group_instance_membership.group_id = our_indirect_aa_groups.anti_affinity_group_id
-        ),
-        other_indirect_aa_instances_via_groups AS (
-            SELECT anti_affinity_group_id AS group_id,instance_id
-            FROM affinity_group_instance_membership
-            JOIN our_indirect_aa_groups
-            ON affinity_group_instance_membership.group_id = our_indirect_aa_groups.affinity_group_id
-            WHERE
-                -- If our instance belongs to exactly one of these groups...
-                CASE WHEN our_indirect_aa_groups.only_one_affinity_group
-                -- ... exclude that group from our anti-affinity
-                THEN affinity_group_instance_membership.group_id NOT IN (SELECT group_id FROM our_a_groups)
-                -- ... otherwise, consider all groups anti-affine
-                ELSE TRUE
-                END
         ),
         other_aa_instances AS (
-            SELECT * FROM other_direct_aa_instances
-            UNION
-            SELECT * FROM other_indirect_aa_instances_via_instances
-            UNION
-            SELECT * FROM other_indirect_aa_instances_via_groups
+            SELECT anti_affinity_group_instance_membership.group_id,instance_id
+            FROM anti_affinity_group_instance_membership
+            JOIN our_aa_groups
+            ON anti_affinity_group_instance_membership.group_id = our_aa_groups.group_id
+            WHERE instance_id != ").param().sql("
         ),
         banned_instances AS (
             SELECT instance_id
@@ -292,6 +200,18 @@ pub fn sled_insert_resource_query(
             JOIN sled_resource_vmm
             ON
                 sled_resource_vmm.instance_id = banned_instances.instance_id
+        ),
+        our_a_groups AS (
+            SELECT group_id
+            FROM affinity_group_instance_membership
+            WHERE instance_id = ").param().sql("
+        ),
+        other_a_instances AS (
+            SELECT affinity_group_instance_membership.group_id,instance_id
+            FROM affinity_group_instance_membership
+            JOIN our_a_groups
+            ON affinity_group_instance_membership.group_id = our_a_groups.group_id
+            WHERE instance_id != ").param().sql("
         ),
         required_instances AS (
             SELECT policy,instance_id

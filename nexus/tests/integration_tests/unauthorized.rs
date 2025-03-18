@@ -323,12 +323,6 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
             body: serde_json::Value::Null,
             id_routes: vec![],
         },
-        // Add an affinity group member to the affinity group
-        SetupReq::Post {
-            url: &DEMO_ANTI_AFFINITY_GROUP_AFFINITY_GROUP_MEMBER_URL,
-            body: serde_json::Value::Null,
-            id_routes: vec![],
-        },
         // Lookup the previously created NIC
         SetupReq::Get {
             url: &DEMO_INSTANCE_NIC_URL,
