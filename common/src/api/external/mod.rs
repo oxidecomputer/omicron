@@ -1343,9 +1343,7 @@ impl SimpleIdentityOrName for AffinityGroupMember {
 ///
 /// Membership in a group is not exclusive - members may belong to multiple
 /// affinity / anti-affinity groups.
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Hash, Eq,
-)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum AntiAffinityGroupMember {
     /// An instance belonging to this group

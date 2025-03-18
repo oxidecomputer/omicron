@@ -1413,7 +1413,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::AntiAffinityGroupPath>,
     ) -> Result<HttpResponseOk<ResultsPage<AntiAffinityGroupMember>>, HttpError>;
 
-    /// Fetch anti-affinity group member of type instance
+    /// Fetch anti-affinity group member
     #[endpoint {
         method = GET,
         path = "/v1/anti-affinity-groups/{anti_affinity_group}/members/instance/{instance}",
@@ -1425,7 +1425,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::AntiAffinityInstanceGroupMemberPath>,
     ) -> Result<HttpResponseOk<AntiAffinityGroupMember>, HttpError>;
 
-    /// Add instance member to anti-affinity group
+    /// Add member to anti-affinity group
     #[endpoint {
         method = POST,
         path = "/v1/anti-affinity-groups/{anti_affinity_group}/members/instance/{instance}",
@@ -1437,7 +1437,7 @@ pub trait NexusExternalApi {
         path_params: Path<params::AntiAffinityInstanceGroupMemberPath>,
     ) -> Result<HttpResponseCreated<AntiAffinityGroupMember>, HttpError>;
 
-    /// Remove instance member from anti-affinity group
+    /// Remove member from anti-affinity group
     #[endpoint {
         method = DELETE,
         path = "/v1/anti-affinity-groups/{anti_affinity_group}/members/instance/{instance}",

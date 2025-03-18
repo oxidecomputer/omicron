@@ -232,18 +232,16 @@ impl DataStore {
                         })?;
 
                     // Ensure all memberships in the affinity group are deleted
-                    {
-                        use db::schema::affinity_group_instance_membership::dsl as member_dsl;
-                        diesel::delete(member_dsl::affinity_group_instance_membership)
-                            .filter(member_dsl::group_id.eq(authz_affinity_group.id()))
-                            .execute_async(&conn)
-                            .await
-                            .map_err(|e| {
-                                err.bail_retryable_or_else(e, |e| {
-                                    public_error_from_diesel(e, ErrorHandler::Server)
-                                })
-                            })?;
-                    }
+                    use db::schema::affinity_group_instance_membership::dsl as member_dsl;
+                    diesel::delete(member_dsl::affinity_group_instance_membership)
+                        .filter(member_dsl::group_id.eq(authz_affinity_group.id()))
+                        .execute_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            err.bail_retryable_or_else(e, |e| {
+                                public_error_from_diesel(e, ErrorHandler::Server)
+                            })
+                        })?;
 
                     Ok(())
                 }
@@ -321,19 +319,17 @@ impl DataStore {
                             })
                         })?;
 
-                    // Ensure all memberships in the anti-affinity group are deleted
-                    {
-                        use db::schema::anti_affinity_group_instance_membership::dsl as member_dsl;
-                        diesel::delete(member_dsl::anti_affinity_group_instance_membership)
-                            .filter(member_dsl::group_id.eq(authz_anti_affinity_group.id()))
-                            .execute_async(&conn)
-                            .await
-                            .map_err(|e| {
-                                err.bail_retryable_or_else(e, |e| {
-                                    public_error_from_diesel(e, ErrorHandler::Server)
-                                })
-                            })?;
-                    }
+                    // Ensure all memberships in the anti affinity group are deleted
+                    use db::schema::anti_affinity_group_instance_membership::dsl as member_dsl;
+                    diesel::delete(member_dsl::anti_affinity_group_instance_membership)
+                        .filter(member_dsl::group_id.eq(authz_anti_affinity_group.id()))
+                        .execute_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            err.bail_retryable_or_else(e, |e| {
+                                public_error_from_diesel(e, ErrorHandler::Server)
+                            })
+                        })?;
 
                     Ok(())
                 }
@@ -360,8 +356,7 @@ impl DataStore {
             .sql(
                 "
                 SELECT * FROM (
-                SELECT
-                    instance.id as id,
+                SELECT instance.id as id,
                     instance.name as name,
                     instance.state,
                     instance.migration_id,
@@ -2837,14 +2832,14 @@ mod tests {
         struct TestArgs {
             // Does the group exist?
             group: bool,
-            // Does the member exist?
-            member: bool,
+            // Does the instance exist?
+            instance: bool,
         }
 
         let args = [
-            TestArgs { group: false, member: false },
-            TestArgs { group: true, member: false },
-            TestArgs { group: false, member: true },
+            TestArgs { group: false, instance: false },
+            TestArgs { group: true, instance: false },
+            TestArgs { group: false, instance: true },
         ];
 
         for arg in args {
@@ -2871,7 +2866,7 @@ mod tests {
                     .unwrap();
             }
 
-            // Create an instance
+            // Create an instance, and maybe deletes it
             let instance = create_stopped_instance_record(
                 &opctx,
                 &datastore,
@@ -2879,7 +2874,6 @@ mod tests {
                 "my-instance",
             )
             .await;
-            let mut instance_exists = true;
 
             let (.., authz_instance) = LookupPath::new(opctx, datastore)
                 .instance_id(instance.into_untyped_uuid())
@@ -2887,18 +2881,17 @@ mod tests {
                 .await
                 .unwrap();
 
-            if !arg.member {
+            if !arg.instance {
                 datastore
                     .project_delete_instance(&opctx, &authz_instance)
                     .await
                     .unwrap();
-                instance_exists = false;
             }
 
-            // Try to add the member to the group.
+            // Try to add the instnace to the group.
             //
             // Expect to see specific errors, depending on whether or not the
-            // group/member exist.
+            // group/instance exist.
             let err = datastore
                 .anti_affinity_group_member_instance_add(
                     &opctx,
@@ -2908,7 +2901,7 @@ mod tests {
                 .await
                 .expect_err("Should have failed");
 
-            match (arg.group, arg.member) {
+            match (arg.group, arg.instance) {
                 (false, _) => {
                     assert!(
                         matches!(err, Error::ObjectNotFound {
@@ -2940,7 +2933,7 @@ mod tests {
                 .await
                 .expect_err("Should have failed");
 
-            match (arg.group, arg.member) {
+            match (arg.group, arg.instance) {
                 (false, _) => {
                     assert!(
                         matches!(err, Error::ObjectNotFound {
@@ -2963,7 +2956,7 @@ mod tests {
             }
 
             // Cleanup, if we actually created anything.
-            if instance_exists {
+            if arg.instance {
                 datastore
                     .project_delete_instance(&opctx, &authz_instance)
                     .await
