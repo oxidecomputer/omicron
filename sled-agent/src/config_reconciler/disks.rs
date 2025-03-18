@@ -29,11 +29,24 @@ impl AllDisks {
     ///
     /// Returns `true` if any changes were made; false if we were asked to
     /// update a disk but none of its properties changed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called with a `raw_disk` of a non-internal-disk variant. For
+    /// Gimlets, this means `raw_disk` must match [`DiskVariant::M2`].
     pub async fn add_or_update_disk(
         &mut self,
         raw_disk: RawDisk,
         log: &Logger,
     ) -> Result<bool, DiskError> {
+        // Check preconditions; we only manage internal disks.
+        match raw_disk.variant() {
+            DiskVariant::U2 => {
+                panic!("InternalDisks::new() called with U2 disk")
+            }
+            DiskVariant::M2 => (),
+        }
+
         let identity = raw_disk.id();
         let log = {
             let DiskIdentity { vendor, model, serial } = identity.clone();
