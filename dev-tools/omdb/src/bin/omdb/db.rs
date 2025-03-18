@@ -1207,6 +1207,10 @@ enum WebhookDeliveryCommands {
     /// List webhook deliveries
     #[clap(alias = "ls")]
     List(WebhookDeliveryListArgs),
+
+    /// Show details on a webhook delivery, including its payload and attempt history.
+    #[clap(alias = "show")]
+    Info(WebhookDeliveryInfoArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1234,6 +1238,12 @@ struct WebhookDeliveryListArgs {
     /// Include only delivery entries created after this timestamp
     #[clap(long, short)]
     after: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Args, Clone)]
+struct WebhookDeliveryInfoArgs {
+    /// The ID of the delivery to show.
+    delivery_id: Uuid,
 }
 
 impl DbArgs {
@@ -8130,6 +8140,9 @@ async fn cmd_db_webhook(
         WebhookCommands::Delivery {
             command: WebhookDeliveryCommands::List(args),
         } => cmd_db_webhook_delivery_list(datastore, fetch_opts, args).await,
+        WebhookCommands::Delivery {
+            command: WebhookDeliveryCommands::Info(args),
+        } => cmd_db_webhook_delivery_info(datastore, fetch_opts, args).await,
         WebhookCommands::Event => {
             Err(anyhow::anyhow!("not yet implemented, sorry!"))
         }
@@ -8456,6 +8469,7 @@ async fn cmd_db_webhook_delivery_list(
     check_limit(&deliveries, fetch_opts.fetch_limit, ctx);
 
     #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct DeliveryRow {
         id: Uuid,
         trigger: nexus_db_model::WebhookDeliveryTrigger,
@@ -8468,6 +8482,7 @@ async fn cmd_db_webhook_delivery_list(
     }
 
     #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct WithEventId<T: Tabled> {
         #[tabled(inline)]
         inner: T,
@@ -8475,6 +8490,7 @@ async fn cmd_db_webhook_delivery_list(
     }
 
     #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct WithRxId<T: Tabled> {
         #[tabled(inline)]
         inner: T,
@@ -8583,6 +8599,171 @@ async fn lookup_webhook_rx(
     }
     .optional()
     .with_context(|| format!("loading webhook_receiver {name_or_id}"))
+}
+
+async fn cmd_db_webhook_delivery_info(
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &WebhookDeliveryInfoArgs,
+) -> anyhow::Result<()> {
+    use db::model::WebhookDeliveryAttempt;
+    use nexus_db_schema::schema::webhook_delivery::dsl;
+    use nexus_db_schema::schema::webhook_delivery_attempt::dsl as attempt_dsl;
+
+    let WebhookDeliveryInfoArgs { delivery_id } = args;
+    let conn = datastore.pool_connection_for_tests().await?;
+    let delivery = dsl::webhook_delivery
+        .filter(dsl::id.eq(*delivery_id))
+        .limit(1)
+        .select(WebhookDelivery::as_select())
+        .get_result_async(&*conn)
+        .await
+        .optional()
+        .with_context(|| format!("loading webhook delivery {delivery_id}"))?
+        .ok_or_else(|| {
+            anyhow::anyhow!("no webhook delivery {delivery_id} exists")
+        })?;
+
+    const ID: &'static str = "ID";
+    const EVENT_ID: &'static str = "event ID";
+    const RECEIVER_ID: &'static str = "receiver ID";
+    const STATE: &'static str = "state";
+    const TRIGGER: &'static str = "triggered by";
+    const ATTEMPTS: &'static str = "attempts";
+    const TIME_CREATED: &'static str = "created at";
+    const TIME_COMPLETED: &'static str = "completed at";
+
+    const DELIVERATOR_ID: &'static str = "by Nexus";
+    const TIME_LEASED: &'static str = "leased at";
+
+    const WIDTH: usize = const_max_len(&[
+        ID,
+        EVENT_ID,
+        RECEIVER_ID,
+        TRIGGER,
+        STATE,
+        TIME_CREATED,
+        TIME_COMPLETED,
+        DELIVERATOR_ID,
+        TIME_LEASED,
+        ATTEMPTS,
+    ]);
+
+    let WebhookDelivery {
+        id,
+        event_id,
+        rx_id,
+        triggered_by,
+        attempts,
+        time_created,
+        time_completed,
+        state,
+        deliverator_id,
+        time_leased,
+    } = delivery;
+    println!("\n{:=<80}", "== DELIVERY ");
+    println!("    {ID:>WIDTH$}: {id}");
+    println!("    {EVENT_ID:>WIDTH$}: {event_id}");
+    println!("    {RECEIVER_ID:>WIDTH$}: {rx_id}");
+    println!("    {STATE:>WIDTH$}: {state}");
+    println!("    {TRIGGER:>WIDTH$}: {triggered_by}");
+    println!("    {TIME_CREATED:>WIDTH$}: {time_created}");
+    println!("    {ATTEMPTS}: {}", attempts.0);
+
+    if let Some(completed) = time_completed {
+        println!("\n{:=<80}", "== DELIVERY COMPLETED ");
+        println!("    {TIME_COMPLETED:>WIDTH$}: {completed}");
+        if let Some(leased) = time_leased {
+            println!("    {TIME_LEASED:>WIDTH$}: {leased}");
+        } else {
+            println!(
+                "/!\\ WEIRD: delivery is completed but has no start timestamp?"
+            );
+        }
+        if let Some(nexus) = deliverator_id {
+            println!("    {DELIVERATOR_ID:>WIDTH$}: {nexus}");
+        } else {
+            println!("/!\\ WEIRD: delivery is completed but has no Nexus ID?");
+        }
+    } else if let Some(leased) = time_leased {
+        println!("\n{:=<80}", "== DELIVERY IN PROGRESS ");
+        println!("    {TIME_LEASED:>WIDTH$}: {leased}");
+
+        if let Some(nexus) = deliverator_id {
+            println!("    {DELIVERATOR_ID:>WIDTH$}: {nexus}");
+        } else {
+            println!(
+                "/!\\ WEIRD: delivery is in progress but has no Nexus ID?"
+            );
+        }
+    } else if let Some(deliverator) = deliverator_id {
+        println!(
+            "/!\\ WEIRD: delivery is not completed or in progress but has \
+             Nexus ID {deliverator:?}"
+        );
+    }
+
+    // Okay, now go get attempts for this delivery.
+    let ctx = || format!("listing delivery attempts for {delivery_id}");
+    let attempts = attempt_dsl::webhook_delivery_attempt
+        .filter(attempt_dsl::delivery_id.eq(*delivery_id))
+        .order_by(attempt_dsl::attempt.desc())
+        .limit(fetch_opts.fetch_limit.get().into())
+        .select(WebhookDeliveryAttempt::as_select())
+        .load_async(&*conn)
+        .await
+        .with_context(ctx)?;
+
+    check_limit(&attempts, fetch_opts.fetch_limit, ctx);
+
+    if !attempts.is_empty() {
+        println!("\n{:=<80}", "== DELIVERY ATTEMPT HISTORY ");
+
+        #[derive(Tabled)]
+        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+        struct DeliveryAttemptRow {
+            id: Uuid,
+            #[tabled(rename = "#")]
+            attempt: u8,
+            #[tabled(display_with = "datetime_rfc3339_concise")]
+            time_created: DateTime<Utc>,
+            nexus_id: Uuid,
+            result: db::model::WebhookDeliveryAttemptResult,
+            #[tabled(display_with = "display_u16_opt")]
+            status: Option<u16>,
+            #[tabled(display_with = "display_time_delta_opt")]
+            duration: Option<chrono::TimeDelta>,
+        }
+
+        let rows = attempts.into_iter().map(
+            |WebhookDeliveryAttempt {
+                 id,
+                 delivery_id: _,
+                 rx_id: _,
+                 attempt,
+                 result,
+                 response_status,
+                 response_duration,
+                 time_created,
+                 deliverator_id,
+             }| DeliveryAttemptRow {
+                id: id.into_untyped_uuid(),
+                attempt: attempt.0,
+                time_created,
+                nexus_id: deliverator_id.into_untyped_uuid(),
+                result,
+                status: response_status.map(|u| u.into()),
+                duration: response_duration,
+            },
+        );
+        let mut table = tabled::Table::new(rows);
+        table
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(0, 1, 0, 0));
+        println!("{table}");
+    }
+
+    Ok(())
 }
 
 // Format a `chrono::DateTime` in RFC3339 with milliseconds precision and using
@@ -8697,4 +8878,12 @@ async fn cmd_db_zpool_set_storage_buffer(
     );
 
     Ok(())
+}
+
+fn display_time_delta_opt(t: &Option<chrono::TimeDelta>) -> String {
+    t.map(|t| t.to_string()).unwrap_or_else(|| "-".to_string())
+}
+
+fn display_u16_opt(u: &Option<u16>) -> String {
+    u.map(|u| u.to_string()).unwrap_or_else(|| "-".to_string())
 }
