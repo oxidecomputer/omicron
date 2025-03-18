@@ -1,5 +1,5 @@
 [package]
-name = "omicron-reconfigurator-exec"
+name = "omicron-reconfigurator-exec-unsafe"
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
@@ -31,8 +31,6 @@ update-engine.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
-[dev-dependencies]
-
 [[bin]]
-name = "reconfigurator-exec"
+name = "reconfigurator-exec-unsafe"
 path = "src/main.rs"

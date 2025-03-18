@@ -7292,7 +7292,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "omicron-reconfigurator-exec"
+name = "omicron-reconfigurator-exec-unsafe"
 version = "0.1.0"
 dependencies = [
  "anyhow",
