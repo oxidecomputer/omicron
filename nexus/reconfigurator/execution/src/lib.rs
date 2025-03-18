@@ -37,8 +37,68 @@ mod sled_state;
 #[cfg(test)]
 mod test_utils;
 
-/// The result of calling [`realize_blueprint`] or
-/// [`realize_blueprint_with_overrides`].
+/// Encapsulates arguments used for [`realize_blueprint`]
+///
+/// You probably want to start with `RequiredRealizeArgs` and use the
+/// builder-like methods to tweak it as required.
+pub struct RealizeArgs<'a> {
+    pub opctx: &'a OpContext,
+    pub datastore: &'a DataStore,
+    pub resolver: &'a Resolver,
+    pub blueprint: &'a Blueprint,
+    pub nexus_id: OmicronZoneUuid,
+    pub sender: mpsc::Sender<Event>,
+    pub overrides: Option<&'a Overridables>,
+}
+
+impl<'a> RealizeArgs<'a> {
+    pub fn with_overrides(
+        mut self,
+        overrides: &'a Overridables,
+    ) -> RealizeArgs<'a> {
+        self.overrides = Some(overrides);
+        self
+    }
+}
+
+/// Encapsulates all of the required arguments for [`realize_blueprint`]
+///
+/// You'll need to convert this to a [`RealizeArgs`] to use it with
+/// `realize_blueprint()`.  You can also use the builder-like `with_*` methods
+/// to tweak this as you do so.
+pub struct RequiredRealizeArgs<'a> {
+    pub opctx: &'a OpContext,
+    pub datastore: &'a DataStore,
+    pub resolver: &'a Resolver,
+    pub blueprint: &'a Blueprint,
+    pub nexus_id: OmicronZoneUuid,
+    pub sender: mpsc::Sender<Event>,
+}
+
+impl<'a> From<RequiredRealizeArgs<'a>> for RealizeArgs<'a> {
+    fn from(value: RequiredRealizeArgs<'a>) -> Self {
+        RealizeArgs {
+            opctx: value.opctx,
+            datastore: value.datastore,
+            resolver: value.resolver,
+            blueprint: value.blueprint,
+            nexus_id: value.nexus_id,
+            sender: value.sender,
+            overrides: None,
+        }
+    }
+}
+
+impl<'a> RequiredRealizeArgs<'a> {
+    pub fn with_overrides(
+        self,
+        overrides: &'a Overridables,
+    ) -> RealizeArgs<'a> {
+        RealizeArgs::from(self).with_overrides(overrides)
+    }
+}
+
+/// The result of calling [`realize_blueprint`].
 #[derive(Debug)]
 #[must_use = "the output of realize_blueprint should probably be used"]
 pub struct RealizeBlueprintOutput {
@@ -52,34 +112,18 @@ pub struct RealizeBlueprintOutput {
 /// The assumption is that callers are running this periodically or in a loop to
 /// deal with transient errors or changes in the underlying system state.
 pub async fn realize_blueprint(
-    opctx: &OpContext,
-    datastore: &DataStore,
-    resolver: &Resolver,
-    blueprint: &Blueprint,
-    nexus_id: OmicronZoneUuid,
-    sender: mpsc::Sender<Event>,
+    exec_ctx: RealizeArgs<'_>,
 ) -> Result<RealizeBlueprintOutput, anyhow::Error> {
-    realize_blueprint_with_overrides(
+    let RealizeArgs {
         opctx,
         datastore,
         resolver,
         blueprint,
         nexus_id,
-        &Default::default(),
         sender,
-    )
-    .await
-}
+        overrides,
+    } = exec_ctx;
 
-pub async fn realize_blueprint_with_overrides(
-    opctx: &OpContext,
-    datastore: &DataStore,
-    resolver: &Resolver,
-    blueprint: &Blueprint,
-    nexus_id: OmicronZoneUuid,
-    overrides: &Overridables,
-    sender: mpsc::Sender<Event>,
-) -> Result<RealizeBlueprintOutput, anyhow::Error> {
     let opctx = opctx.child(BTreeMap::from([(
         "comment".to_string(),
         blueprint.comment.clone(),
@@ -126,7 +170,7 @@ pub async fn realize_blueprint_with_overrides(
         datastore,
         blueprint,
         nexus_id,
-        overrides,
+        overrides.unwrap_or(&*overridables::DEFAULT),
         sled_list.clone(),
     );
 

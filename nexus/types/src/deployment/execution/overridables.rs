@@ -11,6 +11,7 @@ use omicron_common::address::get_switch_zone_address;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
+use std::sync::LazyLock;
 
 /// Override values used during blueprint execution
 ///
@@ -31,6 +32,9 @@ pub struct Overridables {
     /// map: sled id -> IP address of the sled's switch zone
     pub switch_zone_ips: BTreeMap<SledUuid, Ipv6Addr>,
 }
+
+pub static DEFAULT: LazyLock<Overridables> =
+    LazyLock::new(|| Overridables::default());
 
 impl Overridables {
     /// Specify the TCP port on which this sled's Dendrite is listening

@@ -15,7 +15,7 @@ use nexus_types::deployment::{
 use omicron_uuid_kinds::OmicronZoneUuid;
 use update_engine::TerminalKind;
 
-use crate::RealizeBlueprintOutput;
+use crate::{RealizeBlueprintOutput, RequiredRealizeArgs};
 
 pub(crate) async fn realize_blueprint_and_expect(
     opctx: &OpContext,
@@ -34,14 +34,16 @@ pub(crate) async fn realize_blueprint_and_expect(
         buffer
     });
 
-    let output = crate::realize_blueprint_with_overrides(
-        opctx,
-        datastore,
-        resolver,
-        blueprint,
-        OmicronZoneUuid::new_v4(),
-        overrides,
-        sender,
+    let output = crate::realize_blueprint(
+        RequiredRealizeArgs {
+            opctx,
+            datastore,
+            resolver,
+            blueprint,
+            nexus_id: OmicronZoneUuid::new_v4(),
+            sender,
+        }
+        .with_overrides(overrides),
     )
     .await
     // We expect here rather than in the caller because we want to assert that

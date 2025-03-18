@@ -42,6 +42,7 @@ http-range.workspace = true
 hyper.workspace = true
 hyper-staticfile.workspace = true
 gateway-client.workspace = true
+id-map.workspace = true
 illumos-utils.workspace = true
 installinator-common.workspace = true
 internal-dns-resolver.workspace = true

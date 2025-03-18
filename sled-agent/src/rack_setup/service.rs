@@ -82,6 +82,7 @@ use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use chrono::Utc;
 use dns_service_client::DnsError;
+use id_map::IdMap;
 use internal_dns_resolver::Resolver as DnsResolver;
 use internal_dns_types::names::ServiceName;
 use nexus_client::{
@@ -93,8 +94,7 @@ use nexus_sled_agent_shared::inventory::{
 use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::{
     Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
-    BlueprintDatasetsConfig, BlueprintZoneType, BlueprintZonesConfig,
-    CockroachDbPreserveDowngrade, blueprint_zone_type, id_map::IdMap,
+    BlueprintZoneType, CockroachDbPreserveDowngrade, blueprint_zone_type,
 };
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::get_sled_address;
@@ -104,7 +104,9 @@ use omicron_common::api::internal::shared::LldpAdminStatus;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
-use omicron_common::disk::DatasetKind;
+use omicron_common::disk::{
+    DatasetKind, DatasetsConfig, OmicronPhysicalDisksConfig,
+};
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use omicron_uuid_kinds::BlueprintUuid;
@@ -530,9 +532,25 @@ impl ServiceInner {
                         ))
                     })?
                     .clone();
+
+                // TODO OmicronSledConfig should have a single generation; for
+                // now we reuse our zone generation for all three subfields.
+                // Tracked by
+                // https://github.com/oxidecomputer/omicron/issues/7774
+                let generation = zones_config.generation;
                 let sled_config = OmicronSledConfig {
-                    disks_config: config.disks.clone().into_in_service_disks(),
-                    datasets_config: config.datasets.clone(),
+                    disks_config: OmicronPhysicalDisksConfig {
+                        generation,
+                        disks: config
+                            .disks
+                            .iter()
+                            .map(|c| c.clone().into())
+                            .collect(),
+                    },
+                    datasets_config: DatasetsConfig {
+                        generation,
+                        datasets: config.datasets.clone(),
+                    },
                     zones_config,
                 };
 
@@ -765,7 +783,7 @@ impl ServiceInner {
         for dataset in blueprint
             .sleds
             .values()
-            .flat_map(|config| config.datasets_config.datasets.iter())
+            .flat_map(|config| config.datasets.iter())
             .filter(|dataset| dataset.kind == DatasetKind::Crucible)
         {
             let address = match dataset.address {
@@ -935,7 +953,7 @@ impl ServiceInner {
         let physical_disks: Vec<_> = sled_configs_by_id
             .iter()
             .flat_map(|(sled_id, config)| {
-                config.disks.disks.iter().map(|config| {
+                config.disks.iter().map(|config| {
                     NexusTypes::PhysicalDiskPutRequest {
                         id: config.id,
                         vendor: config.identity.vendor.clone(),
@@ -951,12 +969,10 @@ impl ServiceInner {
         let zpools = sled_configs_by_id
             .iter()
             .flat_map(|(sled_id, config)| {
-                config.disks.disks.iter().map(|config| {
-                    NexusTypes::ZpoolPutRequest {
-                        id: config.pool_id.into_untyped_uuid(),
-                        physical_disk_id: config.id,
-                        sled_id: sled_id.into_untyped_uuid(),
-                    }
+                config.disks.iter().map(|config| NexusTypes::ZpoolPutRequest {
+                    id: config.pool_id.into_untyped_uuid(),
+                    physical_disk_id: config.id,
+                    sled_id: sled_id.into_untyped_uuid(),
                 })
             })
             .collect();
@@ -1461,7 +1477,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
     let mut blueprint_sleds = BTreeMap::new();
     for (sled_id, sled_config) in sled_configs_by_id {
         let mut datasets = IdMap::new();
-        for d in sled_config.datasets.datasets.values() {
+        for d in sled_config.datasets.values() {
             // Only the "Crucible" dataset needs to know the address
             let address = if *d.name.kind() == DatasetKind::Crucible {
                 let address = sled_config.zones.iter().find_map(|z| {
@@ -1503,11 +1519,6 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
             *sled_id,
             BlueprintSledConfig {
                 state: SledState::Active,
-                disks_config: sled_config.disks.clone(),
-                datasets_config: BlueprintDatasetsConfig {
-                    generation: sled_config.datasets.generation,
-                    datasets,
-                },
                 // This is a bit of a hack. We only construct a blueprint after
                 // completing RSS, so we need to know the final generation value
                 // sent to all sleds. Arguably, we should record this in the
@@ -1518,10 +1529,10 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
                 // a way where newly-deployed systems will have a different
                 // value, we will need to revisit storing this in the serialized
                 // RSS plan.
-                zones_config: BlueprintZonesConfig {
-                    generation: DeployStepVersion::V5_EVERYTHING,
-                    zones: sled_config.zones.iter().cloned().collect(),
-                },
+                sled_agent_generation: DeployStepVersion::V5_EVERYTHING,
+                disks: sled_config.disks.clone(),
+                datasets,
+                zones: sled_config.zones.iter().cloned().collect(),
             },
         );
     }
