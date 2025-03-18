@@ -586,7 +586,7 @@ impl SpawnUpdateDriver for FakeUpdateDriver {
                     UpdateComponent::Host,
                     UpdateStepId::RunningInstallinator,
                     "Fake step that waits for receiver to resolve",
-                    move |_cx| async move {
+                    async |_cx| {
                         // This will resolve as soon as the sender (typically a
                         // test) sends a value over the channel.
                         let ret = fake_step_receiver.await;
@@ -1226,7 +1226,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::DownloadingInstallinator,
                 "Downloading installinator, waiting for it to start",
-                async move |cx| {
+                async |cx| {
                     let image_id = image_id_handle.into_value(cx.token()).await;
                     // The previous step should send this value in.
                     let report_receiver = update_cx
@@ -1249,7 +1249,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::RunningInstallinator,
                 "Running installinator",
-                move |cx| async move {
+                async |cx| {
                     let report_receiver =
                         start_handle.into_value(cx.token()).await;
                     let write_output = update_cx
@@ -2820,7 +2820,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                     .new_step(
                         SpComponentUpdateStepId::Resetting,
                         "Resetting the RoT to check the bootloader signature",
-                        move |_cx| async move {
+                        async |_cx| {
                             update_cx
                                 .reset_sp_component(SpComponent::ROT.const_as_str())
                                 .await
