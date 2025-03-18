@@ -20,75 +20,18 @@ WITH
         AND COALESCE(sum(CAST(sled_resource_vmm.reservoir_ram AS INT8)), 0) + $4
           <= sled.reservoir_size
     ),
-  our_a_groups AS (SELECT group_id FROM affinity_group_instance_membership WHERE instance_id = $5),
-  other_a_instances
-    AS (
-      SELECT
-        affinity_group_instance_membership.group_id, instance_id
-      FROM
-        affinity_group_instance_membership
-        JOIN our_a_groups ON affinity_group_instance_membership.group_id = our_a_groups.group_id
-      WHERE
-        instance_id != $6
-    ),
-  our_direct_aa_groups
-    AS (SELECT group_id FROM anti_affinity_group_instance_membership WHERE instance_id = $7),
-  other_direct_aa_instances
+  our_aa_groups
+    AS (SELECT group_id FROM anti_affinity_group_instance_membership WHERE instance_id = $5),
+  other_aa_instances
     AS (
       SELECT
         anti_affinity_group_instance_membership.group_id, instance_id
       FROM
         anti_affinity_group_instance_membership
-        JOIN our_direct_aa_groups ON
-            anti_affinity_group_instance_membership.group_id = our_direct_aa_groups.group_id
+        JOIN our_aa_groups ON
+            anti_affinity_group_instance_membership.group_id = our_aa_groups.group_id
       WHERE
-        instance_id != $8
-    ),
-  our_indirect_aa_groups
-    AS (
-      SELECT
-        anti_affinity_group_id,
-        affinity_group_id,
-        CASE
-        WHEN count(*) OVER (PARTITION BY anti_affinity_group_id) = 1 THEN true
-        ELSE false
-        END
-          AS only_one_affinity_group
-      FROM
-        anti_affinity_group_affinity_membership
-      WHERE
-        affinity_group_id IN (SELECT group_id FROM our_a_groups)
-    ),
-  other_indirect_aa_instances_via_instances
-    AS (
-      SELECT
-        anti_affinity_group_id AS group_id, instance_id
-      FROM
-        anti_affinity_group_instance_membership
-        JOIN our_indirect_aa_groups ON
-            anti_affinity_group_instance_membership.group_id
-            = our_indirect_aa_groups.anti_affinity_group_id
-    ),
-  other_indirect_aa_instances_via_groups
-    AS (
-      SELECT
-        anti_affinity_group_id AS group_id, instance_id
-      FROM
-        affinity_group_instance_membership
-        JOIN our_indirect_aa_groups ON
-            affinity_group_instance_membership.group_id = our_indirect_aa_groups.affinity_group_id
-      WHERE
-        CASE
-        WHEN our_indirect_aa_groups.only_one_affinity_group
-        THEN affinity_group_instance_membership.group_id NOT IN (SELECT group_id FROM our_a_groups)
-        ELSE true
-        END
-    ),
-  other_aa_instances
-    AS (
-      SELECT * FROM other_direct_aa_instances
-      UNION SELECT * FROM other_indirect_aa_instances_via_instances
-      UNION SELECT * FROM other_indirect_aa_instances_via_groups
+        instance_id != $6
     ),
   banned_instances
     AS (
@@ -110,6 +53,17 @@ WITH
       FROM
         banned_instances
         JOIN sled_resource_vmm ON sled_resource_vmm.instance_id = banned_instances.instance_id
+    ),
+  our_a_groups AS (SELECT group_id FROM affinity_group_instance_membership WHERE instance_id = $7),
+  other_a_instances
+    AS (
+      SELECT
+        affinity_group_instance_membership.group_id, instance_id
+      FROM
+        affinity_group_instance_membership
+        JOIN our_a_groups ON affinity_group_instance_membership.group_id = our_a_groups.group_id
+      WHERE
+        instance_id != $8
     ),
   required_instances
     AS (

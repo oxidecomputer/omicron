@@ -518,17 +518,6 @@ pub static DEMO_ANTI_AFFINITY_GROUP_INSTANCE_MEMBER_URL: LazyLock<String> =
             *DEMO_PROJECT_SELECTOR
         )
     });
-pub static DEMO_ANTI_AFFINITY_GROUP_AFFINITY_GROUP_MEMBER_URL: LazyLock<
-    String,
-> = LazyLock::new(|| {
-    format!(
-        "/v1/anti-affinity-groups/{}/members/affinity-group/{}?{}",
-        *DEMO_ANTI_AFFINITY_GROUP_NAME,
-        *DEMO_AFFINITY_GROUP_NAME,
-        *DEMO_PROJECT_SELECTOR
-    )
-});
-
 pub static DEMO_ANTI_AFFINITY_GROUP_CREATE: LazyLock<
     params::AntiAffinityGroupCreate,
 > = LazyLock::new(|| params::AntiAffinityGroupCreate {
@@ -2004,17 +1993,6 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
             },
             VerifyEndpoint {
                 url: &DEMO_ANTI_AFFINITY_GROUP_INSTANCE_MEMBER_URL,
-                visibility: Visibility::Protected,
-                unprivileged_access: UnprivilegedAccess::None,
-
-                allowed_methods: vec![
-                    AllowedMethod::Get,
-                    AllowedMethod::Delete,
-                    AllowedMethod::Post(serde_json::Value::Null),
-                ],
-            },
-            VerifyEndpoint {
-                url: &DEMO_ANTI_AFFINITY_GROUP_AFFINITY_GROUP_MEMBER_URL,
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
 

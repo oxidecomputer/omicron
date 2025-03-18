@@ -511,13 +511,6 @@ table! {
 }
 
 table! {
-    anti_affinity_group_affinity_membership (anti_affinity_group_id, affinity_group_id) {
-        anti_affinity_group_id -> Uuid,
-        affinity_group_id -> Uuid,
-    }
-}
-
-table! {
     metric_producer (id) {
         id -> Uuid,
         time_created -> Timestamptz,
@@ -1714,20 +1707,12 @@ table! {
 }
 
 table! {
-    bp_sled_state (blueprint_id, sled_id) {
+    bp_sled_metadata (blueprint_id, sled_id) {
         blueprint_id -> Uuid,
         sled_id -> Uuid,
 
         sled_state -> crate::SledStateEnum,
-    }
-}
-
-table! {
-    bp_sled_omicron_physical_disks (blueprint_id, sled_id) {
-        blueprint_id -> Uuid,
-        sled_id -> Uuid,
-
-        generation -> Int8,
+        sled_agent_generation -> Int8,
     }
 }
 
@@ -1750,15 +1735,6 @@ table! {
 }
 
 table! {
-    bp_sled_omicron_datasets (blueprint_id, sled_id) {
-        blueprint_id -> Uuid,
-        sled_id -> Uuid,
-
-        generation -> Int8,
-    }
-}
-
-table! {
     bp_omicron_dataset (blueprint_id, id) {
         blueprint_id -> Uuid,
         sled_id -> Uuid,
@@ -1775,15 +1751,6 @@ table! {
         quota -> Nullable<Int8>,
         reservation -> Nullable<Int8>,
         compression -> Text,
-    }
-}
-
-table! {
-    bp_sled_omicron_zones (blueprint_id, sled_id) {
-        blueprint_id -> Uuid,
-        sled_id -> Uuid,
-
-        generation -> Int8,
     }
 }
 
@@ -2090,7 +2057,6 @@ allow_tables_to_appear_in_same_query!(hw_baseboard_id, inv_sled_agent,);
 
 allow_tables_to_appear_in_same_query!(
     anti_affinity_group,
-    anti_affinity_group_affinity_membership,
     anti_affinity_group_instance_membership,
     affinity_group,
     affinity_group_instance_membership,

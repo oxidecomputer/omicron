@@ -22,6 +22,7 @@ use hickory_resolver::config::NameServerConfig;
 use hickory_resolver::config::Protocol;
 use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::config::ResolverOpts;
+use id_map::IdMap;
 use internal_dns_types::config::DnsConfigBuilder;
 use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
 use internal_dns_types::names::ServiceName;
@@ -32,6 +33,7 @@ use nexus_config::MgdConfig;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_config::NexusConfig;
 use nexus_db_queries::db::pub_test_utils::crdb;
+use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
@@ -39,21 +41,17 @@ use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
-use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
-use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
-use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::blueprint_zone_type;
-use nexus_types::deployment::id_map::IdMap;
 use nexus_types::external_api::views::SledState;
 use nexus_types::internal_api::params::DnsConfigParams;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
@@ -71,6 +69,8 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::disk::CompressionAlgorithm;
+use omicron_common::disk::DatasetsConfig;
+use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
@@ -855,7 +855,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 let mut disks = IdMap::new();
                 let mut datasets = IdMap::new();
 
-                let zones_config = if let Some(zones) = maybe_zones {
+                let zones = if let Some(zones) = maybe_zones {
                     for zone in zones {
                         if let Some(zpool) = &zone.filesystem_pool {
                             disks.insert(BlueprintPhysicalDiskConfig {
@@ -891,15 +891,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                             });
                         }
                     }
-                    BlueprintZonesConfig {
-                        generation: Generation::new().next(),
-                        zones: zones.iter().cloned().collect(),
-                    }
+                    zones.iter().cloned().collect()
                 } else {
-                    BlueprintZonesConfig {
-                        generation: Generation::new().next(),
-                        zones: IdMap::new(),
-                    }
+                    IdMap::new()
                 };
 
                 // Populate extra fake disks, giving each sled 10 total.
@@ -924,15 +918,10 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     sled_id,
                     BlueprintSledConfig {
                         state: SledState::Active,
-                        disks_config: BlueprintPhysicalDisksConfig {
-                            generation: Generation::new().next(),
-                            disks,
-                        },
-                        datasets_config: BlueprintDatasetsConfig {
-                            generation: Generation::new().next(),
-                            datasets,
-                        },
-                        zones_config,
+                        sled_agent_generation: Generation::new().next(),
+                        disks,
+                        datasets,
+                        zones,
                     },
                 );
             }
@@ -1071,14 +1060,20 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         );
 
         client
-            .omicron_zones_put(&OmicronZonesConfig {
-                zones: self
-                    .blueprint_zones
-                    .clone()
-                    .into_iter()
-                    .map(From::from)
-                    .collect(),
-                generation: Generation::new().next(),
+            .omicron_config_put(&OmicronSledConfig {
+                // Sending no disks or datasets is probably wrong, but there are
+                // a lot of inconsistencies with this in nexus-test.
+                disks_config: OmicronPhysicalDisksConfig::default(),
+                datasets_config: DatasetsConfig::default(),
+                zones_config: OmicronZonesConfig {
+                    zones: self
+                        .blueprint_zones
+                        .clone()
+                        .into_iter()
+                        .map(From::from)
+                        .collect(),
+                    generation: Generation::new().next(),
+                },
             })
             .await
             .expect("Failed to configure sled agent with our zones");
@@ -1111,9 +1106,14 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             );
 
             client
-                .omicron_zones_put(&OmicronZonesConfig {
-                    zones: vec![],
-                    generation: Generation::new().next(),
+                .omicron_config_put(&OmicronSledConfig {
+                    // As above, sending no disks or datasets is probably wrong
+                    disks_config: OmicronPhysicalDisksConfig::default(),
+                    datasets_config: DatasetsConfig::default(),
+                    zones_config: OmicronZonesConfig {
+                        zones: vec![],
+                        generation: Generation::new().next(),
+                    },
                 })
                 .await
                 .expect("Failed to configure sled agent with our zones");

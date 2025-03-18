@@ -22,7 +22,6 @@ use dropshot::HttpError;
 pub use dropshot::PaginationOrder;
 pub use error::*;
 use futures::stream::BoxStream;
-use omicron_uuid_kinds::AffinityGroupUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use oxnet::IpNet;
@@ -1344,14 +1343,9 @@ impl SimpleIdentityOrName for AffinityGroupMember {
 ///
 /// Membership in a group is not exclusive - members may belong to multiple
 /// affinity / anti-affinity groups.
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Hash, Eq,
-)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum AntiAffinityGroupMember {
-    /// An affinity group belonging to this group
-    AffinityGroup { id: AffinityGroupUuid, name: Name },
-
     /// An instance belonging to this group
     Instance { id: InstanceUuid, name: Name, run_state: InstanceState },
 }
@@ -1359,9 +1353,6 @@ pub enum AntiAffinityGroupMember {
 impl SimpleIdentityOrName for AntiAffinityGroupMember {
     fn id(&self) -> Uuid {
         match self {
-            AntiAffinityGroupMember::AffinityGroup { id, .. } => {
-                *id.as_untyped_uuid()
-            }
             AntiAffinityGroupMember::Instance { id, .. } => {
                 *id.as_untyped_uuid()
             }
@@ -1370,7 +1361,6 @@ impl SimpleIdentityOrName for AntiAffinityGroupMember {
 
     fn name(&self) -> &Name {
         match self {
-            AntiAffinityGroupMember::AffinityGroup { name, .. } => name,
             AntiAffinityGroupMember::Instance { name, .. } => name,
         }
     }

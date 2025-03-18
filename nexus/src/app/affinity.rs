@@ -22,7 +22,6 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_uuid_kinds::AffinityGroupUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 
@@ -300,28 +299,6 @@ impl super::Nexus {
             .await
     }
 
-    pub(crate) async fn anti_affinity_group_member_affinity_group_view(
-        &self,
-        opctx: &OpContext,
-        anti_affinity_group_lookup: &lookup::AntiAffinityGroup<'_>,
-        affinity_group_lookup: &lookup::AffinityGroup<'_>,
-    ) -> Result<external::AntiAffinityGroupMember, Error> {
-        let (.., authz_anti_affinity_group) =
-            anti_affinity_group_lookup.lookup_for(authz::Action::Read).await?;
-        let (.., authz_affinity_group) =
-            affinity_group_lookup.lookup_for(authz::Action::Read).await?;
-        let member =
-            AffinityGroupUuid::from_untyped_uuid(authz_affinity_group.id());
-
-        self.db_datastore
-            .anti_affinity_group_member_affinity_group_view(
-                opctx,
-                &authz_anti_affinity_group,
-                member,
-            )
-            .await
-    }
-
     pub(crate) async fn affinity_group_member_add(
         &self,
         opctx: &OpContext,
@@ -381,33 +358,6 @@ impl super::Nexus {
         })
     }
 
-    pub(crate) async fn anti_affinity_group_member_affinity_group_add(
-        &self,
-        opctx: &OpContext,
-        anti_affinity_group_lookup: &lookup::AntiAffinityGroup<'_>,
-        affinity_group_lookup: &lookup::AffinityGroup<'_>,
-    ) -> Result<external::AntiAffinityGroupMember, Error> {
-        let (.., authz_anti_affinity_group) = anti_affinity_group_lookup
-            .lookup_for(authz::Action::Modify)
-            .await?;
-        let (.., authz_affinity_group, affinity_group) =
-            affinity_group_lookup.fetch_for(authz::Action::Read).await?;
-        let member =
-            AffinityGroupUuid::from_untyped_uuid(authz_affinity_group.id());
-
-        self.db_datastore
-            .anti_affinity_group_member_affinity_group_add(
-                opctx,
-                &authz_anti_affinity_group,
-                member,
-            )
-            .await?;
-        Ok(external::AntiAffinityGroupMember::AffinityGroup {
-            id: member,
-            name: affinity_group.name().clone(),
-        })
-    }
-
     pub(crate) async fn affinity_group_member_delete(
         &self,
         opctx: &OpContext,
@@ -444,29 +394,6 @@ impl super::Nexus {
 
         self.db_datastore
             .anti_affinity_group_member_instance_delete(
-                opctx,
-                &authz_anti_affinity_group,
-                member,
-            )
-            .await
-    }
-
-    pub(crate) async fn anti_affinity_group_member_affinity_group_delete(
-        &self,
-        opctx: &OpContext,
-        anti_affinity_group_lookup: &lookup::AntiAffinityGroup<'_>,
-        affinity_group_lookup: &lookup::AffinityGroup<'_>,
-    ) -> Result<(), Error> {
-        let (.., authz_anti_affinity_group) = anti_affinity_group_lookup
-            .lookup_for(authz::Action::Modify)
-            .await?;
-        let (.., authz_affinity_group) =
-            affinity_group_lookup.lookup_for(authz::Action::Read).await?;
-        let member =
-            AffinityGroupUuid::from_untyped_uuid(authz_affinity_group.id());
-
-        self.db_datastore
-            .anti_affinity_group_member_affinity_group_delete(
                 opctx,
                 &authz_anti_affinity_group,
                 member,

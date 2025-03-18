@@ -3726,9 +3726,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_clickhouse_keeper_membership (
  * will eventually prune old blueprint targets, so it will not always be
  * possible to view the entire history.
  *
- * `bp_sled_omicron_zones`, `bp_omicron_zone`, and `bp_omicron_zone_nic` are
- * nearly identical to their `inv_*` counterparts, and record the
- * `OmicronZonesConfig` for each sled.
+ * `bp_omicron_zone` and `bp_omicron_zone_nic` are nearly identical to their
+ * `inv_*` counterparts, and record the `OmicronZoneConfig`s for each sled.
  */
 
 CREATE TYPE IF NOT EXISTS omicron.public.bp_zone_disposition AS ENUM (
@@ -3807,23 +3806,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_target (
     time_made_target TIMESTAMPTZ NOT NULL
 );
 
--- state of a sled in a blueprint
-CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_state (
+-- metadata associated with a single sled in a blueprint
+CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
     -- foreign key into `blueprint` table
     blueprint_id UUID NOT NULL,
 
     sled_id UUID NOT NULL,
     sled_state omicron.public.sled_state NOT NULL,
-    PRIMARY KEY (blueprint_id, sled_id)
-);
-
--- description of a collection of omicron physical disks stored in a blueprint.
-CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_physical_disks (
-    -- foreign key into `blueprint` table
-    blueprint_id UUID NOT NULL,
-
-    sled_id UUID NOT NULL,
-    generation INT8 NOT NULL,
+    sled_agent_generation INT8 NOT NULL,
     PRIMARY KEY (blueprint_id, sled_id)
 );
 
@@ -3862,16 +3852,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_physical_disk  (
     )
 );
 
--- description of a collection of omicron datasets stored in a blueprint
-CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_datasets (
-    -- foreign key into the `blueprint` table
-    blueprint_id UUID NOT NULL,
-    sled_id UUID NOT NULL,
-    generation INT8 NOT NULL,
-
-    PRIMARY KEY (blueprint_id, sled_id)
-);
-
 -- description of an omicron dataset specified in a blueprint.
 CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_dataset (
     -- foreign key into the `blueprint` table
@@ -3906,17 +3886,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_dataset (
     ),
 
     PRIMARY KEY (blueprint_id, id)
-);
-
--- see inv_sled_omicron_zones, which is identical except it references a
--- collection whereas this table references a blueprint
-CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_zones (
-    -- foreign key into `blueprint` table
-    blueprint_id UUID NOT NULL,
-
-    sled_id UUID NOT NULL,
-    generation INT8 NOT NULL,
-    PRIMARY KEY (blueprint_id, sled_id)
 );
 
 -- description of omicron zones specified in a blueprint
@@ -4271,25 +4240,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group_instance_membershi
 -- memberships efficiently when instances are deleted.
 CREATE INDEX IF NOT EXISTS lookup_anti_affinity_group_instance_membership_by_instance ON omicron.public.anti_affinity_group_instance_membership (
     instance_id
-);
-
--- Describes an affinity group's membership within an anti-affinity group
---
--- Since the naming here is a little confusing:
--- This allows an anti-affinity group to contain affinity groups as members.
--- This is useful for saying "I want these groups of VMMs to be anti-affine from
--- one another", rather than "I want individual VMMs to be anti-affine from each other".
-CREATE TABLE IF NOT EXISTS omicron.public.anti_affinity_group_affinity_membership (
-    anti_affinity_group_id UUID NOT NULL,
-    affinity_group_id UUID NOT NULL,
-
-    PRIMARY KEY (anti_affinity_group_id, affinity_group_id)
-);
-
--- We need to look up all memberships of an affinity group so we can revoke these
--- memberships efficiently when affinity groups are deleted
-CREATE INDEX IF NOT EXISTS lookup_anti_affinity_group_affinity_membership_by_affinity_group ON omicron.public.anti_affinity_group_affinity_membership (
-    affinity_group_id
 );
 
 -- Per-VMM state.

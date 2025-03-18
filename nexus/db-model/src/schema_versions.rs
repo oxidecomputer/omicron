@@ -28,7 +28,7 @@ static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(130, "anti-affinity-group-affinity-member"),
+        KnownVersion::new(130, "bp-sled-agent-generation"),
         KnownVersion::new(129, "create-target-release"),
         KnownVersion::new(128, "sled-resource-for-vmm"),
         KnownVersion::new(127, "bp-disk-disposition-expunged-cleanup"),
