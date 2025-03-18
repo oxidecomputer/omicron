@@ -5022,12 +5022,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_receiver (
     endpoint STRING(512) NOT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_webhook_receiver_by_id
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_webhook_rx_by_id
 ON omicron.public.webhook_receiver (id)
 WHERE
     time_deleted IS NULL;
 
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_webhook_receiver_by_name
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_webhook_rx_by_name
 ON omicron.public.webhook_receiver (
     name
 ) WHERE
