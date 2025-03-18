@@ -188,14 +188,16 @@ fn install_propolis(sh: &Shell) -> Result<()> {
     cmd!(sh, "pfexec cp OVMF_CODE.fd /var/ovmf/OVMF_CODE.fd").run()?;
 
     // Download Propolis
-    // XXX falcon `get-propolis.sh` downloads this old version of propolis, but
+    //
+    // XXX https://github.com/oxidecomputer/falcon/issues/106
+    //
+    // falcon `get-propolis.sh` downloads this old version of propolis, but
     // it does not work when running on latest helios as a host. The latest
     // propolis doesn't either, because falcon uses it in a way it doesn't
     // support anymore (?). Right now the correct propolis is in catacomb in
     // `/staff/mike/propolis-server`, which we cannot readily download here.
     //
-    // I'm not sure if there's a tracking issue for this, but I will make sure
-    // there is one before this PR goes in, and get a stable link so we can
+    // Before this PR gets in, I want to get a stable link so we can
     // automatically download the hotpatched propolis at least. So consider the
     // comment below and printlns NOT FINAL and something that should be
     // resolved BEFORE this code is merged.
