@@ -5,16 +5,14 @@
 //! Execute blueprints from the command line
 
 use anyhow::Context;
-use anyhow::anyhow;
+use anyhow::bail;
 use camino::Utf8PathBuf;
 use clap::Parser;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
-use nexus_reconfigurator_execution::realize_blueprint;
-use nexus_types::deployment::UnstableReconfiguratorState;
-use omicron_uuid_kinds::BlueprintUuid;
-use omicron_uuid_kinds::OmicronZoneUuid;
+use nexus_reconfigurator_execution::{RequiredRealizeArgs, realize_blueprint};
+use nexus_types::deployment::Blueprint;
 use slog::info;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -44,18 +42,25 @@ struct ReconfiguratorExec {
         long,
         value_parser = parse_dropshot_log_level,
         default_value = "info",
-        global = true,
     )]
     log_level: dropshot::ConfigLoggingLevel,
 
     /// an internal DNS server in this deployment
+    // This default value is currently appropriate for all deployed systems.
+    // That relies on two assumptions:
+    //
+    // 1. The internal DNS servers' underlay addresses are at a fixed location
+    //    from the base of the AZ subnet.  This is unlikely to change, since the
+    //    DNS servers must be discoverable with virtually no other information.
+    // 2. The AZ subnet used for all deployments today is fixed.
+    //
+    // For simulated systems (e.g., `cargo xtask omicron-dev run-all`), or if
+    // these assumptions change in the future, we may need to adjust this.
+    #[arg(long, default_value = "[fd00:1122:3344:3::1]:53")]
     dns_server: SocketAddr,
 
-    /// path to a reconfigurator save file
-    reconfigurator_save_file: Utf8PathBuf,
-
-    /// blueprint (contained in the save file) to execute
-    blueprint_id: BlueprintUuid,
+    /// path to a serialized (JSON) blueprint file
+    blueprint_file: Utf8PathBuf,
 }
 
 fn parse_dropshot_log_level(
@@ -107,35 +112,32 @@ impl ReconfiguratorExec {
             )
         })?;
 
-        let input_path = &self.reconfigurator_save_file;
+        let input_path = &self.blueprint_file;
         info!(
             &log,
-            "loading reconfigurator state file";
+            "loading blueprint file";
             "input_path" => %input_path
         );
-        let file = std::fs::File::open(&self.reconfigurator_save_file)
+        let file = std::fs::File::open(&self.blueprint_file)
             .with_context(|| format!("open {:?}", input_path))?;
         let bufread = std::io::BufReader::new(file);
-        let bundle: UnstableReconfiguratorState =
-            serde_json::from_reader(bufread)
-                .with_context(|| format!("read and parse {:?}", &input_path))?;
+        let blueprint: Blueprint = serde_json::from_reader(bufread)
+            .with_context(|| format!("read and parse {:?}", &input_path))?;
 
-        info!(
-            &log,
-            "loading blueprint from state file";
-            "blueprint_id" => %self.blueprint_id
-        );
-        let blueprint = bundle
-            .blueprints
-            .iter()
-            .find(|b| b.id == self.blueprint_id)
-            .ok_or_else(|| {
-                anyhow!(
-                    "blueprint {:?} not found in {:?}",
-                    self.blueprint_id,
-                    &input_path
-                )
-            })?;
+        // Check that the blueprint is the current system target.
+        // (This is currently redundant with a check done early during blueprint
+        // realization, but we want to avoid assuming that here in this tool.)
+        let target = datastore
+            .blueprint_target_get_current(&opctx)
+            .await
+            .context("loading current target blueprint")?;
+        if target.target_id != blueprint.id {
+            bail!(
+                "requested blueprint {} does not match current target ({})",
+                blueprint.id,
+                target.target_id
+            );
+        }
 
         let (sender, mut receiver) = update_engine::channel();
 
@@ -147,14 +149,24 @@ impl ReconfiguratorExec {
             event_buffer
         });
 
+        // This uuid uses similar conventions as the DB fixed data.  It's
+        // intended to be recognizable by a human (maybe just as "a little
+        // strange looking") and ideally evoke this tool.
+        let creator =
+            uuid::Uuid::from_u128(0x001de000_4cf4_4000_8000_4ec04f140000)
+                .to_string();
+        //                         "oxide"  "rcfg"         "reconfig[urator]"
         info!(&log, "beginning execution");
         let rv = realize_blueprint(
-            &opctx,
-            &datastore,
-            &resolver,
-            &blueprint,
-            None,
-            sender,
+            RequiredRealizeArgs {
+                opctx: &opctx,
+                datastore: &datastore,
+                resolver: &resolver,
+                blueprint: &blueprint,
+                creator,
+                sender,
+            }
+            .into(),
         )
         .await
         .context("blueprint execution failed");

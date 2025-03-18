@@ -46,7 +46,8 @@ pub struct RealizeArgs<'a> {
     pub datastore: &'a DataStore,
     pub resolver: &'a Resolver,
     pub blueprint: &'a Blueprint,
-    pub nexus_id: OmicronZoneUuid,
+    pub nexus_id: Option<OmicronZoneUuid>,
+    pub creator: String,
     pub sender: mpsc::Sender<Event>,
     pub overrides: Option<&'a Overridables>,
 }
@@ -57,6 +58,16 @@ impl<'a> RealizeArgs<'a> {
         overrides: &'a Overridables,
     ) -> RealizeArgs<'a> {
         self.overrides = Some(overrides);
+        self
+    }
+
+    pub fn with_creator(mut self, creator: String) -> RealizeArgs<'a> {
+        self.creator = creator;
+        self
+    }
+
+    pub fn as_nexus(mut self, nexus_id: OmicronZoneUuid) -> RealizeArgs<'a> {
+        self.nexus_id = Some(nexus_id);
         self
     }
 }
@@ -70,8 +81,8 @@ pub struct RequiredRealizeArgs<'a> {
     pub opctx: &'a OpContext,
     pub datastore: &'a DataStore,
     pub resolver: &'a Resolver,
+    pub creator: String,
     pub blueprint: &'a Blueprint,
-    pub nexus_id: OmicronZoneUuid,
     pub sender: mpsc::Sender<Event>,
 }
 
@@ -82,7 +93,8 @@ impl<'a> From<RequiredRealizeArgs<'a>> for RealizeArgs<'a> {
             datastore: value.datastore,
             resolver: value.resolver,
             blueprint: value.blueprint,
-            nexus_id: value.nexus_id,
+            creator: value.creator,
+            nexus_id: None,
             sender: value.sender,
             overrides: None,
         }
@@ -95,6 +107,10 @@ impl<'a> RequiredRealizeArgs<'a> {
         overrides: &'a Overridables,
     ) -> RealizeArgs<'a> {
         RealizeArgs::from(self).with_overrides(overrides)
+    }
+
+    pub fn as_nexus(self, nexus_id: OmicronZoneUuid) -> RealizeArgs<'a> {
+        RealizeArgs::from(self).as_nexus(nexus_id)
     }
 }
 
@@ -120,6 +136,7 @@ pub async fn realize_blueprint(
         resolver,
         blueprint,
         nexus_id,
+        creator,
         sender,
         overrides,
     } = exec_ctx;
@@ -169,7 +186,7 @@ pub async fn realize_blueprint(
         &opctx,
         datastore,
         blueprint,
-        nexus_id,
+        creator,
         overrides.unwrap_or(&*overridables::DEFAULT),
         sled_list.clone(),
     );
@@ -289,7 +306,7 @@ fn register_support_bundle_failure_step<'a>(
     opctx: &'a OpContext,
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
-    nexus_id: OmicronZoneUuid,
+    nexus_id: Option<OmicronZoneUuid>,
 ) {
     registrar
         .new_step(
@@ -297,6 +314,10 @@ fn register_support_bundle_failure_step<'a>(
             "Mark support bundles as failed if they rely on \
              an expunged disk or sled",
             move |_cx| async move {
+                let Some(nexus_id) = nexus_id else {
+                    return StepSkipped::new((), "not running as Nexus").into();
+                };
+
                 let res = match datastore
                     .support_bundle_fail_expunged(opctx, blueprint, nexus_id)
                     .await
@@ -405,7 +426,7 @@ fn register_dns_records_step<'a>(
     opctx: &'a OpContext,
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
-    nexus_id: OmicronZoneUuid,
+    creator: String,
     overrides: &'a Overridables,
     sleds: SharedStepHandle<Arc<BTreeMap<SledUuid, Sled>>>,
 ) {
@@ -419,7 +440,7 @@ fn register_dns_records_step<'a>(
                 let res = dns::deploy_dns(
                     opctx,
                     datastore,
-                    nexus_id.to_string(),
+                    creator,
                     blueprint,
                     &sleds_by_id,
                     overrides,
@@ -551,13 +572,18 @@ fn register_reassign_sagas_step<'a>(
     opctx: &'a OpContext,
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
-    nexus_id: OmicronZoneUuid,
+    nexus_id: Option<OmicronZoneUuid>,
 ) -> StepHandle<bool> {
     registrar
         .new_step(
             ExecutionStepId::Cleanup,
             "Reassign sagas",
             move |_cx| async move {
+                let Some(nexus_id) = nexus_id else {
+                    return StepSkipped::new(false, "not running as Nexus")
+                        .into();
+                };
+
                 // For any expunged Nexus zones, re-assign in-progress sagas to
                 // some other Nexus.  If this fails for some reason, it doesn't
                 // affect anything else.

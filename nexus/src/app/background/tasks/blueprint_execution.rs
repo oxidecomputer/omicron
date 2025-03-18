@@ -106,11 +106,11 @@ impl BlueprintExecutor {
                 opctx,
                 datastore: &self.datastore,
                 resolver: &self.resolver,
+                creator: self.nexus_id.to_string(),
                 blueprint,
-                nexus_id: self.nexus_id,
                 sender,
             }
-            .into(),
+            .as_nexus(self.nexus_id),
         )
         .await;
 

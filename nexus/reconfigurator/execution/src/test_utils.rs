@@ -34,16 +34,18 @@ pub(crate) async fn realize_blueprint_and_expect(
         buffer
     });
 
+    let nexus_id = OmicronZoneUuid::new_v4();
     let output = crate::realize_blueprint(
         RequiredRealizeArgs {
             opctx,
             datastore,
             resolver,
+            creator: nexus_id.to_string(),
             blueprint,
-            nexus_id: OmicronZoneUuid::new_v4(),
             sender,
         }
-        .with_overrides(overrides),
+        .with_overrides(overrides)
+        .as_nexus(OmicronZoneUuid::new_v4()),
     )
     .await
     // We expect here rather than in the caller because we want to assert that
