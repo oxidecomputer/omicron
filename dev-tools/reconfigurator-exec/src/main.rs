@@ -14,6 +14,8 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_execution::{RequiredRealizeArgs, realize_blueprint};
 use nexus_types::deployment::Blueprint;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::info;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -158,8 +160,7 @@ impl ReconfiguratorExec {
         // intended to be recognizable by a human (maybe just as "a little
         // strange looking") and ideally evoke this tool.
         let creator =
-            uuid::Uuid::from_u128(0x001de000_4cf4_4000_8000_4ec04f140000)
-                .to_string();
+            uuid::Uuid::from_u128(0x001de000_4cf4_4000_8000_4ec04f140000);
         //                         "oxide"  "rcfg"         "reconfig[urator]"
         info!(&log, "beginning execution");
         let rv = realize_blueprint(
@@ -168,7 +169,7 @@ impl ReconfiguratorExec {
                 datastore: &datastore,
                 resolver: &resolver,
                 blueprint: &blueprint,
-                creator,
+                creator: OmicronZoneUuid::from_untyped_uuid(creator),
                 sender,
             }
             .into(),

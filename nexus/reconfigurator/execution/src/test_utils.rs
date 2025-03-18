@@ -40,7 +40,7 @@ pub(crate) async fn realize_blueprint_and_expect(
             opctx,
             datastore,
             resolver,
-            creator: nexus_id.to_string(),
+            creator: nexus_id,
             blueprint,
             sender,
         }

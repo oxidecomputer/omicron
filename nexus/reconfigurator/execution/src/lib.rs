@@ -47,12 +47,15 @@ pub struct RealizeArgs<'a> {
     pub resolver: &'a Resolver,
     pub blueprint: &'a Blueprint,
     pub nexus_id: Option<OmicronZoneUuid>,
-    pub creator: String,
+    pub creator: OmicronZoneUuid,
     pub sender: mpsc::Sender<Event>,
     pub overrides: Option<&'a Overridables>,
 }
 
 impl<'a> RealizeArgs<'a> {
+    /// See [`Overridables`]
+    ///
+    /// If not specified, no overrides are in place during blueprint execution.
     pub fn with_overrides(
         mut self,
         overrides: &'a Overridables,
@@ -61,11 +64,20 @@ impl<'a> RealizeArgs<'a> {
         self
     }
 
-    pub fn with_creator(mut self, creator: String) -> RealizeArgs<'a> {
+    /// Specifies the `creator` field used when Nexus creates various kinds of
+    /// database records
+    ///
+    /// This generally matches the current Nexus's id.  It's generally only used
+    /// for debugging.
+    pub fn with_creator(mut self, creator: OmicronZoneUuid) -> RealizeArgs<'a> {
         self.creator = creator;
         self
     }
 
+    /// Specifies that we're running as a real Nexus with id `nexus_id`
+    ///
+    /// This enables some steps of blueprint execution that currently assume
+    /// it's running a valid Nexus.
     pub fn as_nexus(mut self, nexus_id: OmicronZoneUuid) -> RealizeArgs<'a> {
         self.nexus_id = Some(nexus_id);
         self
@@ -81,7 +93,7 @@ pub struct RequiredRealizeArgs<'a> {
     pub opctx: &'a OpContext,
     pub datastore: &'a DataStore,
     pub resolver: &'a Resolver,
-    pub creator: String,
+    pub creator: OmicronZoneUuid,
     pub blueprint: &'a Blueprint,
     pub sender: mpsc::Sender<Event>,
 }
@@ -102,6 +114,7 @@ impl<'a> From<RequiredRealizeArgs<'a>> for RealizeArgs<'a> {
 }
 
 impl<'a> RequiredRealizeArgs<'a> {
+    /// See [`RealizeArgs::with_overrides()`]
     pub fn with_overrides(
         self,
         overrides: &'a Overridables,
@@ -109,6 +122,7 @@ impl<'a> RequiredRealizeArgs<'a> {
         RealizeArgs::from(self).with_overrides(overrides)
     }
 
+    /// See [`RealizeArgs::as_nexus()`]
     pub fn as_nexus(self, nexus_id: OmicronZoneUuid) -> RealizeArgs<'a> {
         RealizeArgs::from(self).as_nexus(nexus_id)
     }
@@ -426,7 +440,7 @@ fn register_dns_records_step<'a>(
     opctx: &'a OpContext,
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
-    creator: String,
+    creator: OmicronZoneUuid,
     overrides: &'a Overridables,
     sleds: SharedStepHandle<Arc<BTreeMap<SledUuid, Sled>>>,
 ) {
@@ -440,7 +454,7 @@ fn register_dns_records_step<'a>(
                 let res = dns::deploy_dns(
                     opctx,
                     datastore,
-                    creator,
+                    creator.to_string(),
                     blueprint,
                     &sleds_by_id,
                     overrides,
