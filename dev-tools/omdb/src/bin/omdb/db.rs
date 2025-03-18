@@ -2519,7 +2519,7 @@ async fn cmd_db_volume_lock_holder(
     let maybe_volume_repair_record = datastore
         .pool_connection_for_tests()
         .await?
-        .transaction_async(|conn| async move {
+        .transaction_async(async move |conn| {
             use db::schema::volume_repair::dsl;
 
             conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
@@ -2701,7 +2701,7 @@ async fn cmd_db_region_used_by(
         datastore
             .pool_connection_for_tests()
             .await?
-            .transaction_async(|conn| async move {
+            .transaction_async(async move |conn| {
                 use db::schema::disk::dsl;
 
                 conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
@@ -2728,7 +2728,7 @@ async fn cmd_db_region_used_by(
         datastore
             .pool_connection_for_tests()
             .await?
-            .transaction_async(|conn| async move {
+            .transaction_async(async move |conn| {
                 use db::schema::snapshot::dsl;
 
                 conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
@@ -2759,7 +2759,7 @@ async fn cmd_db_region_used_by(
         datastore
             .pool_connection_for_tests()
             .await?
-            .transaction_async(|conn| async move {
+            .transaction_async(async move |conn| {
                 use db::schema::image::dsl;
 
                 conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
@@ -4755,7 +4755,7 @@ async fn cmd_db_validate_volume_references(
         let region_snapshots: Vec<RegionSnapshot> = datastore
             .pool_connection_for_tests()
             .await?
-            .transaction_async(|conn| async move {
+            .transaction_async(async move |conn| {
                 // Selecting all region snapshots requires a full table scan
                 conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
@@ -4789,7 +4789,7 @@ async fn cmd_db_validate_volume_references(
             let matching_volumes = datastore
                 .pool_connection_for_tests()
                 .await?
-                .transaction_async(|conn| async move {
+                .transaction_async(async move |conn| {
                     // Selecting all volumes based on the data column requires a
                     // full table scan
                     conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
@@ -4895,7 +4895,7 @@ async fn cmd_db_validate_regions(
     let datasets_and_regions: Vec<(CrucibleDataset, Region)> = datastore
         .pool_connection_for_tests()
         .await?
-        .transaction_async(|conn| async move {
+        .transaction_async(async move |conn| {
             // Selecting all datasets and regions requires a full table scan
             conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
@@ -5030,7 +5030,7 @@ async fn cmd_db_validate_regions(
     let datasets: Vec<CrucibleDataset> = datastore
         .pool_connection_for_tests()
         .await?
-        .transaction_async(|conn| async move {
+        .transaction_async(async move |conn| {
             // Selecting all datasets and regions requires a full table scan
             conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
@@ -5154,7 +5154,7 @@ async fn cmd_db_validate_region_snapshots(
             datastore
                 .pool_connection_for_tests()
                 .await?
-                .transaction_async(|conn| async move {
+                .transaction_async(async move |conn| {
                     // Selecting all datasets and region snapshots requires a
                     // full table scan
                     conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
@@ -5350,7 +5350,7 @@ async fn cmd_db_validate_region_snapshots(
         let datasets_and_regions: Vec<(CrucibleDataset, Region)> = datastore
             .pool_connection_for_tests()
             .await?
-            .transaction_async(|conn| async move {
+            .transaction_async(async move |conn| {
                 // Selecting all datasets and regions requires a full table scan
                 conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
@@ -6644,7 +6644,7 @@ async fn cmd_db_vmm_list(
     let vmms = datastore
         .pool_connection_for_tests()
         .await?
-        .transaction_async(|conn| async move {
+        .transaction_async(async move |conn| {
             // If we are including deleted VMMs, we can no longer use indices on
             // the VMM table, which do not index deleted VMMs. Thus, we must
             // allow a full-table scan in that case.

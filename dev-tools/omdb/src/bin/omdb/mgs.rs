@@ -147,7 +147,7 @@ async fn cmd_mgs_inventory(
                 None
             }
         }))
-        .then(|sp_id| async move {
+        .then(async move |sp_id| {
             c.sp_get(sp_id.type_, sp_id.slot)
                 .await
                 .with_context(|| format!("fetching info about SP {:?}", sp_id))
