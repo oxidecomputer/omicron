@@ -1272,7 +1272,7 @@ resource: WebhookEvent id "31cb17da-4164-4cbf-b9a3-b3e4a687c08b"
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: WebhookReceiver id "73bccab2-467d-41d1-8e9d-97e9d821d029"
+resource: WebhookReceiver "webhooked-on-phonics"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
