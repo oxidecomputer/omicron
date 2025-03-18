@@ -405,6 +405,14 @@ impl Disk {
     }
 }
 
+impl IdMappable for Disk {
+    type Id = DiskIdentity;
+
+    fn id(&self) -> Self::Id {
+        self.identity().clone()
+    }
+}
+
 impl From<Disk> for RawDisk {
     fn from(disk: Disk) -> RawDisk {
         match disk {

@@ -18,6 +18,8 @@ use tokio::sync::watch;
 
 mod disks;
 mod ledger;
+mod raw_disks;
+mod internal_disks;
 
 pub struct ConfigReconciler {
     current_config: watch::Sender<CurrentConfig>,
