@@ -1174,8 +1174,33 @@ impl fmt::Display for WebhookDeliveryState {
     }
 }
 
+impl std::str::FromStr for WebhookDeliveryState {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Error> {
+        for &v in Self::ALL {
+            if s.trim().eq_ignore_ascii_case(v.as_str()) {
+                return Ok(v);
+            }
+        }
+        Err(Error::invalid_value(
+            "WebhookDeliveryState",
+            "expected one of 'pending', 'delivered', or 'failed'",
+        ))
+    }
+}
+
 /// The reason a webhook event was delivered
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    strum::VariantArray,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum WebhookDeliveryTrigger {
     /// Delivery was triggered by the event occurring for the first time.
@@ -1199,6 +1224,21 @@ impl WebhookDeliveryTrigger {
 impl fmt::Display for WebhookDeliveryTrigger {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for WebhookDeliveryTrigger {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Error> {
+        for &v in <Self as strum::VariantArray>::VARIANTS {
+            if s.trim().eq_ignore_ascii_case(v.as_str()) {
+                return Ok(v);
+            }
+        }
+        Err(Error::invalid_value(
+            "WebhookDeliveryTrigger",
+            "expected one of 'event', 'resend', or 'probe'",
+        ))
     }
 }
 
