@@ -102,7 +102,7 @@ impl std::fmt::Debug for KeyShareEd25519 {
 }
 impl std::fmt::Debug for KeyShareGf256 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("KeyShareEd25519").finish()
+        f.debug_struct("KeyShareGf256").finish()
     }
 }
 

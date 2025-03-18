@@ -31,8 +31,34 @@ pub struct Configuration {
     /// The number of sleds required to reconstruct the rack secret
     pub threshold: Threshold,
 
+    /// Encrypted key shares for this configuration. This is used to generate
+    /// `Prepare` messages to send to members of this configuration in case they
+    /// were offline during initial distribution.
+    pub encrypted_shares: EncryptedShares,
+
     // There is no previous configuration for the initial configuration
     pub previous_configuration: Option<PreviousConfiguration>,
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
+pub struct EncryptedShares {
+    /// Random salt passed to HKDF-extract along with the RackSecret as IKM
+    ///
+    /// There is only *one* salt for all derived keys
+    pub salt: [u8; 32],
+
+    /// Map of encrypted GF(256) key shares
+    ///
+    /// Each share has its own unique encryption key created via HKDF-expand
+    /// using the extracted PRK created via HKDF-extract with the RackSecret and
+    /// salt above. The "info" parameter to HKDF-extract is a stringified form
+    /// of the `PlatformId`.
+    ///
+    /// Since we only use these keys once, we use a nonce of all zeros when
+    /// encrypting/decrypting.
+    pub encrypted_shares: BTreeMap<PlatformId, Vec<u8>>,
 }
 
 #[derive(
