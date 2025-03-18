@@ -48,14 +48,13 @@ struct ReconfiguratorExec {
     )]
     log_level: dropshot::ConfigLoggingLevel,
 
+    /// an internal DNS server in this deployment
     dns_server: SocketAddr,
 
-    // XXX-dap assumed unused
-    #[arg(long, default_value = "080c53b8-7833-45c6-bfc3-63466a416228")]
-    nexus_id: OmicronZoneUuid,
-
+    /// path to a reconfigurator save file
     reconfigurator_save_file: Utf8PathBuf,
 
+    /// blueprint (contained in the save file) to execute
     blueprint_id: BlueprintUuid,
 }
 
@@ -154,7 +153,7 @@ impl ReconfiguratorExec {
             &datastore,
             &resolver,
             &blueprint,
-            self.nexus_id,
+            None,
             sender,
         )
         .await
