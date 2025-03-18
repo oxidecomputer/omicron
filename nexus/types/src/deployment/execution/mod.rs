@@ -8,6 +8,6 @@ mod spec;
 mod utils;
 
 pub use dns::*;
-pub use overridables::*;
+pub use overridables::Overridables;
 pub use spec::*;
 pub use utils::*;
