@@ -1492,7 +1492,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Fetch anti-affinity group member of type instance",
+        "summary": "Fetch anti-affinity group member",
         "operationId": "anti_affinity_group_member_instance_view",
         "parameters": [
           {
@@ -1543,7 +1543,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Add instance member to anti-affinity group",
+        "summary": "Add member to anti-affinity group",
         "operationId": "anti_affinity_group_member_instance_add",
         "parameters": [
           {
@@ -1594,7 +1594,7 @@
         "tags": [
           "affinity"
         ],
-        "summary": "Remove instance member from anti-affinity group",
+        "summary": "Remove member from anti-affinity group",
         "operationId": "anti_affinity_group_member_instance_delete",
         "parameters": [
           {
