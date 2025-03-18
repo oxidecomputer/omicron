@@ -1148,8 +1148,6 @@ pub static DEMO_TARGET_RELEASE: LazyLock<params::SetTargetReleaseParams> =
 pub static WEBHOOK_RECEIVERS_URL: &'static str = "/v1/webhooks/receivers";
 pub static WEBHOOK_EVENT_CLASSES_URL: &'static str =
     "/v1/webhooks/event-classes";
-pub static WEBHOOK_EVENT_CLASS_FOO_BAR_URL: &'static str =
-    "/v1/webhooks/event-classes/test.foo.bar";
 
 pub static DEMO_WEBHOOK_RECEIVER_NAME: LazyLock<Name> =
     LazyLock::new(|| "my-great-webhook".parse().unwrap());
@@ -2836,12 +2834,6 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
             },
             VerifyEndpoint {
                 url: &WEBHOOK_EVENT_CLASSES_URL,
-                visibility: Visibility::Public,
-                unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Get],
-            },
-            VerifyEndpoint {
-                url: &WEBHOOK_EVENT_CLASS_FOO_BAR_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],
