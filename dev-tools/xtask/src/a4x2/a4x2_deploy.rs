@@ -60,8 +60,7 @@ pub enum DeployCommand {
     /// Collect logs from a4x2, and services within the sleds.
     CollectEvidence,
 
-    /// Query the current state of a4x2, including node access information and
-    /// whether the control plane is accessible.
+    /// Query a4x2 node access information
     Status,
 }
 
@@ -160,11 +159,11 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
             // If we are leaving a4x2 up, we ought to be nice and
             // print some information to the user so they can get
             // into the system
-            print_a4x2_access_info(&sh, &env);
+            print_a4x2_access_info(&sh, &env)?;
         }
         DeployCommand::Stop => teardown_a4x2(&sh, &env)?,
         DeployCommand::Status => {
-            print_a4x2_access_info(&sh, &env);
+            print_a4x2_access_info(&sh, &env)?;
         }
         DeployCommand::RunLiveTests => run_live_tests(&sh, &env)?,
         DeployCommand::InstallPropolis => install_propolis(&sh)?,
@@ -756,8 +755,16 @@ fn collect_sled_logs(
     Ok(())
 }
 
-fn print_a4x2_access_info(sh: &Shell, env: &Environment) {
+fn print_a4x2_access_info(sh: &Shell, env: &Environment) -> Result<()> {
+    let falcon_dir = &env.falcon_dir;
     let a4x2_dir = &env.a4x2_dir;
+
+    if !falcon_dir.try_exists()? {
+        eprintln!(
+            "a4x2 is down: falcon directory at `{falcon_dir}` does not exist."
+        );
+        return Ok(());
+    }
 
     // This is best effort. If we can't get the node IPs, it's up to the reader
     // to decide on a course of action. Knowing that we can't get the node IPs
@@ -786,8 +793,6 @@ Consult ./a4x2 --help for additional a4x2 functionality.
 
 NOTE: you *MUST* `cd` into the a4x2 workdir before using a4x2.
 
-a4x2 workdir: {a4x2_dir}
-
 ---
 
 If network setup succeeded, you should be able to ssh/scp into the sleds as
@@ -811,8 +816,13 @@ Virtual Sled IP addresses:
 Control plane IP address:
 - {DEFAULT_OMICRON_NEXUS_ADDR}
 
+a4x2 workdir:
+- {a4x2_dir}
+
 "#
     );
+
+    Ok(())
 }
 
 /// Get the IP address of a node, so we can connect or ssh into it
