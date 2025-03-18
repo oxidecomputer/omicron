@@ -2643,7 +2643,7 @@ async fn cmd_nexus_blueprints_target_set(
     // if `args.diff` is true, or later if `args.enabled` is "inherit" (or
     // both).
     let current_target = OnceCell::new();
-    let get_current_target = || async {
+    let get_current_target = async || {
         current_target
             .get_or_try_init(|| client.blueprint_target_view())
             .await

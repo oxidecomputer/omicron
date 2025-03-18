@@ -80,8 +80,10 @@ impl ReconfiguratorArgs {
         log: &Logger,
     ) -> anyhow::Result<()> {
         self.db_url_opts
-            .with_datastore(omdb, log, |opctx, datastore| async move {
-                match &self.command {
+            .with_datastore(
+                omdb,
+                log,
+                async move |opctx, datastore| match &self.command {
                     ReconfiguratorCommands::Export(export_args) => {
                         let _state = cmd_reconfigurator_export(
                             &opctx,
@@ -109,8 +111,8 @@ impl ReconfiguratorArgs {
                         )
                         .await
                     }
-                }
-            })
+                },
+            )
             .await
     }
 }
