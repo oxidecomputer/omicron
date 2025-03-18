@@ -7310,6 +7310,7 @@ dependencies = [
  "pq-sys",
  "serde_json",
  "slog",
+ "supports-color",
  "tokio",
  "update-engine",
  "uuid",

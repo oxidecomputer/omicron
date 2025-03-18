@@ -7,6 +7,7 @@
 use anyhow::Context;
 use anyhow::bail;
 use camino::Utf8PathBuf;
+use clap::ColorChoice;
 use clap::Parser;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -58,6 +59,10 @@ struct ReconfiguratorExec {
     // these assumptions change in the future, we may need to adjust this.
     #[arg(long, default_value = "[fd00:1122:3344:3::1]:53")]
     dns_server: SocketAddr,
+
+    /// Color output
+    #[arg(long, value_enum, default_value_t)]
+    color: ColorChoice,
 
     /// path to a serialized (JSON) blueprint file
     blueprint_file: Utf8PathBuf,
@@ -175,10 +180,16 @@ impl ReconfiguratorExec {
         let event_buffer =
             receiver_task.await.map_err(|error| NestedError::new(&error))?;
         let mut line_display = LineDisplay::new(std::io::stdout());
-        // XXX-dap make conditional
-        // if should_colorize(color, supports_color::Stream::Stdout) {
-        line_display.set_styles(LineDisplayStyles::colorized());
-        // }
+        let should_colorize = match self.color {
+            ColorChoice::Always => true,
+            ColorChoice::Auto => {
+                supports_color::on(supports_color::Stream::Stdout).is_some()
+            }
+            ColorChoice::Never => false,
+        };
+        if should_colorize {
+            line_display.set_styles(LineDisplayStyles::colorized());
+        }
         line_display.write_event_buffer(&event_buffer)?;
 
         rv.map(|_| ())

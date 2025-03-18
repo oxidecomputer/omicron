@@ -25,6 +25,7 @@ omicron-uuid-kinds.workspace = true
 pq-sys = "*"
 serde_json.workspace = true
 slog.workspace = true
+supports-color.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 update-engine.workspace = true
 uuid.workspace = true
