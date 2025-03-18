@@ -7,15 +7,18 @@
 use super::DataStore;
 use super::SQL_BATCH_SIZE;
 use crate::db;
+use crate::db::column_walker::AllColumnsOf;
 use crate::db::error::ErrorHandler;
 use crate::db::error::public_error_from_diesel;
 use crate::db::pagination::Paginator;
+use crate::db::pagination::RawPaginator;
 use crate::db::pagination::paginated;
-use crate::db::pagination::paginated_multicolumn;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use diesel::helper_types::AsSelect;
+use diesel::pg::Pg;
 use nexus_auth::authz;
 use nexus_auth::context::OpContext;
 use omicron_common::api::external::Error;
@@ -175,16 +178,19 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
         while let Some(p) = paginator.next() {
             use db::schema::saga_node_event::dsl;
-            let batch = paginated_multicolumn(
-                dsl::saga_node_event,
-                (dsl::node_id, dsl::event_type),
-                &p.current_pagparams(),
-            )
-            .filter(dsl::saga_id.eq(saga_id))
-            .select(db::saga_types::SagaNodeEvent::as_select())
-            .load_async(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            let mut pagination_query = RawPaginator::new();
+            pagination_query.source()
+                .sql("SELECT ")
+                .sql(AllColumnsOf::<dsl::saga_node_event>::as_str())
+                .sql(" FROM saga_node_event WHERE saga_id = ")
+                .param()
+                .bind::<diesel::sql_types::Uuid, _>(saga_id);
+            let batch = pagination_query.with_parameters(&p.current_pagparams())
+                .paginate_by_diesel_columns::<dsl::node_id, dsl::event_type>()
+                .query::<AsSelect<db::saga_types::SagaNodeEvent, Pg>>()
+                .load_async(&*conn)
+                .await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
             paginator = p.found_batch(&batch, &|row| {
                 (row.node_id, row.event_type.clone())
