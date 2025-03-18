@@ -1011,9 +1011,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.10.0"
+version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f61dac84819c6588b558454b194026eb1f09c293b9036ae9b159e74e73ab6cf9"
+checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
 dependencies = [
  "serde",
 ]
@@ -2105,9 +2105,9 @@ dependencies = [
 
 [[package]]
 name = "daft"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a75caf1eeef382d47bf5d3012b5ec521311cd876a1304ac8807ec86d4df42a7"
+checksum = "ca607475e0cd38d41f8d1a5bd8985e7cdc1a205a69942211a475b02e48e406e0"
 dependencies = [
  "daft-derive",
  "newtype-uuid",
@@ -2118,9 +2118,9 @@ dependencies = [
 
 [[package]]
 name = "daft-derive"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a851e4efac7afda4a5e1a11fea1d65ef528dbdcff08177d7087e4bb6225e60a9"
+checksum = "a78e2436bc785be168ec3641025f713acc89b541ab41c318d7a1cfb4a4c2c50e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4449,6 +4449,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "id-map"
+version = "0.1.0"
+dependencies = [
+ "daft",
+ "derive-where",
+ "omicron-workspace-hack",
+ "proptest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "test-strategy",
+]
+
+[[package]]
 name = "ident_case"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4594,9 +4608,9 @@ checksum = "bfa799dd5ed20a7e349f3b4639aa80d74549c81716d9ec4f994c9b5815598306"
 
 [[package]]
 name = "indoc"
-version = "2.0.5"
+version = "2.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b248f5224d1d606005e02c97f5aa4e88eeb230488bcc03bc9ca4d7991399f2b5"
+checksum = "f4c7245a08504955605670dbf141fceab975f15ca21570696aebe9d2e71576bd"
 
 [[package]]
 name = "ingot"
@@ -5774,6 +5788,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "pretty_assertions",
  "schemars",
  "serde",
  "serde_json",
@@ -5866,6 +5881,7 @@ dependencies = [
  "futures",
  "gateway-client",
  "hyper-rustls 0.26.0",
+ "id-map",
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -6104,6 +6120,7 @@ dependencies = [
  "diesel",
  "futures",
  "httptest",
+ "id-map",
  "internal-dns-resolver",
  "internal-dns-types",
  "ipnet",
@@ -6147,6 +6164,7 @@ dependencies = [
  "debug-ignore",
  "expectorate",
  "gateway-client",
+ "id-map",
  "illumos-utils",
  "indexmap 2.7.1",
  "internal-dns-resolver",
@@ -6322,6 +6340,7 @@ dependencies = [
  "http",
  "http-body-util",
  "hyper",
+ "id-map",
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -6382,6 +6401,7 @@ dependencies = [
  "gateway-client",
  "http",
  "humantime",
+ "id-map",
  "illumos-utils",
  "internal-dns-types",
  "ipnetwork",
@@ -7032,6 +7052,7 @@ dependencies = [
  "hyper",
  "hyper-rustls 0.26.0",
  "hyper-staticfile",
+ "id-map",
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -7182,6 +7203,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oximeter-client",
  "oximeter-db",
+ "petgraph 0.7.1",
  "pq-sys",
  "ratatui",
  "reedline",
@@ -7347,6 +7369,7 @@ dependencies = [
  "http-range",
  "hyper",
  "hyper-staticfile",
+ "id-map",
  "illumos-utils",
  "installinator-common",
  "internal-dns-resolver",
@@ -7538,6 +7561,7 @@ dependencies = [
  "indexmap 2.7.1",
  "indicatif",
  "inout",
+ "ipnetwork",
  "itertools 0.10.5",
  "itertools 0.12.1",
  "lalrpop-util",
@@ -7555,6 +7579,7 @@ dependencies = [
  "num-integer",
  "num-iter",
  "num-traits",
+ "once_cell",
  "openapiv3",
  "peg-runtime",
  "pem-rfc7468",
@@ -8992,9 +9017,9 @@ dependencies = [
 
 [[package]]
 name = "prettyplease"
-version = "0.2.29"
+version = "0.2.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6924ced06e1f7dfe3fa48d57b9f74f55d8915f5036121bef647ef4b204895fac"
+checksum = "f1ccf34da56fc294e7d4ccf69a85992b7dfb826b7cf57bac6a70bba3494cc08a"
 dependencies = [
  "proc-macro2",
  "syn 2.0.98",
@@ -9076,9 +9101,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.93"
+version = "1.0.94"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60946a68e5f9d28b0dc1c21bb8a97ee7d018a8b322fa57838ba31cc878e22d99"
+checksum = "a31971752e70b8b2686d7e46ec17fb38dad4051d94024c88df49b667caea9c84"
 dependencies = [
  "unicode-ident",
 ]
@@ -9452,9 +9477,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.38"
+version = "1.0.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e4dccaaaf89514f546c693ddc140f729f958c247918a13380cccc6078391acc"
+checksum = "c1f1914ce909e1658d9907913b4b91947430c7d9be598b15a1912935b8c04801"
 dependencies = [
  "proc-macro2",
 ]
@@ -9604,7 +9629,7 @@ dependencies = [
  "cassowary",
  "compact_str",
  "crossterm",
- "indoc 2.0.5",
+ "indoc 2.0.6",
  "instability",
  "itertools 0.13.0",
  "lru",
@@ -12996,7 +13021,7 @@ dependencies = [
  "indent_write",
  "indexmap 2.7.1",
  "indicatif",
- "indoc 2.0.5",
+ "indoc 2.0.6",
  "libsw",
  "linear-map",
  "omicron-test-utils",

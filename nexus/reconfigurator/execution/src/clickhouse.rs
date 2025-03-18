@@ -45,6 +45,33 @@ pub(crate) async fn deploy_nodes(
     blueprint: &Blueprint,
     clickhouse_cluster_config: &ClickhouseClusterConfig,
 ) -> Result<(), Vec<anyhow::Error>> {
+    // Important: We must continue to pass in `BlueprintZoneDisposition::any`
+    // here, instead of `BlueprintZoneDisposition::is_in_service`, as would
+    // be expected.
+    //
+    // We can only add or remove one clickhouse keeper node at a time,
+    // and the planner generates the `ClickhouseClusterConfig` under this
+    // assumption. Unfortunately the `ClickhouseClusterConfig` only tracks
+    // the zone id -> keeper id mapping, and the executor does the zone to
+    // IP lookup in the `keeper_configs` function below. If two zones were
+    // expunged simultaneously (in the same planner round) and they both
+    // contained clickhouse keepers, only one would be removed from the
+    // `ClickhouseClusterConfig`. If we then only tried to lookup zone IPs based
+    // on in-service zones in `keeper_configs` below, we'd fail to find an ip
+    // for a given keeper id and execution would fail.
+    //
+    // This code is correct right now because we never remove any expunged zones
+    // from a blueprint. As soon as we start garbage collecting these zones
+    // however, we'll run into same problem where there won't be a matching zone
+    // with an IP that we can use. We can fix that in one of two ways:
+    //
+    // 1. Change the planner to put the ip address inside the
+    //    `ClickhouseClusterConfig`.
+    // 2. Gate the removal of zones from blueprints on the zone id
+    //    not being used elsewhere in the blueprint, like, say, the
+    //    `ClickhouseClusterConfig`.
+    //
+    // This is tracked in https://github.com/oxidecomputer/omicron/issues/7724
     deploy_nodes_impl(
         opctx,
         blueprint.all_omicron_zones(BlueprintZoneDisposition::any),
