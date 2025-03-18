@@ -12,6 +12,7 @@ use illumos_utils::zpool::ZpoolName;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
 use sled_storage::config::MountConfig;
+use sled_storage::dataset::CONFIG_DATASET;
 use sled_storage::disk::Disk;
 use sled_storage::disk::DiskError;
 use sled_storage::disk::RawDisk;
@@ -147,6 +148,13 @@ impl AllDisks {
         self.all_zpools(DiskVariant::M2).map(|zpool| {
             zpool.dataset_mountpoint(&self.mount_config.root, dataset)
         })
+    }
+
+    /// Returns all `CONFIG_DATASET` paths within available M.2 disks.
+    pub fn all_m2_config_datasets(
+        &self,
+    ) -> impl Iterator<Item = Utf8PathBuf> + '_ {
+        self.all_m2_mountpoints(CONFIG_DATASET)
     }
 
     // Returns all zpools of a particular variant.

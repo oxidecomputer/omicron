@@ -72,6 +72,7 @@ impl ConfigReconciler {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum CurrentConfig {
     // We're still waiting on the M.2 drives to be found: We don't yet know
     // whether we have a ledgered config, nor would we be able to write one.
