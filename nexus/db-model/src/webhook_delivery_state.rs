@@ -61,6 +61,13 @@ impl From<views::WebhookDeliveryState> for WebhookDeliveryState {
     }
 }
 
+impl std::str::FromStr for WebhookDeliveryState {
+    type Err = omicron_common::api::external::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        views::WebhookDeliveryState::from_str(s).map(Into::into)
+    }
+}
+
 impl diesel::query_builder::QueryId for WebhookDeliveryStateEnum {
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;
