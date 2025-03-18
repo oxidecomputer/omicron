@@ -5,7 +5,7 @@
 use std::convert::Infallible;
 
 use super::CurrentConfig;
-use super::disks::AllDisks;
+use super::internal_disks::InternalDisksHandle;
 use crate::services::OmicronZonesConfigLocal;
 use camino::Utf8PathBuf;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
@@ -71,13 +71,13 @@ impl LedgerTaskHandle {
 pub struct LedgerTask {
     rx: mpsc::Receiver<WriteNewConfig>,
     current_config: watch::Sender<CurrentConfig>,
-    all_disks: watch::Receiver<AllDisks>,
+    internal_disks: InternalDisksHandle,
     log: Logger,
 }
 
 impl LedgerTask {
     pub fn spawn(
-        all_disks: watch::Receiver<AllDisks>,
+        internal_disks: InternalDisksHandle,
         log: Logger,
     ) -> (LedgerTaskHandle, watch::Receiver<CurrentConfig>) {
         // We don't expect messages to be queued for long in this channel, so
@@ -92,7 +92,7 @@ impl LedgerTask {
         let (current_config, current_config_rx) =
             watch::channel(CurrentConfig::WaitingForM2Disks);
 
-        tokio::spawn(Self { rx, current_config, all_disks, log }.run());
+        tokio::spawn(Self { rx, current_config, internal_disks, log }.run());
 
         (LedgerTaskHandle { tx }, current_config_rx)
     }
@@ -147,11 +147,8 @@ impl LedgerTask {
         &mut self,
         new_config: OmicronSledConfig,
     ) -> Result<(), LedgerTaskError> {
-        let config_datasets = self
-            .all_disks
-            .borrow_and_update()
-            .all_m2_config_datasets()
-            .collect::<Vec<_>>();
+        let config_datasets =
+            self.internal_disks.borrow_and_update().all_config_datasets();
 
         // This would be very unusual: We waited for at least one M.2 to be
         // present in `run_impl`, so if this is empty that means we've lost all
@@ -266,11 +263,8 @@ impl LedgerTask {
 
     async fn wait_for_m2_disks(&mut self) -> Result<(), LedgerTaskExit> {
         loop {
-            let config_datasets = self
-                .all_disks
-                .borrow_and_update()
-                .all_m2_config_datasets()
-                .collect::<Vec<_>>();
+            let config_datasets =
+                self.internal_disks.borrow_and_update().all_config_datasets();
 
             // The condition we're waiting for: do we have at least one M.2?
             if !config_datasets.is_empty() {
@@ -282,28 +276,24 @@ impl LedgerTask {
                 return Ok(());
             }
 
-            // We don't have at least one M.2; wait for a change in all_disks,
-            // and reject any incoming requests in the meantime.
+            // We don't have at least one M.2; wait for a change in
+            // internal_disks, and reject any incoming requests in the meantime.
             tokio::select! {
-                // Cancel-safe per docs on watch::Receiver::changed()
-                result = self.all_disks.changed() => {
+                // Cancel-safe per docs on `changed()`
+                result = self.internal_disks.changed() => {
                     if result.is_err() {
-                        return Err(LedgerTaskExit::AllDisksSenderDropped);
+                        return Err(LedgerTaskExit::InternalDisksSenderDropped);
                     }
                     continue;
                 }
 
-                // Cancel-safe per docs on mpsc::Receiver::recv()
+                // Cancel-safe per docs on `recv()`
                 request = self.rx.recv() => {
-                    let Some(request) = request else {
+                    let Some(WriteNewConfig { tx, .. }) = request else {
                         return Err(LedgerTaskExit::LedgerTaskHandleDropped);
                     };
-                    match request {
-                        WriteNewConfig { tx, .. } => {
-                            // We don't care if the receiver is gone.
-                            let _ = tx.send(Err(LedgerTaskError::NoM2Disks));
-                        }
-                    }
+                    // We don't care if the receiver is gone.
+                    let _ = tx.send(Err(LedgerTaskError::NoM2Disks));
                 }
             }
         }
@@ -315,8 +305,8 @@ impl LedgerTask {
 // by this error (in the hopefully-impossible event we see it outside of tests).
 #[derive(Debug, thiserror::Error)]
 enum LedgerTaskExit {
-    #[error("internal error: AllDisks watch channel Sender dropped")]
-    AllDisksSenderDropped,
+    #[error("internal error: InternalDisks watch channel Sender dropped")]
+    InternalDisksSenderDropped,
     #[error("internal error: LedgerTaskHandle dropped")]
     LedgerTaskHandleDropped,
 }
