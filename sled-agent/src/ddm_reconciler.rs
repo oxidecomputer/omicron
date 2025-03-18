@@ -86,14 +86,27 @@ impl DdmReconciler {
         });
     }
 
-    pub fn set_internal_dns_subnets(
+    /// Add an internal DNS subset to the set we should be advertising.
+    ///
+    /// This method is idempotent.
+    pub fn add_internal_dns_subnet(
         &self,
-        internal_dns_subnets: BTreeSet<Ipv6Subnet<SLED_PREFIX>>,
+        internal_dns_subnet: Ipv6Subnet<SLED_PREFIX>,
     ) {
         self.prefixes.send_if_modified(|prefixes| {
-            let modified = prefixes.internal_dns != internal_dns_subnets;
-            prefixes.internal_dns = internal_dns_subnets;
-            modified
+            prefixes.internal_dns.insert(internal_dns_subnet)
+        });
+    }
+
+    /// Remove an internal DNS subnet from the set we should be advertising.
+    ///
+    /// This method is idempotent.
+    pub fn remove_internal_dns_subnet(
+        &self,
+        internal_dns_subnet: Ipv6Subnet<SLED_PREFIX>,
+    ) {
+        self.prefixes.send_if_modified(|prefixes| {
+            prefixes.internal_dns.remove(&internal_dns_subnet)
         });
     }
 }
