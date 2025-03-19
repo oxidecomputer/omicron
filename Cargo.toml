@@ -392,6 +392,7 @@ dropshot = { version = "0.16.0", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.19"
 either = "1.14.0"
 ereporter-api = { path = "ereport/api" }
+ereporter-client = { path = "clients/ereporter-client" }
 ereport-types = { path = "ereport/types" }
 expectorate = "1.1.0"
 fatfs = "0.3.6"
