@@ -102,10 +102,6 @@ mod tests {
     #[test]
     fn test_roundtrip() {
         let ereport = Ereport {
-            reporter: Reporter {
-                reporter_id: Uuid::new_v4(),
-                gen_id: EreporterGenerationUuid::new_v4(),
-            },
             ena: Ena(0x3cae76440c100001),
             report: ReportKind::Event(Event {
                 // Example ereport taken from https://rfd.shared.oxide.computer/rfd/0520#_ereports_in_the_fma
