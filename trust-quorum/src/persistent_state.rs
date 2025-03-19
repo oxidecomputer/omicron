@@ -39,9 +39,9 @@ impl PersistentState {
         self.lrtq.is_none() && self.last_committed_epoch().is_none()
     }
 
-    // Is there only lrtq data, and no committed configurations yet?
-    pub fn is_lrtq_only(&self) -> bool {
-        self.lrtq.is_some() && self.last_committed_epoch().is_none()
+    // Is the last committed configuration for lrtq?
+    pub fn is_last_committed_config_lrtq(&self) -> bool {
+        self.lrtq.is_some() && (self.last_committed_epoch() == Some(Epoch(0)))
     }
 
     pub fn last_prepared_epoch(&self) -> Option<Epoch> {
@@ -49,7 +49,11 @@ impl PersistentState {
     }
 
     pub fn last_committed_epoch(&self) -> Option<Epoch> {
-        self.commits.keys().last().map(|epoch| *epoch)
+        self.commits
+            .keys()
+            .last()
+            .map(|epoch| *epoch)
+            .or_else(|| if self.lrtq.is_some() { Some(Epoch(0)) } else { None })
     }
 
     // Get the configuration for the current epoch from its prepare message
