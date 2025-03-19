@@ -1387,9 +1387,9 @@ stdout:
 blueprint  ......<REDACTED_BLUEPRINT_ID>.......
 parent:    <none>
 
-  sled: ..........<REDACTED_UUID>........... (active)
+  sled: ..........<REDACTED_UUID>........... (active, config generation 2)
 
-    physical disks at generation 2:
+    physical disks:
     -----------------------------------------------------------------
     vendor        model              serial               disposition
     -----------------------------------------------------------------
@@ -1405,22 +1405,22 @@ parent:    <none>
     nexus-tests   nexus-test-model   nexus-test-disk-19   in service 
 
 
-    datasets at generation 2:
+    datasets:
     ---------------------------------------------------------------------------
     dataset name   dataset id   disposition   quota   reservation   compression
     ---------------------------------------------------------------------------
 
 
-    omicron zones at generation 2:
+    omicron zones:
     --------------------------------------------------------------
     zone type   zone id   image source   disposition   underlay IP
     --------------------------------------------------------------
 
 
 
-  sled: ..........<REDACTED_UUID>........... (active)
+  sled: ..........<REDACTED_UUID>........... (active, config generation 2)
 
-    physical disks at generation 2:
+    physical disks:
     ----------------------------------------------------------------
     vendor        model              serial              disposition
     ----------------------------------------------------------------
@@ -1436,7 +1436,7 @@ parent:    <none>
     nexus-tests   nexus-test-model   nexus-test-disk-9   in service 
 
 
-    datasets at generation 2:
+    datasets:
     -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota   reservation   compression
     -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -1448,7 +1448,7 @@ parent:    <none>
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
 
 
-    omicron zones at generation 2:
+    omicron zones:
     ---------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition   underlay IP     
     ---------------------------------------------------------------------------------------------------------
@@ -1483,9 +1483,9 @@ stdout:
 blueprint  ......<REDACTED_BLUEPRINT_ID>.......
 parent:    <none>
 
-  sled: ..........<REDACTED_UUID>........... (active)
+  sled: ..........<REDACTED_UUID>........... (active, config generation 2)
 
-    physical disks at generation 2:
+    physical disks:
     -----------------------------------------------------------------
     vendor        model              serial               disposition
     -----------------------------------------------------------------
@@ -1501,22 +1501,22 @@ parent:    <none>
     nexus-tests   nexus-test-model   nexus-test-disk-19   in service 
 
 
-    datasets at generation 2:
+    datasets:
     ---------------------------------------------------------------------------
     dataset name   dataset id   disposition   quota   reservation   compression
     ---------------------------------------------------------------------------
 
 
-    omicron zones at generation 2:
+    omicron zones:
     --------------------------------------------------------------
     zone type   zone id   image source   disposition   underlay IP
     --------------------------------------------------------------
 
 
 
-  sled: ..........<REDACTED_UUID>........... (active)
+  sled: ..........<REDACTED_UUID>........... (active, config generation 2)
 
-    physical disks at generation 2:
+    physical disks:
     ----------------------------------------------------------------
     vendor        model              serial              disposition
     ----------------------------------------------------------------
@@ -1532,7 +1532,7 @@ parent:    <none>
     nexus-tests   nexus-test-model   nexus-test-disk-9   in service 
 
 
-    datasets at generation 2:
+    datasets:
     -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota   reservation   compression
     -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -1544,7 +1544,7 @@ parent:    <none>
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
 
 
-    omicron zones at generation 2:
+    omicron zones:
     ---------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition   underlay IP     
     ---------------------------------------------------------------------------------------------------------
@@ -1581,9 +1581,9 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
 
  UNCHANGED SLEDS:
 
-  sled ..........<REDACTED_UUID>........... (active):
+  sled ..........<REDACTED_UUID>........... (active, config generation 2):
 
-    physical disks at generation 2:
+    physical disks:
     -----------------------------------------------------------------
     vendor        model              serial               disposition
     -----------------------------------------------------------------
@@ -1599,9 +1599,9 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
     nexus-tests   nexus-test-model   nexus-test-disk-19   in service 
 
 
-  sled ..........<REDACTED_UUID>........... (active):
+  sled ..........<REDACTED_UUID>........... (active, config generation 2):
 
-    physical disks at generation 2:
+    physical disks:
     ----------------------------------------------------------------
     vendor        model              serial              disposition
     ----------------------------------------------------------------
@@ -1617,7 +1617,7 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
     nexus-tests   nexus-test-model   nexus-test-disk-9   in service 
 
 
-    datasets at generation 2:
+    datasets:
     -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota   reservation   compression
     -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -1629,7 +1629,7 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
     oxp_..........<REDACTED_UUID>.........../crypt/zone/oxz_nexus_..........<REDACTED_UUID>...........             ..........<REDACTED_UUID>...........   in service    none    none          off        
 
 
-    omicron zones at generation 2:
+    omicron zones:
     ---------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition   underlay IP     
     ---------------------------------------------------------------------------------------------------------

@@ -1707,20 +1707,12 @@ table! {
 }
 
 table! {
-    bp_sled_state (blueprint_id, sled_id) {
+    bp_sled_metadata (blueprint_id, sled_id) {
         blueprint_id -> Uuid,
         sled_id -> Uuid,
 
         sled_state -> crate::SledStateEnum,
-    }
-}
-
-table! {
-    bp_sled_omicron_physical_disks (blueprint_id, sled_id) {
-        blueprint_id -> Uuid,
-        sled_id -> Uuid,
-
-        generation -> Int8,
+        sled_agent_generation -> Int8,
     }
 }
 
@@ -1743,15 +1735,6 @@ table! {
 }
 
 table! {
-    bp_sled_omicron_datasets (blueprint_id, sled_id) {
-        blueprint_id -> Uuid,
-        sled_id -> Uuid,
-
-        generation -> Int8,
-    }
-}
-
-table! {
     bp_omicron_dataset (blueprint_id, id) {
         blueprint_id -> Uuid,
         sled_id -> Uuid,
@@ -1768,15 +1751,6 @@ table! {
         quota -> Nullable<Int8>,
         reservation -> Nullable<Int8>,
         compression -> Text,
-    }
-}
-
-table! {
-    bp_sled_omicron_zones (blueprint_id, sled_id) {
-        blueprint_id -> Uuid,
-        sled_id -> Uuid,
-
-        generation -> Int8,
     }
 }
 

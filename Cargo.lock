@@ -4449,6 +4449,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "id-map"
+version = "0.1.0"
+dependencies = [
+ "daft",
+ "derive-where",
+ "omicron-workspace-hack",
+ "proptest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "test-strategy",
+]
+
+[[package]]
 name = "ident_case"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5774,6 +5788,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "pretty_assertions",
  "schemars",
  "serde",
  "serde_json",
@@ -5866,6 +5881,7 @@ dependencies = [
  "futures",
  "gateway-client",
  "hyper-rustls 0.26.0",
+ "id-map",
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -6104,6 +6120,7 @@ dependencies = [
  "diesel",
  "futures",
  "httptest",
+ "id-map",
  "internal-dns-resolver",
  "internal-dns-types",
  "ipnet",
@@ -6147,6 +6164,7 @@ dependencies = [
  "debug-ignore",
  "expectorate",
  "gateway-client",
+ "id-map",
  "illumos-utils",
  "indexmap 2.7.1",
  "internal-dns-resolver",
@@ -6322,6 +6340,7 @@ dependencies = [
  "http",
  "http-body-util",
  "hyper",
+ "id-map",
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -6382,6 +6401,7 @@ dependencies = [
  "gateway-client",
  "http",
  "humantime",
+ "id-map",
  "illumos-utils",
  "internal-dns-types",
  "ipnetwork",
@@ -7035,6 +7055,7 @@ dependencies = [
  "hyper",
  "hyper-rustls 0.26.0",
  "hyper-staticfile",
+ "id-map",
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -7186,6 +7207,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oximeter-client",
  "oximeter-db",
+ "petgraph 0.7.1",
  "pq-sys",
  "ratatui",
  "reedline",
@@ -7351,6 +7373,7 @@ dependencies = [
  "http-range",
  "hyper",
  "hyper-staticfile",
+ "id-map",
  "illumos-utils",
  "installinator-common",
  "internal-dns-resolver",
@@ -7542,6 +7565,7 @@ dependencies = [
  "indexmap 2.7.1",
  "indicatif",
  "inout",
+ "ipnetwork",
  "itertools 0.10.5",
  "itertools 0.12.1",
  "lalrpop-util",
@@ -7559,6 +7583,7 @@ dependencies = [
  "num-integer",
  "num-iter",
  "num-traits",
+ "once_cell",
  "openapiv3",
  "peg-runtime",
  "pem-rfc7468",
@@ -7570,7 +7595,6 @@ dependencies = [
  "postgres-types",
  "predicates",
  "proc-macro2",
- "qorb",
  "quote",
  "rand 0.8.5",
  "regex",
@@ -9376,17 +9400,13 @@ dependencies = [
  "async-trait",
  "debug-ignore",
  "derive-where",
- "dropshot 0.12.0",
  "futures",
  "hickory-resolver",
  "rand 0.8.5",
- "schemars",
  "serde",
- "serde_json",
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
- "tokio-tungstenite 0.24.0",
  "tracing",
  "usdt",
 ]
@@ -12280,18 +12300,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tokio-tungstenite"
-version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edc5f74e248dc973e0dbb7b74c7e0d6fcc301c694ff50049504004ef4d0cdcd9"
-dependencies = [
- "futures-util",
- "log",
- "tokio",
- "tungstenite 0.24.0",
-]
-
-[[package]]
 name = "tokio-util"
 version = "0.7.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12666,24 +12674,6 @@ name = "tungstenite"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e2e2ce1e47ed2994fd43b04c8f618008d4cabdd5ee34027cf14f9d918edd9c8"
-dependencies = [
- "byteorder",
- "bytes",
- "data-encoding",
- "http",
- "httparse",
- "log",
- "rand 0.8.5",
- "sha1",
- "thiserror 1.0.69",
- "utf-8",
-]
-
-[[package]]
-name = "tungstenite"
-version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18e5b8366ee7a95b16d32197d0b2604b43a0be89dc5fac9f8e96ccafbaedda8a"
 dependencies = [
  "byteorder",
  "bytes",
