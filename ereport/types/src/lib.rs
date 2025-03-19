@@ -33,7 +33,6 @@ pub struct Ereport {
     JsonSchema,
 )]
 #[repr(transparent)]
-#[serde(transparent)]
 pub struct Ena(pub u64);
 
 impl fmt::Display for Ena {

@@ -30,10 +30,7 @@
             "name": "committed",
             "description": "The ENA of the last ereport committed to persistent storage from the requested reporter generation.\n\nIf the generation parameter matches the reporter's current generation, it is permitted to discard any ereports with ENAs up to and including this value. If the generation has changed from the provided generation, the reporter will not discard data.",
             "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
+              "$ref": "#/components/schemas/Ena"
             }
           },
           {
@@ -61,10 +58,7 @@
             "name": "start_at",
             "description": "If present, the reporter should not include ENAs earlier than this one in its response, provided that the query's requested generation matches the current generation.",
             "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
+              "$ref": "#/components/schemas/Ena"
             }
           }
         ],
@@ -91,15 +85,23 @@
   },
   "components": {
     "schemas": {
+      "Ena": {
+        "description": "An Error Numeric Association (ENA)",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
       "Ereport": {
         "description": "An ereport message.",
         "type": "object",
         "properties": {
           "ena": {
             "description": "The ENA of the ereport.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ena"
+              }
+            ]
           },
           "report": {
             "description": "The body of the ereport.",
@@ -130,9 +132,11 @@
           "next_page": {
             "nullable": true,
             "description": "If more ereports are present, this value contains the ENA of the ereport immediately after the last report in this tranche. If this is None, no more ereports are currently avaialble.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ena"
+              }
+            ]
           },
           "reports": {
             "description": "The values of the ereports in this tranche.",
