@@ -71,7 +71,6 @@ pub enum RssStep {
     InitTrustQuorum,
     NetworkConfigUpdate,
     SledInit,
-    EnsureStorage,
     InitDns,
     ConfigureDns,
     InitNtp,

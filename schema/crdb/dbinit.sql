@@ -2439,6 +2439,40 @@ ON CONFLICT DO NOTHING;
 
 /*******************************************************************/
 
+-- The source of the software release that should be deployed to the rack.
+CREATE TYPE IF NOT EXISTS omicron.public.target_release_source AS ENUM (
+    'unspecified',
+    'system_version'
+);
+
+-- Software releases that should be/have been deployed to the rack. The
+-- current target release is the one with the largest generation number.
+CREATE TABLE IF NOT EXISTS omicron.public.target_release (
+    generation INT8 NOT NULL PRIMARY KEY,
+    time_requested TIMESTAMPTZ NOT NULL,
+    release_source omicron.public.target_release_source NOT NULL,
+    tuf_repo_id UUID, -- "foreign key" into the `tuf_repo` table
+    CONSTRAINT tuf_repo_for_system_version CHECK (
+      (release_source != 'system_version' AND tuf_repo_id IS NULL) OR
+      (release_source = 'system_version' AND tuf_repo_id IS NOT NULL)
+    )
+);
+
+-- System software is by default from the `install` dataset.
+INSERT INTO omicron.public.target_release (
+    generation,
+    time_requested,
+    release_source,
+    tuf_repo_id
+) VALUES (
+    1,
+    NOW(),
+    'unspecified',
+    NULL
+) ON CONFLICT DO NOTHING;
+
+/*******************************************************************/
+
 /*
  * Support Bundles
  */
@@ -3721,9 +3755,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_clickhouse_keeper_membership (
  * will eventually prune old blueprint targets, so it will not always be
  * possible to view the entire history.
  *
- * `bp_sled_omicron_zones`, `bp_omicron_zone`, and `bp_omicron_zone_nic` are
- * nearly identical to their `inv_*` counterparts, and record the
- * `OmicronZonesConfig` for each sled.
+ * `bp_omicron_zone` and `bp_omicron_zone_nic` are nearly identical to their
+ * `inv_*` counterparts, and record the `OmicronZoneConfig`s for each sled.
  */
 
 CREATE TYPE IF NOT EXISTS omicron.public.bp_zone_disposition AS ENUM (
@@ -3802,23 +3835,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_target (
     time_made_target TIMESTAMPTZ NOT NULL
 );
 
--- state of a sled in a blueprint
-CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_state (
+-- metadata associated with a single sled in a blueprint
+CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
     -- foreign key into `blueprint` table
     blueprint_id UUID NOT NULL,
 
     sled_id UUID NOT NULL,
     sled_state omicron.public.sled_state NOT NULL,
-    PRIMARY KEY (blueprint_id, sled_id)
-);
-
--- description of a collection of omicron physical disks stored in a blueprint.
-CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_physical_disks (
-    -- foreign key into `blueprint` table
-    blueprint_id UUID NOT NULL,
-
-    sled_id UUID NOT NULL,
-    generation INT8 NOT NULL,
+    sled_agent_generation INT8 NOT NULL,
     PRIMARY KEY (blueprint_id, sled_id)
 );
 
@@ -3857,16 +3881,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_physical_disk  (
     )
 );
 
--- description of a collection of omicron datasets stored in a blueprint
-CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_datasets (
-    -- foreign key into the `blueprint` table
-    blueprint_id UUID NOT NULL,
-    sled_id UUID NOT NULL,
-    generation INT8 NOT NULL,
-
-    PRIMARY KEY (blueprint_id, sled_id)
-);
-
 -- description of an omicron dataset specified in a blueprint.
 CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_dataset (
     -- foreign key into the `blueprint` table
@@ -3901,17 +3915,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_dataset (
     ),
 
     PRIMARY KEY (blueprint_id, id)
-);
-
--- see inv_sled_omicron_zones, which is identical except it references a
--- collection whereas this table references a blueprint
-CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_zones (
-    -- foreign key into `blueprint` table
-    blueprint_id UUID NOT NULL,
-
-    sled_id UUID NOT NULL,
-    generation INT8 NOT NULL,
-    PRIMARY KEY (blueprint_id, sled_id)
 );
 
 -- description of omicron zones specified in a blueprint
@@ -5000,7 +5003,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '129.0.0', NULL)
+    (TRUE, NOW(), NOW(), '131.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

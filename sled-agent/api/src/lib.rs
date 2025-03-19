@@ -13,7 +13,7 @@ use dropshot::{
     TypedBody,
 };
 use nexus_sled_agent_shared::inventory::{
-    Inventory, OmicronZonesConfig, SledRole,
+    Inventory, OmicronSledConfig, OmicronSledConfigResult, SledRole,
 };
 use omicron_common::{
     api::external::Generation,
@@ -24,10 +24,7 @@ use omicron_common::{
             SledIdentifiers, SwitchPorts, VirtualNetworkInterfaceHost,
         },
     },
-    disk::{
-        DatasetsConfig, DatasetsManagementResult, DiskVariant,
-        DisksManagementResult, OmicronPhysicalDisksConfig,
-    },
+    disk::{DatasetsConfig, DiskVariant, OmicronPhysicalDisksConfig},
     update::ArtifactHash,
 };
 use omicron_uuid_kinds::{
@@ -267,22 +264,12 @@ pub trait SledAgentApi {
 
     #[endpoint {
         method = PUT,
-        path = "/omicron-zones",
+        path = "/omicron-config",
     }]
-    async fn omicron_zones_put(
+    async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<OmicronZonesConfig>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// Configures datasets to be used on this sled
-    #[endpoint {
-        method = PUT,
-        path = "/datasets",
-    }]
-    async fn datasets_put(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<DatasetsConfig>,
-    ) -> Result<HttpResponseOk<DatasetsManagementResult>, HttpError>;
+        body: TypedBody<OmicronSledConfig>,
+    ) -> Result<HttpResponseOk<OmicronSledConfigResult>, HttpError>;
 
     /// Lists the datasets that this sled is configured to use
     #[endpoint {
@@ -300,15 +287,6 @@ pub trait SledAgentApi {
     async fn omicron_physical_disks_get(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<OmicronPhysicalDisksConfig>, HttpError>;
-
-    #[endpoint {
-        method = PUT,
-        path = "/omicron-physical-disks",
-    }]
-    async fn omicron_physical_disks_put(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<OmicronPhysicalDisksConfig>,
-    ) -> Result<HttpResponseOk<DisksManagementResult>, HttpError>;
 
     #[endpoint {
         method = GET,
