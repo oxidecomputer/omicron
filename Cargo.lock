@@ -691,7 +691,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=e5c85d84b0a51803caffb335a1063612edb02f6d#e5c85d84b0a51803caffb335a1063612edb02f6d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=0b1c7c5c75be8d395246286a48cee26199c08418#0b1c7c5c75be8d395246286a48cee26199c08418"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -701,7 +701,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=e5c85d84b0a51803caffb335a1063612edb02f6d#e5c85d84b0a51803caffb335a1063612edb02f6d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=0b1c7c5c75be8d395246286a48cee26199c08418#0b1c7c5c75be8d395246286a48cee26199c08418"
 dependencies = [
  "libc",
  "strum",
@@ -939,7 +939,7 @@ dependencies = [
 name = "bootstrap-agent-api"
 version = "0.1.0"
 dependencies = [
- "dropshot 0.16.0",
+ "dropshot",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -1226,7 +1226,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "dropshot 0.16.0",
+ "dropshot",
  "futures",
  "libc",
  "omicron-common",
@@ -1398,7 +1398,7 @@ dependencies = [
  "clap",
  "clickhouse-admin-server-client",
  "clickhouse-admin-types",
- "dropshot 0.16.0",
+ "dropshot",
  "futures",
  "omicron-common",
  "omicron-workspace-hack",
@@ -1419,7 +1419,7 @@ name = "clickhouse-admin-api"
 version = "0.1.0"
 dependencies = [
  "clickhouse-admin-types",
- "dropshot 0.16.0",
+ "dropshot",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -1479,7 +1479,7 @@ dependencies = [
  "camino",
  "clickhouse-admin-types",
  "clickward",
- "dropshot 0.16.0",
+ "dropshot",
  "omicron-workspace-hack",
 ]
 
@@ -1566,7 +1566,7 @@ name = "cockroach-admin-api"
 version = "0.1.0"
 dependencies = [
  "cockroach-admin-types",
- "dropshot 0.16.0",
+ "dropshot",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -1837,7 +1837,7 @@ name = "crdb-seed"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dropshot 0.16.0",
+ "dropshot",
  "omicron-test-utils",
  "omicron-workspace-hack",
  "slog",
@@ -1986,7 +1986,7 @@ dependencies = [
  "anyhow",
  "atty",
  "crucible-workspace-hack",
- "dropshot 0.16.0",
+ "dropshot",
  "nix 0.29.0",
  "rustls-pemfile 1.0.4",
  "schemars",
@@ -2586,7 +2586,7 @@ dependencies = [
  "clap",
  "dns-server-api",
  "dns-service-client",
- "dropshot 0.16.0",
+ "dropshot",
  "expectorate",
  "hickory-client",
  "hickory-proto",
@@ -2621,7 +2621,7 @@ name = "dns-server-api"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "dropshot 0.16.0",
+ "dropshot",
  "internal-dns-types",
  "omicron-workspace-hack",
  "openapi-manager-types",
@@ -2701,54 +2701,6 @@ dependencies = [
 
 [[package]]
 name = "dropshot"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab804b8d4ab58d96e1e19c8ef87e1747a70d2819e92b659d6fe8d5ac5ac44d50"
-dependencies = [
- "async-stream",
- "async-trait",
- "base64 0.22.1",
- "bytes",
- "camino",
- "chrono",
- "debug-ignore",
- "dropshot_endpoint 0.12.0",
- "form_urlencoded",
- "futures",
- "hostname 0.4.0",
- "http",
- "http-body-util",
- "hyper",
- "hyper-util",
- "indexmap 2.7.1",
- "multer",
- "openapiv3",
- "paste",
- "percent-encoding",
- "rustls 0.22.4",
- "rustls-pemfile 2.2.0",
- "schemars",
- "scopeguard",
- "serde",
- "serde_json",
- "serde_path_to_error",
- "serde_urlencoded",
- "sha1",
- "slog",
- "slog-async",
- "slog-bunyan",
- "slog-json",
- "slog-term",
- "tokio",
- "tokio-rustls 0.25.0",
- "toml 0.8.20",
- "uuid",
- "version_check",
- "waitgroup",
-]
-
-[[package]]
-name = "dropshot"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a37c505dad56e0c1fa5ed47e29fab1a1ab2d1a9d93e952024bb47168969705f6"
@@ -2760,7 +2712,7 @@ dependencies = [
  "camino",
  "chrono",
  "debug-ignore",
- "dropshot_endpoint 0.16.0",
+ "dropshot_endpoint",
  "form_urlencoded",
  "futures",
  "hostname 0.4.0",
@@ -2796,20 +2748,6 @@ dependencies = [
  "uuid",
  "version_check",
  "waitgroup",
-]
-
-[[package]]
-name = "dropshot_endpoint"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "796be76b11b79de0decd7be2105add01220f8bbe04cf1f83214c0b801414a722"
-dependencies = [
- "heck 0.5.0",
- "proc-macro2",
- "quote",
- "serde",
- "serde_tokenstream",
- "syn 2.0.98",
 ]
 
 [[package]]
@@ -3069,7 +3007,7 @@ checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
 name = "ereport-api"
 version = "0.1.0"
 dependencies = [
- "dropshot 0.16.0",
+ "dropshot",
  "ereport-types",
  "omicron-workspace-hack",
  "openapi-manager-types",
@@ -3509,7 +3447,7 @@ dependencies = [
 name = "gateway-api"
 version = "0.1.0"
 dependencies = [
- "dropshot 0.16.0",
+ "dropshot",
  "gateway-types",
  "omicron-common",
  "omicron-uuid-kinds",
@@ -3617,7 +3555,7 @@ name = "gateway-test-utils"
 version = "0.1.0"
 dependencies = [
  "camino",
- "dropshot 0.16.0",
+ "dropshot",
  "gateway-messages",
  "gateway-types",
  "omicron-gateway",
@@ -4624,7 +4562,7 @@ dependencies = [
  "cfg-if",
  "crucible-smf",
  "debug-ignore",
- "dropshot 0.16.0",
+ "dropshot",
  "futures",
  "http",
  "ipnetwork",
@@ -4831,7 +4769,7 @@ name = "installinator-api"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dropshot 0.16.0",
+ "dropshot",
  "hyper",
  "installinator-common",
  "omicron-common",
@@ -4897,7 +4835,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "dropshot 0.16.0",
+ "dropshot",
  "hickory-resolver",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -4915,7 +4853,7 @@ dependencies = [
  "assert_matches",
  "dns-server",
  "dns-service-client",
- "dropshot 0.16.0",
+ "dropshot",
  "expectorate",
  "futures",
  "hickory-resolver",
@@ -5873,7 +5811,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "cookie",
- "dropshot 0.16.0",
+ "dropshot",
  "futures",
  "headers",
  "http",
@@ -5938,7 +5876,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
- "dropshot 0.16.0",
+ "dropshot",
  "expectorate",
  "libc",
  "omicron-common",
@@ -6073,7 +6011,7 @@ dependencies = [
  "db-macros",
  "diesel",
  "diesel-dtrace",
- "dropshot 0.16.0",
+ "dropshot",
  "expectorate",
  "futures",
  "gateway-client",
@@ -6167,7 +6105,7 @@ name = "nexus-external-api"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dropshot 0.16.0",
+ "dropshot",
  "http",
  "hyper",
  "ipnetwork",
@@ -6184,7 +6122,7 @@ dependencies = [
 name = "nexus-internal-api"
 version = "0.1.0"
 dependencies = [
- "dropshot 0.16.0",
+ "dropshot",
  "http",
  "nexus-types",
  "omicron-common",
@@ -6590,7 +6528,7 @@ dependencies = [
  "crucible-agent-client",
  "dns-server",
  "dns-service-client",
- "dropshot 0.16.0",
+ "dropshot",
  "futures",
  "gateway-messages",
  "gateway-test-utils",
@@ -6655,7 +6593,7 @@ dependencies = [
  "daft",
  "derive-where",
  "derive_more",
- "dropshot 0.16.0",
+ "dropshot",
  "futures",
  "gateway-client",
  "http",
@@ -7005,7 +6943,7 @@ dependencies = [
  "clickhouse-admin-test-utils",
  "clickhouse-admin-types",
  "clickward",
- "dropshot 0.16.0",
+ "dropshot",
  "expectorate",
  "flume",
  "http",
@@ -7046,7 +6984,7 @@ dependencies = [
  "cockroach-admin-api",
  "cockroach-admin-types",
  "csv",
- "dropshot 0.16.0",
+ "dropshot",
  "expectorate",
  "http",
  "illumos-utils",
@@ -7088,7 +7026,7 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "daft",
- "dropshot 0.16.0",
+ "dropshot",
  "expectorate",
  "futures",
  "hex",
@@ -7150,7 +7088,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "dropshot 0.16.0",
+ "dropshot",
  "expectorate",
  "futures",
  "libc",
@@ -7190,7 +7128,7 @@ dependencies = [
  "camino",
  "chrono",
  "clap",
- "dropshot 0.16.0",
+ "dropshot",
  "ereport-api",
  "expectorate",
  "futures",
@@ -7236,7 +7174,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_matches",
- "dropshot 0.16.0",
+ "dropshot",
  "futures",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -7313,7 +7251,7 @@ dependencies = [
  "dns-server",
  "dns-service-client",
  "dpd-client",
- "dropshot 0.16.0",
+ "dropshot",
  "ereport-client",
  "expectorate",
  "fatfs",
@@ -7395,7 +7333,7 @@ dependencies = [
  "pq-sys",
  "pretty_assertions",
  "progenitor-client 0.9.1",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=e5c85d84b0a51803caffb335a1063612edb02f6d)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=0b1c7c5c75be8d395246286a48cee26199c08418)",
  "qorb",
  "rand 0.8.5",
  "range-requests",
@@ -7456,7 +7394,7 @@ dependencies = [
  "crucible-agent-client",
  "csv",
  "diesel",
- "dropshot 0.16.0",
+ "dropshot",
  "dyn-clone",
  "expectorate",
  "futures",
@@ -7591,7 +7529,7 @@ dependencies = [
  "anyhow",
  "camino",
  "clap",
- "dropshot 0.16.0",
+ "dropshot",
  "internal-dns-resolver",
  "internal-dns-types",
  "nexus-db-model",
@@ -7665,7 +7603,7 @@ dependencies = [
  "bytes",
  "camino",
  "clap",
- "dropshot 0.16.0",
+ "dropshot",
  "futures",
  "omicron-workspace-hack",
  "repo-depot-api",
@@ -7712,7 +7650,7 @@ dependencies = [
  "dns-server",
  "dns-service-client",
  "dpd-client",
- "dropshot 0.16.0",
+ "dropshot",
  "ereport-api",
  "expectorate",
  "flate2",
@@ -7755,7 +7693,7 @@ dependencies = [
  "oximeter-producer",
  "oxnet",
  "pretty_assertions",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=e5c85d84b0a51803caffb335a1063612edb02f6d)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=0b1c7c5c75be8d395246286a48cee26199c08418)",
  "propolis-mock-server",
  "propolis_api_types",
  "rand 0.8.5",
@@ -7814,7 +7752,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
- "dropshot 0.16.0",
+ "dropshot",
  "expectorate",
  "filetime",
  "futures",
@@ -8076,7 +8014,7 @@ dependencies = [
  "cockroach-admin-api",
  "debug-ignore",
  "dns-server-api",
- "dropshot 0.16.0",
+ "dropshot",
  "ereport-api",
  "fs-err 3.1.0",
  "gateway-api",
@@ -8331,7 +8269,7 @@ name = "oximeter-api"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "dropshot 0.16.0",
+ "dropshot",
  "omicron-common",
  "omicron-workspace-hack",
  "schemars",
@@ -8363,7 +8301,7 @@ dependencies = [
  "camino",
  "chrono",
  "clap",
- "dropshot 0.16.0",
+ "dropshot",
  "expectorate",
  "futures",
  "httpmock",
@@ -8421,7 +8359,7 @@ dependencies = [
  "crossterm",
  "debug-ignore",
  "display-error-chain",
- "dropshot 0.16.0",
+ "dropshot",
  "expectorate",
  "futures",
  "gethostname",
@@ -8473,7 +8411,7 @@ version = "0.1.0"
 dependencies = [
  "cfg-if",
  "chrono",
- "dropshot 0.16.0",
+ "dropshot",
  "futures",
  "http",
  "hyper",
@@ -8520,7 +8458,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
- "dropshot 0.16.0",
+ "dropshot",
  "internal-dns-resolver",
  "internal-dns-types",
  "nexus-client",
@@ -9689,7 +9627,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=e5c85d84b0a51803caffb335a1063612edb02f6d#e5c85d84b0a51803caffb335a1063612edb02f6d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=0b1c7c5c75be8d395246286a48cee26199c08418#0b1c7c5c75be8d395246286a48cee26199c08418"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -9734,20 +9672,22 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=e5c85d84b0a51803caffb335a1063612edb02f6d#e5c85d84b0a51803caffb335a1063612edb02f6d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=0b1c7c5c75be8d395246286a48cee26199c08418#0b1c7c5c75be8d395246286a48cee26199c08418"
 dependencies = [
  "anyhow",
  "atty",
  "base64 0.21.7",
  "clap",
- "dropshot 0.12.0",
+ "dropshot",
  "futures",
  "hyper",
  "progenitor 0.9.1",
+ "propolis_api_types",
  "propolis_types",
  "rand 0.8.5",
  "reqwest",
  "schemars",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "slog",
@@ -9776,13 +9716,12 @@ dependencies = [
 [[package]]
 name = "propolis_api_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=e5c85d84b0a51803caffb335a1063612edb02f6d#e5c85d84b0a51803caffb335a1063612edb02f6d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=0b1c7c5c75be8d395246286a48cee26199c08418#0b1c7c5c75be8d395246286a48cee26199c08418"
 dependencies = [
  "crucible-client-types",
  "propolis_types",
  "schemars",
  "serde",
- "serde_with",
  "thiserror 1.0.69",
  "uuid",
 ]
@@ -9790,7 +9729,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=e5c85d84b0a51803caffb335a1063612edb02f6d#e5c85d84b0a51803caffb335a1063612edb02f6d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=0b1c7c5c75be8d395246286a48cee26199c08418#0b1c7c5c75be8d395246286a48cee26199c08418"
 dependencies = [
  "schemars",
  "serde",
@@ -10058,7 +9997,7 @@ name = "range-requests"
 version = "0.1.0"
 dependencies = [
  "bytes",
- "dropshot 0.16.0",
+ "dropshot",
  "futures",
  "http",
  "http-body",
@@ -10175,7 +10114,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
- "dropshot 0.16.0",
+ "dropshot",
  "futures",
  "gateway-client",
  "humantime",
@@ -10316,7 +10255,7 @@ checksum = "ba39f3699c378cd8970968dcbff9c43159ea4cfbd88d43c00b22f2ef10a435d2"
 name = "repo-depot-api"
 version = "0.1.0"
 dependencies = [
- "dropshot 0.16.0",
+ "dropshot",
  "omicron-workspace-hack",
  "schemars",
  "serde",
@@ -11435,7 +11374,7 @@ name = "sled-agent-api"
 version = "0.1.0"
 dependencies = [
  "camino",
- "dropshot 0.16.0",
+ "dropshot",
  "http",
  "nexus-sled-agent-shared",
  "omicron-common",
@@ -11463,12 +11402,13 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor 0.9.1",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=e5c85d84b0a51803caffb335a1063612edb02f6d)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=0b1c7c5c75be8d395246286a48cee26199c08418)",
  "regress",
  "reqwest",
  "schemars",
  "serde",
  "serde_json",
+ "sled-agent-types",
  "slog",
  "uuid",
 ]
@@ -11489,7 +11429,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=e5c85d84b0a51803caffb335a1063612edb02f6d)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=0b1c7c5c75be8d395246286a48cee26199c08418)",
  "rcgen",
  "schemars",
  "serde",
@@ -11841,7 +11781,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "clap",
- "dropshot 0.16.0",
+ "dropshot",
  "futures",
  "gateway-messages",
  "gateway-types",
@@ -13516,7 +13456,7 @@ dependencies = [
  "clap",
  "debug-ignore",
  "display-error-chain",
- "dropshot 0.16.0",
+ "dropshot",
  "flate2",
  "fs-err 3.1.0",
  "futures",
@@ -14029,7 +13969,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dpd-client",
- "dropshot 0.16.0",
+ "dropshot",
  "gateway-client",
  "maplit",
  "omicron-common",
@@ -14087,7 +14027,7 @@ dependencies = [
  "debug-ignore",
  "display-error-chain",
  "dpd-client",
- "dropshot 0.16.0",
+ "dropshot",
  "either",
  "expectorate",
  "flate2",
@@ -14158,7 +14098,7 @@ name = "wicketd-api"
 version = "0.1.0"
 dependencies = [
  "bootstrap-agent-client",
- "dropshot 0.16.0",
+ "dropshot",
  "gateway-client",
  "omicron-common",
  "omicron-passwords",
@@ -14914,7 +14854,7 @@ dependencies = [
  "anyhow",
  "camino",
  "clap",
- "dropshot 0.16.0",
+ "dropshot",
  "illumos-utils",
  "omicron-common",
  "omicron-workspace-hack",

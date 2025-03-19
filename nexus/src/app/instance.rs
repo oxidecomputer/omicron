@@ -14,7 +14,6 @@ use super::MAX_VCPU_PER_INSTANCE;
 use super::MIN_MEMORY_BYTES_PER_INSTANCE;
 use crate::app::sagas;
 use crate::app::sagas::NexusSaga;
-use crate::cidata::InstanceCiData;
 use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
@@ -41,6 +40,7 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::Hostname;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::InternalContext;
@@ -64,9 +64,7 @@ use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use sagas::instance_common::ExternalIpAttach;
 use sagas::instance_start;
 use sagas::instance_update;
-use sled_agent_client::types::InstanceBootSettings;
 use sled_agent_client::types::InstanceMigrationTargetParams;
-use sled_agent_client::types::InstanceProperties;
 use sled_agent_client::types::VmmPutStateBody;
 use std::matches;
 use std::net::SocketAddr;
@@ -1080,7 +1078,7 @@ impl super::Nexus {
         // TODO-cleanup: This can be removed when we are confident that no
         // instances exist prior to the addition of strict hostname validation
         // in the API.
-        let Ok(hostname) = db_instance.hostname.parse() else {
+        let Ok(hostname) = db_instance.hostname.parse::<Hostname>() else {
             let msg = format!(
                 "The instance hostname '{}' is no longer valid. \
                 To access the data on its disks, this instance \
@@ -1106,57 +1104,6 @@ impl super::Nexus {
                 }),
             )
             .await?;
-
-        let mut disk_reqs = vec![];
-        for disk in &disks {
-            // Disks that are attached to an instance should always have a slot
-            // assignment, but if for some reason this one doesn't, return an
-            // error instead of taking down the whole process.
-            let slot = match disk.slot {
-                Some(s) => s,
-                None => {
-                    error!(self.log, "attached disk has no PCI slot assignment";
-                       "disk_id" => %disk.id(),
-                       "disk_name" => disk.name().to_string(),
-                       "instance_id" => ?disk.runtime_state.attach_instance_id);
-
-                    return Err(Error::internal_error(&format!(
-                        "disk {} is attached but has no PCI slot assignment",
-                        disk.id()
-                    ))
-                    .into());
-                }
-            };
-
-            let volume = self
-                .db_datastore
-                .volume_checkout(
-                    disk.volume_id(),
-                    match operation {
-                        InstanceRegisterReason::Start { vmm_id } =>
-                            db::datastore::VolumeCheckoutReason::InstanceStart { vmm_id },
-                        InstanceRegisterReason::Migrate { vmm_id, target_vmm_id } =>
-                            db::datastore::VolumeCheckoutReason::InstanceMigrate { vmm_id, target_vmm_id },
-                    }
-                )
-                .await?;
-
-            disk_reqs.push(sled_agent_client::types::InstanceDisk {
-                disk_id: disk.id(),
-                name: disk.name().to_string(),
-                slot: slot.0,
-                read_only: false,
-                vcr_json: volume.data().to_owned(),
-            });
-        }
-
-        // The routines that maintain an instance's boot options are supposed to
-        // guarantee that the boot disk ID, if present, is the ID of an attached
-        // disk. If this invariant isn't upheld, Propolis will catch the failure
-        // when it processes its received VM configuration.
-        let boot_settings = db_instance
-            .boot_disk_id
-            .map(|id| InstanceBootSettings { order: vec![id] });
 
         let nics = self
             .db_datastore
@@ -1271,28 +1218,25 @@ impl super::Nexus {
                         .unwrap(),
                 }),
             )
-            .await?
-            .into_iter();
+            .await?;
 
-        let ssh_keys: Vec<String> =
-            ssh_keys.map(|ssh_key| ssh_key.public_key).collect();
+        let vmm_spec = self
+            .generate_vmm_spec(
+                &operation,
+                db_instance,
+                &disks,
+                &nics,
+                &ssh_keys,
+            )
+            .await?;
 
         let metadata = sled_agent_client::types::InstanceMetadata {
             silo_id: authz_silo.id(),
             project_id: authz_project.id(),
         };
 
-        // Ask the sled agent to begin the state change.  Then update the
-        // database to reflect the new intermediate state.  If this update is
-        // not the newest one, that's fine.  That might just mean the sled agent
-        // beat us to it.
-
-        let instance_hardware = sled_agent_client::types::InstanceHardware {
-            properties: InstanceProperties {
-                ncpus: db_instance.ncpus.into(),
-                memory: db_instance.memory.into(),
-                hostname,
-            },
+        let local_config = sled_agent_client::types::InstanceSledLocalConfig {
+            hostname,
             nics,
             source_nat,
             ephemeral_ip,
@@ -1304,12 +1248,6 @@ impl super::Nexus {
                 host_domain: None,
                 search_domains: Vec::new(),
             },
-            disks: disk_reqs,
-            boot_settings,
-            cloud_init_bytes: Some(base64::Engine::encode(
-                &base64::engine::general_purpose::STANDARD,
-                db_instance.generate_cidata(&ssh_keys)?,
-            )),
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
@@ -1338,7 +1276,8 @@ impl super::Nexus {
             .vmm_register(
                 propolis_id,
                 &sled_agent_client::types::InstanceEnsureBody {
-                    hardware: instance_hardware,
+                    vmm_spec,
+                    local_config,
                     migration_id: db_instance.runtime().migration_id,
                     vmm_runtime,
                     instance_id,
