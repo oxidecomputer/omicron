@@ -90,7 +90,7 @@ impl LedgerTask {
         // simultaneously.
         let (tx, rx) = mpsc::channel(4);
         let (current_config, current_config_rx) =
-            watch::channel(CurrentConfig::WaitingForM2Disks);
+            watch::channel(CurrentConfig::WaitingForInternalDisks);
 
         tokio::spawn(Self { rx, current_config, internal_disks, log }.run());
 
@@ -118,14 +118,14 @@ impl LedgerTask {
         // `wait_for_m2_disks` should not return until we've seen one.
         assert_eq!(
             *self.current_config.borrow(),
-            CurrentConfig::WaitingForM2Disks
+            CurrentConfig::WaitingForInternalDisks
         );
         if let Err(err) = self.wait_for_m2_disks().await {
             return Err((self.log, err));
         }
         assert_ne!(
             *self.current_config.borrow(),
-            CurrentConfig::WaitingForM2Disks
+            CurrentConfig::WaitingForInternalDisks
         );
 
         loop {
@@ -154,7 +154,7 @@ impl LedgerTask {
         // present in `run_impl`, so if this is empty that means we've lost all
         // M.2s. Refuse to accept new config.
         if config_datasets.is_empty() {
-            error!(self.log, "no M.2 drives available ?!");
+            error!(self.log, "no M.2 drives available any longer");
             return Err(LedgerTaskError::NoM2Disks);
         }
 
@@ -164,7 +164,7 @@ impl LedgerTask {
         // while we do our check.
         let current_config = self.current_config.borrow().clone();
         match current_config {
-            CurrentConfig::WaitingForM2Disks => {
+            CurrentConfig::WaitingForInternalDisks => {
                 unreachable!("already waited for M.2 disks")
             }
             // If this is the first config we've gotten, we have no previous
@@ -270,7 +270,10 @@ impl LedgerTask {
             if !config_datasets.is_empty() {
                 let loaded_config =
                     load_sled_config(&config_datasets, &self.log).await;
-                assert_ne!(loaded_config, CurrentConfig::WaitingForM2Disks);
+                assert_ne!(
+                    loaded_config,
+                    CurrentConfig::WaitingForInternalDisks
+                );
 
                 self.current_config.send_modify(|c| *c = loaded_config);
                 return Ok(());
@@ -498,4 +501,148 @@ async fn convert_legacy_ledgers(
     }
 
     Some(config_ledger.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+    use camino_tempfile::Utf8TempDir;
+    use id_map::IdMap;
+    use illumos_utils::zpool::ZpoolName;
+    use omicron_common::disk::DiskIdentity;
+    use omicron_common::disk::DiskVariant;
+    use omicron_common::disk::OmicronPhysicalDiskConfig;
+    use omicron_test_utils::dev;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
+    use sled_hardware::DiskFirmware;
+    use sled_hardware::DiskPaths;
+    use sled_hardware::PooledDisk;
+    use sled_storage::config::MountConfig;
+    use sled_storage::disk::Disk;
+
+    fn fake_m2_disk() -> Disk {
+        Disk::Real(PooledDisk {
+            paths: DiskPaths {
+                devfs_path: "/fake-disk".into(),
+                dev_path: None,
+            },
+            slot: 0,
+            variant: DiskVariant::M2,
+            identity: DiskIdentity {
+                vendor: "ledger-test".into(),
+                model: "ledger-test".into(),
+                serial: "ledger-test-disk".into(),
+            },
+            is_boot_disk: false,
+            partitions: vec![],
+            zpool_name: ZpoolName::new_internal(ZpoolUuid::new_v4()),
+            firmware: DiskFirmware::new(0, None, false, 1, Vec::new()),
+        })
+    }
+
+    #[tokio::test]
+    async fn test_first_config_is_ledgered() {
+        let logctx = dev::test_setup_log("test_first_config_is_ledgered");
+
+        // Set up and spawn the ledgering task.
+        let tempdir = Utf8TempDir::new().expect("created temp directory");
+        let mount_config = MountConfig {
+            root: tempdir.path().to_owned(),
+            synthetic_disk_root: "/test/todo2".into(),
+        };
+        let (disks_tx, disks_rx) = watch::channel(IdMap::new());
+        let mut internal_disks =
+            InternalDisksHandle::new_for_tests(disks_rx, mount_config.clone());
+        let (task_handle, mut current_config) =
+            LedgerTask::spawn(internal_disks.clone(), logctx.log.clone());
+
+        // We have no disks, so the ledger task should be waiting for them.
+        assert_eq!(
+            *current_config.borrow_and_update(),
+            CurrentConfig::WaitingForInternalDisks
+        );
+
+        // Tell the ledger that there's one internal disk.
+        disks_tx.send_modify(|disks| {
+            disks.insert(fake_m2_disk());
+        });
+
+        // Our fake disk's datasets live underneath our `tempdir`; create the
+        // intermediate subdirectories.
+        let config_datasets =
+            internal_disks.borrow_and_update().all_config_datasets();
+        assert!(!config_datasets.is_empty());
+        for path in &config_datasets {
+            assert!(
+                path.starts_with(tempdir.path()),
+                "expected dataset path ({path}) to be under tempdir {}",
+                tempdir.path(),
+            );
+            tokio::fs::create_dir_all(&path)
+                .await
+                .expect("created tempdir subdirectory");
+        }
+
+        // Wait for the ledger task to realize there's an internal disk; it has
+        // no config, so it should transition to the "waiting for RSS" state.
+        tokio::time::timeout(Duration::from_secs(60), current_config.changed())
+            .await
+            .expect("config changed before timeout")
+            .expect("changed() succeeded");
+        assert_eq!(
+            *current_config.borrow_and_update(),
+            CurrentConfig::WaitingForRackSetup
+        );
+
+        // Send a new config; the contents here don't matter much, but we'll do
+        // something slightly more than `::default()` and give it a single fake
+        // disk. Below we'll check that this config was successfully ledgered.
+        let sled_config = OmicronSledConfig {
+            generation: Generation::new().next(),
+            disks: [OmicronPhysicalDiskConfig {
+                identity: DiskIdentity {
+                    vendor: "test-vendor".into(),
+                    model: "test-model".into(),
+                    serial: "test-serial".into(),
+                },
+                id: PhysicalDiskUuid::new_v4(),
+                pool_id: ZpoolUuid::new_v4(),
+            }]
+            .into_iter()
+            .collect(),
+            datasets: IdMap::default(),
+            zones: IdMap::default(),
+        };
+        task_handle
+            .set_new_config(sled_config.clone())
+            .await
+            .expect("no ledger task error");
+
+        // Confirm that the watch channel was updated.
+        assert_eq!(
+            *current_config.borrow_and_update(),
+            CurrentConfig::Ledgered(sled_config.clone()),
+        );
+
+        // Also confirm the config was persisted as expected.
+        for path in &config_datasets {
+            let path = path.join(CONFIG_LEDGER_FILENAME);
+            let persisted = tokio::fs::read(&path)
+                .await
+                .expect("read persisted sled config");
+            let parsed: OmicronSledConfig = serde_json::from_slice(&persisted)
+                .expect("parsed persisted sled config");
+            assert_eq!(parsed, sled_config);
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    // TODO-john more tests
+    // * read existing config
+    // * convert legacy configs
+    // * reject bad configs
 }

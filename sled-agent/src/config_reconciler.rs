@@ -17,9 +17,9 @@ use sled_storage::disk::RawDisk;
 use tokio::sync::watch;
 
 mod disks;
+mod internal_disks;
 mod ledger;
 mod raw_disks;
-mod internal_disks;
 
 pub struct ConfigReconciler {
     current_config: watch::Sender<CurrentConfig>,
@@ -29,7 +29,7 @@ pub struct ConfigReconciler {
 impl ConfigReconciler {
     pub fn new() -> Self {
         let (current_config, _current_config_rx) =
-            watch::channel(CurrentConfig::WaitingForM2Disks);
+            watch::channel(CurrentConfig::WaitingForInternalDisks);
         let (raw_disks, _raw_disks_rx) = watch::channel(IdMap::new());
         Self { current_config, raw_disks }
     }
@@ -78,7 +78,7 @@ impl ConfigReconciler {
 enum CurrentConfig {
     // We're still waiting on the M.2 drives to be found: We don't yet know
     // whether we have a ledgered config, nor would we be able to write one.
-    WaitingForM2Disks,
+    WaitingForInternalDisks,
     // We have at least one M.2 drive, but there is no ledgered config: we're
     // waiting for rack setup to run.
     WaitingForRackSetup,
