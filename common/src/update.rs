@@ -10,9 +10,8 @@ use schemars::{
     gen::SchemaGenerator,
     schema::{Schema, SchemaObject},
 };
-use semver::Version;
 use serde::{Deserialize, Serialize};
-use tufaceous_artifact::{Artifact, ArtifactKind};
+use tufaceous_artifact::{Artifact, ArtifactKind, ArtifactVersion};
 
 /// An identifier for an artifact.
 ///
@@ -35,7 +34,7 @@ pub struct ArtifactId {
     pub name: String,
 
     /// The artifact's version.
-    pub version: Version,
+    pub version: ArtifactVersion,
 
     /// The kind of artifact this is.
     pub kind: ArtifactKind,

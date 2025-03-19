@@ -18,9 +18,10 @@ use omicron_common::{
 use omicron_uuid_kinds::TufArtifactKind;
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
+use parse_display::Display;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use tufaceous_artifact::ArtifactKind;
+use tufaceous_artifact::{ArtifactKind, ArtifactVersion};
 use uuid::Uuid;
 
 /// A description of a TUF update: a repo, along with the artifacts it
@@ -149,7 +150,7 @@ impl TufRepo {
 pub struct TufArtifact {
     pub id: DbTypedUuid<TufArtifactKind>,
     pub name: String,
-    pub version: SemverVersion,
+    pub version: DbArtifactVersion,
     pub kind: String,
     pub time_created: DateTime<Utc>,
     pub sha256: ArtifactHash,
@@ -204,13 +205,57 @@ impl TufArtifact {
 
     /// Returns the artifact's name, version, and kind, which is unique across
     /// all artifacts.
-    pub fn nvk(&self) -> (&str, &SemverVersion, &str) {
+    pub fn nvk(&self) -> (&str, &ArtifactVersion, &str) {
         (&self.name, &self.version, &self.kind)
     }
 
     /// Returns the artifact length in bytes.
     pub fn artifact_size(&self) -> u64 {
         self.artifact_size as u64
+    }
+}
+
+/// Artifact version in the database: a freeform identifier.
+#[derive(
+    Clone,
+    Debug,
+    AsExpression,
+    FromSqlRow,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Hash,
+    Display,
+)]
+#[diesel(sql_type = Text)]
+#[serde(transparent)]
+#[display("{0}")]
+pub struct DbArtifactVersion(pub ArtifactVersion);
+
+NewtypeFrom! { () pub struct DbArtifactVersion(ArtifactVersion); }
+NewtypeDeref! { () pub struct DbArtifactVersion(ArtifactVersion); }
+
+impl ToSql<Text, diesel::pg::Pg> for DbArtifactVersion {
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut diesel::serialize::Output<'a, '_, diesel::pg::Pg>,
+    ) -> diesel::serialize::Result {
+        <String as ToSql<Text, diesel::pg::Pg>>::to_sql(
+            &self.0.to_string(),
+            &mut out.reborrow(),
+        )
+    }
+}
+
+impl FromSql<Text, diesel::pg::Pg> for DbArtifactVersion {
+    fn from_sql(
+        bytes: diesel::pg::PgValue<'_>,
+    ) -> diesel::deserialize::Result<Self> {
+        let s = <String as FromSql<Text, diesel::pg::Pg>>::from_sql(bytes)?;
+        s.parse::<ArtifactVersion>()
+            .map(DbArtifactVersion)
+            .map_err(|e| e.into())
     }
 }
 

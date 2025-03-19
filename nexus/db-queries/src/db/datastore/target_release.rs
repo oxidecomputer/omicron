@@ -119,7 +119,7 @@ mod test {
     use chrono::{TimeDelta, Utc};
     use omicron_common::update::ArtifactId;
     use omicron_test_utils::dev;
-    use tufaceous_artifact::ArtifactKind;
+    use tufaceous_artifact::{ArtifactKind, ArtifactVersion};
 
     #[tokio::test]
     async fn target_release_datastore() {
@@ -180,7 +180,9 @@ mod test {
         assert_eq!(target_release.generation, Generation(3.into()));
 
         // Now add a new TUF repo and use it as the source.
-        let version = SemverVersion::new(0, 0, 1);
+        let system_version = SemverVersion::new(0, 0, 1);
+        const ARTIFACT_VERSION: ArtifactVersion =
+            ArtifactVersion::new_const("0.0.1");
         let hash = ArtifactHash(
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
                 .parse()
@@ -194,13 +196,13 @@ mod test {
                         hash,
                         0,
                         Utc::now(),
-                        version.clone(),
+                        system_version.clone(),
                         String::from(""),
                     ),
                     artifacts: vec![TufArtifact::new(
                         ArtifactId {
                             name: String::from(""),
-                            version: version.clone().into(),
+                            version: ARTIFACT_VERSION.clone(),
                             kind: ArtifactKind::from_static("empty"),
                         },
                         hash,
@@ -212,7 +214,7 @@ mod test {
             .unwrap()
             .recorded
             .repo;
-        assert_eq!(repo.system_version, version);
+        assert_eq!(repo.system_version, system_version);
         let tuf_repo_id = repo.id;
 
         let before = Utc::now();
