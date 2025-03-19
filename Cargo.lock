@@ -3053,6 +3053,7 @@ dependencies = [
  "ereport-types",
  "openapi-manager-types",
  "schemars",
+ "semver 1.0.25",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
