@@ -3063,6 +3063,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "ereporter-client"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "ereport-types",
+ "expectorate",
+ "http",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "progenitor 0.9.1",
+ "reqwest",
+ "schemars",
+ "serde",
+ "slog",
+ "uuid",
+]
+
+[[package]]
 name = "errno"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
