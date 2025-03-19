@@ -1054,6 +1054,7 @@ mod test {
                 blueprint: Blueprint {
                     id: BlueprintUuid::new_v4(),
                     sleds: BTreeMap::new(),
+                    pending_mgs_updates: BTreeMap::new(),
                     cockroachdb_setting_preserve_downgrade:
                         CockroachDbPreserveDowngrade::DoNotModify,
                     parent_blueprint_id: None,
@@ -1539,6 +1540,7 @@ mod test {
         let blueprint = Blueprint {
             id: BlueprintUuid::new_v4(),
             sleds: make_sled_config_only_zones(blueprint_zones),
+            pending_mgs_updates: BTreeMap::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
@@ -1796,6 +1798,7 @@ mod test {
         let blueprint = Blueprint {
             id: BlueprintUuid::new_v4(),
             sleds: make_sled_config_only_zones(blueprint_zones),
+            pending_mgs_updates: BTreeMap::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
@@ -2002,6 +2005,7 @@ mod test {
         let blueprint = Blueprint {
             id: BlueprintUuid::new_v4(),
             sleds: make_sled_config_only_zones(blueprint_zones),
+            pending_mgs_updates: BTreeMap::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,
@@ -2138,6 +2142,7 @@ mod test {
         let blueprint = Blueprint {
             id: BlueprintUuid::new_v4(),
             sleds: make_sled_config_only_zones(blueprint_zones),
+            pending_mgs_updates: BTreeMap::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
             parent_blueprint_id: None,

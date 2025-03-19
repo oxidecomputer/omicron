@@ -69,6 +69,7 @@ progenitor::generate_api!(
         SpIgnition = { derives = [PartialEq, Eq, PartialOrd, Ord] },
         SpIgnitionSystemType = { derives = [Copy, PartialEq, Eq, PartialOrd, Ord] },
         SpState = { derives = [PartialEq, Eq, PartialOrd, Ord] },
+        SpType = { derives = [daft::Diffable] },
     },
 );
 

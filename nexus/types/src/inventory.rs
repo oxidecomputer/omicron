@@ -14,6 +14,7 @@ use crate::external_api::params::UninitializedSledId;
 use chrono::DateTime;
 use chrono::Utc;
 use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
+use daft::Diffable;
 pub use gateway_client::types::PowerState;
 pub use gateway_client::types::RotImageError;
 pub use gateway_client::types::RotSlot;
@@ -34,6 +35,7 @@ use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use std::collections::BTreeMap;
@@ -205,7 +207,16 @@ impl Collection {
 /// the same part number and serial number but a new revision number, we'd want
 /// to treat that as the same baseboard as one with a different revision number.
 #[derive(
-    Clone, Debug, Ord, Eq, PartialOrd, PartialEq, Deserialize, Serialize,
+    Clone,
+    Debug,
+    Diffable,
+    Ord,
+    Eq,
+    PartialOrd,
+    PartialEq,
+    Deserialize,
+    Serialize,
+    JsonSchema,
 )]
 pub struct BaseboardId {
     /// Oxide Part Number
