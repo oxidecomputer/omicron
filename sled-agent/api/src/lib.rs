@@ -25,6 +25,7 @@ use omicron_common::{
         },
     },
     disk::{DatasetsConfig, DiskVariant, OmicronPhysicalDisksConfig},
+    ledger::Ledgerable,
     update::ArtifactHash,
 };
 use omicron_uuid_kinds::{
@@ -786,6 +787,15 @@ pub struct DiskPathParam {
 pub struct ArtifactConfig {
     pub generation: Generation,
     pub artifacts: BTreeSet<ArtifactHash>,
+}
+
+impl Ledgerable for ArtifactConfig {
+    fn is_newer_than(&self, other: &ArtifactConfig) -> bool {
+        self.generation > other.generation
+    }
+
+    // No need to do this, the generation number is provided externally.
+    fn generation_bump(&mut self) {}
 }
 
 #[derive(Deserialize, JsonSchema)]

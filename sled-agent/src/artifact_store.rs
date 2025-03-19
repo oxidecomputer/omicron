@@ -32,10 +32,9 @@ use dropshot::{
 use futures::{Stream, TryStreamExt};
 use omicron_common::address::REPO_DEPOT_PORT;
 use omicron_common::api::external::Generation;
-use omicron_common::ledger::{Ledger, Ledgerable};
+use omicron_common::ledger::Ledger;
 use omicron_common::update::ArtifactHash;
 use repo_depot_api::*;
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sled_agent_api::{
     ArtifactConfig, ArtifactListResponse, ArtifactPutResponse,
@@ -47,12 +46,12 @@ use slog::{Logger, error, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
-use tokio::sync::{Mutex, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 
 // These paths are defined under the artifact storage dataset. They
 // cannot conflict with any artifact paths because all artifact paths are
 // hexadecimal-encoded SHA-256 checksums.
-const LEDGER_PATH: &str = "ledger.json";
+const LEDGER_PATH: &str = "artifact-config.json";
 const TEMP_SUBDIR: &str = "tmp";
 
 /// Content-addressable local storage for software artifacts.
@@ -78,13 +77,8 @@ const TEMP_SUBDIR: &str = "tmp";
 pub(crate) struct ArtifactStore<T: DatasetsManager> {
     log: Logger,
     reqwest_client: reqwest::Client,
-    // `tokio::sync::watch` channels are a `std::sync::RwLock` with an
-    // asynchronous notification mechanism for value updates. Modifying the
-    // value takes a write lock, and borrowing the value takes a read lock until
-    // the guard is dropped.
-    config: watch::Sender<Option<ArtifactConfig>>,
-    // This mutex must only be unlocked in `put_config`.
-    ledger: Mutex<Ledger<LedgerFormat>>,
+    ledger_tx: mpsc::Sender<LedgerManagerRequest>,
+    config: watch::Receiver<Option<ArtifactConfig>>,
     storage: T,
 
     /// Used for synchronization in unit tests.
@@ -130,24 +124,25 @@ impl<T: DatasetsManager> ArtifactStore<T> {
             }
         }
 
-        let ledger = match Ledger::new(&log, ledger_paths.clone()).await {
-            Some(ledger) => ledger,
-            None => Ledger::new_with(
-                &log,
-                ledger_paths,
-                // Use generation 0 to reflect that we found no generation
-                // number on disk. Any generation Nexus tells us about will
-                // be higher.
-                LedgerFormat { generation: const { Generation::from_u32(0) } },
-            ),
-        };
-        let (tx, rx) = watch::channel(None);
+        let config = Ledger::new(&log, ledger_paths.clone())
+            .await
+            .map(Ledger::into_inner);
+        let (config_tx, config) = watch::channel(config);
+        // Somewhat arbitrary bound size, large enough that we should never hit it.
+        let (ledger_tx, ledger_rx) = mpsc::channel(256);
+        tokio::task::spawn(ledger_manager(
+            log.clone(),
+            ledger_paths,
+            ledger_rx,
+            config_tx,
+        ));
+
         #[cfg(test)]
         let (done_signal, delete_done) = watch::channel(0u32.into());
         tokio::task::spawn(delete_reconciler(
             log.clone(),
             storage.clone(),
-            rx,
+            config.clone(),
             #[cfg(test)]
             done_signal,
         ));
@@ -159,8 +154,8 @@ impl<T: DatasetsManager> ArtifactStore<T> {
                 .read_timeout(Duration::from_secs(15))
                 .build()
                 .unwrap(),
-            config: tx,
-            ledger: Mutex::new(ledger),
+            ledger_tx,
+            config,
             storage,
 
             #[cfg(test)]
@@ -236,49 +231,12 @@ impl<T: DatasetsManager> ArtifactStore<T> {
         &self,
         new_config: ArtifactConfig,
     ) -> Result<(), Error> {
-        // A lock on the ledger Mutex is held until the end of this function.
-        // Only one request to put a new configuration is processed at a time.
-        let mut ledger = self.ledger.lock().await;
-        let ledger_generation = ledger.data().generation;
-        // This closure runs during a write lock on `self.config`. This is the
-        // only write lock taken in this implementation. At this point we're
-        // holding two locks, but the `self.config` write lock is released
-        // before we attempt to do any I/O to the ledgers.
-        let mut result = Ok(None);
-        let result_ref = &mut result;
-        self.config.send_if_modified(move |old_config| {
-            let mut changed = false;
-            if Some(&new_config) != old_config.as_ref() {
-                let current_generation = match old_config.as_ref() {
-                    Some(config) => ledger_generation.max(config.generation),
-                    None => ledger_generation,
-                };
-                if new_config.generation > current_generation {
-                    *result_ref = Ok(Some(new_config.generation));
-                    *old_config = Some(new_config);
-                    changed = true;
-                } else {
-                    *result_ref = Err(Error::GenerationConfig {
-                        attempted_generation: new_config.generation,
-                        current_generation,
-                    });
-                }
-            }
-            changed
-        });
-        // If the closure set a new generation number, attempt to write it to
-        // the ledger.
-        if let Some(generation) = result? {
-            *ledger.data_mut() = LedgerFormat { generation };
-            if let Err(err) = ledger.commit().await {
-                error!(
-                    &self.log,
-                    "Failed to write new generation to any ledger";
-                    "err" => InlineErrorChain::new(&err),
-                );
-            }
-        }
-        Ok(())
+        let (tx, rx) = oneshot::channel();
+        self.ledger_tx
+            .send((new_config, tx))
+            .await
+            .map_err(|_| Error::LedgerChannel)?;
+        rx.await.map_err(|_| Error::LedgerChannel)?
     }
 
     /// Open an artifact file by hash.
@@ -497,6 +455,56 @@ impl<T: DatasetsManager> ArtifactStore<T> {
         });
         Ok(())
     }
+}
+
+type LedgerManagerRequest =
+    (ArtifactConfig, oneshot::Sender<Result<(), Error>>);
+
+/// Receives requests via an [`mpsc`] channel, responding via the [`oneshot`]
+/// channel sent by the requester. Updates the configuration in a [`watch`]
+/// channel so that the artifact store can use it and the delete reconciler can
+/// be notified of changes.
+async fn ledger_manager(
+    log: Logger,
+    ledger_paths: Vec<Utf8PathBuf>,
+    mut rx: mpsc::Receiver<LedgerManagerRequest>,
+    config_channel: watch::Sender<Option<ArtifactConfig>>,
+) {
+    let handle_request = async |new_config: ArtifactConfig| {
+        if ledger_paths.is_empty() {
+            return Err(Error::NoUpdateDataset);
+        }
+        let mut ledger = if let Some(mut ledger) =
+            Ledger::<ArtifactConfig>::new(&log, ledger_paths.clone()).await
+        {
+            if new_config.generation > ledger.data().generation {
+                // New config generation; update the ledger.
+                *ledger.data_mut() = new_config;
+                ledger
+            } else if new_config == *ledger.data() {
+                // Be idempotent and do nothing.
+                return Ok(());
+            } else {
+                // Either we were asked to use an older generation, or the same
+                // generation with a different config.
+                return Err(Error::GenerationConfig {
+                    attempted_generation: new_config.generation,
+                    current_generation: ledger.data().generation,
+                });
+            }
+        } else {
+            Ledger::new_with(&log, ledger_paths.clone(), new_config)
+        };
+        ledger.commit().await?;
+        // If we successfully wrote to the ledger, update the watch channel.
+        config_channel.send_replace(Some(ledger.data().clone()));
+        Ok(())
+    };
+
+    while let Some((new_config, tx)) = rx.recv().await {
+        tx.send(handle_request(new_config).await).ok();
+    }
+    warn!(log, "All ledger manager request senders dropped");
 }
 
 async fn delete_reconciler<T: DatasetsManager>(
@@ -848,6 +856,12 @@ pub(crate) enum Error {
     #[error("Blocking task failed")]
     Join(#[from] tokio::task::JoinError),
 
+    #[error("Failed to commit ledger")]
+    LedgerCommit(#[from] omicron_common::ledger::Error),
+
+    #[error("Ledger manager task dropped its end of the channel")]
+    LedgerChannel,
+
     #[error("No artifact configuration present")]
     NoConfig,
 
@@ -899,35 +913,13 @@ impl From<Error> for HttpError {
             Error::DepotCopy { .. }
             | Error::File { .. }
             | Error::FileRename { .. }
-            | Error::Join(_) => HttpError::for_internal_error(
+            | Error::Join(_)
+            | Error::LedgerCommit(_)
+            | Error::LedgerChannel => HttpError::for_internal_error(
                 InlineErrorChain::new(&err).to_string(),
             ),
         }
     }
-}
-
-/// The format for the `ledger.json` file in the artifact dataset.
-///
-/// We store only the generation number. This prevents us from using possibly
-/// out-of-date information on which artifacts to delete in the delete
-/// reconciler; no actions will take place until Nexus explicitly tells us what
-/// the current state of the world is.
-///
-/// We must store the most recent generation number to disk to prevent the case
-/// where we start and a Nexus instance with out-of-date information tells us
-/// about a configuration.
-#[derive(Debug, Deserialize, Serialize)]
-struct LedgerFormat {
-    generation: Generation,
-}
-
-impl Ledgerable for LedgerFormat {
-    fn is_newer_than(&self, other: &LedgerFormat) -> bool {
-        self.generation > other.generation
-    }
-
-    // No need to do this, the generation number is provided externally.
-    fn generation_bump(&mut self) {}
 }
 
 #[cfg(test)]
@@ -1201,29 +1193,28 @@ mod test {
 
     #[tokio::test]
     async fn no_dataset() {
-        // If there are no update datasets, all gets should fail with
-        // `Error::NotFound`, and all other operations should fail with
-        // `Error::NoUpdateDataset`.
+        // If there are no update datasets:
+        // - all gets should fail with `Error::NotFound`
+        // - putting a config should fail with `Error::NoUpdateDataset`
 
         let log = test_setup_log("no_dataset");
         let backend = TestBackend::new(0);
         let store = ArtifactStore::new(&log.log, backend).await.unwrap();
+
+        assert!(matches!(
+            store.get(TEST_HASH).await,
+            Err(Error::NotFound { .. })
+        ));
+
         let mut config = ArtifactConfig {
             generation: 1u32.into(),
             artifacts: BTreeSet::new(),
         };
         config.artifacts.insert(TEST_HASH);
-        store.put_config(config).await.unwrap();
-
         assert!(matches!(
-            store.writer(TEST_HASH, 1u32.into()).await,
+            store.put_config(config).await,
             Err(Error::NoUpdateDataset)
         ));
-        assert!(matches!(
-            store.get(TEST_HASH).await,
-            Err(Error::NotFound { .. })
-        ));
-        assert!(matches!(store.list().await, Err(Error::NoUpdateDataset)));
 
         log.cleanup_successful();
     }
