@@ -11,6 +11,7 @@ use crate::{
 use crate::{
     KeyShareEd25519, KeyShareGf256, ReconstructedRackSecret, messages::*,
 };
+use slog::{Logger, error, info, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
@@ -80,8 +81,10 @@ pub enum PreviousConfigSecrets {
 
 /// An entity capable of participating in trust quorum
 pub struct Node {
+    log: Logger,
+
     /// The unique hardware ID of a sled
-    id: PlatformId,
+    platform_id: PlatformId,
 
     /// State that gets persistenly stored in ledgers
     persistent_state: PersistentState,
@@ -91,8 +94,19 @@ pub struct Node {
 }
 
 impl Node {
-    pub fn id(&self) -> &PlatformId {
-        &self.id
+    pub fn new(
+        log: Logger,
+        platform_id: PlatformId,
+        persistent_state: PersistentState,
+    ) -> Node {
+        let id_str = format!("{platform_id:?}");
+        let log =
+            log.new(o!("component" => "trust-quorum", "platform_id" => id_str));
+        Node { log, platform_id, persistent_state, coordinator_state: None }
+    }
+
+    pub fn platform_id(&self) -> &PlatformId {
+        &self.platform_id
     }
 
     /// Start coordinating a reconfiguration
@@ -133,8 +147,14 @@ impl Node {
     ) -> Result<(), Error> {
         // Are we already coordinating?
         if let Some(coordinator_state) = &self.coordinator_state {
+            let current_epoch = coordinator_state.reconfigure_msg.epoch;
             if coordinator_state.reconfigure_msg.epoch > msg.epoch {
-                // TODO: Log that we are rejecting a stale configuration
+                warn!(
+                    self.log,
+                    "Reconfiguration in progress: rejecting stale attempt";
+                    "current_epoch" => current_epoch.to_string(),
+                    "msg_epoch" => msg.epoch.to_string()
+                );
                 return Err(Error::ReconfigurationInProgress {
                     current_epoch: coordinator_state.reconfigure_msg.epoch,
                     msg_epoch: msg.epoch,
@@ -143,7 +163,13 @@ impl Node {
 
             if coordinator_state.reconfigure_msg.epoch == msg.epoch {
                 if coordinator_state.reconfigure_msg != msg {
-                    // TODO: Log error about invalid message
+                    error!(
+                        self.log,
+                        concat!(
+                            "Reconfiguration in progress for same epoch, ",
+                            "but messages differ");
+                        "epoch" => msg.epoch.to_string(),
+                    );
                     return Err(Error::MismatchedReconfigurationForSameEpoch(
                         msg.epoch,
                     ));
@@ -153,7 +179,12 @@ impl Node {
                 return Ok(());
             }
 
-            // TODO: Log that we are updating our configuration state
+            info!(
+                self.log,
+                "Configuration being coordinated changed";
+                "previous_epoch" => current_epoch.to_string(),
+                "new_epoch" => msg.epoch.to_string()
+            );
         }
 
         // How we collect the previous configuration's secrets depends upon

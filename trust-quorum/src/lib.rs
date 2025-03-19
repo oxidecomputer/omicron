@@ -10,6 +10,7 @@
 //! implementation. Callers interact with the protocol via the [`Node`] api.
 
 use bootstore::trust_quorum::RackSecret as LrtqRackSecret;
+use derive_more::Display;
 use secrecy::{ExposeSecret, Secret};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
@@ -31,12 +32,30 @@ pub use node::Node;
 const SHARE_SIZE: usize = 33;
 
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    Display,
 )]
 pub struct RackId(Uuid);
 
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    Display,
 )]
 pub struct Epoch(u64);
 
@@ -44,7 +63,16 @@ pub struct Epoch(u64);
 ///
 /// Typically referred to as `k` in the docs
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    Display,
 )]
 pub struct Threshold(pub u8);
 
