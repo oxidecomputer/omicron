@@ -7770,6 +7770,7 @@ dependencies = [
  "debug-ignore",
  "dns-server-api",
  "dropshot 0.16.0",
+ "ereporter-api",
  "fs-err",
  "gateway-api",
  "hex",

@@ -85,6 +85,18 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
             ident: "dns-server",
             extra_validation: None,
         },
+            ManagedApiConfig {
+            title: "Ereporter API",
+            versions: Versions::new_versioned(
+                ereporter_api::supported_versions()
+            ),
+            description: "API for ereport producers",
+            boundary: ApiBoundary::Internal,
+            api_description:
+                ereporter_api::ereporter_api_mod::stub_api_description,
+            ident: "ereporter",
+            extra_validation: None,
+        },
         ManagedApiConfig {
             title: "Installinator API",
             versions: Versions::new_lockstep(semver::Version::new(0,0,1)),

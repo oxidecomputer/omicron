@@ -51,7 +51,7 @@ api_versions!([
 
 /// API for ereport producers.
 #[dropshot::api_description]
-pub trait Ereporter {
+pub trait EreporterApi {
     type Context;
 
     /// Collect a tranche of ereports from this reporter.
