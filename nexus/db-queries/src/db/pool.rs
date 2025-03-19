@@ -28,7 +28,7 @@ type QorbPool = qorb::pool::Pool<QorbConnection>;
 /// Expected to be used as the primary interface to the database.
 pub struct Pool {
     inner: QorbPool,
-
+    log: Logger,
     terminated: std::sync::atomic::AtomicBool,
 }
 
@@ -97,7 +97,11 @@ impl Pool {
                 err.into_inner()
             }
         };
-        Pool { inner, terminated: std::sync::atomic::AtomicBool::new(false) }
+        Pool {
+            inner,
+            log: log.clone(),
+            terminated: std::sync::atomic::AtomicBool::new(false),
+        }
     }
 
     /// Creates a new qorb-backed connection pool to a single instance of the
@@ -121,7 +125,11 @@ impl Pool {
                 err.into_inner()
             }
         };
-        Pool { inner, terminated: std::sync::atomic::AtomicBool::new(false) }
+        Pool {
+            inner,
+            log: log.clone(),
+            terminated: std::sync::atomic::AtomicBool::new(false),
+        }
     }
 
     /// Creates a new qorb-backed connection pool which returns an error
@@ -151,7 +159,11 @@ impl Pool {
                 err.into_inner()
             }
         };
-        Pool { inner, terminated: std::sync::atomic::AtomicBool::new(false) }
+        Pool {
+            inner,
+            log: log.clone(),
+            terminated: std::sync::atomic::AtomicBool::new(false),
+        }
     }
 
     /// Returns a connection from the pool
@@ -177,19 +189,14 @@ impl Drop for Pool {
         // it's possible for these tasks to keep nudging slightly forward if
         // we're using a multi-threaded async executor.
         //
-        // With this check, we'll reliably panic (rather than flake) if the pool
-        // is dropped without terminating these worker tasks.
+        // With this check, we'll warn if the pool is dropped without
+        // terminating these worker tasks.
         if !self.terminated.load(std::sync::atomic::Ordering::SeqCst) {
-            // If we're already panicking, don't panic again.
-            // Doing so can ruin test handlers by aborting the process.
-            //
-            // Instead, just drop a message to stderr and carry on.
-            let msg = "Pool dropped without invoking `terminate`";
-            if std::thread::panicking() {
-                eprintln!("{msg}");
-            } else {
-                panic!("{msg}");
-            }
+            error!(
+                self.log,
+                "Pool dropped without invoking `terminate`. qorb background tasks
+                 should be cancelled, but they may briefly still be initializing connections"
+            );
         }
     }
 }
