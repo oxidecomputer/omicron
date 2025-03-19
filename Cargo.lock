@@ -6962,6 +6962,7 @@ dependencies = [
  "chrono",
  "clap",
  "dropshot 0.16.0",
+ "ereporter-api",
  "expectorate",
  "futures",
  "gateway-api",
