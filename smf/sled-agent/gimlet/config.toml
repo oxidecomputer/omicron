@@ -23,7 +23,19 @@ data_link = "cxgbe0"
 
 # Percentage of usable physical DRAM to use for the VMM reservoir, which
 # guest memory is pulled from.
-vmm_reservoir_percentage = 80
+vmm_reservoir_percentage = 86.3
+# The amount of memory held back for services which exist between zero and one
+# on this Gimlet. This currently includes some additional terms reflecting
+# OS memory use under load.
+#
+# As of writing, this is the sum of the following items from RFD 413:
+# * Network buffer slush: 18 GiB
+# * Other kernel heap: 20 GiB
+# * ZFS ARC minimum: 5 GiB
+# * Sled agent: 0.5 GiB
+# * Maghemite: 0.25 GiB
+# * NTP: 0.25 GiB
+control_plane_memory_earmark_mb = 45056
 
 # Swap device size for the system. The device is a sparsely allocated zvol on
 # the internal zpool of the M.2 that we booted from.

@@ -25,14 +25,21 @@ pub fn online_processor_count() -> Result<u32, Error> {
     Ok(u32::try_from(res)?)
 }
 
-/// Returns the amount of RAM on this sled, in bytes.
-pub fn usable_physical_ram_bytes() -> Result<u64, Error> {
-    let phys_pages: u64 = illumos_utils::libc::sysconf(libc::_SC_PHYS_PAGES)
+/// Returns the number of physical RAM pages on this sled.
+pub fn usable_physical_pages() -> Result<u64, Error> {
+    let pages = illumos_utils::libc::sysconf(libc::_SC_PHYS_PAGES)
         .map_err(|e| Error::Sysconf { arg: "physical pages", e })?
         .try_into()?;
+    Ok(pages)
+}
+
+/// Returns the amount of RAM on this sled, in bytes.
+pub fn usable_physical_ram_bytes() -> Result<u64, Error> {
     let page_size: u64 = illumos_utils::libc::sysconf(libc::_SC_PAGESIZE)
         .map_err(|e| Error::Sysconf { arg: "physical page size", e })?
         .try_into()?;
 
-    Ok(phys_pages * page_size)
+    // XXX: if we eventually have pages with mixed sizes, this may be wrong!
+    // I'm not even sure how we'd calculate this in such a world!
+    Ok(usable_physical_pages()? * page_size)
 }

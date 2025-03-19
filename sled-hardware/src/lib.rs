@@ -75,3 +75,74 @@ pub enum SledMode {
     /// Force sled to run as a Scrimlet
     Scrimlet { asic: DendriteAsic },
 }
+
+/// Accounting for high watermark memory usage for various system purposes
+#[derive(Copy, Clone, Debug)]
+pub struct MemoryReservations {
+    /// Installed physical memory in this sled. Probably should hold a
+    /// [`HardwareManager`] and call `usable_physical_ram_bytes()` instead of
+    /// this.
+    hardware_physical_ram_bytes: u64,
+    /// The amount of memory expected to be used if "control plane" services all
+    /// running on this sled. "control plane" here refers to services that have
+    /// roughly fixed memory use given differing sled hardware configurations.
+    /// DNS (internal, external), Nexus, Cockroach, or ClickHouse are all
+    /// examples of "control plane" here.
+    ///
+    /// This is a pessimistic overestimate; it is unlikely
+    /// (and one might say undesirable) that all such services are colocated on
+    /// a sled, and (as described in RFD 413) the budgeting for each service's
+    /// RAM must include headroom for those services potentially forking and
+    /// bursting required swap or resident pages.
+    //
+    // XXX: This is really something we should be told by Neuxs, perhaps after
+    // starting with this conservative estimate to get the sled started.
+    control_plane_earmark_bytes: u64,
+    /// The amount of memory used for `page_t` structures, assuming a distinct
+    /// `page_t` for each 4k page in the system. If we use larger pages, like
+    /// 2MiB pages, this will be potentially a gross overestimate.
+    max_page_t_space: u64,
+    // XXX: Crucible involves some amount of memory in support of the volumes it
+    // manages. We should collect zpool size and estimate the memory that would
+    // be used if all available storage was dedicated to Crucible volumes. For
+    // now this is part of the control plane earmark.
+}
+
+impl MemoryReservations {
+    pub fn new(
+        hardware_manager: HardwareManager,
+        control_plane_earmark_mib: Option<u32>,
+    ) -> MemoryReservations {
+        let hardware_physical_ram_bytes =
+            hardware_manager.usable_physical_ram_bytes();
+        // Don't like hardcoding a struct size from the host OS here like
+        // this, maybe we shuffle some bits around before merging.. On the
+        // other hand, the last time page_t changed was illumos-gate commit
+        // a5652762e5 from 2006.
+        const PAGE_T_SIZE: u64 = 120;
+        let max_page_t_space =
+            hardware_manager.usable_physical_pages() * PAGE_T_SIZE;
+
+        const MIB: u64 = 1024 * 1024;
+        let control_plane_earmark_bytes =
+            u64::from(control_plane_earmark_mib.unwrap_or(0)) * MIB;
+
+        Self {
+            hardware_physical_ram_bytes,
+            max_page_t_space,
+            control_plane_earmark_bytes,
+        }
+    }
+
+    /// Compute the amount of physical memory that could be set aside for the
+    /// VMM reservoir.
+    ///
+    /// The actual VMM reservoir will be smaller than this amount, and is either
+    /// a fixed amount of memory specified by `ReservoirMode::Size` or
+    /// a percentage of this amount specified by `ReservoirMode::Percentage`.
+    pub fn vmm_eligible(&self) -> u64 {
+        self.hardware_physical_ram_bytes
+            - self.max_page_t_space
+            - self.control_plane_earmark_bytes
+    }
+}
