@@ -22,6 +22,7 @@ use std::time::Duration;
 use tokio::sync::watch;
 use tokio::sync::watch::error::RecvError;
 
+/// A thin wrapper around a [`watch::Receiver`] that presents a similar API.
 #[derive(Debug, Clone)]
 pub struct InternalDisksHandle {
     disks: watch::Receiver<IdMap<Disk>>,
@@ -38,6 +39,16 @@ impl InternalDisksHandle {
 
     pub async fn changed(&mut self) -> Result<(), RecvError> {
         self.disks.changed().await
+    }
+
+    // Allow tests in other modules to construct this handle without having to
+    // construct an entire `InternalDisksTask`.
+    #[cfg(test)]
+    pub(crate) fn new_for_tests(
+        disks: watch::Receiver<IdMap<Disk>>,
+        mount_config: MountConfig,
+    ) -> Self {
+        Self { disks, mount_config: Arc::new(mount_config) }
     }
 }
 
