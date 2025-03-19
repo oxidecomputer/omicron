@@ -3039,6 +3039,7 @@ name = "ereport-types"
 version = "0.1.0"
 dependencies = [
  "omicron-uuid-kinds",
+ "omicron-workspace-hack",
  "schemars",
  "serde",
  "serde_json",
@@ -3051,6 +3052,7 @@ version = "0.1.0"
 dependencies = [
  "dropshot 0.16.0",
  "ereport-types",
+ "omicron-workspace-hack",
  "openapi-manager-types",
  "schemars",
  "semver 1.0.25",
