@@ -200,3 +200,32 @@ impl Drop for Pool {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::db::pub_test_utils::crdb;
+    use omicron_test_utils::dev;
+
+    #[tokio::test]
+    async fn test_pool_can_be_terminated() {
+        let logctx = dev::test_setup_log("test_pool_can_be_terminated");
+        let log = &logctx.log;
+        let db = crdb::test_setup_database(log).await;
+        let cfg = crate::db::Config { url: db.pg_config().clone() };
+        let pool = Pool::new_single_host(&log, &cfg);
+        pool.terminate().await;
+    }
+
+    // Regression test against https://github.com/oxidecomputer/omicron/issues/7821
+    //
+    // Dropping the pool without termination should not cause a panic anymore.
+    #[tokio::test]
+    async fn test_pool_drop_does_not_panic() {
+        let logctx = dev::test_setup_log("test_pool_drop_does_not_panic");
+        let log = &logctx.log;
+        let db = crdb::test_setup_database(log).await;
+        let cfg = crate::db::Config { url: db.pg_config().clone() };
+        let _pool = Pool::new_single_host(&log, &cfg);
+    }
+}
