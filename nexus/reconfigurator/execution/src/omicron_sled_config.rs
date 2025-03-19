@@ -28,7 +28,7 @@ pub(crate) async fn deploy_sled_configs(
     sled_configs: &BTreeMap<SledUuid, BlueprintSledConfig>,
 ) -> Result<(), Vec<anyhow::Error>> {
     let errors: Vec<_> = stream::iter(sled_configs)
-        .filter_map(|(sled_id, config)| async move {
+        .filter_map(async |(sled_id, config)| {
             let log = opctx.log.new(slog::o!(
                 "sled_id" => sled_id.to_string(),
                 "generation" => i64::from(&config.sled_agent_generation),

@@ -54,7 +54,7 @@ async fn clean_up_expunged_zones_impl<R: CleanupResolver>(
     zones_to_clean_up: impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)>,
 ) -> Result<(), Vec<anyhow::Error>> {
     let errors: Vec<anyhow::Error> = stream::iter(zones_to_clean_up)
-        .filter_map(|(sled_id, config)| async move {
+        .filter_map(async |(sled_id, config)| {
             let log = opctx.log.new(slog::o!(
                 "sled_id" => sled_id.to_string(),
                 "zone_id" => config.id.to_string(),
