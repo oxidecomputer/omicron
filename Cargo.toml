@@ -49,6 +49,7 @@ members = [
     "dns-server",
     "dns-server-api",
     "end-to-end-tests",
+    "ereport/api",
     "ereport/types",
     "gateway",
     "gateway-api",
@@ -132,7 +133,7 @@ members = [
     "wicketd",
     "wicketd-api",
     "workspace-hack",
-    "zone-setup", "ereport/api",
+    "zone-setup",
 ]
 
 default-members = [
@@ -188,6 +189,7 @@ default-members = [
     "dns-server",
     "dns-server-api",
     "end-to-end-tests",
+    "ereport/api",
     "ereport/types",
     "gateway",
     "gateway-api",
