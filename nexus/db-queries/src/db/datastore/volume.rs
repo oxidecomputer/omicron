@@ -3934,6 +3934,14 @@ fn ipv6_net_referenced_in_vcr(
     false
 }
 
+pub enum VolumeCookedResult {
+    HardDeleted,
+    Ok,
+    RegionSetWithAllExpungedMembers { region_set: Vec<SocketAddrV6> },
+    MultipleSomeReturned { target: SocketAddrV6 },
+    TargetNotFound { target: SocketAddrV6 },
+}
+
 impl DataStore {
     pub async fn find_volumes_referencing_socket_addr(
         &self,
@@ -4125,15 +4133,13 @@ impl DataStore {
         Ok(Some(reference))
     }
 
-    /// Returns Some(bool) depending if a volume contains a region set with all
-    /// expunged members, None if the volume was deleted, or an error otherwise.
     pub async fn volume_cooked(
         &self,
         opctx: &OpContext,
         volume_id: VolumeUuid,
-    ) -> LookupResult<Option<bool>> {
+    ) -> LookupResult<VolumeCookedResult> {
         let Some(volume) = self.volume_get(volume_id).await? else {
-            return Ok(None);
+            return Ok(VolumeCookedResult::HardDeleted);
         };
 
         let vcr: VolumeConstructionRequest =
@@ -4179,7 +4185,7 @@ impl DataStore {
         for region_set in region_sets {
             let mut checked_region_set = Vec::with_capacity(region_set.len());
 
-            for target in region_set {
+            for target in &region_set {
                 let maybe_ro_usage =
                     Self::read_only_target_to_volume_resource_usage(
                         &conn, &target,
@@ -4247,18 +4253,21 @@ impl DataStore {
                     }
 
                     (Some(_), Some(_)) => {
-                        return Err(Error::internal_error(&String::from(
-                            "multiple Some returned!",
-                        )));
+                        // This is an error: multiple resources (read/write
+                        // region, read-only region, and/or a region snapshot)
+                        // share the same target addr.
+                        return Ok(VolumeCookedResult::MultipleSomeReturned {
+                            target: *target,
+                        });
                     }
 
                     // volume may have been deleted after `volume_get` at
                     // beginning of function, and before grabbing the expunged
                     // resources
                     (None, None) => {
-                        return Err(Error::conflict(String::from(
-                            "volume may have been deleted concurrently",
-                        )));
+                        return Ok(VolumeCookedResult::TargetNotFound {
+                            target: *target,
+                        });
                     }
                 };
 
@@ -4266,11 +4275,15 @@ impl DataStore {
             }
 
             if checked_region_set.iter().all(|x| *x == Checked::Expunged) {
-                return Ok(Some(true));
+                return Ok(
+                    VolumeCookedResult::RegionSetWithAllExpungedMembers {
+                        region_set,
+                    },
+                );
             }
         }
 
-        Ok(Some(false))
+        Ok(VolumeCookedResult::Ok)
     }
 }
 

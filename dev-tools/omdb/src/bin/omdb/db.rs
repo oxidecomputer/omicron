@@ -106,6 +106,7 @@ use nexus_db_queries::db::datastore::CrucibleTargets;
 use nexus_db_queries::db::datastore::DataStoreConnection;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
+use nexus_db_queries::db::datastore::VolumeCookedResult;
 use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
@@ -2800,11 +2801,35 @@ async fn cmd_db_volume_cooked(
 
         for volume in batch {
             match datastore.volume_cooked(opctx, volume.id()).await? {
-                Some(true) => {
-                    println!("{}", volume.id());
+                VolumeCookedResult::HardDeleted => {
+                    println!("{} hard deleted!", volume.id());
                 }
 
-                Some(false) | None => {}
+                VolumeCookedResult::Ok => {}
+
+                VolumeCookedResult::RegionSetWithAllExpungedMembers {
+                    region_set,
+                } => {
+                    println!(
+                        "volume {} is cooked: {region_set:?} are all expunged!",
+                        volume.id(),
+                    );
+                }
+
+                VolumeCookedResult::MultipleSomeReturned { target } => {
+                    println!(
+                        "target {target} does not uniquely identify a \
+                        resource, please run `omdb db validate` sub-commands \
+                        related to volumes!"
+                    );
+                }
+
+                VolumeCookedResult::TargetNotFound { target } => {
+                    println!(
+                        "target {target} not found (was probably \
+                        deleted concurrently when `volume_cooked` was called)"
+                    )
+                }
             }
         }
     }
