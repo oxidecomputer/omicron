@@ -41,6 +41,7 @@ crossbeam-utils = { version = "0.8.20" }
 crossterm = { version = "0.28.1", features = ["event-stream", "serde"] }
 crypto-common = { version = "0.1.6", default-features = false, features = ["getrandom", "std"] }
 curve25519-dalek = { version = "4.1.3", features = ["digest", "legacy_compatibility", "rand_core"] }
+daft = { version = "0.1.2", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
 digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
 dropshot = { version = "0.12.0", default-features = false, features = ["usdt-probes"] }
 ecdsa = { version = "0.16.9", features = ["pem", "signing", "std", "verifying"] }
@@ -164,6 +165,7 @@ crossbeam-utils = { version = "0.8.20" }
 crossterm = { version = "0.28.1", features = ["event-stream", "serde"] }
 crypto-common = { version = "0.1.6", default-features = false, features = ["getrandom", "std"] }
 curve25519-dalek = { version = "4.1.3", features = ["digest", "legacy_compatibility", "rand_core"] }
+daft = { version = "0.1.2", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
 digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
 dropshot = { version = "0.12.0", default-features = false, features = ["usdt-probes"] }
 ecdsa = { version = "0.16.9", features = ["pem", "signing", "std", "verifying"] }

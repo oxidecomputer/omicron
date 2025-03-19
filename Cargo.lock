@@ -7529,6 +7529,7 @@ dependencies = [
  "crossterm",
  "crypto-common",
  "curve25519-dalek",
+ "daft",
  "digest",
  "dof",
  "dropshot 0.12.0",
