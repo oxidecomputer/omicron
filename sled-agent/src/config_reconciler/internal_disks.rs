@@ -12,9 +12,11 @@ use omicron_common::disk::DiskVariant;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::CONFIG_DATASET;
 use sled_storage::disk::Disk;
+use sled_storage::disk::DiskError;
 use sled_storage::disk::RawDisk;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -75,6 +77,16 @@ impl InternalDisksTask {
         raw_disks: watch::Receiver<IdMap<RawDisk>>,
         log: Logger,
     ) -> InternalDisksHandle {
+        Self::spawn_impl(mount_config, raw_disks, log, RealDiskAdopter)
+    }
+
+    // This method is private and used by tests to inject a fake disk adopter.
+    fn spawn_impl<T: DiskAdopter + Send + 'static>(
+        mount_config: MountConfig,
+        raw_disks: watch::Receiver<IdMap<RawDisk>>,
+        log: Logger,
+        mut disk_adopter: T,
+    ) -> InternalDisksHandle {
         let (disks_tx, disks_rx) = watch::channel(IdMap::default());
 
         let mount_config = Arc::new(mount_config);
@@ -86,13 +98,13 @@ impl InternalDisksTask {
                 mount_config: Arc::clone(&mount_config),
                 log,
             };
-            task.run()
+            async move { task.run(&mut disk_adopter).await }
         });
 
         InternalDisksHandle { disks: disks_rx, mount_config }
     }
 
-    async fn run(mut self) {
+    async fn run<T: DiskAdopter>(mut self, disk_adopter: &mut T) {
         // If disk adoption fails, the most likely cause is that the disk is not
         // formatted correctly, and we have no automated means to recover that.
         // However, it's always possible we could fail to adopt due to some
@@ -107,7 +119,11 @@ impl InternalDisksTask {
             .build();
 
         loop {
-            let retry_timeout = match self.adopt_internal_disks().await {
+            let adoption_result = self.adopt_internal_disks(disk_adopter).await;
+
+            // If any option failed, we'll retry; otherwise we'll wait for a
+            // change in `raw_disks`.
+            let retry_timeout = match adoption_result {
                 AdoptionResult::AllSuccess => {
                     next_backoff.reset();
                     Either::Left(future::pending())
@@ -153,7 +169,10 @@ impl InternalDisksTask {
         }
     }
 
-    async fn adopt_internal_disks(&mut self) -> AdoptionResult {
+    async fn adopt_internal_disks<T: DiskAdopter>(
+        &mut self,
+        disk_adopter: &mut T,
+    ) -> AdoptionResult {
         // Collect the internal disks into a Vec<_> to avoid holding the watch
         // channel lock while we attempt to adopt disks below.
         let internal_raw_disks = self
@@ -213,21 +232,16 @@ impl InternalDisksTask {
                 }
                 None => {
                     let identity = raw_disk.identity().clone();
-                    let disk = match Disk::new(
-                        &self.log,
-                        &self.mount_config,
-                        raw_disk,
-                        None, // pool_id (control plane doesn't manage M.2s)
-                        None, // key_requester (M.2s are unencrypted)
-                    )
-                    .await
-                    {
+                    let adopt_result = disk_adopter
+                        .adopt_disk(raw_disk, &self.mount_config, &self.log)
+                        .await;
+                    let disk = match adopt_result {
                         Ok(disk) => disk,
                         Err(err) => {
-                            // Disk adoption failed: there isn't much we can do
-                            // other than retry later. Log an error, and tell
-                            // `run()` that it should retry adoption in case the
-                            // cause is transient.
+                            // Disk adoption failed: there isn't much we can
+                            // do other than retry later. Log an error, and
+                            // tell `run()` that it should retry adoption in
+                            // case the cause is transient.
                             error!(
                                 self.log, "Internal disk adoption failed";
                                 "identity" => ?identity,
@@ -264,4 +278,164 @@ impl InternalDisksTask {
 enum AdoptionResult {
     AllSuccess,
     SomeAdoptionFailed,
+}
+
+/// Helper to allow unit tests to run without interacting with the real [`Disk`]
+/// implementation. In production, the only implementor of this trait is
+/// [`RealDiskAdopter`].
+trait DiskAdopter {
+    fn adopt_disk(
+        &mut self,
+        raw_disk: RawDisk,
+        mount_config: &MountConfig,
+        log: &Logger,
+    ) -> impl Future<Output = Result<Disk, DiskError>> + Send;
+}
+
+struct RealDiskAdopter;
+
+impl DiskAdopter for RealDiskAdopter {
+    async fn adopt_disk(
+        &mut self,
+        raw_disk: RawDisk,
+        mount_config: &MountConfig,
+        log: &Logger,
+    ) -> Result<Disk, DiskError> {
+        Disk::new(
+            log,
+            mount_config,
+            raw_disk,
+            None, // pool_id (control plane doesn't manage M.2s)
+            None, // key_requester (M.2s are unencrypted)
+        )
+        .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use illumos_utils::zpool::ZpoolName;
+    use omicron_test_utils::dev;
+    use omicron_uuid_kinds::ZpoolUuid;
+    use sled_hardware::DiskFirmware;
+    use sled_hardware::DiskPaths;
+    use sled_hardware::PooledDisk;
+    use sled_hardware::UnparsedDisk;
+    use std::sync::Mutex;
+
+    #[derive(Debug, Default)]
+    struct TestDiskAdopter {
+        requests: Mutex<Vec<RawDisk>>,
+    }
+
+    impl DiskAdopter for Arc<TestDiskAdopter> {
+        async fn adopt_disk(
+            &mut self,
+            raw_disk: RawDisk,
+            _mount_config: &MountConfig,
+            _log: &Logger,
+        ) -> Result<Disk, DiskError> {
+            let disk = Disk::Real(PooledDisk {
+                paths: DiskPaths {
+                    devfs_path: "/fake-disk".into(),
+                    dev_path: None,
+                },
+                slot: raw_disk.slot(),
+                variant: raw_disk.variant(),
+                identity: raw_disk.identity().clone(),
+                is_boot_disk: raw_disk.is_boot_disk(),
+                partitions: vec![],
+                zpool_name: match raw_disk.variant() {
+                    DiskVariant::U2 => {
+                        ZpoolName::new_external(ZpoolUuid::new_v4())
+                    }
+                    DiskVariant::M2 => {
+                        ZpoolName::new_internal(ZpoolUuid::new_v4())
+                    }
+                },
+                firmware: raw_disk.firmware().clone(),
+            });
+            self.requests.lock().unwrap().push(raw_disk);
+            Ok(disk)
+        }
+    }
+
+    fn any_mount_config() -> MountConfig {
+        MountConfig {
+            root: "/sled-agent-tests".into(),
+            synthetic_disk_root: "/sled-agent-tests".into(),
+        }
+    }
+
+    fn new_raw_test_disk(variant: DiskVariant, serial: &str) -> RawDisk {
+        RawDisk::Real(UnparsedDisk::new(
+            "/test-devfs".into(),
+            None,
+            0,
+            variant,
+            omicron_common::disk::DiskIdentity {
+                vendor: "test".into(),
+                model: "test".into(),
+                serial: serial.into(),
+            },
+            false,
+            DiskFirmware::new(0, None, false, 1, vec![]),
+        ))
+    }
+
+    #[tokio::test]
+    async fn test_only_adopts_m2_disks() {
+        let logctx = dev::test_setup_log("test_only_adopts_m2_disks");
+
+        let (raw_disks_tx, raw_disks_rx) = watch::channel(IdMap::new());
+        let disk_adopter = Arc::new(TestDiskAdopter::default());
+        let mut disks_handle = InternalDisksTask::spawn_impl(
+            any_mount_config(),
+            raw_disks_rx,
+            logctx.log.clone(),
+            Arc::clone(&disk_adopter),
+        );
+
+        // There should be no disks to start.
+        assert_eq!(*disks_handle.borrow_and_update().disks, IdMap::new());
+
+        // Add four disks: two M.2 and two U.2.
+        raw_disks_tx.send_modify(|disks| {
+            for disk in [
+                new_raw_test_disk(DiskVariant::M2, "m2-0"),
+                new_raw_test_disk(DiskVariant::U2, "u2-0"),
+                new_raw_test_disk(DiskVariant::M2, "m2-1"),
+                new_raw_test_disk(DiskVariant::U2, "u2-1"),
+            ] {
+                disks.insert(disk);
+            }
+        });
+
+        // Wait for the adopted disks to change; this should happen nearly
+        // immediately, but we'll put a timeout on to avoid hanging if something
+        // is broken.
+        tokio::time::timeout(Duration::from_secs(60), disks_handle.changed())
+            .await
+            .expect("disks changed before timeout")
+            .expect("changed() succeeded");
+
+        // We should see the two M.2s only.
+        let adopted_disks = disks_handle.borrow_and_update().disks.clone();
+        assert_eq!(adopted_disks.len(), 2);
+        assert!(
+            adopted_disks.iter().any(|disk| disk.identity().serial == "m2-0"),
+            "found disk m2-0"
+        );
+        assert!(
+            adopted_disks.iter().any(|disk| disk.identity().serial == "m2-1"),
+            "found disk m2-1"
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    // TODO-john more tests
+    // * retry on adoption failure
+    // * remove disks
 }
