@@ -21,7 +21,7 @@
 // these are valid v4 uuids, and they're as unlikely to collide with a future
 // uuid as any random uuid is.)
 //
-// The specific kinds of resources to which we've assigned uuids:|
+// The specific kinds of resources to which we've assigned uuids:
 //
 //    UUID PREFIX     RESOURCE
 //    001de000-05e4   built-in users ("05e4" looks a bit like "user")
