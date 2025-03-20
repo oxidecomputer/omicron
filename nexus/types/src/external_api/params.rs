@@ -1152,7 +1152,7 @@ pub struct InstanceCreate {
     /// The amount of RAM (in bytes) to be allocated to the instance
     pub memory: ByteCount,
     /// The hostname to be assigned to the instance
-    pub hostname: Hostname,
+    pub hostname: Option<Hostname>,
 
     /// User data for instance initialization systems (such as cloud-init).
     /// Must be a Base64-encoded string, as specified in RFC 4648 § 4 (+ and /
