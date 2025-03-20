@@ -2196,26 +2196,26 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
 fn print_task_tuf_artifact_replication(details: &serde_json::Value) {
     fn print_counters(counters: TufArtifactReplicationCounters) {
         const ROWS: &[&str] = &[
+            "put config ok:",
+            "put config err:",
             "list ok:",
             "list err:",
             "put ok:",
             "put err:",
             "copy ok:",
             "copy err:",
-            "delete ok:",
-            "delete err:",
         ];
         const WIDTH: usize = const_max_len(ROWS);
 
         for (label, value) in ROWS.iter().zip([
+            counters.put_config_ok,
+            counters.put_config_err,
             counters.list_ok,
             counters.list_err,
             counters.put_ok,
             counters.put_err,
             counters.copy_ok,
             counters.copy_err,
-            counters.delete_ok,
-            counters.delete_err,
         ]) {
             println!("      {label:<WIDTH$} {value:>3}");
         }
@@ -2643,7 +2643,7 @@ async fn cmd_nexus_blueprints_target_set(
     // if `args.diff` is true, or later if `args.enabled` is "inherit" (or
     // both).
     let current_target = OnceCell::new();
-    let get_current_target = || async {
+    let get_current_target = async || {
         current_target
             .get_or_try_init(|| client.blueprint_target_view())
             .await
