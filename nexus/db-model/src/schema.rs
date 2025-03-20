@@ -2173,9 +2173,9 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
-        endpoint -> Text,
         secret_gen -> Int8,
         subscription_gen -> Int8,
+        endpoint -> Text,
     }
 }
 
@@ -2184,9 +2184,9 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
         rx_id -> Uuid,
         secret -> Text,
-        time_deleted -> Nullable<Timestamptz>,
     }
 }
 
@@ -2204,8 +2204,8 @@ table! {
         rx_id -> Uuid,
         glob -> Text,
         regex -> Text,
-        schema_version -> Text,
         time_created -> Timestamptz,
+        schema_version -> Text,
     }
 }
 
@@ -2225,9 +2225,9 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
-        time_dispatched -> Nullable<Timestamptz>,
         event_class -> crate::WebhookEventClassEnum,
         event -> Jsonb,
+        time_dispatched -> Nullable<Timestamptz>,
         num_dispatched -> Int8,
     }
 }
