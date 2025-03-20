@@ -80,7 +80,7 @@ async fn get_set_target_release() -> anyhow::Result<()> {
     .expect("can't parse tufaceous args")
     .exec(&logctx.log)
     .await
-    .expect("can't assemble TUF repo");
+    .expect("can't assemble version 1 TUF repo");
 
     assert_eq!(
         system_version,
@@ -129,6 +129,57 @@ async fn get_set_target_release() -> anyhow::Result<()> {
         target_release.release_source,
         TargetReleaseSource::SystemVersion { version: system_version },
     );
+
+    // Attempting to downgrade to an earlier system version (1.0.0 → 0.0.0) should fail.
+    let system_version = Version::new(0, 0, 0);
+    tufaceous::Args::try_parse_from([
+        "tufaceous",
+        "assemble",
+        "../update-common/manifests/fake0.toml",
+        path.as_str(),
+    ])
+    .expect("can't parse tufaceous args")
+    .exec(&logctx.log)
+    .await
+    .expect("can't assemble version 0 TUF repo");
+
+    assert_eq!(
+        system_version,
+        NexusRequest::new(
+            RequestBuilder::new(
+                client,
+                http::Method::PUT,
+                "/v1/system/update/repository?file_name=/tmp/foo.zip",
+            )
+            .body_file(Some(&path))
+            .expect_status(Some(http::StatusCode::OK)),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body::<TufRepoInsertResponse>()
+        .unwrap()
+        .recorded
+        .repo
+        .system_version
+    );
+
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::PUT,
+            "/v1/system/update/target-release",
+        )
+        .body(Some(&SetTargetReleaseParams {
+            system_version: system_version.clone(),
+        }))
+        .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect_err("shouldn't be able to downgrade");
 
     ctx.teardown().await;
     logctx.cleanup_successful();
