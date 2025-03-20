@@ -17,7 +17,10 @@ use nexus_types::{
     external_api::{params, shared, views},
 };
 use omicron_common::api::external::{
-    http_pagination::{PaginatedById, PaginatedByName, PaginatedByNameOrId},
+    http_pagination::{
+        PaginatedById, PaginatedByName, PaginatedByNameOrId,
+        PaginatedByTimeAndId,
+    },
     *,
 };
 use openapi_manager_types::ValidationContext;
@@ -3659,7 +3662,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         receiver: Query<params::WebhookReceiverSelector>,
         state_filter: Query<params::WebhookDeliveryStateFilter>,
-        pagination: Query<PaginatedById>,
+        pagination: Query<PaginatedByTimeAndId>,
     ) -> Result<HttpResponseOk<ResultsPage<views::WebhookDelivery>>, HttpError>;
 
     /// Request re-delivery of webhook event

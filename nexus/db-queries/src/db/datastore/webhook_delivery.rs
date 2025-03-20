@@ -17,7 +17,7 @@ use crate::db::model::WebhookDeliveryState;
 use crate::db::model::WebhookDeliveryTrigger;
 use crate::db::model::WebhookEvent;
 use crate::db::model::WebhookEventClass;
-use crate::db::pagination::paginated;
+use crate::db::pagination::paginated_multicolumn;
 use crate::db::schema;
 use crate::db::schema::webhook_delivery::dsl;
 use crate::db::schema::webhook_delivery_attempt::dsl as attempt_dsl;
@@ -140,7 +140,7 @@ impl DataStore {
         rx_id: &WebhookReceiverUuid,
         triggers: &'static [WebhookDeliveryTrigger],
         only_states: Vec<WebhookDeliveryState>,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
     ) -> ListResultVec<(
         WebhookDelivery,
         WebhookEventClass,
@@ -148,20 +148,24 @@ impl DataStore {
     )> {
         let conn = self.pool_connection_authorized(opctx).await?;
         // Paginate the query, ordered by delivery UUID.
-        let mut query = paginated(dsl::webhook_delivery, dsl::id, pagparams)
-            // Select only deliveries that are to the receiver we're interested in,
-            // and were initiated by the triggers we're interested in.
-            .filter(
-                dsl::rx_id
-                    .eq(rx_id.into_untyped_uuid())
-                    .and(dsl::trigger.eq_any(triggers)),
-            )
-            // Join with the event table on the delivery's event ID,
-            // so that we can grab the event class of the event that initiated
-            // this delivery.
-            .inner_join(
-                event_dsl::webhook_event.on(dsl::event_id.eq(event_dsl::id)),
-            );
+        let mut query = paginated_multicolumn(
+            dsl::webhook_delivery,
+            (dsl::time_created, dsl::id),
+            pagparams,
+        )
+        // Select only deliveries that are to the receiver we're interested in,
+        // and were initiated by the triggers we're interested in.
+        .filter(
+            dsl::rx_id
+                .eq(rx_id.into_untyped_uuid())
+                .and(dsl::trigger.eq_any(triggers)),
+        )
+        // Join with the event table on the delivery's event ID,
+        // so that we can grab the event class of the event that initiated
+        // this delivery.
+        .inner_join(
+            event_dsl::webhook_event.on(dsl::event_id.eq(event_dsl::id)),
+        );
         if !only_states.is_empty() {
             query = query.filter(dsl::state.eq_any(only_states));
         }
@@ -531,8 +535,9 @@ mod test {
                 )
                 .await
                 .unwrap();
-            paginator = p
-                .found_batch(&deliveries, &|(d, _, _)| *d.id.as_untyped_uuid());
+            paginator = p.found_batch(&deliveries, &|(d, _, _)| {
+                (d.time_created, *d.id.as_untyped_uuid())
+            });
             all_deliveries
                 .extend(deliveries.into_iter().map(|(d, _, _)| dbg!(d).id));
         }

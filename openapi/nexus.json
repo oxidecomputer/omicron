@@ -11999,7 +11999,7 @@
             "in": "query",
             "name": "sort_by",
             "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
+              "$ref": "#/components/schemas/TimeAndIdSortMode"
             }
           }
         ],
@@ -25773,6 +25773,25 @@
             "type": "string",
             "enum": [
               "name_ascending"
+            ]
+          }
+        ]
+      },
+      "TimeAndIdSortMode": {
+        "description": "Supported set of sort modes for scanning by timestamp and ID",
+        "oneOf": [
+          {
+            "description": "sort in increasing order of timestamp and ID, i.e., earliest first",
+            "type": "string",
+            "enum": [
+              "ascending"
+            ]
+          },
+          {
+            "description": "sort in increasing order of timestamp and ID, i.e., most recent first",
+            "type": "string",
+            "enum": [
+              "descending"
             ]
           }
         ]

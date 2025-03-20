@@ -89,9 +89,11 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByName;
 use omicron_common::api::external::http_pagination::PaginatedByNameOrId;
+use omicron_common::api::external::http_pagination::PaginatedByTimeAndId;
 use omicron_common::api::external::http_pagination::ScanById;
 use omicron_common::api::external::http_pagination::ScanByName;
 use omicron_common::api::external::http_pagination::ScanByNameOrId;
+use omicron_common::api::external::http_pagination::ScanByTimeAndId;
 use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::id_pagination;
@@ -7953,7 +7955,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         receiver: Query<params::WebhookReceiverSelector>,
         filter: Query<params::WebhookDeliveryStateFilter>,
-        query: Query<PaginatedById>,
+        query: Query<PaginatedByTimeAndId>,
     ) -> Result<HttpResponseOk<ResultsPage<views::WebhookDelivery>>, HttpError>
     {
         let apictx = rqctx.context();
@@ -7966,16 +7968,16 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let webhook_selector = receiver.into_inner();
             let filter = filter.into_inner();
             let query = query.into_inner();
-            let pagparams = data_page_params_for(&rqctx, &query)?;
+            let pag_params = data_page_params_for(&rqctx, &query)?;
             let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
             let deliveries = nexus
-                .webhook_receiver_delivery_list(&opctx, rx, filter, &pagparams)
+                .webhook_receiver_delivery_list(&opctx, rx, filter, &pag_params)
                 .await?;
 
-            Ok(HttpResponseOk(ScanById::results_page(
+            Ok(HttpResponseOk(ScanByTimeAndId::results_page(
                 &query,
                 deliveries,
-                &|_, d| d.id,
+                &|_, d| (d.time_started, d.id),
             )?))
         };
         apictx

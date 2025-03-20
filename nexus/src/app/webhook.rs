@@ -133,6 +133,7 @@
 use crate::Nexus;
 use crate::app::external_dns;
 use anyhow::Context;
+use chrono::DateTime;
 use chrono::TimeDelta;
 use chrono::Utc;
 use hmac::{Hmac, Mac};
@@ -634,7 +635,7 @@ impl Nexus {
         opctx: &OpContext,
         rx: lookup::WebhookReceiver<'_>,
         filter: params::WebhookDeliveryStateFilter,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<'_, (DateTime<Utc>, Uuid)>,
     ) -> ListResultVec<views::WebhookDelivery> {
         let (authz_rx,) = rx.lookup_for(authz::Action::ListChildren).await?;
         let only_states = if filter.include_all() {

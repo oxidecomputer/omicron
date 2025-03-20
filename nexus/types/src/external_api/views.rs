@@ -1118,6 +1118,10 @@ pub struct WebhookDelivery {
 
     /// Individual attempts to deliver this webhook event, and their outcomes.
     pub attempts: Vec<WebhookDeliveryAttempt>,
+
+    /// The time at which this delivery began (i.e. the event was dispatched to
+    /// the receiver).
+    pub time_started: DateTime<Utc>,
 }
 
 /// The state of a webhook delivery attempt.

@@ -77,7 +77,6 @@ impl WebhookDelivery {
         trigger: WebhookDeliveryTrigger,
     ) -> Self {
         Self {
-            // N.B.: perhaps we ought to use timestamp-based UUIDs for these?
             id: WebhookDeliveryUuid::new_v4().into(),
             event_id: event.id().into(),
             rx_id: (*rx_id).into(),
@@ -134,6 +133,7 @@ impl WebhookDelivery {
                 .iter()
                 .map(views::WebhookDeliveryAttempt::from)
                 .collect(),
+            time_started: self.time_created,
         };
         // Make sure attempts are in order; each attempt entry also includes an
         // attempt number, which should be used authoritatively to determine the

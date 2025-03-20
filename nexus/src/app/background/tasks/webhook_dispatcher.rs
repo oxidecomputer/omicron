@@ -483,8 +483,9 @@ mod test {
                 )
                 .await
                 .unwrap();
-            paginator =
-                p.found_batch(&batch, &|(d, _, _)| d.id.into_untyped_uuid());
+            paginator = p.found_batch(&batch, &|(d, _, _)| {
+                (d.time_created, d.id.into_untyped_uuid())
+            });
             deliveries.extend(batch);
         }
         let event =
