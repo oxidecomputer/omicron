@@ -142,7 +142,7 @@ impl Node {
         now: Instant,
         outbox: &mut Vec<Envelope>,
     ) -> Result<Option<PersistentState>, Error> {
-        let Some(state) = self.coordinator_state else {
+        let Some(state) = &self.coordinator_state else {
             return Ok(None);
         };
 

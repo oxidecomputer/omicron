@@ -6,9 +6,9 @@
 //!
 //! Note that this state is not necessarily directly serialized and saved.
 
+use crate::crypto::{KeyShareEd25519, KeyShareGf256};
 use crate::messages::{CommitMsg, PrepareMsg};
-use crate::{Configuration, KeyShareEd25519, KeyShareGf256};
-use crate::{Epoch, PlatformId};
+use crate::{Configuration, Epoch, PlatformId};
 use bootstore::schemes::v0::SharePkgCommon as LrtqShareData;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -70,7 +70,7 @@ impl PersistentState {
 
     /// Return the key share for lrtq if one exists
     pub fn lrtq_key_share(&self) -> Option<KeyShareEd25519> {
-        self.lrtq.as_ref().map(|p| KeyShareEd25519(p.share.clone()))
+        self.lrtq.as_ref().map(|p| p.share.clone().into())
     }
 
     // Return the key share for the latest committed trust quorum configuration

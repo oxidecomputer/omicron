@@ -4,9 +4,8 @@
 
 //! A configuration of a trust quroum
 
-use crate::{
-    EncryptedRackSecret, Epoch, PlatformId, RackId, ShareDigestGf256, Threshold,
-};
+use crate::crypto::{EncryptedRackSecret, ShareDigestGf256};
+use crate::{Epoch, PlatformId, RackId, Threshold};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

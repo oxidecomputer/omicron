@@ -2086,9 +2086,7 @@ dependencies = [
  "cpufeatures",
  "curve25519-dalek-derive",
  "digest",
- "ff",
  "fiat-crypto",
- "group",
  "rand_core 0.6.4",
  "rustc_version 0.4.1",
  "subtle",
@@ -13321,7 +13319,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fec4ebcc5594130c31b49594d55c0583fe80621f252f570b222ca4845cafd3cf"
 dependencies = [
  "crypto-bigint",
- "curve25519-dalek",
  "elliptic-curve",
  "elliptic-curve-tools",
  "generic-array 1.2.0",

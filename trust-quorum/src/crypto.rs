@@ -5,12 +5,16 @@
 //! Various cryptographic constructs used by trust quroum.
 
 use bootstore::trust_quorum::RackSecret as LrtqRackSecret;
+use derive_more::From;
+use rand::RngCore;
 use rand::rngs::OsRng;
-use secrecy::Secret;
+use secrecy::{ExposeSecret, Secret};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
 use vsss_rs::{Gf256, subtle::ConstantTimeEq};
 use zeroize::{Zeroize, ZeroizeOnDrop};
+
+use crate::{Error, Threshold};
 
 // Each share is a point on a polynomial (Curve25519). Each share is 33 bytes
 // - one identifier (x-coordinate) byte, and one 32-byte y-coordinate.
@@ -25,13 +29,32 @@ pub struct EncryptedRackSecret(pub Vec<u8>);
 
 /// The key share used for our "real" trust quorum
 #[derive(
-    PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ZeroizeOnDrop,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    Zeroize,
+    ZeroizeOnDrop,
+    From,
 )]
+#[repr(transparent)]
 pub struct KeyShareGf256(Vec<u8>);
 
 // The key share format used for LRTQ
 #[derive(
-    PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ZeroizeOnDrop,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    Zeroize,
+    ZeroizeOnDrop,
+    From,
 )]
 pub struct KeyShareEd25519(Vec<u8>);
 
@@ -111,6 +134,7 @@ pub struct ReconstructedRackSecret {
     secret: Secret<RackSecretData>,
 }
 
+#[derive(Debug)]
 pub struct InvalidRackSecretSize;
 
 impl TryFrom<Vec<u8>> for ReconstructedRackSecret {
@@ -143,8 +167,8 @@ impl RackSecret {
     pub fn new() -> RackSecret {
         let mut rng = OsRng;
         let mut data = Box::new([0u8; 32]);
-        while data.ct_eq(&[0u8; 32]) {
-            rng.fill_bytes(&mut data);
+        while data.ct_eq(&[0u8; 32]).into() {
+            rng.fill_bytes(&mut *data);
         }
         RackSecret { secret: Secret::new(RackSecretData(data)) }
     }
@@ -153,20 +177,42 @@ impl RackSecret {
     /// `threshold` of the shares can be used to recover the secret.
     pub fn split(
         &self,
-        threshold: u8,
-        total_shares: u8,
+        threshold: Threshold,
+        total_shares: usize,
     ) -> Result<Secret<Vec<KeyShareGf256>>, Error> {
-        todo!()
+        let rng = OsRng;
+        let shares = Gf256::split_array(
+            threshold.0 as usize,
+            total_shares,
+            &*self.secret.expose_secret().0,
+            rng,
+        )?;
+        Ok(Secret::new(shares.into_iter().map(KeyShareGf256).collect()))
     }
 
-    pub fn reconstruct(shares: &[KeyShareGf256]) -> Result<RackSecret, Errors> {
-        todo!()
+    pub fn reconstruct(
+        shares: &[KeyShareGf256],
+    ) -> Result<ReconstructedRackSecret, Error> {
+        // Safety: We're casting from a transparent newtype wrapper,
+        // so `KeyShareGf256` and `Vec<u8>` are the same size.
+        let shares = unsafe {
+            std::slice::from_raw_parts(
+                shares.as_ptr() as *const Vec<u8>,
+                shares.len(),
+            )
+        };
+        let secret = Gf256::combine_array(shares)?;
+        Ok(secret.try_into().expect("valid rack secret size"))
     }
 }
 
 impl PartialEq for RackSecret {
     fn eq(&self, other: &Self) -> bool {
-        self.secret.expose_secret().ct_eq(other.secret.expose_secret()).into()
+        self.secret
+            .expose_secret()
+            .0
+            .ct_eq(&*other.secret.expose_secret().0)
+            .into()
     }
 }
 

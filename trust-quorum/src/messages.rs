@@ -4,10 +4,8 @@
 
 //! Messsages for the trust quorum protocol
 
-use crate::{
-    Configuration, Epoch, KeyShareEd25519, KeyShareGf256, PlatformId, RackId,
-    Threshold,
-};
+use crate::crypto::{KeyShareEd25519, KeyShareGf256};
+use crate::{Configuration, Epoch, PlatformId, RackId, Threshold};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, time::Duration};
 

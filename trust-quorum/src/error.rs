@@ -6,17 +6,7 @@
 use crate::{Epoch, PlatformId, Threshold};
 use serde::{Deserialize, Serialize};
 
-#[derive(
-    Debug,
-    Clone,
-    thiserror::Error,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum Error {
     #[error(
         "sled was decommissioned on msg from {from:?} at epoch {epoch:?}: last prepared epoch = {last_prepared_epoch:?}"
@@ -71,4 +61,14 @@ pub enum Error {
 
     #[error("Mismatched reconfiguration requests for epoch {0:?}")]
     MismatchedReconfigurationForSameEpoch(Epoch),
+
+    #[error("shamir error: {0:?}")]
+    Shamir(vsss_rs::Error),
+}
+
+/// Vsss_rs doesn't implement std::error::Error
+impl From<vsss_rs::Error> for Error {
+    fn from(value: vsss_rs::Error) -> Self {
+        Error::Shamir(value)
+    }
 }
