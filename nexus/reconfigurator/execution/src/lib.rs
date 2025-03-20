@@ -37,8 +37,98 @@ mod sled_state;
 #[cfg(test)]
 mod test_utils;
 
-/// The result of calling [`realize_blueprint`] or
-/// [`realize_blueprint_with_overrides`].
+/// Encapsulates arguments used for [`realize_blueprint`]
+///
+/// You probably want to start with `RequiredRealizeArgs` and use the
+/// builder-like methods to tweak it as required.
+pub struct RealizeArgs<'a> {
+    pub opctx: &'a OpContext,
+    pub datastore: &'a DataStore,
+    pub resolver: &'a Resolver,
+    pub blueprint: &'a Blueprint,
+    pub nexus_id: Option<OmicronZoneUuid>,
+    pub creator: OmicronZoneUuid,
+    pub sender: mpsc::Sender<Event>,
+    pub overrides: Option<&'a Overridables>,
+}
+
+impl<'a> RealizeArgs<'a> {
+    /// See [`Overridables`]
+    ///
+    /// If not specified, no overrides are in place during blueprint execution.
+    pub fn with_overrides(
+        mut self,
+        overrides: &'a Overridables,
+    ) -> RealizeArgs<'a> {
+        self.overrides = Some(overrides);
+        self
+    }
+
+    /// Specifies the `creator` field used when Nexus creates various kinds of
+    /// database records
+    ///
+    /// This generally matches the current Nexus's id.  It's generally only used
+    /// for debugging.
+    pub fn with_creator(mut self, creator: OmicronZoneUuid) -> RealizeArgs<'a> {
+        self.creator = creator;
+        self
+    }
+
+    /// Specifies that we're running as a real Nexus with id `nexus_id`
+    ///
+    /// This enables some steps of blueprint execution that currently assume
+    /// it's running a valid Nexus.
+    pub fn as_nexus(mut self, nexus_id: OmicronZoneUuid) -> RealizeArgs<'a> {
+        self.nexus_id = Some(nexus_id);
+        self
+    }
+}
+
+/// Encapsulates all of the required arguments for [`realize_blueprint`]
+///
+/// You'll need to convert this to a [`RealizeArgs`] to use it with
+/// `realize_blueprint()`.  You can also use the builder-like `with_*` methods
+/// to tweak this as you do so.
+pub struct RequiredRealizeArgs<'a> {
+    pub opctx: &'a OpContext,
+    pub datastore: &'a DataStore,
+    pub resolver: &'a Resolver,
+    pub creator: OmicronZoneUuid,
+    pub blueprint: &'a Blueprint,
+    pub sender: mpsc::Sender<Event>,
+}
+
+impl<'a> From<RequiredRealizeArgs<'a>> for RealizeArgs<'a> {
+    fn from(value: RequiredRealizeArgs<'a>) -> Self {
+        RealizeArgs {
+            opctx: value.opctx,
+            datastore: value.datastore,
+            resolver: value.resolver,
+            blueprint: value.blueprint,
+            creator: value.creator,
+            nexus_id: None,
+            sender: value.sender,
+            overrides: None,
+        }
+    }
+}
+
+impl<'a> RequiredRealizeArgs<'a> {
+    /// See [`RealizeArgs::with_overrides()`]
+    pub fn with_overrides(
+        self,
+        overrides: &'a Overridables,
+    ) -> RealizeArgs<'a> {
+        RealizeArgs::from(self).with_overrides(overrides)
+    }
+
+    /// See [`RealizeArgs::as_nexus()`]
+    pub fn as_nexus(self, nexus_id: OmicronZoneUuid) -> RealizeArgs<'a> {
+        RealizeArgs::from(self).as_nexus(nexus_id)
+    }
+}
+
+/// The result of calling [`realize_blueprint`].
 #[derive(Debug)]
 #[must_use = "the output of realize_blueprint should probably be used"]
 pub struct RealizeBlueprintOutput {
@@ -52,34 +142,19 @@ pub struct RealizeBlueprintOutput {
 /// The assumption is that callers are running this periodically or in a loop to
 /// deal with transient errors or changes in the underlying system state.
 pub async fn realize_blueprint(
-    opctx: &OpContext,
-    datastore: &DataStore,
-    resolver: &Resolver,
-    blueprint: &Blueprint,
-    nexus_id: OmicronZoneUuid,
-    sender: mpsc::Sender<Event>,
+    exec_ctx: RealizeArgs<'_>,
 ) -> Result<RealizeBlueprintOutput, anyhow::Error> {
-    realize_blueprint_with_overrides(
+    let RealizeArgs {
         opctx,
         datastore,
         resolver,
         blueprint,
         nexus_id,
-        &Default::default(),
+        creator,
         sender,
-    )
-    .await
-}
+        overrides,
+    } = exec_ctx;
 
-pub async fn realize_blueprint_with_overrides(
-    opctx: &OpContext,
-    datastore: &DataStore,
-    resolver: &Resolver,
-    blueprint: &Blueprint,
-    nexus_id: OmicronZoneUuid,
-    overrides: &Overridables,
-    sender: mpsc::Sender<Event>,
-) -> Result<RealizeBlueprintOutput, anyhow::Error> {
     let opctx = opctx.child(BTreeMap::from([(
         "comment".to_string(),
         blueprint.comment.clone(),
@@ -125,8 +200,8 @@ pub async fn realize_blueprint_with_overrides(
         &opctx,
         datastore,
         blueprint,
-        nexus_id,
-        overrides,
+        creator,
+        overrides.unwrap_or(&*overridables::DEFAULT),
         sled_list.clone(),
     );
 
@@ -245,7 +320,7 @@ fn register_support_bundle_failure_step<'a>(
     opctx: &'a OpContext,
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
-    nexus_id: OmicronZoneUuid,
+    nexus_id: Option<OmicronZoneUuid>,
 ) {
     registrar
         .new_step(
@@ -253,6 +328,10 @@ fn register_support_bundle_failure_step<'a>(
             "Mark support bundles as failed if they rely on \
              an expunged disk or sled",
             move |_cx| async move {
+                let Some(nexus_id) = nexus_id else {
+                    return StepSkipped::new((), "not running as Nexus").into();
+                };
+
                 let res = match datastore
                     .support_bundle_fail_expunged(opctx, blueprint, nexus_id)
                     .await
@@ -361,7 +440,7 @@ fn register_dns_records_step<'a>(
     opctx: &'a OpContext,
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
-    nexus_id: OmicronZoneUuid,
+    creator: OmicronZoneUuid,
     overrides: &'a Overridables,
     sleds: SharedStepHandle<Arc<BTreeMap<SledUuid, Sled>>>,
 ) {
@@ -375,7 +454,7 @@ fn register_dns_records_step<'a>(
                 let res = dns::deploy_dns(
                     opctx,
                     datastore,
-                    nexus_id.to_string(),
+                    creator.to_string(),
                     blueprint,
                     &sleds_by_id,
                     overrides,
@@ -507,13 +586,18 @@ fn register_reassign_sagas_step<'a>(
     opctx: &'a OpContext,
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
-    nexus_id: OmicronZoneUuid,
+    nexus_id: Option<OmicronZoneUuid>,
 ) -> StepHandle<bool> {
     registrar
         .new_step(
             ExecutionStepId::Cleanup,
             "Reassign sagas",
             move |_cx| async move {
+                let Some(nexus_id) = nexus_id else {
+                    return StepSkipped::new(false, "not running as Nexus")
+                        .into();
+                };
+
                 // For any expunged Nexus zones, re-assign in-progress sagas to
                 // some other Nexus.  If this fails for some reason, it doesn't
                 // affect anything else.

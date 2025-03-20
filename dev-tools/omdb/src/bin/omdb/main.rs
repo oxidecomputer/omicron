@@ -203,7 +203,7 @@ impl Omdb {
         }
 
         let mut socket_stream = futures::stream::iter(addrs)
-            .map(|sockaddr_v6| async move {
+            .map(async move |sockaddr_v6| {
                 (sockaddr_v6, try_connect(sockaddr_v6).await)
             })
             .buffer_unordered(3);
