@@ -211,10 +211,13 @@ mod test {
     async fn test_pool_can_be_terminated() {
         let logctx = dev::test_setup_log("test_pool_can_be_terminated");
         let log = &logctx.log;
-        let db = crdb::test_setup_database(log).await;
+        let mut db = crdb::test_setup_database(log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool = Pool::new_single_host(&log, &cfg);
-        pool.terminate().await;
+        {
+            let pool = Pool::new_single_host(&log, &cfg);
+            pool.terminate().await;
+        }
+        db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
 
@@ -225,10 +228,13 @@ mod test {
     async fn test_pool_drop_does_not_panic() {
         let logctx = dev::test_setup_log("test_pool_drop_does_not_panic");
         let log = &logctx.log;
-        let db = crdb::test_setup_database(log).await;
+        let mut db = crdb::test_setup_database(log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool = Pool::new_single_host(&log, &cfg);
-        drop(pool);
+        {
+            let pool = Pool::new_single_host(&log, &cfg);
+            drop(pool);
+        }
+        db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
 }
