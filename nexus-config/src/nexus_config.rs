@@ -779,7 +779,7 @@ pub struct WebhookDeliveratorConfig {
     #[serde(default = "WebhookDeliveratorConfig::default_first_retry_backoff")]
     pub first_retry_backoff_secs: u64,
 
-    /// backoff period for the seecond retry of a failed delivery attempt.
+    /// backoff period for the second retry of a failed delivery attempt.
     ///
     /// this is tuneable to allow testing delivery retries without having to
     /// wait a long time.
