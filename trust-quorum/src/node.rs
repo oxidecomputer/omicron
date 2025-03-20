@@ -4,13 +4,17 @@
 
 //! A trust quorum node that implements the trust quorum protocol
 
-use crate::messages::*;
+use crate::{Configuration, messages::*};
 use crate::{
     Envelope, Epoch, Error, PlatformId, Threshold,
     persistent_state::PersistentState,
 };
 
-use crate::crypto::{KeyShareEd25519, KeyShareGf256, ReconstructedRackSecret};
+use crate::crypto::{
+    EncryptedShares, KeyShareEd25519, KeyShareGf256, RackSecret,
+    ReconstructedRackSecret,
+};
+use secrecy::ExposeSecret;
 use slog::{Logger, error, info, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
@@ -142,6 +146,9 @@ impl Node {
         now: Instant,
         outbox: &mut Vec<Envelope>,
     ) -> Result<Option<PersistentState>, Error> {
+        // This function is going to be called unconditionally in `tick`
+        // callbacks. In this case we may not actually be a coordinator. We just
+        // ignore the call in that case.
         let Some(state) = &self.coordinator_state else {
             return Ok(None);
         };
@@ -149,6 +156,40 @@ impl Node {
         if state.is_initial_configuration() {
             // No need to collect any old key shares
             // Let's create a new rack secret, split it, and start sending prepares.
+            let rack_secret = RackSecret::new();
+            let shares = rack_secret.split(
+                state.reconfigure_msg.threshold,
+                state.reconfigure_msg.members.len(),
+            )?;
+
+            let share_digests =
+                shares.expose_secret().iter().map(|s| s.digest());
+            let member_ids = state.reconfigure_msg.members.clone();
+            let members = state
+                .reconfigure_msg
+                .members
+                .iter()
+                .cloned()
+                .zip(share_digests)
+                .collect();
+
+            let rack_id = state.reconfigure_msg.rack_id;
+            let encrypted_shares = EncryptedShares::new(
+                &rack_id,
+                &rack_secret,
+                member_ids,
+                shares.expose_secret().as_ref(),
+            )?;
+
+            let config = Configuration {
+                rack_id,
+                epoch: state.reconfigure_msg.epoch,
+                coordinator: self.platform_id.clone(),
+                members,
+                threshold: state.reconfigure_msg.threshold,
+                encrypted_shares,
+                previous_configuration: None,
+            };
         }
 
         todo!()
@@ -223,7 +264,22 @@ impl Node {
         msg: &ReconfigureMsg,
     ) -> Result<(), Error> {
         Self::check_reconfigure_membership_sizes(msg)?;
+        self.check_rack_id(msg)?;
         self.check_reconfigure_epoch(msg)?;
+
+        Ok(())
+    }
+
+    /// RackId's must remain the same over the lifetime of the trust quorum
+    fn check_rack_id(&self, msg: &ReconfigureMsg) -> Result<(), Error> {
+        if let Some(rack_id) = self.persistent_state.rack_id() {
+            if rack_id != msg.rack_id {
+                return Err(Error::MismatchedRackId {
+                    expected: rack_id,
+                    got: msg.rack_id,
+                });
+            }
+        }
 
         Ok(())
     }

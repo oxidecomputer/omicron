@@ -8,7 +8,7 @@
 
 use crate::crypto::{KeyShareEd25519, KeyShareGf256};
 use crate::messages::{CommitMsg, PrepareMsg};
-use crate::{Configuration, Epoch, PlatformId};
+use crate::{Configuration, Epoch, PlatformId, RackId};
 use bootstore::schemes::v0::SharePkgCommon as LrtqShareData;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -34,6 +34,12 @@ pub struct PersistentState {
 }
 
 impl PersistentState {
+    pub fn rack_id(&self) -> Option<RackId> {
+        self.last_committed_configuration()
+            .map(|c| c.rack_id)
+            .or_else(|| self.lrtq.as_ref().map(|pkg| RackId(pkg.rack_uuid)))
+    }
+
     // Are there any committed configurations or lrtq data?
     pub fn is_uninitialized(&self) -> bool {
         self.lrtq.is_none() && self.last_committed_epoch().is_none()

@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Errors returned from the Node API
-use crate::{Epoch, PlatformId, Threshold};
+use crate::{Epoch, PlatformId, RackId, Threshold};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
@@ -64,6 +64,15 @@ pub enum Error {
 
     #[error("shamir error: {0:?}")]
     Shamir(vsss_rs::Error),
+
+    #[error("mismatched rack id: expected {expected:?}, got {got:?}")]
+    MismatchedRackId { expected: RackId, got: RackId },
+
+    #[error("failed to decrypt")]
+    FailedToDecrypt,
+
+    #[error("failed to encrypt")]
+    FailedToEncrypt,
 }
 
 /// Vsss_rs doesn't implement std::error::Error
