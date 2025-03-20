@@ -1105,7 +1105,7 @@ dependencies = [
  "semver 1.0.25",
  "serde",
  "serde_json",
- "thiserror 2.0.11",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -2757,7 +2757,7 @@ dependencies = [
  "slog-bunyan",
  "slog-json",
  "slog-term",
- "thiserror 2.0.11",
+ "thiserror 2.0.12",
  "tokio",
  "tokio-rustls 0.25.0",
  "toml 0.8.20",
@@ -6184,7 +6184,6 @@ dependencies = [
  "oxnet",
  "proptest",
  "rand 0.8.5",
- "semver 1.0.25",
  "sled-agent-client",
  "slog",
  "slog-error-chain",
@@ -6192,6 +6191,7 @@ dependencies = [
  "strum",
  "test-strategy",
  "thiserror 1.0.69",
+ "tufaceous-artifact",
  "typed-rng",
  "uuid",
 ]
@@ -6428,6 +6428,7 @@ dependencies = [
  "strum",
  "test-strategy",
  "thiserror 1.0.69",
+ "tufaceous-artifact",
  "update-engine",
  "uuid",
 ]
@@ -7292,6 +7293,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-reconfigurator-exec-unsafe"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "clap",
+ "dropshot 0.16.0",
+ "internal-dns-resolver",
+ "nexus-db-model",
+ "nexus-db-queries",
+ "nexus-reconfigurator-execution",
+ "nexus-types",
+ "omicron-rpaths",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "pq-sys",
+ "serde_json",
+ "slog",
+ "supports-color",
+ "tokio",
+ "update-engine",
+ "uuid",
+]
+
+[[package]]
 name = "omicron-releng"
 version = "0.1.0"
 dependencies = [
@@ -7528,6 +7554,7 @@ dependencies = [
  "crossterm",
  "crypto-common",
  "curve25519-dalek",
+ "daft",
  "digest",
  "dof",
  "dropshot 0.12.0",
@@ -7854,7 +7881,7 @@ dependencies = [
  "oxide-vpc",
  "postcard",
  "serde",
- "thiserror 2.0.11",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -9198,7 +9225,7 @@ dependencies = [
  "serde",
  "serde_json",
  "syn 2.0.98",
- "thiserror 2.0.11",
+ "thiserror 2.0.12",
  "typify 0.3.0",
  "unicode-ident",
 ]
@@ -9712,6 +9739,7 @@ dependencies = [
  "swrite",
  "tabled 0.15.0",
  "tokio",
+ "tufaceous-artifact",
  "uuid",
 ]
 
@@ -10439,7 +10467,7 @@ dependencies = [
  "quick-xml",
  "rand 0.8.5",
  "serde",
- "thiserror 2.0.11",
+ "thiserror 2.0.12",
  "url",
  "uuid",
 ]
@@ -11952,11 +11980,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.11"
+version = "2.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d452f284b73e6d76dd36758a0c8684b1d5be31f92b89d07fd5822175732206fc"
+checksum = "567b8a2dae586314f7be2a752ec7474332959c6460e02bde30d702a66d488708"
 dependencies = [
- "thiserror-impl 2.0.11",
+ "thiserror-impl 2.0.12",
 ]
 
 [[package]]
@@ -11972,9 +12000,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.11"
+version = "2.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26afc1baea8a989337eeb52b6e72a039780ce45c3edfcc9c5b9d112feeb173c2"
+checksum = "7f7cf42b4507d8ea322120659672cf1b9dbb93f8f2d4ecfd6e51350ff5b17a1d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -12494,7 +12522,7 @@ dependencies = [
  "slog-async",
  "slog-term",
  "tabled 0.18.0",
- "thiserror 2.0.11",
+ "thiserror 2.0.12",
  "tokio",
  "transceiver-decode",
  "transceiver-messages",
@@ -12510,7 +12538,7 @@ dependencies = [
  "schemars",
  "serde",
  "static_assertions",
- "thiserror 2.0.11",
+ "thiserror 2.0.12",
  "transceiver-messages",
 ]
 
@@ -12524,7 +12552,7 @@ dependencies = [
  "hubpack",
  "schemars",
  "serde",
- "thiserror 2.0.11",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -12551,7 +12579,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#d2387032714f66e31b7e255d89f9bf6eb9b3a010"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#69e2896b5905aba61445e519aaa40f02d59638b2"
 dependencies = [
  "anyhow",
  "camino",
@@ -12572,8 +12600,9 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#d2387032714f66e31b7e255d89f9bf6eb9b3a010"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#69e2896b5905aba61445e519aaa40f02d59638b2"
 dependencies = [
+ "daft",
  "parse-display",
  "proptest",
  "schemars",
@@ -12582,12 +12611,13 @@ dependencies = [
  "serde_human_bytes",
  "strum",
  "test-strategy",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#d2387032714f66e31b7e255d89f9bf6eb9b3a010"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#69e2896b5905aba61445e519aaa40f02d59638b2"
 dependencies = [
  "semver 1.0.25",
  "serde",
@@ -12598,7 +12628,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#d2387032714f66e31b7e255d89f9bf6eb9b3a010"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#69e2896b5905aba61445e519aaa40f02d59638b2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12770,7 +12800,7 @@ dependencies = [
  "serde",
  "serde_json",
  "syn 2.0.98",
- "thiserror 2.0.11",
+ "thiserror 2.0.12",
  "unicode-ident",
 ]
 

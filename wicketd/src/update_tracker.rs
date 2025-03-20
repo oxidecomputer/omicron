@@ -60,6 +60,7 @@ use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio_util::io::StreamReader;
+use tufaceous_artifact::ArtifactVersion;
 use update_common::artifacts::ArtifactIdData;
 use update_common::artifacts::ArtifactsWithPlan;
 use update_common::artifacts::ControlPlaneZonesMode;
@@ -961,7 +962,7 @@ impl UpdateDriver {
                         "SP board {}, version {} (git commit {})",
                         caboose.board, caboose.version, caboose.git_commit
                     );
-                    match caboose.version.parse::<Version>() {
+                    match caboose.version.parse::<ArtifactVersion>() {
                         Ok(version) => {
                             StepSuccess::new((sp_artifact, Some(version)))
                                 .with_message(message)
@@ -1683,7 +1684,7 @@ struct RotInterrogation {
     sp: SpIdentifier,
     // Version reported by the target RoT.
     artifact_to_apply: ArtifactIdData,
-    active_version: Option<Version>,
+    active_version: Option<ArtifactVersion>,
 }
 
 impl RotInterrogation {
@@ -1918,7 +1919,7 @@ impl UpdateContext {
                     c.version, c.git_commit
                 );
 
-                match c.version.parse::<Version>() {
+                match c.version.parse::<ArtifactVersion>() {
                     Ok(version) => StepSuccess::new(make_result(Some(version)))
                         .with_message(message)
                         .into(),
@@ -2012,7 +2013,7 @@ impl UpdateContext {
             active_version,
         };
 
-        match caboose.version.parse::<Version>() {
+        match caboose.version.parse::<ArtifactVersion>() {
             Ok(version) => StepSuccess::new(make_result(Some(version)))
                 .with_message(message)
                 .into(),
