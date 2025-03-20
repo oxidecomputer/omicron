@@ -5,7 +5,7 @@
 use std::convert::Infallible;
 
 use super::CurrentConfig;
-use super::internal_disks::InternalDisksHandle;
+use super::internal_disks::InternalDisksReceiver;
 use crate::services::OmicronZonesConfigLocal;
 use camino::Utf8PathBuf;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
@@ -71,13 +71,13 @@ impl LedgerTaskHandle {
 pub struct LedgerTask {
     rx: mpsc::Receiver<WriteNewConfig>,
     current_config: watch::Sender<CurrentConfig>,
-    internal_disks: InternalDisksHandle,
+    internal_disks: InternalDisksReceiver,
     log: Logger,
 }
 
 impl LedgerTask {
     pub fn spawn(
-        internal_disks: InternalDisksHandle,
+        internal_disks: InternalDisksReceiver,
         log: Logger,
     ) -> (LedgerTaskHandle, watch::Receiver<CurrentConfig>) {
         // We don't expect messages to be queued for long in this channel, so
@@ -186,7 +186,7 @@ impl LedgerTask {
                     == omicron_sled_config.generation
                 {
                     if new_config != omicron_sled_config {
-                        error!(
+                        warn!(
                             self.log,
                             "requested config changed (with same generation)";
                             "generation" => %new_config.generation,
@@ -555,7 +555,7 @@ mod tests {
         };
         let (disks_tx, disks_rx) = watch::channel(IdMap::new());
         let mut internal_disks =
-            InternalDisksHandle::new_for_tests(disks_rx, mount_config.clone());
+            InternalDisksReceiver::new_for_tests(disks_rx, mount_config.clone());
         let (task_handle, mut current_config) =
             LedgerTask::spawn(internal_disks.clone(), logctx.log.clone());
 

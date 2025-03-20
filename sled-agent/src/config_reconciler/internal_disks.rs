@@ -24,12 +24,12 @@ use tokio::sync::watch::error::RecvError;
 
 /// A thin wrapper around a [`watch::Receiver`] that presents a similar API.
 #[derive(Debug, Clone)]
-pub struct InternalDisksHandle {
+pub struct InternalDisksReceiver {
     disks: watch::Receiver<IdMap<Disk>>,
     mount_config: Arc<MountConfig>,
 }
 
-impl InternalDisksHandle {
+impl InternalDisksReceiver {
     pub fn borrow_and_update(&mut self) -> InternalDisks<'_> {
         InternalDisks {
             disks: self.disks.borrow_and_update(),
@@ -84,23 +84,21 @@ pub struct InternalDisksTask {
 
 impl InternalDisksTask {
     pub fn spawn(
-        mount_config: MountConfig,
+        mount_config: Arc<MountConfig>,
         raw_disks: watch::Receiver<IdMap<RawDisk>>,
         log: Logger,
-    ) -> InternalDisksHandle {
+    ) -> InternalDisksReceiver {
         Self::spawn_impl(mount_config, raw_disks, log, RealDiskAdopter)
     }
 
     // This method is private and used by tests to inject a fake disk adopter.
     fn spawn_impl<T: DiskAdopter + Send + 'static>(
-        mount_config: MountConfig,
+        mount_config: Arc<MountConfig>,
         raw_disks: watch::Receiver<IdMap<RawDisk>>,
         log: Logger,
         mut disk_adopter: T,
-    ) -> InternalDisksHandle {
+    ) -> InternalDisksReceiver {
         let (disks_tx, disks_rx) = watch::channel(IdMap::default());
-
-        let mount_config = Arc::new(mount_config);
 
         tokio::spawn({
             let task = Self {
@@ -112,7 +110,7 @@ impl InternalDisksTask {
             async move { task.run(&mut disk_adopter).await }
         });
 
-        InternalDisksHandle { disks: disks_rx, mount_config }
+        InternalDisksReceiver { disks: disks_rx, mount_config }
     }
 
     async fn run<T: DiskAdopter>(mut self, disk_adopter: &mut T) {
@@ -253,7 +251,7 @@ impl InternalDisksTask {
                             // do other than retry later. Log an error, and
                             // tell `run()` that it should retry adoption in
                             // case the cause is transient.
-                            error!(
+                            warn!(
                                 self.log, "Internal disk adoption failed";
                                 "identity" => ?identity,
                                 InlineErrorChain::new(&err),
@@ -347,6 +345,8 @@ mod tests {
             _mount_config: &MountConfig,
             _log: &Logger,
         ) -> Result<Disk, DiskError> {
+            // InternalDisks should only adopt M2 disks
+            assert_eq!(raw_disk.variant(), DiskVariant::M2);
             let disk = Disk::Real(PooledDisk {
                 paths: DiskPaths {
                     devfs_path: "/fake-disk".into(),
@@ -357,14 +357,7 @@ mod tests {
                 identity: raw_disk.identity().clone(),
                 is_boot_disk: raw_disk.is_boot_disk(),
                 partitions: vec![],
-                zpool_name: match raw_disk.variant() {
-                    DiskVariant::U2 => {
-                        ZpoolName::new_external(ZpoolUuid::new_v4())
-                    }
-                    DiskVariant::M2 => {
-                        ZpoolName::new_internal(ZpoolUuid::new_v4())
-                    }
-                },
+                zpool_name: ZpoolName::new_internal(ZpoolUuid::new_v4()),
                 firmware: raw_disk.firmware().clone(),
             });
             self.requests.lock().unwrap().push(raw_disk);
@@ -402,7 +395,7 @@ mod tests {
         let (raw_disks_tx, raw_disks_rx) = watch::channel(IdMap::new());
         let disk_adopter = Arc::new(TestDiskAdopter::default());
         let mut disks_handle = InternalDisksTask::spawn_impl(
-            any_mount_config(),
+            Arc::new(any_mount_config()),
             raw_disks_rx,
             logctx.log.clone(),
             Arc::clone(&disk_adopter),
