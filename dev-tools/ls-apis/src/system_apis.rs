@@ -60,7 +60,7 @@ pub struct SystemApis {
     workspaces: Workspaces,
 }
 
-type ApiProducerMap = BTreeMap<ServerComponentName, DepPath>;
+type ApiProducerMap = BTreeMap<ServerComponentName, Vec<DepPath>>;
 
 impl SystemApis {
     /// Load information about APIs in the system based on both developer-
@@ -122,14 +122,6 @@ impl SystemApis {
                     },
                 )?;
             }
-        }
-
-        if !tracker.errors.is_empty() {
-            for e in tracker.errors {
-                eprintln!("error: {:#}", e);
-            }
-
-            bail!("found at least one API exported by multiple servers");
         }
 
         let (server_component_units, unit_server_components, api_producers) = (
@@ -792,7 +784,6 @@ struct ServerComponentsTracker<'a> {
         &'a BTreeMap<ServerPackageName, Vec<&'a ApiMetadata>>,
 
     // outputs (structures that we're building up)
-    errors: Vec<anyhow::Error>,
     server_component_units: BTreeMap<ServerComponentName, DeploymentUnitName>,
     unit_server_components:
         BTreeMap<DeploymentUnitName, BTreeSet<ServerComponentName>>,
@@ -808,7 +799,6 @@ impl<'a> ServerComponentsTracker<'a> {
     ) -> ServerComponentsTracker<'a> {
         ServerComponentsTracker {
             known_server_packages,
-            errors: Vec::new(),
             server_component_units: BTreeMap::new(),
             unit_server_components: BTreeMap::new(),
             api_producers: BTreeMap::new(),
@@ -860,19 +850,12 @@ impl<'a> ServerComponentsTracker<'a> {
             return;
         }
 
-        if let Some(prev_dep_path) = self
-            .api_producers
+        self.api_producers
             .entry(api.client_package_name.clone())
             .or_default()
-            .insert(server_pkgname.clone(), dep_path.clone())
-        {
-            self.errors.push(anyhow!(
-                "API for client {} appears to be exported by {server_pkgname} \
-                 via multiple dependency paths: at least {prev_dep_path:?} and \
-                 {dep_path:?}",
-                api.client_package_name,
-            ));
-        }
+            .entry(server_pkgname.clone())
+            .or_default()
+            .push(dep_path.clone());
     }
 
     /// Record that deployment unit package `dunit_pkgname` depends on package
