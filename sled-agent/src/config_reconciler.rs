@@ -20,6 +20,7 @@ mod disks;
 mod internal_disks;
 mod ledger;
 mod raw_disks;
+mod external_disks;
 
 pub struct ConfigReconciler {
     current_config: watch::Sender<CurrentConfig>,
