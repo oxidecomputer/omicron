@@ -7,7 +7,7 @@ This migration adds initial tables required for webhook delivery.
 The individual transactions in this upgrade do the following:
 
 * *Webhook receivers*:
-** `up01.sql` creates the `omicron.public.webhook_rx` table, which stores
+** `up01.sql` creates the `omicron.public.webhook_receiver` table, which stores
 the receiver endpoints that receive webhook events.
 ** `up02.sql` creates the `lookup_webhook_rx_by_id` index on that table, for listing non-deleted webhook receivers.
 ** `up03.sql` creates the `lookup_webhook_rx_by_name` index on that table, for looking up receivers by name (and ensuring names are unique across all non-deleted receivers).
