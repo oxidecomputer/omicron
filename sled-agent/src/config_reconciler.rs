@@ -16,7 +16,6 @@ use omicron_common::disk::DiskIdentity;
 use sled_storage::disk::RawDisk;
 use tokio::sync::watch;
 
-mod disks;
 mod internal_disks;
 mod ledger;
 mod raw_disks;
