@@ -31,6 +31,7 @@ use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
 use clap::ArgAction;
+use clap::ArgGroup;
 use clap::Args;
 use clap::Subcommand;
 use clap::ValueEnum;
@@ -870,6 +871,11 @@ struct VolumeLockHolderArgs {
 }
 
 #[derive(Debug, Args, Clone)]
+#[clap(group(
+ArgGroup::new("volume-reference-group")
+    .required(true)
+    .args(&["ip", "net", "read_only_region", "region_snapshot"])
+))]
 struct VolumeReferenceArgs {
     #[clap(long, conflicts_with_all = ["net", "read_only_region", "region_snapshot"])]
     ip: Option<std::net::Ipv6Addr>,
@@ -880,7 +886,8 @@ struct VolumeReferenceArgs {
     #[clap(long, conflicts_with_all = ["ip", "net", "region_snapshot"])]
     read_only_region: Option<Uuid>,
 
-    /// Dataset, region, and snapshot ID.
+    /// Provide dataset, region, and snapshot ID in a string, delimited by
+    /// spaces.
     #[clap(long, conflicts_with_all = ["ip", "net", "read_only_region"], value_delimiter = ' ')]
     region_snapshot: Option<Vec<Uuid>>,
 }
