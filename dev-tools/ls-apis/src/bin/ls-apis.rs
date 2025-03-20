@@ -108,33 +108,32 @@ fn run_adoc(apis: &SystemApis) -> Result<()> {
 
     let metadata = apis.api_metadata();
     for api in metadata.apis() {
+        println!("// DO NOT EDIT.  This table is auto-generated. See above.");
+        println!("|{}", apis.adoc_label(&api.client_package_name)?);
+
+        println!("|");
         for server_component in apis.api_producers(&api.client_package_name) {
-            println!(
-                "// DO NOT EDIT.  This table is auto-generated. See above."
-            );
-            println!("|{}", api.label);
-            println!("|{}", apis.adoc_label(server_component)?);
-            println!("|{}", apis.adoc_label(&api.client_package_name)?);
-            println!("|");
-
-            for (c, _) in apis.api_consumers(
-                &api.client_package_name,
-                ApiDependencyFilter::default(),
-            )? {
-                println!("* {}", apis.adoc_label(c)?);
-            }
-
-            match &api.versioned_how {
-                VersionedHow::Unknown => println!("|TBD"),
-                VersionedHow::Server => println!("|Server-side only"),
-                VersionedHow::Client(reason) => {
-                    println!("|Client-side ({})", reason);
-                }
-            };
-
-            print!("|{}", api.notes.as_deref().unwrap_or("-\n"));
-            println!("");
+            println!("* {}", apis.adoc_label(server_component)?);
         }
+
+        println!("|");
+        for (c, _) in apis.api_consumers(
+            &api.client_package_name,
+            ApiDependencyFilter::default(),
+        )? {
+            println!("* {}", apis.adoc_label(c)?);
+        }
+
+        match &api.versioned_how {
+            VersionedHow::Unknown => println!("|TBD"),
+            VersionedHow::Server => println!("|Server-side only"),
+            VersionedHow::Client(reason) => {
+                println!("|Client-side ({})", reason);
+            }
+        };
+
+        print!("|{}", api.notes.as_deref().unwrap_or("-\n"));
+        println!("");
     }
 
     println!("|===\n");
