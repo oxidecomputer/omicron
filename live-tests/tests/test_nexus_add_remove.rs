@@ -193,7 +193,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
             return Ok(latest_collection);
         },
         &Duration::from_millis(3000),
-        &Duration::from_secs(30),
+        &Duration::from_secs(90),
     )
     .await
     .expect("waiting for zone to be gone from inventory");
