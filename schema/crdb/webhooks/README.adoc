@@ -37,7 +37,7 @@ each receiver.
 ** *Dispatch table*:
 *** `up16.sql` creates the `omicron.public.webhook_delivery_trigger` enum, which tracks why a webhook delivery was initiated.
 
-*** `up1s7ql` creates the `omicron.public.webhook_delivery_state` enum, representing the current state of a webhook delivery.
+*** `up17.sql` creates the `omicron.public.webhook_delivery_state` enum, representing the current state of a webhook delivery.
 *** `up18.sql` creates the table `omicron.public.webhook_delivery`, which tracks the webhook messages that have been dispatched to receivers.
 *** `up19.sql` creates the `one_webhook_event_dispatch_per_rx` unique index on `webhook_delivery`.
 +
