@@ -5,7 +5,7 @@
 use std::str::FromStr;
 
 use crate::{
-    SemverVersion,
+    Generation, SemverVersion,
     schema::{tuf_artifact, tuf_repo, tuf_repo_artifact},
     typed_uuid::DbTypedUuid,
 };
@@ -44,13 +44,18 @@ impl TufRepoDescription {
     /// This is not implemented as a `From` impl because we insert new fields
     /// as part of the process, which `From` doesn't necessarily communicate
     /// and can be surprising.
-    pub fn from_external(description: external::TufRepoDescription) -> Self {
+    pub fn from_external(
+        description: external::TufRepoDescription,
+        generation_added: external::Generation,
+    ) -> Self {
         Self {
             repo: TufRepo::from_external(description.repo),
             artifacts: description
                 .artifacts
                 .into_iter()
-                .map(TufArtifact::from_external)
+                .map(|artifact| {
+                    TufArtifact::from_external(artifact, generation_added)
+                })
                 .collect(),
         }
     }
@@ -155,6 +160,7 @@ pub struct TufArtifact {
     pub time_created: DateTime<Utc>,
     pub sha256: ArtifactHash,
     artifact_size: i64,
+    pub generation_added: Generation,
 }
 
 impl TufArtifact {
@@ -163,6 +169,7 @@ impl TufArtifact {
         artifact_id: ArtifactId,
         sha256: ArtifactHash,
         artifact_size: u64,
+        generation_added: external::Generation,
     ) -> Self {
         Self {
             id: TypedUuid::new_v4().into(),
@@ -172,6 +179,7 @@ impl TufArtifact {
             time_created: Utc::now(),
             sha256,
             artifact_size: artifact_size as i64,
+            generation_added: generation_added.into(),
         }
     }
 
@@ -181,8 +189,16 @@ impl TufArtifact {
     /// This is not implemented as a `From` impl because we insert new fields
     /// as part of the process, which `From` doesn't necessarily communicate
     /// and can be surprising.
-    pub fn from_external(artifact: external::TufArtifactMeta) -> Self {
-        Self::new(artifact.id, artifact.hash.into(), artifact.size)
+    pub fn from_external(
+        artifact: external::TufArtifactMeta,
+        generation_added: external::Generation,
+    ) -> Self {
+        Self::new(
+            artifact.id,
+            artifact.hash.into(),
+            artifact.size,
+            generation_added,
+        )
     }
 
     /// Converts self into [`external::TufArtifactMeta`].
