@@ -511,12 +511,22 @@ impl DisksManagementResult {
 }
 
 #[derive(
-    Clone, Debug, thiserror::Error, JsonSchema, Serialize, Deserialize,
+    Clone,
+    Debug,
+    thiserror::Error,
+    JsonSchema,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
 )]
 #[serde(rename_all = "snake_case", tag = "type", content = "value")]
 pub enum DiskManagementError {
     #[error("Disk requested by control plane, but not found on device")]
     NotFound,
+
+    #[error("Disk requested by control plane is an internal disk: {0}")]
+    InternalDiskControlPlaneRequest(PhysicalDiskUuid),
 
     #[error("Expected zpool UUID of {expected}, but saw {observed}")]
     ZpoolUuidMismatch { expected: ZpoolUuid, observed: ZpoolUuid },
