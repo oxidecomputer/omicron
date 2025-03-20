@@ -7296,6 +7296,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-reconfigurator-exec-unsafe"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "clap",
+ "dropshot 0.16.0",
+ "internal-dns-resolver",
+ "nexus-db-model",
+ "nexus-db-queries",
+ "nexus-reconfigurator-execution",
+ "nexus-types",
+ "omicron-rpaths",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "pq-sys",
+ "serde_json",
+ "slog",
+ "supports-color",
+ "tokio",
+ "update-engine",
+ "uuid",
+]
+
+[[package]]
 name = "omicron-releng"
 version = "0.1.0"
 dependencies = [

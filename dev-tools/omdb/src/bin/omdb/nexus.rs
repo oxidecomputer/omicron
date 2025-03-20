@@ -2203,26 +2203,26 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
 fn print_task_tuf_artifact_replication(details: &serde_json::Value) {
     fn print_counters(counters: TufArtifactReplicationCounters) {
         const ROWS: &[&str] = &[
+            "put config ok:",
+            "put config err:",
             "list ok:",
             "list err:",
             "put ok:",
             "put err:",
             "copy ok:",
             "copy err:",
-            "delete ok:",
-            "delete err:",
         ];
         const WIDTH: usize = const_max_len(ROWS);
 
         for (label, value) in ROWS.iter().zip([
+            counters.put_config_ok,
+            counters.put_config_err,
             counters.list_ok,
             counters.list_err,
             counters.put_ok,
             counters.put_err,
             counters.copy_ok,
             counters.copy_err,
-            counters.delete_ok,
-            counters.delete_err,
         ]) {
             println!("      {label:<WIDTH$} {value:>3}");
         }
