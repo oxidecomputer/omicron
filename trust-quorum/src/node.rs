@@ -4,13 +4,13 @@
 
 //! A trust quorum node that implements the trust quorum protocol
 
+use crate::messages::*;
 use crate::{
     Envelope, Epoch, Error, PlatformId, Threshold,
     persistent_state::PersistentState,
 };
-use crate::{
-    KeyShareEd25519, KeyShareGf256, ReconstructedRackSecret, messages::*,
-};
+
+use crate::crypto::{KeyShareEd25519, KeyShareGf256, ReconstructedRackSecret};
 use slog::{Logger, error, info, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
@@ -64,6 +64,11 @@ impl CoordinatorState {
             prepare_acks: BTreeSet::new(),
             retry_deadline,
         }
+    }
+
+    /// Do we need to reconstruct an old rack secret?
+    pub fn is_initial_configuration(&self) -> bool {
+        self.previous_config_secrets.is_none()
     }
 }
 
@@ -137,6 +142,15 @@ impl Node {
         now: Instant,
         outbox: &mut Vec<Envelope>,
     ) -> Result<Option<PersistentState>, Error> {
+        let Some(state) = self.coordinator_state else {
+            return Ok(None);
+        };
+
+        if state.is_initial_configuration() {
+            // No need to collect any old key shares
+            // Let's create a new rack secret, split it, and start sending prepares.
+        }
+
         todo!()
     }
 
