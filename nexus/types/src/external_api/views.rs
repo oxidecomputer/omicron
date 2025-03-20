@@ -1077,3 +1077,44 @@ pub struct TargetRelease {
     /// The source of the target release.
     pub release_source: TargetReleaseSource,
 }
+
+/// Audit log entry
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AuditLogEntry {
+    /// Unique identifier for the audit log entry
+    pub id: Uuid,
+
+    /// When the request was received
+    pub timestamp: DateTime<Utc>,
+
+    /// Request ID for tracing requests through the system
+    pub request_id: String,
+    /// Full URL of the request
+    pub request_uri: String,
+    /// API endpoint ID, e.g., `project_create`
+    pub operation_id: String,
+    /// IP address that made the request
+    pub source_ip: IpAddr,
+
+    /// User ID of the actor who performed the action
+    pub actor_id: Option<Uuid>,
+    pub actor_silo_id: Option<Uuid>,
+
+    /// API token or session cookie. Optional because it will not be defined on
+    /// unauthenticated requests like login attempts.
+    pub access_method: Option<String>,
+
+    // Fields that are optional because they get filled in after the action completes
+    /// Resource identifier
+    pub resource_id: Option<Uuid>,
+
+    /// Time operation completed
+    pub time_completed: DateTime<Utc>,
+
+    /// HTTP status code
+    pub http_status_code: u16,
+
+    /// Error information if the action failed
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
+}

@@ -431,6 +431,25 @@ has_relation(fleet: Fleet, "parent_fleet", ip_pool_list: IpPoolList)
 has_permission(actor: AuthenticatedActor, "create_child", ip_pool: IpPool)
 	if silo in actor.silo and silo.fleet = ip_pool.fleet;
 
+# Describes the policy for reading and writing the audit log 
+resource AuditLog {
+	permissions = [
+	    "list_children", # retrieve audit log
+	    "create_child",  # create audit log entry
+	];
+
+	relations = { parent_fleet: Fleet };
+
+	# Fleet viewers can read the audit log
+	"list_children" if "viewer" on "parent_fleet";
+}
+# TODO: is this right? any op context should be able to write to the audit log?
+# feels weird though
+has_permission(_actor: AuthenticatedActor, "create_child", _audit_log: AuditLog);
+
+has_relation(fleet: Fleet, "parent_fleet", audit_log: AuditLog)
+	if audit_log.fleet = fleet;
+
 # Describes the policy for creating and managing web console sessions.
 resource ConsoleSessionList {
 	permissions = [ "create_child" ];
