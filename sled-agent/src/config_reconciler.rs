@@ -11,27 +11,40 @@
 use id_map::Entry;
 use id_map::IdMap;
 use id_map::IdMappable as _;
+use key_manager::StorageKeyRequester;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use omicron_common::disk::DiskIdentity;
 use sled_storage::disk::RawDisk;
 use tokio::sync::watch;
 
+mod external_disks;
 mod internal_disks;
+mod key_requester;
 mod ledger;
 mod raw_disks;
-mod external_disks;
+
+use self::key_requester::KeyManagerWaiter;
 
 pub struct ConfigReconciler {
     current_config: watch::Sender<CurrentConfig>,
     raw_disks: watch::Sender<IdMap<RawDisk>>,
+    key_manager_waiter: KeyManagerWaiter,
 }
 
 impl ConfigReconciler {
-    pub fn new() -> Self {
+    pub fn new(key_requester: StorageKeyRequester) -> Self {
         let (current_config, _current_config_rx) =
             watch::channel(CurrentConfig::WaitingForInternalDisks);
         let (raw_disks, _raw_disks_rx) = watch::channel(IdMap::new());
-        Self { current_config, raw_disks }
+        let (key_manager_waiter, _key_requester_rx) =
+            KeyManagerWaiter::hold_requester_until_key_manager_ready(
+                key_requester,
+            );
+        Self { current_config, raw_disks, key_manager_waiter }
+    }
+
+    pub fn notify_key_manager_ready(&self) {
+        self.key_manager_waiter.notify_key_manager_ready();
     }
 
     pub fn set_raw_disks<I>(&self, raw_disks: I)
