@@ -215,6 +215,7 @@ mod test {
         let cfg = crate::db::Config { url: db.pg_config().clone() };
         let pool = Pool::new_single_host(&log, &cfg);
         pool.terminate().await;
+        logctx.cleanup_successful();
     }
 
     // Regression test against https://github.com/oxidecomputer/omicron/issues/7821
@@ -226,6 +227,8 @@ mod test {
         let log = &logctx.log;
         let db = crdb::test_setup_database(log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let _pool = Pool::new_single_host(&log, &cfg);
+        let pool = Pool::new_single_host(&log, &cfg);
+        drop(pool);
+        logctx.cleanup_successful();
     }
 }
