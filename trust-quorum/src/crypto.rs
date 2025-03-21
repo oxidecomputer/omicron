@@ -188,7 +188,7 @@ impl RackSecret {
         &self,
         threshold: Threshold,
         total_shares: usize,
-    ) -> Result<Secret<Vec<KeyShareGf256>>, Error> {
+    ) -> Result<Vec<KeyShareGf256>, Error> {
         let rng = OsRng;
         let shares = Gf256::split_array(
             threshold.0 as usize,
@@ -196,7 +196,7 @@ impl RackSecret {
             &*self.secret.expose_secret().0,
             rng,
         )?;
-        Ok(Secret::new(shares.into_iter().map(KeyShareGf256).collect()))
+        Ok(shares.into_iter().map(KeyShareGf256).collect())
     }
 
     pub fn reconstruct(
@@ -263,21 +263,19 @@ impl EncryptedShares {
     pub fn new(
         rack_id: &RackId,
         rack_secret: &RackSecret,
-        members: BTreeSet<PlatformId>,
-        shares: &[KeyShareGf256],
+        shares_by_member: &BTreeMap<PlatformId, KeyShareGf256>,
     ) -> Result<Self, Error> {
-        assert_eq!(members.len(), shares.len());
         let salt = Salt::new();
         let mut encrypted_shares = BTreeMap::new();
-        for (platform_id, share) in members.into_iter().zip(shares) {
+        for (platform_id, share) in shares_by_member.iter() {
             let encrypted_share = Self::encrypt_share(
                 rack_id,
-                &platform_id,
+                platform_id,
                 rack_secret,
                 &salt,
                 share,
             )?;
-            encrypted_shares.insert(platform_id, encrypted_share);
+            encrypted_shares.insert(platform_id.clone(), encrypted_share);
         }
 
         Ok(EncryptedShares { salt, encrypted_shares })

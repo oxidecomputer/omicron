@@ -5,7 +5,8 @@
 //! A configuration of a trust quroum
 
 use crate::crypto::{
-    EncryptedRackSecret, EncryptedShares, RackSecret, ShareDigestGf256,
+    EncryptedRackSecret, EncryptedShares, KeyShareGf256, RackSecret,
+    ShareDigestGf256,
 };
 use crate::{Epoch, Error, PlatformId, RackId, ReconfigureMsg, Threshold};
 use secrecy::ExposeSecret;
@@ -42,17 +43,21 @@ pub struct Configuration {
 }
 
 impl Configuration {
-    /// Create an initial configuration for the trust quorum
-    pub fn initial(
+    /// Create a new configuration for the trust quorum
+    ///
+    /// `previous_configuration` is never filled in upon construction. A
+    /// coordinator will fill this in as necessary after retrieving shares for
+    /// the last committed epoch.
+    pub fn new(
         coordinator: PlatformId,
         reconfigure_msg: &ReconfigureMsg,
-    ) -> Result<Configuration, Error> {
+    ) -> Result<(Configuration, BTreeMap<PlatformId, KeyShareGf256>), Error>
+    {
         let rack_secret = RackSecret::new();
         let shares = rack_secret
             .split(reconfigure_msg.threshold, reconfigure_msg.members.len())?;
 
-        let share_digests = shares.expose_secret().iter().map(|s| s.digest());
-        let member_ids = reconfigure_msg.members.clone();
+        let share_digests = shares.iter().map(|s| s.digest());
         let members = reconfigure_msg
             .members
             .iter()
@@ -60,23 +65,30 @@ impl Configuration {
             .zip(share_digests)
             .collect();
 
-        let rack_id = reconfigure_msg.rack_id;
-        let encrypted_shares = EncryptedShares::new(
-            &rack_id,
-            &rack_secret,
-            member_ids,
-            shares.expose_secret().as_ref(),
-        )?;
+        let shares_by_member: BTreeMap<PlatformId, KeyShareGf256> =
+            reconfigure_msg
+                .members
+                .iter()
+                .cloned()
+                .zip(shares.into_iter())
+                .collect();
 
-        Ok(Configuration {
-            rack_id,
-            epoch: reconfigure_msg.epoch,
-            coordinator,
-            members,
-            threshold: reconfigure_msg.threshold,
-            encrypted_shares,
-            previous_configuration: None,
-        })
+        let rack_id = reconfigure_msg.rack_id;
+        let encrypted_shares =
+            EncryptedShares::new(&rack_id, &rack_secret, &shares_by_member)?;
+
+        Ok((
+            Configuration {
+                rack_id,
+                epoch: reconfigure_msg.epoch,
+                coordinator,
+                members,
+                threshold: reconfigure_msg.threshold,
+                encrypted_shares,
+                previous_configuration: None,
+            },
+            shares_by_member,
+        ))
     }
 }
 

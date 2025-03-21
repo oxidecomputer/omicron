@@ -40,6 +40,12 @@ impl PersistentState {
             .or_else(|| self.lrtq.as_ref().map(|pkg| RackId(pkg.rack_uuid)))
     }
 
+    // There is no information other than lrtq so far. Reconfigurations must
+    // upgrade.
+    pub fn is_lrtq_only(&self) -> bool {
+        self.lrtq.is_some() && self.last_committed_epoch().is_none()
+    }
+
     // Are there any committed configurations or lrtq data?
     pub fn is_uninitialized(&self) -> bool {
         self.lrtq.is_none() && self.last_committed_epoch().is_none()

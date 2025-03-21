@@ -59,8 +59,11 @@ pub enum Error {
     )]
     ReconfigurationInProgress { current_epoch: Epoch, msg_epoch: Epoch },
 
-    #[error("Mismatched reconfiguration requests for epoch {0:?}")]
+    #[error("mismatched reconfiguration requests for epoch {0:?}")]
     MismatchedReconfigurationForSameEpoch(Epoch),
+
+    #[error("upgrade from LRTQ required")]
+    UpgradeFromLrtqRequired,
 
     #[error("shamir error: {0:?}")]
     Shamir(vsss_rs::Error),

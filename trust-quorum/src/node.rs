@@ -4,14 +4,14 @@
 
 //! A trust quorum node that implements the trust quorum protocol
 
-use crate::{Configuration, messages::*};
+use crate::{Configuration, Epoch, messages::*};
 use crate::{
     Envelope, Error, PlatformId, Threshold, persistent_state::PersistentState,
 };
 
 use crate::crypto::{
     EncryptedShares, KeyShareEd25519, KeyShareGf256, RackSecret,
-    ReconstructedRackSecret,
+    ReconstructedRackSecret, ShareDigestEd25519, ShareDigestGf256,
 };
 use slog::{Logger, error, info, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
@@ -34,15 +34,12 @@ pub struct CoordinatorState {
     /// A copy of the message used to start this reconfiguration
     reconfigure_msg: ReconfigureMsg,
 
-    /// Collection of shares and/or reconstructed rack secret
-    /// for the prior configuration if there is one.
-    previous_config_secrets: Option<PreviousConfigSecrets>,
+    /// Configuration that will get persisted inside a `Prepare` message in a
+    /// `Node`s `PersistentState`, once it is possible to create the Prepare.
+    configuration: Configuration,
 
-    /// The set of Prepares to send to each node
-    prepares: BTreeMap<PlatformId, PrepareMsg>,
-
-    /// Acknowledgements that the prepare has been received
-    prepare_acks: BTreeSet<PlatformId>,
+    /// What is the coordinator currently doing
+    op: CoordinatorOperation,
 
     /// When to resend prepare messages next
     retry_deadline: Instant,
@@ -52,7 +49,8 @@ impl CoordinatorState {
     pub fn new(
         now: Instant,
         reconfigure_msg: ReconfigureMsg,
-        previous_config_secrets: Option<PreviousConfigSecrets>,
+        configuration: Configuration,
+        op: CoordinatorOperation,
     ) -> CoordinatorState {
         // We always set the retry deadline to `now` so that we will send
         // prepares upon new construction. This field gets updated after
@@ -61,29 +59,32 @@ impl CoordinatorState {
         CoordinatorState {
             start_time: now,
             reconfigure_msg,
-            previous_config_secrets,
-            prepares: BTreeMap::new(),
-            prepare_acks: BTreeSet::new(),
+            configuration,
+            op,
             retry_deadline,
         }
     }
-
-    /// Do we need to reconstruct an old rack secret?
-    pub fn is_initial_configuration(&self) -> bool {
-        self.previous_config_secrets.is_none()
-    }
 }
 
-/// Coordinator's collection of prior secret information
-///
-/// Used in all but the initial configuration.
-pub enum PreviousConfigSecrets {
-    /// If collecting shares for LRTQ, we start in this variant
-    Ed25519Shares(BTreeMap<PlatformId, KeyShareEd25519>),
-    /// If collecting shares for this protocol we start here
-    Gf256Shares(BTreeMap<PlatformId, KeyShareGf256>),
-    /// We end here when we have enough shares to reconstruct the rack secret
-    RackSecret(ReconstructedRackSecret),
+/// What should the coordinator be doing?
+pub enum CoordinatorOperation {
+    CollectShares {
+        epoch: Epoch,
+        members: BTreeMap<PlatformId, ShareDigestGf256>,
+        shares: BTreeMap<PlatformId, KeyShareGf256>,
+    },
+    // Epoch is always 0
+    CollectLrtqShares {
+        members: BTreeMap<PlatformId, ShareDigestEd25519>,
+        shares: BTreeMap<PlatformId, KeyShareEd25519>,
+    },
+    Prepare {
+        /// The set of Prepares to send to each node
+        prepares: BTreeMap<PlatformId, PrepareMsg>,
+
+        /// Acknowledgements that the prepare has been received
+        prepare_acks: BTreeSet<PlatformId>,
+    },
 }
 
 /// An entity capable of participating in trust quorum
@@ -120,6 +121,8 @@ impl Node {
     ///
     /// On success, puts messages that need sending to other nodes in `outbox`
     /// and returns a `PersistentState` which the caller must write to disk.
+    ///
+    /// For upgrading from LRTQ, use `coordinate_upgrade_from_lrtq`
     pub fn coordinate_reconfiguration(
         &mut self,
         now: Instant,
@@ -151,13 +154,10 @@ impl Node {
             return Ok(None);
         };
 
-        if state.is_initial_configuration() {
-            // No need to collect any old key shares
-            // Let's create a new configuration and start sending prepares.
-            let config = Configuration::initial(
-                self.platform_id.clone(),
-                &state.reconfigure_msg,
-            )?;
+        match &state.op {
+            CoordinatorOperation::CollectShares { epoch, members, shares } => {}
+            CoordinatorOperation::CollectLrtqShares { members, shares } => {}
+            CoordinatorOperation::Prepare { prepares, prepare_acks } => {}
         }
 
         todo!()
@@ -210,19 +210,40 @@ impl Node {
             );
         }
 
+        // Create a configuration for this epoch
+        let (config, shares) =
+            Configuration::new(self.platform_id.clone(), &msg)?;
+
         // How we collect the previous configuration's secrets depends upon
         // this node's persistent state.
-        let previous_config_secrets =
-            if self.persistent_state.is_uninitialized() {
-                None
-            } else if self.persistent_state.is_last_committed_config_lrtq() {
-                Some(PreviousConfigSecrets::Ed25519Shares(BTreeMap::new()))
-            } else {
-                Some(PreviousConfigSecrets::Gf256Shares(BTreeMap::new()))
-            };
+        let op = if self.persistent_state.is_uninitialized() {
+            let prepares = shares
+                .into_iter()
+                .map(|(platform_id, share)| {
+                    (platform_id, PrepareMsg { config: config.clone(), share })
+                })
+                .collect();
+            CoordinatorOperation::Prepare {
+                prepares,
+                prepare_acks: BTreeSet::new(),
+            }
+        } else if self.persistent_state.is_last_committed_config_lrtq() {
+            // We should never get here, as we must upgrade from a reconfig
+            // which is checked earlier in this code path.
+            return Err(Error::UpgradeFromLrtqRequired);
+        } else {
+            // Safety: We already validated the last committed configuration before getting here
+            let config =
+                self.persistent_state.last_committed_configuration().unwrap();
+            CoordinatorOperation::CollectShares {
+                epoch: config.epoch,
+                members: config.members.clone(),
+                shares: BTreeMap::new(),
+            }
+        };
 
         self.coordinator_state =
-            Some(CoordinatorState::new(now, msg, previous_config_secrets));
+            Some(CoordinatorState::new(now, msg, config, op));
 
         Ok(())
     }
@@ -231,6 +252,9 @@ impl Node {
         &self,
         msg: &ReconfigureMsg,
     ) -> Result<(), Error> {
+        if self.persistent_state.is_lrtq_only() {
+            return Err(Error::UpgradeFromLrtqRequired);
+        }
         Self::check_reconfigure_membership_sizes(msg)?;
         self.check_rack_id(msg)?;
         self.check_reconfigure_epoch(msg)?;
