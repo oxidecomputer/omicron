@@ -44,7 +44,6 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
-use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -53,6 +52,7 @@ use std::fmt;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use strum::EnumIter;
+use tufaceous_artifact::ArtifactVersion;
 
 mod blueprint_diff;
 mod blueprint_display;
@@ -934,7 +934,7 @@ pub enum BlueprintZoneImageSource {
     /// This originates from TUF repos uploaded to Nexus which are then
     /// replicated out to all sleds.
     #[serde(rename_all = "snake_case")]
-    Artifact { version: Version, hash: ArtifactHash },
+    Artifact { version: ArtifactVersion, hash: ArtifactHash },
 }
 
 impl From<BlueprintZoneImageSource> for OmicronZoneImageSource {

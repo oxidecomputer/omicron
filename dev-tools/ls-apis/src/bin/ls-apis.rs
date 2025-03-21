@@ -8,8 +8,8 @@ use anyhow::{Context, Result, bail};
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use omicron_ls_apis::{
-    AllApiMetadata, ApiDependencyFilter, LoadArgs, ServerComponentName,
-    SystemApis, VersionedHow,
+    AllApiMetadata, ApiDependencyFilter, ApiMetadata, LoadArgs,
+    ServerComponentName, SystemApis, VersionedHow,
 };
 use parse_display::{Display, FromStr};
 
@@ -108,17 +108,15 @@ fn run_adoc(apis: &SystemApis) -> Result<()> {
 
     let metadata = apis.api_metadata();
     for api in metadata.apis() {
-        let Some(server_component) =
-            apis.api_producer(&api.client_package_name)
-        else {
-            continue;
-        };
         println!("// DO NOT EDIT.  This table is auto-generated. See above.");
-        println!("|{}", api.label);
-        println!("|{}", apis.adoc_label(server_component)?);
         println!("|{}", apis.adoc_label(&api.client_package_name)?);
-        println!("|");
 
+        println!("|");
+        for server_component in apis.api_producers(&api.client_package_name) {
+            println!("* {}", apis.adoc_label(server_component)?);
+        }
+
+        println!("|");
         for (c, _) in apis.api_consumers(
             &api.client_package_name,
             ApiDependencyFilter::default(),
@@ -214,12 +212,10 @@ fn print_server_components<'a>(
     for s in server_components.into_iter() {
         let (repo_name, pkg_path) = apis.package_label(s)?;
         println!("{}{} ({}/{})", prefix, s, repo_name, pkg_path);
-        for api in metadata.apis().filter(|a| {
-            matches!(
-                apis.api_producer(&a.client_package_name),
-                Some (name) if name == s
-            )
-        }) {
+        for api in metadata
+            .apis()
+            .filter(|a| apis.is_producer_of(s, &a.client_package_name))
+        {
             println!(
                 "{}    exposes: {} (client = {})",
                 prefix, api.label, api.client_package_name
@@ -301,6 +297,18 @@ fn run_check(apis: &SystemApis) -> Result<()> {
         );
     }
 
+    fn print_api_and_producers(api: &ApiMetadata, apis: &SystemApis) {
+        print!("    {} ({}", api.label, api.client_package_name,);
+        let mut producers = apis.api_producers(&api.client_package_name);
+        if let Some(producer) = producers.next() {
+            print!(", exposed by {producer}");
+            for producer in producers {
+                print!(", {producer}")
+            }
+        }
+        println!(")");
+    }
+
     println!("\n");
     println!("Server-managed APIs:\n");
     for api in apis
@@ -308,24 +316,14 @@ fn run_check(apis: &SystemApis) -> Result<()> {
         .apis()
         .filter(|f| f.deployed() && f.versioned_how == VersionedHow::Server)
     {
-        println!(
-            "    {} ({}, exposed by {})",
-            api.label,
-            api.client_package_name,
-            apis.api_producer(&api.client_package_name).unwrap()
-        );
+        print_api_and_producers(api, apis);
     }
 
     println!("\n");
     println!("Client-managed API:\n");
     for api in apis.api_metadata().apis().filter(|f| f.deployed()) {
         if let VersionedHow::Client(reason) = &api.versioned_how {
-            println!(
-                "    {} ({}, exposed by {})",
-                api.label,
-                api.client_package_name,
-                apis.api_producer(&api.client_package_name).unwrap()
-            );
+            print_api_and_producers(api, apis);
             println!("        reason: {}", reason);
         }
     }
@@ -342,12 +340,7 @@ fn run_check(apis: &SystemApis) -> Result<()> {
     } else {
         println!("\n");
         for api in unknown {
-            println!(
-                "    {} ({}, exposed by {})",
-                api.label,
-                api.client_package_name,
-                apis.api_producer(&api.client_package_name).unwrap()
-            );
+            print_api_and_producers(api, apis);
         }
         bail!("at least one API has unknown version strategy (see above)");
     }

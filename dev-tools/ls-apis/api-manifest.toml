@@ -255,11 +255,7 @@ versioned_how = "server"
 client_package_name = "dpd-client"
 label = "Dendrite DPD"
 server_package_name = "dpd"
-# TODO We might need to pick this apart more carefully.  DPD invokes and is
-# invoked by several different services.  It's possible that some of them can
-# treat it as server-managed.
-versioned_how = "client"
-versioned_how_reason = "Sled Agent calling DPD creates a circular dependency"
+versioned_how = "server"
 notes = """
 Dendrite's data plane daemon (`dpd`) is the interface to configure and manage \
 the rack switches. It's consumed by sled-agent to get the rack off the \
