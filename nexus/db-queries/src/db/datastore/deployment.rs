@@ -1810,6 +1810,7 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
+    use nexus_types::deployment::BlueprintZoneImageVersion;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::PlanningInput;
@@ -1828,10 +1829,15 @@ mod tests {
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::Name;
+    use omicron_common::api::external::TufArtifactMeta;
+    use omicron_common::api::external::TufRepoDescription;
+    use omicron_common::api::external::TufRepoMeta;
     use omicron_common::api::external::Vni;
     use omicron_common::api::internal::shared::NetworkInterface;
     use omicron_common::api::internal::shared::NetworkInterfaceKind;
     use omicron_common::disk::DiskIdentity;
+    use omicron_common::update::ArtifactHash;
+    use omicron_common::update::ArtifactId;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::poll::wait_for_condition;
@@ -1856,6 +1862,7 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
+    use tufaceous_artifact::ArtifactVersion;
 
     static EMPTY_PLANNING_INPUT: LazyLock<PlanningInput> =
         LazyLock::new(|| PlanningInputBuilder::empty_input());
@@ -2169,6 +2176,84 @@ mod tests {
                     .unwrap(),
                 Ensure::Added
             );
+        }
+
+        const ARTIFACT_VERSION_1: ArtifactVersion =
+            ArtifactVersion::new_const("1.0.0");
+        const ARTIFACT_HASH_1: ArtifactHash = ArtifactHash([1; 32]);
+        const ARTIFACT_HASH_2: ArtifactHash = ArtifactHash([2; 32]);
+
+        // Add an artifact to the tuf_artifact table. This is used to test
+        // artifact version lookup.
+        {
+            const SYSTEM_VERSION: semver::Version =
+                semver::Version::new(0, 0, 1);
+            const SYSTEM_HASH: ArtifactHash = ArtifactHash([3; 32]);
+
+            datastore
+                .update_tuf_repo_insert(
+                    opctx,
+                    &TufRepoDescription {
+                        repo: TufRepoMeta {
+                            hash: SYSTEM_HASH,
+                            targets_role_version: 0,
+                            valid_until: Utc::now(),
+                            system_version: SYSTEM_VERSION,
+                            file_name: String::new(),
+                        },
+                        artifacts: vec![TufArtifactMeta {
+                            id: ArtifactId {
+                                name: String::new(),
+                                version: ARTIFACT_VERSION_1,
+                                kind: KnownArtifactKind::Zone.into(),
+                            },
+                            hash: ARTIFACT_HASH_1,
+                            size: 0,
+                        }],
+                    },
+                )
+                .await
+                .expect("inserted TUF repo");
+        }
+
+        // Take the first two zones and set their image sources.
+        {
+            let zone_ids: Vec<OmicronZoneUuid> = builder
+                .current_sled_zones(
+                    new_sled_id,
+                    BlueprintZoneDisposition::is_in_service,
+                )
+                .map(|zone| zone.id)
+                .take(2)
+                .collect();
+            if zone_ids.len() < 2 {
+                panic!(
+                    "expected new sled to have at least 2 zones, got {}",
+                    zone_ids.len()
+                );
+            }
+            builder
+                .sled_set_zone_source(
+                    new_sled_id,
+                    zone_ids[0],
+                    BlueprintZoneImageSource::Artifact {
+                        version: BlueprintZoneImageVersion::Version(
+                            ARTIFACT_VERSION_1,
+                        ),
+                        hash: ARTIFACT_HASH_1,
+                    },
+                )
+                .unwrap();
+            builder
+                .sled_set_zone_source(
+                    new_sled_id,
+                    zone_ids[1],
+                    BlueprintZoneImageSource::Artifact {
+                        version: BlueprintZoneImageVersion::Unknown,
+                        hash: ARTIFACT_HASH_2,
+                    },
+                )
+                .unwrap();
         }
 
         let num_new_ntp_zones = 1;
