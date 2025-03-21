@@ -813,9 +813,51 @@ impl super::Nexus {
                         Ok(())
                     }
 
-                    _ => Err(BackoffError::transient(WaitError::Transient(
-                        anyhow!("region unexpected state {:?}", region.state),
-                    ))),
+                    RegionState::Failed => {
+                        // If the delete failed, Nexus can re-request that the
+                        // region be deleted, and it will move back to
+                        // Tombstoned.
+
+                        match self
+                            .request_crucible_region_delete(
+                                log, dataset, region_id,
+                            )
+                            .await
+                        {
+                            Ok(()) => {
+                                // Either the request succeeded, or the
+                                // dataset's agent is gone.
+                                Err(BackoffError::transient(
+                                    WaitError::Transient(anyhow!(
+                                        "region is failed, re-requested delete"
+                                    )),
+                                ))
+                            }
+
+                            Err(e) => Err(BackoffError::transient(
+                                WaitError::Transient(anyhow!(
+                                    "region is failed, error re-requesting \
+                                        delete: {e}"
+                                )),
+                            )),
+                        }
+                    }
+
+                    RegionState::Requested | RegionState::Created => {
+                        // It's unexpected that the region be here after a
+                        // deletion request. We successfully requested the
+                        // region deletion before entering this retry loop, and
+                        // the Crucible agent should prevent the state
+                        // transition from Tombstoned to either of these states.
+
+                        Err(BackoffError::Permanent(WaitError::Permanent(
+                            Error::internal_error(&format!(
+                                "region is {:?} after successful deletion \
+                                request!",
+                                region.state,
+                            )),
+                        )))
+                    }
                 }
             },
             |e: WaitError, delay| {

@@ -12,7 +12,10 @@ use omicron_common::{
         external::{ByteCount, Generation},
         internal::shared::{NetworkInterface, SourceNatConfig},
     },
-    disk::DiskVariant,
+    disk::{
+        DatasetManagementStatus, DatasetsConfig, DiskManagementStatus,
+        DiskVariant, OmicronPhysicalDisksConfig,
+    },
     update::ArtifactHash,
     zpool_name::ZpoolName,
 };
@@ -122,6 +125,26 @@ pub enum SledRole {
     /// The sled is attached to the network switch, and has additional
     /// responsibilities.
     Scrimlet,
+}
+
+/// Describes the set of Reconfigurator-managed configuration elements of a sled
+// TODO this struct should have a generation number; at the moment, each of
+// the fields has a separete one internally.
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct OmicronSledConfig {
+    pub disks_config: OmicronPhysicalDisksConfig,
+    pub datasets_config: DatasetsConfig,
+    pub zones_config: OmicronZonesConfig,
+}
+
+/// Result of the currently-synchronous `omicron_config_put` endpoint.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[must_use = "this `DatasetManagementResult` may contain errors, which should be handled"]
+pub struct OmicronSledConfigResult {
+    pub disks: Vec<DiskManagementStatus>,
+    pub datasets: Vec<DatasetManagementStatus>,
 }
 
 /// Describes the set of Omicron-managed zones running on a sled

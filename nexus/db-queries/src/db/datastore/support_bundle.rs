@@ -528,7 +528,6 @@ mod test {
             let mut sleds = vec![];
             for (sled, config) in &blueprint.sleds {
                 let pools = config
-                    .datasets_config
                     .datasets
                     .iter()
                     .filter_map(|dataset| {
@@ -928,7 +927,7 @@ mod test {
             .values()
             .flat_map(|sled_config| {
                 let mut nexus_zones = vec![];
-                for zone in &sled_config.zones_config.zones {
+                for zone in &sled_config.zones {
                     if matches!(zone.zone_type, BlueprintZoneType::Nexus(_))
                         && zone.disposition.is_in_service()
                     {
@@ -947,7 +946,7 @@ mod test {
             .values()
             .flat_map(|sled_config| {
                 let mut debug_datasets = vec![];
-                for dataset in sled_config.datasets_config.datasets.iter() {
+                for dataset in sled_config.datasets.iter() {
                     if matches!(dataset.kind, DebugDatasetKind)
                         && dataset.disposition.is_in_service()
                     {
@@ -961,7 +960,7 @@ mod test {
 
     fn expunge_dataset_for_bundle(bp: &mut Blueprint, bundle: &SupportBundle) {
         for sled in bp.sleds.values_mut() {
-            for mut dataset in sled.datasets_config.datasets.iter_mut() {
+            for mut dataset in sled.datasets.iter_mut() {
                 if dataset.id == bundle.dataset_id.into() {
                     dataset.disposition = BlueprintDatasetDisposition::Expunged;
                 }
@@ -971,7 +970,7 @@ mod test {
 
     fn expunge_nexus_for_bundle(bp: &mut Blueprint, bundle: &SupportBundle) {
         for sled in bp.sleds.values_mut() {
-            for mut zone in &mut sled.zones_config.zones {
+            for mut zone in &mut sled.zones {
                 if zone.id == bundle.assigned_nexus.unwrap().into() {
                     zone.disposition = BlueprintZoneDisposition::Expunged {
                         as_of_generation: *Generation::new(),

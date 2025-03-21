@@ -71,6 +71,53 @@ struct CrucibleDataInner {
     used_ports: HashSet<u16>,
 }
 
+/// Returns Some with a string if there's a mismatch
+pub fn mismatch(params: &CreateRegion, r: &Region) -> Option<String> {
+    if params.block_size != r.block_size {
+        Some(format!(
+            "requested block size {} instead of {}",
+            params.block_size, r.block_size
+        ))
+    } else if params.extent_size != r.extent_size {
+        Some(format!(
+            "requested extent size {} instead of {}",
+            params.extent_size, r.extent_size
+        ))
+    } else if params.extent_count != r.extent_count {
+        Some(format!(
+            "requested extent count {} instead of {}",
+            params.extent_count, r.extent_count
+        ))
+    } else if params.encrypted != r.encrypted {
+        Some(format!(
+            "requested encrypted {} instead of {}",
+            params.encrypted, r.encrypted
+        ))
+    } else if params.cert_pem != r.cert_pem {
+        Some(format!(
+            "requested cert_pem {:?} instead of {:?}",
+            params.cert_pem, r.cert_pem
+        ))
+    } else if params.key_pem != r.key_pem {
+        Some(format!(
+            "requested key_pem {:?} instead of {:?}",
+            params.key_pem, r.key_pem
+        ))
+    } else if params.root_pem != r.root_pem {
+        Some(format!(
+            "requested root_pem {:?} instead of {:?}",
+            params.root_pem, r.root_pem
+        ))
+    } else if params.source != r.source {
+        Some(format!(
+            "requested source {:?} instead of {:?}",
+            params.source, r.source
+        ))
+    } else {
+        None
+    }
+}
+
 impl CrucibleDataInner {
     fn new(log: Logger, start_port: u16, end_port: u16) -> Self {
         Self {
@@ -108,7 +155,7 @@ impl CrucibleDataInner {
         panic!("no free ports for simulated crucible agent!");
     }
 
-    fn create(&mut self, params: CreateRegion) -> Result<Region> {
+    fn create(&mut self, params: CreateRegion) -> Result<Region, HttpError> {
         let id = Uuid::from_str(&params.id.0).unwrap();
 
         let state = if let Some(on_create) = &self.on_create {
@@ -118,7 +165,23 @@ impl CrucibleDataInner {
         };
 
         if self.region_creation_error {
-            bail!("region creation error!");
+            return Err(HttpError::for_internal_error(
+                "region creation error!".to_string(),
+            ));
+        }
+
+        if let Some(region) = self.regions.get(&id) {
+            if let Some(mismatch) = mismatch(&params, &region) {
+                let s = format!(
+                    "region {region:?} already exists as {params:?}: {mismatch}"
+                );
+                warn!(self.log, "{s}");
+                return Err(HttpError::for_client_error(
+                    None,
+                    dropshot::ClientErrorStatusCode::CONFLICT,
+                    s,
+                ));
+            }
         }
 
         let read_only = params.source.is_some();
@@ -131,10 +194,10 @@ impl CrucibleDataInner {
             // NOTE: This is a lie - no server is running.
             port_number: self.get_free_port(),
             state,
-            encrypted: false,
-            cert_pem: None,
-            key_pem: None,
-            root_pem: None,
+            encrypted: params.encrypted,
+            cert_pem: params.cert_pem,
+            key_pem: params.key_pem,
+            root_pem: params.root_pem,
             source: params.source,
             read_only,
         };
@@ -933,7 +996,7 @@ impl CrucibleData {
         self.inner.lock().unwrap().list()
     }
 
-    pub fn create(&self, params: CreateRegion) -> Result<Region> {
+    pub fn create(&self, params: CreateRegion) -> Result<Region, HttpError> {
         self.inner.lock().unwrap().create(params)
     }
 
