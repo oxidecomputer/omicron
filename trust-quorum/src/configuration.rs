@@ -9,7 +9,6 @@ use crate::crypto::{
     ShareDigestGf256,
 };
 use crate::{Epoch, Error, PlatformId, RackId, ReconfigureMsg, Threshold};
-use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

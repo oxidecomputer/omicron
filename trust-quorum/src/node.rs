@@ -131,8 +131,9 @@ impl Node {
     ) -> Result<Option<PersistentState>, Error> {
         self.check_in_service()?;
         self.validate_reconfigure_msg(&msg)?;
-        self.set_coordinator_state(now, msg)?;
-        self.send_coordinator_msgs(now, outbox)
+        let persistent_state = self.set_coordinator_state(now, msg)?;
+        self.send_coordinator_msgs(now, outbox)?;
+        Ok(persistent_state)
     }
 
     // Send any required messages as a reconfiguration coordinator
@@ -142,32 +143,43 @@ impl Node {
     // In some cases a `PrepareMsg` will be added locally to the
     // `PersistentState`, requiring persistence from the caller. In this case we
     // will return a copy of it.
+    //
+    // This method is "in progress" - allow unused parameters for now
+    #[allow(unused)]
     fn send_coordinator_msgs(
         &mut self,
         now: Instant,
         outbox: &mut Vec<Envelope>,
-    ) -> Result<Option<PersistentState>, Error> {
+    ) -> Result<(), Error> {
         // This function is going to be called unconditionally in `tick`
         // callbacks. In this case we may not actually be a coordinator. We just
         // ignore the call in that case.
         let Some(state) = &self.coordinator_state else {
-            return Ok(None);
+            return Ok(());
         };
 
         match &state.op {
             CoordinatorOperation::CollectShares { epoch, members, shares } => {}
             CoordinatorOperation::CollectLrtqShares { members, shares } => {}
-            CoordinatorOperation::Prepare { prepares, prepare_acks } => {}
+            CoordinatorOperation::Prepare { prepares, prepare_acks } => {
+                for (platform_id, prepare) in prepares.clone().into_iter() {
+                    outbox.push(Envelope {
+                        to: platform_id,
+                        from: self.platform_id.clone(),
+                        msg: PeerMsg::Prepare(prepare),
+                    });
+                }
+            }
         }
 
-        todo!()
+        Ok(())
     }
 
     fn set_coordinator_state(
         &mut self,
         now: Instant,
         msg: ReconfigureMsg,
-    ) -> Result<(), Error> {
+    ) -> Result<Option<PersistentState>, Error> {
         // Are we already coordinating?
         if let Some(coordinator_state) = &self.coordinator_state {
             let current_epoch = coordinator_state.reconfigure_msg.epoch;
@@ -199,7 +211,7 @@ impl Node {
                 }
 
                 // Idempotent request
-                return Ok(());
+                return Ok(None);
             }
 
             info!(
@@ -214,19 +226,30 @@ impl Node {
         let (config, shares) =
             Configuration::new(self.platform_id.clone(), &msg)?;
 
-        // How we collect the previous configuration's secrets depends upon
-        // this node's persistent state.
-        let op = if self.persistent_state.is_uninitialized() {
-            let prepares = shares
-                .into_iter()
-                .map(|(platform_id, share)| {
-                    (platform_id, PrepareMsg { config: config.clone(), share })
-                })
-                .collect();
-            CoordinatorOperation::Prepare {
-                prepares,
-                prepare_acks: BTreeSet::new(),
+        // How (and if) we collect the previous configuration's secrets depends
+        // upon this node's persistent state.
+        let (op, persistent_state) = if self.persistent_state.is_uninitialized()
+        {
+            let mut prepares = BTreeMap::new();
+            for (platform_id, share) in shares.into_iter() {
+                let prepare_msg = PrepareMsg { config: config.clone(), share };
+                if platform_id == self.platform_id {
+                    // Add the prepare to our `PersistentState`
+                    self.persistent_state
+                        .prepares
+                        .insert(msg.epoch, prepare_msg);
+                } else {
+                    // Create a message that requires sending
+                    prepares.insert(platform_id, prepare_msg);
+                }
             }
+            (
+                CoordinatorOperation::Prepare {
+                    prepares,
+                    prepare_acks: BTreeSet::new(),
+                },
+                Some(self.persistent_state.clone()),
+            )
         } else if self.persistent_state.is_last_committed_config_lrtq() {
             // We should never get here, as we must upgrade from a reconfig
             // which is checked earlier in this code path.
@@ -235,17 +258,20 @@ impl Node {
             // Safety: We already validated the last committed configuration before getting here
             let config =
                 self.persistent_state.last_committed_configuration().unwrap();
-            CoordinatorOperation::CollectShares {
-                epoch: config.epoch,
-                members: config.members.clone(),
-                shares: BTreeMap::new(),
-            }
+            (
+                CoordinatorOperation::CollectShares {
+                    epoch: config.epoch,
+                    members: config.members.clone(),
+                    shares: BTreeMap::new(),
+                },
+                None,
+            )
         };
 
         self.coordinator_state =
             Some(CoordinatorState::new(now, msg, config, op));
 
-        Ok(())
+        Ok(persistent_state)
     }
 
     fn validate_reconfigure_msg(

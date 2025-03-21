@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// All the persistent state for this protocol
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct PersistentState {
     // Ledger generation
     pub generation: u64,
@@ -94,7 +94,7 @@ impl PersistentState {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DecommissionedMetadata {
     /// The committed epoch, later than its current configuration at which the
     /// node learned that it had been decommissioned.
