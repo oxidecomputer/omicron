@@ -719,7 +719,7 @@ only_for_targets.image = "standard"
 # 3. Change the below `source.type` key to `"manual"` and comment out or remove
 # the other `source.*` keys.
 source.type = "prebuilt"
-source.repo = "dendrite"
+source.repo = "dendrite-os"
 source.commit = "66acce1de14a0fe3c6e2c4a0cb1e7545734d5fc6"
 source.sha256 = "9c960c19f20f2d9c75221a625da1ee376e27a7bf3e08c876aadff9096d886e48"
 output.type = "zone"
@@ -746,7 +746,7 @@ only_for_targets.image = "standard"
 # 3. Change the below `source.type` key to `"manual"` and comment out or remove
 # the other `source.*` keys.
 source.type = "prebuilt"
-source.repo = "dendrite"
+source.repo = "dendrite-os"
 source.commit = "66acce1de14a0fe3c6e2c4a0cb1e7545734d5fc6"
 source.sha256 = "f06197a8e3a4c17a33f16eb974151ee90da4b693bd8f0ae36df6104e9ad00c40"
 output.type = "zone"
@@ -766,7 +766,7 @@ only_for_targets.image = "standard"
 # 3. Change the below `source.type` key to `"manual"` and comment out or remove
 # the other `source.*` keys.
 source.type = "prebuilt"
-source.repo = "dendrite"
+source.repo = "dendrite-os"
 source.commit = "66acce1de14a0fe3c6e2c4a0cb1e7545734d5fc6"
 source.sha256 = "d46d8213dc6b079d1334252a4daec6c7bda848f40b5e071612130feea33ee083"
 output.type = "zone"
