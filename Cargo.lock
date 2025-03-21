@@ -1614,7 +1614,6 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
-source = "git+https://github.com/nieuwejaar/dendrite#66acce1de14a0fe3c6e2c4a0cb1e7545734d5fc6"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2672,11 +2671,10 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dpd-client"
 version = "0.1.0"
-source = "git+https://github.com/nieuwejaar/dendrite#66acce1de14a0fe3c6e2c4a0cb1e7545734d5fc6"
 dependencies = [
  "async-trait",
  "chrono",
- "common 0.1.0 (git+https://github.com/nieuwejaar/dendrite)",
+ "common 0.1.0",
  "crc8",
  "futures",
  "http",
@@ -5209,7 +5207,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -8809,7 +8807,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9cd31dcfdbbd7431a807ef4df6edd6473228e94d5c805e8cf671227a21bad068"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "rand 0.8.5",
@@ -11479,7 +11477,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.98",

@@ -21,7 +21,7 @@ PACKAGES=(
   "dendrite-stub"
 )
 
-REPO="nieuwejaar/dendrite"
+REPO="oxidecomputer/dendrite-os"
 
 . "$SOURCE_DIR/update_helpers.sh"
 
@@ -74,6 +74,7 @@ function main {
     install_toml2json
     do_update_packages "$TARGET_COMMIT" "$DRY_RUN" "$REPO" "${PACKAGES[@]}"
     update_dendrite_stub_shas "$TARGET_COMMIT" "$DRY_RUN"
+    echo COMMIT=\""$TARGET_COMMIT"\" > tools/dendrite_version
 }
 
 main "$@"
