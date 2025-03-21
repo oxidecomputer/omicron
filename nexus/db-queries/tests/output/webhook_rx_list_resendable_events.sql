@@ -20,6 +20,6 @@ WHERE
             webhook_delivery AS also_delivey
           WHERE
             (also_delivey.event_id = webhook_event.id AND also_delivey.state != $3)
-            AND also_delivey.trigger != $4
+            AND also_delivey.triggered_by != $4
         )
       )
