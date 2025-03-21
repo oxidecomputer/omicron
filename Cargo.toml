@@ -13,7 +13,6 @@ members = [
     "clients/cockroach-admin-client",
     "clients/ddm-admin-client",
     "clients/dns-service-client",
-    "clients/dpd-client",
     "clients/ereport-client",
     "clients/gateway-client",
     "clients/installinator-client",
@@ -153,7 +152,6 @@ default-members = [
     "clients/cockroach-admin-client",
     "clients/ddm-admin-client",
     "clients/dns-service-client",
-    "clients/dpd-client",
     "clients/ereport-client",
     "clients/gateway-client",
     "clients/installinator-client",
@@ -389,7 +387,7 @@ diesel-dtrace = "0.4.2"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { path = "clients/dpd-client" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite" }
 dropshot = { version = "0.16.0", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.19"
 either = "1.14.0"
@@ -475,8 +473,8 @@ lldpd-client = { git = "https://github.com/oxidecomputer/lldp" }
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 newtype_derive = "0.1.6"
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "5a0d6edd0ecc7f26225a5bf3849d8508956682d0" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "5a0d6edd0ecc7f26225a5bf3849d8508956682d0" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "8452936a53c3b16e53cbbf4e34e5e59899afc965" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "8452936a53c3b16e53cbbf4e34e5e59899afc965" }
 multimap = "0.10.0"
 nexus-auth = { path = "nexus/auth" }
 nexus-client = { path = "clients/nexus-client" }

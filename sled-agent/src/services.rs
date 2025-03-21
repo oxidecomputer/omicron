@@ -799,6 +799,100 @@ pub struct ServiceManager {
     inner: Arc<ServiceManagerInner>,
 }
 
+/// Ensure that a NAT entry exists, overwriting a previous conflicting entry if
+/// applicable.
+///
+/// nat_ipv\[46\]_create are not idempotent (see oxidecomputer/dendrite#343),
+/// but this wrapper function is. Call this from sagas instead.
+#[allow(clippy::too_many_arguments)]
+async fn dpd_ensure_nat_entry(
+    client: &DpdClient,
+    log: &Logger,
+    target_ip: IpAddr,
+    target_mac: DpdTypes::MacAddr,
+    target_first_port: u16,
+    target_last_port: u16,
+    target_vni: u32,
+    sled_ip_address: &std::net::Ipv6Addr,
+) -> Result<(), Error> {
+    let existing_nat = match &target_ip {
+        IpAddr::V4(ip) => client.nat_ipv4_get(ip, target_first_port).await,
+        IpAddr::V6(ip) => client.nat_ipv6_get(ip, target_first_port).await,
+    };
+
+    // If a NAT entry already exists, but has the wrong internal
+    // IP address, delete the old entry before continuing (the
+    // DPD entry-creation API won't replace an existing entry).
+    // If the entry exists and has the right internal IP, there's
+    // no more work to do for this external IP.
+    match existing_nat {
+        Ok(existing) => {
+            let existing = existing.into_inner();
+            if existing.internal_ip != *sled_ip_address {
+                info!(log, "deleting old nat entry";
+                      "target_ip" => ?target_ip);
+
+                match &target_ip {
+                    IpAddr::V4(ip) => {
+                        client.nat_ipv4_delete(ip, target_first_port).await
+                    }
+                    IpAddr::V6(ip) => {
+                        client.nat_ipv6_delete(ip, target_first_port).await
+                    }
+                }?;
+            } else {
+                info!(log,
+                      "nat entry with expected internal ip exists";
+                      "target_ip" => ?target_ip,
+                      "existing_entry" => ?existing);
+
+                return Ok(());
+            }
+        }
+        Err(e) => {
+            if e.status() == Some(http::StatusCode::NOT_FOUND) {
+                info!(log, "no nat entry found for: {target_ip:#?}");
+            } else {
+                return Err(Error::DpdError(e));
+            }
+        }
+    }
+
+    info!(log, "creating nat entry for: {target_ip:#?}");
+    let nat_target = DpdTypes::NatTarget {
+        inner_mac: target_mac,
+        internal_ip: *sled_ip_address,
+        vni: target_vni.into(),
+    };
+
+    match &target_ip {
+        IpAddr::V4(ip) => {
+            client
+                .nat_ipv4_create(
+                    ip,
+                    target_first_port,
+                    target_last_port,
+                    &nat_target,
+                )
+                .await
+        }
+        IpAddr::V6(ip) => {
+            client
+                .nat_ipv6_create(
+                    ip,
+                    target_first_port,
+                    target_last_port,
+                    &nat_target,
+                )
+                .await
+        }
+    }?;
+
+    info!(log, "creation of nat entry successful for: {target_ip:#?}");
+
+    Ok(())
+}
+
 impl ServiceManager {
     /// Creates a service manager.
     ///
@@ -1384,22 +1478,18 @@ impl ServiceManager {
                     "zone_type" => zone_kind.report_str(),
                 );
 
-                dpd_client
-                    .ensure_nat_entry(
-                        &self.inner.log,
-                        target_ip,
-                        dpd_client::types::MacAddr {
-                            a: port.0.mac().into_array(),
-                        },
-                        first_port,
-                        last_port,
-                        port.0.vni().as_u32(),
-                        underlay_address,
-                    )
-                    .await
-                    .map_err(BackoffError::transient)?;
-
-                Ok::<(), BackoffError<DpdError<DpdTypes::Error>>>(())
+                dpd_ensure_nat_entry(
+                    dpd_client,
+                    &self.inner.log,
+                    target_ip,
+                    dpd_client::types::MacAddr { a: port.0.mac().into_array() },
+                    first_port,
+                    last_port,
+                    port.0.vni().as_u32(),
+                    underlay_address,
+                )
+                .await
+                .map_err(BackoffError::transient)
             };
             let log_failure = |error, _| {
                 warn!(
