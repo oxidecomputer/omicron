@@ -1614,6 +1614,7 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
+source = "git+https://github.com/nieuwejaar/dendrite#fdafd7dc45034fe9f15fab938dbed9e363bf157c"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2671,10 +2672,11 @@ checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
 [[package]]
 name = "dpd-client"
 version = "0.1.0"
+source = "git+https://github.com/nieuwejaar/dendrite#fdafd7dc45034fe9f15fab938dbed9e363bf157c"
 dependencies = [
  "async-trait",
  "chrono",
- "common 0.1.0",
+ "common 0.1.0 (git+https://github.com/nieuwejaar/dendrite)",
  "crc8",
  "futures",
  "http",
