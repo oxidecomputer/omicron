@@ -852,8 +852,8 @@ enum VolumeCommands {
     List,
     /// What is holding the lock?
     LockHolder(VolumeLockHolderArgs),
-    /// What volumes are cooked (read: cannot activate)?
-    Cooked,
+    /// What volumes cannot activate?
+    CannotActivate,
     /// What volumes reference a thing?
     Reference(VolumeReferenceArgs),
 }
@@ -1201,8 +1201,8 @@ impl DbArgs {
                         command: VolumeCommands::LockHolder(args),
                     }) => cmd_db_volume_lock_holder(&datastore, args).await,
                     DbCommands::Volumes(VolumeArgs {
-                        command: VolumeCommands::Cooked,
-                    }) => cmd_db_volume_cooked(&opctx, &datastore).await,
+                        command: VolumeCommands::CannotActivate,
+                    }) => cmd_db_volume_cannot_activate(&opctx, &datastore).await,
                     DbCommands::Volumes(VolumeArgs {
                         command: VolumeCommands::Reference(args),
                     }) => cmd_db_volume_reference(&opctx, &datastore, &fetch_opts, &args).await,
@@ -2789,8 +2789,7 @@ async fn cmd_db_volume_lock_holder(
     Ok(())
 }
 
-/// What volumes cannot activate?
-async fn cmd_db_volume_cooked(
+async fn cmd_db_volume_cannot_activate(
     opctx: &OpContext,
     datastore: &DataStore,
 ) -> Result<(), anyhow::Error> {
