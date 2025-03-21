@@ -31,6 +31,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
+use nexus_db_queries::db::datastore::InstanceStateComputer;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
@@ -780,10 +781,9 @@ impl super::Nexus {
         vmm_state: &Option<db::model::Vmm>,
         requested: &InstanceStateChangeRequest,
     ) -> Result<InstanceStateChangeRequestAction, Error> {
-        let effective_state = InstanceAndActiveVmm::determine_effective_state(
-            instance_state,
-            vmm_state.as_ref(),
-        );
+        let effective_state =
+            InstanceStateComputer::new(instance_state, vmm_state.as_ref())
+                .compute_state();
 
         // Requests that operate on active instances have to be directed to the
         // instance's current sled agent. If there is none, the request needs to

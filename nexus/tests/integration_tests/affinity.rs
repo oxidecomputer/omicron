@@ -623,7 +623,7 @@ async fn test_anti_affinity_group_usage(cptestctx: &ControlPlaneTestContext) {
         .map(|instance| instance.identity.id)
         .collect::<BTreeSet<_>>();
 
-    // We expect that each sled will have a since instance, as all of the
+    // We expect that each sled will have a single instance, as all of the
     // instances will want to be anti-located from each other.
     for sled in &sleds {
         let observed_instances = api

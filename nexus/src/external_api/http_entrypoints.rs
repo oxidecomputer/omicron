@@ -94,7 +94,6 @@ use omicron_common::api::external::http_pagination::ScanByName;
 use omicron_common::api::external::http_pagination::ScanByNameOrId;
 use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::http_pagination::data_page_params_for;
-use omicron_common::api::external::http_pagination::id_pagination;
 use omicron_common::api::external::http_pagination::marker_for_id;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
@@ -2577,7 +2576,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn affinity_group_member_list(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
         path_params: Path<params::AffinityGroupPath>,
     ) -> Result<HttpResponseOk<ResultsPage<AffinityGroupMember>>, HttpError>
     {
@@ -2589,8 +2590,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
             let pag_params = data_page_params_for(&rqctx, &query)?;
-            let scan_params = ScanById::from_query(&query)?;
-            let paginated_by = id_pagination(&pag_params, scan_params)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
 
             let group_selector = params::AffinityGroupSelector {
                 project: scan_params.selector.project.clone(),
@@ -2605,10 +2606,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &paginated_by,
                 )
                 .await?;
-            Ok(HttpResponseOk(ScanById::results_page(
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
                 &query,
                 affinity_group_member_instances,
-                &marker_for_id,
+                &marker_for_name_or_id,
             )?))
         };
         apictx
@@ -2912,7 +2913,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn anti_affinity_group_member_list(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
         path_params: Path<params::AntiAffinityGroupPath>,
     ) -> Result<HttpResponseOk<ResultsPage<AntiAffinityGroupMember>>, HttpError>
     {
@@ -2924,8 +2927,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
             let pag_params = data_page_params_for(&rqctx, &query)?;
-            let scan_params = ScanById::from_query(&query)?;
-            let paginated_by = id_pagination(&pag_params, scan_params)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
 
             let group_selector = params::AntiAffinityGroupSelector {
                 project: scan_params.selector.project.clone(),
@@ -2940,10 +2943,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &paginated_by,
                 )
                 .await?;
-            Ok(HttpResponseOk(ScanById::results_page(
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
                 &query,
                 group_members,
-                &marker_for_id,
+                &marker_for_name_or_id,
             )?))
         };
         apictx
@@ -2983,7 +2986,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 nexus.instance_lookup(&opctx, instance_selector)?;
 
             let group = nexus
-                .anti_affinity_group_member_view(
+                .anti_affinity_group_member_instance_view(
                     &opctx,
                     &group_lookup,
                     &instance_lookup,
@@ -3029,7 +3032,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 nexus.instance_lookup(&opctx, instance_selector)?;
 
             let member = nexus
-                .anti_affinity_group_member_add(
+                .anti_affinity_group_member_instance_add(
                     &opctx,
                     &group_lookup,
                     &instance_lookup,
@@ -3074,7 +3077,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 nexus.instance_lookup(&opctx, instance_selector)?;
 
             nexus
-                .anti_affinity_group_member_delete(
+                .anti_affinity_group_member_instance_delete(
                     &opctx,
                     &group_lookup,
                     &instance_lookup,
