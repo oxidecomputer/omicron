@@ -18,9 +18,6 @@ progenitor::generate_api!(
     }),
     replace = {
         Ena = ereport_types::Ena,
-        Ereport = ereport_types::Ereport,
-        Event = ereport_types::Event,
-        ReportKind = ereport_types::ReportKind,
         TypedUuidForEreporterGenerationKind = omicron_uuid_kinds::EreporterGenerationUuid,
     }
 );
