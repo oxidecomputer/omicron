@@ -886,9 +886,12 @@ struct VolumeReferenceArgs {
     #[clap(long, conflicts_with_all = ["ip", "net", "region_snapshot"])]
     read_only_region: Option<Uuid>,
 
-    /// Provide dataset, region, and snapshot ID in a string, delimited by
-    /// spaces.
-    #[clap(long, conflicts_with_all = ["ip", "net", "read_only_region"], value_delimiter = ' ')]
+    /// Provide dataset, region, and snapshot ID.
+    #[clap(
+        long,
+        conflicts_with_all = ["ip", "net", "read_only_region"],
+        num_args = 3,
+    )]
     region_snapshot: Option<Vec<Uuid>>,
 }
 
@@ -2876,7 +2879,10 @@ async fn cmd_db_volume_reference(
             .collect()
     } else if let Some(region_snapshot_ids) = &args.region_snapshot {
         if region_snapshot_ids.len() != 3 {
-            bail!("three IDs required: dataset, region, and snapshot");
+            bail!(
+                "three IDs required to uniquely identify a region snapshot: \
+                dataset, region, and snapshot"
+            );
         }
 
         datastore
