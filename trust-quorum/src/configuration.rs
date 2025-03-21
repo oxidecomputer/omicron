@@ -5,14 +5,16 @@
 //! A configuration of a trust quroum
 
 use crate::crypto::{
-    EncryptedRackSecret, EncryptedShares, KeyShareGf256, RackSecret,
+    EncryptedRackSecret, EncryptedShares, KeyShareGf256, RackSecret, Salt,
     ShareDigestGf256,
 };
 use crate::{Epoch, Error, PlatformId, RackId, ReconfigureMsg, Threshold};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// The configuration for a given epoch
+/// The configuration for a given epoch.
+///
+/// Only valid for non-lrtq configurations
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
@@ -98,7 +100,7 @@ pub struct PreviousConfiguration {
     /// The epoch of the last committed configuration
     pub epoch: Epoch,
 
-    /// Is this configuration an LRTQ configuration?
+    /// Is the previous configuration LRTQ?
     pub is_lrtq: bool,
 
     /// The encrypted rack secret for the last committed epoch
@@ -108,5 +110,5 @@ pub struct PreviousConfiguration {
     /// the last committed epoch.
     ///
     /// We only encrypt the rack secret once and so we use a nonce of all zeros
-    pub encrypted_last_committed_rack_secret_salt: [u8; 32],
+    pub encrypted_last_committed_rack_secret_salt: Salt,
 }
