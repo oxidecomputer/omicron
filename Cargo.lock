@@ -6430,6 +6430,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tufaceous-artifact",
  "update-engine",
+ "url",
  "uuid",
 ]
 
@@ -7046,8 +7047,10 @@ dependencies = [
  "headers",
  "hex",
  "hickory-resolver",
+ "hmac",
  "http",
  "http-body-util",
+ "httpmock",
  "httptest",
  "hubtools",
  "hyper",
@@ -7061,6 +7064,7 @@ dependencies = [
  "itertools 0.14.0",
  "lldpd-client",
  "macaddr",
+ "maplit",
  "mg-admin-client",
  "nexus-auth",
  "nexus-client",
@@ -7657,6 +7661,7 @@ dependencies = [
  "toml_edit 0.22.24",
  "tracing",
  "unicode-xid",
+ "url",
  "usdt",
  "usdt-impl",
  "uuid",
@@ -10513,6 +10518,7 @@ dependencies = [
  "semver 1.0.25",
  "serde",
  "serde_json",
+ "url",
  "uuid",
 ]
 
@@ -13046,6 +13052,7 @@ dependencies = [
  "form_urlencoded",
  "idna",
  "percent-encoding",
+ "serde",
 ]
 
 [[package]]
