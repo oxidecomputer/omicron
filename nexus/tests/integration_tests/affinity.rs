@@ -406,7 +406,11 @@ impl AffinityGroupish for AntiAffinityType {
     }
 }
 
-fn instance_groups_url(ty: &str, instance: &str, project: Option<&str>) -> String {
+fn instance_groups_url(
+    ty: &str,
+    instance: &str,
+    project: Option<&str>,
+) -> String {
     let query_params = project_query_param_suffix(project);
     format!("/v1/instances/{instance}/{ty}{query_params}")
 }
@@ -766,18 +770,24 @@ async fn test_group_crud<T: AffinityGroupish>(client: &ClientTestContext) {
 }
 
 #[nexus_test]
-async fn test_affinity_instance_group_list(cptestctx: &ControlPlaneTestContext) {
+async fn test_affinity_instance_group_list(
+    cptestctx: &ControlPlaneTestContext,
+) {
     let external_client = &cptestctx.external_client;
     test_instance_group_list::<AffinityType>(external_client).await;
 }
 
 #[nexus_test]
-async fn test_anti_affinity_instance_group_list(cptestctx: &ControlPlaneTestContext) {
+async fn test_anti_affinity_instance_group_list(
+    cptestctx: &ControlPlaneTestContext,
+) {
     let external_client = &cptestctx.external_client;
     test_instance_group_list::<AntiAffinityType>(external_client).await;
 }
 
-async fn test_instance_group_list<T: AffinityGroupish>(client: &ClientTestContext) {
+async fn test_instance_group_list<T: AffinityGroupish>(
+    client: &ClientTestContext,
+) {
     const PROJECT_NAME: &'static str = "test-project";
 
     let api = ApiHelper::new(client);
