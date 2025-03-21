@@ -3527,7 +3527,7 @@ pub trait NexusExternalApi {
     /// List webhook receivers.
     #[endpoint {
         method = GET,
-        path = "/v1/webhooks/receivers/",
+        path = "/v1/webhooks/receivers",
         tags = ["system/webhooks"],
     }]
     async fn webhook_receiver_list(

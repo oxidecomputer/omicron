@@ -54,7 +54,7 @@ impl BackgroundTask for WebhookDispatcher {
                         );
                     } else {
                         // no sense cluttering up the logs if we didn't do
-                        // anyuthing interesting today
+                        // anything interesting today
                         slog::trace!(
                             &opctx.log,
                             "{MSG}";

@@ -85,10 +85,10 @@
 //!
 //! A *delivery* represents the process of sending HTTP request(s) representing
 //! a webhook event to a receiver.  Failed HTTP requests are retried up to two
-//! times times, so a delivery may consist of up to three *delivery attempts*.
+//! times, so a delivery may consist of up to three *delivery attempts*.
 //! Each time the `webhook_deliverator` background task is activated, it
 //! searches for deliveries which have not yet succeeded or permanently failed,
-//! hich are not presently being delivered by another Nexus, and for which the
+//! which are not presently being delivered by another Nexus, and for which the
 //! backoff period for any prior failed delivery attempts has elapsed.  It then
 //! sends an HTTP request to the webhook receiver, and records the result,
 //! creating a new `webhook_delivery_attempt` record and updating the
