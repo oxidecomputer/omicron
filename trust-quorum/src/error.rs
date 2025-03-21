@@ -4,7 +4,6 @@
 
 //! Errors returned from the Node API
 use crate::{Epoch, PlatformId, RackId, Threshold};
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum Error {

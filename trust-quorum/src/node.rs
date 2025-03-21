@@ -5,13 +5,10 @@
 //! A trust quorum node that implements the trust quorum protocol
 
 use crate::{Configuration, Epoch, messages::*};
-use crate::{
-    Envelope, Error, PlatformId, Threshold, persistent_state::PersistentState,
-};
+use crate::{Envelope, Error, PersistentState, PlatformId};
 
 use crate::crypto::{
-    EncryptedShares, KeyShareEd25519, KeyShareGf256, RackSecret,
-    ReconstructedRackSecret, ShareDigestEd25519, ShareDigestGf256,
+    KeyShareEd25519, KeyShareGf256, ShareDigestEd25519, ShareDigestGf256,
 };
 use slog::{Logger, error, info, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
@@ -27,6 +24,9 @@ use std::time::Instant;
 /// rack crash (such as a power outage) occurs before nexus is informed of the
 /// prepares, nexus will  skip the epoch and start a new reconfiguration. This
 /// allows progress to always be made with a full linearization of epochs.
+///
+/// We allow some unused fields before we complete the coordination code
+#[allow(unused)]
 pub struct CoordinatorState {
     /// When the reconfiguration started
     start_time: Instant,
@@ -67,6 +67,9 @@ impl CoordinatorState {
 }
 
 /// What should the coordinator be doing?
+///
+/// We haven't started implementing upgrade from LRTQ yet
+#[allow(unused)]
 pub enum CoordinatorOperation {
     CollectShares {
         epoch: Epoch,

@@ -23,6 +23,7 @@ pub use configuration::Configuration;
 pub use error::Error;
 pub use messages::*;
 pub use node::Node;
+pub use persistent_state::PersistentState;
 
 #[derive(
     Debug,

@@ -13,7 +13,7 @@ use rand::rngs::OsRng;
 use secrecy::{ExposeSecret, Secret};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use vsss_rs::{Gf256, subtle::ConstantTimeEq};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
@@ -137,6 +137,12 @@ pub struct ReconstructedRackSecret {
     secret: Secret<RackSecretData>,
 }
 
+impl ExposeSecret<[u8; 32]> for ReconstructedRackSecret {
+    fn expose_secret(&self) -> &[u8; 32] {
+        &self.secret.expose_secret().0
+    }
+}
+
 #[derive(Debug)]
 pub struct InvalidRackSecretSize;
 
@@ -256,6 +262,12 @@ pub struct EncryptedShares {
     ///
     /// Since we only use these keys once, we use a nonce of all zeros when
     /// encrypting/decrypting.
+    ///
+    /// TODO: Should we encrypt the whole map with one key instead? We already
+    /// must have the rack secret in memory, and it doesn't seem less safe to
+    /// have all keys available. It would certainly be cheaper to not have to
+    /// derive a key for each member and a separate encryption at construction
+    /// time.
     pub encrypted_shares: BTreeMap<PlatformId, Vec<u8>>,
 }
 
@@ -331,6 +343,8 @@ impl EncryptedShares {
             .map_err(|_| Error::FailedToEncrypt)
     }
 
+    // We don't use this yet as we haven't implemented `PrepareAndCommit`
+    #[allow(unused)]
     fn decrypt_share(
         rack_id: &RackId,
         platform_id: &PlatformId,
