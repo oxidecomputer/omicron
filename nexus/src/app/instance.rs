@@ -1523,6 +1523,38 @@ impl super::Nexus {
         Ok(disk)
     }
 
+    /// Lists affinity groups to which this instance belongs
+    pub(crate) async fn instance_list_affinity_groups(
+        &self,
+        opctx: &OpContext,
+        instance_lookup: &lookup::Instance<'_>,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<db::model::AffinityGroup> {
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::ListChildren).await?;
+        self.db_datastore
+            .instance_list_affinity_groups(opctx, &authz_instance, pagparams)
+            .await
+    }
+
+    /// Lists anti-affinity groups to which this instance belongs
+    pub(crate) async fn instance_list_anti_affinity_groups(
+        &self,
+        opctx: &OpContext,
+        instance_lookup: &lookup::Instance<'_>,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<db::model::AntiAffinityGroup> {
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::ListChildren).await?;
+        self.db_datastore
+            .instance_list_anti_affinity_groups(
+                opctx,
+                &authz_instance,
+                pagparams,
+            )
+            .await
+    }
+
     /// Invoked by a sled agent to publish an updated runtime state for an
     /// Instance.
     pub(crate) async fn notify_vmm_updated(

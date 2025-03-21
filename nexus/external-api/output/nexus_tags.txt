@@ -75,6 +75,8 @@ image_view                               GET      /v1/images/{image}
 
 API operations found with tag "instances"
 OPERATION ID                             METHOD   URL PATH
+instance_affinity_group_list             GET      /v1/instances/{instance}/affinity-groups
+instance_anti_affinity_group_list        GET      /v1/instances/{instance}/anti-affinity-groups
 instance_create                          POST     /v1/instances
 instance_delete                          DELETE   /v1/instances/{instance}
 instance_disk_attach                     POST     /v1/instances/{instance}/disks/attach

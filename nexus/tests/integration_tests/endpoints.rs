@@ -596,6 +596,20 @@ pub static DEMO_INSTANCE_DISKS_DETACH_URL: LazyLock<String> =
             *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
         )
     });
+pub static DEMO_INSTANCE_AFFINITY_GROUPS_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/instances/{}/affinity-groups?{}",
+            *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
+        )
+    });
+pub static DEMO_INSTANCE_ANTI_AFFINITY_GROUPS_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/instances/{}/anti-affinity-groups?{}",
+            *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
+        )
+    });
 pub static DEMO_INSTANCE_EPHEMERAL_IP_URL: LazyLock<String> =
     LazyLock::new(|| {
         format!(
@@ -1909,6 +1923,18 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                     })
                     .unwrap(),
                 )],
+            },
+            VerifyEndpoint {
+                url: &DEMO_INSTANCE_AFFINITY_GROUPS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_INSTANCE_ANTI_AFFINITY_GROUPS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
             },
             /* Affinity Groups */
             VerifyEndpoint {
