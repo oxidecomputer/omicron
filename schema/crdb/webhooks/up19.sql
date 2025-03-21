@@ -3,4 +3,4 @@ ON omicron.public.webhook_delivery (
     event_id, rx_id
 )
 WHERE
-    trigger = 'event';
+    triggered_by = 'event';
