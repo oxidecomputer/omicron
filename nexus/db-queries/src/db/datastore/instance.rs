@@ -67,75 +67,28 @@ use omicron_uuid_kinds::SledUuid;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
-/// Wraps a record of an `Instance` along with its active `Vmm`, if it has one.
-#[derive(Clone, Debug)]
-pub struct InstanceAndActiveVmm {
-    pub instance: Instance,
-    pub vmm: Option<Vmm>,
+pub struct InstanceStateComputer<'s> {
+    instance_state: &'s InstanceState,
+    migration_id: Option<&'s Uuid>,
+    vmm_state: Option<&'s VmmState>,
 }
 
-impl InstanceAndActiveVmm {
-    pub fn instance(&self) -> &Instance {
-        &self.instance
-    }
-
-    pub fn vmm(&self) -> &Option<Vmm> {
-        &self.vmm
-    }
-
-    pub fn sled_id(&self) -> Option<SledUuid> {
-        self.vmm.as_ref().map(|v| SledUuid::from_untyped_uuid(v.sled_id))
-    }
-
-    /// Returns the operator-visible [external API
-    /// `InstanceState`](external::InstanceState) for this instance and its
-    /// active VMM.
-    pub fn effective_state(&self) -> external::InstanceState {
-        Self::determine_effective_state(&self.instance, self.vmm.as_ref())
-    }
-
-    /// Returns the operator-visible [external API
-    /// `InstanceState`](external::InstanceState) for the provided [`Instance`]
-    /// and its active [`Vmm`], if one exists.
-    ///
-    /// # Arguments
-    ///
-    /// - `instance`: the instance
-    /// - `active_vmm`: the instance's active VMM, if one exists.
-    ///
-    /// # Notes
-    ///
-    /// Generally, the value of `active_vmm` should be
-    /// the VMM pointed to by `instance.runtime_state.propolis_id`. However,
-    /// this is not enforced by this function, as the `instance_migrate` saga
-    /// must in some cases determine an effective instance state from the
-    /// instance and *target* VMM states.
-    pub fn determine_effective_state(
-        instance: &Instance,
-        active_vmm: Option<&Vmm>,
+impl<'s> InstanceStateComputer<'s> {
+    pub fn compute_state_from(
+        instance_state: &'s InstanceState,
+        migration_id: Option<&'s Uuid>,
+        vmm_state: Option<&'s VmmState>,
     ) -> external::InstanceState {
-        let instance_state = instance.runtime_state.nexus_state;
-        let migration_id = instance.runtime_state.migration_id;
-        let vmm_state = active_vmm.map(|vmm| vmm.runtime.state);
-
-        Self::determine_effective_state_inner(
-            instance_state,
-            migration_id,
-            vmm_state,
-        )
+        Self { instance_state, migration_id, vmm_state }.compute_state()
     }
 
-    pub fn determine_effective_state_inner(
-        instance_state: InstanceState,
-        migration_id: Option<Uuid>,
-        vmm_state: Option<VmmState>,
-    ) -> external::InstanceState {
+    fn compute_state(&self) -> external::InstanceState {
         use crate::db::model::InstanceState;
         use crate::db::model::VmmState;
 
         // We want to only report that an instance is `Stopped` when a new
         // `instance-start` saga is able to proceed. That means that:
-        match (instance_state, vmm_state) {
+        match (self.instance_state, self.vmm_state) {
             // - If there's an active migration ID for the instance, *always*
             //   treat its state as "migration" regardless of the VMM's state.
             //
@@ -158,7 +111,7 @@ impl InstanceAndActiveVmm {
             //   instance-update saga will come along and remove the active VMM
             //   and migration IDs.
             //
-            (InstanceState::Vmm, Some(_)) if migration_id.is_some() => {
+            (InstanceState::Vmm, Some(_)) if self.migration_id.is_some() => {
                 external::InstanceState::Migrating
             }
             // - An instance with a "stopped" or "destroyed" VMM needs to be
@@ -192,12 +145,81 @@ impl InstanceAndActiveVmm {
             // If there's a VMM state, and none of the above rules apply, use
             // that.
             (_instance_state, Some(vmm_state)) => {
-                debug_assert_eq!(_instance_state, InstanceState::Vmm);
-                vmm_state.into()
+                debug_assert_eq!(_instance_state, &InstanceState::Vmm);
+                (*vmm_state).into()
             }
             // If there's no VMM state, use the instance's state.
-            (instance_state, None) => instance_state.into(),
+            (instance_state, None) => (*instance_state).into(),
         }
+    }
+}
+
+impl<'s> From<&'s InstanceAndActiveVmm> for InstanceStateComputer<'s> {
+    fn from(i: &'s InstanceAndActiveVmm) -> Self {
+        Self {
+            instance_state: &i.instance.runtime_state.nexus_state,
+            migration_id: i.instance.runtime_state.migration_id.as_ref(),
+            vmm_state: i.vmm.as_ref().map(|vmm| &vmm.runtime.state),
+        }
+    }
+}
+
+/// Wraps a record of an `Instance` along with its active `Vmm`, if it has one.
+#[derive(Clone, Debug)]
+pub struct InstanceAndActiveVmm {
+    pub instance: Instance,
+    pub vmm: Option<Vmm>,
+}
+
+impl InstanceAndActiveVmm {
+    pub fn instance(&self) -> &Instance {
+        &self.instance
+    }
+
+    pub fn vmm(&self) -> &Option<Vmm> {
+        &self.vmm
+    }
+
+    pub fn sled_id(&self) -> Option<SledUuid> {
+        self.vmm.as_ref().map(|v| SledUuid::from_untyped_uuid(v.sled_id))
+    }
+
+    /// Returns the operator-visible [external API
+    /// `InstanceState`](external::InstanceState) for this instance and its
+    /// active VMM.
+    pub fn effective_state(&self) -> external::InstanceState {
+        InstanceStateComputer::from(self).compute_state()
+    }
+
+    /// Returns the operator-visible [external API
+    /// `InstanceState`](external::InstanceState) for the provided [`Instance`]
+    /// and its active [`Vmm`], if one exists.
+    ///
+    /// # Arguments
+    ///
+    /// - `instance`: the instance
+    /// - `active_vmm`: the instance's active VMM, if one exists.
+    ///
+    /// # Notes
+    ///
+    /// Generally, the value of `active_vmm` should be
+    /// the VMM pointed to by `instance.runtime_state.propolis_id`. However,
+    /// this is not enforced by this function, as the `instance_migrate` saga
+    /// must in some cases determine an effective instance state from the
+    /// instance and *target* VMM states.
+    pub fn determine_effective_state(
+        instance: &Instance,
+        active_vmm: Option<&Vmm>,
+    ) -> external::InstanceState {
+        let instance_state = instance.runtime_state.nexus_state;
+        let migration_id = instance.runtime_state.migration_id;
+        let vmm_state = active_vmm.map(|vmm| vmm.runtime.state);
+
+        InstanceStateComputer::compute_state_from(
+            &instance_state,
+            migration_id.as_ref(),
+            vmm_state.as_ref(),
+        )
     }
 }
 
