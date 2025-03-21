@@ -502,7 +502,7 @@ impl BpOmicronZone {
             // The version is not preserved here -- instead, it is looked up
             // from the tuf_artifact table.
             image_artifact_sha256: image_artifact_data
-                .map(|(_version, hash)| hash.into()),
+                .map(|(_version, hash)| hash),
 
             // Set the remainder of the fields to a default
             primary_service_ip: "::1"

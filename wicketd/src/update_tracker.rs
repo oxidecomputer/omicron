@@ -587,7 +587,7 @@ impl SpawnUpdateDriver for FakeUpdateDriver {
                     UpdateComponent::Host,
                     UpdateStepId::RunningInstallinator,
                     "Fake step that waits for receiver to resolve",
-                    move |_cx| async move {
+                    async |_cx| {
                         // This will resolve as soon as the sender (typically a
                         // test) sends a value over the channel.
                         let ret = fake_step_receiver.await;
@@ -902,7 +902,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::InterrogateRot,
                 "Checking current RoT bootloader version",
-                move |_cx| async move {
+                async |_cx| {
                     update_cx.interrogate_rot_bootloader(rot_bootloader).await
                 },
             )
@@ -916,9 +916,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::InterrogateRot,
                 "Checking current RoT version and active slot",
-                move |_cx| async move {
-                    update_cx.interrogate_rot(rot_a, rot_b).await
-                },
+                async |_cx| update_cx.interrogate_rot(rot_a, rot_b).await,
             )
             .register();
 
@@ -933,7 +931,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::InterrogateSp,
                 "Checking SP board and current version",
-                move |_cx| async move {
+                async move |_cx| {
                     let caboose = update_cx
                         .mgs_client
                         .sp_component_caboose_get(
@@ -989,7 +987,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::SpComponentUpdate,
                 "Updating RoT bootloader",
-                move |cx| async move {
+                async move |cx| {
                     if let Some(result) = opts.test_simulate_rot_bootloader_result {
                         return simulate_result(result);
                     }
@@ -1067,7 +1065,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::SpComponentUpdate,
                 "Updating RoT",
-                move |cx| async move {
+                async move |cx| {
                     if let Some(result) = opts.test_simulate_rot_result {
                         return simulate_result(result);
                     }
@@ -1127,7 +1125,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::SpComponentUpdate,
                 "Updating SP",
-                move |cx| async move {
+                async move |cx| {
                     if let Some(result) = opts.test_simulate_sp_result {
                         return simulate_result(result);
                     }
@@ -1229,7 +1227,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::DownloadingInstallinator,
                 "Downloading installinator, waiting for it to start",
-                move |cx| async move {
+                async |cx| {
                     let image_id = image_id_handle.into_value(cx.token()).await;
                     // The previous step should send this value in.
                     let report_receiver = update_cx
@@ -1252,7 +1250,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::RunningInstallinator,
                 "Running installinator",
-                move |cx| async move {
+                async |cx| {
                     let report_receiver =
                         start_handle.into_value(cx.token()).await;
                     let write_output = update_cx
@@ -1321,7 +1319,7 @@ impl UpdateDriver {
         let image_id_step_handle = registrar.new_step(
             UpdateStepId::WaitingForTrampolinePhase2Upload,
             "Waiting for trampoline phase 2 upload to MGS",
-            move |_cx| async move {
+            async move |_cx| {
                 // We expect this loop to run just once, but iterate just in
                 // case the image ID doesn't get populated the first time.
                 loop {
@@ -1365,7 +1363,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::SettingInstallinatorImageId,
                 "Setting installinator image ID",
-                move |_cx| async move {
+                async move |_cx| {
                     let installinator_image_id = InstallinatorImageId {
                         control_plane: plan.control_plane_hash.to_string(),
                         host_phase_2: plan.host_phase_2_hash.to_string(),
@@ -1395,7 +1393,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::SettingHostStartupOptions,
                 "Setting host startup options",
-                move |_cx| async move {
+                async move |_cx| {
                     update_cx
                         .set_component_active_slot(
                             SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
@@ -1444,7 +1442,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::SetHostPowerState { state: PowerState::A0 },
                 "Setting host power state to A0",
-                move |_cx| async move {
+                async move |_cx| {
                     update_cx.set_host_power_state(PowerState::A0).await
                 },
             )
@@ -1479,7 +1477,7 @@ impl UpdateDriver {
         registrar.new_step(
             UpdateStepId::ClearingInstallinatorImageId,
             "Clearing installinator image ID",
-            move |_cx| async move {
+            async move |_cx| {
                 if let Err(err) = update_cx
                     .mgs_client
                         .sp_installinator_image_id_delete(
@@ -1502,7 +1500,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::SettingHostStartupOptions,
                 "Setting startup options for standard boot",
-                move |cx| async move {
+                async move |cx| {
                     // Persistently set to boot off of the first disk
                     // installinator successfully updated (usually 0, unless it
                     // only updated 1).
@@ -1566,7 +1564,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::SetHostPowerState { state: PowerState::A0 },
                 "Booting the host",
-                |_cx| async {
+                async |_cx| {
                     update_cx.set_host_power_state(PowerState::A0).await
                 },
             )
@@ -1585,7 +1583,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::SetHostPowerState { state: PowerState::A2 },
                 "Setting host power state to A2",
-                move |_cx| async move {
+                async |_cx| {
                     update_cx.set_host_power_state(PowerState::A2).await
                 },
             )
@@ -1597,7 +1595,7 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::SpComponentUpdate,
                 format!("Updating {kind} phase 1"),
-                move |cx| async move {
+                async move |cx| {
                     let slots_to_update =
                         slots_to_update.into_value(cx.token()).await;
 
@@ -1622,7 +1620,7 @@ fn define_test_steps(engine: &UpdateEngine, secs: u64) {
             UpdateComponent::Rot,
             UpdateStepId::TestStep,
             "Test step",
-            move |cx| async move {
+            async move |cx| {
                 cx.with_nested_engine(
                     |engine: &mut UpdateEngine<TestStepSpec>| {
                         engine
@@ -1630,7 +1628,7 @@ fn define_test_steps(engine: &UpdateEngine, secs: u64) {
                                 TestStepComponent::Test,
                                 TestStepId::Delay,
                                 format!("Delay step ({secs} secs)"),
-                                |cx| async move {
+                                async move |cx| {
                                     for sec in 0..secs {
                                         cx.send_progress(
                                             StepProgress::with_current_and_total(
@@ -1649,7 +1647,7 @@ fn define_test_steps(engine: &UpdateEngine, secs: u64) {
 
                                     StepSuccess::new(())
                                         .with_message(format!(
-                                                "Step completed after {secs} seconds"
+                                            "Step completed after {secs} seconds"
                                         ))
                                         .into()
                                 },
@@ -1661,7 +1659,7 @@ fn define_test_steps(engine: &UpdateEngine, secs: u64) {
                                 TestStepComponent::Test,
                                 TestStepId::Delay,
                                 "Nested stub step",
-                                |_cx| async move { StepSuccess::new(()).into() },
+                                async |_cx| { StepSuccess::new(()).into() },
                             )
                             .register();
 
@@ -2718,7 +2716,7 @@ impl<'a> SpComponentUpdateContext<'a> {
             .new_step(
                 SpComponentUpdateStepId::Sending,
                 format!("Sending data to MGS (slot {firmware_slot})"),
-                move |_cx| async move {
+                async move |_cx| {
                     let data_stream = artifact
                         .data
                         .reader_stream()
@@ -2761,7 +2759,7 @@ impl<'a> SpComponentUpdateContext<'a> {
             .new_step(
                 SpComponentUpdateStepId::Preparing,
                 format!("Preparing for update (slot {firmware_slot})"),
-                move |cx| async move {
+                async move |cx| {
                     update_cx
                         .poll_component_update(
                             cx,
@@ -2787,7 +2785,7 @@ impl<'a> SpComponentUpdateContext<'a> {
             .new_step(
                 SpComponentUpdateStepId::Writing,
                 format!("Writing update (slot {firmware_slot})"),
-                move |cx| async move {
+                async move |cx| {
                     update_cx
                         .poll_component_update(
                             cx,
@@ -2823,7 +2821,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                     .new_step(
                         SpComponentUpdateStepId::Resetting,
                         "Resetting the RoT to check the bootloader signature",
-                        move |_cx| async move {
+                        async |_cx| {
                             update_cx
                                 .reset_sp_component(SpComponent::ROT.const_as_str())
                                 .await
@@ -2841,7 +2839,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                     .new_step(
                         SpComponentUpdateStepId::Resetting,
                         "Waiting for RoT to boot".to_string(),
-                        move |_cx| async move {
+                        async move |_cx| {
                             let (_, stage0next_error) = update_cx
                                 .wait_for_rot_boot_info(WAIT_FOR_BOOT_TIMEOUT)
                                 .await
@@ -2865,7 +2863,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                     .new_step(
                         SpComponentUpdateStepId::SettingActiveBootSlot,
                         format!("Setting {component_name} active slot to {firmware_slot}"),
-                        move |_cx| async move {
+                        async move |_cx| {
                             update_cx
                                 .set_component_active_slot(
                                     component_name,
@@ -2888,7 +2886,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                     .new_step(
                         SpComponentUpdateStepId::Resetting,
                         "Resetting the RoT to boot into the new bootloader",
-                        move |_cx| async move {
+                        async move |_cx| {
                             update_cx
                                 .reset_sp_component(SpComponent::ROT.const_as_str())
                                 .await
@@ -2906,7 +2904,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                     .new_step(
                         SpComponentUpdateStepId::Resetting,
                         "Checking the new RoT bootloader".to_string(),
-                        move |_cx| async move {
+                        async move |_cx| {
                             let (stage0_error, stage0next_error) = update_cx
                                 .wait_for_rot_boot_info(WAIT_FOR_BOOT_TIMEOUT)
                                 .await
@@ -2938,7 +2936,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                     .new_step(
                         SpComponentUpdateStepId::SettingActiveBootSlot,
                         format!("Setting {component_name} active slot to {firmware_slot}"),
-                        move |_cx| async move {
+                        async move |_cx| {
                             update_cx
                                 .set_component_active_slot(
                                     component_name,
@@ -2961,7 +2959,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                     .new_step(
                         SpComponentUpdateStepId::Resetting,
                         format!("Resetting {component_name}"),
-                        move |_cx| async move {
+                        async move |_cx| {
                             update_cx
                                 .reset_sp_component(component_name)
                                 .await
@@ -2995,7 +2993,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                     .new_step(
                         SpComponentUpdateStepId::Resetting,
                         format!("Waiting for RoT to boot slot {firmware_slot}"),
-                        move |_cx| async move {
+                        async move |_cx| {
                             const WAIT_FOR_BOOT_TIMEOUT: Duration =
                                 Duration::from_secs(30);
                             let active_slot = update_cx
@@ -3020,7 +3018,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                     .new_step(
                         SpComponentUpdateStepId::Resetting,
                         "Resetting SP",
-                        move |_cx| async move {
+                        async move |_cx| {
                             update_cx
                                 .reset_sp_component(component_name)
                                 .await
