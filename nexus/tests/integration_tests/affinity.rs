@@ -799,17 +799,14 @@ async fn test_instance_group_list<T: AffinityGroupish>(
     let project_api = api.use_project::<T>(PROJECT_NAME);
 
     project_api.create_stopped_instance("test-instance").await;
-    println!("Listing groups (expect none)");
     let groups = project_api.instance_groups_list("test-instance").await;
     assert!(groups.is_empty(), "New instance should not belong to any groups");
 
-    println!("Creating groups");
     project_api.group_create("yes-group").await;
     project_api.group_create("no-group").await;
 
     project_api.group_member_add("yes-group", "test-instance").await;
 
-    println!("Listing groups again");
     let groups = project_api.instance_groups_list("test-instance").await;
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0].identity().name, "yes-group");
