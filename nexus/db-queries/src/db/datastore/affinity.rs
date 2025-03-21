@@ -29,6 +29,7 @@ use crate::db::model::Project;
 use crate::db::model::VmmState;
 use crate::db::model::VmmStateEnum;
 use crate::db::pagination::RawPaginator;
+use crate::db::pagination::paginated;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -48,9 +49,88 @@ use omicron_uuid_kinds::AffinityGroupUuid;
 use omicron_uuid_kinds::AntiAffinityGroupUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use ref_cast::RefCast;
 use uuid::Uuid;
 
 impl DataStore {
+    /// List affinity groups associated with a given instance
+    pub async fn instance_list_affinity_groups(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<AffinityGroup> {
+        use db::schema::affinity_group::dsl as group_dsl;
+        use db::schema::affinity_group_instance_membership::dsl as membership_dsl;
+
+        opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
+
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(group_dsl::affinity_group, group_dsl::id, &pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                group_dsl::affinity_group,
+                group_dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(group_dsl::time_deleted.is_null())
+        .inner_join(
+            membership_dsl::affinity_group_instance_membership.on(
+                membership_dsl::instance_id
+                    .eq(authz_instance.id())
+                    .and(membership_dsl::group_id.eq(group_dsl::id)),
+            ),
+        )
+        .select(AffinityGroup::as_select())
+        .load_async::<AffinityGroup>(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List anti-affinity groups associated with a given instance
+    pub async fn instance_list_anti_affinity_groups(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<AntiAffinityGroup> {
+        use db::schema::anti_affinity_group::dsl as group_dsl;
+        use db::schema::anti_affinity_group_instance_membership::dsl as membership_dsl;
+
+        opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
+
+        match pagparams {
+            PaginatedBy::Id(pagparams) => paginated(
+                group_dsl::anti_affinity_group,
+                group_dsl::id,
+                &pagparams,
+            ),
+            PaginatedBy::Name(pagparams) => paginated(
+                group_dsl::anti_affinity_group,
+                group_dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(group_dsl::time_deleted.is_null())
+        .inner_join(
+            membership_dsl::anti_affinity_group_instance_membership.on(
+                membership_dsl::instance_id
+                    .eq(authz_instance.id())
+                    .and(membership_dsl::group_id.eq(group_dsl::id)),
+            ),
+        )
+        .select(AntiAffinityGroup::as_select())
+        .load_async::<AntiAffinityGroup>(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     pub async fn affinity_group_list(
         &self,
         opctx: &OpContext,
