@@ -6,15 +6,13 @@
 
 use crate::{Configuration, messages::*};
 use crate::{
-    Envelope, Epoch, Error, PlatformId, Threshold,
-    persistent_state::PersistentState,
+    Envelope, Error, PlatformId, Threshold, persistent_state::PersistentState,
 };
 
 use crate::crypto::{
     EncryptedShares, KeyShareEd25519, KeyShareGf256, RackSecret,
     ReconstructedRackSecret,
 };
-use secrecy::ExposeSecret;
 use slog::{Logger, error, info, o, warn};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
@@ -40,7 +38,7 @@ pub struct CoordinatorState {
     /// for the prior configuration if there is one.
     previous_config_secrets: Option<PreviousConfigSecrets>,
 
-    /// The set of Prepares sent to each node
+    /// The set of Prepares to send to each node
     prepares: BTreeMap<PlatformId, PrepareMsg>,
 
     /// Acknowledgements that the prepare has been received
@@ -155,41 +153,11 @@ impl Node {
 
         if state.is_initial_configuration() {
             // No need to collect any old key shares
-            // Let's create a new rack secret, split it, and start sending prepares.
-            let rack_secret = RackSecret::new();
-            let shares = rack_secret.split(
-                state.reconfigure_msg.threshold,
-                state.reconfigure_msg.members.len(),
+            // Let's create a new configuration and start sending prepares.
+            let config = Configuration::initial(
+                self.platform_id.clone(),
+                &state.reconfigure_msg,
             )?;
-
-            let share_digests =
-                shares.expose_secret().iter().map(|s| s.digest());
-            let member_ids = state.reconfigure_msg.members.clone();
-            let members = state
-                .reconfigure_msg
-                .members
-                .iter()
-                .cloned()
-                .zip(share_digests)
-                .collect();
-
-            let rack_id = state.reconfigure_msg.rack_id;
-            let encrypted_shares = EncryptedShares::new(
-                &rack_id,
-                &rack_secret,
-                member_ids,
-                shares.expose_secret().as_ref(),
-            )?;
-
-            let config = Configuration {
-                rack_id,
-                epoch: state.reconfigure_msg.epoch,
-                coordinator: self.platform_id.clone(),
-                members,
-                threshold: state.reconfigure_msg.threshold,
-                encrypted_shares,
-                previous_configuration: None,
-            };
         }
 
         todo!()

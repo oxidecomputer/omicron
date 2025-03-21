@@ -4,8 +4,11 @@
 
 //! A configuration of a trust quroum
 
-use crate::crypto::{EncryptedRackSecret, EncryptedShares, ShareDigestGf256};
-use crate::{Epoch, PlatformId, RackId, Threshold};
+use crate::crypto::{
+    EncryptedRackSecret, EncryptedShares, RackSecret, ShareDigestGf256,
+};
+use crate::{Epoch, Error, PlatformId, RackId, ReconfigureMsg, Threshold};
+use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -36,6 +39,45 @@ pub struct Configuration {
 
     // There is no previous configuration for the initial configuration
     pub previous_configuration: Option<PreviousConfiguration>,
+}
+
+impl Configuration {
+    /// Create an initial configuration for the trust quorum
+    pub fn initial(
+        coordinator: PlatformId,
+        reconfigure_msg: &ReconfigureMsg,
+    ) -> Result<Configuration, Error> {
+        let rack_secret = RackSecret::new();
+        let shares = rack_secret
+            .split(reconfigure_msg.threshold, reconfigure_msg.members.len())?;
+
+        let share_digests = shares.expose_secret().iter().map(|s| s.digest());
+        let member_ids = reconfigure_msg.members.clone();
+        let members = reconfigure_msg
+            .members
+            .iter()
+            .cloned()
+            .zip(share_digests)
+            .collect();
+
+        let rack_id = reconfigure_msg.rack_id;
+        let encrypted_shares = EncryptedShares::new(
+            &rack_id,
+            &rack_secret,
+            member_ids,
+            shares.expose_secret().as_ref(),
+        )?;
+
+        Ok(Configuration {
+            rack_id,
+            epoch: reconfigure_msg.epoch,
+            coordinator,
+            members,
+            threshold: reconfigure_msg.threshold,
+            encrypted_shares,
+            previous_configuration: None,
+        })
+    }
 }
 
 #[derive(
