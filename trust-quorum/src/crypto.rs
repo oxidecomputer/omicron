@@ -10,10 +10,11 @@ use derive_more::From;
 use hkdf::Hkdf;
 use rand::RngCore;
 use rand::rngs::OsRng;
-use secrecy::{ExposeSecret, Secret};
+use secrecy::{DebugSecret, ExposeSecret, Secret};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
 use std::collections::BTreeMap;
+use std::fmt::Debug;
 use vsss_rs::{Gf256, subtle::ConstantTimeEq};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
@@ -137,6 +138,14 @@ pub struct ReconstructedRackSecret {
     secret: Secret<RackSecretData>,
 }
 
+impl DebugSecret for ReconstructedRackSecret {}
+
+impl Debug for ReconstructedRackSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Self::debug_secret(f)
+    }
+}
+
 impl ExposeSecret<[u8; 32]> for ReconstructedRackSecret {
     fn expose_secret(&self) -> &[u8; 32] {
         &self.secret.expose_secret().0
@@ -199,7 +208,7 @@ impl RackSecret {
         let shares = Gf256::split_array(
             threshold.0 as usize,
             total_shares,
-            &*self.secret.expose_secret().0,
+            self.expose_secret(),
             rng,
         )?;
         Ok(shares.into_iter().map(KeyShareGf256).collect())
@@ -218,6 +227,14 @@ impl RackSecret {
         };
         let secret = Gf256::combine_array(shares)?;
         Ok(secret.try_into().expect("valid rack secret size"))
+    }
+}
+
+impl DebugSecret for RackSecret {}
+
+impl Debug for RackSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Self::debug_secret(f)
     }
 }
 
@@ -366,5 +383,58 @@ impl EncryptedShares {
             .map_err(|_| Error::FailedToDecrypt)?;
 
         Ok(KeyShareGf256(plaintext))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::{
+        prelude::TestCaseError, prop_assert, prop_assert_eq, prop_assert_ne,
+    };
+    use test_strategy::{Arbitrary, proptest};
+
+    #[derive(Arbitrary, Debug)]
+    pub struct TestRackSecretInput {
+        #[strategy(2..255u8)]
+        threshold: u8,
+        #[strategy(2..255usize)]
+        total_shares: usize,
+    }
+
+    fn check_rack_secret_invariants(
+        input: &TestRackSecretInput,
+        original: RackSecret,
+        res: Result<Vec<KeyShareGf256>, Error>,
+    ) -> Result<(), TestCaseError> {
+        if input.threshold as usize > input.total_shares {
+            prop_assert!(res.is_err());
+            return Ok(());
+        }
+
+        let shares = res.unwrap();
+
+        // Fewer than threshold shares generates a nonsense secret
+        let res =
+            RackSecret::reconstruct(&shares[0..(input.threshold - 2) as usize]);
+        if res.is_ok() {
+            let rs = res.unwrap();
+            prop_assert_ne!(rs.expose_secret(), original.expose_secret());
+        }
+
+        // Can unlock with at least `threshold` shares
+        let rack_secret =
+            RackSecret::reconstruct(&shares[..input.threshold as usize])
+                .unwrap();
+        prop_assert_eq!(rack_secret.expose_secret(), original.expose_secret());
+
+        Ok(())
+    }
+
+    #[proptest]
+    fn rack_secret_test(input: TestRackSecretInput) {
+        let rs = RackSecret::new();
+        let res = rs.split(Threshold(input.threshold), input.total_shares);
+        check_rack_secret_invariants(&input, rs, res)?;
     }
 }
