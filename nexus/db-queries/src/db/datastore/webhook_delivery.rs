@@ -6,6 +6,7 @@
 
 use super::DataStore;
 use crate::context::OpContext;
+use crate::db::IncompleteOnConflictExt;
 use crate::db::datastore::RunnableQuery;
 use crate::db::error::ErrorHandler;
 use crate::db::error::public_error_from_diesel;
@@ -68,7 +69,9 @@ impl DataStore {
             // NOTHING, which is fine, becausse the only other uniqueness
             // constraint is the UUID primary key, and we kind of assume UUID
             // collisions don't happen. Oh well.
-            .on_conflict_do_nothing()
+            .on_conflict((dsl::event_id, dsl::rx_id))
+            .as_partial_index()
+            .do_nothing()
             .execute_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
