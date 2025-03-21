@@ -2834,10 +2834,7 @@ async fn cmd_db_volume_cannot_activate(
                 }
 
                 VolumeCookedResult::TargetNotFound { target } => {
-                    println!(
-                        "target {target} not found (was probably \
-                        deleted concurrently when `volume_cooked` was called)"
-                    )
+                    println!("target {target} not found")
                 }
             }
         }
