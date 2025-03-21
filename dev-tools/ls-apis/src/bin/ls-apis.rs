@@ -109,6 +109,7 @@ fn run_adoc(apis: &SystemApis) -> Result<()> {
     let metadata = apis.api_metadata();
     for api in metadata.apis() {
         println!("// DO NOT EDIT.  This table is auto-generated. See above.");
+        println!("|{}", api.label);
         println!("|{}", apis.adoc_label(&api.client_package_name)?);
 
         println!("|");
