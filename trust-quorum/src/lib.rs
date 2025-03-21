@@ -39,6 +39,16 @@ pub use persistent_state::PersistentState;
 )]
 pub struct RackId(Uuid);
 
+impl RackId {
+    pub fn new(uuid: Uuid) -> RackId {
+        RackId(uuid)
+    }
+
+    pub fn random() -> RackId {
+        RackId(Uuid::new_v4())
+    }
+}
+
 #[derive(
     Debug,
     Clone,
@@ -81,8 +91,8 @@ pub struct Threshold(pub u8);
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
 pub struct PlatformId {
-    part_number: String,
-    serial_number: String,
+    pub part_number: String,
+    pub serial_number: String,
 }
 
 /// A container to make messages between trust quorum nodes routable

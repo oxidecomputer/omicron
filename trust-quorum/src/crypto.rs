@@ -284,7 +284,8 @@ pub struct EncryptedShares {
     /// must have the rack secret in memory, and it doesn't seem less safe to
     /// have all keys available. It would certainly be cheaper to not have to
     /// derive a key for each member and a separate encryption at construction
-    /// time.
+    /// time. The benefit as the code currently stands is that we only have to
+    /// decrypt one share at a time.
     pub encrypted_shares: BTreeMap<PlatformId, Vec<u8>>,
 }
 
@@ -362,7 +363,7 @@ impl EncryptedShares {
 
     // We don't use this yet as we haven't implemented `PrepareAndCommit`
     #[allow(unused)]
-    fn decrypt_share(
+    pub fn decrypt_share(
         rack_id: &RackId,
         platform_id: &PlatformId,
         rack_secret: &RackSecret,
@@ -389,6 +390,7 @@ impl EncryptedShares {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::RackId;
     use proptest::{
         prelude::TestCaseError, prop_assert, prop_assert_eq, prop_assert_ne,
     };
@@ -436,5 +438,41 @@ mod tests {
         let rs = RackSecret::new();
         let res = rs.split(Threshold(input.threshold), input.total_shares);
         check_rack_secret_invariants(&input, rs, res)?;
+    }
+
+    #[proptest]
+    fn encrypted_shares_test(#[strategy(5..15usize)] num_members: usize) {
+        let rack_id = RackId::random();
+        let threshold = Threshold((num_members / 2 + 1) as u8);
+        let rs = RackSecret::new();
+        let shares = rs.split(threshold, num_members).unwrap();
+        let shares_by_member = shares
+            .into_iter()
+            .enumerate()
+            .map(|(i, share)| {
+                (
+                    PlatformId {
+                        part_number: "test".to_string(),
+                        serial_number: format!("{i}"),
+                    },
+                    share,
+                )
+            })
+            .collect();
+
+        let encrypted =
+            EncryptedShares::new(&rack_id, &rs, &shares_by_member).unwrap();
+
+        for (platform_id, share) in shares_by_member {
+            let decrypted = EncryptedShares::decrypt_share(
+                &rack_id,
+                &platform_id,
+                &rs,
+                &encrypted.salt,
+                &encrypted.encrypted_shares.get(&platform_id).unwrap(),
+            )
+            .unwrap();
+            prop_assert_eq!(decrypted, share);
+        }
     }
 }
