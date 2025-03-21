@@ -3148,9 +3148,9 @@ pub mod test {
                 .set_zone_image_source(
                     &zone_id,
                     BlueprintZoneImageSource::Artifact {
-                        version: BlueprintZoneImageVersion::Version(
-                            ARTIFACT_VERSION,
-                        ),
+                        version: BlueprintZoneImageVersion::Available {
+                            version: ARTIFACT_VERSION,
+                        },
                         // The hash is not displayed in the diff -- only the
                         // version is.
                         hash: ArtifactHash([0x12; 32]),

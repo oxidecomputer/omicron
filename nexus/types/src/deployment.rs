@@ -979,10 +979,10 @@ impl fmt::Display for BlueprintZoneImageSource {
     Serialize,
     Diffable,
 )]
-#[serde(tag = "version", rename_all = "snake_case")]
+#[serde(tag = "image_version", rename_all = "snake_case")]
 pub enum BlueprintZoneImageVersion {
-    /// A specific version of the image.
-    Version(ArtifactVersion),
+    /// A specific version of the image is available.
+    Available { version: ArtifactVersion },
 
     /// The version could not be determined. This is non-fatal.
     Unknown,
@@ -991,7 +991,7 @@ pub enum BlueprintZoneImageVersion {
 impl fmt::Display for BlueprintZoneImageVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BlueprintZoneImageVersion::Version(version) => {
+            BlueprintZoneImageVersion::Available { version } => {
                 write!(f, "version {version}")
             }
             BlueprintZoneImageVersion::Unknown => {

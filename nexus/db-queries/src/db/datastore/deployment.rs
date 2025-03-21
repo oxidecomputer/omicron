@@ -2237,9 +2237,9 @@ mod tests {
                     new_sled_id,
                     zone_ids[0],
                     BlueprintZoneImageSource::Artifact {
-                        version: BlueprintZoneImageVersion::Version(
-                            ARTIFACT_VERSION_1,
-                        ),
+                        version: BlueprintZoneImageVersion::Available {
+                            version: ARTIFACT_VERSION_1,
+                        },
                         hash: ARTIFACT_HASH_1,
                     },
                 )

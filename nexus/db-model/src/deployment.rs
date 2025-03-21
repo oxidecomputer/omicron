@@ -1024,9 +1024,9 @@ impl DbBpZoneImageSourceColumns {
         // Some.
         let image_artifact_data = image_artifact_sha256.map(|hash| {
             let version = match image_artifact_row {
-                Some(artifact_row) => {
-                    BlueprintZoneImageVersion::Version(artifact_row.version.0)
-                }
+                Some(artifact_row) => BlueprintZoneImageVersion::Available {
+                    version: artifact_row.version.0,
+                },
                 None => BlueprintZoneImageVersion::Unknown,
             };
             (version, hash)

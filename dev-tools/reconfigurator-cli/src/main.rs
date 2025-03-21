@@ -494,7 +494,9 @@ fn parse_blueprint_zone_image_version(
         return Ok(BlueprintZoneImageVersion::Unknown);
     }
 
-    Ok(BlueprintZoneImageVersion::Version(version.parse::<ArtifactVersion>()?))
+    Ok(BlueprintZoneImageVersion::Available {
+        version: version.parse::<ArtifactVersion>()?,
+    })
 }
 
 #[derive(Debug, Args)]
