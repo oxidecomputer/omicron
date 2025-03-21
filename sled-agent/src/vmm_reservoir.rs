@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use tokio::sync::{broadcast, oneshot};
 
-use sled_hardware::HardwareManager;
+use sled_hardware::MemoryReservations;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -35,7 +35,7 @@ pub enum Error {
 #[derive(Debug, Clone, Copy)]
 pub enum ReservoirMode {
     Size(u32),
-    Percentage(u8),
+    Percentage(f32),
 }
 
 impl ReservoirMode {
@@ -44,7 +44,7 @@ impl ReservoirMode {
     ///
     /// Panic upon invalid configuration
     pub fn from_config(
-        percentage: Option<u8>,
+        percentage: Option<f32>,
         size_mb: Option<u32>,
     ) -> Option<ReservoirMode> {
         match (percentage, size_mb) {
@@ -135,6 +135,7 @@ impl VmmReservoirManagerHandle {
 
 /// Manage the VMM reservoir in a background thread
 pub struct VmmReservoirManager {
+    memory_reservations: MemoryReservations,
     reservoir_size: Arc<AtomicU64>,
     rx: flume::Receiver<ReservoirManagerMsg>,
     size_updated_tx: broadcast::Sender<()>,
@@ -146,7 +147,7 @@ pub struct VmmReservoirManager {
 impl VmmReservoirManager {
     pub fn spawn(
         log: &Logger,
-        hardware_manager: HardwareManager,
+        memory_reservations: sled_hardware::MemoryReservations,
         reservoir_mode: Option<ReservoirMode>,
     ) -> VmmReservoirManagerHandle {
         let log = log.new(o!("component" => "VmmReservoirManager"));
@@ -157,15 +158,15 @@ impl VmmReservoirManager {
         let (tx, rx) = flume::bounded(0);
         let reservoir_size = Arc::new(AtomicU64::new(0));
         let manager = VmmReservoirManager {
+            memory_reservations,
             reservoir_size: reservoir_size.clone(),
             size_updated_tx: size_updated_tx.clone(),
             _size_updated_rx,
             rx,
             log,
         };
-        let _manager_handle = Arc::new(thread::spawn(move || {
-            manager.run(hardware_manager, reservoir_mode)
-        }));
+        let _manager_handle =
+            Arc::new(thread::spawn(move || manager.run(reservoir_mode)));
         VmmReservoirManagerHandle {
             reservoir_size,
             tx,
@@ -174,23 +175,18 @@ impl VmmReservoirManager {
         }
     }
 
-    fn run(
-        self,
-        hardware_manager: HardwareManager,
-        reservoir_mode: Option<ReservoirMode>,
-    ) {
+    fn run(self, reservoir_mode: Option<ReservoirMode>) {
         match reservoir_mode {
             None => warn!(self.log, "Not using VMM reservoir"),
             Some(ReservoirMode::Size(0))
-            | Some(ReservoirMode::Percentage(0)) => {
+            | Some(ReservoirMode::Percentage(0.0)) => {
                 warn!(
                     self.log,
                     "Not using VMM reservoir (size 0 bytes requested)"
                 )
             }
             Some(mode) => {
-                if let Err(e) = self.set_reservoir_size(&hardware_manager, mode)
-                {
+                if let Err(e) = self.set_reservoir_size(mode) {
                     error!(self.log, "Failed to setup VMM reservoir: {e}");
                 }
             }
@@ -198,7 +194,7 @@ impl VmmReservoirManager {
 
         while let Ok(msg) = self.rx.recv() {
             let ReservoirManagerMsg::SetReservoirSize { mode, reply_tx } = msg;
-            match self.set_reservoir_size(&hardware_manager, mode) {
+            match self.set_reservoir_size(mode) {
                 Ok(()) => {
                     let _ = reply_tx.send(Ok(()));
                 }
@@ -213,33 +209,28 @@ impl VmmReservoirManager {
     /// Sets the VMM reservoir to the requested percentage of usable physical
     /// RAM or to a size in MiB. Either mode will round down to the nearest
     /// aligned size required by the control plane.
-    fn set_reservoir_size(
-        &self,
-        hardware: &sled_hardware::HardwareManager,
-        mode: ReservoirMode,
-    ) -> Result<(), Error> {
-        let hardware_physical_ram_bytes = hardware.usable_physical_ram_bytes();
+    fn set_reservoir_size(&self, mode: ReservoirMode) -> Result<(), Error> {
+        let vmm_eligible_memory = self.memory_reservations.vmm_eligible();
         let req_bytes = match mode {
             ReservoirMode::Size(mb) => {
                 let bytes = ByteCount::from_mebibytes_u32(mb).to_bytes();
-                if bytes > hardware_physical_ram_bytes {
+                if bytes > vmm_eligible_memory {
                     return Err(Error::ReservoirConfig(format!(
-                        "cannot specify a reservoir of {bytes} bytes when \
-                        physical memory is {hardware_physical_ram_bytes} bytes",
+                        "cannot specify a reservoir of {bytes} bytes when the \
+                        maximum reservoir size is {vmm_eligible_memory} bytes",
                     )));
                 }
                 bytes
             }
             ReservoirMode::Percentage(percent) => {
-                if !matches!(percent, 1..=99) {
+                if !matches!(percent, 0.1..100.0) {
                     return Err(Error::ReservoirConfig(format!(
                         "VMM reservoir percentage of {} must be between 0 and \
                         100",
                         percent
                     )));
                 };
-                (hardware_physical_ram_bytes as f64
-                    * (f64::from(percent) / 100.0))
+                (vmm_eligible_memory as f64 * (f64::from(percent) / 100.0))
                     .floor() as u64
             }
         };
@@ -258,15 +249,16 @@ impl VmmReservoirManager {
         }
 
         // The max ByteCount value is i64::MAX, which is ~8 million TiB.
-        // As this value is either a percentage of DRAM or a size in MiB
-        // represented as a u32, constructing this should always work.
+        // As this value is either a percentage of otherwise-unbudgeted DRAM or
+        // a size in MiB represented as a u32, constructing this should always
+        // work.
         let reservoir_size = ByteCount::try_from(req_bytes_aligned).unwrap();
         if let ReservoirMode::Percentage(percent) = mode {
             info!(
                 self.log,
-                "{}% of {} physical ram = {} bytes)",
+                "{}% of {} VMM eligible ram = {} bytes)",
                 percent,
-                hardware_physical_ram_bytes,
+                vmm_eligible_memory,
                 req_bytes,
             );
         }
