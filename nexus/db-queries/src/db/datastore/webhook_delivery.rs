@@ -52,16 +52,6 @@ pub struct DeliveryConfig {
     pub lease_timeout: TimeDelta,
 }
 
-impl Default for DeliveryConfig {
-    fn default() -> Self {
-        Self {
-            lease_timeout: TimeDelta::seconds(60), // 1 minute
-            first_retry_backoff: TimeDelta::seconds(60), // 1 minute
-            second_retry_backoff: TimeDelta::seconds(60 * 5), // 5 minutes
-        }
-    }
-}
-
 impl DataStore {
     pub async fn webhook_delivery_create_batch(
         &self,
