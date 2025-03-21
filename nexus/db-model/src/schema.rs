@@ -2252,7 +2252,7 @@ table! {
         time_completed -> Nullable<Timestamptz>,
         state -> crate::WebhookDeliveryStateEnum,
         deliverator_id -> Nullable<Uuid>,
-        time_delivery_started -> Nullable<Timestamptz>,
+        time_leased -> Nullable<Timestamptz>,
     }
 }
 

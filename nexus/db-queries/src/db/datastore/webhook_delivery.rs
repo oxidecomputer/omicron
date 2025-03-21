@@ -218,14 +218,11 @@ impl DataStore {
                     .and(dsl::state.eq(WebhookDeliveryState::Pending)),
             )
             .filter(dsl::rx_id.eq(rx_id.into_untyped_uuid()))
-            .filter(
-                (dsl::deliverator_id.is_null()).or(dsl::time_delivery_started
-                    .is_not_null()
-                    .and(
-                        dsl::time_delivery_started
-                            .le(now.nullable() - cfg.lease_timeout),
-                    )),
-            )
+            .filter((dsl::deliverator_id.is_null()).or(
+                dsl::time_leased.is_not_null().and(
+                    dsl::time_leased.le(now.nullable() - cfg.lease_timeout),
+                ),
+            ))
             .filter(
                 // Retry backoffs: one of the following must be true:
                 // - the delivery has not yet been attempted,
@@ -234,13 +231,13 @@ impl DataStore {
                     // - this is the first retry and the previous attempt was at
                     //   least `first_retry_backoff` ago, or
                     .or(dsl::attempts.eq(1).and(
-                        dsl::time_delivery_started
+                        dsl::time_leased
                             .le(now.nullable() - cfg.first_retry_backoff),
                     ))
                     // - this is the second retry, and the previous attempt was at
                     //   least `second_retry_backoff` ago.
                     .or(dsl::attempts.eq(2).and(
-                        dsl::time_delivery_started
+                        dsl::time_leased
                             .le(now.nullable() - cfg.second_retry_backoff),
                     )),
             )
@@ -275,15 +272,12 @@ impl DataStore {
             )
             .filter(dsl::id.eq(id))
             .filter(
-                dsl::deliverator_id.is_null().or(dsl::time_delivery_started
+                dsl::deliverator_id.is_null().or(dsl::time_leased
                     .is_not_null()
-                    .and(
-                        dsl::time_delivery_started
-                            .le(now.nullable() - lease_timeout),
-                    )),
+                    .and(dsl::time_leased.le(now.nullable() - lease_timeout))),
             )
             .set((
-                dsl::time_delivery_started.eq(now.nullable()),
+                dsl::time_leased.eq(now.nullable()),
                 dsl::deliverator_id.eq(nexus_id.into_untyped_uuid()),
             ))
             .check_if_exists::<WebhookDelivery>(id)
@@ -299,7 +293,7 @@ impl DataStore {
                     ));
                 }
 
-                if let Some(started) = updated.found.time_delivery_started {
+                if let Some(started) = updated.found.time_leased {
                     let nexus_id =
                         updated.found.deliverator_id.ok_or_else(|| {
                             Error::internal_error(

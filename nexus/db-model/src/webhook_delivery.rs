@@ -67,7 +67,7 @@ pub struct WebhookDelivery {
 
     pub deliverator_id: Option<DbTypedUuid<OmicronZoneKind>>,
 
-    pub time_delivery_started: Option<DateTime<Utc>>,
+    pub time_leased: Option<DateTime<Utc>>,
 }
 
 impl WebhookDelivery {
@@ -86,7 +86,7 @@ impl WebhookDelivery {
             time_created: Utc::now(),
             time_completed: None,
             deliverator_id: None,
-            time_delivery_started: None,
+            time_leased: None,
             state: WebhookDeliveryState::Pending,
         }
     }
@@ -113,7 +113,7 @@ impl WebhookDelivery {
             time_created: Utc::now(),
             time_completed: None,
             deliverator_id: Some((*deliverator_id).into()),
-            time_delivery_started: Some(Utc::now()),
+            time_leased: Some(Utc::now()),
         }
     }
 

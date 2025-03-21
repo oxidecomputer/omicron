@@ -5248,12 +5248,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
 
     -- Deliverator coordination bits
     deliverator_id UUID,
-    time_delivery_started TIMESTAMPTZ,
+    time_leased TIMESTAMPTZ,
 
     CONSTRAINT attempts_is_non_negative CHECK (attempts >= 0),
     CONSTRAINT active_deliveries_have_started_timestamps CHECK (
         (deliverator_id IS NULL) OR (
-            deliverator_id IS NOT NULL AND time_delivery_started IS NOT NULL
+            deliverator_id IS NOT NULL AND time_leased IS NOT NULL
         )
     ),
     CONSTRAINT time_completed_iff_not_pending CHECK (
