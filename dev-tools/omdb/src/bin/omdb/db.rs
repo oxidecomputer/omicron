@@ -886,11 +886,11 @@ struct VolumeReferenceArgs {
     #[clap(long, conflicts_with_all = ["ip", "net", "region_snapshot"])]
     read_only_region: Option<Uuid>,
 
-    /// Provide dataset, region, and snapshot ID.
     #[clap(
         long,
         conflicts_with_all = ["ip", "net", "read_only_region"],
         num_args = 3,
+        value_names = ["DATASET ID", "REGION ID", "SNAPSHOT ID"],
     )]
     region_snapshot: Option<Vec<Uuid>>,
 }
