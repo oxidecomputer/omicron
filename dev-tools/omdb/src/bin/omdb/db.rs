@@ -105,6 +105,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::CrucibleTargets;
 use nexus_db_queries::db::datastore::DataStoreConnection;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
+use nexus_db_queries::db::datastore::InstanceStateComputer;
 use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
@@ -3567,10 +3568,9 @@ async fn cmd_db_instance_info(
         time_last_auto_restarted,
     } = instance.runtime_state;
     println!("    {STATE:>WIDTH$}: {nexus_state:?}");
-    let effective_state = InstanceAndActiveVmm::determine_effective_state(
-        &instance,
-        active_vmm.as_ref(),
-    );
+    let effective_state =
+        InstanceStateComputer::new(&instance, active_vmm.as_ref())
+            .compute_state();
     println!(
         "{} {API_STATE:>WIDTH$}: {effective_state:?}",
         if effective_state == InstanceState::Failed { "/!\\" } else { "(i)" }
