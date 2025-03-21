@@ -7204,6 +7204,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oximeter-client",
  "oximeter-db",
+ "oxnet",
  "petgraph 0.7.1",
  "pq-sys",
  "ratatui",
