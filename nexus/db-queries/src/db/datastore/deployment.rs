@@ -22,10 +22,13 @@ use chrono::Utc;
 use clickhouse_admin_types::{KeeperId, ServerId};
 use core::future::Future;
 use core::pin::Pin;
+use diesel::BoolExpressionMethods;
 use diesel::Column;
 use diesel::ExpressionMethods;
 use diesel::Insertable;
 use diesel::IntoSql;
+use diesel::JoinOnDsl;
+use diesel::NullableExpressionMethods;
 use diesel::OptionalExtension;
 use diesel::QueryDsl;
 use diesel::RunQueryDsl;
@@ -49,6 +52,7 @@ use nexus_db_model::BpOmicronZone;
 use nexus_db_model::BpOmicronZoneNic;
 use nexus_db_model::BpSledMetadata;
 use nexus_db_model::BpTarget;
+use nexus_db_model::TufArtifact;
 use nexus_db_model::to_db_typed_uuid;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
@@ -67,6 +71,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
+use tufaceous_artifact::KnownArtifactKind;
 use uuid::Uuid;
 
 mod external_networking;
@@ -544,6 +549,7 @@ impl DataStore {
         // Load all the zones for each sled.
         {
             use db::schema::bp_omicron_zone::dsl;
+            use db::schema::tuf_artifact::dsl as tuf_artifact_dsl;
 
             let mut paginator = Paginator::new(SQL_BATCH_SIZE);
             while let Some(p) = paginator.next() {
@@ -555,16 +561,30 @@ impl DataStore {
                     &p.current_pagparams(),
                 )
                 .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
-                .select(BpOmicronZone::as_select())
-                .load_async(&*conn)
+                // Left join in case the artifact is missing from the
+                // tuf_artifact table, which is non-fatal.
+                .left_join(
+                    tuf_artifact_dsl::tuf_artifact.on(tuf_artifact_dsl::kind
+                        .eq(KnownArtifactKind::Zone.to_string())
+                        .and(
+                            tuf_artifact_dsl::sha256
+                                .nullable()
+                                .eq(dsl::image_artifact_sha256),
+                        )),
+                )
+                .select((
+                    BpOmicronZone::as_select(),
+                    Option::<TufArtifact>::as_select(),
+                ))
+                .load_async::<(BpOmicronZone, Option<TufArtifact>)>(&*conn)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
 
-                paginator = p.found_batch(&batch, &|z| z.id);
+                paginator = p.found_batch(&batch, &|(z, _)| z.id);
 
-                for z in batch {
+                for (z, artifact) in batch {
                     let nic_row = z
                         .bp_nic_id
                         .map(|id| {
@@ -597,7 +617,7 @@ impl DataStore {
                             ))
                         })?;
                     let zone = z
-                        .into_blueprint_zone_config(nic_row)
+                        .into_blueprint_zone_config(nic_row, artifact)
                         .with_context(|| {
                             format!("zone {zone_id}: parse from database")
                         })
