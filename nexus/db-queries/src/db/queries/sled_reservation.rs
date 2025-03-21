@@ -38,7 +38,8 @@ pub fn sled_find_targets_query(
     sql_types::Nullable<AffinityPolicyEnum>,
     sql_types::Nullable<AffinityPolicyEnum>,
 )> {
-    QueryBuilder::new().sql("
+    let mut query = QueryBuilder::new();
+    query.sql("
         WITH sled_targets AS (
             SELECT sled.id as sled_id
             FROM sled
@@ -143,8 +144,9 @@ pub fn sled_find_targets_query(
     .bind::<sql_types::Uuid, _>(instance_id.into_untyped_uuid())
     .bind::<sql_types::Uuid, _>(instance_id.into_untyped_uuid())
     .bind::<sql_types::Uuid, _>(instance_id.into_untyped_uuid())
-    .bind::<sql_types::Uuid, _>(instance_id.into_untyped_uuid())
-    .query()
+    .bind::<sql_types::Uuid, _>(instance_id.into_untyped_uuid());
+
+    query.query()
 }
 
 /// Inserts a sled_resource_vmm record into the database, if it is
@@ -152,7 +154,8 @@ pub fn sled_find_targets_query(
 pub fn sled_insert_resource_query(
     resource: &SledResourceVmm,
 ) -> TypedSqlQuery<(sql_types::Numeric,)> {
-    QueryBuilder::new().sql("
+    let mut query = QueryBuilder::new();
+    query.sql("
         WITH sled_has_space AS (
             SELECT 1
             FROM sled
@@ -265,8 +268,9 @@ pub fn sled_insert_resource_query(
     .bind::<sql_types::BigInt, _>(resource.resources.hardware_threads)
     .bind::<sql_types::BigInt, _>(resource.resources.rss_ram)
     .bind::<sql_types::BigInt, _>(resource.resources.reservoir_ram)
-    .bind::<sql_types::Uuid, _>(resource.instance_id.unwrap().into_untyped_uuid())
-    .query()
+    .bind::<sql_types::Uuid, _>(resource.instance_id.unwrap().into_untyped_uuid());
+
+    query.query()
 }
 
 #[cfg(test)]

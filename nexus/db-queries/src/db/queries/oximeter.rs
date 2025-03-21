@@ -38,11 +38,11 @@ type SelectableSql<T> = <
 pub fn upsert_producer(
     producer: &internal::nexus::ProducerEndpoint,
 ) -> TypedSqlQuery<SelectableSql<OximeterInfo>> {
-    let builder = QueryBuilder::new();
+    let mut builder = QueryBuilder::new();
 
     // Select the existing oximeter ID for this producer, if it exists and is
     // not expunged.
-    let builder = builder
+    builder
         .sql(
             r#"
             WITH existing_oximeter AS (
@@ -59,7 +59,7 @@ pub fn upsert_producer(
 
     // Choose a random non-expunged Oximeter instance to use if the previous
     // clause did not find an existing, non-expunged Oximeter.
-    let builder = builder.sql(
+    builder.sql(
         r#"
         random_oximeter AS (
           SELECT id FROM oximeter
@@ -73,7 +73,7 @@ pub fn upsert_producer(
     // Combine the previous two queries. The `LEFT JOIN ... ON true` ensures we
     // always get a row from this clause if there is _any_ non-expunged Oximeter
     // available.
-    let builder = builder.sql(
+    builder.sql(
         r#"
       chosen_oximeter AS (
         SELECT COALESCE(existing_oximeter.id, random_oximeter.id) AS oximeter_id
@@ -83,7 +83,7 @@ pub fn upsert_producer(
     );
 
     // Build the INSERT for new producers...
-    let builder = builder.sql(
+    builder.sql(
         r#"
         inserted_producer AS (
             INSERT INTO metric_producer (
@@ -100,7 +100,7 @@ pub fn upsert_producer(
     );
 
     // ... by querying our chosen oximeter ID and the values from `producer`.
-    let builder = builder
+    builder
         .sql("SELECT ")
         .param()
         .bind::<sql_types::Uuid, _>(producer.id)
@@ -125,7 +125,7 @@ pub fn upsert_producer(
     // the first clause in our CTE (selecting the existing oximeter id if it's
     // not expunged), or reassign to our randomly-chosen one (the second clause
     // above) if our current assignment is expunged.
-    let builder = builder.sql(
+    builder.sql(
         r#"
         ON CONFLICT (id)
         DO UPDATE SET
@@ -139,7 +139,7 @@ pub fn upsert_producer(
     );
 
     // ... and return this producer's assigned collector ID.
-    let builder = builder.sql(
+    builder.sql(
         r#"
           RETURNING oximeter_id
         )
@@ -148,7 +148,7 @@ pub fn upsert_producer(
 
     // Finally, join the oximeter ID from our inserted or updated producer with
     // the `oximeter` table to get all of its information.
-    let builder = builder
+    builder
         .sql("SELECT ")
         .sql(AllColumnsOfOximeterInfo::with_prefix("oximeter"))
         .sql(
@@ -168,10 +168,10 @@ pub fn upsert_producer(
 /// assignment is randomly chosen from among the non-expunged Oximeter instances
 /// recorded in the `oximeter` table.
 pub fn reassign_producers_query(oximeter_id: Uuid) -> TypedSqlQuery<()> {
-    let builder = QueryBuilder::new();
+    let mut builder = QueryBuilder::new();
 
     // Find all non-expunged Oximeter instances.
-    let builder = builder.sql(
+    builder.sql(
         "\
         WITH available_oximeters AS ( \
           SELECT ARRAY( \
@@ -184,7 +184,7 @@ pub fn reassign_producers_query(oximeter_id: Uuid) -> TypedSqlQuery<()> {
     // for every producer assigned to `oximeter_id`. If the `ids` array from the
     // previous expression is empty, every `new_id` column in this expression
     // will be NULL. We'll catch that in the update below.
-    let builder = builder
+    builder
         .sql(
             "\
             new_assignments AS ( \
@@ -204,7 +204,7 @@ pub fn reassign_producers_query(oximeter_id: Uuid) -> TypedSqlQuery<()> {
     // step is `NULL` (because there aren't any non-expunged Oximeter
     // instances), this will fail the `NOT NULL` constraint on the oximeter_id
     // column.
-    let builder = builder
+    builder
         .sql(
             "\
             UPDATE metric_producer SET oximeter_id = ( \
