@@ -11,9 +11,9 @@
   },
   "paths": {
     "/ereports/{reporter_id}": {
-      "get": {
+      "post": {
         "summary": "Collect a tranche of ereports from this reporter.",
-        "operationId": "ereports_get",
+        "operationId": "ereports_collect",
         "parameters": [
           {
             "in": "path",
@@ -129,26 +129,22 @@
               }
             ]
           },
-          "next_page": {
-            "nullable": true,
-            "description": "If more ereports are present, this value contains the ENA of the ereport immediately after the last report in this tranche. If this is None, no more ereports are currently avaialble.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Ena"
-              }
-            ]
-          },
-          "reports": {
-            "description": "The values of the ereports in this tranche.",
+          "items": {
+            "description": "list of items on this page of results",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Ereport"
             }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
           }
         },
         "required": [
           "generation",
-          "reports"
+          "items"
         ]
       },
       "Error": {

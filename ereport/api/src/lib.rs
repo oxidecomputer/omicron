@@ -9,6 +9,7 @@ use dropshot::HttpResponseOk;
 use dropshot::Path;
 use dropshot::Query;
 use dropshot::RequestContext;
+use dropshot::ResultsPage;
 pub use ereport_types::Ena;
 pub use ereport_types::Ereport;
 pub use ereport_types::EreporterGenerationUuid;
@@ -56,10 +57,10 @@ pub trait EreporterApi {
 
     /// Collect a tranche of ereports from this reporter.
     #[endpoint {
-        method = GET,
+        method = POST,
         path = "/ereports/{reporter_id}",
     }]
-    async fn ereports_get(
+    async fn ereports_collect(
         rqctx: RequestContext<Self::Context>,
         path: Path<ReporterPath>,
         query: Query<EreportQuery>,
@@ -101,17 +102,15 @@ pub struct EreportQuery {
 }
 
 /// A tranche of ereports received from a reporter.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Ereports {
     /// The reporter's current generation ID.
     ///
     /// If this is not equal to the current known generation, then the reporter
     /// has restarted.
     pub generation: EreporterGenerationUuid,
-    /// The values of the ereports in this tranche.
-    pub reports: Vec<Ereport>,
-    /// If more ereports are present, this value contains the ENA of the ereport
-    /// immediately after the last report in this tranche. If this is None, no
-    /// more ereports are currently avaialble.
-    pub next_page: Option<Ena>,
+    /// The ereports in this tranche, and the ENA of the next apge of ereports
+    /// (if one exists).)
+    #[serde(flatten)]
+    pub reports: ResultsPage<Ereport>,
 }
