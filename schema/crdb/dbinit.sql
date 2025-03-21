@@ -5232,7 +5232,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
     -- `omicron.public.webhook_rx`)
     rx_id UUID NOT NULL,
 
-    trigger omicron.public.webhook_delivery_trigger NOT NULL,
+    triggered_by omicron.public.webhook_delivery_trigger NOT NULL,
 
     payload JSONB NOT NULL,
 

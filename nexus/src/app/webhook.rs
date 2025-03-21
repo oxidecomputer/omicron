@@ -783,7 +783,7 @@ impl<'a> ReceiverClient<'a> {
                 id: delivery.id.into(),
                 webhook_id: self.rx.id(),
                 sent_at: &sent_at,
-                trigger: delivery.trigger.into(),
+                trigger: delivery.triggered_by.into(),
             },
         };
         // N.B. that we serialize the body "ourselves" rather than just
@@ -801,7 +801,7 @@ impl<'a> ReceiverClient<'a> {
                     "event_id" => %delivery.event_id,
                     "event_class" => %event_class,
                     "delivery_id" => %delivery.id,
-                    "delivery_trigger" => %delivery.trigger,
+                    "delivery_trigger" => %delivery.triggered_by,
                     "error" => %e,
                 );
 
@@ -849,7 +849,7 @@ impl<'a> ReceiverClient<'a> {
                     "event_id" => %delivery.event_id,
                     "event_class" => %event_class,
                     "delivery_id" => %delivery.id,
-                    "delivery_trigger" => %delivery.trigger,
+                    "delivery_trigger" => %delivery.triggered_by,
                     "error" => %e,
                     "payload" => ?payload,
                 );
@@ -871,7 +871,7 @@ impl<'a> ReceiverClient<'a> {
                     "event_id" => %delivery.event_id,
                     "event_class" => %event_class,
                     "delivery_id" => %delivery.id,
-                    "delivery_trigger" => %delivery.trigger,
+                    "delivery_trigger" => %delivery.triggered_by,
                     "error" => %e,
                 );
                 return Err(e).context(MSG);
@@ -884,7 +884,7 @@ impl<'a> ReceiverClient<'a> {
                         "event_id" => %delivery.event_id,
                         "event_class" => %event_class,
                         "delivery_id" => %delivery.id,
-                        "delivery_trigger" => %delivery.trigger,
+                        "delivery_trigger" => %delivery.triggered_by,
                         "response_status" => ?status,
                         "response_duration" => ?duration,
                     );
@@ -908,7 +908,7 @@ impl<'a> ReceiverClient<'a> {
                         "event_id" => %delivery.event_id,
                         "event_class" => %event_class,
                         "delivery_id" => %delivery.id,
-                        "delivery_trigger" => %delivery.trigger,
+                        "delivery_trigger" => %delivery.triggered_by,
                         "error" => %e,
                     );
                     (result, None)
@@ -923,7 +923,7 @@ impl<'a> ReceiverClient<'a> {
                         "event_id" => %delivery.event_id,
                         "event_class" => %event_class,
                         "delivery_id" => %delivery.id,
-                        "delivery_trigger" => %delivery.trigger,
+                        "delivery_trigger" => %delivery.triggered_by,
                         "response_status" => ?status,
                         "response_duration" => ?duration,
                     );
@@ -935,7 +935,7 @@ impl<'a> ReceiverClient<'a> {
                         "event_id" => %delivery.event_id,
                         "event_class" => %event_class,
                         "delivery_id" => %delivery.id,
-                        "delivery_trigger" => %delivery.trigger,
+                        "delivery_trigger" => %delivery.triggered_by,
                         "response_status" => ?status,
                         "response_duration" => ?duration,
                     );

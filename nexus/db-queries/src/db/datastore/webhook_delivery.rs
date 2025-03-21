@@ -124,7 +124,7 @@ impl DataStore {
                     )
                     .filter(
                         also_delivery
-                            .field(dsl::trigger)
+                            .field(dsl::triggered_by)
                             .ne(WebhookDeliveryTrigger::Probe),
                     ),
             )))
@@ -158,7 +158,7 @@ impl DataStore {
         .filter(
             dsl::rx_id
                 .eq(rx_id.into_untyped_uuid())
-                .and(dsl::trigger.eq_any(triggers)),
+                .and(dsl::triggered_by.eq_any(triggers)),
         )
         // Join with the event table on the delivery's event ID,
         // so that we can grab the event class of the event that initiated
@@ -210,7 +210,7 @@ impl DataStore {
             // Filter out deliveries triggered by probe requests, as those are
             // executed synchronously by the probe endpoint, rather than by the
             // webhook deliverator.
-            .filter(dsl::trigger.ne(WebhookDeliveryTrigger::Probe))
+            .filter(dsl::triggered_by.ne(WebhookDeliveryTrigger::Probe))
             // Only select deliveries that are still in progress.
             .filter(
                 dsl::time_completed

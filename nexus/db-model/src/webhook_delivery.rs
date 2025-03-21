@@ -48,7 +48,7 @@ pub struct WebhookDelivery {
     pub rx_id: DbTypedUuid<WebhookReceiverKind>,
 
     /// Describes why this delivery was triggered.
-    pub trigger: WebhookDeliveryTrigger,
+    pub triggered_by: WebhookDeliveryTrigger,
 
     /// The data payload as sent to this receiver.
     pub payload: serde_json::Value,
@@ -80,7 +80,7 @@ impl WebhookDelivery {
             id: WebhookDeliveryUuid::new_v4().into(),
             event_id: event.id().into(),
             rx_id: (*rx_id).into(),
-            trigger,
+            triggered_by: trigger,
             payload: event.event.clone(),
             attempts: SqlU8::new(0),
             time_created: Utc::now(),
@@ -106,7 +106,7 @@ impl WebhookDelivery {
             )
             .into(),
             rx_id: (*rx_id).into(),
-            trigger: WebhookDeliveryTrigger::Probe,
+            triggered_by: WebhookDeliveryTrigger::Probe,
             state: WebhookDeliveryState::Pending,
             payload: serde_json::json!({}),
             attempts: SqlU8::new(0),
@@ -128,7 +128,7 @@ impl WebhookDelivery {
             event_class: event_class.as_str().to_owned(),
             event_id: self.event_id.into(),
             state: self.state.into(),
-            trigger: self.trigger.into(),
+            trigger: self.triggered_by.into(),
             attempts: attempts
                 .iter()
                 .map(views::WebhookDeliveryAttempt::from)
