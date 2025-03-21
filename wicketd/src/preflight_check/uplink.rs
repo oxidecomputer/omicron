@@ -180,7 +180,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                 // We must use `port_settings_apply` to create and configure the
                 // link + gateway in one go instead of using `link_create` +
                 // `link_enabled_set` + `link_ipv4_create` + `route_ipv4_create`
-                // due to https://github.com/oxidecomputer/dendrite/issues/588.
+                // due to https://github.com/nieuwejaar/dendrite/issues/588.
                 // That means we have to conjure up the link ID that we want;
                 // because we just checked that this port has no config, we
                 // will use link id 0.

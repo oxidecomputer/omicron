@@ -13,7 +13,6 @@ members = [
     "clients/cockroach-admin-client",
     "clients/ddm-admin-client",
     "clients/dns-service-client",
-    "clients/dpd-client",
     "clients/gateway-client",
     "clients/installinator-client",
     "clients/nexus-client",
@@ -149,7 +148,6 @@ default-members = [
     "clients/cockroach-admin-client",
     "clients/ddm-admin-client",
     "clients/dns-service-client",
-    "clients/dpd-client",
     "clients/gateway-client",
     "clients/installinator-client",
     "clients/nexus-client",
@@ -381,7 +379,7 @@ diesel-dtrace = "0.4.2"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { path = "clients/dpd-client" }
+dpd-client = { git = "https://github.com/nieuwejaar/dendrite" }
 dropshot = { version = "0.16.0", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.19"
 either = "1.14.0"

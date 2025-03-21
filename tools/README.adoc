@@ -39,7 +39,7 @@ Some of these dependencies are services we are using in the control plane but
 didn't write ourselves (e.g., cockroachdb, clickhouse), and some are software we
 wrote internally and fetch as artifacts from
 https://github.com/oxidecomputer/buildomat/[buildomat] (e.g.,
-https://github.com/oxidecomputer/dendrite[dendrite],
+https://github.com/nieuwejaar/dendrite[dendrite],
 https://github.com/oxidecomputer/maghemite[maghemite],
 https://github.com/oxidecomputer/console[console]).
 

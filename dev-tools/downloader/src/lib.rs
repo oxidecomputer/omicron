@@ -63,9 +63,6 @@ enum Target {
     /// Web console assets
     Console,
 
-    /// Dendrite OpenAPI spec
-    DendriteOpenapi,
-
     /// Stub Dendrite binary tarball
     DendriteStub,
 
@@ -138,9 +135,6 @@ pub async fn run_cmd(args: DownloadArgs) -> Result<()> {
                     Target::Clickhouse => downloader.download_clickhouse().await,
                     Target::Cockroach => downloader.download_cockroach().await,
                     Target::Console => downloader.download_console().await,
-                    Target::DendriteOpenapi => {
-                        downloader.download_dendrite_openapi().await
-                    }
                     Target::DendriteStub => downloader.download_dendrite_stub().await,
                     Target::MaghemiteMgd => downloader.download_maghemite_mgd().await,
                     Target::Softnpu => downloader.download_softnpu().await,
@@ -664,7 +658,7 @@ impl Downloader<'_> {
             get_values_from_file(["COMMIT", "SHA2"], &checksums_path).await?;
 
         let url = format!(
-            "{BUILDOMAT_URL}/oxidecomputer/dendrite/openapi/{commit}/dpd.json"
+            "{BUILDOMAT_URL}/nieuwejaar/dendrite/openapi/{commit}/dpd.json"
         );
         let path = download_dir.join(format!("dpd-{commit}.json"));
 
@@ -708,7 +702,7 @@ impl Downloader<'_> {
 
         let tarball_file = "dendrite-stub.tar.gz";
         let tarball_path = download_dir.join(tarball_file);
-        let repo = "oxidecomputer/dendrite";
+        let repo = "nieuwejaar/dendrite";
         let url_base = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
 
         tokio::fs::create_dir_all(&download_dir).await?;

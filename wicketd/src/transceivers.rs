@@ -36,7 +36,7 @@ const TRANSCEIVER_POLL_INTERVAL: Duration = Duration::from_secs(5);
 // regardless of whether we're running on switch0 or switch1.
 //
 // We will need to change these if we address
-// https://github.com/oxidecomputer/dendrite/issues/221.
+// https://github.com/nieuwejaar/dendrite/issues/221.
 const LOCAL_SWITCH_SP_INTERFACE: &str = "sidecar0";
 
 // IP interface we use when polling transceivers on the other switch.
