@@ -85,7 +85,7 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
             ident: "dns-server",
             extra_validation: None,
         },
-            ManagedApiConfig {
+        ManagedApiConfig {
             title: "Ereporter API",
             versions: Versions::new_versioned(
                 ereporter_api::supported_versions()
