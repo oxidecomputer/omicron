@@ -467,9 +467,18 @@ impl DataStore {
     ) -> DeleteResult {
         use db::schema::volume::dsl;
 
+        let conn = self.pool_connection_unauthorized().await?;
+
+        // If running integration tests, assert that the volume we're about to
+        // hard delete has no volume usage records.
+        #[cfg(any(test, feature = "testing"))]
+        Self::validate_volume_has_no_usage_records(&conn, volume_id)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
         diesel::delete(dsl::volume)
             .filter(dsl::id.eq(to_db_typed_uuid(volume_id)))
-            .execute_async(&*self.pool_connection_unauthorized().await?)
+            .execute_async(&*conn)
             .await
             .map(|_| ())
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -4055,6 +4064,32 @@ impl DataStore {
             return Err(Self::volume_invariant_violated(format!(
                 "read-only region {} has matching usage records: {:?}",
                 region.id(),
+                matching_usage_records,
+            )));
+        }
+
+        Ok(())
+    }
+
+    async fn validate_volume_has_no_usage_records(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        volume_id: VolumeUuid,
+    ) -> Result<(), diesel::result::Error> {
+        use db::schema::volume_resource_usage::dsl;
+
+        let matching_usage_records: Vec<VolumeResourceUsage> =
+            dsl::volume_resource_usage
+                .filter(dsl::volume_id.eq(to_db_typed_uuid(volume_id)))
+                .select(VolumeResourceUsageRecord::as_select())
+                .get_results_async(conn)
+                .await?
+                .into_iter()
+                .map(|r| r.try_into().unwrap())
+                .collect();
+
+        if !matching_usage_records.is_empty() {
+            return Err(Self::volume_invariant_violated(format!(
+                "volume {volume_id} has matching usage records: {:?}",
                 matching_usage_records,
             )));
         }
