@@ -67,12 +67,7 @@ impl Configuration {
             .collect();
 
         let shares_by_member: BTreeMap<PlatformId, KeyShareGf256> =
-            reconfigure_msg
-                .members
-                .iter()
-                .cloned()
-                .zip(shares.into_iter())
-                .collect();
+            reconfigure_msg.members.iter().cloned().zip(shares).collect();
 
         let rack_id = reconfigure_msg.rack_id;
         let encrypted_shares =

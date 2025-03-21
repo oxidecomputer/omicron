@@ -136,8 +136,8 @@ pub struct RackSecretData(Box<[u8; 32]>);
 ///
 /// This secret must be treated as a generic array of 32 bytes. We don't
 /// differentiate between whether or not this secret was recreated via Ed25519
-/// + Ristretto key shares (LRTQ) or GF256 Key Shares (current protocol).
-/// Therfore, this rack secret should never be split back into key shares.
+/// +Ristretto key shares (LRTQ) or GF256 Key Shares (current protocol).
+/// Therefore, this rack secret should never be split back into key shares.
 pub struct ReconstructedRackSecret {
     secret: Secret<RackSecretData>,
 }
@@ -187,6 +187,12 @@ pub struct RackSecret {
 impl ExposeSecret<[u8; 32]> for RackSecret {
     fn expose_secret(&self) -> &[u8; 32] {
         &self.secret.expose_secret().0
+    }
+}
+
+impl Default for RackSecret {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -244,7 +250,7 @@ impl Debug for RackSecret {
 
 impl PartialEq for RackSecret {
     fn eq(&self, other: &Self) -> bool {
-        self.expose_secret().ct_eq(&*other.expose_secret()).into()
+        self.expose_secret().ct_eq(other.expose_secret()).into()
     }
 }
 
@@ -262,6 +268,12 @@ impl Salt {
         let mut salt = [0u8; 32];
         rng.fill_bytes(&mut salt);
         Salt(salt)
+    }
+}
+
+impl Default for Salt {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -476,7 +488,7 @@ mod tests {
                 &platform_id,
                 &rs,
                 &encrypted.salt,
-                &encrypted.encrypted_shares.get(&platform_id).unwrap(),
+                encrypted.encrypted_shares.get(&platform_id).unwrap(),
             )
             .unwrap();
             prop_assert_eq!(decrypted, share);
