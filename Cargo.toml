@@ -465,8 +465,8 @@ macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 mockall = "0.13"
 newtype_derive = "0.1.6"
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "eb4ad59142bf6605cb1090ee52fb2126c9515518" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "eb4ad59142bf6605cb1090ee52fb2126c9515518" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "6e4a3e70c6b4b3a9a41230dc592cc1d6be62e921" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "6e4a3e70c6b4b3a9a41230dc592cc1d6be62e921" }
 multimap = "0.10.0"
 nexus-auth = { path = "nexus/auth" }
 nexus-client = { path = "clients/nexus-client" }
