@@ -63,7 +63,6 @@ generic-array = { version = "0.14.7", default-features = false, features = ["mor
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.15.1" }
-heck = { version = "0.4.1" }
 hex = { version = "0.4.3", features = ["serde"] }
 hickory-proto = { version = "0.24.4", features = ["text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
@@ -105,8 +104,8 @@ regex-automata = { version = "0.4.8", default-features = false, features = ["dfa
 regex-syntax = { version = "0.8.5" }
 reqwest = { version = "0.12.12", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 rsa = { version = "0.9.6", features = ["serde", "sha2"] }
-rustls = { version = "0.23.19", features = ["ring"] }
-rustls-webpki = { version = "0.102.8", default-features = false, features = ["aws_lc_rs", "ring", "std"] }
+rustls = { version = "0.23.25", features = ["ring"] }
+rustls-webpki = { version = "0.103.0", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.25", features = ["serde"] }
@@ -187,7 +186,6 @@ generic-array = { version = "0.14.7", default-features = false, features = ["mor
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.15.1" }
-heck = { version = "0.4.1" }
 hex = { version = "0.4.3", features = ["serde"] }
 hickory-proto = { version = "0.24.4", features = ["text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
@@ -229,8 +227,8 @@ regex-automata = { version = "0.4.8", default-features = false, features = ["dfa
 regex-syntax = { version = "0.8.5" }
 reqwest = { version = "0.12.12", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 rsa = { version = "0.9.6", features = ["serde", "sha2"] }
-rustls = { version = "0.23.19", features = ["ring"] }
-rustls-webpki = { version = "0.102.8", default-features = false, features = ["aws_lc_rs", "ring", "std"] }
+rustls = { version = "0.23.25", features = ["ring"] }
+rustls-webpki = { version = "0.103.0", default-features = false, features = ["aws-lc-rs", "ring", "std"] }
 schemars = { version = "0.8.22", features = ["bytes", "chrono", "semver", "uuid1"] }
 scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.25", features = ["serde"] }
