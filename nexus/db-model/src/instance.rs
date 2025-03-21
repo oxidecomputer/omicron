@@ -10,10 +10,7 @@ use crate::collection::DatastoreAttachTargetConfig;
 use crate::schema::{disk, external_ip, instance};
 use chrono::{DateTime, TimeDelta, Utc};
 use db_macros::Resource;
-use diesel::expression::{ValidGrouping, is_aggregate};
-use diesel::pg;
 use diesel::prelude::*;
-use diesel::sql_types::{Bool, Nullable};
 use nexus_types::external_api::params;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
@@ -391,66 +388,6 @@ impl InstanceAutoRestart {
         }
 
         Reincarnatability::WillReincarnate
-    }
-
-    /// Filters a database query to include only instances whose auto-restart
-    /// configs permit them to reincarnate.
-    ///
-    /// Yes, this should probably be in `nexus-db-queries`, but it seemed nice
-    /// for it to be defined on the same struct as the in-memory logic
-    /// (`can_reincarnate`).
-    pub fn filter_reincarnatable()
-    -> impl diesel::query_builder::QueryFragment<pg::Pg>
-    + diesel::query_builder::QueryId
-    // All elements in this expression appear on the `instance` table, so
-    // it's a valid `filter` for that table, and the expression evaluates
-    // to a bool (or NULL), making it a valid WHERE clause.
-    + AppearsOnTable<instance::table, SqlType = Nullable<Bool>>
-    // I think this trait tells diesel that the query fragment has no
-    // GROUP BY clause, so that it knows it can be used as a WHERE clause
-    + ValidGrouping<(), IsAggregate = is_aggregate::No> {
-        use instance::dsl;
-
-        let now = diesel::dsl::now.into_sql::<pg::sql_types::Timestamptz>();
-
-        // The instance's auto-restart policy must allow the control plane
-        // to restart it automatically.
-        //
-        // N.B. that this may become more complex in the future if we grow
-        // additional auto-restart policies that require additional logic
-        // (such as restart limits...)
-        (dsl::auto_restart_policy
-            .eq(InstanceAutoRestartPolicy::BestEffort)
-            // If the auto-restart policy is null, then it should
-            // default to "best effort".
-            .or(dsl::auto_restart_policy.is_null()))
-        // An instance whose last reincarnation was within the cooldown
-        // interval from now must remain in _bardo_ --- the liminal
-        // state between death and rebirth --- before its next
-        // reincarnation.
-        .and(
-            // If the instance has never previously been reincarnated, then
-            // it's allowed to reincarnate.
-            dsl::time_last_auto_restarted
-                .is_null()
-                // Or, if it has an overridden cooldown period, has that elapsed?
-                .or(dsl::auto_restart_cooldown.is_not_null().and(
-                    dsl::time_last_auto_restarted
-                        .le(now.nullable() - dsl::auto_restart_cooldown),
-                ))
-                // Or, finally, if it does not have an overridden cooldown
-                // period, has the default cooldown period elapsed?
-                .or(dsl::auto_restart_cooldown.is_null().and(
-                    dsl::time_last_auto_restarted
-                        .le((now - Self::DEFAULT_COOLDOWN).nullable()),
-                )),
-        )
-        // Deleted instances may not be reincarnated.
-        .and(dsl::time_deleted.is_null())
-        // If the instance is currently in the process of being updated,
-        // let's not mess with it for now and try to restart it on another
-        // pass.
-        .and(dsl::updater_id.is_null())
     }
 }
 
