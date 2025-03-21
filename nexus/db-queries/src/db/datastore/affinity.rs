@@ -10,7 +10,7 @@ use crate::authz::ApiResource;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::datastore::InstanceAndActiveVmm;
+use crate::db::datastore::InstanceStateComputer;
 use crate::db::datastore::OpContext;
 use crate::db::error::ErrorHandler;
 use crate::db::error::public_error_from_diesel;
@@ -439,10 +439,10 @@ impl DataStore {
                 Ok(external::AffinityGroupMember::Instance {
                     id: InstanceUuid::from_untyped_uuid(id),
                     name: name.into(),
-                    run_state: InstanceAndActiveVmm::determine_effective_state_inner(
-                        instance_state,
-                        migration_id,
-                        vmm_state,
+                    run_state: InstanceStateComputer::compute_state_from(
+                        &instance_state,
+                        migration_id.as_ref(),
+                        vmm_state.as_ref(),
                     ),
                 })
             })
@@ -556,10 +556,10 @@ impl DataStore {
                 Ok(external::AntiAffinityGroupMember::Instance {
                     id: InstanceUuid::from_untyped_uuid(id),
                     name: name.into(),
-                    run_state: InstanceAndActiveVmm::determine_effective_state_inner(
-                        instance_state,
-                        migration_id,
-                        vmm_state,
+                    run_state: InstanceStateComputer::compute_state_from(
+                        &instance_state,
+                        migration_id.as_ref(),
+                        vmm_state.as_ref(),
                     ),
                 })
             })
@@ -606,12 +606,11 @@ impl DataStore {
             )>(&*conn)
             .await
             .map(|(member, name, instance_state, migration_id, vmm_state)| {
-                let run_state =
-                    InstanceAndActiveVmm::determine_effective_state_inner(
-                        instance_state,
-                        migration_id,
-                        vmm_state,
-                    );
+                let run_state = InstanceStateComputer::compute_state_from(
+                    &instance_state,
+                    migration_id.as_ref(),
+                    vmm_state.as_ref(),
+                );
                 member.to_external(name.into(), run_state)
             })
             .map_err(|e| {
@@ -665,12 +664,11 @@ impl DataStore {
             )>(&*conn)
             .await
             .map(|(member, name, instance_state, migration_id, vmm_state)| {
-                let run_state =
-                    InstanceAndActiveVmm::determine_effective_state_inner(
-                        instance_state,
-                        migration_id,
-                        vmm_state,
-                    );
+                let run_state = InstanceStateComputer::compute_state_from(
+                    &instance_state,
+                    migration_id.as_ref(),
+                    vmm_state.as_ref(),
+                );
                 member.to_external(name.into(), run_state)
             })
             .map_err(|e| {
@@ -1926,7 +1924,7 @@ mod tests {
     }
 
     // Anti-affinity group member listing has a slightly more complicated
-    // implementation, because it queries multiple tables and UNIONs them
+    // implementation, because it queries multiple tables and JOINs them
     // together.
     //
     // This test exists to validate that manual implementation.

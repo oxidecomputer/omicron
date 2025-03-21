@@ -323,7 +323,7 @@ impl super::Nexus {
             name: instance.name().clone(),
             // TODO: This is kinda a lie - the current implementation of
             // "affinity_group_member_instance_add" relies on the instance
-            // note having a VMM, but that might change in the future.
+            // not having a VMM, but that might change in the future.
             run_state: external::InstanceState::Stopped,
         })
     }
@@ -353,7 +353,7 @@ impl super::Nexus {
             name: instance.name().clone(),
             // TODO: This is kinda a lie - the current implementation of
             // "anti_affinity_group_member_instance_add" relies on the instance
-            // note having a VMM, but that might change in the future.
+            // not having a VMM, but that might change in the future.
             run_state: external::InstanceState::Stopped,
         })
     }
