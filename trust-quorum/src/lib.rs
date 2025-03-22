@@ -7,7 +7,7 @@
 //! This protocol is written as a
 //! [no-IO](https://sans-io.readthedocs.io/how-to-sans-io.html) implementation.
 //! All persistent state and all networking is managed outside of this
-//! implementation. Callers interact with the protocol via the [`Node`] api.
+//! implementation.
 
 use derive_more::Display;
 use serde::{Deserialize, Serialize};

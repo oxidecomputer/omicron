@@ -31,7 +31,6 @@ pub enum PeerMsg {
     Prepare(PrepareMsg),
     PrepareAck(Epoch),
     Commit(CommitMsg),
-    Committed(CommittedMsg),
 
     GetShare(Epoch),
     Share { epoch: Epoch, share: KeyShareGf256 },
@@ -48,14 +47,6 @@ pub enum PeerMsg {
 pub struct PrepareMsg {
     pub config: Configuration,
     pub share: KeyShareGf256,
-}
-
-/// A message that is sent between peers until all healthy peers have seen it
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
-)]
-pub struct CommittedMsg {
-    pub epoch: Epoch,
 }
 
 #[derive(
