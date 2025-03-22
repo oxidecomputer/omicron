@@ -1030,21 +1030,35 @@ pub(crate) async fn lldpd_clients(
     Ok(clients)
 }
 
+// Look up Dendrite addresses in DNS then determine the switch location for
+// each address DNS returns.  If we fail to lookup ServiceName::Dendrite, we
+// return error, otherwise we keep looping until we can determine the switch
+// location of all addresses returned to us from the lookup.
 async fn switch_zone_address_mappings(
     resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
 ) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
-    let switch_zone_addresses = match resolver
-        .lookup_all_ipv6(ServiceName::Dendrite)
-        .await
-    {
-        Ok(addrs) => addrs,
-        Err(e) => {
-            error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
-            return Err(e.to_string());
+    loop {
+        let switch_zone_addresses = match resolver
+            .lookup_all_ipv6(ServiceName::Dendrite)
+            .await
+        {
+            Ok(addrs) => addrs,
+            Err(e) => {
+                error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
+                return Err(e.to_string());
+            }
+        };
+        match map_switch_zone_addrs(&log, switch_zone_addresses).await {
+            Ok(mappings) => {
+                return Ok(mappings);
+            }
+            Err(e) => {
+                warn!(log, "Failed to map switch zone addr: {e}, retrying");
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
         }
-    };
-    Ok(map_switch_zone_addrs(&log, switch_zone_addresses).await)
+    }
 }
 
 // TODO: #3596 Allow updating of Nexus from `handoff_to_nexus()`
@@ -1058,7 +1072,7 @@ async fn switch_zone_address_mappings(
 async fn map_switch_zone_addrs(
     log: &Logger,
     switch_zone_addresses: Vec<Ipv6Addr>,
-) -> HashMap<SwitchLocation, Ipv6Addr> {
+) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
     use gateway_client::Client as MgsClient;
     info!(log, "Determining switch slots managed by switch zones");
     let mut switch_zone_addrs = HashMap::new();
@@ -1069,28 +1083,25 @@ async fn map_switch_zone_addrs(
         );
 
         info!(log, "determining switch slot managed by dendrite zone"; "zone_address" => #?addr);
-        // TODO: #3599 Use retry function instead of looping on a fixed timer
-        let switch_slot = loop {
-            match mgs_client.sp_local_switch_id().await {
-                Ok(switch) => {
-                    info!(
-                        log,
-                        "identified switch slot for dendrite zone";
-                        "slot" => #?switch,
-                        "zone_address" => #?addr
-                    );
-                    break switch.slot;
-                }
-                Err(e) => {
-                    warn!(
-                        log,
-                        "failed to identify switch slot for dendrite, will retry in 2 seconds";
-                        "zone_address" => #?addr,
-                        "reason" => #?e
-                    );
-                }
+        let switch_slot = match mgs_client.sp_local_switch_id().await {
+            Ok(switch) => {
+                info!(
+                    log,
+                    "identified switch slot for dendrite zone";
+                    "slot" => #?switch,
+                    "zone_address" => #?addr
+                );
+                switch.slot
             }
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            Err(e) => {
+                warn!(
+                    log,
+                    "failed to identify switch slot for dendrite";
+                    "zone_address" => #?addr,
+                    "reason" => #?e
+                );
+                return Err(e.to_string());
+            }
         };
 
         match switch_slot {
@@ -1113,5 +1124,5 @@ async fn map_switch_zone_addrs(
         "completed mapping dendrite zones to switch slots";
         "mappings" => #?switch_zone_addrs
     );
-    switch_zone_addrs
+    Ok(switch_zone_addrs)
 }
