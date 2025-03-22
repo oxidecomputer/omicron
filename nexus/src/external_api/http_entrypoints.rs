@@ -6443,23 +6443,37 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let params = body.into_inner();
             let system_version = params.system_version;
 
+            // We don't need a transaction for the following queries because
+            // (1) the generation numbers provide optimistic concurrency control:
+            // if another request were to successfully update the target release
+            // between when we fetch it here and when we try to update it below,
+            // our update would fail because the next generation number would
+            // would already be taken; and
+            // (2) we assume that TUF repo depot records are immutable, i.e.,
+            // system version X.Y.Z won't designate different repos over time.
             let current_target_release =
                 nexus.datastore().target_release_get_current(&opctx).await?;
-            let view = nexus
+
+            // Disallow downgrades.
+            if let views::TargetReleaseSource::SystemVersion { version } = nexus
                 .datastore()
                 .target_release_view(&opctx, &current_target_release)
-                .await?;
-            if let views::TargetReleaseSource::SystemVersion { version } =
-                view.release_source
+                .await?
+                .release_source
             {
                 if version > system_version {
                     return Err(HttpError::for_bad_request(
                         None,
-                        "can't downgrade system".into(),
+                        format!(
+                            "The requested target system release ({system_version}) \
+                             is older than the current target system release ({version}). \
+                             This is not supported."
+                        ),
                     ));
                 }
             }
 
+            // Fetch the TUF repo metadata and update the target release.
             let tuf_repo_id = nexus
                 .datastore()
                 .update_tuf_repo_get(&opctx, system_version.into())
@@ -6475,6 +6489,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .datastore()
                 .target_release_insert(&opctx, next_target_release)
                 .await?;
+
             Ok(HttpResponseCreated(
                 nexus
                     .datastore()
