@@ -180,9 +180,8 @@ mod tests {
         }
     }
 
-    fn with_test_runtime<F, Fut, T>(f: F) -> T
+    fn with_test_runtime<Fut, T>(fut: Fut) -> T
     where
-        F: FnOnce() -> Fut,
         Fut: Future<Output = T>,
     {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -190,7 +189,7 @@ mod tests {
             .start_paused(true)
             .build()
             .expect("tokio Runtime built successfully");
-        runtime.block_on(f())
+        runtime.block_on(fut)
     }
 
     #[proptest]
@@ -198,7 +197,7 @@ mod tests {
         chunks: Vec<Vec<u8>>,
         #[strategy(16_usize..4096)] block_size: usize,
     ) {
-        with_test_runtime(move || async move {
+        with_test_runtime(async move {
             proptest_block_writer_impl(chunks, block_size)
                 .await
                 .expect("test failed");

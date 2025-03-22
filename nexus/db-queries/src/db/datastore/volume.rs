@@ -198,6 +198,9 @@ impl FreedCrucibleResources {
     }
 }
 
+pub struct SourceVolume(pub VolumeUuid);
+pub struct DestVolume(pub VolumeUuid);
+
 impl DataStore {
     async fn volume_create_in_txn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
@@ -1121,10 +1124,11 @@ impl DataStore {
     /// returned by `read_only_resources_associated_with_volume`.
     pub async fn volume_checkout_randomize_ids(
         &self,
-        volume_id: VolumeUuid,
+        source_volume_id: SourceVolume,
+        dest_volume_id: DestVolume,
         reason: VolumeCheckoutReason,
     ) -> CreateResult<Volume> {
-        let volume = self.volume_checkout(volume_id, reason).await?;
+        let volume = self.volume_checkout(source_volume_id.0, reason).await?;
 
         let vcr: sled_agent_client::VolumeConstructionRequest =
             serde_json::from_str(volume.data())?;
@@ -1132,7 +1136,7 @@ impl DataStore {
         let randomized_vcr = Self::randomize_ids(&vcr)
             .map_err(|e| Error::internal_error(&e.to_string()))?;
 
-        self.volume_create(VolumeUuid::new_v4(), randomized_vcr).await
+        self.volume_create(dest_volume_id.0, randomized_vcr).await
     }
 
     /// Find read/write regions for deleted volumes that do not have associated
@@ -3906,7 +3910,9 @@ impl DataStore {
                 p.found_batch(&haystack, &|v| *v.id().as_untyped_uuid());
 
             for volume in haystack {
-                Self::validate_volume_has_all_resources(&conn, volume).await?;
+                Self::validate_volume_has_all_resources(&conn, &volume).await?;
+                Self::validate_volume_region_sets_have_unique_targets(&volume)
+                    .await?;
             }
         }
 
@@ -3935,7 +3941,7 @@ impl DataStore {
     /// been prematurely deleted.
     async fn validate_volume_has_all_resources(
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        volume: Volume,
+        volume: &Volume,
     ) -> Result<(), diesel::result::Error> {
         if volume.time_deleted.is_some() {
             // Do not need to validate resources for soft-deleted volumes
@@ -4021,6 +4027,62 @@ impl DataStore {
                     "could not find resource for {read_only_target}"
                 )));
             };
+        }
+
+        Ok(())
+    }
+
+    /// Assert that all the region sets have three distinct targets
+    async fn validate_volume_region_sets_have_unique_targets(
+        volume: &Volume,
+    ) -> Result<(), diesel::result::Error> {
+        let vcr: VolumeConstructionRequest =
+            serde_json::from_str(&volume.data()).unwrap();
+
+        let mut parts = VecDeque::new();
+        parts.push_back(&vcr);
+
+        while let Some(part) = parts.pop_front() {
+            match part {
+                VolumeConstructionRequest::Volume {
+                    sub_volumes,
+                    read_only_parent,
+                    ..
+                } => {
+                    for sub_volume in sub_volumes {
+                        parts.push_back(sub_volume);
+                    }
+                    if let Some(read_only_parent) = read_only_parent {
+                        parts.push_back(read_only_parent);
+                    }
+                }
+
+                VolumeConstructionRequest::Url { .. } => {
+                    // nothing required
+                }
+
+                VolumeConstructionRequest::Region { opts, .. } => {
+                    let mut set = HashSet::new();
+                    let mut count = 0;
+
+                    for target in &opts.target {
+                        set.insert(target);
+                        count += 1;
+                    }
+
+                    if set.len() != count {
+                        return Err(Self::volume_invariant_violated(format!(
+                            "volume {} has a region set with {} unique targets",
+                            volume.id(),
+                            set.len(),
+                        )));
+                    }
+                }
+
+                VolumeConstructionRequest::File { .. } => {
+                    // nothing required
+                }
+            }
         }
 
         Ok(())

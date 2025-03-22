@@ -4,10 +4,12 @@
 
 //! Get/set the target release via the external API.
 
+use anyhow::Result;
+use camino::Utf8Path;
 use camino_tempfile::Utf8TempDir;
 use chrono::Utc;
 use clap::Parser as _;
-use dropshot::test_util::LogContext;
+use dropshot::test_util::{ClientTestContext, LogContext};
 use http::StatusCode;
 use http::method::Method;
 use nexus_config::UpdatesConfig;
@@ -22,7 +24,7 @@ use omicron_sled_agent::sim;
 use semver::Version;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn get_set_target_release() -> anyhow::Result<()> {
+async fn get_set_target_release() -> Result<()> {
     let mut config = load_test_config();
     config.pkg.updates = Some(UpdatesConfig {
         // XXX: This is currently not used by the update system, but
@@ -38,6 +40,7 @@ async fn get_set_target_release() -> anyhow::Result<()> {
     )
     .await;
     let client = &ctx.external_client;
+    let logctx = LogContext::new("get_set_target_release", &config.pkg.log);
 
     // There should always be a target release.
     let target_release: TargetRelease =
@@ -64,124 +67,121 @@ async fn get_set_target_release() -> anyhow::Result<()> {
     .await
     .expect_err("invalid TUF repo");
 
+    let temp = Utf8TempDir::new().unwrap();
+
     // Adding a fake (tufaceous) repo and then setting it as the
     // target release should succeed.
-    let before = Utc::now();
-    let system_version = Version::new(1, 0, 0);
-    let logctx = LogContext::new("get_set_target_release", &config.pkg.log);
-    let temp = Utf8TempDir::new().unwrap();
-    let path = temp.path().join("repo.zip");
-    tufaceous::Args::try_parse_from([
-        "tufaceous",
-        "assemble",
-        "../update-common/manifests/fake.toml",
-        path.as_str(),
-    ])
-    .expect("can't parse tufaceous args")
-    .exec(&logctx.log)
-    .await
-    .expect("can't assemble version 1 TUF repo");
-
-    assert_eq!(
-        system_version,
-        NexusRequest::new(
-            RequestBuilder::new(
-                client,
-                http::Method::PUT,
-                "/v1/system/update/repository?file_name=/tmp/foo.zip",
-            )
-            .body_file(Some(&path))
-            .expect_status(Some(http::StatusCode::OK)),
-        )
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
+    {
+        let before = Utc::now();
+        let system_version = Version::new(1, 0, 0);
+        let path = temp.path().join("repo-1.0.0.zip");
+        tufaceous::Args::try_parse_from([
+            "tufaceous",
+            "assemble",
+            "../update-common/manifests/fake.toml",
+            path.as_str(),
+        ])
+        .expect("can't parse tufaceous args")
+        .exec(&logctx.log)
         .await
-        .unwrap()
-        .parsed_body::<TufRepoInsertResponse>()
-        .unwrap()
-        .recorded
-        .repo
-        .system_version
-    );
+        .expect("can't assemble TUF repo");
 
-    let target_release: TargetRelease = NexusRequest::new(
+        assert_eq!(
+            system_version,
+            upload_tuf_repo(client, &path).await?.recorded.repo.system_version
+        );
+
+        let target_release =
+            set_target_release(client, system_version.clone()).await?;
+        let after = Utc::now();
+        assert_eq!(target_release.generation, 2);
+        assert!(target_release.time_requested >= before);
+        assert!(target_release.time_requested <= after);
+        assert_eq!(
+            target_release.release_source,
+            TargetReleaseSource::SystemVersion { version: system_version },
+        );
+    }
+
+    // Adding a repo with non-semver artifact versions should be ok, too.
+    {
+        let before = Utc::now();
+        let system_version = Version::new(2, 0, 0);
+        let path = temp.path().join("repo-2.0.0.zip");
+        tufaceous::Args::try_parse_from([
+            "tufaceous",
+            "assemble",
+            "../update-common/manifests/fake-non-semver.toml",
+            "--allow-non-semver",
+            path.as_str(),
+        ])
+        .expect("can't parse tufaceous args")
+        .exec(&logctx.log)
+        .await
+        .expect("can't assemble TUF repo");
+
+        assert_eq!(
+            system_version,
+            upload_tuf_repo(client, &path).await?.recorded.repo.system_version
+        );
+
+        let target_release =
+            set_target_release(client, system_version.clone()).await?;
+        let after = Utc::now();
+        assert_eq!(target_release.generation, 3);
+        assert!(target_release.time_requested >= before);
+        assert!(target_release.time_requested <= after);
+        assert_eq!(
+            target_release.release_source,
+            TargetReleaseSource::SystemVersion { version: system_version },
+        );
+    }
+
+    // Attempting to downgrade to an earlier system version (2.0.0 → 1.0.0)
+    // should not be allowed.
+    set_target_release(client, Version::new(1, 0, 0))
+        .await
+        .expect_err("shouldn't be able to downgrade system");
+
+    ctx.teardown().await;
+    logctx.cleanup_successful();
+    Ok(())
+}
+
+async fn upload_tuf_repo(
+    client: &ClientTestContext,
+    path: &Utf8Path,
+) -> Result<TufRepoInsertResponse> {
+    NexusRequest::new(
         RequestBuilder::new(
             client,
-            Method::PUT,
-            "/v1/system/update/target-release",
+            http::Method::PUT,
+            "/v1/system/update/repository?file_name=/tmp/foo.zip",
         )
-        .body(Some(&SetTargetReleaseParams {
-            system_version: system_version.clone(),
-        }))
-        .expect_status(Some(StatusCode::CREATED)),
+        .body_file(Some(path))
+        .expect_status(Some(StatusCode::OK)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
-    let after = Utc::now();
-    assert_eq!(target_release.generation, 2);
-    assert!(target_release.time_requested >= before);
-    assert!(target_release.time_requested <= after);
-    assert_eq!(
-        target_release.release_source,
-        TargetReleaseSource::SystemVersion { version: system_version },
-    );
+    .map(|response| response.parsed_body().unwrap())
+}
 
-    // Attempting to downgrade to an earlier system version (1.0.0 → 0.0.0) should fail.
-    let system_version = Version::new(0, 0, 0);
-    tufaceous::Args::try_parse_from([
-        "tufaceous",
-        "assemble",
-        "../update-common/manifests/fake0.toml",
-        path.as_str(),
-    ])
-    .expect("can't parse tufaceous args")
-    .exec(&logctx.log)
-    .await
-    .expect("can't assemble version 0 TUF repo");
-
-    assert_eq!(
-        system_version,
-        NexusRequest::new(
-            RequestBuilder::new(
-                client,
-                http::Method::PUT,
-                "/v1/system/update/repository?file_name=/tmp/foo.zip",
-            )
-            .body_file(Some(&path))
-            .expect_status(Some(http::StatusCode::OK)),
-        )
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap()
-        .parsed_body::<TufRepoInsertResponse>()
-        .unwrap()
-        .recorded
-        .repo
-        .system_version
-    );
-
+async fn set_target_release(
+    client: &ClientTestContext,
+    system_version: Version,
+) -> Result<TargetRelease> {
     NexusRequest::new(
         RequestBuilder::new(
             client,
             Method::PUT,
             "/v1/system/update/target-release",
         )
-        .body(Some(&SetTargetReleaseParams {
-            system_version: system_version.clone(),
-        }))
+        .body(Some(&SetTargetReleaseParams { system_version }))
         .expect_status(Some(StatusCode::CREATED)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect_err("shouldn't be able to downgrade");
-
-    ctx.teardown().await;
-    logctx.cleanup_successful();
-    Ok(())
+    .map(|response| response.parsed_body().unwrap())
 }

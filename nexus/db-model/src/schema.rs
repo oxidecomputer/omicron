@@ -1393,6 +1393,7 @@ table! {
         time_created -> Timestamptz,
         sha256 -> Text,
         artifact_size -> Int8,
+        generation_added -> Int8,
     }
 }
 
@@ -1410,6 +1411,13 @@ allow_tables_to_appear_in_same_query!(
 );
 joinable!(tuf_repo_artifact -> tuf_repo (tuf_repo_id));
 joinable!(tuf_repo_artifact -> tuf_artifact (tuf_artifact_id));
+
+table! {
+    tuf_generation (singleton) {
+        singleton -> Bool,
+        generation -> Int8,
+    }
+}
 
 table! {
     target_release (generation) {
@@ -1707,20 +1715,12 @@ table! {
 }
 
 table! {
-    bp_sled_state (blueprint_id, sled_id) {
+    bp_sled_metadata (blueprint_id, sled_id) {
         blueprint_id -> Uuid,
         sled_id -> Uuid,
 
         sled_state -> crate::SledStateEnum,
-    }
-}
-
-table! {
-    bp_sled_omicron_physical_disks (blueprint_id, sled_id) {
-        blueprint_id -> Uuid,
-        sled_id -> Uuid,
-
-        generation -> Int8,
+        sled_agent_generation -> Int8,
     }
 }
 
@@ -1743,15 +1743,6 @@ table! {
 }
 
 table! {
-    bp_sled_omicron_datasets (blueprint_id, sled_id) {
-        blueprint_id -> Uuid,
-        sled_id -> Uuid,
-
-        generation -> Int8,
-    }
-}
-
-table! {
     bp_omicron_dataset (blueprint_id, id) {
         blueprint_id -> Uuid,
         sled_id -> Uuid,
@@ -1768,15 +1759,6 @@ table! {
         quota -> Nullable<Int8>,
         reservation -> Nullable<Int8>,
         compression -> Text,
-    }
-}
-
-table! {
-    bp_sled_omicron_zones (blueprint_id, sled_id) {
-        blueprint_id -> Uuid,
-        sled_id -> Uuid,
-
-        generation -> Int8,
     }
 }
 
