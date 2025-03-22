@@ -638,10 +638,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "7227ad95080c185911f88e1e6a783ccb227e2343"
+source.commit = "7a3d85a46e089b847f917c91f696de06dd32fa0d"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "9f34673816f40299e3b5a04faea778fb2a40289f5e7597a7e94c1795c0e8f17f"
+source.sha256 = "8e5bfd52db2cb363d513942862dcdd2f7bf63fa5959eebb16246216320a263ea"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -654,10 +654,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "7227ad95080c185911f88e1e6a783ccb227e2343"
+source.commit = "7a3d85a46e089b847f917c91f696de06dd32fa0d"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "d19d0435c781ee789a23eef0f21b9ba444442f09309dc86b7df35b71cada53ec"
+source.sha256 = "ad0afc8a463a179c52e69609d486f72ddfa7b6ac9d53e9f961e21758c72cb5d7"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -669,7 +669,7 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "7227ad95080c185911f88e1e6a783ccb227e2343"
+source.commit = "7a3d85a46e089b847f917c91f696de06dd32fa0d"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
 source.sha256 = "14c8b8a5edf1d5999cc9289428b71d48320e09570b9b03d85c97c963a4957f0d"
