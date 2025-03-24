@@ -1,6 +1,35 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Background task that sends HTTP requests to webhook receiver endpoints for
+//! active webhook deliveries.
+//!
+//! This task reads [`WebhookDelivery`] records from the database (created by the
+//! [`webhook_dispatcher`] task) and sends HTTP requests to the receivers for
+//! those records.  The deliverator is responsible for recording the status of
+//! each of these attempts, and for retrying failed attempts as needed.  For
+//! an overview of all the components of the webhook subsystem, their roles, and
+//! how they fit together, refer to the comments in the [`app::webhook`] module.
+//!
+//! The `webhook_deliverator` background tasks in multiple Nexus instances
+//! coordinate between each other using a simple advisory lease system to avoid
+//! attempting to deliver the same event to the same receiver simultaneously.
+//! Since webhooks guarantee at-least-once delivery, this mechanism is not
+//! required for correctness; instead, it serves only to reduce unnecessary work
+//! by avoiding duplicate delivereis when possible.  A delivery is leased by
+//! setting the `deliverator_id` field to the leasing Nexus' Omicron zone UUID
+//! and the `time_leased` field to the current timestamp.  When querying the
+//! database for deliveries in need of deliverating, a delivery is selected if
+//! its `deliverator_id` field is unset OR if a configurable timeout period has
+//! elapsed since its `time_leased` timestamp.  This way, should a Nexus
+//! instance die or get stuck in the midst of a delivery, its lease will
+//! eventually time out, and other Nexii will attempt that delivery.
+//!
+//! [`WebhookDelivery`]: nexus_db_model::WebhookDelivery
+//! [`webhook_dispatcher`]: super::webhook_dispatcher
+//! [`app::webhook`]: crate::app::webhook
+
 use crate::app::background::BackgroundTask;
 use crate::app::webhook::ReceiverClient;
 use futures::future::BoxFuture;

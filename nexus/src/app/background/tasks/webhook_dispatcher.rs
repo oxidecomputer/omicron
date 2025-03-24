@@ -3,6 +3,24 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Background task that dispatches queued webhook events to receivers.
+//!
+//! This task reads un-dispatched webhook events from the [`WebhookEvent`]
+//! table, determines which webhook receivers are subscribed to those events,
+//! and constructs the event payload for those receivers.  It then inserts new
+//! records into the [`WebhookDelivery`] table for those deliveries, which are
+//! read by the [`webhook_deliverator`] task that actually sends HTTP requests to
+//! receivers.  Prior to dispatching events, this task will first ensure that
+//! all webhook receiver glob subscriptions are up to date with the current
+//! database schema version, ensuring that receivers with glob subscriptions
+//! will receive newly-added event classes that match their globs.
+//!
+//! For an overview of all the components of the webhook subsystem, their roles,
+//! and how they fit together, refer to the comments in the [`app::webhook`]
+//! module.
+//!
+//! [`WebhookEvent`]: nexus_db_model::WebhookEvent
+//! [`webhook_deliverator`]: super::webhook_deliverator
+//! [`app::webhook`]: crate::app::webhook
 
 use crate::app::background::Activator;
 use crate::app::background::BackgroundTask;
