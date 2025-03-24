@@ -975,7 +975,7 @@
             "in": "query",
             "name": "sort_by",
             "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
+              "$ref": "#/components/schemas/NameOrIdSortMode"
             }
           },
           {
@@ -1451,7 +1451,7 @@
             "in": "query",
             "name": "sort_by",
             "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
+              "$ref": "#/components/schemas/NameOrIdSortMode"
             }
           },
           {
@@ -12277,7 +12277,7 @@
         "description": "A member of an Affinity Group\n\nMembership in a group is not exclusive - members may belong to multiple affinity / anti-affinity groups.",
         "oneOf": [
           {
-            "description": "An instance belonging to this group, identified by UUID.",
+            "description": "An instance belonging to this group",
             "type": "object",
             "properties": {
               "type": {
@@ -12287,7 +12287,23 @@
                 ]
               },
               "value": {
-                "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+                  },
+                  "name": {
+                    "$ref": "#/components/schemas/Name"
+                  },
+                  "run_state": {
+                    "$ref": "#/components/schemas/InstanceState"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "run_state"
+                ]
               }
             },
             "required": [
@@ -12561,7 +12577,7 @@
         "description": "A member of an Anti-Affinity Group\n\nMembership in a group is not exclusive - members may belong to multiple affinity / anti-affinity groups.",
         "oneOf": [
           {
-            "description": "An instance belonging to this group, identified by UUID.",
+            "description": "An instance belonging to this group",
             "type": "object",
             "properties": {
               "type": {
@@ -12571,7 +12587,23 @@
                 ]
               },
               "value": {
-                "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+                  },
+                  "name": {
+                    "$ref": "#/components/schemas/Name"
+                  },
+                  "run_state": {
+                    "$ref": "#/components/schemas/InstanceState"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "run_state"
+                ]
               }
             },
             "required": [
@@ -17664,21 +17696,6 @@
             },
             "required": [
               "id",
-              "type"
-            ]
-          },
-          {
-            "description": "Boot the Alpine ISO that ships with the Propolis zone. Intended for development purposes only.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "you_can_boot_anything_as_long_as_its_alpine"
-                ]
-              }
-            },
-            "required": [
               "type"
             ]
           }
