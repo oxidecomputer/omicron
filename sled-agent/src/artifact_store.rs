@@ -357,15 +357,17 @@ impl<T: DatasetsManager> ArtifactStore<T> {
                 }
             }
 
-            let temp_path =
-                Utf8TempPath::from_path(temp_dir.join(sha256.to_string()));
+            let temp_path = temp_dir.join(sha256.to_string());
             let file = match OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .open(&temp_path)
                 .await
             {
-                Ok(file) => file,
+                Ok(file) => NamedUtf8TempFile::from_parts(
+                    file,
+                    Utf8TempPath::from_path(temp_dir),
+                ),
                 Err(err) => {
                     if err.kind() == ErrorKind::AlreadyExists {
                         return Err(Error::AlreadyInProgress { sha256 });
@@ -378,7 +380,6 @@ impl<T: DatasetsManager> ArtifactStore<T> {
                     }
                 }
             };
-            let file = NamedUtf8TempFile::from_parts(file, temp_path);
 
             files.push(Some((file, mountpoint)));
         }
