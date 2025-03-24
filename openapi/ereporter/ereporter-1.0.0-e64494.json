@@ -179,6 +179,47 @@
           "data"
         ]
       },
+      "LossReport": {
+        "description": "The number of ereports that were discarded, if it is known.\n\nIf ereports are dropped because a buffer has reached its capacity, the reporter is strongly encouraged to attempt to count the number of ereports lost. In other cases, such as a reporter crashing and restarting, the reporter may not be capable of determining the number of ereports that were lost, or even *if* data loss actually occurred.",
+        "oneOf": [
+          {
+            "description": "An unknown number of ereports MAY have been lost.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The provided number of ereports are known to have been lost.",
+            "type": "object",
+            "properties": {
+              "lost": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "exact"
+                ]
+              }
+            },
+            "required": [
+              "lost",
+              "type"
+            ]
+          }
+        ]
+      },
       "ReportKind": {
         "description": "The body of an ereport: either an event is reported, or a loss report.",
         "oneOf": [
@@ -200,16 +241,7 @@
             "type": "object",
             "properties": {
               "loss": {
-                "type": "object",
-                "properties": {
-                  "lost": {
-                    "nullable": true,
-                    "description": "If ereports are dropped because a buffer has reached its capacity, the reporter is strongly encouraged to attempt to count the number of ereports lost. In other cases, such as a reporter crashing and restarting, the reporter may not be capable of determining the number of ereports that were lost, or even *if* data loss actually occurred. Therefore, a `None` here indicates *possible* data loss, while a `Some(u32)` indicates *known* data loss.",
-                    "type": "integer",
-                    "format": "uint32",
-                    "minimum": 0
-                  }
-                }
+                "$ref": "#/components/schemas/LossReport"
               }
             },
             "required": [

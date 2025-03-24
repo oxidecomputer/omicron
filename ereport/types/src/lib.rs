@@ -74,18 +74,25 @@ pub enum ReportKind {
     /// An ereport.
     Event(Event),
     /// Ereports were lost, or may have been lost.
-    Loss {
-        // The number of ereports that were discarded, if it is known.
-        ///
-        /// If ereports are dropped because a buffer has reached its capacity,
-        /// the reporter is strongly encouraged to attempt to count the number
-        /// of ereports lost. In other cases, such as a reporter crashing and
-        /// restarting, the reporter may not be capable of determining the
-        /// number of ereports that were lost, or even *if* data loss actually
-        /// occurred. Therefore, a `None` here indicates *possible* data loss,
-        /// while a `Some(u32)` indicates *known* data loss.
-        lost: Option<u32>,
-    },
+    Loss(LossReport),
+}
+
+/// The number of ereports that were discarded, if it is known.
+///
+/// If ereports are dropped because a buffer has reached its capacity,
+/// the reporter is strongly encouraged to attempt to count the number
+/// of ereports lost. In other cases, such as a reporter crashing and
+/// restarting, the reporter may not be capable of determining the
+/// number of ereports that were lost, or even *if* data loss actually
+/// occurred.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "lost")]
+pub enum LossReport {
+    /// An unknown number of ereports MAY have been lost.
+    Unknown,
+    /// The provided number of ereports are known to have been lost.
+    Exact(u32),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
