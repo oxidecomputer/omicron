@@ -400,13 +400,6 @@ impl DataStore {
             return Ok(());
         }
 
-        if let Some(other_nexus_id) = found.deliverator_id {
-            return Err(Error::conflict(format!(
-                "cannot mark delivery completed, as {other_nexus_id:?} was \
-                 attempting to deliver it",
-            )));
-        }
-
         if found.time_completed.is_some()
             || found.state != WebhookDeliveryState::Pending
         {
@@ -419,9 +412,33 @@ impl DataStore {
             return Err(Error::conflict("wrong number of delivery attempts"));
         }
 
-        Err(Error::internal_error(
-            "couldn't update delivery for some other reason i didn't think of here...",
-        ))
+        if let Some(other_nexus_id) = found.deliverator_id {
+            if other_nexus_id != nexus_id {
+                return Err(Error::conflict(format!(
+                    "cannot mark delivery completed, as {other_nexus_id:?} was \
+                     attempting to deliver it",
+                )));
+            }
+        }
+
+        // Something else prevented this delivery from being finished; log
+        // the state of the delivery record, as this is unexpected.
+        const MSG: &'static str = "could not finish webhook delivery attempt \
+            for an unexpected reason";
+        slog::error!(
+            opctx.log,
+            "{MSG}";
+            "delivery_id" => %id,
+            "event_id" => %delivery.event_id,
+            "nexus_id" => %nexus_id,
+            "found_deliverator_id" => ?found.deliverator_id,
+            "found_time_leased" => ?found.time_leased,
+            "found_time_completed" => ?found.time_completed,
+            "found_state" => ?found.state,
+            "found_attempts" => found.attempts,
+        );
+
+        Err(Error::internal_error(MSG))
     }
 }
 
