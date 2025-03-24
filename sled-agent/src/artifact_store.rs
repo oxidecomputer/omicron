@@ -17,14 +17,16 @@
 //! Operations that list or modify artifacts or the configuration are called by
 //! Nexus and handled by the Sled Agent API.
 
+use std::collections::{BTreeMap, btree_map::Entry};
 use std::future::Future;
 use std::io::ErrorKind;
 use std::net::SocketAddrV6;
 use std::str::FromStr;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use camino::Utf8PathBuf;
-use camino_tempfile::{NamedUtf8TempFile, Utf8TempPath};
+use camino_tempfile::NamedUtf8TempFile;
 use dropshot::{
     Body, ConfigDropshot, FreeformBody, HttpError, HttpResponseOk, Path,
     RequestContext, ServerBuilder, StreamingBody,
@@ -44,8 +46,9 @@ use sled_storage::error::Error as StorageError;
 use sled_storage::manager::StorageHandle;
 use slog::{Logger, error, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
-use tokio::fs::{File, OpenOptions};
+use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
+use tokio::sync::oneshot::error::TryRecvError;
 use tokio::sync::{mpsc, oneshot, watch};
 
 // These paths are defined under the artifact storage dataset. They
@@ -79,6 +82,7 @@ pub(crate) struct ArtifactStore<T: DatasetsManager> {
     reqwest_client: reqwest::Client,
     ledger_tx: mpsc::Sender<LedgerManagerRequest>,
     config: watch::Receiver<Option<ArtifactConfig>>,
+    in_progress: Mutex<BTreeMap<ArtifactHash, oneshot::Receiver<()>>>,
     storage: T,
 
     /// Used for synchronization in unit tests.
@@ -156,6 +160,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
                 .unwrap(),
             ledger_tx,
             config,
+            in_progress: Mutex::new(BTreeMap::new()),
             storage,
 
             #[cfg(test)]
@@ -342,6 +347,24 @@ impl<T: DatasetsManager> ArtifactStore<T> {
             return Err(Error::NoConfig);
         }
 
+        let progress_guard = {
+            let mut in_progress = self.in_progress.lock().unwrap();
+            // Retain all receivers where the sender is still open.
+            in_progress.retain(|_, rx| {
+                matches!(rx.try_recv(), Err(TryRecvError::Empty))
+            });
+            match in_progress.entry(sha256) {
+                Entry::Vacant(entry) => {
+                    let (tx, rx) = oneshot::channel();
+                    entry.insert(rx);
+                    tx
+                }
+                Entry::Occupied(_) => {
+                    return Err(Error::AlreadyInProgress { sha256 });
+                }
+            }
+        };
+
         let mut files = Vec::new();
         let mut last_error = None;
         let mut datasets = 0;
@@ -357,29 +380,29 @@ impl<T: DatasetsManager> ArtifactStore<T> {
                 }
             }
 
-            let temp_path =
-                Utf8TempPath::from_path(temp_dir.join(sha256.to_string()));
-            let file = match OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&temp_path)
-                .await
+            let moved_temp_dir = temp_dir.clone();
+            let file = match tokio::task::spawn_blocking(move || {
+                camino_tempfile::Builder::new()
+                    .prefix(&format!("{sha256}."))
+                    .tempfile_in(moved_temp_dir)
+            })
+            .await?
             {
                 Ok(file) => file,
                 Err(err) => {
-                    if err.kind() == ErrorKind::AlreadyExists {
-                        return Err(Error::AlreadyInProgress { sha256 });
-                    } else {
-                        let path = temp_path.to_path_buf();
-                        log_and_store!(
-                            last_error, &self.log, "create", path, err
-                        );
-                        continue;
-                    }
+                    log_and_store!(
+                        last_error,
+                        &self.log,
+                        "create temporary file in",
+                        temp_dir,
+                        err
+                    );
+                    continue;
                 }
             };
-            let file = NamedUtf8TempFile::from_parts(file, temp_path);
-
+            let (file, temp_path) = file.into_parts();
+            let file =
+                NamedUtf8TempFile::from_parts(File::from_std(file), temp_path);
             files.push(Some((file, mountpoint)));
         }
         if files.is_empty() {
@@ -391,6 +414,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
                 files,
                 log: self.log.clone(),
                 sha256,
+                _progress_guard: progress_guard,
             })
         }
     }
@@ -640,6 +664,11 @@ struct ArtifactWriter {
     hasher: Sha256,
     log: Logger,
     sha256: ArtifactHash,
+    /// Held while the artifact is being written to. The receiver end is
+    /// stored in [ArtifactStore::in_progress]. [ArtifactStore::writer] checks
+    /// whether this sender has been dropped to determine that it is no longer
+    /// in progress.
+    _progress_guard: oneshot::Sender<()>,
 }
 
 impl ArtifactWriter {
@@ -1124,6 +1153,19 @@ mod test {
                 err => panic!("wrong error: {err}"),
             }
         }
+
+        // a second writer cannot be started while a first is in-progress
+        let writer = store.writer(TEST_HASH, 1u32.into()).await.unwrap();
+        assert!(matches!(
+            store.writer(TEST_HASH, 1u32.into()).await,
+            Err(Error::AlreadyInProgress { .. })
+        ));
+        drop(writer);
+        // dropping the writer partway through didn't persist the file
+        assert!(matches!(
+            store.get(TEST_HASH).await,
+            Err(Error::NotFound { .. })
+        ));
 
         // test several things here:
         // 1. put succeeds
