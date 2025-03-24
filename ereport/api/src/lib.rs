@@ -109,7 +109,7 @@ pub struct Ereports {
     /// If this is not equal to the current known generation, then the reporter
     /// has restarted.
     pub generation: EreporterGenerationUuid,
-    /// The ereports in this tranche, and the ENA of the next apge of ereports
+    /// The ereports in this tranche, and the ENA of the next page of ereports
     /// (if one exists).)
     #[serde(flatten)]
     pub reports: ResultsPage<Ereport>,
