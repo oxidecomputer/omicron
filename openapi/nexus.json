@@ -12426,10 +12426,10 @@
         ]
       },
       "AffinityGroupMember": {
-        "description": "A member of an Affinity Group\n\nMembership in a group is not exclusive - members may belong to multiple affinity / anti-affinity groups.",
+        "description": "A member of an Affinity Group\n\nMembership in a group is not exclusive - members may belong to multiple affinity / anti-affinity groups.\n\nAffinity Groups can contain up to 32 members.",
         "oneOf": [
           {
-            "description": "An instance belonging to this group",
+            "description": "An instance belonging to this group\n\nInstances can belong to up to 16 affinity groups.",
             "type": "object",
             "properties": {
               "type": {
@@ -12726,10 +12726,10 @@
         ]
       },
       "AntiAffinityGroupMember": {
-        "description": "A member of an Anti-Affinity Group\n\nMembership in a group is not exclusive - members may belong to multiple affinity / anti-affinity groups.",
+        "description": "A member of an Anti-Affinity Group\n\nMembership in a group is not exclusive - members may belong to multiple affinity / anti-affinity groups.\n\nAnti-Affinity Groups can contain up to 32 members.",
         "oneOf": [
           {
-            "description": "An instance belonging to this group",
+            "description": "An instance belonging to this group\n\nInstances can belong to up to 16 anti-affinity groups.",
             "type": "object",
             "properties": {
               "type": {
