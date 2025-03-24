@@ -318,6 +318,7 @@ impl DataStore {
                     "found_time_leased" => ?found.time_leased,
                     "found_time_completed" => ?found.time_completed,
                     "found_state" => ?found.state,
+                    "found_attempts" => found.attempts.0,
                 );
                 Err(Error::internal_error(MSG))
             }
@@ -413,7 +414,7 @@ impl DataStore {
         }
 
         if let Some(other_nexus_id) = found.deliverator_id {
-            if other_nexus_id != nexus_id {
+            if other_nexus_id.as_untyped_uuid() != nexus_id.as_untyped_uuid() {
                 return Err(Error::conflict(format!(
                     "cannot mark delivery completed, as {other_nexus_id:?} was \
                      attempting to deliver it",
@@ -428,14 +429,14 @@ impl DataStore {
         slog::error!(
             opctx.log,
             "{MSG}";
-            "delivery_id" => %id,
+            "delivery_id" => %delivery.id,
             "event_id" => %delivery.event_id,
             "nexus_id" => %nexus_id,
             "found_deliverator_id" => ?found.deliverator_id,
             "found_time_leased" => ?found.time_leased,
             "found_time_completed" => ?found.time_completed,
             "found_state" => ?found.state,
-            "found_attempts" => found.attempts,
+            "found_attempts" => found.attempts.0,
         );
 
         Err(Error::internal_error(MSG))

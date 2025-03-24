@@ -7860,7 +7860,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let rx = nexus.webhook_receiver_lookup(&opctx, webhook_selector)?;
             let result =
                 nexus.webhook_receiver_probe(&opctx, rx, probe_params).await?;
-            // TODO(eliza): send the status code that came back from the probe req...
             Ok(HttpResponseOk(result))
         };
         apictx
