@@ -1214,6 +1214,8 @@ pub mod test {
                 disks: Vec::new(),
                 start: false,
                 auto_restart_policy: Default::default(),
+                affinity_groups: Vec::new(),
+                anti_affinity_groups: Vec::new(),
             },
             boundary_switches: HashSet::from([SwitchLocation::Switch0]),
         }

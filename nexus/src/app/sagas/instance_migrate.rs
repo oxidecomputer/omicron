@@ -613,6 +613,8 @@ mod tests {
                 boot_disk: None,
                 start: true,
                 auto_restart_policy: Default::default(),
+                affinity_groups: Vec::new(),
+                anti_affinity_groups: Vec::new(),
             },
         )
         .await

@@ -1228,6 +1228,14 @@ pub struct InstanceCreate {
     /// `null`.
     #[serde(default)]
     pub auto_restart_policy: Option<InstanceAutoRestartPolicy>,
+
+    /// Affinity groups which this instance should be added into.
+    #[serde(default)]
+    pub affinity_groups: Vec<NameOrId>,
+
+    /// Anti-Affinity groups which this instance should be added into.
+    #[serde(default)]
+    pub anti_affinity_groups: Vec<NameOrId>,
 }
 
 /// Parameters of an `Instance` that can be reconfigured after creation.

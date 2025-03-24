@@ -655,6 +655,8 @@ pub static DEMO_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
+        affinity_groups: Vec::new(),
+        anti_affinity_groups: Vec::new(),
     });
 pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
     LazyLock::new(|| params::InstanceCreate {
@@ -675,6 +677,8 @@ pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
+        affinity_groups: Vec::new(),
+        anti_affinity_groups: Vec::new(),
     });
 pub static DEMO_INSTANCE_UPDATE: LazyLock<params::InstanceUpdate> =
     LazyLock::new(|| params::InstanceUpdate {
