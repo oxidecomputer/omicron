@@ -2062,9 +2062,9 @@ pub mod test {
     use omicron_common::disk::DatasetName;
     use omicron_common::update::ArtifactHash;
     use omicron_test_utils::dev::test_setup_log;
-    use semver::Version;
     use std::collections::BTreeSet;
     use std::mem;
+    use tufaceous_artifact::ArtifactVersion;
 
     pub const DEFAULT_N_SLEDS: usize = 3;
 
@@ -3141,11 +3141,13 @@ pub mod test {
                 .iter();
             let zone_id = zones.next().expect("zone exists").id;
             // Set the zone's image source to an artifact.
+            const ARTIFACT_VERSION: ArtifactVersion =
+                ArtifactVersion::new_const("1.2.3");
             editor
                 .set_zone_image_source(
                     &zone_id,
                     BlueprintZoneImageSource::Artifact {
-                        version: Version::new(1, 2, 3),
+                        version: ARTIFACT_VERSION,
                         // The hash is not displayed in the diff -- only the
                         // version is.
                         hash: ArtifactHash([0x12; 32]),

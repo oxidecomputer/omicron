@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::fmt::Display;
-use tufaceous_artifact::KnownArtifactKind;
+use tufaceous_artifact::{ArtifactVersion, KnownArtifactKind};
 
 // Represents a version and the signature (optional) associated
 // with a particular artifact. This allows for multiple versions
@@ -30,7 +30,7 @@ use tufaceous_artifact::KnownArtifactKind;
 // sign is currently only used for RoT artifacts
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArtifactVersions {
-    pub version: Version,
+    pub version: ArtifactVersion,
     pub sign: Option<Vec<u8>>,
 }
 
@@ -122,7 +122,7 @@ impl RackUpdateState {
         self.artifacts = artifacts;
         self.artifact_versions.clear();
         for a in &mut self.artifacts {
-            if let Ok(known) = a.id.kind.parse() {
+            if let Some(known) = a.id.kind.to_known() {
                 self.artifact_versions.entry(known).or_default().push(
                     ArtifactVersions {
                         version: a.id.version.clone(),
