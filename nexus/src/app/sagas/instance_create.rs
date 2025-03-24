@@ -21,7 +21,9 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::{Error, InternalContext};
 use omicron_common::api::internal::shared::SwitchLocation;
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
+use omicron_uuid_kinds::{
+    AffinityGroupUuid, AntiAffinityGroupUuid, GenericUuid, InstanceUuid,
+};
 use ref_cast::RefCast;
 use serde::Deserialize;
 use serde::Serialize;
@@ -55,6 +57,20 @@ struct NetParams {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+struct AffinityParams {
+    serialized_authn: authn::saga::Serialized,
+    instance_id: InstanceUuid,
+    group: AffinityGroupUuid,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct AntiAffinityParams {
+    serialized_authn: authn::saga::Serialized,
+    instance_id: InstanceUuid,
+    group: AntiAffinityGroupUuid,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 struct NetworkConfigParams {
     saga_params: Params,
     instance_id: InstanceUuid,
@@ -81,6 +97,16 @@ declare_saga_actions! {
     ASSOCIATE_SSH_KEYS -> "output" {
         + sic_associate_ssh_keys
         - sic_associate_ssh_keys_undo
+    }
+    ADD_TO_AFFINITY_GROUP -> "output" {
+        + sic_add_to_affinity_group
+        // NOTE: Deleting the instance record deletes all affinity group memberships.
+        // Therefore: No undo action is necessary here.
+    }
+    ADD_TO_ANTI_AFFINITY_GROUP -> "output" {
+        + sic_add_to_anti_affinity_group
+        // NOTE: Deleting the instance record deletes all anti-affinity group memberships.
+        // Therefore: No undo action is necessary here.
     }
     CREATE_NETWORK_INTERFACE -> "output" {
         + sic_create_network_interface
@@ -148,7 +174,7 @@ impl NexusSaga for SagaInstanceCreate {
         ) -> Result<(), SagaInitError> {
             // The "parameter" node is a constant node that goes into the outer
             // saga.  Its value becomes the parameters for the one-node subsaga
-            // (defined below) that actually creates each NIC.
+            // (defined below) that actually creates each resource.
             let params_node_name = format!("{}_params{}", node_basename, which);
             parent_builder.append(Node::constant(
                 &params_node_name,
@@ -164,6 +190,76 @@ impl NexusSaga for SagaInstanceCreate {
                 params_node_name,
             ));
             Ok(())
+        }
+
+        for (i, group) in
+            params.create_params.affinity_groups.iter().enumerate()
+        {
+            let group = match group {
+                NameOrId::Id(id) => AffinityGroupUuid::from_untyped_uuid(*id),
+                _ => {
+                    return Err(SagaInitError::InvalidParameter(
+                        "Non-UUID group".to_string(),
+                    ));
+                }
+            };
+
+            let repeat_params = AffinityParams {
+                serialized_authn: params.serialized_authn.clone(),
+                instance_id,
+                group,
+            };
+            let subsaga_name =
+                SagaName::new(&format!("add-to-affinity-group-{i}"));
+            let mut subsaga_builder = DagBuilder::new(subsaga_name);
+            subsaga_builder.append(Node::action(
+                "output",
+                format!("AddToAffinityGroup{i}").as_str(),
+                ADD_TO_AFFINITY_GROUP.as_ref(),
+            ));
+            subsaga_append(
+                "affinity_groups".into(),
+                subsaga_builder.build()?,
+                &mut builder,
+                repeat_params,
+                i,
+            )?;
+        }
+
+        for (i, group) in
+            params.create_params.anti_affinity_groups.iter().enumerate()
+        {
+            let group = match group {
+                NameOrId::Id(id) => {
+                    AntiAffinityGroupUuid::from_untyped_uuid(*id)
+                }
+                _ => {
+                    return Err(SagaInitError::InvalidParameter(
+                        "Non-UUID group".to_string(),
+                    ));
+                }
+            };
+
+            let repeat_params = AntiAffinityParams {
+                serialized_authn: params.serialized_authn.clone(),
+                instance_id,
+                group,
+            };
+            let subsaga_name =
+                SagaName::new(&format!("add-to-anti-affinity-group-{i}"));
+            let mut subsaga_builder = DagBuilder::new(subsaga_name);
+            subsaga_builder.append(Node::action(
+                "output",
+                format!("AddToAntiAffinityGroup{i}").as_str(),
+                ADD_TO_ANTI_AFFINITY_GROUP.as_ref(),
+            ));
+            subsaga_append(
+                "anti_affinity_groups".into(),
+                subsaga_builder.build()?,
+                &mut builder,
+                repeat_params,
+                i,
+            )?;
         }
 
         // We use a similar pattern here for NICs, external IPs and disks.  We
@@ -378,6 +474,60 @@ async fn sic_associate_ssh_keys_undo(
         .instance_ssh_keys_delete(&opctx, instance_id)
         .await
         .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+async fn sic_add_to_affinity_group(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let params = sagactx.saga_params::<AffinityParams>()?;
+    let AffinityParams { serialized_authn, instance_id, group } = params;
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let opctx =
+        crate::context::op_context_for_saga_action(&sagactx, &serialized_authn);
+
+    let (.., authz_affinity_group) = LookupPath::new(&opctx, datastore)
+        .affinity_group_id(group.into_untyped_uuid())
+        .lookup_for(authz::Action::Modify)
+        .await
+        .map_err(ActionError::action_failed)?;
+    datastore
+        .affinity_group_member_instance_add(
+            &opctx,
+            &authz_affinity_group,
+            instance_id,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
+async fn sic_add_to_anti_affinity_group(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let params = sagactx.saga_params::<AntiAffinityParams>()?;
+    let AntiAffinityParams { serialized_authn, instance_id, group } = params;
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let opctx =
+        crate::context::op_context_for_saga_action(&sagactx, &serialized_authn);
+
+    let (.., authz_anti_affinity_group) = LookupPath::new(&opctx, datastore)
+        .anti_affinity_group_id(group.into_untyped_uuid())
+        .lookup_for(authz::Action::Modify)
+        .await
+        .map_err(ActionError::action_failed)?;
+    datastore
+        .anti_affinity_group_member_instance_add(
+            &opctx,
+            &authz_anti_affinity_group,
+            instance_id,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+
     Ok(())
 }
 
