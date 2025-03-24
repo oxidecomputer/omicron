@@ -29,7 +29,7 @@ const CONFIG_LEDGER_FILENAME: &str = "omicron-sled-config.json";
 pub enum LedgerTaskError {
     #[error("cannot write sled config ledger: no M.2 disks available")]
     NoM2Disks,
-    #[error("not accepting sled configs: still waiting for key manager")]
+    #[error("cannot accept sled config: waiting for key manager")]
     WaitingForKeyManager,
     #[error(
         "sled config generation out of date (got {requested}, have {current})"
@@ -40,9 +40,9 @@ pub enum LedgerTaskError {
     #[error("failed to commit sled config to ledger")]
     LedgerCommitFailed(#[source] ledger::Error),
     #[error("ledger task busy; cannot service new requests")]
-    LedgerTaskBusy,
+    Busy,
     #[error("internal error: ledger task exited!")]
-    LedgerTaskExited,
+    Exited,
 }
 
 pub struct LedgerTaskHandle {
@@ -59,15 +59,15 @@ impl LedgerTaskHandle {
         self.tx.try_send(request).map_err(|err| match err {
             // We should only see this error if the ledger task has gotten badly
             // behind updating ledgers on M.2s.
-            TrySendError::Full(_) => LedgerTaskError::LedgerTaskBusy,
+            TrySendError::Full(_) => LedgerTaskError::Busy,
             // We should never see this error in production, as the ledger task
             // never exits, but may see it in tests.
-            TrySendError::Closed(_) => LedgerTaskError::LedgerTaskExited,
+            TrySendError::Closed(_) => LedgerTaskError::Exited,
         })?;
         match rx.await {
             Ok(result) => result,
             // As above, we should never see this error in production.
-            Err(_) => Err(LedgerTaskError::LedgerTaskExited),
+            Err(_) => Err(LedgerTaskError::Exited),
         }
     }
 }
