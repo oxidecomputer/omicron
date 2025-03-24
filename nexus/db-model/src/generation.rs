@@ -28,6 +28,7 @@ use std::convert::TryFrom;
 #[repr(transparent)]
 pub struct Generation(pub external::Generation);
 
+NewtypeDisplay! { () pub struct Generation(external::Generation); }
 NewtypeFrom! { () pub struct Generation(external::Generation); }
 NewtypeDeref! { () pub struct Generation(external::Generation); }
 
