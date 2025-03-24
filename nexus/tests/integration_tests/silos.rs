@@ -330,7 +330,6 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
             },
         )
         .await
-        .unwrap()
         .unwrap();
 
     let group_memberships = nexus
@@ -824,13 +823,12 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
                     groups: vec![],
                 },
             )
-            .await
-            .unwrap();
+            .await;
 
         if test_case.expect_user {
-            assert!(existing_silo_user.is_some());
+            assert!(existing_silo_user.is_ok());
         } else {
-            assert!(existing_silo_user.is_none());
+            assert!(existing_silo_user.is_err());
         }
 
         NexusRequest::object_delete(&client, &"/v1/system/silos/test-silo")
@@ -1063,7 +1061,6 @@ async fn test_silo_groups_jit(cptestctx: &ControlPlaneTestContext) {
             },
         )
         .await
-        .unwrap()
         .unwrap();
 
     let group_memberships = nexus
@@ -1137,7 +1134,6 @@ async fn test_silo_groups_fixed(cptestctx: &ControlPlaneTestContext) {
             },
         )
         .await
-        .unwrap()
         .unwrap();
 
     let group_memberships = nexus
@@ -1193,7 +1189,6 @@ async fn test_silo_groups_remove_from_one_group(
             },
         )
         .await
-        .unwrap()
         .unwrap();
 
     // Check those groups were created and the user was added
@@ -1236,7 +1231,6 @@ async fn test_silo_groups_remove_from_one_group(
             },
         )
         .await
-        .unwrap()
         .unwrap();
 
     let group_memberships = nexus
@@ -1306,7 +1300,6 @@ async fn test_silo_groups_remove_from_both_groups(
             },
         )
         .await
-        .unwrap()
         .unwrap();
 
     // Check those groups were created and the user was added
@@ -1349,7 +1342,6 @@ async fn test_silo_groups_remove_from_both_groups(
             },
         )
         .await
-        .unwrap()
         .unwrap();
 
     let group_memberships = nexus
@@ -1418,8 +1410,7 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
             },
         )
         .await
-        .expect("silo_user_from_authenticated_subject")
-        .unwrap();
+        .expect("silo_user_from_authenticated_subject");
 
     // Delete the silo
     NexusRequest::object_delete(&client, &"/v1/system/silos/test-silo")
@@ -1501,8 +1492,7 @@ async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
             },
         )
         .await
-        .expect("silo_user_from_authenticated_subject 1")
-        .unwrap();
+        .expect("silo_user_from_authenticated_subject 1");
 
     // Add the first user with a group membership
     let _silo_user_2 = nexus
@@ -1516,8 +1506,7 @@ async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
             },
         )
         .await
-        .expect("silo_user_from_authenticated_subject 2")
-        .unwrap();
+        .expect("silo_user_from_authenticated_subject 2");
 
     // TODO-coverage were we intending to verify something here?
 }

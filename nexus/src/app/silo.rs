@@ -369,7 +369,7 @@ impl super::Nexus {
         authz_silo: &authz::Silo,
         db_silo: &db::model::Silo,
         authenticated_subject: &authn::silos::AuthenticatedSubject,
-    ) -> LookupResult<Option<db::model::SiloUser>> {
+    ) -> LookupResult<db::model::SiloUser> {
         // XXX create user permission?
         opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
         opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
@@ -383,35 +383,38 @@ impl super::Nexus {
             )
             .await?;
 
-        let (authz_silo_user, db_silo_user) =
-            if let Some(existing_silo_user) = fetch_result {
-                existing_silo_user
-            } else {
-                // In this branch, no user exists for the authenticated subject
-                // external id. The next action depends on the silo's user
-                // provision type.
-                match db_silo.user_provision_type {
-                    // If the user provision type is ApiOnly, do not create a
-                    // new user if one does not exist.
-                    db::model::UserProvisionType::ApiOnly => {
-                        return Ok(None);
-                    }
-
-                    // If the user provision type is JIT, then create the user if
-                    // one does not exist
-                    db::model::UserProvisionType::Jit => {
-                        let silo_user = db::model::SiloUser::new(
-                            authz_silo.id(),
-                            Uuid::new_v4(),
-                            authenticated_subject.external_id.clone(),
-                        );
-
-                        self.db_datastore
-                            .silo_user_create(&authz_silo, silo_user)
-                            .await?
-                    }
+        let (authz_silo_user, db_silo_user) = if let Some(existing_silo_user) =
+            fetch_result
+        {
+            existing_silo_user
+        } else {
+            // In this branch, no user exists for the authenticated subject
+            // external id. The next action depends on the silo's user
+            // provision type.
+            match db_silo.user_provision_type {
+                // If the user provision type is ApiOnly, do not create a
+                // new user if one does not exist.
+                db::model::UserProvisionType::ApiOnly => {
+                    return Err(Error::Unauthenticated {
+                            internal_message: "User must exist before login when user provision type is ApiOnly".to_string(),
+                    });
                 }
-            };
+
+                // If the user provision type is JIT, then create the user if
+                // one does not exist
+                db::model::UserProvisionType::Jit => {
+                    let silo_user = db::model::SiloUser::new(
+                        authz_silo.id(),
+                        Uuid::new_v4(),
+                        authenticated_subject.external_id.clone(),
+                    );
+
+                    self.db_datastore
+                        .silo_user_create(&authz_silo, silo_user)
+                        .await?
+                }
+            }
+        };
 
         // Gather a list of groups that the user is part of based on what the
         // IdP sent us. Also, if the silo user provision type is Jit, create
@@ -460,7 +463,7 @@ impl super::Nexus {
             )
             .await?;
 
-        Ok(Some(db_silo_user))
+        Ok(db_silo_user)
     }
 
     // Silo user passwords
@@ -587,7 +590,7 @@ impl super::Nexus {
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
         credentials: params::UsernamePasswordCredentials,
-    ) -> Result<Option<db::model::SiloUser>, Error> {
+    ) -> Result<db::model::SiloUser, Error> {
         let (authz_silo, _) = self.local_idp_fetch_silo(silo_lookup).await?;
 
         // NOTE: It's very important that we not bail out early if we fail to
@@ -617,9 +620,11 @@ impl super::Nexus {
                 "passed password verification without a valid user"
             );
             let db_user = fetch_user.unwrap().1;
-            Ok(Some(db_user))
+            Ok(db_user)
         } else {
-            Ok(None)
+            Err(Error::Unauthenticated {
+                internal_message: "Failed password verification".to_string(),
+            })
         }
     }
 

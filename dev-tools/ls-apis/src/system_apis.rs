@@ -51,14 +51,16 @@ pub struct SystemApis {
         BTreeMap<ServerComponentName, Vec<DepPath>>,
     >,
 
-    /// maps an API name to the server component that exposes that API
-    api_producers: BTreeMap<ClientPackageName, (ServerComponentName, DepPath)>,
+    /// maps an API name to the server component(s) that expose that API
+    api_producers: BTreeMap<ClientPackageName, ApiProducerMap>,
 
     /// source of developer-maintained API metadata
     api_metadata: AllApiMetadata,
     /// source of Cargo package metadata
     workspaces: Workspaces,
 }
+
+type ApiProducerMap = BTreeMap<ServerComponentName, Vec<DepPath>>;
 
 impl SystemApis {
     /// Load information about APIs in the system based on both developer-
@@ -120,14 +122,6 @@ impl SystemApis {
                     },
                 )?;
             }
-        }
-
-        if !tracker.errors.is_empty() {
-            for e in tracker.errors {
-                eprintln!("error: {:#}", e);
-            }
-
-            bail!("found at least one API exported by multiple servers");
         }
 
         let (server_component_units, unit_server_components, api_producers) = (
@@ -259,12 +253,15 @@ impl SystemApis {
     }
 
     /// Given the client package name for an API, return the name of the server
-    /// component that provides it
-    pub fn api_producer(
-        &self,
+    /// component(s) that provide it
+    pub fn api_producers<'apis>(
+        &'apis self,
         client: &ClientPackageName,
-    ) -> Option<&ServerComponentName> {
-        self.api_producers.get(client).map(|s| &s.0)
+    ) -> impl Iterator<Item = &'apis ServerComponentName> + 'apis {
+        self.api_producers
+            .get(client)
+            .into_iter()
+            .flat_map(|producers| producers.keys())
     }
 
     /// Given the client package name for an API, return the list of server
@@ -301,6 +298,20 @@ impl SystemApis {
         }
 
         Ok(rv.into_iter())
+    }
+
+    /// Given the client package name for an API and the name of a server
+    /// component, returns `true` if the server is a producer of that API, or
+    /// `false` if it is not.
+    pub fn is_producer_of(
+        &self,
+        server: &ServerComponentName,
+        client: &ClientPackageName,
+    ) -> bool {
+        self.api_producers
+            .get(client)
+            .map(|producers| producers.contains_key(server))
+            .unwrap_or(false)
     }
 
     /// Given the name of any package defined in one of our workspaces, return
@@ -351,14 +362,27 @@ impl SystemApis {
                 for (client_pkg, _) in
                     self.component_apis_consumed(server_pkg, filter)?
                 {
-                    let other_component =
-                        self.api_producer(client_pkg).unwrap();
-                    let other_unit = self
-                        .server_component_units
-                        .get(other_component)
-                        .unwrap();
-                    let other_node = nodes.get(other_unit).unwrap();
-                    graph.add_edge(*my_node, *other_node, client_pkg.clone());
+                    // Multiple server components may produce an API. However,
+                    // if an API is produced by multiple server components
+                    // within the same deployment unit, we would like to only
+                    // create one edge per unit.  Thus, use a BTreeSet here to
+                    // de-duplicate the producing units.
+                    let other_units: BTreeSet<_> = self
+                        .api_producers(client_pkg)
+                        .map(|other_component| {
+                            self.server_component_units
+                                .get(other_component)
+                                .unwrap()
+                        })
+                        .collect();
+                    for other_unit in other_units {
+                        let other_node = nodes.get(other_unit).unwrap();
+                        graph.update_edge(
+                            *my_node,
+                            *other_node,
+                            client_pkg.clone(),
+                        );
+                    }
                 }
             }
         }
@@ -414,9 +438,10 @@ impl SystemApis {
                     }
                 }
 
-                let other_component = self.api_producer(client_pkg).unwrap();
-                let other_node = nodes.get(other_component).unwrap();
-                graph.add_edge(*my_node, *other_node, client_pkg);
+                for other_component in self.api_producers(client_pkg) {
+                    let other_node = nodes.get(other_component).unwrap();
+                    graph.add_edge(*my_node, *other_node, client_pkg);
+                }
             }
         }
 
@@ -526,105 +551,106 @@ impl SystemApis {
                 }
                 continue;
             }
-            let producer = self.api_producer(&api.client_package_name).unwrap();
-            let apis_consumed: BTreeSet<_> = self
-                .component_apis_consumed(producer, filter)?
-                .map(|(client_pkgname, _dep_path)| client_pkgname)
-                .collect();
-            let dependents: BTreeSet<_> = self
-                .api_consumers(&api.client_package_name, filter)
-                .unwrap()
-                .map(|(dependent, _dep_path)| dependent)
-                .collect();
+            for producer in self.api_producers(&api.client_package_name) {
+                let apis_consumed: BTreeSet<_> = self
+                    .component_apis_consumed(producer, filter)?
+                    .map(|(client_pkgname, _dep_path)| client_pkgname)
+                    .collect();
+                let dependents: BTreeSet<_> = self
+                    .api_consumers(&api.client_package_name, filter)
+                    .unwrap()
+                    .map(|(dependent, _dep_path)| dependent)
+                    .collect();
 
-            if api.versioned_how == VersionedHow::Unknown {
-                // If we haven't determined how to manage versioning on this
-                // API, and it has no dependencies on "unknown" or
-                // client-managed APIs, then it can be made server-managed.
-                if !apis_consumed.iter().any(|client_pkgname| {
-                    let api = self
-                        .api_metadata
-                        .client_pkgname_lookup(*client_pkgname)
-                        .unwrap();
-                    api.versioned_how != VersionedHow::Server
-                }) {
-                    dag_check.propose_server(
-                        &api.client_package_name,
-                        String::from(
-                            "has no unknown or client-managed dependencies",
-                        ),
-                    );
-                } else if apis_consumed.contains(&api.client_package_name) {
-                    // If this thing depends on itself, it must be
-                    // client-managed.
-                    dag_check.propose_client(
-                        &api.client_package_name,
-                        String::from("depends on itself"),
-                    );
-                } else if dependents.is_empty() {
-                    // If something has no consumers in deployed components, it
-                    // can be server-managed.  (These are generally debug APIs.)
-                    dag_check.propose_server(
-                        &api.client_package_name,
-                        String::from(
-                            "has no consumers among deployed components",
-                        ),
-                    );
-                }
-
-                continue;
-            }
-
-            let dependencies: BTreeMap<_, _> = apis_consumed
-                .iter()
-                .map(|dependency_clientpkg| {
-                    (
-                        self.api_producer(dependency_clientpkg).unwrap(),
-                        *dependency_clientpkg,
-                    )
-                })
-                .collect();
-
-            // Look for one-step circular dependencies (i.e., API API A1 is
-            // produced by component C1, which uses API A2 produced by C2, which
-            // also uses A1).  In such cases, either A1 or A2 must be
-            // client-managed (or both).
-            for other_pkgname in dependents {
-                if let Some(dependency_clientpkg) =
-                    dependencies.get(other_pkgname)
-                {
-                    let dependency_api = self
-                        .api_metadata
-                        .client_pkgname_lookup(*dependency_clientpkg)
-                        .unwrap();
-
-                    // If we're looking at a server-managed dependency and the
-                    // other is unknown, then that one should be client-managed.
-                    //
-                    // Without loss of generality, we can ignore the reverse
-                    // case (because we will catch that case when we're
-                    // iterating over the dependency API).
-                    if api.versioned_how == VersionedHow::Server
-                        && dependency_api.versioned_how == VersionedHow::Unknown
-                    {
-                        dag_check.propose_client(
-                            dependency_clientpkg,
-                            format!(
-                                "has cyclic dependency on {:?}, which is \
-                                 server-managed",
-                                api.client_package_name,
+                if api.versioned_how == VersionedHow::Unknown {
+                    // If we haven't determined how to manage versioning on this
+                    // API, and it has no dependencies on "unknown" or
+                    // client-managed APIs, then it can be made server-managed.
+                    if !apis_consumed.iter().any(|client_pkgname| {
+                        let api = self
+                            .api_metadata
+                            .client_pkgname_lookup(*client_pkgname)
+                            .unwrap();
+                        api.versioned_how != VersionedHow::Server
+                    }) {
+                        dag_check.propose_server(
+                            &api.client_package_name,
+                            String::from(
+                                "has no unknown or client-managed dependencies",
                             ),
-                        )
+                        );
+                    } else if apis_consumed.contains(&api.client_package_name) {
+                        // If this thing depends on itself, it must be
+                        // client-managed.
+                        dag_check.propose_client(
+                            &api.client_package_name,
+                            String::from("depends on itself"),
+                        );
+                    } else if dependents.is_empty() {
+                        // If something has no consumers in deployed components, it
+                        // can be server-managed.  (These are generally debug APIs.)
+                        dag_check.propose_server(
+                            &api.client_package_name,
+                            String::from(
+                                "has no consumers among deployed components",
+                            ),
+                        );
                     }
 
-                    // If both are Unknown, tell the user to pick one.
-                    if api.versioned_how == VersionedHow::Unknown
-                        && dependency_api.versioned_how == VersionedHow::Unknown
+                    continue;
+                }
+
+                let dependencies: BTreeMap<_, _> = apis_consumed
+                    .iter()
+                    .flat_map(|dependency_clientpkg| {
+                        self.api_producers(dependency_clientpkg)
+                            .map(|p| (p, *dependency_clientpkg))
+                    })
+                    .collect();
+
+                // Look for one-step circular dependencies (i.e., API API A1 is
+                // produced by component C1, which uses API A2 produced by C2, which
+                // also uses A1).  In such cases, either A1 or A2 must be
+                // client-managed (or both).
+                for other_pkgname in dependents {
+                    if let Some(dependency_clientpkg) =
+                        dependencies.get(other_pkgname)
                     {
-                        dag_check.propose_upick(
-                            &api.client_package_name,
-                            dependency_clientpkg,
-                        );
+                        let dependency_api = self
+                            .api_metadata
+                            .client_pkgname_lookup(*dependency_clientpkg)
+                            .unwrap();
+
+                        // If we're looking at a server-managed dependency and the
+                        // other is unknown, then that one should be client-managed.
+                        //
+                        // Without loss of generality, we can ignore the reverse
+                        // case (because we will catch that case when we're
+                        // iterating over the dependency API).
+                        if api.versioned_how == VersionedHow::Server
+                            && dependency_api.versioned_how
+                                == VersionedHow::Unknown
+                        {
+                            dag_check.propose_client(
+                                dependency_clientpkg,
+                                format!(
+                                    "has cyclic dependency on {:?}, which is \
+                                 server-managed",
+                                    api.client_package_name,
+                                ),
+                            )
+                        }
+
+                        // If both are Unknown, tell the user to pick one.
+                        if api.versioned_how == VersionedHow::Unknown
+                            && dependency_api.versioned_how
+                                == VersionedHow::Unknown
+                        {
+                            dag_check.propose_upick(
+                                &api.client_package_name,
+                                dependency_clientpkg,
+                            );
+                        }
                     }
                 }
             }
@@ -758,11 +784,10 @@ struct ServerComponentsTracker<'a> {
         &'a BTreeMap<ServerPackageName, Vec<&'a ApiMetadata>>,
 
     // outputs (structures that we're building up)
-    errors: Vec<anyhow::Error>,
     server_component_units: BTreeMap<ServerComponentName, DeploymentUnitName>,
     unit_server_components:
         BTreeMap<DeploymentUnitName, BTreeSet<ServerComponentName>>,
-    api_producers: BTreeMap<ClientPackageName, (ServerComponentName, DepPath)>,
+    api_producers: BTreeMap<ClientPackageName, ApiProducerMap>,
 }
 
 impl<'a> ServerComponentsTracker<'a> {
@@ -774,7 +799,6 @@ impl<'a> ServerComponentsTracker<'a> {
     ) -> ServerComponentsTracker<'a> {
         ServerComponentsTracker {
             known_server_packages,
-            errors: Vec::new(),
             server_component_units: BTreeMap::new(),
             unit_server_components: BTreeMap::new(),
             api_producers: BTreeMap::new(),
@@ -826,19 +850,12 @@ impl<'a> ServerComponentsTracker<'a> {
             return;
         }
 
-        if let Some((previous, _)) = self.api_producers.insert(
-            api.client_package_name.clone(),
-            (server_pkgname.clone(), dep_path.clone()),
-        ) {
-            self.errors.push(anyhow!(
-                "API for client {} appears to be exported by multiple \
-                 components: at least {} and {} ({:?})",
-                api.client_package_name,
-                previous,
-                server_pkgname,
-                dep_path
-            ));
-        }
+        self.api_producers
+            .entry(api.client_package_name.clone())
+            .or_default()
+            .entry(server_pkgname.clone())
+            .or_default()
+            .push(dep_path.clone());
     }
 
     /// Record that deployment unit package `dunit_pkgname` depends on package
