@@ -32,6 +32,13 @@ use steno::ActionError;
 use steno::SagaCachedState;
 use steno::SagaNodeEventType;
 
+/// OMDB's SEC id, used when inserting errors into running sagas. There should
+/// be no way that regular V4 UUID creation collides with this, as the first
+/// hexidecimal digit in the third group always starts with a 4 in for that
+/// format.
+const OMDB_SEC_UUID: Uuid =
+    Uuid::from_u128(0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAu128);
+
 /// `omdb db saga` subcommand
 #[derive(Debug, Args, Clone)]
 pub struct SagaArgs {
@@ -269,7 +276,7 @@ async fn cmd_sagas_inject_error(
                 .to_string(),
             data: Some(serde_json::to_value(action_error)?),
             event_time: chrono::Utc::now(),
-            creator: crate::OMDB_UUID.into(),
+            creator: OMDB_SEC_UUID.into(),
         };
 
         eprintln!(
