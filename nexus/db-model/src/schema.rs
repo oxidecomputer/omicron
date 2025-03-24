@@ -2268,7 +2268,7 @@ table! {
         attempt -> Int2,
         rx_id -> Uuid,
         result -> crate::WebhookDeliveryAttemptResultEnum,
-        response_status -> Nullable<Int2>,
+        response_status -> Nullable<Int4>,
         response_duration -> Nullable<Interval>,
         time_created -> Timestamptz,
         deliverator_id -> Uuid,

@@ -5317,10 +5317,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery_attempt (
     rx_id UUID NOT NULL,
 
     result omicron.public.webhook_delivery_attempt_result NOT NULL,
-    -- A status code > 599 would be Very Surprising, so rather than using an
-    -- INT4 to store a full unsigned 16-bit number in the database, we'll use a
-    -- signed 16-bit integer with a check constraint that it's unsigned.
-    response_status INT2,
+
+    -- This is an INT4 to ensure we can store any unsigned 16-bit number,
+    -- although status code > 599 would be Very Surprising...
+    response_status INT4
     response_duration INTERVAL,
     time_created TIMESTAMPTZ NOT NULL,
     -- UUID of the Nexus who did this delivery attempt.

@@ -960,7 +960,7 @@ impl<'a> ReceiverClient<'a> {
             rx_id: delivery.rx_id,
             attempt: SqlU8::new(delivery.attempts.0 + 1),
             result: delivery_result,
-            response_status: status.map(|s| s.as_u16() as i16),
+            response_status: status.map(|s| s.as_u16().into()),
             response_duration,
             time_created: chrono::Utc::now(),
             deliverator_id: self.nexus_id.into(),

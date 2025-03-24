@@ -310,7 +310,7 @@ impl WebhookDeliverator {
                         result: delivery_attempt.result.into(),
                         response_status: delivery_attempt
                             .response_status
-                            .map(|status| status as u16),
+                            .map(Into::into),
                         response_duration: delivery_attempt.response_duration,
                     },
                 );

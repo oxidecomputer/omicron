@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::SqlU8;
+use crate::SqlU16;
 use crate::WebhookDeliveryAttemptResult;
 use crate::WebhookDeliveryState;
 use crate::WebhookDeliveryTrigger;
@@ -169,7 +170,7 @@ pub struct WebhookDeliveryAttempt {
 
     pub result: WebhookDeliveryAttemptResult,
 
-    pub response_status: Option<i16>,
+    pub response_status: Option<SqlU16>,
 
     #[serde(with = "optional_time_delta")]
     pub response_duration: Option<TimeDelta>,
@@ -182,7 +183,7 @@ pub struct WebhookDeliveryAttempt {
 impl WebhookDeliveryAttempt {
     fn response_view(&self) -> Option<views::WebhookDeliveryResponse> {
         Some(views::WebhookDeliveryResponse {
-            status: self.response_status? as u16, // i hate that this has to signed in the database...
+            status: self.response_status?.into(),
             duration_ms: self.response_duration?.num_milliseconds() as usize,
         })
     }
