@@ -257,53 +257,69 @@ impl DataStore {
         let now =
             diesel::dsl::now.into_sql::<diesel::pg::sql_types::Timestamptz>();
         let id = delivery.id.into_untyped_uuid();
-        let updated = diesel::update(dsl::webhook_delivery)
-            .filter(
-                dsl::time_completed
-                    .is_null()
-                    .and(dsl::state.eq(WebhookDeliveryState::Pending)),
-            )
-            .filter(dsl::id.eq(id))
-            .filter(
-                dsl::deliverator_id.is_null().or(dsl::time_leased
-                    .is_not_null()
-                    .and(dsl::time_leased.le(now.nullable() - lease_timeout))),
-            )
-            .set((
-                dsl::time_leased.eq(now.nullable()),
-                dsl::deliverator_id.eq(nexus_id.into_untyped_uuid()),
-            ))
-            .check_if_exists::<WebhookDelivery>(id)
-            .execute_and_check(&conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        match updated.status {
+        let UpdateAndQueryResult { found, status } =
+            diesel::update(dsl::webhook_delivery)
+                .filter(
+                    dsl::time_completed
+                        .is_null()
+                        .and(dsl::state.eq(WebhookDeliveryState::Pending)),
+                )
+                .filter(dsl::id.eq(id))
+                .filter(dsl::deliverator_id.is_null().or(
+                    dsl::time_leased.is_not_null().and(
+                        dsl::time_leased.le(now.nullable() - lease_timeout),
+                    ),
+                ))
+                .set((
+                    dsl::time_leased.eq(now.nullable()),
+                    dsl::deliverator_id.eq(nexus_id.into_untyped_uuid()),
+                ))
+                .check_if_exists::<WebhookDelivery>(id)
+                .execute_and_check(&conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+        match status {
             UpdateStatus::Updated => Ok(DeliveryAttemptState::Started),
             UpdateStatus::NotUpdatedButExists => {
-                if let Some(completed) = updated.found.time_completed {
+                if let Some(completed) = found.time_completed {
                     return Ok(DeliveryAttemptState::AlreadyCompleted(
                         completed,
                     ));
                 }
 
-                if let Some(started) = updated.found.time_leased {
-                    let nexus_id =
-                        updated.found.deliverator_id.ok_or_else(|| {
-                            Error::internal_error(
-                                "if a delivery attempt has a last started \
+                if let Some(started) = found.time_leased {
+                    let nexus_id = found.deliverator_id.ok_or_else(|| {
+                        Error::internal_error(
+                            "if a delivery attempt has a last started \
                                  timestamp, the database should ensure that \
                                  it also has a Nexus ID",
-                            )
-                        })?;
+                        )
+                    })?;
                     return Ok(DeliveryAttemptState::InProgress {
                         nexus_id: nexus_id.into(),
                         started,
                     });
                 }
 
-                Err(Error::internal_error(
-                    "couldn't start delivery attempt for some secret third reason???",
-                ))
+                // Something else prevented this delivery from being leased; log
+                // the state of the delivery record, as this is unexpected.
+                const MSG: &'static str = "found an incomplete webhook \
+                     delivery which is not leased by another Nexus, but \
+                     which was not in a consistent state to be leased";
+                slog::error!(
+                    opctx.log,
+                    "couldn't start delivery attempt: {MSG}";
+                    "delivery_id" => %id,
+                    "event_id" => %delivery.event_id,
+                    "nexus_id" => %nexus_id,
+                    "found_deliverator_id" => ?found.deliverator_id,
+                    "found_time_leased" => ?found.time_leased,
+                    "found_time_completed" => ?found.time_completed,
+                    "found_state" => ?found.state,
+                );
+                Err(Error::internal_error(MSG))
             }
         }
     }
