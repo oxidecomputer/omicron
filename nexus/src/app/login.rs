@@ -6,9 +6,7 @@ use dropshot::{HttpError, HttpResponseFound, http_response_found};
 use nexus_auth::context::OpContext;
 use nexus_db_model::{ConsoleSession, Name};
 use nexus_db_queries::authn::silos::IdentityProviderType;
-use nexus_db_queries::db::identity::Asset;
 use nexus_types::external_api::{params::RelativeUri, shared::RelayState};
-use omicron_common::api::external::Error;
 
 impl super::Nexus {
     pub(crate) async fn login_saml_redirect(
@@ -77,28 +75,11 @@ impl super::Nexus {
                 &authenticated_subject,
             )
             .await?;
-        let session = self.create_session(opctx, user).await?;
+        let session = self.session_create(opctx, &user).await?;
         let next_url = relay_state
             .and_then(|r| r.redirect_uri)
             .map(|u| u.to_string())
             .unwrap_or_else(|| "/".to_string());
         Ok((session, next_url))
-    }
-
-    // TODO: move this logic, it's weird
-    pub(crate) async fn create_session(
-        &self,
-        opctx: &OpContext,
-        user: Option<nexus_db_queries::db::model::SiloUser>,
-    ) -> Result<ConsoleSession, Error> {
-        let session = match user {
-            Some(user) => self.session_create(&opctx, user.id()).await?,
-            None => Err(Error::Unauthenticated {
-                internal_message: String::from(
-                    "no matching user found or credentials were not valid",
-                ),
-            })?,
-        };
-        Ok(session)
     }
 }

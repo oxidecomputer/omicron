@@ -6,7 +6,7 @@
 //! Responsible for cleaning up soft deleted entries once they
 //! have been propagated to running dpd instances.
 
-use crate::app::map_switch_zone_addrs;
+use crate::app::switch_zone_address_mappings;
 
 use super::networking::build_dpd_clients;
 use crate::app::background::BackgroundTask;
@@ -14,7 +14,6 @@ use chrono::{Duration, Utc};
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
-use internal_dns_types::names::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use serde_json::json;
@@ -65,26 +64,24 @@ impl BackgroundTask for Ipv4NatGarbageCollector {
                 }
             };
 
-            let switch_zone_addresses = match self
-                .resolver
-                .lookup_all_ipv6(ServiceName::Dendrite)
-                .await
+            let mappings = match
+                switch_zone_address_mappings(&self.resolver, log).await
             {
-                Ok(addrs) => addrs,
+                Ok(mappings) => mappings,
                 Err(e) => {
-                    error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
+                    error!(
+                        log,
+                        "failed to resolve addresses for Dendrite services"; "error" => %e
+                    );
                     return json!({
                         "error":
                             format!(
                                 "failed to resolve addresses for Dendrite services: {:#}",
                                 e
                             )
-                        });
-                },
+                    });
+                }
             };
-
-            let mappings =
-                map_switch_zone_addrs(log, switch_zone_addresses).await;
 
             let dpd_clients = build_dpd_clients(&mappings, log);
 

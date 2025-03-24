@@ -7402,7 +7402,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let user =
                 nexus.login_local(&opctx, &silo_lookup, credentials).await?;
 
-            let session = nexus.create_session(opctx, user).await?;
+            let session = nexus.session_create(opctx, &user).await?;
             let mut response = HttpResponseHeaders::new_unnamed(
                 HttpResponseUpdatedNoContent(),
             );

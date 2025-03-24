@@ -392,7 +392,7 @@ impl SlotWriteContext<'_> {
                 WriteComponent::HostPhase2,
                 WriteStepId::Writing { slot: self.slot },
                 format!("Writing host phase 2 to slot {}", self.slot),
-                move |ctx| async move {
+                async move |ctx| {
                     self.artifacts
                         .write_host_phase_2(
                             &self.log,
@@ -414,7 +414,7 @@ impl SlotWriteContext<'_> {
                     "Validating checksum of host phase 2 in slot {}",
                     self.slot
                 ),
-                move |ctx| async move {
+                async move |ctx| {
                     let block_size =
                         block_size_handle.into_value(&ctx.token()).await;
                     self.validate_written_host_phase_2_hash(block_size).await
@@ -494,7 +494,7 @@ impl SlotWriteContext<'_> {
                 WriteComponent::ControlPlane,
                 WriteStepId::Writing { slot: self.slot },
                 format!("Writing control plane to slot {}", self.slot),
-                move |cx2| async move {
+                async move |cx2| {
                     self.artifacts
                         .write_control_plane(
                             &self.log,
@@ -618,7 +618,7 @@ impl ControlPlaneZoneWriteContext<'_> {
                         path: output_directory.clone(),
                     },
                     format!("Removing files in {}", output_directory),
-                    move |_cx| async move {
+                    async move |_cx| {
                         let path = output_directory.clone();
                         tokio::task::spawn_blocking(move || {
                             remove_contents_of(&output_directory)
@@ -649,7 +649,7 @@ impl ControlPlaneZoneWriteContext<'_> {
                     WriteComponent::ControlPlane,
                     ControlPlaneZonesStepId::Zone { name: name.clone() },
                     format!("Writing zone {name}"),
-                    move |cx| async move {
+                    async move |cx| {
                         let transport = transport.into_value(cx.token()).await;
                         write_artifact_impl(
                             WriteComponent::ControlPlane,
@@ -675,7 +675,7 @@ impl ControlPlaneZoneWriteContext<'_> {
                 WriteComponent::ControlPlane,
                 ControlPlaneZonesStepId::Fsync,
                 "Syncing writes to disk",
-                move |_cx| async move {
+                async move |_cx| {
                     let output_directory =
                         File::open(&output_directory).await.map_err(
                             |error| WriteError::SyncOutputDirError { error },
@@ -948,7 +948,7 @@ mod tests {
         data2: Vec<Vec<u8>>,
         #[strategy(WriteOps::strategy())] write_ops: WriteOps,
     ) {
-        with_test_runtime(move || async move {
+        with_test_runtime(async move {
             proptest_write_artifact_impl(data1, data2, write_ops)
                 .await
                 .expect("test failed");
@@ -1123,7 +1123,7 @@ mod tests {
                 InstallinatorComponent::Both,
                 InstallinatorStepId::Write,
                 "Writing",
-                |cx| async move {
+                async move |cx| {
                     let write_output = writer
                         .write_with_transport(
                             &cx,
