@@ -386,6 +386,14 @@ impl Resolver {
             .flatten()
     }
 
+    /// Lookup a specific record's IPv6 address
+    ///
+    /// In general, callers should _not_ be using this function, and instead
+    /// using the other functions in this struct that query based on a service
+    /// name. This function is currently only used by omdb because it has to ask
+    /// questions of a _specific_ Nexus, but most (if not all) control plane
+    /// software should not care about talking to a specific instance of
+    /// something by name.
     pub async fn ipv6_lookup(
         &self,
         query: &str,
