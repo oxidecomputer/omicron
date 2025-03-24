@@ -4,6 +4,7 @@
 use crate::{State, keymap::Cmd, state::ComponentId};
 use camino::Utf8PathBuf;
 use humantime::format_rfc3339;
+use omicron_common::update::ArtifactId;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -12,7 +13,7 @@ use std::time::SystemTime;
 use wicket_common::inventory::RackV1Inventory;
 use wicket_common::update_events::EventReport;
 use wicketd_client::types::{
-    ArtifactId, CurrentRssUserConfig, GetLocationResponse, IgnitionCommand,
+    CurrentRssUserConfig, GetLocationResponse, IgnitionCommand,
     RackOperationStatus,
 };
 

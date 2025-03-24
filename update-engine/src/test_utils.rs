@@ -104,13 +104,13 @@ fn define_test_steps(
     last_step_outcome: LastStepOutcome,
 ) {
     engine
-        .new_step("foo".to_owned(), 1, "Step 1", move |_cx| async move {
+        .new_step("foo".to_owned(), 1, "Step 1", async |_cx| {
             StepSuccess::new(()).into()
         })
         .register();
 
     engine
-        .new_step("bar".to_owned(), 2, "Step 2", move |cx| async move {
+        .new_step("bar".to_owned(), 2, "Step 2", async |cx| {
             for _ in 0..20 {
                 cx.send_progress(StepProgress::with_current_and_total(
                     5,
@@ -137,7 +137,7 @@ fn define_test_steps(
             "nested".to_owned(),
             3,
             "Step 3 (this is nested)",
-            move |parent_cx| async move {
+            async move |parent_cx| {
                 parent_cx
                     .with_nested_engine(|engine| {
                         define_nested_engine(&parent_cx, engine, 3, "steps");
@@ -174,7 +174,7 @@ fn define_test_steps(
         "remote-nested".to_owned(),
         20,
         "Step 4 (remote nested)",
-        move |cx| async move {
+        async move |cx| {
             let (sender, mut receiver) = crate::channel();
             let mut engine = UpdateEngine::new(&log, sender);
             define_remote_nested_engine(&mut engine, 20);
@@ -209,7 +209,7 @@ fn define_test_steps(
     // The step index here (100) is large enough to be higher than all nested
     // steps.
     engine
-        .new_step("baz".to_owned(), 100, "Step 5", move |_cx| async move {
+        .new_step("baz".to_owned(), 100, "Step 5", async move |_cx| {
             match last_step_outcome {
                 LastStepOutcome::Completed => StepSuccess::new(()).into(),
                 LastStepOutcome::Failed => {
@@ -238,7 +238,7 @@ fn define_nested_engine<'a>(
             "nested-foo".to_owned(),
             start_id + 1,
             "Nested step 1",
-            move |cx| async move {
+            async move |cx| {
                 parent_cx
                     .send_progress(StepProgress::with_current_and_total(
                         1,
@@ -259,7 +259,7 @@ fn define_nested_engine<'a>(
             "nested-bar".to_owned(),
             start_id + 2,
             "Nested step 2 (fails)",
-            move |cx| async move {
+            async move |cx| {
                 // This is used by NestedProgressCheck below.
                 parent_cx
                     .send_progress(StepProgress::with_current_and_total(
@@ -301,7 +301,7 @@ fn define_remote_nested_engine(
             "nested-foo".to_owned(),
             start_id + 1,
             "Nested step 1",
-            move |cx| async move {
+            async move |cx| {
                 cx.send_progress(StepProgress::progress(Default::default()))
                     .await;
                 StepSuccess::new(()).into()
@@ -314,7 +314,7 @@ fn define_remote_nested_engine(
             "nested-bar".to_owned(),
             start_id + 2,
             "Nested step 2",
-            move |cx| async move {
+            async move |cx| {
                 cx.send_progress(StepProgress::with_current(
                     20,
                     "units",
