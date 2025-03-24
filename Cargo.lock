@@ -7482,6 +7482,7 @@ dependencies = [
  "clap",
  "clickhouse-admin-types",
  "crucible-agent-client",
+ "debug-ignore",
  "derive_more",
  "display-error-chain",
  "dns-server",
