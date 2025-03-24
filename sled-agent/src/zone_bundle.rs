@@ -71,9 +71,12 @@ fn initialize_zfs_resources(log: &Logger) -> Result<(), BundleError> {
     let zb_snapshots =
         Zfs::list_snapshots().unwrap().into_iter().filter(|snap| {
             // Check for snapshots named how we expect to create them.
-            if snap.snap_name != ZONE_ROOT_SNAPSHOT_NAME
-                || !snap.snap_name.starts_with(ARCHIVE_SNAPSHOT_PREFIX)
-            {
+            let is_root_snapshot = snap.snap_name == ZONE_ROOT_SNAPSHOT_NAME;
+            let is_archive_snapshot =
+                snap.snap_name.starts_with(ARCHIVE_SNAPSHOT_PREFIX);
+            let is_zone_bundle_snapshot =
+                is_root_snapshot || is_archive_snapshot;
+            if !is_zone_bundle_snapshot {
                 return false;
             }
 
@@ -83,21 +86,25 @@ fn initialize_zfs_resources(log: &Logger) -> Result<(), BundleError> {
             // have such a property (or has in invalid property), we'll log it
             // but avoid deleting the snapshot.
             let name = snap.to_string();
-            let Ok([value]) = Zfs::get_values(
+            let value = match Zfs::get_values(
                 &name,
                 &[ZONE_BUNDLE_ZFS_PROPERTY_NAME],
                 Some(illumos_utils::zfs::PropertySource::Local),
-            ) else {
-                warn!(
-                    log,
-                    "Found a ZFS snapshot with a name reserved for zone \
-                    bundling, but which does not have the zone-bundle-specific \
-                    property. Bailing out, rather than risking deletion of \
-                    user data.";
-                    "snap_name" => &name,
-                    "property" => ZONE_BUNDLE_ZFS_PROPERTY_NAME
-                );
-                return false;
+            ) {
+                Ok([value]) => value,
+                Err(err) => {
+                    warn!(
+                        log,
+                        "Found a ZFS snapshot with a name reserved for zone \
+                        bundling, but which does not have the zone-bundle-specific \
+                        property. Bailing out, rather than risking deletion of \
+                        user data.";
+                        "snap_name" => &name,
+                        "property" => ZONE_BUNDLE_ZFS_PROPERTY_NAME,
+                        "error" => slog_error_chain::InlineErrorChain::new(&err),
+                    );
+                    return false;
+                }
             };
             if value != ZONE_BUNDLE_ZFS_PROPERTY_VALUE {
                 warn!(
