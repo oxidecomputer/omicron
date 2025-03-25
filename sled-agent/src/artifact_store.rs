@@ -1224,13 +1224,13 @@ mod test {
         // 2. Writer B fails to create, returning `AlreadyInProgress`. This
         //    triggers a logic error where a `TempPath` is dropped, unlinking
         //    one of writer A's temporary files.
-        // 2. Writer C fails to create, returning `AlreadyInProgress`. Similarly
+        // 3. Writer C fails to create, returning `AlreadyInProgress`. Similarly
         //    to writer B, this unlinks the other of writer A's temporary files.
-        // 3. Writer D is created successfully because writer A's files are no
+        // 4. Writer D is created successfully because writer A's files are no
         //    longer present.
-        // 4. Writer A finishes and incorrectly persists writer C's incomplete
+        // 5. Writer A finishes and incorrectly persists writer C's incomplete
         //    files.
-        // 5. Writer D finishes and fails because its files have already been
+        // 6. Writer D finishes and fails because its files have already been
         //    moved.
         //
         // We no longer use a temporary file with a known name or fail if
