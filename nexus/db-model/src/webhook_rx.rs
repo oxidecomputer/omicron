@@ -218,6 +218,13 @@ impl WebhookSubscriptionKind {
             Error::invalid_value("event_class", e.to_string())
         })?;
 
+        if class == WebhookEventClass::Probe {
+            return Err(Error::invalid_value(
+                "event_class",
+                "webhook receivers cannot subscribe to probes",
+            ));
+        }
+
         Ok(Self::Exact(class))
     }
 

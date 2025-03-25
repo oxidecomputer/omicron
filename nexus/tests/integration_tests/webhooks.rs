@@ -151,16 +151,20 @@ fn my_great_webhook_params(
     mock: &httpmock::MockServer,
 ) -> params::WebhookCreate {
     params::WebhookCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "my-great-webhook".parse().unwrap(),
-            description: String::from("my great webhook"),
-        },
+        identity: my_great_webhook_identity(),
         endpoint: mock
             .url("/webhooks")
             .parse()
             .expect("this should be a valid URL"),
         secrets: vec![MY_COOL_SECRET.to_string()],
         events: vec!["test.foo".to_string()],
+    }
+}
+
+fn my_great_webhook_identity() -> IdentityMetadataCreateParams {
+    IdentityMetadataCreateParams {
+        name: "my-great-webhook".parse().unwrap(),
+        description: String::from("my great webhook"),
     }
 }
 
@@ -273,11 +277,19 @@ fn signature_verifies(
 async fn test_webhook_receiver_get(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let server = httpmock::MockServer::start_async().await;
-
     // Create a webhook receiver.
-    let created_webhook =
-        webhook_create(&cptestctx, &my_great_webhook_params(&server)).await;
+    let created_webhook = webhook_create(
+        &cptestctx,
+        &params::WebhookCreate {
+            identity: my_great_webhook_identity(),
+            endpoint: "https://example.com/webhooks"
+                .parse()
+                .expect("this should be a valid URL"),
+            secrets: vec![MY_COOL_SECRET.to_string()],
+            events: vec!["test.foo".to_string()],
+        },
+    )
+    .await;
     dbg!(&created_webhook);
 
     // Fetch the receiver by ID.
@@ -297,11 +309,19 @@ async fn test_webhook_receiver_create_delete(
 ) {
     let client = &cptestctx.external_client;
 
-    let server = httpmock::MockServer::start_async().await;
-
     // Create a webhook receiver.
-    let created_webhook =
-        webhook_create(&cptestctx, &my_great_webhook_params(&server)).await;
+    let created_webhook = webhook_create(
+        &cptestctx,
+        &params::WebhookCreate {
+            identity: my_great_webhook_identity(),
+            endpoint: "https://example.com/webhooks"
+                .parse()
+                .expect("this should be a valid URL"),
+            secrets: vec![MY_COOL_SECRET.to_string()],
+            events: vec!["test.foo".to_string()],
+        },
+    )
+    .await;
     dbg!(&created_webhook);
 
     resource_helpers::object_delete(
@@ -318,29 +338,70 @@ async fn test_webhook_receiver_create_delete(
     )
     .await;
 }
+
 #[nexus_test]
 async fn test_webhook_receiver_names_are_unique(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
 
-    let server = httpmock::MockServer::start_async().await;
-
     // Create a webhook receiver.
-    let created_webhook =
-        webhook_create(&cptestctx, &my_great_webhook_params(&server)).await;
+    let created_webhook = webhook_create(
+        &cptestctx,
+        &params::WebhookCreate {
+            identity: my_great_webhook_identity(),
+            endpoint: "https://example.com/webhooks"
+                .parse()
+                .expect("this should be a valid URL"),
+            secrets: vec![MY_COOL_SECRET.to_string()],
+            events: vec!["test.foo".to_string()],
+        },
+    )
+    .await;
     dbg!(&created_webhook);
 
     let error = resource_helpers::object_create_error(
         &client,
         RECEIVERS_BASE_PATH,
-        &my_great_webhook_params(&server),
+        &params::WebhookCreate {
+            identity: my_great_webhook_identity(),
+            endpoint: "https://example.com/more-webhooks"
+                .parse()
+                .expect("this should be a valid URL"),
+            secrets: vec![MY_COOL_SECRET.to_string()],
+            events: vec!["test.foo.bar".to_string()],
+        },
         http::StatusCode::BAD_REQUEST,
     )
     .await;
     assert_eq!(
         dbg!(&error).message,
         "already exists: webhook-receiver \"my-great-webhook\""
+    );
+}
+
+#[nexus_test]
+async fn test_cannot_subscribe_to_probes(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    let error = resource_helpers::object_create_error(
+        &client,
+        RECEIVERS_BASE_PATH,
+        &params::WebhookCreate {
+            identity: my_great_webhook_identity(),
+            endpoint: "https://example.com/webhooks"
+                .parse()
+                .expect("this should be a valid URL"),
+            secrets: vec![MY_COOL_SECRET.to_string()],
+            events: vec!["probe".to_string(), "test.foo".to_string()],
+        },
+        http::StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(
+        dbg!(&error)
+            .message
+            .contains("webhook receivers cannot subscribe to probes"),
     );
 }
 
