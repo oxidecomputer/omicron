@@ -17698,21 +17698,6 @@
               "id",
               "type"
             ]
-          },
-          {
-            "description": "Boot the Alpine ISO that ships with the Propolis zone. Intended for development purposes only.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "you_can_boot_anything_as_long_as_its_alpine"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
           }
         ]
       },
