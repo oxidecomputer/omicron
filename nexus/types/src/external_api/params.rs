@@ -2120,6 +2120,7 @@ pub enum ImageSource {
 
     /// Boot the Alpine ISO that ships with the Propolis zone. Intended for
     /// development purposes only.
+    #[schemars(skip)] // keep it out of the OpenAPI schema
     YouCanBootAnythingAsLongAsItsAlpine,
 }
 
