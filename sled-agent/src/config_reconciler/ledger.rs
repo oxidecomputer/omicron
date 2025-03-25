@@ -532,8 +532,6 @@ async fn convert_legacy_ledgers(
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::*;
     use camino_tempfile::Utf8TempDir;
     use id_map::IdMap;
@@ -549,6 +547,8 @@ mod tests {
     use sled_hardware::PooledDisk;
     use sled_storage::config::MountConfig;
     use sled_storage::disk::Disk;
+    use std::sync::Arc;
+    use std::time::Duration;
 
     fn fake_m2_disk() -> Disk {
         Disk::Real(PooledDisk {
@@ -580,7 +580,7 @@ mod tests {
             root: tempdir.path().to_owned(),
             synthetic_disk_root: "/test/todo2".into(),
         };
-        let (disks_tx, disks_rx) = watch::channel(IdMap::new());
+        let (disks_tx, disks_rx) = watch::channel(Arc::default());
         let mut internal_disks = InternalDisksReceiver::new_for_tests(
             disks_rx,
             mount_config.clone(),
@@ -601,7 +601,7 @@ mod tests {
 
         // Tell the ledger that there's one internal disk.
         disks_tx.send_modify(|disks| {
-            disks.insert(fake_m2_disk());
+            Arc::make_mut(disks).insert(fake_m2_disk());
         });
 
         // Our fake disk's datasets live underneath our `tempdir`; create the

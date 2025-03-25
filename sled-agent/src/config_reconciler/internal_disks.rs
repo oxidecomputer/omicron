@@ -17,6 +17,7 @@ use sled_storage::disk::RawDisk;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::future::Future;
+use std::mem;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -25,7 +26,7 @@ use tokio::sync::watch::error::RecvError;
 /// A thin wrapper around a [`watch::Receiver`] that presents a similar API.
 #[derive(Debug, Clone)]
 pub struct InternalDisksReceiver {
-    disks: watch::Receiver<IdMap<Disk>>,
+    disks: watch::Receiver<Arc<IdMap<Disk>>>,
     mount_config: Arc<MountConfig>,
 }
 
@@ -45,7 +46,7 @@ impl InternalDisksReceiver {
     // construct an entire `InternalDisksTask`.
     #[cfg(test)]
     pub(crate) fn new_for_tests(
-        disks: watch::Receiver<IdMap<Disk>>,
+        disks: watch::Receiver<Arc<IdMap<Disk>>>,
         mount_config: MountConfig,
     ) -> Self {
         Self { disks, mount_config: Arc::new(mount_config) }
@@ -53,7 +54,7 @@ impl InternalDisksReceiver {
 }
 
 pub struct InternalDisks<'a> {
-    disks: watch::Ref<'a, IdMap<Disk>>,
+    disks: watch::Ref<'a, Arc<IdMap<Disk>>>,
     mount_config: &'a MountConfig,
 }
 
@@ -76,7 +77,7 @@ impl InternalDisks<'_> {
 
 #[derive(Debug)]
 pub struct InternalDisksTask {
-    disks: watch::Sender<IdMap<Disk>>,
+    disks: watch::Sender<Arc<IdMap<Disk>>>,
     raw_disks: watch::Receiver<IdMap<RawDisk>>,
     mount_config: Arc<MountConfig>,
     log: Logger,
@@ -98,7 +99,7 @@ impl InternalDisksTask {
         log: Logger,
         mut disk_adopter: T,
     ) -> InternalDisksReceiver {
-        let (disks_tx, disks_rx) = watch::channel(IdMap::default());
+        let (disks_tx, disks_rx) = watch::channel(Arc::default());
 
         tokio::spawn({
             let task = Self {
@@ -201,15 +202,18 @@ impl InternalDisksTask {
         );
 
         // Clone our current set of adopted disks. This allows us to do the
-        // below calculations without holding the lock.
-        let disks_snapshot = self.disks.borrow().clone();
+        // below calculations without holding the lock. If we need to make any
+        // changes, we'll do so via `Arc::make_mut()` after we reacquire the
+        // lock.
+        let disks_snapshot = Arc::clone(&*self.disks.borrow());
 
         // Note for removal any disks we no longer have.
         let disks_to_remove = disks_snapshot
             .iter()
             .filter_map(|disk| {
-                if !internal_raw_disks.contains_key(disk.identity()) {
-                    Some(disk.identity())
+                let identity = disk.identity();
+                if !internal_raw_disks.contains_key(identity) {
+                    Some(identity.clone())
                 } else {
                     None
                 }
@@ -269,10 +273,18 @@ impl InternalDisksTask {
             }
         }
 
+        // Drop `disks_snapshot` now: we're done using to decide whether we have
+        // any disks to remove or insert, and its liveness would guarantee the
+        // `Arc::make_mut()` below would have to clone the full disks map. We
+        // might still have to clone it if outside callers have a live clone,
+        // but we can save the clone any time that isn't true.
+        mem::drop(disks_snapshot);
+
         if !disks_to_remove.is_empty() || !disks_to_insert.is_empty() {
             self.disks.send_modify(|disks| {
+                let disks = Arc::make_mut(disks);
                 for disk in disks_to_remove {
-                    disks.remove(disk);
+                    disks.remove(&disk);
                 }
                 for disk in disks_to_insert {
                     disks.insert(disk);
@@ -402,7 +414,7 @@ mod tests {
         );
 
         // There should be no disks to start.
-        assert_eq!(*disks_handle.borrow_and_update().disks, IdMap::new());
+        assert_eq!(*disks_handle.borrow_and_update().disks, Arc::default());
 
         // Add four disks: two M.2 and two U.2.
         raw_disks_tx.send_modify(|disks| {
