@@ -35,6 +35,7 @@
 
 use anyhow::Context;
 use anyhow::anyhow;
+use anyhow::bail;
 use anyhow::ensure;
 use clap::Args;
 use clap::ColorChoice;
@@ -43,6 +44,9 @@ use clap::Subcommand;
 use futures::StreamExt;
 use internal_dns_types::names::ServiceName;
 use omicron_common::address::Ipv6Subnet;
+use reedline::DefaultPrompt;
+use reedline::DefaultPromptSegment;
+use reedline::Reedline;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use tokio::net::TcpSocket;
@@ -56,6 +60,39 @@ mod oximeter;
 mod oxql;
 mod reconfigurator;
 mod sled_agent;
+
+struct ConfirmationPrompt(Reedline);
+
+impl ConfirmationPrompt {
+    fn new() -> Self {
+        Self(Reedline::create())
+    }
+
+    fn read(&mut self, message: &str) -> Result<String, anyhow::Error> {
+        let prompt = DefaultPrompt::new(
+            DefaultPromptSegment::Basic(message.to_string()),
+            DefaultPromptSegment::Empty,
+        );
+        if let Ok(reedline::Signal::Success(input)) = self.0.read_line(&prompt)
+        {
+            Ok(input)
+        } else {
+            bail!("operation aborted")
+        }
+    }
+
+    fn read_and_validate(
+        &mut self,
+        message: &str,
+        expected: &str,
+    ) -> Result<(), anyhow::Error> {
+        let input = self.read(message)?;
+        if input != expected {
+            bail!("Aborting, input did not match expected value");
+        }
+        Ok(())
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {

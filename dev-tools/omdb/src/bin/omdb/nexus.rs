@@ -4,6 +4,7 @@
 
 //! omdb commands that query or update specific Nexus instances
 
+use crate::ConfirmationPrompt;
 use crate::Omdb;
 use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::db::DbUrlOptions;
@@ -66,9 +67,6 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::ParseError;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
-use reedline::DefaultPrompt;
-use reedline::DefaultPromptSegment;
-use reedline::Reedline;
 use serde::Deserialize;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -2992,39 +2990,6 @@ async fn cmd_nexus_sled_add(
         .id;
     eprintln!("added sled {} ({}): {sled_id}", args.serial, args.part);
     Ok(())
-}
-
-struct ConfirmationPrompt(Reedline);
-
-impl ConfirmationPrompt {
-    fn new() -> Self {
-        Self(Reedline::create())
-    }
-
-    fn read(&mut self, message: &str) -> Result<String, anyhow::Error> {
-        let prompt = DefaultPrompt::new(
-            DefaultPromptSegment::Basic(message.to_string()),
-            DefaultPromptSegment::Empty,
-        );
-        if let Ok(reedline::Signal::Success(input)) = self.0.read_line(&prompt)
-        {
-            Ok(input)
-        } else {
-            bail!("operation aborted")
-        }
-    }
-
-    fn read_and_validate(
-        &mut self,
-        message: &str,
-        expected: &str,
-    ) -> Result<(), anyhow::Error> {
-        let input = self.read(message)?;
-        if input != expected {
-            bail!("Aborting, input did not match expected value");
-        }
-        Ok(())
-    }
 }
 
 /// Runs `omdb nexus sleds expunge`

@@ -4,9 +4,11 @@
 
 //! `omdb db saga` subcommands
 
+use crate::ConfirmationPrompt;
 use crate::Omdb;
 use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::db::datetime_rfc3339_concise;
+use crate::helpers::should_colorize;
 use anyhow::Context;
 use anyhow::bail;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -23,6 +25,7 @@ use nexus_db_queries::db::datastore::DataStoreConnection;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
+use owo_colors::OwoColorize;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tabled::Tabled;
@@ -131,6 +134,8 @@ async fn cmd_sagas_inject_error(
     args: &SagaInjectErrorArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
+    let should_print_color =
+        should_colorize(omdb.output.color, supports_color::Stream::Stdout);
     let conn = datastore.pool_connection_for_tests().await?;
 
     // Before doing anything: find the current SEC for the saga, and ping it to
@@ -149,6 +154,14 @@ async fn cmd_sagas_inject_error(
                 // If there's no current SEC, then we don't need to check if
                 // it's up. Would we see this if the saga was Requested but not
                 // started?
+                let text = "warning: saga has no assigned SEC, so cannot \
+                verify that the saga is not still running!";
+
+                if should_print_color {
+                    println!("{}", text.yellow().bold());
+                } else {
+                    println!("{text}");
+                }
             }
 
             Some(current_sec) => {
@@ -159,10 +172,34 @@ async fn cmd_sagas_inject_error(
                     .iter()
                     .find(|(name, _)| name.contains(&current_sec.to_string()))
                 else {
+                    let text = format!(
+                        "Cannot proceed: no SRV record for Nexus with id \
+                        {current_sec}, so cannot verify that it is not still \
+                        running!"
+                    );
+
+                    if should_print_color {
+                        println!("{}", text.red().bold());
+                    } else {
+                        println!("{text}");
+                    }
+
                     bail!("dns lookup for {current_sec} found nothing");
                 };
 
                 let Some(addr) = resolver.ipv6_lookup(&target).await? else {
+                    let text = format!(
+                        "Cannot proceed: no AAAA record for Nexus with id \
+                        {current_sec}, so cannot verify that it is not still \
+                        running!"
+                    );
+
+                    if should_print_color {
+                        println!("{}", text.red().bold());
+                    } else {
+                        println!("{text}");
+                    }
+
                     bail!("dns lookup for {target} found nothing");
                 };
 
@@ -173,6 +210,20 @@ async fn cmd_sagas_inject_error(
 
                 match client.ping().await {
                     Ok(_) => {
+                        let text = format!(
+                            "Cannot proceed: Nexus with id matching current \
+                            SEC responded ok to a ping, meaning it is still \
+                            running. Injecting errors into running sagas is \
+                            not safe. Please ensure the Nexus with id \
+                            {current_sec} is stopped before proceeding."
+                        );
+
+                        if should_print_color {
+                            println!("{}", text.red().bold());
+                        } else {
+                            println!("{text}");
+                        }
+
                         bail!("{current_sec} answered a ping");
                     }
 
@@ -185,19 +236,52 @@ async fn cmd_sagas_inject_error(
                         | nexus_client::Error::UnexpectedResponse(_)
                         | nexus_client::Error::PreHookError(_)
                         | nexus_client::Error::PostHookError(_) => {
+                            let text = format!(
+                                "Cannot proceed: Nexus with id matching \
+                                current SEC responded with an error to a ping, \
+                                meaning it is still running. Injecting errors \
+                                into running sagas is not safe. Please ensure \
+                                the Nexus with id {current_sec} is stopped \
+                                before proceeding."
+                            );
+
+                            if should_print_color {
+                                println!("{}", text.red().bold());
+                            } else {
+                                println!("{text}");
+                            }
+
                             bail!("{current_sec} failed a ping with {e}");
                         }
 
-                        nexus_client::Error::CommunicationError(_) => {
+                        nexus_client::Error::CommunicationError(e) => {
                             // Assume communication error means that it could
                             // not be contacted.
                             //
                             // Note: this could be seen if Nexus is up but
                             // unreachable from where omdb is run!
+
+                            println!(
+                                "saw {e} when trying to ping Nexus with id \
+                                {current_sec}. Proceed?"
+                            );
+
+                            let mut prompt = ConfirmationPrompt::new();
+                            prompt.read_and_validate("y/N", "y")?;
                         }
                     },
                 }
             }
+        }
+    } else {
+        let text = "Skipping check of whether the Nexus assigned to this saga \
+        is running. If this Nexus is running, the control plane state managed \
+        by this saga may become corrupted!";
+
+        if should_print_color {
+            println!("{}", text.red().bold());
+        } else {
+            println!("{text}");
         }
     }
 
@@ -279,7 +363,7 @@ async fn cmd_sagas_inject_error(
             creator: OMDB_SEC_UUID.into(),
         };
 
-        eprintln!(
+        println!(
             "injecting error for saga {:?} node {:?}",
             node.saga_id, node.node_id,
         );

@@ -66,6 +66,7 @@ ipnetwork.workspace = true
 omicron-workspace-hack.workspace = true
 multimap.workspace = true
 indicatif.workspace = true
+owo-colors.workspace = true
 
 [dev-dependencies]
 camino-tempfile.workspace = true
