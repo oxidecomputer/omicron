@@ -152,7 +152,6 @@ impl<T: DatasetsManager> ArtifactStore<T> {
             log,
             reqwest_client: reqwest::ClientBuilder::new()
                 .connect_timeout(Duration::from_secs(15))
-                .read_timeout(Duration::from_secs(15))
                 .build()
                 .unwrap(),
             ledger_tx,
