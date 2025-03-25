@@ -782,7 +782,7 @@ impl From<BlueprintZoneConfig> for OmicronZoneConfig {
         } = z;
         Self {
             id,
-            filesystem_pool: Some(z.filesystem_pool),
+            filesystem_pool: Some(filesystem_pool),
             zone_type: zone_type.into(),
             image_source: image_source.into(),
         }

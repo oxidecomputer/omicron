@@ -1411,7 +1411,7 @@ mod test {
                 BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: ntp1_id,
-                    filesystem_pool: Some(random_zpool()),
+                    filesystem_pool: random_zpool(),
                     zone_type: BlueprintZoneType::BoundaryNtp(
                         blueprint_zone_type::BoundaryNtp {
                             address: "[::1]:80".parse().unwrap(),
@@ -1484,7 +1484,7 @@ mod test {
                 BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: ntp2_id,
-                    filesystem_pool: Some(random_zpool()),
+                    filesystem_pool: random_zpool(),
                     zone_type: BlueprintZoneType::BoundaryNtp(
                         blueprint_zone_type::BoundaryNtp {
                             address: "[::1]:80".parse().unwrap(),
@@ -1734,7 +1734,7 @@ mod test {
                 BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: nexus_id2,
-                    filesystem_pool: Some(random_zpool()),
+                    filesystem_pool: random_zpool(),
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
                             internal_address: "[::1]:80".parse().unwrap(),
@@ -2102,7 +2102,7 @@ mod test {
                 BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: nexus_id,
-                    filesystem_pool: Some(random_zpool()),
+                    filesystem_pool: random_zpool(),
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
                             internal_address: "[::1]:80".parse().unwrap(),

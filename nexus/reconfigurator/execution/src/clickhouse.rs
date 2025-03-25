@@ -407,7 +407,6 @@ mod test {
             let zone_config = BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: zone_id,
-                filesystem_pool: None,
                 filesystem_pool: ZpoolName::new_external(
                     ZpoolUuid::new_v4(),
                 ),

@@ -4014,10 +4014,7 @@ pub(crate) mod test {
 
         // Expunge the disk used by the Nexus zone.
         let input = {
-            let nexus_zpool = nexus_config
-                .filesystem_pool
-                .as_ref()
-                .expect("Nexus has a filesystem pool");
+            let nexus_zpool = &nexus_config.filesystem_pool;
             let mut builder = input.into_builder();
             builder
                 .sleds_mut()
@@ -4198,10 +4195,7 @@ pub(crate) mod test {
 
         // Expunge the disk used by the internal DNS zone.
         let input = {
-            let internal_dns_zpool = internal_dns_config
-                .filesystem_pool
-                .as_ref()
-                .expect("internal DNS zone has a filesystem pool");
+            let internal_dns_zpool = &internal_dns_config.filesystem_pool;
             let mut builder = input.into_builder();
             builder
                 .sleds_mut()
