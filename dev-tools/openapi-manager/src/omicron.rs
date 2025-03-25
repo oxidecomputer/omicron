@@ -98,7 +98,7 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
         },
         ManagedApiConfig {
             title: "Oxide Region API",
-            versions: Versions::new_lockstep(semver::Version::new(20250212,0,0)),
+            versions: Versions::new_lockstep(semver::Version::new(20250409,0,0)),
             description: "API for interacting with the Oxide control plane",
             boundary: ApiBoundary::External,
             api_description:
