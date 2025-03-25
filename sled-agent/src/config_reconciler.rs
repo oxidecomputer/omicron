@@ -17,12 +17,12 @@ use omicron_common::disk::DiskIdentity;
 use sled_storage::disk::RawDisk;
 use tokio::sync::watch;
 
+mod datasets;
 mod external_disks;
 mod internal_disks;
 mod key_requester;
 mod ledger;
 mod raw_disks;
-mod datasets;
 
 use self::key_requester::KeyManagerWaiter;
 

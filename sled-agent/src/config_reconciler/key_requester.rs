@@ -85,9 +85,8 @@ fn spawn_escrow_task<T: Send + 'static>(
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::*;
+    use std::time::Duration;
 
     #[tokio::test]
     async fn test_escrow_basic() {
