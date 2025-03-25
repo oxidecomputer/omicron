@@ -255,39 +255,45 @@ impl TryFrom<String> for WebhookGlob {
 
 impl WebhookGlob {
     fn regex_from_glob(glob: &str) -> Result<String, Error> {
-        let seg2regex = |segment: &str,
-                         regex: &mut String|
-         -> Result<(), Error> {
-            match segment {
-                // Match one segment (i.e. any number of segment characters)
-                "*" => regex.push_str("[^\\.]+"),
-                // Match any number of segments
-                "**" => regex.push_str(".+"),
-                "" => {
-                    return Err(Error::invalid_value(
-                        "event_class",
-                        "invalid event class {glob:?}: dot-delimited \
-                         event class segments must not be empty",
-                    ));
+        let seg2regex =
+            |segment: &str, regex: &mut String| -> Result<(), Error> {
+                match segment {
+                    // Match one segment (i.e. any number of segment characters)
+                    "*" => regex.push_str("[^\\.]+"),
+                    // Match any number of segments
+                    "**" => regex.push_str(".+"),
+                    "" => {
+                        return Err(Error::invalid_value(
+                            "event_class",
+                            format!(
+                                "invalid event class {glob:?}: dot-delimited \
+                                 event class segments must not be empty"
+                            ),
+                        ));
+                    }
+                    s if s.contains('*') => {
+                        return Err(Error::invalid_value(
+                            "event_class",
+                            format!(
+                                "invalid event class {glob:?}: all segments \
+                                 must be either '*', '**', or any sequence of \
+                                 non-'*' alphanumeric characters",
+                            ),
+                        ));
+                    }
+                    // Match the literal segment.
+                    s => regex.push_str(s),
                 }
-                s if s.contains('*') => {
-                    return Err(Error::invalid_value(
-                        "event_class",
-                        "invalid event class {glob:?}: all segments must be \
-                        either '*', '**', or any sequence of non-'*' characters",
-                    ));
-                }
-                // Match the literal segment.
-                s => regex.push_str(s),
-            }
-            Ok(())
-        };
+                Ok(())
+            };
 
         if glob.contains(char::is_whitespace) {
             return Err(Error::invalid_value(
                 "event_class",
-                "invalid event class {glob:?}: event classes do not contain \
-                 whitespace",
+                format!(
+                    "invalid event class {glob:?}: event classes do not \
+                     contain whitespace",
+                ),
             ));
         }
 
@@ -306,7 +312,7 @@ impl WebhookGlob {
         } else {
             return Err(Error::invalid_value(
                 "event_class",
-                "must not be empty",
+                "event class strings must not be empty",
             ));
         };
         regex.push('$'); // End anchor
