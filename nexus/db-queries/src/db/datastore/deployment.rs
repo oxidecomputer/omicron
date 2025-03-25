@@ -2583,9 +2583,7 @@ mod tests {
             BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: zone_id,
-                filesystem_pool: ZpoolName::new_external(
-                    ZpoolUuid::new_v4(),
-                ),
+                filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
                 zone_type: BlueprintZoneType::Nexus(
                     blueprint_zone_type::Nexus {
                         internal_address: SocketAddrV6::new(

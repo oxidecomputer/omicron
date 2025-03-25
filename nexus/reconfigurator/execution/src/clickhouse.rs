@@ -407,9 +407,7 @@ mod test {
             let zone_config = BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: zone_id,
-                filesystem_pool: ZpoolName::new_external(
-                    ZpoolUuid::new_v4(),
-                ),
+                filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
                 zone_type: BlueprintZoneType::ClickhouseKeeper(
                     blueprint_zone_type::ClickhouseKeeper {
                         address: SocketAddrV6::new(
@@ -445,9 +443,7 @@ mod test {
             let zone_config = BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: zone_id,
-                filesystem_pool: ZpoolName::new_external(
-                    ZpoolUuid::new_v4(),
-                ),
+                filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
                 zone_type: BlueprintZoneType::ClickhouseServer(
                     blueprint_zone_type::ClickhouseServer {
                         address: SocketAddrV6::new(
