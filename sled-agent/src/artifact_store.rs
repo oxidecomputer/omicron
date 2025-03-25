@@ -18,13 +18,14 @@
 //! Nexus and handled by the Sled Agent API.
 
 use std::future::Future;
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Write};
 use std::net::SocketAddrV6;
 use std::str::FromStr;
 use std::time::Duration;
 
+use atomicwrites::{AtomicFile, OverwriteBehavior};
+use bytes::Bytes;
 use camino::Utf8PathBuf;
-use camino_tempfile::{NamedUtf8TempFile, Utf8TempPath};
 use dropshot::{
     Body, ConfigDropshot, FreeformBody, HttpError, HttpResponseOk, Path,
     RequestContext, ServerBuilder, StreamingBody,
@@ -44,9 +45,9 @@ use sled_storage::error::Error as StorageError;
 use sled_storage::manager::StorageHandle;
 use slog::{Logger, error, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
-use tokio::fs::{File, OpenOptions};
-use tokio::io::AsyncWriteExt;
+use tokio::fs::File;
 use tokio::sync::{mpsc, oneshot, watch};
+use tokio::task::JoinSet;
 
 // These paths are defined under the artifact storage dataset. They
 // cannot conflict with any artifact paths because all artifact paths are
@@ -210,11 +211,17 @@ macro_rules! log_io_err {
     };
 }
 
-macro_rules! log_and_store {
-    ($last_error:expr, $log:expr, $verb:literal, $path:expr, $err:expr) => {{
+macro_rules! log_io_err_into {
+    ($log:expr, $verb:literal, $path:expr, $err:expr) => {{
         log_io_err!($log, $verb, $path, $err);
-        $last_error = Some(Error::File { verb: $verb, path: $path, err: $err });
+        Error::File { verb: $verb, path: $path, err: $err }
     }};
+}
+
+macro_rules! log_and_store {
+    ($last_error:expr, $log:expr, $verb:literal, $path:expr, $err:expr) => {
+        $last_error = Some(log_io_err_into!($log, $verb, $path, $err))
+    };
 }
 
 impl<T: DatasetsManager> ArtifactStore<T> {
@@ -342,11 +349,9 @@ impl<T: DatasetsManager> ArtifactStore<T> {
             return Err(Error::NoConfig);
         }
 
-        let mut files = Vec::new();
+        let mut writer = ArtifactWriter::new(self.log.clone(), sha256);
         let mut last_error = None;
-        let mut datasets = 0;
         for mountpoint in self.storage.artifact_storage_paths().await? {
-            datasets += 1;
             let temp_dir = mountpoint.join(TEMP_SUBDIR);
             if let Err(err) = tokio::fs::create_dir(&temp_dir).await {
                 if err.kind() != ErrorKind::AlreadyExists {
@@ -356,42 +361,12 @@ impl<T: DatasetsManager> ArtifactStore<T> {
                     continue;
                 }
             }
-
-            let temp_path =
-                Utf8TempPath::from_path(temp_dir.join(sha256.to_string()));
-            let file = match OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&temp_path)
-                .await
-            {
-                Ok(file) => file,
-                Err(err) => {
-                    if err.kind() == ErrorKind::AlreadyExists {
-                        return Err(Error::AlreadyInProgress { sha256 });
-                    } else {
-                        let path = temp_path.to_path_buf();
-                        log_and_store!(
-                            last_error, &self.log, "create", path, err
-                        );
-                        continue;
-                    }
-                }
-            };
-            let file = NamedUtf8TempFile::from_parts(file, temp_path);
-
-            files.push(Some((file, mountpoint)));
+            writer.add_path(mountpoint, temp_dir);
         }
-        if files.is_empty() {
+        if writer.write_tasks.is_empty() {
             Err(last_error.unwrap_or(Error::NoUpdateDataset))
         } else {
-            Ok(ArtifactWriter {
-                datasets,
-                hasher: Sha256::new(),
-                files,
-                log: self.log.clone(),
-                sha256,
-            })
+            Ok(writer)
         }
     }
 
@@ -404,7 +379,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
     ) -> Result<ArtifactPutResponse, Error> {
         self.writer(sha256, generation)
             .await?
-            .write_stream(body.into_stream().map_err(Error::Body))
+            .write_stream(Box::pin(body.into_stream().map_err(Error::Body)))
             .await
     }
 
@@ -635,141 +610,129 @@ impl DatasetsManager for StorageHandle {
 /// Abstraction that handles writing to several temporary files.
 #[derive(Debug)]
 struct ArtifactWriter {
-    datasets: usize,
-    files: Vec<Option<(NamedUtf8TempFile<File>, Utf8PathBuf)>>,
-    hasher: Sha256,
+    senders: Vec<mpsc::Sender<Bytes>>,
+    write_tasks: JoinSet<Result<(), Error>>,
     log: Logger,
     sha256: ArtifactHash,
 }
 
 impl ArtifactWriter {
-    /// Calls [`ArtifactWriter::write`] for each chunk in the stream, then
-    /// [`ArtifactWriter::finalize`]. See the documentation for these functions
-    /// for error handling information.
+    fn new(log: Logger, sha256: ArtifactHash) -> ArtifactWriter {
+        ArtifactWriter {
+            senders: Vec::new(),
+            write_tasks: JoinSet::new(),
+            log,
+            sha256,
+        }
+    }
+
+    fn add_path(&mut self, mountpoint: Utf8PathBuf, temp_dir: Utf8PathBuf) {
+        let log = self.log.clone();
+        let path = mountpoint.join(self.sha256.to_string());
+        let atomic_file = AtomicFile::new_with_tmpdir(
+            &path,
+            OverwriteBehavior::AllowOverwrite,
+            temp_dir,
+        );
+        let (tx, mut rx) = mpsc::channel(16); // TODO
+        let expected = self.sha256;
+        self.senders.push(tx);
+        self.write_tasks.spawn_blocking(move || {
+            let moved_path = path.clone();
+            atomic_file
+                .write(|file| {
+                    let mut hasher = Sha256::new();
+                    while let Some(bytes) = rx.blocking_recv() {
+                        hasher.update(&bytes);
+                        if let Err(err) = file.write_all(&bytes) {
+                            return Err(log_io_err_into!(
+                                log,
+                                "write to temporary file for",
+                                moved_path,
+                                err
+                            ));
+                        }
+                    }
+                    let actual = ArtifactHash(hasher.finalize().into());
+                    if expected == actual {
+                        Ok(())
+                    } else {
+                        Err(Error::HashMismatch { expected, actual })
+                    }
+                })
+                .map_err(|err| match err {
+                    atomicwrites::Error::Internal(err) => {
+                        log_io_err_into!(
+                            log,
+                            "create or persist temporary file for",
+                            path,
+                            err
+                        )
+                    }
+                    atomicwrites::Error::User(err) => err,
+                })
+        });
+    }
+
     async fn write_stream(
-        self,
-        stream: impl Stream<Item = Result<impl AsRef<[u8]>, Error>>,
+        mut self,
+        mut stream: impl Stream<Item = Result<Bytes, Error>> + Unpin,
     ) -> Result<ArtifactPutResponse, Error> {
-        let writer = stream
-            .try_fold(self, |mut writer, chunk| async {
-                writer.write(chunk).await?;
-                Ok(writer)
-            })
-            .await?;
-        writer.finalize().await
-    }
-
-    /// Write `chunk` to all temporary files.
-    ///
-    /// Errors in this method are considered non-fatal errors. All errors
-    /// are logged. If all files have failed, this method returns the most
-    /// recently-seen non-fatal error as a fatal error.
-    async fn write(&mut self, chunk: impl AsRef<[u8]>) -> Result<(), Error> {
-        self.hasher.update(&chunk);
-
-        let mut last_error = None;
-        for option in &mut self.files {
-            if let Some((mut file, mountpoint)) = option.take() {
-                match file.as_file_mut().write_all(chunk.as_ref()).await {
-                    Ok(()) => {
-                        *option = Some((file, mountpoint));
-                    }
-                    Err(err) => {
-                        let path = file.path().to_owned();
-                        log_and_store!(
-                            last_error, &self.log, "write to", path, err
-                        );
-                        // `file` and `final_path` are dropped here, cleaning up
-                        // the file
-                    }
+        let mut swap = Vec::with_capacity(self.senders.len());
+        while let Some(chunk) = stream.try_next().await? {
+            // Send the chunk to all the write tasks, pruning any that failed
+            // because the other end hung up.
+            for sender in self.senders.drain(..) {
+                if sender.send(chunk.clone()).await.is_ok() {
+                    swap.push(sender);
                 }
             }
-        }
-
-        self.files.retain(Option::is_some);
-        if self.files.is_empty() {
-            Err(last_error.unwrap_or(Error::NoUpdateDataset))
-        } else {
-            Ok(())
-        }
-    }
-
-    /// Rename all files to their final paths.
-    ///
-    /// Errors in this method are considered non-fatal errors. If all files have
-    /// failed in some way, the most recently-seen error is returned as a fatal
-    /// error.
-    async fn finalize(self) -> Result<ArtifactPutResponse, Error> {
-        let digest = self.hasher.finalize();
-        if digest.as_slice() != self.sha256.as_ref() {
-            return Err(Error::HashMismatch {
-                expected: self.sha256,
-                actual: ArtifactHash(digest.into()),
-            });
-        }
-
-        let mut last_error = None;
-        let mut successful_writes = 0;
-        for (mut file, mountpoint) in self.files.into_iter().flatten() {
-            // 1. fsync the temporary file.
-            if let Err(err) = file.as_file_mut().sync_all().await {
-                let path = file.path().to_owned();
-                log_and_store!(last_error, &self.log, "sync", path, err);
-                continue;
-            }
-            // 2. Open the parent directory so we can fsync it.
-            let parent_dir = match File::open(&mountpoint).await {
-                Ok(dir) => dir,
-                Err(err) => {
-                    log_and_store!(
-                        last_error, &self.log, "open", mountpoint, err
-                    );
-                    continue;
-                }
-            };
-            // 3. Rename the temporary file.
-            let final_path = mountpoint.join(self.sha256.to_string());
-            let moved_final_path = final_path.clone();
-            if let Err(err) = tokio::task::spawn_blocking(move || {
-                file.persist(&moved_final_path)
-            })
-            .await?
-            {
-                error!(
+            if swap.is_empty() {
+                // All tasks have hung up!
+                warn!(
                     &self.log,
-                    "Failed to rename temporary file";
-                    "error" => &err.error,
-                    "from" => err.file.path().as_str(),
-                    "to" => final_path.as_str(),
+                    "All writer tasks have hung up";
+                    "sha256" => &self.sha256.to_string()
                 );
-                last_error = Some(Error::FileRename {
-                    from: err.file.path().to_owned(),
-                    to: final_path,
-                    err: err.error,
-                });
-                continue;
+                break;
             }
-            // 4. fsync the parent directory.
-            if let Err(err) = parent_dir.sync_all().await {
-                log_and_store!(last_error, &self.log, "sync", mountpoint, err);
-                continue;
-            }
-
-            successful_writes += 1;
+            std::mem::swap(&mut self.senders, &mut swap);
         }
+        // Drop the senders so that tasks stop waiting for new chunks.
+        drop(self.senders);
+        // `swap` should be empty, but drop it early just in case.
+        debug_assert!(swap.is_empty());
+        drop(swap);
 
+        let datasets = self.write_tasks.len();
+        let mut successful_writes = 0;
+        let mut last_error = None;
+        while let Some(result) = self.write_tasks.join_next().await {
+            match result
+                .map_err(|err| {
+                    error!(
+                        &self.log,
+                        "Failed to join artifact write task";
+                        "error" => InlineErrorChain::new(&err),
+                        "sha256" => &self.sha256.to_string(),
+                    );
+                    Error::Join(err)
+                })
+                .and_then(|r| r)
+            {
+                Ok(()) => successful_writes += 1,
+                Err(err) => last_error = Some(err),
+            }
+        }
         if successful_writes > 0 {
             info!(
                 &self.log,
                 "Wrote artifact";
                 "sha256" => &self.sha256.to_string(),
-                "datasets" => self.datasets,
+                "datasets" => datasets,
                 "successful_writes" => successful_writes,
             );
-            Ok(ArtifactPutResponse {
-                datasets: self.datasets,
-                successful_writes,
-            })
+            Ok(ArtifactPutResponse { datasets, successful_writes })
         } else {
             Err(last_error.unwrap_or(Error::NoUpdateDataset))
         }
@@ -799,9 +762,6 @@ impl RepoDepotApi for RepoDepotImpl {
 
 #[derive(Debug, thiserror::Error, SlogInlineError)]
 pub(crate) enum Error {
-    #[error("Another task is already writing artifact {sha256}")]
-    AlreadyInProgress { sha256: ArtifactHash },
-
     #[error("Error while reading request body")]
     Body(dropshot::HttpError),
 
@@ -820,14 +780,6 @@ pub(crate) enum Error {
     File {
         verb: &'static str,
         path: Utf8PathBuf,
-        #[source]
-        err: std::io::Error,
-    },
-
-    #[error("Failed to rename `{from}` to `{to}`")]
-    FileRename {
-        from: Utf8PathBuf,
-        to: Utf8PathBuf,
         #[source]
         err: std::io::Error,
     },
@@ -854,7 +806,7 @@ pub(crate) enum Error {
     HashMismatch { expected: ArtifactHash, actual: ArtifactHash },
 
     #[error("Blocking task failed")]
-    Join(#[from] tokio::task::JoinError),
+    Join(#[source] tokio::task::JoinError),
 
     #[error("Failed to commit ledger")]
     LedgerCommit(#[from] omicron_common::ledger::Error),
@@ -894,13 +846,11 @@ impl From<Error> for HttpError {
                 dropshot::ClientErrorStatusCode::CONFLICT,
                 err.to_string(),
             ),
-            Error::AlreadyInProgress { .. } | Error::GenerationPut { .. } => {
-                HttpError::for_client_error(
-                    None,
-                    dropshot::ClientErrorStatusCode::CONFLICT,
-                    err.to_string(),
-                )
-            }
+            Error::GenerationPut { .. } => HttpError::for_client_error(
+                None,
+                dropshot::ClientErrorStatusCode::CONFLICT,
+                err.to_string(),
+            ),
 
             // 5xx errors: ensure the error chain is logged
             Error::Body(inner) => inner,
@@ -912,7 +862,6 @@ impl From<Error> for HttpError {
             }
             Error::DepotCopy { .. }
             | Error::File { .. }
-            | Error::FileRename { .. }
             | Error::Join(_)
             | Error::LedgerCommit(_)
             | Error::LedgerChannel => HttpError::for_internal_error(
@@ -995,7 +944,7 @@ mod test {
         }
     }
 
-    const TEST_ARTIFACT: &[u8] = b"I'm an artifact!\n";
+    const TEST_ARTIFACT: Bytes = Bytes::from_static(b"I'm an artifact!\n");
     const TEST_HASH: ArtifactHash = ArtifactHash(hex!(
         "ab3581cd62f6645518f61a8e4391af6c062d5d60111edb0e51b37bd84827f5b4"
     ));
@@ -1137,7 +1086,9 @@ mod test {
                 .writer(TEST_HASH, 1u32.into())
                 .await
                 .unwrap()
-                .write_stream(stream::once(async { Ok(TEST_ARTIFACT) }))
+                .write_stream(Box::pin(stream::once(async {
+                    Ok(TEST_ARTIFACT)
+                })))
                 .await
                 .unwrap();
             // list lists the file
@@ -1240,9 +1191,9 @@ mod test {
             .writer(TEST_HASH, 1u32.into())
             .await
             .unwrap()
-            .write_stream(stream::once(async {
-                Ok(b"This isn't right at all.")
-            }))
+            .write_stream(Box::pin(stream::once(async {
+                Ok(Bytes::from_static(b"This isn't right at all."))
+            })))
             .await
             .unwrap_err();
         match err {
