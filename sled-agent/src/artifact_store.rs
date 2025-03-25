@@ -927,8 +927,9 @@ mod test {
     use std::collections::BTreeSet;
     use std::sync::Arc;
 
+    use bytes::Bytes;
     use camino_tempfile::Utf8TempDir;
-    use futures::stream;
+    use futures::stream::{self, StreamExt};
     use hex_literal::hex;
     use omicron_common::disk::{
         DatasetConfig, DatasetKind, DatasetName, DatasetsConfig,
@@ -941,6 +942,7 @@ mod test {
     use sled_agent_api::ArtifactConfig;
     use sled_storage::error::Error as StorageError;
     use tokio::io::AsyncReadExt;
+    use tokio::sync::oneshot;
 
     use super::{ArtifactStore, DatasetsManager, Error};
 
@@ -1254,6 +1256,95 @@ mod test {
             store.get(TEST_HASH).await,
             Err(Error::NotFound { .. })
         ));
+
+        log.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn issue_7796() {
+        // Tests a specific multi-writer issue described in omicron#7796.
+        // Previously, creating a writer would create temporary files at
+        // `tmp/{sha256}`, returning an error if there was already a writer in
+        // progress. However a `tempfile::TempPath` was created before this and
+        // dropped when an error was returned, deleting the temporary file in
+        // use by the previous writer.
+        //
+        // One manifestation of the issue is:
+        // 1. Writer A is created and starts writing.
+        // 2. Writer B fails to create, returning `AlreadyInProgress`. This
+        //    triggers a logic error where a `TempPath` is dropped, unlinking
+        //    one of writer A's temporary files.
+        // 2. Writer C fails to create, returning `AlreadyInProgress`. Similarly
+        //    to writer B, this unlinks the other of writer A's temporary files.
+        // 3. Writer D is created successfully because writer A's files are no
+        //    longer present.
+        // 4. Writer A finishes and incorrectly persists writer C's incomplete
+        //    files.
+        // 5. Writer D finishes and fails because its files have already been
+        //    moved.
+        //
+        // We no longer use a temporary file with a known name or fail if
+        // another writer is already in progress, but it's good to have
+        // regression tests.
+
+        let log = test_setup_log("issue_7796");
+        let backend = TestBackend::new(2);
+        let store = ArtifactStore::new(&log.log, backend).await.unwrap();
+
+        let mut config = ArtifactConfig {
+            generation: 1u32.into(),
+            artifacts: BTreeSet::new(),
+        };
+        config.artifacts.insert(TEST_HASH);
+        store.put_config(config.clone()).await.unwrap();
+
+        // Start the first writer.
+        let first_writer = store.writer(TEST_HASH, 1u32.into()).await.unwrap();
+        // Start two additional writers and immediately drop them. Currently
+        // both are successful. In the omicron#7796 implementation both fail
+        // with `AlreadyInProgress`. Two writers are necessary to delete both of
+        // the temporary files from the first writer.
+        for _ in 0..2 {
+            let _ = store.writer(TEST_HASH, 1u32.into()).await;
+        }
+        // Start a fourth writer and partially write to it.
+        let fourth_writer = store.writer(TEST_HASH, 1u32.into()).await.unwrap();
+        let (tx, rx) = oneshot::channel();
+        let stream = stream::once(async { Ok(Bytes::from_static(b"I'm an ")) })
+            .chain(stream::once(async {
+                rx.await.unwrap();
+                Ok(Bytes::from_static(b"artifact!\n"))
+            }));
+        let handle =
+            tokio::task::spawn(fourth_writer.write_stream(Box::pin(stream)));
+        // Write to the first writer.
+        first_writer
+            .write_stream(Box::pin(stream::once(async { Ok(TEST_ARTIFACT) })))
+            .await
+            .unwrap();
+        // The artifacts should be complete.
+        for mountpoint in store.storage.artifact_storage_paths().await.unwrap()
+        {
+            assert_eq!(
+                tokio::fs::read(mountpoint.join(TEST_HASH.to_string()))
+                    .await
+                    .unwrap(),
+                TEST_ARTIFACT
+            );
+        }
+        // Allow the fourth writer to finish. It should not have failed.
+        tx.send(()).unwrap();
+        handle.await.unwrap().unwrap();
+        // The artifacts should still be complete.
+        for mountpoint in store.storage.artifact_storage_paths().await.unwrap()
+        {
+            assert_eq!(
+                tokio::fs::read(mountpoint.join(TEST_HASH.to_string()))
+                    .await
+                    .unwrap(),
+                TEST_ARTIFACT
+            );
+        }
 
         log.cleanup_successful();
     }
