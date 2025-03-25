@@ -199,6 +199,15 @@ impl WebhookSubscriptionKind {
                 "must not be empty",
             ));
         }
+        if value.contains(char::is_whitespace) {
+            return Err(Error::invalid_value(
+                "event_class",
+                format!(
+                    "invalid event class {value:?}: event classes do not \
+                     contain whitespace",
+                ),
+            ));
+        }
 
         if value.contains('*') {
             let regex = WebhookGlob::regex_from_glob(&value)?;
@@ -208,6 +217,7 @@ impl WebhookSubscriptionKind {
         let class = value.parse().map_err(|e: EventClassParseError| {
             Error::invalid_value("event_class", e.to_string())
         })?;
+
         Ok(Self::Exact(class))
     }
 
@@ -287,16 +297,6 @@ impl WebhookGlob {
                 Ok(())
             };
 
-        if glob.contains(char::is_whitespace) {
-            return Err(Error::invalid_value(
-                "event_class",
-                format!(
-                    "invalid event class {glob:?}: event classes do not \
-                     contain whitespace",
-                ),
-            ));
-        }
-
         // The subscription's regex will always be at least as long as the event
         // class glob, plus start and end anchors.
         let mut regex = String::with_capacity(glob.len());
@@ -351,19 +351,20 @@ impl WebhookRxSubscription {
 mod test {
     use super::*;
 
+    const GLOB_CASES: &[(&str, &str)] = &[
+        ("foo.*.bar", "^foo\\.[^\\.]+\\.bar$"),
+        ("foo.*", "^foo\\.[^\\.]+$"),
+        ("*.foo", "^[^\\.]+\\.foo$"),
+        ("foo.**.bar", "^foo\\..+\\.bar$"),
+        ("foo.**", "^foo\\..+$"),
+        ("foo_bar.*.baz", "^foo_bar\\.[^\\.]+\\.baz$"),
+    ];
+
     #[test]
     fn test_event_class_glob_to_regex() {
-        const CASES: &[(&str, &str)] = &[
-            ("foo.bar", "^foo\\.bar$"),
-            ("foo.*.bar", "^foo\\.[^\\.]+\\.bar$"),
-            ("foo.*", "^foo\\.[^\\.]+$"),
-            ("*.foo", "^[^\\.]+\\.foo$"),
-            ("foo.**.bar", "^foo\\..+\\.bar$"),
-            ("foo.**", "^foo\\..+$"),
-            ("foo_bar.baz", "^foo_bar\\.baz$"),
-            ("foo_bar.*.baz", "^foo_bar\\.[^\\.]+\\.baz$"),
-        ];
-        for (class, regex) in CASES {
+        const NON_GLOB_CASES: &[(&str, &str)] =
+            &[("foo.bar", "^foo\\.bar$"), ("foo_bar.baz", "^foo_bar\\.baz$")];
+        for (class, regex) in GLOB_CASES.iter().chain(NON_GLOB_CASES.iter()) {
             let glob = match WebhookGlob::from_str(dbg!(class)) {
                 Ok(glob) => glob,
                 Err(error) => panic!(
@@ -380,7 +381,55 @@ mod test {
     }
 
     #[test]
-    fn test_invalid_event_class_globs() {
+    fn test_valid_subscription_parsing() {
+        const EXACT_CASES: &[&str] =
+            &["test.foo", "test.foo.bar", "test.foo.baz"];
+        for input in EXACT_CASES {
+            let parsed = WebhookSubscriptionKind::new(dbg!(input).to_string());
+
+            match dbg!(parsed) {
+                Ok(WebhookSubscriptionKind::Exact(exact)) => {
+                    assert_eq!(exact.as_str(), *input)
+                }
+                Ok(WebhookSubscriptionKind::Glob(glob)) => panic!(
+                    "expected {input:?} to be an exact subscription, but it \
+                     parsed as glob {glob:?}",
+                ),
+                Err(e) => panic!(
+                    "expected {input:?} to be a valid event class, but it \
+                     failed to parse: {e}"
+                ),
+            }
+        }
+
+        for (input, _) in GLOB_CASES {
+            let parsed = WebhookSubscriptionKind::new(dbg!(input).to_string());
+
+            match dbg!(parsed) {
+                Ok(WebhookSubscriptionKind::Exact(exact)) => {
+                    panic!(
+                        "expected {input:?} to be a glob subscription, but it \
+                         parsed as an exact subscription {exact:?}",
+                    );
+                }
+                Ok(WebhookSubscriptionKind::Glob(glob)) => {
+                    match regex::Regex::new(&glob.regex) {
+                        Ok(_) => {}
+                        Err(e) => panic!(
+                            "glob {glob:?} produced an invalid regex: {e}"
+                        ),
+                    }
+                }
+                Err(e) => panic!(
+                    "expected {input:?} to be a valid event class, but it \
+                     failed to parse: {e}"
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn test_invalid_subscription_parsing() {
         const CASES: &[&str] = &[
             "foo..bar",
             ".foo.bar",
@@ -395,9 +444,9 @@ mod test {
             " .*",
         ];
         for input in CASES {
-            match WebhookGlob::from_str(dbg!(input)) {
+            match WebhookSubscriptionKind::new(dbg!(input).to_string()) {
                 Ok(glob) => panic!(
-                    "invalid event class glob {input:?} was parsed \
+                    "invalid event class {input:?} was parsed \
                      successfully as {glob:?}"
                 ),
                 Err(error) => {

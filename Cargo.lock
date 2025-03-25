@@ -5844,6 +5844,7 @@ dependencies = [
  "pq-sys",
  "rand 0.8.5",
  "ref-cast",
+ "regex",
  "schemars",
  "semver 1.0.25",
  "serde",
