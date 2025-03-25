@@ -311,114 +311,6 @@ impl Nexus {
         let (tuf_artifact_replication_tx, tuf_artifact_replication_rx) =
             mpsc::channel(16);
 
-        let client_state = dpd_client::ClientState {
-            tag: String::from("nexus"),
-            log: log.new(o!(
-                "component" => "DpdClient"
-            )),
-        };
-
-        let mut dpd_clients: HashMap<SwitchLocation, Arc<dpd_client::Client>> =
-            HashMap::new();
-
-        let mut mg_clients: HashMap<
-            SwitchLocation,
-            Arc<mg_admin_client::Client>,
-        > = HashMap::new();
-
-        // Currently static dpd configuration mappings are still required for
-        // testing
-        for (location, config) in &config.pkg.dendrite {
-            let address = config.address.ip().to_string();
-            let port = config.address.port();
-            let dpd_client = dpd_client::Client::new(
-                &format!("http://[{address}]:{port}"),
-                client_state.clone(),
-            );
-            dpd_clients.insert(*location, Arc::new(dpd_client));
-        }
-        for (location, config) in &config.pkg.mgd {
-            let mg_client = mg_admin_client::Client::new(
-                &format!("http://{}", config.address),
-                log.clone(),
-            );
-            mg_clients.insert(*location, Arc::new(mg_client));
-        }
-        if config.pkg.dendrite.is_empty() {
-            loop {
-                let result = resolver
-                    .lookup_all_ipv6(ServiceName::Dendrite)
-                    .await
-                    .map_err(|e| {
-                        format!("Cannot lookup Dendrite addresses: {e}")
-                    });
-                match result {
-                    Ok(addrs) => {
-                        let mappings = map_switch_zone_addrs(
-                            &log.new(o!("component" => "Nexus")),
-                            addrs,
-                        )
-                        .await;
-                        for (location, addr) in &mappings {
-                            let port = DENDRITE_PORT;
-                            let dpd_client = dpd_client::Client::new(
-                                &format!("http://[{addr}]:{port}"),
-                                client_state.clone(),
-                            );
-                            dpd_clients.insert(*location, Arc::new(dpd_client));
-                        }
-                        break;
-                    }
-                    Err(e) => {
-                        warn!(log, "Failed to lookup Dendrite address: {e}");
-                        tokio::time::sleep(std::time::Duration::from_secs(1))
-                            .await;
-                    }
-                }
-            }
-        }
-        if config.pkg.mgd.is_empty() {
-            loop {
-                let result = resolver
-                    // TODO this should be ServiceName::Mgd, but in the upgrade
-                    //      path, that does not exist because RSS has not
-                    //      created it. So we just piggyback on Dendrite's SRV
-                    //      record.
-                    .lookup_all_ipv6(ServiceName::Dendrite)
-                    .await
-                    .map_err(|e| format!("Cannot lookup mgd addresses: {e}"));
-                match result {
-                    Ok(addrs) => {
-                        let mappings = map_switch_zone_addrs(
-                            &log.new(o!("component" => "Nexus")),
-                            addrs,
-                        )
-                        .await;
-                        for (location, addr) in &mappings {
-                            let port = MGD_PORT;
-                            let mgd_client = mg_admin_client::Client::new(
-                                &format!(
-                                    "http://{}",
-                                    &std::net::SocketAddr::new(
-                                        (*addr).into(),
-                                        port,
-                                    )
-                                ),
-                                log.clone(),
-                            );
-                            mg_clients.insert(*location, Arc::new(mgd_client));
-                        }
-                        break;
-                    }
-                    Err(e) => {
-                        warn!(log, "Failed to lookup mgd address: {e}");
-                        tokio::time::sleep(std::time::Duration::from_secs(1))
-                            .await;
-                    }
-                }
-            }
-        }
-
         let reqwest_client = reqwest::ClientBuilder::new()
             .connect_timeout(std::time::Duration::from_secs(15))
             .timeout(std::time::Duration::from_secs(15))
@@ -1052,6 +944,22 @@ impl Nexus {
             ))
         })
     }
+
+    /// A `service` with `address` is considered gone if it is not present in a
+    /// DNS lookup of all addresses for that service.
+    async fn is_internal_service_gone(
+        &self,
+        service: ServiceName,
+        address: SocketAddrV6,
+    ) -> Result<bool, Error> {
+        match self.resolver().lookup_all_socket_v6(service).await {
+            Ok(entries) => Ok(!entries.contains(&address)),
+
+            Err(err) => {
+                return Err(Error::internal_error(&format!("{err}")));
+            }
+        }
+    }
 }
 
 /// For unimplemented endpoints, indicates whether the resource identified
@@ -1122,21 +1030,35 @@ pub(crate) async fn lldpd_clients(
     Ok(clients)
 }
 
+// Look up Dendrite addresses in DNS then determine the switch location for
+// each address DNS returns.  If we fail to lookup ServiceName::Dendrite, we
+// return error, otherwise we keep looping until we can determine the switch
+// location of all addresses returned to us from the lookup.
 async fn switch_zone_address_mappings(
     resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
 ) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
-    let switch_zone_addresses = match resolver
-        .lookup_all_ipv6(ServiceName::Dendrite)
-        .await
-    {
-        Ok(addrs) => addrs,
-        Err(e) => {
-            error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
-            return Err(e.to_string());
+    loop {
+        let switch_zone_addresses = match resolver
+            .lookup_all_ipv6(ServiceName::Dendrite)
+            .await
+        {
+            Ok(addrs) => addrs,
+            Err(e) => {
+                error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
+                return Err(e.to_string());
+            }
+        };
+        match map_switch_zone_addrs(&log, switch_zone_addresses).await {
+            Ok(mappings) => {
+                return Ok(mappings);
+            }
+            Err(e) => {
+                warn!(log, "Failed to map switch zone addr: {e}, retrying");
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
         }
-    };
-    Ok(map_switch_zone_addrs(&log, switch_zone_addresses).await)
+    }
 }
 
 // TODO: #3596 Allow updating of Nexus from `handoff_to_nexus()`
@@ -1150,7 +1072,7 @@ async fn switch_zone_address_mappings(
 async fn map_switch_zone_addrs(
     log: &Logger,
     switch_zone_addresses: Vec<Ipv6Addr>,
-) -> HashMap<SwitchLocation, Ipv6Addr> {
+) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
     use gateway_client::Client as MgsClient;
     info!(log, "Determining switch slots managed by switch zones");
     let mut switch_zone_addrs = HashMap::new();
@@ -1161,28 +1083,25 @@ async fn map_switch_zone_addrs(
         );
 
         info!(log, "determining switch slot managed by dendrite zone"; "zone_address" => #?addr);
-        // TODO: #3599 Use retry function instead of looping on a fixed timer
-        let switch_slot = loop {
-            match mgs_client.sp_local_switch_id().await {
-                Ok(switch) => {
-                    info!(
-                        log,
-                        "identified switch slot for dendrite zone";
-                        "slot" => #?switch,
-                        "zone_address" => #?addr
-                    );
-                    break switch.slot;
-                }
-                Err(e) => {
-                    warn!(
-                        log,
-                        "failed to identify switch slot for dendrite, will retry in 2 seconds";
-                        "zone_address" => #?addr,
-                        "reason" => #?e
-                    );
-                }
+        let switch_slot = match mgs_client.sp_local_switch_id().await {
+            Ok(switch) => {
+                info!(
+                    log,
+                    "identified switch slot for dendrite zone";
+                    "slot" => #?switch,
+                    "zone_address" => #?addr
+                );
+                switch.slot
             }
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            Err(e) => {
+                warn!(
+                    log,
+                    "failed to identify switch slot for dendrite";
+                    "zone_address" => #?addr,
+                    "reason" => #?e
+                );
+                return Err(e.to_string());
+            }
         };
 
         match switch_slot {
@@ -1205,5 +1124,5 @@ async fn map_switch_zone_addrs(
         "completed mapping dendrite zones to switch slots";
         "mappings" => #?switch_zone_addrs
     );
-    switch_zone_addrs
+    Ok(switch_zone_addrs)
 }

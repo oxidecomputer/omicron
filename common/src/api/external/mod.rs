@@ -715,7 +715,6 @@ impl From<ByteCount> for i64 {
     Ord,
     PartialEq,
     PartialOrd,
-    Serialize,
     Diffable,
 )]
 #[daft(leaf)]
@@ -763,6 +762,17 @@ impl<'de> Deserialize<'de> for Generation {
                 &"an integer between 0 and 9223372036854775807",
             )
         })
+    }
+}
+
+// This is the equivalent of applying `#[serde(transparent)]`, but that has a
+// side effect of changing the JsonSchema derive to no longer emit a schema.
+impl Serialize for Generation {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.serialize(serializer)
     }
 }
 
@@ -818,6 +828,17 @@ impl FromStr for Generation {
         // either.
         let _ = i64::from_str(s)?;
         Ok(Generation(u64::from_str(s)?))
+    }
+}
+
+impl slog::Value for Generation {
+    fn serialize(
+        &self,
+        _rec: &slog::Record,
+        key: slog::Key,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        serializer.emit_u64(key, self.0)
     }
 }
 
@@ -1066,6 +1087,7 @@ pub struct IdentityMetadataUpdateParams {
     Debug,
     Deserialize,
     Eq,
+    Hash,
     Ord,
     PartialEq,
     PartialOrd,
@@ -1320,14 +1342,20 @@ pub enum FailureDomain {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum AffinityGroupMember {
-    /// An instance belonging to this group, identified by UUID.
-    Instance(InstanceUuid),
+    /// An instance belonging to this group
+    Instance { id: InstanceUuid, name: Name, run_state: InstanceState },
 }
 
-impl SimpleIdentity for AffinityGroupMember {
+impl SimpleIdentityOrName for AffinityGroupMember {
     fn id(&self) -> Uuid {
         match self {
-            AffinityGroupMember::Instance(id) => *id.as_untyped_uuid(),
+            AffinityGroupMember::Instance { id, .. } => *id.as_untyped_uuid(),
+        }
+    }
+
+    fn name(&self) -> &Name {
+        match self {
+            AffinityGroupMember::Instance { name, .. } => name,
         }
     }
 }
@@ -1339,14 +1367,22 @@ impl SimpleIdentity for AffinityGroupMember {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum AntiAffinityGroupMember {
-    /// An instance belonging to this group, identified by UUID.
-    Instance(InstanceUuid),
+    /// An instance belonging to this group
+    Instance { id: InstanceUuid, name: Name, run_state: InstanceState },
 }
 
-impl SimpleIdentity for AntiAffinityGroupMember {
+impl SimpleIdentityOrName for AntiAffinityGroupMember {
     fn id(&self) -> Uuid {
         match self {
-            AntiAffinityGroupMember::Instance(id) => *id.as_untyped_uuid(),
+            AntiAffinityGroupMember::Instance { id, .. } => {
+                *id.as_untyped_uuid()
+            }
+        }
+    }
+
+    fn name(&self) -> &Name {
+        match self {
+            AntiAffinityGroupMember::Instance { name, .. } => name,
         }
     }
 }
@@ -3091,10 +3127,10 @@ pub enum BfdMode {
 /// A description of an uploaded TUF repository.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct TufRepoDescription {
-    // Information about the repository.
+    /// Information about the repository.
     pub repo: TufRepoMeta,
 
-    // Information about the artifacts present in the repository.
+    /// Information about the artifacts present in the repository.
     pub artifacts: Vec<TufArtifactMeta>,
 }
 
@@ -3107,7 +3143,7 @@ impl TufRepoDescription {
 
 /// Metadata about a TUF repository.
 ///
-/// Found within a [`TufRepoDescription`].
+/// Found within a `TufRepoDescription`.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct TufRepoMeta {
     /// The hash of the repository.
@@ -3136,7 +3172,7 @@ pub struct TufRepoMeta {
 
 /// Metadata about an individual TUF artifact.
 ///
-/// Found within a [`TufRepoDescription`].
+/// Found within a `TufRepoDescription`.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct TufArtifactMeta {
     /// The artifact ID.
@@ -3162,7 +3198,7 @@ pub struct TufRepoInsertResponse {
 
 /// Status of a TUF repo import.
 ///
-/// Part of [`TufRepoInsertResponse`].
+/// Part of `TufRepoInsertResponse`.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
 )]

@@ -16,27 +16,6 @@ use omicron_common::api::external::{
 use semver::Version;
 use update_common::artifacts::{ArtifactsWithPlan, ControlPlaneZonesMode};
 
-mod common_sp_update;
-mod host_phase1_updater;
-mod mgs_clients;
-mod rot_updater;
-mod sp_updater;
-
-pub use common_sp_update::SpComponentUpdateError;
-pub use host_phase1_updater::HostPhase1Updater;
-pub use mgs_clients::MgsClients;
-pub use rot_updater::RotUpdater;
-pub use sp_updater::SpUpdater;
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum UpdateProgress {
-    Started,
-    Preparing { progress: Option<f64> },
-    InProgress { progress: Option<f64> },
-    Complete,
-    Failed(String),
-}
-
 impl super::Nexus {
     pub(crate) async fn updates_put_repository(
         &self,
@@ -62,12 +41,9 @@ impl super::Nexus {
         .map_err(|error| error.to_http_error())?;
 
         // Now store the artifacts in the database.
-        let tuf_repo_description = TufRepoDescription::from_external(
-            artifacts_with_plan.description().clone(),
-        );
         let response = self
             .db_datastore
-            .update_tuf_repo_insert(opctx, tuf_repo_description)
+            .update_tuf_repo_insert(opctx, artifacts_with_plan.description())
             .await
             .map_err(HttpError::from)?;
 

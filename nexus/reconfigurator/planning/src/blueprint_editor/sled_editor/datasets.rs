@@ -4,14 +4,11 @@
 
 use crate::blueprint_builder::EditCounts;
 use crate::planner::SledPlannerRng;
+use id_map::IdMap;
 use illumos_utils::zpool::ZpoolName;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
-use nexus_types::deployment::BlueprintDatasetFilter;
-use nexus_types::deployment::BlueprintDatasetsConfig;
-use nexus_types::deployment::id_map::{self, IdMap};
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Generation;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
@@ -118,7 +115,7 @@ impl PartialDatasetConfig {
 
 #[derive(Debug)]
 pub(super) struct DatasetsEditor {
-    config: BlueprintDatasetsConfig,
+    datasets: IdMap<BlueprintDatasetConfig>,
     // Cache of _in service only_ datasets, identified by (zpool, kind).
     in_service_by_zpool_and_kind:
         BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, DatasetUuid>>,
@@ -127,10 +124,10 @@ pub(super) struct DatasetsEditor {
 
 impl DatasetsEditor {
     pub fn new(
-        config: BlueprintDatasetsConfig,
+        datasets: IdMap<BlueprintDatasetConfig>,
     ) -> Result<Self, MultipleDatasetsOfKind> {
         let mut in_service_by_zpool_and_kind = BTreeMap::new();
-        for dataset in config.datasets.iter() {
+        for dataset in datasets.iter() {
             match dataset.disposition {
                 BlueprintDatasetDisposition::InService => {
                     let by_kind: &mut BTreeMap<_, _> =
@@ -155,7 +152,7 @@ impl DatasetsEditor {
             }
         }
         Ok(Self {
-            config,
+            datasets,
             in_service_by_zpool_and_kind,
             counts: EditCounts::zeroes(),
         })
@@ -163,42 +160,34 @@ impl DatasetsEditor {
 
     pub fn empty() -> Self {
         Self {
-            config: BlueprintDatasetsConfig {
-                generation: Generation::new(),
-                datasets: IdMap::new(),
-            },
+            datasets: IdMap::new(),
             in_service_by_zpool_and_kind: BTreeMap::new(),
             counts: EditCounts::zeroes(),
         }
     }
 
-    pub fn finalize(self) -> (BlueprintDatasetsConfig, EditCounts) {
-        let mut config = self.config;
-        if self.counts.has_nonzero_counts() {
-            config.generation = config.generation.next();
-        }
-        (config, self.counts)
+    pub fn finalize(self) -> (IdMap<BlueprintDatasetConfig>, EditCounts) {
+        (self.datasets, self.counts)
     }
 
     pub fn edit_counts(&self) -> EditCounts {
         self.counts
     }
 
-    pub fn datasets(
+    pub fn datasets<F>(
         &self,
-        filter: BlueprintDatasetFilter,
-    ) -> impl Iterator<Item = &BlueprintDatasetConfig> {
-        self.config
-            .datasets
-            .iter()
-            .filter(move |dataset| dataset.disposition.matches(filter))
+        mut filter: F,
+    ) -> impl Iterator<Item = &BlueprintDatasetConfig>
+    where
+        F: FnMut(BlueprintDatasetDisposition) -> bool,
+    {
+        self.datasets.iter().filter(move |dataset| filter(dataset.disposition))
     }
 
     // Private method; panics if given an ID that isn't present in
     // `self.config.datasets`. Callers must ensure the ID is valid.
     fn expunge_by_known_valid_id(&mut self, id: DatasetUuid) -> bool {
         let mut dataset = self
-            .config
             .datasets
             .get_mut(&id)
             .expect("expunge_impl called with invalid ID");
@@ -308,7 +297,7 @@ impl DatasetsEditor {
         };
 
         // Add or update our config with this new dataset info.
-        match self.config.datasets.entry(dataset.id) {
+        match self.datasets.entry(dataset.id) {
             id_map::Entry::Vacant(slot) => {
                 self.in_service_by_zpool_and_kind
                     .entry(dataset.pool.id())
@@ -363,7 +352,7 @@ mod tests {
             .map(|kind| (BlueprintDatasetDisposition::Expunged, kind))
     }
 
-    fn build_test_config<I, J>(values: I) -> BlueprintDatasetsConfig
+    fn build_test_config<I, J>(values: I) -> IdMap<BlueprintDatasetConfig>
     where
         I: Iterator<Item = J>,
         J: Iterator<Item = (BlueprintDatasetDisposition, DatasetKind)>,
@@ -396,11 +385,7 @@ mod tests {
                 assert!(prev.is_none(), "no duplicate dataset IDs");
             }
         }
-        let mut generation = Generation::new();
-        if dataset_id_index > 0 {
-            generation = generation.next();
-        }
-        BlueprintDatasetsConfig { generation, datasets }
+        datasets
     }
 
     #[derive(Debug, Arbitrary)]
@@ -416,7 +401,7 @@ mod tests {
     }
 
     impl ZpoolsWithInServiceDatasets {
-        fn into_config(self) -> BlueprintDatasetsConfig {
+        fn into_config(self) -> IdMap<BlueprintDatasetConfig> {
             build_test_config(
                 self.by_zpool
                     .into_iter()
@@ -438,7 +423,7 @@ mod tests {
     }
 
     impl ZpoolsWithExpungedDatasets {
-        fn into_config(self) -> BlueprintDatasetsConfig {
+        fn into_config(self) -> IdMap<BlueprintDatasetConfig> {
             build_test_config(
                 self.by_zpool
                     .into_iter()
@@ -457,7 +442,7 @@ mod tests {
     }
 
     impl ZpoolsWithMixedDatasets {
-        fn into_config(self) -> BlueprintDatasetsConfig {
+        fn into_config(self) -> IdMap<BlueprintDatasetConfig> {
             build_test_config(self.by_zpool.into_iter().map(
                 |(in_service, expunged)| {
                     all_in_service(in_service.kinds)
@@ -486,9 +471,9 @@ mod tests {
         initial: ZpoolsWithMixedDatasets,
         rng_seed: u32,
     ) {
-        let config = initial.into_config();
+        let datasets = initial.into_config();
         let mut editor =
-            DatasetsEditor::new(config.clone()).expect("built editor");
+            DatasetsEditor::new(datasets.clone()).expect("built editor");
 
         let mut rng = PlannerRng::from_seed((
             rng_seed,
@@ -508,9 +493,10 @@ mod tests {
         // 1. Expunge that dataset
         // 2. Add a new dataset of the same kind
         // 3. Ensure the new dataset ID is freshly-generated
-        for dataset in config.datasets.iter().filter(|dataset| {
-            dataset.disposition.matches(BlueprintDatasetFilter::InService)
-        }) {
+        for dataset in datasets
+            .iter()
+            .filter(|dataset| dataset.disposition.is_in_service())
+        {
             editor
                 .expunge(&dataset.pool.id(), &dataset.kind)
                 .expect("expunged dataset");
@@ -535,14 +521,13 @@ mod tests {
         initial: ZpoolsWithMixedDatasets,
         rng_seed: u32,
     ) {
-        let config = initial.into_config();
-        let all_zpools = config
-            .datasets
+        let datasets = initial.into_config();
+        let all_zpools = datasets
             .iter()
             .map(|dataset| dataset.pool.id())
             .collect::<BTreeSet<_>>();
         let mut editor =
-            DatasetsEditor::new(config.clone()).expect("built editor");
+            DatasetsEditor::new(datasets.clone()).expect("built editor");
 
         let mut rng = PlannerRng::from_seed((
             rng_seed,
@@ -563,7 +548,7 @@ mod tests {
             // There should no longer be any in-service datasets on this zpool.
             assert!(
                 !editor
-                    .datasets(BlueprintDatasetFilter::InService)
+                    .datasets(BlueprintDatasetDisposition::is_in_service)
                     .any(|dataset| dataset.pool.id() == *zpool_id),
                 "in-service dataset remains after expunging zpool"
             );
@@ -573,9 +558,10 @@ mod tests {
         //
         // 1. Add a new dataset of the same kind
         // 2. Ensure the new dataset ID is freshly-generated
-        for dataset in config.datasets.iter().filter(|dataset| {
-            dataset.disposition.matches(BlueprintDatasetFilter::InService)
-        }) {
+        for dataset in datasets
+            .iter()
+            .filter(|dataset| dataset.disposition.is_in_service())
+        {
             let new_dataset = PartialDatasetConfig {
                 name: DatasetName::new(
                     dataset.pool.clone(),

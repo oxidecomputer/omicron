@@ -20,6 +20,7 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use futures::FutureExt;
+use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
@@ -231,9 +232,7 @@ impl DataStore {
 
         // For this blueprint: The set of expunged debug datasets
         let invalid_datasets = blueprint
-            .all_omicron_datasets(
-                nexus_types::deployment::BlueprintDatasetFilter::Expunged,
-            )
+            .all_omicron_datasets(BlueprintDatasetDisposition::is_expunged)
             .filter_map(|(_sled_id, dataset_config)| {
                 if matches!(
                     dataset_config.kind,
@@ -479,8 +478,6 @@ mod test {
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::example::SimRngState;
     use nexus_types::deployment::Blueprint;
-    use nexus_types::deployment::BlueprintDatasetDisposition;
-    use nexus_types::deployment::BlueprintDatasetFilter;
     use nexus_types::deployment::BlueprintZoneType;
     use omicron_common::api::external::LookupType;
     use omicron_common::api::internal::shared::DatasetKind::Debug as DebugDatasetKind;
@@ -531,14 +528,11 @@ mod test {
             let mut sleds = vec![];
             for (sled, config) in &blueprint.sleds {
                 let pools = config
-                    .datasets_config
                     .datasets
                     .iter()
                     .filter_map(|dataset| {
                         if !matches!(dataset.kind, DebugDatasetKind)
-                            || !dataset
-                                .disposition
-                                .matches(BlueprintDatasetFilter::InService)
+                            || !dataset.disposition.is_in_service()
                         {
                             return None;
                         };
@@ -933,7 +927,7 @@ mod test {
             .values()
             .flat_map(|sled_config| {
                 let mut nexus_zones = vec![];
-                for zone in &sled_config.zones_config.zones {
+                for zone in &sled_config.zones {
                     if matches!(zone.zone_type, BlueprintZoneType::Nexus(_))
                         && zone.disposition.is_in_service()
                     {
@@ -945,17 +939,16 @@ mod test {
             .collect()
     }
 
-    fn get_debug_datasets_from_blueprint(
+    fn get_in_service_debug_datasets_from_blueprint(
         bp: &Blueprint,
-        filter: BlueprintDatasetFilter,
     ) -> Vec<DatasetUuid> {
         bp.sleds
             .values()
             .flat_map(|sled_config| {
                 let mut debug_datasets = vec![];
-                for dataset in sled_config.datasets_config.datasets.iter() {
+                for dataset in sled_config.datasets.iter() {
                     if matches!(dataset.kind, DebugDatasetKind)
-                        && dataset.disposition.matches(filter)
+                        && dataset.disposition.is_in_service()
                     {
                         debug_datasets.push(dataset.id);
                     }
@@ -967,7 +960,7 @@ mod test {
 
     fn expunge_dataset_for_bundle(bp: &mut Blueprint, bundle: &SupportBundle) {
         for sled in bp.sleds.values_mut() {
-            for mut dataset in sled.datasets_config.datasets.iter_mut() {
+            for mut dataset in sled.datasets.iter_mut() {
                 if dataset.id == bundle.dataset_id.into() {
                     dataset.disposition = BlueprintDatasetDisposition::Expunged;
                 }
@@ -977,7 +970,7 @@ mod test {
 
     fn expunge_nexus_for_bundle(bp: &mut Blueprint, bundle: &SupportBundle) {
         for sled in bp.sleds.values_mut() {
-            for mut zone in &mut sled.zones_config.zones {
+            for mut zone in &mut sled.zones {
                 if zone.id == bundle.assigned_nexus.unwrap().into() {
                     zone.disposition = BlueprintZoneDisposition::Expunged {
                         as_of_generation: *Generation::new(),
@@ -1026,10 +1019,7 @@ mod test {
             .get(0)
             .map(|id| *id)
             .expect("There should be a Nexus in the example blueprint");
-        let debug_datasets = get_debug_datasets_from_blueprint(
-            &bp1,
-            BlueprintDatasetFilter::InService,
-        );
+        let debug_datasets = get_in_service_debug_datasets_from_blueprint(&bp1);
         assert!(!debug_datasets.is_empty());
 
         // When we create a bundle, it should exist on a dataset provisioned by
@@ -1134,10 +1124,7 @@ mod test {
             .get(0)
             .map(|id| *id)
             .expect("There should be a Nexus in the example blueprint");
-        let debug_datasets = get_debug_datasets_from_blueprint(
-            &bp1,
-            BlueprintDatasetFilter::InService,
-        );
+        let debug_datasets = get_in_service_debug_datasets_from_blueprint(&bp1);
         assert!(!debug_datasets.is_empty());
 
         // When we create a bundle, it should exist on a dataset provisioned by
@@ -1238,10 +1225,7 @@ mod test {
 
         // Extract Nexus and Dataset information from the generated blueprint.
         let nexus_ids = get_in_service_nexuses_from_blueprint(&bp1);
-        let debug_datasets = get_debug_datasets_from_blueprint(
-            &bp1,
-            BlueprintDatasetFilter::InService,
-        );
+        let debug_datasets = get_in_service_debug_datasets_from_blueprint(&bp1);
         assert!(!debug_datasets.is_empty());
 
         // When we create a bundle, it should exist on a dataset provisioned by
@@ -1362,10 +1346,7 @@ mod test {
 
         // Extract Nexus and Dataset information from the generated blueprint.
         let nexus_ids = get_in_service_nexuses_from_blueprint(&bp1);
-        let debug_datasets = get_debug_datasets_from_blueprint(
-            &bp1,
-            BlueprintDatasetFilter::InService,
-        );
+        let debug_datasets = get_in_service_debug_datasets_from_blueprint(&bp1);
         assert!(!debug_datasets.is_empty());
 
         // When we create a bundle, it should exist on a dataset provisioned by

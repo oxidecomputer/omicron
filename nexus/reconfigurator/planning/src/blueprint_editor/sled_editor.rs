@@ -10,22 +10,21 @@ use illumos_utils::zpool::ZpoolName;
 use itertools::Either;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintDatasetConfig;
-use nexus_types::deployment::BlueprintDatasetFilter;
-use nexus_types::deployment::BlueprintDatasetsConfig;
+use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
-use nexus_types::deployment::BlueprintPhysicalDisksConfig;
+use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
-use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Dataset;
 use nexus_types::inventory::Zpool;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
+use omicron_common::api::external::Generation;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::DatasetUuid;
@@ -51,8 +50,6 @@ mod zones;
 pub use self::datasets::DatasetsEditError;
 pub use self::datasets::MultipleDatasetsOfKind;
 pub use self::disks::DisksEditError;
-pub use self::disks::DuplicateDiskId;
-pub use self::zones::DuplicateZoneId;
 pub use self::zones::ZonesEditError;
 
 use self::datasets::DatasetsEditor;
@@ -62,10 +59,6 @@ use self::zones::ZonesEditor;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SledInputError {
-    #[error(transparent)]
-    DuplicateZoneId(#[from] DuplicateZoneId),
-    #[error(transparent)]
-    DuplicateDiskId(#[from] DuplicateDiskId),
     #[error(transparent)]
     MultipleDatasetsOfKind(#[from] MultipleDatasetsOfKind),
 }
@@ -147,26 +140,27 @@ enum InnerSledEditor {
 impl SledEditor {
     pub fn for_existing_active(
         subnet: Ipv6Subnet<SLED_PREFIX>,
-        zones: BlueprintZonesConfig,
-        disks: BlueprintPhysicalDisksConfig,
-        datasets: BlueprintDatasetsConfig,
+        config: BlueprintSledConfig,
     ) -> Result<Self, SledInputError> {
-        let inner = ActiveSledEditor::new(subnet, zones, disks, datasets)?;
+        assert_eq!(
+            config.state,
+            SledState::Active,
+            "for_existing_active called on non-active sled"
+        );
+        let inner = ActiveSledEditor::new(subnet, config)?;
         Ok(Self(InnerSledEditor::Active(inner)))
     }
 
     pub fn for_existing_decommissioned(
-        zones: BlueprintZonesConfig,
-        disks: BlueprintPhysicalDisksConfig,
-        datasets: BlueprintDatasetsConfig,
+        config: BlueprintSledConfig,
     ) -> Result<Self, SledInputError> {
-        let inner = EditedSled {
-            state: SledState::Decommissioned,
-            zones,
-            disks,
-            datasets,
-            edit_counts: SledEditCounts::zeroes(),
-        };
+        assert_eq!(
+            config.state,
+            SledState::Decommissioned,
+            "for_existing_decommissioned called on non-decommissioned sled"
+        );
+        let inner =
+            EditedSled { config, edit_counts: SledEditCounts::zeroes() };
         Ok(Self(InnerSledEditor::Decommissioned(inner)))
     }
 
@@ -184,7 +178,7 @@ impl SledEditor {
     pub fn state(&self) -> SledState {
         match &self.0 {
             InnerSledEditor::Active(_) => SledState::Active,
-            InnerSledEditor::Decommissioned(edited_sled) => edited_sled.state,
+            InnerSledEditor::Decommissioned(_) => SledState::Decommissioned,
         }
     }
 
@@ -220,7 +214,7 @@ impl SledEditor {
                 mem::swap(editor, &mut stolen);
 
                 let mut finalized = stolen.finalize();
-                finalized.state = SledState::Decommissioned;
+                finalized.config.state = SledState::Decommissioned;
                 self.0 = InnerSledEditor::Decommissioned(finalized);
             }
             // If we're already decommissioned, there's nothing to do.
@@ -248,7 +242,7 @@ impl SledEditor {
             }
             InnerSledEditor::Decommissioned(edited) => Either::Right(
                 edited
-                    .disks
+                    .config
                     .disks
                     .iter()
                     .filter(move |disk| filter(disk.disposition)),
@@ -256,20 +250,23 @@ impl SledEditor {
         }
     }
 
-    pub fn datasets(
+    pub fn datasets<F>(
         &self,
-        filter: BlueprintDatasetFilter,
-    ) -> impl Iterator<Item = &BlueprintDatasetConfig> {
+        mut filter: F,
+    ) -> impl Iterator<Item = &BlueprintDatasetConfig>
+    where
+        F: FnMut(BlueprintDatasetDisposition) -> bool,
+    {
         match &self.0 {
             InnerSledEditor::Active(editor) => {
                 Either::Left(editor.datasets(filter))
             }
             InnerSledEditor::Decommissioned(edited) => Either::Right(
                 edited
-                    .datasets
+                    .config
                     .datasets
                     .iter()
-                    .filter(move |disk| disk.disposition.matches(filter)),
+                    .filter(move |disk| filter(disk.disposition)),
             ),
         }
     }
@@ -287,7 +284,7 @@ impl SledEditor {
             }
             InnerSledEditor::Decommissioned(edited) => Either::Right(
                 edited
-                    .zones
+                    .config
                     .zones
                     .iter()
                     .filter(move |zone| filter(zone.disposition)),
@@ -393,6 +390,7 @@ impl SledEditor {
 #[derive(Debug)]
 struct ActiveSledEditor {
     underlay_ip_allocator: SledUnderlayIpAllocator,
+    incoming_sled_agent_generation: Generation,
     zones: ZonesEditor,
     disks: DisksEditor,
     datasets: DatasetsEditor,
@@ -400,21 +398,17 @@ struct ActiveSledEditor {
 
 #[derive(Debug)]
 pub(crate) struct EditedSled {
-    pub state: SledState,
-    pub zones: BlueprintZonesConfig,
-    pub disks: BlueprintPhysicalDisksConfig,
-    pub datasets: BlueprintDatasetsConfig,
+    pub config: BlueprintSledConfig,
     pub edit_counts: SledEditCounts,
 }
 
 impl ActiveSledEditor {
     pub fn new(
         subnet: Ipv6Subnet<SLED_PREFIX>,
-        zones: BlueprintZonesConfig,
-        disks: BlueprintPhysicalDisksConfig,
-        datasets: BlueprintDatasetsConfig,
+        config: BlueprintSledConfig,
     ) -> Result<Self, SledInputError> {
-        let zones = ZonesEditor::from(zones);
+        let zones =
+            ZonesEditor::new(config.sled_agent_generation, config.zones);
 
         // We never reuse underlay IPs within a sled, regardless of zone
         // dispositions. If a zone has been fully removed from the blueprint
@@ -427,9 +421,10 @@ impl ActiveSledEditor {
             underlay_ip_allocator: SledUnderlayIpAllocator::new(
                 subnet, zone_ips,
             ),
+            incoming_sled_agent_generation: config.sled_agent_generation,
             zones,
-            disks: disks.try_into()?,
-            datasets: DatasetsEditor::new(datasets)?,
+            disks: DisksEditor::new(config.sled_agent_generation, config.disks),
+            datasets: DatasetsEditor::new(config.datasets)?,
         })
     }
 
@@ -443,6 +438,7 @@ impl ActiveSledEditor {
 
         Self {
             underlay_ip_allocator,
+            incoming_sled_agent_generation: Generation::new(),
             zones: ZonesEditor::empty(),
             disks: DisksEditor::empty(),
             datasets: DatasetsEditor::empty(),
@@ -453,11 +449,24 @@ impl ActiveSledEditor {
         let (disks, disks_counts) = self.disks.finalize();
         let (datasets, datasets_counts) = self.datasets.finalize();
         let (zones, zones_counts) = self.zones.finalize();
+        let mut sled_agent_generation = self.incoming_sled_agent_generation;
+
+        // Bump the generation if we made any changes of concern to sled-agent.
+        if disks_counts.has_nonzero_counts()
+            || datasets_counts.has_nonzero_counts()
+            || zones_counts.has_nonzero_counts()
+        {
+            sled_agent_generation = sled_agent_generation.next();
+        }
+
         EditedSled {
-            state: SledState::Active,
-            zones,
-            disks,
-            datasets,
+            config: BlueprintSledConfig {
+                state: SledState::Active,
+                sled_agent_generation,
+                disks,
+                datasets,
+                zones,
+            },
             edit_counts: SledEditCounts {
                 disks: disks_counts,
                 datasets: datasets_counts,
@@ -503,10 +512,13 @@ impl ActiveSledEditor {
         self.disks.disks(filter)
     }
 
-    pub fn datasets(
+    pub fn datasets<F>(
         &self,
-        filter: BlueprintDatasetFilter,
-    ) -> impl Iterator<Item = &BlueprintDatasetConfig> {
+        filter: F,
+    ) -> impl Iterator<Item = &BlueprintDatasetConfig>
+    where
+        F: FnMut(BlueprintDatasetDisposition) -> bool,
+    {
         self.datasets.datasets(filter)
     }
 

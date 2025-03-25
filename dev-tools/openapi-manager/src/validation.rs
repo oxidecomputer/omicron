@@ -126,6 +126,18 @@ pub fn overwrite_file(
         return Ok(OverwriteStatus::Unchanged);
     }
 
+    // Make sure the parent directory exists before trying to write any files.
+    // N.B. that it's very unlikely that `parent()` would be `None` --- why are
+    // you putting your OpenAPI document in `/`? --- but we may as well not fail
+    // if that is the case...
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            fs_err::create_dir_all(path).with_context(|| {
+                format!("failed to create parent directory for '{}'", path)
+            })?
+        }
+    }
+
     AtomicFile::new(path, atomicwrites::OverwriteBehavior::AllowOverwrite)
         .write(|f| f.write_all(contents))
         .with_context(|| format!("failed to write to `{}`", path))?;

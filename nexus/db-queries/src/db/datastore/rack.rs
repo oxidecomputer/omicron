@@ -136,14 +136,18 @@ impl From<RackInitError> for Error {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             },
-            RackInitError::PhysicalDiskInsert(err) => err,
-            RackInitError::ZpoolInsert(err) => err,
-            RackInitError::BlueprintInsert(err) => Error::internal_error(
-                &format!("failed to insert Blueprint: {:#}", err),
-            ),
-            RackInitError::BlueprintTargetSet(err) => Error::internal_error(
-                &format!("failed to insert set target Blueprint: {:#}", err),
-            ),
+            RackInitError::PhysicalDiskInsert(err) => {
+                err.internal_context("failed to insert physical disk")
+            }
+            RackInitError::ZpoolInsert(err) => {
+                err.internal_context("failed to insert zpool")
+            }
+            RackInitError::BlueprintInsert(err) => {
+                err.internal_context("failed to insert Blueprint")
+            }
+            RackInitError::BlueprintTargetSet(err) => {
+                err.internal_context("failed to insert set target Blueprint")
+            }
             RackInitError::RackUpdate { err, rack_id } => {
                 public_error_from_diesel(
                     err,
@@ -153,17 +157,16 @@ impl From<RackInitError> for Error {
                     ),
                 )
             }
-            RackInitError::DnsSerialization(err) => Error::internal_error(
-                &format!("failed to serialize initial DNS records: {:#}", err),
-            ),
-            RackInitError::Silo(err) => Error::internal_error(&format!(
-                "failed to create recovery Silo: {:#}",
-                err
-            )),
-            RackInitError::RoleAssignment(err) => Error::internal_error(
-                &format!("failed to assign role to initial user: {:#}", err),
-            ),
-            RackInitError::Retryable(err) => Error::internal_error(&format!(
+            RackInitError::DnsSerialization(err) => {
+                err.internal_context("failed to serialize initial DNS records")
+            }
+            RackInitError::Silo(err) => {
+                err.internal_context("failed to create recovery Silo")
+            }
+            RackInitError::RoleAssignment(err) => {
+                err.internal_context("failed to assign role to initial user")
+            }
+            RackInitError::Retryable(err) => Error::unavail(&format!(
                 "failed operation due to database contention: {:#}",
                 err
             )),
@@ -998,6 +1001,7 @@ mod test {
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use async_bb8_diesel::AsyncSimpleConnection;
+    use id_map::IdMap;
     use internal_dns_types::names::DNS_ZONE;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_model::{DnsGroup, Generation, InitialDnsGroup};
@@ -1006,11 +1010,8 @@ mod test {
         SledBuilder, SystemDescription,
     };
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+    use nexus_types::deployment::BlueprintSledConfig;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
-    use nexus_types::deployment::{
-        BlueprintDatasetsConfig, BlueprintPhysicalDisksConfig,
-        BlueprintSledConfig, BlueprintZonesConfig,
-    };
     use nexus_types::deployment::{
         BlueprintZoneConfig, OmicronZoneExternalFloatingAddr,
         OmicronZoneExternalFloatingIp,
@@ -1295,18 +1296,19 @@ mod test {
     }
 
     fn make_sled_config_only_zones(
-        blueprint_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
+        blueprint_zones: BTreeMap<SledUuid, IdMap<BlueprintZoneConfig>>,
     ) -> BTreeMap<SledUuid, BlueprintSledConfig> {
         blueprint_zones
             .into_iter()
-            .map(|(sled_id, zones_config)| {
+            .map(|(sled_id, zones)| {
                 (
                     sled_id,
                     BlueprintSledConfig {
                         state: SledState::Active,
-                        disks_config: BlueprintPhysicalDisksConfig::default(),
-                        datasets_config: BlueprintDatasetsConfig::default(),
-                        zones_config,
+                        sled_agent_generation: Generation::new().next(),
+                        disks: IdMap::new(),
+                        datasets: IdMap::new(),
+                        zones,
                     },
                 )
             })
@@ -1375,175 +1377,164 @@ mod test {
         let dataset = random_dataset();
         blueprint_zones.insert(
             SledUuid::from_untyped_uuid(sled1.id()),
-            BlueprintZonesConfig {
-                generation: Generation::new().next(),
-                zones: [
-                    BlueprintZoneConfig {
-                        disposition: BlueprintZoneDisposition::InService,
-                        id: external_dns_id,
-                        filesystem_pool: Some(dataset.pool_name.clone()),
-                        zone_type: BlueprintZoneType::ExternalDns(
-                            blueprint_zone_type::ExternalDns {
-                                dataset,
-                                http_address: "[::1]:80".parse().unwrap(),
-                                dns_address: OmicronZoneExternalFloatingAddr {
-                                    id: ExternalIpUuid::new_v4(),
-                                    addr: SocketAddr::new(external_dns_ip, 53),
-                                },
-                                nic: NetworkInterface {
-                                    id: Uuid::new_v4(),
-                                    kind: NetworkInterfaceKind::Service {
-                                        id: external_dns_id.into_untyped_uuid(),
-                                    },
-                                    name: "external-dns".parse().unwrap(),
-                                    ip: external_dns_pip.into(),
-                                    mac: macs.next().unwrap(),
-                                    subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET),
-                                    vni: Vni::SERVICES_VNI,
-                                    primary: true,
-                                    slot: 0,
-                                    transit_ips: vec![],
-                                },
-                            },
-                        ),
-                        image_source: BlueprintZoneImageSource::InstallDataset,
-                    },
-                    BlueprintZoneConfig {
-                        disposition: BlueprintZoneDisposition::InService,
-                        id: ntp1_id,
-                        filesystem_pool: Some(random_zpool()),
-                        zone_type: BlueprintZoneType::BoundaryNtp(
-                            blueprint_zone_type::BoundaryNtp {
-                                address: "[::1]:80".parse().unwrap(),
-                                ntp_servers: vec![],
-                                dns_servers: vec![],
-                                domain: None,
-                                nic: NetworkInterface {
-                                    id: Uuid::new_v4(),
-                                    kind: NetworkInterfaceKind::Service {
-                                        id: ntp1_id.into_untyped_uuid(),
-                                    },
-                                    name: "ntp1".parse().unwrap(),
-                                    ip: ntp1_pip.into(),
-                                    mac: macs.next().unwrap(),
-                                    subnet: IpNet::from(*NTP_OPTE_IPV4_SUBNET),
-                                    vni: Vni::SERVICES_VNI,
-                                    primary: true,
-                                    slot: 0,
-                                    transit_ips: vec![],
-                                },
-                                external_ip: OmicronZoneExternalSnatIp {
-                                    id: ExternalIpUuid::new_v4(),
-                                    snat_cfg: SourceNatConfig::new(
-                                        ntp1_ip, 16384, 32767,
-                                    )
-                                    .unwrap(),
-                                },
-                            },
-                        ),
-                        image_source: BlueprintZoneImageSource::InstallDataset,
-                    },
-                ]
-                .into_iter()
-                .collect(),
-            },
-        );
-        blueprint_zones.insert(
-            SledUuid::from_untyped_uuid(sled2.id()),
-            BlueprintZonesConfig {
-                generation: Generation::new().next(),
-                zones: [
-                    BlueprintZoneConfig {
-                        disposition: BlueprintZoneDisposition::InService,
-                        id: nexus_id,
-                        filesystem_pool: Some(random_zpool()),
-                        zone_type: BlueprintZoneType::Nexus(
-                            blueprint_zone_type::Nexus {
-                                internal_address: "[::1]:80".parse().unwrap(),
-                                external_ip: OmicronZoneExternalFloatingIp {
-                                    id: ExternalIpUuid::new_v4(),
-                                    ip: nexus_ip,
-                                },
-                                external_tls: false,
-                                external_dns_servers: vec![],
-                                nic: NetworkInterface {
-                                    id: Uuid::new_v4(),
-                                    kind: NetworkInterfaceKind::Service {
-                                        id: nexus_id.into_untyped_uuid(),
-                                    },
-                                    name: "nexus".parse().unwrap(),
-                                    ip: nexus_pip.into(),
-                                    mac: macs.next().unwrap(),
-                                    subnet: IpNet::from(
-                                        *NEXUS_OPTE_IPV4_SUBNET,
-                                    ),
-                                    vni: Vni::SERVICES_VNI,
-                                    primary: true,
-                                    slot: 0,
-                                    transit_ips: vec![],
-                                },
-                            },
-                        ),
-                        image_source: BlueprintZoneImageSource::InstallDataset,
-                    },
-                    BlueprintZoneConfig {
-                        disposition: BlueprintZoneDisposition::InService,
-                        id: ntp2_id,
-                        filesystem_pool: Some(random_zpool()),
-                        zone_type: BlueprintZoneType::BoundaryNtp(
-                            blueprint_zone_type::BoundaryNtp {
-                                address: "[::1]:80".parse().unwrap(),
-                                ntp_servers: vec![],
-                                dns_servers: vec![],
-                                domain: None,
-                                nic: NetworkInterface {
-                                    id: Uuid::new_v4(),
-                                    kind: NetworkInterfaceKind::Service {
-                                        id: ntp2_id.into_untyped_uuid(),
-                                    },
-                                    name: "ntp2".parse().unwrap(),
-                                    ip: ntp2_pip.into(),
-                                    mac: macs.next().unwrap(),
-                                    subnet: IpNet::from(*NTP_OPTE_IPV4_SUBNET),
-                                    vni: Vni::SERVICES_VNI,
-                                    primary: true,
-                                    slot: 0,
-                                    transit_ips: vec![],
-                                },
-                                external_ip: OmicronZoneExternalSnatIp {
-                                    id: ExternalIpUuid::new_v4(),
-                                    snat_cfg: SourceNatConfig::new(
-                                        ntp2_ip, 0, 16383,
-                                    )
-                                    .unwrap(),
-                                },
-                            },
-                        ),
-                        image_source: BlueprintZoneImageSource::InstallDataset,
-                    },
-                ]
-                .into_iter()
-                .collect(),
-            },
-        );
-        blueprint_zones.insert(
-            SledUuid::from_untyped_uuid(sled3.id()),
-            BlueprintZonesConfig {
-                generation: Generation::new().next(),
-                zones: [BlueprintZoneConfig {
+            [
+                BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
-                    id: ntp3_id,
-                    filesystem_pool: Some(random_zpool()),
-                    zone_type: BlueprintZoneType::InternalNtp(
-                        blueprint_zone_type::InternalNtp {
-                            address: "[::1]:80".parse().unwrap(),
+                    id: external_dns_id,
+                    filesystem_pool: Some(dataset.pool_name.clone()),
+                    zone_type: BlueprintZoneType::ExternalDns(
+                        blueprint_zone_type::ExternalDns {
+                            dataset,
+                            http_address: "[::1]:80".parse().unwrap(),
+                            dns_address: OmicronZoneExternalFloatingAddr {
+                                id: ExternalIpUuid::new_v4(),
+                                addr: SocketAddr::new(external_dns_ip, 53),
+                            },
+                            nic: NetworkInterface {
+                                id: Uuid::new_v4(),
+                                kind: NetworkInterfaceKind::Service {
+                                    id: external_dns_id.into_untyped_uuid(),
+                                },
+                                name: "external-dns".parse().unwrap(),
+                                ip: external_dns_pip.into(),
+                                mac: macs.next().unwrap(),
+                                subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET),
+                                vni: Vni::SERVICES_VNI,
+                                primary: true,
+                                slot: 0,
+                                transit_ips: vec![],
+                            },
                         },
                     ),
                     image_source: BlueprintZoneImageSource::InstallDataset,
-                }]
-                .into_iter()
-                .collect(),
-            },
+                },
+                BlueprintZoneConfig {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id: ntp1_id,
+                    filesystem_pool: Some(random_zpool()),
+                    zone_type: BlueprintZoneType::BoundaryNtp(
+                        blueprint_zone_type::BoundaryNtp {
+                            address: "[::1]:80".parse().unwrap(),
+                            ntp_servers: vec![],
+                            dns_servers: vec![],
+                            domain: None,
+                            nic: NetworkInterface {
+                                id: Uuid::new_v4(),
+                                kind: NetworkInterfaceKind::Service {
+                                    id: ntp1_id.into_untyped_uuid(),
+                                },
+                                name: "ntp1".parse().unwrap(),
+                                ip: ntp1_pip.into(),
+                                mac: macs.next().unwrap(),
+                                subnet: IpNet::from(*NTP_OPTE_IPV4_SUBNET),
+                                vni: Vni::SERVICES_VNI,
+                                primary: true,
+                                slot: 0,
+                                transit_ips: vec![],
+                            },
+                            external_ip: OmicronZoneExternalSnatIp {
+                                id: ExternalIpUuid::new_v4(),
+                                snat_cfg: SourceNatConfig::new(
+                                    ntp1_ip, 16384, 32767,
+                                )
+                                .unwrap(),
+                            },
+                        },
+                    ),
+                    image_source: BlueprintZoneImageSource::InstallDataset,
+                },
+            ]
+            .into_iter()
+            .collect::<IdMap<_>>(),
+        );
+        blueprint_zones.insert(
+            SledUuid::from_untyped_uuid(sled2.id()),
+            [
+                BlueprintZoneConfig {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id: nexus_id,
+                    filesystem_pool: Some(random_zpool()),
+                    zone_type: BlueprintZoneType::Nexus(
+                        blueprint_zone_type::Nexus {
+                            internal_address: "[::1]:80".parse().unwrap(),
+                            external_ip: OmicronZoneExternalFloatingIp {
+                                id: ExternalIpUuid::new_v4(),
+                                ip: nexus_ip,
+                            },
+                            external_tls: false,
+                            external_dns_servers: vec![],
+                            nic: NetworkInterface {
+                                id: Uuid::new_v4(),
+                                kind: NetworkInterfaceKind::Service {
+                                    id: nexus_id.into_untyped_uuid(),
+                                },
+                                name: "nexus".parse().unwrap(),
+                                ip: nexus_pip.into(),
+                                mac: macs.next().unwrap(),
+                                subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
+                                vni: Vni::SERVICES_VNI,
+                                primary: true,
+                                slot: 0,
+                                transit_ips: vec![],
+                            },
+                        },
+                    ),
+                    image_source: BlueprintZoneImageSource::InstallDataset,
+                },
+                BlueprintZoneConfig {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id: ntp2_id,
+                    filesystem_pool: Some(random_zpool()),
+                    zone_type: BlueprintZoneType::BoundaryNtp(
+                        blueprint_zone_type::BoundaryNtp {
+                            address: "[::1]:80".parse().unwrap(),
+                            ntp_servers: vec![],
+                            dns_servers: vec![],
+                            domain: None,
+                            nic: NetworkInterface {
+                                id: Uuid::new_v4(),
+                                kind: NetworkInterfaceKind::Service {
+                                    id: ntp2_id.into_untyped_uuid(),
+                                },
+                                name: "ntp2".parse().unwrap(),
+                                ip: ntp2_pip.into(),
+                                mac: macs.next().unwrap(),
+                                subnet: IpNet::from(*NTP_OPTE_IPV4_SUBNET),
+                                vni: Vni::SERVICES_VNI,
+                                primary: true,
+                                slot: 0,
+                                transit_ips: vec![],
+                            },
+                            external_ip: OmicronZoneExternalSnatIp {
+                                id: ExternalIpUuid::new_v4(),
+                                snat_cfg: SourceNatConfig::new(
+                                    ntp2_ip, 0, 16383,
+                                )
+                                .unwrap(),
+                            },
+                        },
+                    ),
+                    image_source: BlueprintZoneImageSource::InstallDataset,
+                },
+            ]
+            .into_iter()
+            .collect(),
+        );
+        blueprint_zones.insert(
+            SledUuid::from_untyped_uuid(sled3.id()),
+            [BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id: ntp3_id,
+                filesystem_pool: Some(random_zpool()),
+                zone_type: BlueprintZoneType::InternalNtp(
+                    blueprint_zone_type::InternalNtp {
+                        address: "[::1]:80".parse().unwrap(),
+                    },
+                ),
+                image_source: BlueprintZoneImageSource::InstallDataset,
+            }]
+            .into_iter()
+            .collect(),
         );
         let blueprint = Blueprint {
             id: BlueprintUuid::new_v4(),
@@ -1708,79 +1699,74 @@ mod test {
         let mut blueprint_zones = BTreeMap::new();
         blueprint_zones.insert(
             SledUuid::from_untyped_uuid(sled.id()),
-            BlueprintZonesConfig {
-                generation: Generation::new().next(),
-                zones: [
-                    BlueprintZoneConfig {
-                        disposition: BlueprintZoneDisposition::InService,
-                        id: nexus_id1,
-                        filesystem_pool: Some(random_zpool()),
-                        zone_type: BlueprintZoneType::Nexus(
-                            blueprint_zone_type::Nexus {
-                                internal_address: "[::1]:80".parse().unwrap(),
-                                external_ip: OmicronZoneExternalFloatingIp {
-                                    id: ExternalIpUuid::new_v4(),
-                                    ip: nexus_ip_start.into(),
-                                },
-                                external_tls: false,
-                                external_dns_servers: vec![],
-                                nic: NetworkInterface {
-                                    id: Uuid::new_v4(),
-                                    kind: NetworkInterfaceKind::Service {
-                                        id: nexus_id1.into_untyped_uuid(),
-                                    },
-                                    name: "nexus1".parse().unwrap(),
-                                    ip: nexus_pip1.into(),
-                                    mac: macs.next().unwrap(),
-                                    subnet: IpNet::from(
-                                        *NEXUS_OPTE_IPV4_SUBNET,
-                                    ),
-                                    vni: Vni::SERVICES_VNI,
-                                    primary: true,
-                                    slot: 0,
-                                    transit_ips: vec![],
-                                },
+            [
+                BlueprintZoneConfig {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id: nexus_id1,
+                    filesystem_pool: Some(random_zpool()),
+                    zone_type: BlueprintZoneType::Nexus(
+                        blueprint_zone_type::Nexus {
+                            internal_address: "[::1]:80".parse().unwrap(),
+                            external_ip: OmicronZoneExternalFloatingIp {
+                                id: ExternalIpUuid::new_v4(),
+                                ip: nexus_ip_start.into(),
                             },
-                        ),
-                        image_source: BlueprintZoneImageSource::InstallDataset,
-                    },
-                    BlueprintZoneConfig {
-                        disposition: BlueprintZoneDisposition::InService,
-                        id: nexus_id2,
-                        filesystem_pool: Some(random_zpool()),
-                        zone_type: BlueprintZoneType::Nexus(
-                            blueprint_zone_type::Nexus {
-                                internal_address: "[::1]:80".parse().unwrap(),
-                                external_ip: OmicronZoneExternalFloatingIp {
-                                    id: ExternalIpUuid::new_v4(),
-                                    ip: nexus_ip_end.into(),
+                            external_tls: false,
+                            external_dns_servers: vec![],
+                            nic: NetworkInterface {
+                                id: Uuid::new_v4(),
+                                kind: NetworkInterfaceKind::Service {
+                                    id: nexus_id1.into_untyped_uuid(),
                                 },
-                                external_tls: false,
-                                external_dns_servers: vec![],
-                                nic: NetworkInterface {
-                                    id: Uuid::new_v4(),
-                                    kind: NetworkInterfaceKind::Service {
-                                        id: nexus_id2.into_untyped_uuid(),
-                                    },
-                                    name: "nexus2".parse().unwrap(),
-                                    ip: nexus_pip2.into(),
-                                    mac: macs.next().unwrap(),
-                                    subnet: oxnet::IpNet::from(
-                                        *NEXUS_OPTE_IPV4_SUBNET,
-                                    ),
-                                    vni: Vni::SERVICES_VNI,
-                                    primary: true,
-                                    slot: 0,
-                                    transit_ips: vec![],
-                                },
+                                name: "nexus1".parse().unwrap(),
+                                ip: nexus_pip1.into(),
+                                mac: macs.next().unwrap(),
+                                subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
+                                vni: Vni::SERVICES_VNI,
+                                primary: true,
+                                slot: 0,
+                                transit_ips: vec![],
                             },
-                        ),
-                        image_source: BlueprintZoneImageSource::InstallDataset,
-                    },
-                ]
-                .into_iter()
-                .collect(),
-            },
+                        },
+                    ),
+                    image_source: BlueprintZoneImageSource::InstallDataset,
+                },
+                BlueprintZoneConfig {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id: nexus_id2,
+                    filesystem_pool: Some(random_zpool()),
+                    zone_type: BlueprintZoneType::Nexus(
+                        blueprint_zone_type::Nexus {
+                            internal_address: "[::1]:80".parse().unwrap(),
+                            external_ip: OmicronZoneExternalFloatingIp {
+                                id: ExternalIpUuid::new_v4(),
+                                ip: nexus_ip_end.into(),
+                            },
+                            external_tls: false,
+                            external_dns_servers: vec![],
+                            nic: NetworkInterface {
+                                id: Uuid::new_v4(),
+                                kind: NetworkInterfaceKind::Service {
+                                    id: nexus_id2.into_untyped_uuid(),
+                                },
+                                name: "nexus2".parse().unwrap(),
+                                ip: nexus_pip2.into(),
+                                mac: macs.next().unwrap(),
+                                subnet: oxnet::IpNet::from(
+                                    *NEXUS_OPTE_IPV4_SUBNET,
+                                ),
+                                vni: Vni::SERVICES_VNI,
+                                primary: true,
+                                slot: 0,
+                                transit_ips: vec![],
+                            },
+                        },
+                    ),
+                    image_source: BlueprintZoneImageSource::InstallDataset,
+                },
+            ]
+            .into_iter()
+            .collect::<IdMap<_>>(),
         );
 
         let datasets = vec![];
@@ -1979,42 +1965,39 @@ mod test {
         let mut blueprint_zones = BTreeMap::new();
         blueprint_zones.insert(
             SledUuid::from_untyped_uuid(sled.id()),
-            BlueprintZonesConfig {
-                generation: Generation::new().next(),
-                zones: [BlueprintZoneConfig {
-                    disposition: BlueprintZoneDisposition::InService,
-                    id: nexus_id,
-                    filesystem_pool: Some(random_zpool()),
-                    zone_type: BlueprintZoneType::Nexus(
-                        blueprint_zone_type::Nexus {
-                            internal_address: "[::1]:80".parse().unwrap(),
-                            external_ip: OmicronZoneExternalFloatingIp {
-                                id: ExternalIpUuid::new_v4(),
-                                ip: nexus_ip,
-                            },
-                            external_tls: false,
-                            external_dns_servers: vec![],
-                            nic: NetworkInterface {
-                                id: Uuid::new_v4(),
-                                kind: NetworkInterfaceKind::Service {
-                                    id: nexus_id.into_untyped_uuid(),
-                                },
-                                name: "nexus".parse().unwrap(),
-                                ip: nexus_pip.into(),
-                                mac: macs.next().unwrap(),
-                                subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
-                                vni: Vni::SERVICES_VNI,
-                                primary: true,
-                                slot: 0,
-                                transit_ips: vec![],
-                            },
+            [BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id: nexus_id,
+                filesystem_pool: Some(random_zpool()),
+                zone_type: BlueprintZoneType::Nexus(
+                    blueprint_zone_type::Nexus {
+                        internal_address: "[::1]:80".parse().unwrap(),
+                        external_ip: OmicronZoneExternalFloatingIp {
+                            id: ExternalIpUuid::new_v4(),
+                            ip: nexus_ip,
                         },
-                    ),
-                    image_source: BlueprintZoneImageSource::InstallDataset,
-                }]
-                .into_iter()
-                .collect(),
-            },
+                        external_tls: false,
+                        external_dns_servers: vec![],
+                        nic: NetworkInterface {
+                            id: Uuid::new_v4(),
+                            kind: NetworkInterfaceKind::Service {
+                                id: nexus_id.into_untyped_uuid(),
+                            },
+                            name: "nexus".parse().unwrap(),
+                            ip: nexus_pip.into(),
+                            mac: macs.next().unwrap(),
+                            subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
+                            vni: Vni::SERVICES_VNI,
+                            primary: true,
+                            slot: 0,
+                            transit_ips: vec![],
+                        },
+                    },
+                ),
+                image_source: BlueprintZoneImageSource::InstallDataset,
+            }]
+            .into_iter()
+            .collect::<IdMap<_>>(),
         );
         let blueprint = Blueprint {
             id: BlueprintUuid::new_v4(),
@@ -2085,76 +2068,71 @@ mod test {
         let dataset = random_dataset();
         blueprint_zones.insert(
             SledUuid::from_untyped_uuid(sled.id()),
-            BlueprintZonesConfig {
-                generation: Generation::new().next(),
-                zones: [
-                    BlueprintZoneConfig {
-                        disposition: BlueprintZoneDisposition::InService,
-                        id: external_dns_id,
-                        filesystem_pool: Some(dataset.pool_name.clone()),
-                        zone_type: BlueprintZoneType::ExternalDns(
-                            blueprint_zone_type::ExternalDns {
-                                dataset,
-                                http_address: "[::1]:80".parse().unwrap(),
-                                dns_address: OmicronZoneExternalFloatingAddr {
-                                    id: ExternalIpUuid::new_v4(),
-                                    addr: SocketAddr::new(ip, 53),
-                                },
-                                nic: NetworkInterface {
-                                    id: Uuid::new_v4(),
-                                    kind: NetworkInterfaceKind::Service {
-                                        id: external_dns_id.into_untyped_uuid(),
-                                    },
-                                    name: "external-dns".parse().unwrap(),
-                                    ip: external_dns_pip.into(),
-                                    mac: macs.next().unwrap(),
-                                    subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET),
-                                    vni: Vni::SERVICES_VNI,
-                                    primary: true,
-                                    slot: 0,
-                                    transit_ips: vec![],
-                                },
+            [
+                BlueprintZoneConfig {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id: external_dns_id,
+                    filesystem_pool: Some(dataset.pool_name.clone()),
+                    zone_type: BlueprintZoneType::ExternalDns(
+                        blueprint_zone_type::ExternalDns {
+                            dataset,
+                            http_address: "[::1]:80".parse().unwrap(),
+                            dns_address: OmicronZoneExternalFloatingAddr {
+                                id: ExternalIpUuid::new_v4(),
+                                addr: SocketAddr::new(ip, 53),
                             },
-                        ),
-                        image_source: BlueprintZoneImageSource::InstallDataset,
-                    },
-                    BlueprintZoneConfig {
-                        disposition: BlueprintZoneDisposition::InService,
-                        id: nexus_id,
-                        filesystem_pool: Some(random_zpool()),
-                        zone_type: BlueprintZoneType::Nexus(
-                            blueprint_zone_type::Nexus {
-                                internal_address: "[::1]:80".parse().unwrap(),
-                                external_ip: OmicronZoneExternalFloatingIp {
-                                    id: ExternalIpUuid::new_v4(),
-                                    ip,
+                            nic: NetworkInterface {
+                                id: Uuid::new_v4(),
+                                kind: NetworkInterfaceKind::Service {
+                                    id: external_dns_id.into_untyped_uuid(),
                                 },
-                                external_tls: false,
-                                external_dns_servers: vec![],
-                                nic: NetworkInterface {
-                                    id: Uuid::new_v4(),
-                                    kind: NetworkInterfaceKind::Service {
-                                        id: nexus_id.into_untyped_uuid(),
-                                    },
-                                    name: "nexus".parse().unwrap(),
-                                    ip: nexus_pip.into(),
-                                    mac: macs.next().unwrap(),
-                                    subnet: IpNet::from(
-                                        *NEXUS_OPTE_IPV4_SUBNET,
-                                    ),
-                                    vni: Vni::SERVICES_VNI,
-                                    primary: true,
-                                    slot: 0,
-                                    transit_ips: vec![],
-                                },
+                                name: "external-dns".parse().unwrap(),
+                                ip: external_dns_pip.into(),
+                                mac: macs.next().unwrap(),
+                                subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET),
+                                vni: Vni::SERVICES_VNI,
+                                primary: true,
+                                slot: 0,
+                                transit_ips: vec![],
                             },
-                        ),
-                        image_source: BlueprintZoneImageSource::InstallDataset,
-                    },
-                ]
-                .into_iter()
-                .collect(),
-            },
+                        },
+                    ),
+                    image_source: BlueprintZoneImageSource::InstallDataset,
+                },
+                BlueprintZoneConfig {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id: nexus_id,
+                    filesystem_pool: Some(random_zpool()),
+                    zone_type: BlueprintZoneType::Nexus(
+                        blueprint_zone_type::Nexus {
+                            internal_address: "[::1]:80".parse().unwrap(),
+                            external_ip: OmicronZoneExternalFloatingIp {
+                                id: ExternalIpUuid::new_v4(),
+                                ip,
+                            },
+                            external_tls: false,
+                            external_dns_servers: vec![],
+                            nic: NetworkInterface {
+                                id: Uuid::new_v4(),
+                                kind: NetworkInterfaceKind::Service {
+                                    id: nexus_id.into_untyped_uuid(),
+                                },
+                                name: "nexus".parse().unwrap(),
+                                ip: nexus_pip.into(),
+                                mac: macs.next().unwrap(),
+                                subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
+                                vni: Vni::SERVICES_VNI,
+                                primary: true,
+                                slot: 0,
+                                transit_ips: vec![],
+                            },
+                        },
+                    ),
+                    image_source: BlueprintZoneImageSource::InstallDataset,
+                },
+            ]
+            .into_iter()
+            .collect::<IdMap<_>>(),
         );
 
         let blueprint = Blueprint {

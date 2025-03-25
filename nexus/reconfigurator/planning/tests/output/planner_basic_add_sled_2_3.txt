@@ -3,9 +3,9 @@ to:   blueprint 4171ad05-89dd-474b-846b-b007e4346366
 
  UNCHANGED SLEDS:
 
-  sled 41f45d9f-766e-4ca6-a881-61ee45c80f57 (active):
+  sled 41f45d9f-766e-4ca6-a881-61ee45c80f57 (active, config generation 2):
 
-    physical disks at generation 2:
+    physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
     ------------------------------------------------------------------------------------
@@ -21,7 +21,7 @@ to:   blueprint 4171ad05-89dd-474b-846b-b007e4346366
     fake-vendor   fake-model   serial-f4a96860-bdeb-4435-bdf5-2a10beb3d44a   in service 
 
 
-    datasets at generation 2:
+    datasets:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -74,7 +74,7 @@ to:   blueprint 4171ad05-89dd-474b-846b-b007e4346366
     oxp_f4a96860-bdeb-4435-bdf5-2a10beb3d44a/crypt/debug                                                           547cb9ee-f196-4dfe-9f2c-aa4b2f114abe   in service    100 GiB   none          gzip-9     
 
 
-    omicron zones at generation 2:
+    omicron zones:
     ---------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition   underlay IP           
     ---------------------------------------------------------------------------------------------------------------
@@ -95,9 +95,9 @@ to:   blueprint 4171ad05-89dd-474b-846b-b007e4346366
     nexus             fb07dee1-d608-451b-83eb-4ee913d6e1f8   install dataset   in service    fd00:1122:3344:103::22
 
 
-  sled 43677374-8d2f-4deb-8a41-eeea506db8e0 (active):
+  sled 43677374-8d2f-4deb-8a41-eeea506db8e0 (active, config generation 2):
 
-    physical disks at generation 2:
+    physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
     ------------------------------------------------------------------------------------
@@ -113,7 +113,7 @@ to:   blueprint 4171ad05-89dd-474b-846b-b007e4346366
     fake-vendor   fake-model   serial-db6686c8-2dd9-4032-8444-2a06b43baa68   in service 
 
 
-    datasets at generation 2:
+    datasets:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -164,7 +164,7 @@ to:   blueprint 4171ad05-89dd-474b-846b-b007e4346366
     oxp_db6686c8-2dd9-4032-8444-2a06b43baa68/crypt/debug                                                           f5b987f9-0a34-4394-8fc5-2ee12bf3e9bf   in service    100 GiB   none          gzip-9     
 
 
-    omicron zones at generation 2:
+    omicron zones:
     ---------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition   underlay IP           
     ---------------------------------------------------------------------------------------------------------------
@@ -184,9 +184,9 @@ to:   blueprint 4171ad05-89dd-474b-846b-b007e4346366
     nexus             7a3ea24a-85f4-4aad-a935-4e7b22766985   install dataset   in service    fd00:1122:3344:101::22
 
 
-  sled 590e3034-d946-4166-b0e5-2d0034197a07 (active):
+  sled 590e3034-d946-4166-b0e5-2d0034197a07 (active, config generation 2):
 
-    physical disks at generation 2:
+    physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
     ------------------------------------------------------------------------------------
@@ -202,7 +202,7 @@ to:   blueprint 4171ad05-89dd-474b-846b-b007e4346366
     fake-vendor   fake-model   serial-f8c9c9a9-d73e-4cdf-a9af-03cfbbbce12b   in service 
 
 
-    datasets at generation 2:
+    datasets:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -253,7 +253,7 @@ to:   blueprint 4171ad05-89dd-474b-846b-b007e4346366
     oxp_f8c9c9a9-d73e-4cdf-a9af-03cfbbbce12b/crypt/debug                                                           fdd77b3a-5ec9-4e1a-bc62-379baa7c5552   in service    100 GiB   none          gzip-9     
 
 
-    omicron zones at generation 2:
+    omicron zones:
     ---------------------------------------------------------------------------------------------------------------
     zone type         zone id                                image source      disposition   underlay IP           
     ---------------------------------------------------------------------------------------------------------------
@@ -275,9 +275,9 @@ to:   blueprint 4171ad05-89dd-474b-846b-b007e4346366
 
  ADDED SLEDS:
 
-  sled ec61eded-c34f-443d-a580-dadf757529c4 (active):
+  sled ec61eded-c34f-443d-a580-dadf757529c4 (active, config generation 2):
 
-    physical disks at generation 2:
+    physical disks:
     ------------------------------------------------------------------------------------
     vendor        model        serial                                        disposition
     ------------------------------------------------------------------------------------
@@ -293,7 +293,7 @@ to:   blueprint 4171ad05-89dd-474b-846b-b007e4346366
 +   fake-vendor   fake-model   serial-fdfd067b-1d86-444d-a21f-ed33709f3e4d   in service 
 
 
-    datasets at generation 2:
+    datasets:
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     dataset name                                                                                       dataset id                             disposition   quota     reservation   compression
     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -320,7 +320,7 @@ to:   blueprint 4171ad05-89dd-474b-846b-b007e4346366
 +   oxp_fdfd067b-1d86-444d-a21f-ed33709f3e4d/crypt/debug                                               ecba8219-9446-4f43-a2fd-098f54ebdfd2   in service    100 GiB   none          gzip-9     
 
 
-    omicron zones at generation 2:
+    omicron zones:
     ------------------------------------------------------------------------------------------------------------
     zone type      zone id                                image source      disposition   underlay IP           
     ------------------------------------------------------------------------------------------------------------
