@@ -23,6 +23,7 @@ mod internal_disks;
 mod key_requester;
 mod ledger;
 mod raw_disks;
+mod zones;
 
 use self::key_requester::KeyManagerWaiter;
 
