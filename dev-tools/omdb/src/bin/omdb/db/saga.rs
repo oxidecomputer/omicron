@@ -333,12 +333,12 @@ async fn cmd_sagas_inject_error(
         let mut result = vec![];
 
         for node_id in incomplete_nodes {
-            let Some(node) = started_nodes
+            // SAFETY: this unwrap is ok because incomplete_nodes will always
+            // contain a subset of entries from started_nodes.
+            let node = started_nodes
                 .iter()
                 .find(|node| node.node_id.0 == node_id.into())
-            else {
-                bail!("could not find node?");
-            };
+                .unwrap();
 
             result.push(node);
         }
