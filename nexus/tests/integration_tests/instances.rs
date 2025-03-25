@@ -48,10 +48,12 @@ use nexus_types::external_api::{params, views};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types::silo::DEFAULT_SILO_ID;
+use omicron_common::api::external::AffinityPolicy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::FailureDomain;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Instance;
@@ -119,6 +121,14 @@ fn get_instance_start_url(instance_name: &str) -> String {
 
 fn get_disks_url() -> String {
     format!("/v1/disks?{}", get_project_selector())
+}
+
+fn affinity_groups_url() -> String {
+    format!("/v1/affinity-groups?{}", get_project_selector())
+}
+
+fn anti_affinity_groups_url() -> String {
+    format!("/v1/anti-affinity-groups?{}", get_project_selector())
 }
 
 fn default_vpc_subnets_url() -> String {
@@ -5201,6 +5211,328 @@ async fn test_instances_memory_greater_than_max_size(
     .unwrap();
 
     assert!(error.message.contains("memory must be less than"));
+}
+
+async fn create_affinity_groups(
+    client: &ClientTestContext,
+    groups: &[&'static str],
+) {
+    for name in groups {
+        let _: views::AffinityGroup = object_create(
+            client,
+            &affinity_groups_url(),
+            &params::AffinityGroupCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: name.parse().unwrap(),
+                    description: String::from("This is a description"),
+                },
+                policy: AffinityPolicy::Allow,
+                failure_domain: FailureDomain::Sled,
+            },
+        )
+        .await;
+    }
+}
+
+async fn create_anti_affinity_groups(
+    client: &ClientTestContext,
+    groups: &[&str],
+) {
+    for name in groups {
+        let _: views::AntiAffinityGroup = object_create(
+            client,
+            &anti_affinity_groups_url(),
+            &params::AntiAffinityGroupCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: name.parse().unwrap(),
+                    description: String::from("This is a description"),
+                },
+                policy: AffinityPolicy::Allow,
+                failure_domain: FailureDomain::Sled,
+            },
+        )
+        .await;
+    }
+}
+
+async fn ensure_affinity_groups_match(
+    client: &ClientTestContext,
+    instance_name: &str,
+    expected_groups: &[&str],
+) {
+    let mut expected_groups = expected_groups.to_vec();
+    expected_groups.sort();
+
+    let groups = objects_list_page_authz::<views::AffinityGroup>(
+        client,
+        &format!(
+            "/v1/instances/{instance_name}/affinity-groups?{}&sort_by=name_ascending",
+            get_project_selector()
+        )
+    )
+    .await
+    .items;
+
+    let group_names =
+        groups.iter().map(|g| g.identity.name.as_str()).collect::<Vec<_>>();
+    assert_eq!(group_names, expected_groups);
+}
+
+async fn ensure_anti_affinity_groups_match(
+    client: &ClientTestContext,
+    instance_name: &str,
+    expected_groups: &[&str],
+) {
+    let mut expected_groups = expected_groups.to_vec();
+    expected_groups.sort();
+
+    let groups = objects_list_page_authz::<views::AntiAffinityGroup>(
+        client,
+        &format!(
+            "/v1/instances/{instance_name}/anti-affinity-groups?{}&sort_by=name_ascending",
+            get_project_selector()
+        )
+    )
+    .await
+    .items;
+
+    let group_names =
+        groups.iter().map(|g| g.identity.name.as_str()).collect::<Vec<_>>();
+    assert_eq!(group_names, expected_groups);
+}
+
+#[nexus_test]
+async fn test_instance_create_with_affinity_groups(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "with-affinity";
+
+    cptestctx
+        .first_sled_agent()
+        .start_local_mock_propolis_server(&cptestctx.logctx.log)
+        .await
+        .unwrap();
+
+    // Test pre-reqs
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(&client).await;
+
+    // Create affinity and anti-affinity groups
+    let affinity_groups = ["affinity1", "affinity2"];
+    let anti_affinity_groups = ["anti-affinity1", "anti-affinity2"];
+
+    create_affinity_groups(&client, &affinity_groups).await;
+    create_anti_affinity_groups(&client, &anti_affinity_groups).await;
+
+    let affinity_groups_param: Vec<_> = affinity_groups
+        .iter()
+        .map(|name| NameOrId::Name(name.parse().unwrap()))
+        .collect();
+    let anti_affinity_groups_param: Vec<_> = anti_affinity_groups
+        .iter()
+        .map(|name| NameOrId::Name(name.parse().unwrap()))
+        .collect();
+
+    // Create an instance belonging to all the groups
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        ssh_public_keys: None,
+        start: false,
+        hostname: instance_name.parse().unwrap(),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![],
+        boot_disk: None,
+        auto_restart_policy: Default::default(),
+        affinity_groups: affinity_groups_param,
+        anti_affinity_groups: anti_affinity_groups_param,
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+    NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation!");
+
+    // Check that the affinity groups match
+    ensure_affinity_groups_match(
+        client,
+        instance_name,
+        affinity_groups.as_slice(),
+    )
+    .await;
+    ensure_anti_affinity_groups_match(
+        client,
+        instance_name,
+        anti_affinity_groups.as_slice(),
+    )
+    .await;
+}
+
+#[nexus_test]
+async fn test_instance_create_with_duplicate_affinity_groups(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "with-affinity";
+
+    cptestctx
+        .first_sled_agent()
+        .start_local_mock_propolis_server(&cptestctx.logctx.log)
+        .await
+        .unwrap();
+
+    // Test pre-reqs
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(&client).await;
+
+    // Create affinity and anti-affinity groups
+    let affinity_groups = ["affinity1", "affinity2"];
+    let anti_affinity_groups = ["anti-affinity1", "anti-affinity2"];
+
+    create_affinity_groups(&client, &affinity_groups).await;
+    create_anti_affinity_groups(&client, &anti_affinity_groups).await;
+
+    let mut affinity_groups_param: Vec<_> = affinity_groups
+        .iter()
+        .map(|name| NameOrId::Name(name.parse().unwrap()))
+        .collect();
+
+    let mut anti_affinity_groups_param: Vec<_> = anti_affinity_groups
+        .iter()
+        .map(|name| NameOrId::Name(name.parse().unwrap()))
+        .collect();
+
+    // Duplicate the names - this asks for each group twice.
+    affinity_groups_param.append(&mut affinity_groups_param.clone());
+    anti_affinity_groups_param.append(&mut anti_affinity_groups_param.clone());
+
+    // Create an instance belonging to all the groups
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        ssh_public_keys: None,
+        start: false,
+        hostname: instance_name.parse().unwrap(),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![],
+        boot_disk: None,
+        auto_restart_policy: Default::default(),
+        affinity_groups: affinity_groups_param,
+        anti_affinity_groups: anti_affinity_groups_param,
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+    NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation!");
+
+    // Check that the affinity groups match.
+    //
+    // We'll only see membership in affinity/anti-affinity groups once.
+    ensure_affinity_groups_match(
+        client,
+        instance_name,
+        affinity_groups.as_slice(),
+    )
+    .await;
+    ensure_anti_affinity_groups_match(
+        client,
+        instance_name,
+        anti_affinity_groups.as_slice(),
+    )
+    .await;
+}
+
+#[nexus_test]
+async fn test_instance_create_with_affinity_groups_that_do_not_exist(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "with-affinity";
+
+    cptestctx
+        .first_sled_agent()
+        .start_local_mock_propolis_server(&cptestctx.logctx.log)
+        .await
+        .unwrap();
+
+    // Test pre-reqs
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(&client).await;
+
+    // Create affinity and anti-affinity groups
+    let affinity_groups = ["affinity1", "affinity2"];
+    let anti_affinity_groups = ["anti-affinity1", "anti-affinity2"];
+
+    // Don't actually create these groups!
+    //
+    // Convert them into a format we can pass to "Instance Create".
+
+    let affinity_groups_param: Vec<_> = affinity_groups
+        .iter()
+        .map(|name| NameOrId::Name(name.parse().unwrap()))
+        .collect();
+    let anti_affinity_groups_param: Vec<_> = anti_affinity_groups
+        .iter()
+        .map(|name| NameOrId::Name(name.parse().unwrap()))
+        .collect();
+
+    // Create an instance belonging to all the groups
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        ssh_public_keys: None,
+        start: false,
+        hostname: instance_name.parse().unwrap(),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![],
+        boot_disk: None,
+        auto_restart_policy: Default::default(),
+        affinity_groups: affinity_groups_param,
+        anti_affinity_groups: anti_affinity_groups_param,
+    };
+
+    let error = object_create_error(
+        client,
+        &get_instances_url(),
+        &instance_params,
+        StatusCode::NOT_FOUND,
+    )
+    .await;
+
+    assert_eq!(
+        error.message,
+        "not found: affinity-group with name \"affinity1\""
+    );
 }
 
 #[nexus_test]
