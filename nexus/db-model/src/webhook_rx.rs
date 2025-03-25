@@ -263,6 +263,13 @@ impl WebhookGlob {
                 "*" => regex.push_str("[^\\.]+"),
                 // Match any number of segments
                 "**" => regex.push_str(".+"),
+                "" => {
+                    return Err(Error::invalid_value(
+                        "event_class",
+                        "invalid event class {glob:?}: dot-delimited \
+                         event class segments must not be empty",
+                    ));
+                }
                 s if s.contains('*') => {
                     return Err(Error::invalid_value(
                         "event_class",
@@ -275,6 +282,14 @@ impl WebhookGlob {
             }
             Ok(())
         };
+
+        if glob.contains(char::is_whitespace) {
+            return Err(Error::invalid_value(
+                "event_class",
+                "invalid event class {glob:?}: event classes do not contain \
+                 whitespace",
+            ));
+        }
 
         // The subscription's regex will always be at least as long as the event
         // class glob, plus start and end anchors.
@@ -355,6 +370,34 @@ mod test {
                 dbg!(&glob.regex),
                 "event class {class:?} should produce the regex {regex:?}"
             );
+        }
+    }
+
+    #[test]
+    fn test_invalid_event_class_globs() {
+        const CASES: &[&str] = &[
+            "foo..bar",
+            ".foo.bar",
+            "",
+            "..",
+            "foo.***",
+            "*****",
+            "foo.bar*.baz",
+            "foo*",
+            "foo bar.baz",
+            " ",
+            " .*",
+        ];
+        for input in CASES {
+            match WebhookGlob::from_str(dbg!(input)) {
+                Ok(glob) => panic!(
+                    "invalid event class glob {input:?} was parsed \
+                     successfully as {glob:?}"
+                ),
+                Err(error) => {
+                    dbg!(error);
+                }
+            }
         }
     }
 }
