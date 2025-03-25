@@ -86,15 +86,15 @@ pub fn all_apis() -> Vec<ManagedApiConfig> {
             extra_validation: None,
         },
         ManagedApiConfig {
-            title: "Ereporter API",
+            title: "Ereport Reporter API",
             versions: Versions::new_versioned(
-                ereporter_api::supported_versions()
+                ereport_api::supported_versions()
             ),
             description: "API for ereport producers",
             boundary: ApiBoundary::Internal,
             api_description:
-                ereporter_api::ereporter_api_mod::stub_api_description,
-            ident: "ereporter",
+                ereport_api::ereport_api_mod::stub_api_description,
+            ident: "ereport",
             extra_validation: None,
         },
         ManagedApiConfig {

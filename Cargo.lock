@@ -3035,19 +3035,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
 
 [[package]]
-name = "ereport-types"
-version = "0.1.0"
-dependencies = [
- "omicron-uuid-kinds",
- "omicron-workspace-hack",
- "schemars",
- "serde",
- "serde_json",
- "uuid",
-]
-
-[[package]]
-name = "ereporter-api"
+name = "ereport-api"
 version = "0.1.0"
 dependencies = [
  "dropshot 0.16.0",
@@ -3063,7 +3051,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ereporter-client"
+name = "ereport-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
@@ -3078,6 +3066,18 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "uuid",
+]
+
+[[package]]
+name = "ereport-types"
+version = "0.1.0"
+dependencies = [
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
+ "serde_json",
  "uuid",
 ]
 
@@ -6963,7 +6963,7 @@ dependencies = [
  "chrono",
  "clap",
  "dropshot 0.16.0",
- "ereporter-api",
+ "ereport-api",
  "expectorate",
  "futures",
  "gateway-api",
@@ -7084,7 +7084,7 @@ dependencies = [
  "dns-service-client",
  "dpd-client",
  "dropshot 0.16.0",
- "ereporter-client",
+ "ereport-client",
  "expectorate",
  "fatfs",
  "futures",
@@ -7429,7 +7429,7 @@ dependencies = [
  "dns-service-client",
  "dpd-client",
  "dropshot 0.16.0",
- "ereporter-api",
+ "ereport-api",
  "expectorate",
  "flate2",
  "flume",
@@ -7792,7 +7792,7 @@ dependencies = [
  "debug-ignore",
  "dns-server-api",
  "dropshot 0.16.0",
- "ereporter-api",
+ "ereport-api",
  "fs-err",
  "gateway-api",
  "hex",

@@ -271,9 +271,9 @@ repo is not currently open source.
 """
 
 [[apis]]
-client_package_name = "ereporter-client"
-label = "Ereporter"
-server_package_name = "ereporter-api"
+client_package_name = "ereport-client"
+label = "ereport"
+server_package_name = "ereport-api"
 versioned_how = "server"
 notes = """
 Implemented by sled-agents and by MGS, and consumed by Nexus to collect \

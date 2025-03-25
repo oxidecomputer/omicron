@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "Ereporter API",
+    "title": "Ereport Reporter API",
     "description": "API for ereport producers",
     "contact": {
       "url": "https://oxide.computer",
@@ -18,7 +18,7 @@
           {
             "in": "path",
             "name": "reporter_id",
-            "description": "The UUID of the reporter from which to collct ereports.",
+            "description": "The UUID of the reporter from which to collect ereports.",
             "required": true,
             "schema": {
               "type": "string",

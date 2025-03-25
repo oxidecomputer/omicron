@@ -52,7 +52,7 @@ api_versions!([
 
 /// API for ereport producers.
 #[dropshot::api_description]
-pub trait EreporterApi {
+pub trait EreportApi {
     type Context;
 
     /// Collect a tranche of ereports from this reporter.
@@ -69,7 +69,7 @@ pub trait EreporterApi {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ReporterPath {
-    /// The UUID of the reporter from which to collct ereports.
+    /// The UUID of the reporter from which to collect ereports.
     pub reporter_id: Uuid,
 }
 

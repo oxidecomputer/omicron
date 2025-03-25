@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 progenitor::generate_api!(
-    spec = "../../openapi/ereporter/ereporter-latest.json",
+    spec = "../../openapi/ereport/ereport-latest.json",
     inner_type = slog::Logger,
     derives = [schemars::JsonSchema, Clone, Eq, PartialEq],
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
