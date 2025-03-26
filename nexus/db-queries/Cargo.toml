@@ -35,6 +35,7 @@ pq-sys = "*"
 qorb.workspace = true
 rand.workspace = true
 ref-cast.workspace = true
+regex.workspace = true
 schemars.workspace = true
 semver.workspace = true
 serde.workspace = true

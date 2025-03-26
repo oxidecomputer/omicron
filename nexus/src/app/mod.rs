@@ -92,6 +92,7 @@ mod volume;
 mod vpc;
 mod vpc_router;
 mod vpc_subnet;
+mod webhook;
 
 // Sagas are not part of the "Nexus" implementation, but they are
 // application logic.
@@ -170,6 +171,13 @@ pub struct Nexus {
 
     /// Client to the timeseries database.
     timeseries_client: oximeter_db::Client,
+
+    /// `reqwest` client used for webhook delivery requests.
+    ///
+    /// This lives on the Nexus struct as we would like to use the same client
+    /// pool for the webhook deliverator background task and the webhook probe
+    /// API.
+    webhook_delivery_client: reqwest::Client,
 
     /// Contents of the trusted root role for the TUF repository.
     #[allow(dead_code)]
@@ -362,6 +370,11 @@ impl Nexus {
             ))
         };
 
+        let webhook_delivery_client =
+            webhook::delivery_client(&external_resolver).map_err(|e| {
+                format!("failed to build webhook delivery client: {e}")
+            })?;
+
         let nexus = Nexus {
             id: config.deployment.id,
             rack_id,
@@ -376,6 +389,7 @@ impl Nexus {
             populate_status,
             reqwest_client,
             timeseries_client,
+            webhook_delivery_client,
             updates_config: config.pkg.updates.clone(),
             tunables: config.pkg.tunables.clone(),
             opctx_alloc: OpContext::for_background(
@@ -456,6 +470,9 @@ impl Nexus {
                     resolver,
                     saga_starter: task_nexus.sagas.clone(),
                     producer_registry: task_registry,
+                    webhook_delivery_client: task_nexus
+                        .webhook_delivery_client
+                        .clone(),
 
                     saga_recovery: SagaRecoveryHelpers {
                         recovery_opctx: saga_recovery_opctx,
