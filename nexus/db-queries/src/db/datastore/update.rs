@@ -22,6 +22,7 @@ use omicron_common::api::external::{
     self, CreateResult, DataPageParams, Generation, ListResultVec,
     LookupResult, LookupType, ResourceType, TufRepoInsertStatus,
 };
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
 use swrite::{SWrite, swrite};
@@ -106,8 +107,41 @@ impl DataStore {
             })
     }
 
+    /// Returns a TUF repo description.
+    pub async fn update_tuf_repo_get_by_id(
+        &self,
+        opctx: &OpContext,
+        repo_id: TypedUuid<TufRepoKind>,
+    ) -> LookupResult<TufRepoDescription> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        use nexus_db_schema::schema::tuf_repo::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let repo_id = repo_id.into_untyped_uuid();
+        let repo = dsl::tuf_repo
+            .filter(dsl::id.eq(repo_id))
+            .select(TufRepo::as_select())
+            .first_async::<TufRepo>(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::TufRepo,
+                        LookupType::ById(repo_id),
+                    ),
+                )
+            })?;
+
+        let artifacts = artifacts_for_repo(repo.id.into(), &conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Ok(TufRepoDescription { repo, artifacts })
+    }
+
     /// Returns the TUF repo description corresponding to this system version.
-    pub async fn update_tuf_repo_get(
+    pub async fn update_tuf_repo_get_by_version(
         &self,
         opctx: &OpContext,
         system_version: SemverVersion,

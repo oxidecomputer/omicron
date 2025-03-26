@@ -39,6 +39,7 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
+use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
@@ -78,6 +79,7 @@ pub struct PlanningInputFromDb<'a> {
     pub cockroachdb_settings: &'a CockroachDbSettings,
     pub clickhouse_policy: Option<ClickhousePolicy>,
     pub oximeter_read_policy: OximeterReadPolicy,
+    pub tuf_repo: Option<TufRepoDescription>,
     pub log: &'a Logger,
 }
 
@@ -140,11 +142,24 @@ impl PlanningInputFromDb<'_> {
             .cockroachdb_settings(opctx)
             .await
             .internal_context("fetching cockroachdb settings")?;
-
         let clickhouse_policy = datastore
             .clickhouse_policy_get_latest(opctx)
             .await
             .internal_context("fetching clickhouse policy")?;
+        let target_release = datastore
+            .target_release_get_current(opctx)
+            .await
+            .internal_context("fetching current target release")?;
+        let tuf_repo = match target_release.tuf_repo_id {
+            None => None,
+            Some(repo_id) => Some(
+                datastore
+                    .update_tuf_repo_get_by_id(opctx, repo_id.into())
+                    .await
+                    .internal_context("fetching target release repo")?
+                    .into_external(),
+            ),
+        };
 
         let oximeter_read_policy = datastore
             .oximeter_read_policy_get_latest(opctx)
@@ -171,6 +186,7 @@ impl PlanningInputFromDb<'_> {
             cockroachdb_settings: &cockroachdb_settings,
             clickhouse_policy,
             oximeter_read_policy,
+            tuf_repo,
         }
         .build()
         .internal_context("assembling planning_input")?;
@@ -194,6 +210,7 @@ impl PlanningInputFromDb<'_> {
                 .target_crucible_pantry_zone_count,
             clickhouse_policy: self.clickhouse_policy.clone(),
             oximeter_read_policy: self.oximeter_read_policy.clone(),
+            tuf_repo: self.tuf_repo.clone(),
         };
         let mut builder = PlanningInputBuilder::new(
             policy,

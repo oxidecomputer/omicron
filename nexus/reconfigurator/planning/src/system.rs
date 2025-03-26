@@ -44,6 +44,7 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
@@ -96,6 +97,7 @@ pub struct SystemDescription {
     external_dns_version: Generation,
     clickhouse_policy: Option<ClickhousePolicy>,
     oximeter_read_policy: OximeterReadPolicy,
+    tuf_repo: Option<TufRepoDescription>,
 }
 
 impl SystemDescription {
@@ -175,6 +177,7 @@ impl SystemDescription {
             external_dns_version: Generation::new(),
             clickhouse_policy: None,
             oximeter_read_policy: OximeterReadPolicy::new(1),
+            tuf_repo: None,
         }
     }
 
@@ -427,6 +430,7 @@ impl SystemDescription {
                 .target_crucible_pantry_zone_count,
             clickhouse_policy: self.clickhouse_policy.clone(),
             oximeter_read_policy: self.oximeter_read_policy.clone(),
+            tuf_repo: self.tuf_repo.clone(),
         };
         let mut builder = PlanningInputBuilder::new(
             policy,
