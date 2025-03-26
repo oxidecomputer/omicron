@@ -960,7 +960,7 @@ impl fmt::Display for BlueprintZoneDisposition {
     }
 }
 
-/// Where a blueprint's image source is located.
+/// Where the zone's image source is located.
 ///
 /// This is the blueprint version of [`OmicronZoneImageSource`].
 #[derive(
