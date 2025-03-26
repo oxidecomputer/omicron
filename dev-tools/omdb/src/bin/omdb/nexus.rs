@@ -2613,12 +2613,8 @@ async fn cmd_nexus_blueprints_diff(
     .await?;
     let diff = b2.diff_since_blueprint(&b1);
     println!("{}", diff.display());
-    if args.exit_code {
-        if diff.has_changes() {
-            std::process::exit(1);
-        } else {
-            std::process::exit(0);
-        }
+    if args.exit_code && diff.has_changes() {
+        std::process::exit(1);
     }
     Ok(())
 }
