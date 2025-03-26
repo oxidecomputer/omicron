@@ -486,7 +486,7 @@ impl<'a> BlueprintBuilder<'a> {
         for (sled_id, sled_cfg) in &parent_blueprint.sleds {
             let state = sled_cfg.state;
 
-            let mut editor = match state {
+            let editor = match state {
                 SledState::Active => {
                     let subnet = input
                         .sled_lookup(SledFilter::Commissioned, *sled_id)
@@ -507,28 +507,6 @@ impl<'a> BlueprintBuilder<'a> {
             .with_context(|| {
                 format!("failed to construct SledEditor for sled {sled_id}")
             })?;
-
-            // Apply fixes for #7229 to all active sleds: If any zones have a
-            // missing or incorrect `filesystem_pool` property, correct it based
-            // on the inventory pools and datasets.
-            match state {
-                SledState::Active => {
-                    let sled_inventory = inventory.sled_agents.get(sled_id);
-                    editor
-                        .backfill_zone_filesystem_pools(
-                            sled_inventory.map_or(&[], |inv| &inv.zpools),
-                            sled_inventory.map_or(&[], |inv| &inv.datasets),
-                            &log,
-                        )
-                        .with_context(|| {
-                            format!(
-                                "failed to backfill zone filesystem_pool \
-                                 values for sled {sled_id}"
-                            )
-                        })?;
-                }
-                SledState::Decommissioned => (),
-            }
 
             sled_editors.insert(*sled_id, editor);
         }
@@ -1167,7 +1145,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: self.rng.sled_rng(sled_id).next_zone(),
-            filesystem_pool: Some(zpool),
+            filesystem_pool: zpool,
             zone_type,
             image_source: BlueprintZoneImageSource::InstallDataset,
         };
@@ -1219,7 +1197,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
-            filesystem_pool: Some(pool_name),
+            filesystem_pool: pool_name,
             zone_type,
             image_source: BlueprintZoneImageSource::InstallDataset,
         };
@@ -1258,7 +1236,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: self.rng.sled_rng(sled_id).next_zone(),
-            filesystem_pool: Some(filesystem_pool),
+            filesystem_pool,
             zone_type,
             image_source: BlueprintZoneImageSource::InstallDataset,
         };
@@ -1319,7 +1297,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: self.rng.sled_rng(sled_id).next_zone(),
-            filesystem_pool: Some(filesystem_pool),
+            filesystem_pool,
             zone_type,
             image_source: BlueprintZoneImageSource::InstallDataset,
         };
@@ -1410,7 +1388,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: nexus_id,
-            filesystem_pool: Some(filesystem_pool),
+            filesystem_pool,
             zone_type,
             image_source: BlueprintZoneImageSource::InstallDataset,
         };
@@ -1435,7 +1413,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: oximeter_id,
-            filesystem_pool: Some(filesystem_pool),
+            filesystem_pool,
             zone_type,
             image_source: BlueprintZoneImageSource::InstallDataset,
         };
@@ -1459,7 +1437,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: pantry_id,
-            filesystem_pool: Some(filesystem_pool),
+            filesystem_pool,
             zone_type,
             image_source: BlueprintZoneImageSource::InstallDataset,
         };
@@ -1493,7 +1471,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
-            filesystem_pool: Some(filesystem_pool),
+            filesystem_pool,
             zone_type,
             image_source: BlueprintZoneImageSource::InstallDataset,
         };
@@ -1519,7 +1497,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
-            filesystem_pool: Some(pool_name),
+            filesystem_pool: pool_name,
             zone_type,
             image_source: BlueprintZoneImageSource::InstallDataset,
         };
@@ -1547,7 +1525,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
-            filesystem_pool: Some(filesystem_pool),
+            filesystem_pool,
             zone_type,
             image_source: BlueprintZoneImageSource::InstallDataset,
         };
@@ -1575,7 +1553,7 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
-            filesystem_pool: Some(filesystem_pool),
+            filesystem_pool,
             zone_type,
             image_source: BlueprintZoneImageSource::InstallDataset,
         };
@@ -1703,7 +1681,7 @@ impl<'a> BlueprintBuilder<'a> {
             BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: new_zone_id,
-                filesystem_pool: Some(filesystem_pool),
+                filesystem_pool,
                 zone_type,
                 image_source: BlueprintZoneImageSource::InstallDataset,
             },
@@ -1819,9 +1797,7 @@ impl<'a> BlueprintBuilder<'a> {
             if let Some(zpool) = zone_config.zone_type.durable_zpool() {
                 skip_zpools.insert(zpool);
             }
-            if let Some(zpool) = &zone_config.filesystem_pool {
-                skip_zpools.insert(zpool);
-            }
+            skip_zpools.insert(&zone_config.filesystem_pool);
         }
 
         for &zpool_id in all_in_service_zpools {
@@ -2058,8 +2034,6 @@ pub mod test {
     use nexus_types::deployment::OmicronZoneNetworkResources;
     use nexus_types::external_api::views::SledPolicy;
     use omicron_common::address::IpRange;
-    use omicron_common::disk::DatasetKind;
-    use omicron_common::disk::DatasetName;
     use omicron_common::update::ArtifactHash;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeSet;
@@ -2441,14 +2415,8 @@ pub mod test {
 
         for (_, sled_config) in &blueprint.sleds {
             for zone in &sled_config.zones {
-                // The pool should only be optional for backwards compatibility.
-                let filesystem_pool = zone
-                    .filesystem_pool
-                    .as_ref()
-                    .expect("Should have filesystem pool");
-
                 if let Some(durable_pool) = zone.zone_type.durable_zpool() {
-                    assert_eq!(durable_pool, filesystem_pool);
+                    assert_eq!(*durable_pool, zone.filesystem_pool);
                 }
             }
         }
@@ -2881,222 +2849,6 @@ pub mod test {
             }
             _ => panic!("unexpected error {err}"),
         }
-
-        logctx.cleanup_successful();
-    }
-
-    #[test]
-    fn test_backfill_filesystem_pool() {
-        static TEST_NAME: &str =
-            "blueprint_builder_test_backfill_filesystem_pool";
-        let logctx = test_setup_log(TEST_NAME);
-
-        // Start a system that has 3 Nexus instances, each on a different sled.
-        let (example, mut parent) =
-            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
-                .nsleds(3)
-                .nexus_count(3)
-                .build();
-        let mut collection = example.collection;
-        let input = example.input;
-
-        // For each of the 3 Nexus instances:
-        //
-        // 0 - remains unchanged
-        // 1,2 - set filesystem_pool to None (should get filled in correctly)
-        //
-        // The zone config generation on sleds 1 and 2 should get bumped. 0
-        // should remain unchanged.
-        let mut sled_ids = Vec::with_capacity(3);
-        let mut expected_filesystem_pools = Vec::with_capacity(3);
-        let mut expected_zones_config_gen = Vec::with_capacity(3);
-
-        for (sled_id, sled_config) in parent.sleds.iter_mut() {
-            let mut nexus = sled_config
-                .zones
-                .iter_mut()
-                .find(|z| z.zone_type.is_nexus())
-                .expect("should find a nexus on each sled");
-            let orig_nexus_filesystem_pool =
-                nexus.filesystem_pool.clone().expect(
-                    "nexus instances in new blueprints \
-                     should have a filesystem_pool",
-                );
-
-            match sled_ids.len() {
-                0 => {
-                    expected_zones_config_gen
-                        .push(sled_config.sled_agent_generation);
-                }
-                1 | 2 => {
-                    expected_zones_config_gen
-                        .push(sled_config.sled_agent_generation.next());
-                    nexus.filesystem_pool = None;
-                }
-                _ => unreachable!("unexpected number of sleds in test"),
-            }
-            sled_ids.push(*sled_id);
-            expected_filesystem_pools.push(orig_nexus_filesystem_pool.clone());
-        }
-
-        // Create a builder and produce a new blueprint.
-        let blueprint1 = {
-            let mut builder = BlueprintBuilder::new_based_on(
-                &logctx.log,
-                &parent,
-                &input,
-                &collection,
-                "test",
-            )
-            .expect("constructed builder");
-
-            for sled_id in input.all_sled_ids(SledFilter::InService) {
-                builder
-                    .sled_ensure_zone_datasets(sled_id)
-                    .expect("ensured zone datasets");
-            }
-
-            builder.build()
-        };
-
-        // Check that our backfilling was correct.
-        for (i, &sled_id) in sled_ids.iter().enumerate() {
-            let sled_config =
-                blueprint1.sleds.get(&sled_id).expect("found sled");
-            assert_eq!(
-                sled_config.sled_agent_generation, expected_zones_config_gen[i],
-                "unexpected generation on sled {i}"
-            );
-
-            let nexus = sled_config
-                .zones
-                .iter()
-                .find(|z| z.zone_type.is_nexus())
-                .expect("found nexus on sled");
-            assert_eq!(
-                nexus.filesystem_pool.as_ref(),
-                Some(&expected_filesystem_pools[i]),
-                "unexpected filesystem_pool on sled {i}"
-            );
-        }
-
-        // Check that the new blueprint is blippy-clean.
-        verify_blueprint(&blueprint1);
-
-        // It's possible a sled-agent could restart in between when the
-        // inventory collection we used for backfilling was created and when we
-        // try to send it the new zone configs, and in doing so it could have
-        // changed the zpool it chose for any zone type that doesn't have a
-        // durable dataset (e.g., Nexus). To emulate this, mutate our collection
-        // and change the zpool for sled 2's Nexus to a different zpool; our
-        // backfilling should correct this again, even though the parent
-        // blueprint has a non-`None` filesystem pool for this Nexus.
-        let sled_2_new_nexus_zpool = {
-            // Get sled 2 and its Nexus from the collection...
-            let entry = collection
-                .sled_agents
-                .get_mut(&sled_ids[2])
-                .expect("sled 2 exists");
-            let nexus = entry
-                .omicron_zones
-                .zones
-                .iter()
-                .find(|z| z.zone_type.is_nexus())
-                .expect("found Nexus");
-            let nexus_filesystem_pool = nexus
-                .filesystem_pool
-                .as_ref()
-                .expect("Nexus has a filesystem_pool");
-
-            // ... pick some other pool to use ...
-            let some_other_pool = entry
-                .zpools
-                .iter()
-                .find_map(|zpool| {
-                    if zpool.id != nexus_filesystem_pool.id() {
-                        Some(ZpoolName::new_external(zpool.id))
-                    } else {
-                        None
-                    }
-                })
-                .expect("found some other zpool");
-
-            // ... and then update the collection's Nexus dataset to report that
-            // new pool as part of its dataset name.
-            let mut found_nexus_dataset = false;
-            for dataset in entry.datasets.iter_mut() {
-                if dataset.name.contains("nexus") {
-                    assert!(
-                        !found_nexus_dataset,
-                        "sled should only have 1 Nexus dataset"
-                    );
-                    found_nexus_dataset = true;
-                    dataset.name = DatasetName::new(
-                        some_other_pool.clone(),
-                        DatasetKind::TransientZone {
-                            name: illumos_utils::zone::zone_name(
-                                nexus.zone_type.kind().zone_prefix(),
-                                Some(nexus.id),
-                            ),
-                        },
-                    )
-                    .full_name();
-                }
-            }
-            assert!(
-                found_nexus_dataset,
-                "did not find and update Nexus dataset"
-            );
-
-            some_other_pool
-        };
-
-        let blueprint2 = {
-            let mut builder = BlueprintBuilder::new_based_on(
-                &logctx.log,
-                &blueprint1,
-                &input,
-                &collection,
-                "test",
-            )
-            .expect("constructed builder");
-
-            for sled_id in input.all_sled_ids(SledFilter::InService) {
-                builder
-                    .sled_ensure_zone_datasets(sled_id)
-                    .expect("ensured zone datasets");
-            }
-
-            builder.build()
-        };
-
-        // Check that our backfilling was correct: sled 2's generation should
-        // have been bumped again, and should have the filesystem pool reported
-        // by our modified collection.
-        expected_zones_config_gen[2] = expected_zones_config_gen[2].next();
-        expected_filesystem_pools[2] = sled_2_new_nexus_zpool;
-        for (i, &sled_id) in sled_ids.iter().enumerate() {
-            let sled_config =
-                blueprint2.sleds.get(&sled_id).expect("found sled");
-            assert_eq!(
-                sled_config.sled_agent_generation, expected_zones_config_gen[i],
-                "unexpected generation on sled {i}"
-            );
-
-            let nexus = sled_config
-                .zones
-                .iter()
-                .find(|z| z.zone_type.is_nexus())
-                .expect("found nexus on sled");
-            assert_eq!(
-                nexus.filesystem_pool.as_ref(),
-                Some(&expected_filesystem_pools[i]),
-                "unexpected filesystem_pool on sled {i}"
-            );
-        }
-
-        // Check that the new blueprint is blippy-clean.
-        verify_blueprint(&blueprint2);
 
         logctx.cleanup_successful();
     }

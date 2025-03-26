@@ -2256,7 +2256,7 @@ pub(crate) mod test {
         let mut zpool_by_zone_usage = HashMap::new();
         for sled in blueprint1.sleds.values() {
             for zone in &sled.zones {
-                let pool = zone.filesystem_pool.as_ref().unwrap();
+                let pool = &zone.filesystem_pool;
                 zpool_by_zone_usage
                     .entry(pool.id())
                     .and_modify(|count| *count += 1)
@@ -2408,7 +2408,7 @@ pub(crate) mod test {
             .find_map(|(_, sled_config)| {
                 for zone_config in &sled_config.zones {
                     if zone_config.zone_type.is_ntp() {
-                        return zone_config.filesystem_pool.clone();
+                        return Some(zone_config.filesystem_pool.clone());
                     }
                 }
                 None
@@ -2422,18 +2422,7 @@ pub(crate) mod test {
         for (_, zone_config) in blueprint1
             .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         {
-            let mut on_pool = false;
-            if let Some(pool) = &zone_config.filesystem_pool {
-                if pool == &pool_to_expunge {
-                    on_pool = true;
-                }
-            } else if let Some(pool) = zone_config.zone_type.durable_zpool() {
-                if pool == &pool_to_expunge {
-                    on_pool = true;
-                }
-            }
-
-            if on_pool {
+            if pool_to_expunge == zone_config.filesystem_pool {
                 zones_on_pool.insert(zone_config.id);
                 *zone_kinds_on_pool
                     .entry(zone_config.zone_type.kind())
@@ -4025,10 +4014,7 @@ pub(crate) mod test {
 
         // Expunge the disk used by the Nexus zone.
         let input = {
-            let nexus_zpool = nexus_config
-                .filesystem_pool
-                .as_ref()
-                .expect("Nexus has a filesystem pool");
+            let nexus_zpool = &nexus_config.filesystem_pool;
             let mut builder = input.into_builder();
             builder
                 .sleds_mut()
@@ -4209,10 +4195,7 @@ pub(crate) mod test {
 
         // Expunge the disk used by the internal DNS zone.
         let input = {
-            let internal_dns_zpool = internal_dns_config
-                .filesystem_pool
-                .as_ref()
-                .expect("internal DNS zone has a filesystem pool");
+            let internal_dns_zpool = &internal_dns_config.filesystem_pool;
             let mut builder = input.into_builder();
             builder
                 .sleds_mut()

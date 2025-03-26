@@ -153,8 +153,6 @@ pub enum SledKind {
     ZpoolMissingZoneRootDataset { zpool: ZpoolUuid },
     /// A zone's filesystem dataset is missing from `blueprint_datasets`.
     ZoneMissingFilesystemDataset { zone: BlueprintZoneConfig },
-    /// A zone's filesystem pool value is missing from `blueprint_datasets`.
-    ZoneMissingFilesystemPool { zone: BlueprintZoneConfig },
     /// A zone's durable dataset is missing from `blueprint_datasets`.
     ZoneMissingDurableDataset { zone: BlueprintZoneConfig },
     /// A zone's durable dataset and transient root dataset are on different
@@ -303,15 +301,6 @@ impl fmt::Display for SledKind {
                 write!(
                     f,
                     "in-service zone's filesytem dataset is missing: {:?} {}",
-                    zone.zone_type.kind(),
-                    zone.id,
-                )
-            }
-            SledKind::ZoneMissingFilesystemPool { zone } => {
-                write!(
-                    f,
-                    "in-service zone's filesytem pool property is missing: \
-                     {:?} {}",
                     zone.zone_type.kind(),
                     zone.id,
                 )
