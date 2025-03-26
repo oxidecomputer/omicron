@@ -3633,6 +3633,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "gfss"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "rand 0.8.5",
+ "secrecy",
+ "subtle",
+ "test-strategy",
+ "thiserror 1.0.69",
+ "zeroize",
+]
+
+[[package]]
 name = "ghash"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
