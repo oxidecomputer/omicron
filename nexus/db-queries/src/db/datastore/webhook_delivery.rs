@@ -514,7 +514,7 @@ mod test {
             .unwrap();
         let rx_id = rx.rx.identity.id.into();
         let event_id = WebhookEventUuid::new_v4();
-        let event = datastore
+        datastore
             .webhook_event_create(
                 &opctx,
                 event_id,

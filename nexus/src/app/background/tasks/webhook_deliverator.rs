@@ -297,7 +297,7 @@ impl WebhookDeliverator {
             }
 
             // okay, actually do the thing...
-            let delivery_attempt = match client
+            let mut delivery_attempt = match client
                 .send_delivery_request(opctx, &delivery, event_class, &event)
                 .await
             {
@@ -316,7 +316,7 @@ impl WebhookDeliverator {
                     opctx,
                     &delivery,
                     &self.nexus_id,
-                    &delivery_attempt,
+                    &mut delivery_attempt,
                 )
                 .await
             {
