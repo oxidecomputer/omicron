@@ -108,7 +108,7 @@ impl DataStore {
         // result. It would be nice to include an aggregate error with all the
         // missing groups.
         for name in names.iter() {
-            if !result.iter().any(|(_, n)| n.clone() == name.clone().into()) {
+            if !result.iter().any(|(_, n)| n == name) {
                 return Err(Error::not_found_by_name(
                     ResourceType::AntiAffinityGroup,
                     name,
