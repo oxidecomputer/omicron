@@ -1596,6 +1596,15 @@ fn before_125_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         let expunged_zone_id: Uuid =
             "00000002-0000-0000-0000-000000000000".parse().unwrap();
 
+        // Fill in a filesystem pool for each zone. This column was NULLable
+        // prior to schema version 132.0.0, but became NOT NULL in that version,
+        // so it's simplest to go ahead and populate it here (otherwise our test
+        // migration to 132 will fail). Operationally, we confirmed via omdb
+        // that all deployed systems had non-NULL filesystem_pool values prior
+        // to upgrading to 132.
+        let filesystem_pool: Uuid =
+            "00000000-0000-0000-0000-0000706f6f6c".parse().unwrap();
+
         for bp_id in [bp1_id, bp2_id] {
             for (zone_id, disposition) in [
                 (in_service_zone_id, "in_service"),
@@ -1611,6 +1620,7 @@ fn before_125_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                             zone_type,
                             primary_service_ip,
                             primary_service_port,
+                            filesystem_pool,
                             disposition
                         ) VALUES (
                             '{bp_id}',
@@ -1619,6 +1629,7 @@ fn before_125_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                             'oximeter',
                             '::1',
                             0,
+                            '{filesystem_pool}',
                             '{disposition}'
                         );
                     "
