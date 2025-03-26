@@ -123,10 +123,6 @@ fn get_disks_url() -> String {
     format!("/v1/disks?{}", get_project_selector())
 }
 
-fn affinity_groups_url() -> String {
-    format!("/v1/affinity-groups?{}", get_project_selector())
-}
-
 fn anti_affinity_groups_url() -> String {
     format!("/v1/anti-affinity-groups?{}", get_project_selector())
 }
@@ -239,7 +235,6 @@ async fn test_create_instance_with_bad_hostname_impl(
         start: false,
         ssh_public_keys: None,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
     let mut body: serde_json::Value =
@@ -347,7 +342,6 @@ async fn test_instances_create_reboot_halt(
                 boot_disk: None,
                 start: true,
                 auto_restart_policy: Default::default(),
-                affinity_groups: Vec::new(),
                 anti_affinity_groups: Vec::new(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
@@ -1902,7 +1896,6 @@ async fn test_instances_create_stopped_start(
             boot_disk: None,
             start: false,
             auto_restart_policy: Default::default(),
-            affinity_groups: Vec::new(),
             anti_affinity_groups: Vec::new(),
         },
     )
@@ -2087,7 +2080,6 @@ async fn test_instance_using_image_from_other_project_fails(
                 boot_disk: None,
                 start: true,
                 auto_restart_policy: Default::default(),
-                affinity_groups: Vec::new(),
                 anti_affinity_groups: Vec::new(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
@@ -2154,7 +2146,6 @@ async fn test_instance_create_saga_removes_instance_database_record(
         boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
     let response = NexusRequest::objects_post(
@@ -2186,7 +2177,6 @@ async fn test_instance_create_saga_removes_instance_database_record(
         boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
     let _ = NexusRequest::objects_post(
@@ -2280,7 +2270,6 @@ async fn test_instance_with_single_explicit_ip_address(
         start: true,
 
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
     let response = NexusRequest::objects_post(
@@ -2399,7 +2388,6 @@ async fn test_instance_with_new_custom_network_interfaces(
         boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
     let response = NexusRequest::objects_post(
@@ -2518,7 +2506,6 @@ async fn test_instance_create_delete_network_interface(
         boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
     let response = NexusRequest::objects_post(
@@ -2766,7 +2753,6 @@ async fn test_instance_update_network_interfaces(
         boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
     let response = NexusRequest::objects_post(
@@ -3398,7 +3384,6 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
     let builder =
@@ -3472,7 +3457,6 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
         disks: Vec::new(),
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
 
@@ -3564,7 +3548,6 @@ async fn test_instance_create_attach_disks(
         ],
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
 
@@ -3663,7 +3646,6 @@ async fn test_instance_create_attach_disks_undo(
         boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
 
@@ -3748,7 +3730,6 @@ async fn test_attach_eight_disks_to_instance(
             .collect(),
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
 
@@ -3837,7 +3818,6 @@ async fn test_cannot_attach_nine_disks_to_instance(
             .collect(),
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
 
@@ -3940,7 +3920,6 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
             .collect(),
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
 
@@ -4032,7 +4011,6 @@ async fn test_disks_detached_when_instance_destroyed(
             .collect(),
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
 
@@ -4131,7 +4109,6 @@ async fn test_disks_detached_when_instance_destroyed(
             .collect(),
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
 
@@ -4216,7 +4193,6 @@ async fn test_duplicate_disk_attach_requests_ok(
         boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
 
@@ -4261,7 +4237,6 @@ async fn test_duplicate_disk_attach_requests_ok(
         )],
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
 
@@ -4319,7 +4294,6 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
         disks: Vec::new(),
         start: false,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
 
@@ -4454,7 +4428,6 @@ async fn test_updating_running_instance_boot_disk_is_conflict(
         )),
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
 
@@ -4617,7 +4590,6 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         start: true,
         // Start out with None
         auto_restart_policy: None,
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
 
@@ -4825,7 +4797,6 @@ async fn test_auto_restart_policy_can_be_changed(
         start: true,
         // Start out with None
         auto_restart_policy: None,
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
 
@@ -4922,7 +4893,6 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         )],
         start: false,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
 
@@ -4993,7 +4963,6 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
         boot_disk: None,
         start: false,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
 
@@ -5086,7 +5055,6 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
         boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
 
@@ -5140,7 +5108,6 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
         boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
 
@@ -5194,7 +5161,6 @@ async fn test_instances_memory_greater_than_max_size(
         boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
 
@@ -5211,27 +5177,6 @@ async fn test_instances_memory_greater_than_max_size(
     .unwrap();
 
     assert!(error.message.contains("memory must be less than"));
-}
-
-async fn create_affinity_groups(
-    client: &ClientTestContext,
-    groups: &[&'static str],
-) {
-    for name in groups {
-        let _: views::AffinityGroup = object_create(
-            client,
-            &affinity_groups_url(),
-            &params::AffinityGroupCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: name.parse().unwrap(),
-                    description: String::from("This is a description"),
-                },
-                policy: AffinityPolicy::Allow,
-                failure_domain: FailureDomain::Sled,
-            },
-        )
-        .await;
-    }
 }
 
 async fn create_anti_affinity_groups(
@@ -5253,29 +5198,6 @@ async fn create_anti_affinity_groups(
         )
         .await;
     }
-}
-
-async fn ensure_affinity_groups_match(
-    client: &ClientTestContext,
-    instance_name: &str,
-    expected_groups: &[&str],
-) {
-    let mut expected_groups = expected_groups.to_vec();
-    expected_groups.sort();
-
-    let groups = objects_list_page_authz::<views::AffinityGroup>(
-        client,
-        &format!(
-            "/v1/instances/{instance_name}/affinity-groups?{}&sort_by=name_ascending",
-            get_project_selector()
-        )
-    )
-    .await
-    .items;
-
-    let group_names =
-        groups.iter().map(|g| g.identity.name.as_str()).collect::<Vec<_>>();
-    assert_eq!(group_names, expected_groups);
 }
 
 async fn ensure_anti_affinity_groups_match(
@@ -5302,11 +5224,11 @@ async fn ensure_anti_affinity_groups_match(
 }
 
 #[nexus_test]
-async fn test_instance_create_with_affinity_groups(
+async fn test_instance_create_with_anti_affinity_groups(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let instance_name = "with-affinity";
+    let instance_name = "with-anti-affinity";
 
     cptestctx
         .first_sled_agent()
@@ -5318,17 +5240,11 @@ async fn test_instance_create_with_affinity_groups(
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(&client).await;
 
-    // Create affinity and anti-affinity groups
-    let affinity_groups = ["affinity1", "affinity2"];
+    // Create anti-affinity groups
     let anti_affinity_groups = ["anti-affinity1", "anti-affinity2"];
 
-    create_affinity_groups(&client, &affinity_groups).await;
     create_anti_affinity_groups(&client, &anti_affinity_groups).await;
 
-    let affinity_groups_param: Vec<_> = affinity_groups
-        .iter()
-        .map(|name| NameOrId::Name(name.parse().unwrap()))
-        .collect();
     let anti_affinity_groups_param: Vec<_> = anti_affinity_groups
         .iter()
         .map(|name| NameOrId::Name(name.parse().unwrap()))
@@ -5351,7 +5267,6 @@ async fn test_instance_create_with_affinity_groups(
         disks: vec![],
         boot_disk: None,
         auto_restart_policy: Default::default(),
-        affinity_groups: affinity_groups_param,
         anti_affinity_groups: anti_affinity_groups_param,
     };
 
@@ -5365,13 +5280,7 @@ async fn test_instance_create_with_affinity_groups(
         .await
         .expect("Expected instance creation!");
 
-    // Check that the affinity groups match
-    ensure_affinity_groups_match(
-        client,
-        instance_name,
-        affinity_groups.as_slice(),
-    )
-    .await;
+    // Check that the anti-affinity groups match
     ensure_anti_affinity_groups_match(
         client,
         instance_name,
@@ -5381,11 +5290,11 @@ async fn test_instance_create_with_affinity_groups(
 }
 
 #[nexus_test]
-async fn test_instance_create_with_duplicate_affinity_groups(
+async fn test_instance_create_with_duplicate_anti_affinity_groups(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let instance_name = "with-affinity";
+    let instance_name = "with-anti-affinity";
 
     cptestctx
         .first_sled_agent()
@@ -5397,17 +5306,10 @@ async fn test_instance_create_with_duplicate_affinity_groups(
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(&client).await;
 
-    // Create affinity and anti-affinity groups
-    let affinity_groups = ["affinity1", "affinity2"];
+    // Create anti-affinity groups
     let anti_affinity_groups = ["anti-affinity1", "anti-affinity2"];
 
-    create_affinity_groups(&client, &affinity_groups).await;
     create_anti_affinity_groups(&client, &anti_affinity_groups).await;
-
-    let mut affinity_groups_param: Vec<_> = affinity_groups
-        .iter()
-        .map(|name| NameOrId::Name(name.parse().unwrap()))
-        .collect();
 
     let mut anti_affinity_groups_param: Vec<_> = anti_affinity_groups
         .iter()
@@ -5415,7 +5317,6 @@ async fn test_instance_create_with_duplicate_affinity_groups(
         .collect();
 
     // Duplicate the names - this asks for each group twice.
-    affinity_groups_param.append(&mut affinity_groups_param.clone());
     anti_affinity_groups_param.append(&mut anti_affinity_groups_param.clone());
 
     // Create an instance belonging to all the groups
@@ -5435,7 +5336,6 @@ async fn test_instance_create_with_duplicate_affinity_groups(
         disks: vec![],
         boot_disk: None,
         auto_restart_policy: Default::default(),
-        affinity_groups: affinity_groups_param,
         anti_affinity_groups: anti_affinity_groups_param,
     };
 
@@ -5449,15 +5349,9 @@ async fn test_instance_create_with_duplicate_affinity_groups(
         .await
         .expect("Expected instance creation!");
 
-    // Check that the affinity groups match.
+    // Check that the anti-affinity groups match.
     //
-    // We'll only see membership in affinity/anti-affinity groups once.
-    ensure_affinity_groups_match(
-        client,
-        instance_name,
-        affinity_groups.as_slice(),
-    )
-    .await;
+    // We'll only see membership in anti-affinity groups once.
     ensure_anti_affinity_groups_match(
         client,
         instance_name,
@@ -5467,11 +5361,11 @@ async fn test_instance_create_with_duplicate_affinity_groups(
 }
 
 #[nexus_test]
-async fn test_instance_create_with_affinity_groups_that_do_not_exist(
+async fn test_instance_create_with_anti_affinity_groups_that_do_not_exist(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let instance_name = "with-affinity";
+    let instance_name = "with-anti-affinity";
 
     cptestctx
         .first_sled_agent()
@@ -5483,18 +5377,13 @@ async fn test_instance_create_with_affinity_groups_that_do_not_exist(
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(&client).await;
 
-    // Create affinity and anti-affinity groups
-    let affinity_groups = ["affinity1", "affinity2"];
+    // Create anti-affinity groups
     let anti_affinity_groups = ["anti-affinity1", "anti-affinity2"];
 
     // Don't actually create these groups!
     //
     // Convert them into a format we can pass to "Instance Create".
 
-    let affinity_groups_param: Vec<_> = affinity_groups
-        .iter()
-        .map(|name| NameOrId::Name(name.parse().unwrap()))
-        .collect();
     let anti_affinity_groups_param: Vec<_> = anti_affinity_groups
         .iter()
         .map(|name| NameOrId::Name(name.parse().unwrap()))
@@ -5517,7 +5406,6 @@ async fn test_instance_create_with_affinity_groups_that_do_not_exist(
         disks: vec![],
         boot_disk: None,
         auto_restart_policy: Default::default(),
-        affinity_groups: affinity_groups_param,
         anti_affinity_groups: anti_affinity_groups_param,
     };
 
@@ -5531,7 +5419,7 @@ async fn test_instance_create_with_affinity_groups_that_do_not_exist(
 
     assert_eq!(
         error.message,
-        "not found: affinity-group with name \"affinity1\""
+        "not found: anti-affinity-group with name \"anti-affinity1\""
     );
 }
 
@@ -5601,7 +5489,6 @@ async fn test_instance_create_with_ssh_keys(
         disks: vec![],
         boot_disk: None,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
 
@@ -5651,7 +5538,6 @@ async fn test_instance_create_with_ssh_keys(
         disks: vec![],
         boot_disk: None,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
 
@@ -5700,7 +5586,6 @@ async fn test_instance_create_with_ssh_keys(
         disks: vec![],
         boot_disk: None,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
 
@@ -5825,7 +5710,6 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
             boot_disk: None,
             start: false,
             auto_restart_policy: Default::default(),
-            affinity_groups: Vec::new(),
             anti_affinity_groups: Vec::new(),
         };
 
@@ -5885,7 +5769,6 @@ async fn test_cannot_provision_instance_beyond_cpu_limit(
         boot_disk: None,
         start: false,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
     let url_instances = get_instances_url();
@@ -5942,7 +5825,6 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
             boot_disk: None,
             start: false,
             auto_restart_policy: Default::default(),
-            affinity_groups: Vec::new(),
             anti_affinity_groups: Vec::new(),
         };
 
@@ -6243,7 +6125,6 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
     let error = object_create_error(
@@ -6314,7 +6195,6 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
         boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
 
@@ -6379,7 +6259,6 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
         boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
 
@@ -6518,7 +6397,6 @@ async fn test_instance_allow_only_one_ephemeral_ip(
         boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
     let error = object_create_error(
@@ -6653,7 +6531,6 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
-        affinity_groups: Vec::new(),
         anti_affinity_groups: Vec::new(),
     };
     let url_instances = format!("/v1/instances?project={}", PROJECT_NAME);

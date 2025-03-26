@@ -98,11 +98,6 @@ declare_saga_actions! {
         + sic_associate_ssh_keys
         - sic_associate_ssh_keys_undo
     }
-    ADD_TO_AFFINITY_GROUP -> "output" {
-        + sic_add_to_affinity_group
-        // NOTE: Deleting the instance record deletes all affinity group memberships.
-        // Therefore: No undo action is necessary here.
-    }
     ADD_TO_ANTI_AFFINITY_GROUP -> "output" {
         + sic_add_to_anti_affinity_group
         // NOTE: Deleting the instance record deletes all anti-affinity group memberships.
@@ -190,40 +185,6 @@ impl NexusSaga for SagaInstanceCreate {
                 params_node_name,
             ));
             Ok(())
-        }
-
-        for (i, group) in
-            params.create_params.affinity_groups.iter().enumerate()
-        {
-            let group = match group {
-                NameOrId::Id(id) => AffinityGroupUuid::from_untyped_uuid(*id),
-                _ => {
-                    return Err(SagaInitError::InvalidParameter(
-                        "Non-UUID group".to_string(),
-                    ));
-                }
-            };
-
-            let repeat_params = AffinityParams {
-                serialized_authn: params.serialized_authn.clone(),
-                instance_id,
-                group,
-            };
-            let subsaga_name =
-                SagaName::new(&format!("add-to-affinity-group-{i}"));
-            let mut subsaga_builder = DagBuilder::new(subsaga_name);
-            subsaga_builder.append(Node::action(
-                "output",
-                format!("AddToAffinityGroup{i}").as_str(),
-                ADD_TO_AFFINITY_GROUP.as_ref(),
-            ));
-            subsaga_append(
-                "affinity_groups".into(),
-                subsaga_builder.build()?,
-                &mut builder,
-                repeat_params,
-                i,
-            )?;
         }
 
         for (i, group) in
@@ -474,33 +435,6 @@ async fn sic_associate_ssh_keys_undo(
         .instance_ssh_keys_delete(&opctx, instance_id)
         .await
         .map_err(ActionError::action_failed)?;
-    Ok(())
-}
-
-async fn sic_add_to_affinity_group(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    let params = sagactx.saga_params::<AffinityParams>()?;
-    let AffinityParams { serialized_authn, instance_id, group } = params;
-    let osagactx = sagactx.user_data();
-    let datastore = osagactx.datastore();
-    let opctx =
-        crate::context::op_context_for_saga_action(&sagactx, &serialized_authn);
-
-    let (.., authz_affinity_group) = LookupPath::new(&opctx, datastore)
-        .affinity_group_id(group.into_untyped_uuid())
-        .lookup_for(authz::Action::Modify)
-        .await
-        .map_err(ActionError::action_failed)?;
-    datastore
-        .affinity_group_member_instance_add(
-            &opctx,
-            &authz_affinity_group,
-            instance_id,
-        )
-        .await
-        .map_err(ActionError::action_failed)?;
-
     Ok(())
 }
 
@@ -1364,7 +1298,6 @@ pub mod test {
                 disks: Vec::new(),
                 start: false,
                 auto_restart_policy: Default::default(),
-                affinity_groups: Vec::new(),
                 anti_affinity_groups: Vec::new(),
             },
             boundary_switches: HashSet::from([SwitchLocation::Switch0]),

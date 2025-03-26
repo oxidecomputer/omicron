@@ -563,7 +563,6 @@ pub async fn create_instance_with(
             boot_disk: None,
             start,
             auto_restart_policy,
-            affinity_groups: Vec::new(),
             anti_affinity_groups: Vec::new(),
         },
     )

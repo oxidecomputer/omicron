@@ -222,7 +222,6 @@ pub async fn create_stopped_instance_record(
             ssh_public_keys: None,
             start: false,
             auto_restart_policy: Default::default(),
-            affinity_groups: Vec::new(),
             anti_affinity_groups: Vec::new(),
         },
     );

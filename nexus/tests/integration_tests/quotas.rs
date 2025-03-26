@@ -89,7 +89,6 @@ impl ResourceAllocator {
                 boot_disk: None,
                 start: false,
                 auto_restart_policy: Default::default(),
-                affinity_groups: Vec::new(),
                 anti_affinity_groups: Vec::new(),
             },
         )

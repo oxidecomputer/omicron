@@ -238,7 +238,6 @@ mod tests {
                         ssh_public_keys: None,
                         start: false,
                         auto_restart_policy: Default::default(),
-                        affinity_groups: Vec::new(),
                         anti_affinity_groups: Vec::new(),
                     },
                 ),

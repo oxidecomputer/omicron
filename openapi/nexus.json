@@ -18051,16 +18051,8 @@
         "description": "Create-time parameters for an `Instance`",
         "type": "object",
         "properties": {
-          "affinity_groups": {
-            "description": "Affinity groups which this instance should be added into.",
-            "default": [],
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
           "anti_affinity_groups": {
-            "description": "Anti-Affinity groups which this instance should be added into.",
+            "description": "Anti-Affinity groups which this instance should be added.",
             "default": [],
             "type": "array",
             "items": {

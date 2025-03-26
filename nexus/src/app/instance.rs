@@ -300,20 +300,6 @@ async fn normalize_ssh_keys(
     Ok(ssh_keys)
 }
 
-async fn normalize_affinity_groups(
-    datastore: &DataStore,
-    opctx: &OpContext,
-    authz_project: &authz::Project,
-    groups: &Vec<NameOrId>,
-) -> Result<Vec<NameOrId>, Error> {
-    Ok(datastore
-        .affinity_groups_batch_lookup(opctx, authz_project, groups)
-        .await?
-        .iter()
-        .map(|id| NameOrId::Id(id.into_untyped_uuid()))
-        .collect::<Vec<NameOrId>>())
-}
-
 async fn normalize_anti_affinity_groups(
     datastore: &DataStore,
     opctx: &OpContext,
@@ -492,14 +478,6 @@ impl super::Nexus {
         )
         .await?;
 
-        let affinity_groups = normalize_affinity_groups(
-            &self.db_datastore,
-            opctx,
-            &authz_project,
-            &params.affinity_groups,
-        )
-        .await?;
-
         let anti_affinity_groups = normalize_anti_affinity_groups(
             &self.db_datastore,
             opctx,
@@ -521,7 +499,6 @@ impl super::Nexus {
             project_id: authz_project.id(),
             create_params: params::InstanceCreate {
                 ssh_public_keys: ssh_keys,
-                affinity_groups,
                 anti_affinity_groups,
                 ..params.clone()
             },
@@ -2513,7 +2490,6 @@ mod tests {
             ssh_public_keys: None,
             start: false,
             auto_restart_policy: Default::default(),
-            affinity_groups: Vec::new(),
             anti_affinity_groups: Vec::new(),
         };
 
