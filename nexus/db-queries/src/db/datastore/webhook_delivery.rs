@@ -349,18 +349,10 @@ impl DataStore {
         opctx: &OpContext,
         delivery: &WebhookDelivery,
         nexus_id: &OmicronZoneUuid,
-        attempt: &WebhookDeliveryAttempt,
+        attempt: &mut WebhookDeliveryAttempt,
     ) -> Result<(), Error> {
         const MAX_ATTEMPTS: u8 = 3;
         let conn = self.pool_connection_authorized(opctx).await?;
-        diesel::insert_into(attempt_dsl::webhook_delivery_attempt)
-            .values(attempt.clone())
-            .on_conflict((attempt_dsl::delivery_id, attempt_dsl::attempt))
-            .do_nothing()
-            .returning(WebhookDeliveryAttempt::as_returning())
-            .execute_async(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         // Has the delivery either completed successfully or exhausted all of
         // its retry attempts?
@@ -389,12 +381,10 @@ impl DataStore {
                 (None, None)
             };
 
-        let prev_attempts = SqlU8::new((*attempt.attempt) - 1);
         let UpdateAndQueryResult { status, found } =
             diesel::update(dsl::webhook_delivery)
                 .filter(dsl::id.eq(delivery.id.into_untyped_uuid()))
                 .filter(dsl::deliverator_id.eq(nexus_id.into_untyped_uuid()))
-                .filter(dsl::attempts.eq(prev_attempts))
                 // Don't mark a delivery as completed if it's already completed!
                 .filter(
                     dsl::time_completed
@@ -404,9 +394,7 @@ impl DataStore {
                 .set((
                     dsl::state.eq(new_state),
                     dsl::time_completed.eq(completed),
-                    // XXX(eliza): hmm this might be racy; we should probably increment this
-                    // in place and use it to determine the attempt number?
-                    dsl::attempts.eq(attempt.attempt),
+                    dsl::attempts.eq(dsl::attempts + 1),
                     dsl::deliverator_id.eq(new_nexus_id),
                 ))
                 .check_if_exists::<WebhookDelivery>(delivery.id)
@@ -415,6 +403,34 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
+
+        // Mutating the delivery attempt model like this is a little bit
+        // goofy, but hear me out. We would, if possible, always like to
+        // have an attempt record in the database for every HTTP request that
+        // was actually sent to the receiver, even if we sent more than we were
+        // supposed to (e.g. if we had leased the delivery and then got stuck
+        // for long enough for our lease to time out).
+        //
+        // When we construct the `WebhookDeliveryAttempt` model, it has the
+        // attempt number that we *think* is correct based on the
+        // `WebhookDelivery` as we initially queried it. But, if we lost the
+        // lease, someone else may have also inserted deliveries. Therefore, we
+        // want to insert this `WebhookDeliveryAttempt` record with the actual
+        // number of attempts plus one, so that we can record it even if another
+        // attempt occurred in the meantime.`
+        attempt.attempt = SqlU8(found.attempts.0 + 1);
+        diesel::insert_into(attempt_dsl::webhook_delivery_attempt)
+            .values(attempt.clone())
+            .on_conflict((attempt_dsl::delivery_id, attempt_dsl::attempt))
+            .do_nothing()
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to insert delivery attempt record",
+                    )
+            })?;
 
         if status == UpdateStatus::Updated {
             return Ok(());
@@ -426,10 +442,6 @@ impl DataStore {
             return Err(Error::conflict(
                 "delivery was already marked as completed",
             ));
-        }
-
-        if found.attempts != prev_attempts {
-            return Err(Error::conflict("wrong number of delivery attempts"));
         }
 
         if let Some(other_nexus_id) = found.deliverator_id {
@@ -514,16 +526,22 @@ mod test {
             .await
             .expect("can't create ye event");
 
-        let dispatch1 =
-            WebhookDelivery::new(&event, &rx_id, WebhookDeliveryTrigger::Event);
+        let dispatch1 = WebhookDelivery::new(
+            &event_id,
+            &rx_id,
+            WebhookDeliveryTrigger::Event,
+        );
         let inserted = datastore
             .webhook_delivery_create_batch(&opctx, vec![dispatch1.clone()])
             .await
             .expect("dispatch 1 should insert");
         assert_eq!(inserted, 1, "first dispatched delivery should be created");
 
-        let dispatch2 =
-            WebhookDelivery::new(&event, &rx_id, WebhookDeliveryTrigger::Event);
+        let dispatch2 = WebhookDelivery::new(
+            &event_id,
+            &rx_id,
+            WebhookDeliveryTrigger::Event,
+        );
         let inserted = datastore
             .webhook_delivery_create_batch(opctx, vec![dispatch2.clone()])
             .await
@@ -534,7 +552,7 @@ mod test {
         );
 
         let resend1 = WebhookDelivery::new(
-            &event,
+            &event_id,
             &rx_id,
             WebhookDeliveryTrigger::Resend,
         );
@@ -548,7 +566,7 @@ mod test {
         );
 
         let resend2 = WebhookDelivery::new(
-            &event,
+            &event_id,
             &rx_id,
             WebhookDeliveryTrigger::Resend,
         );
