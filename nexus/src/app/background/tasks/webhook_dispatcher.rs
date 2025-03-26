@@ -124,7 +124,11 @@ impl WebhookDispatcher {
         status: &mut WebhookDispatcherStatus,
     ) -> Result<(), Error> {
         // Before dispatching any events, ensure that all webhook globs are up
-        // to date with the current schema version.
+        // to date with the current schema version. This has to be done before
+        // we actually dispatch any events, as a receiver with globs that
+        // haven't yet been updated may lack exact subscriptions to event
+        // classes that match its globs but were added after the last time its
+        // globs were reprocessed.
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         let mut globs_reprocessed = 0;
         let mut globs_failed = 0;

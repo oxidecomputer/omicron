@@ -801,6 +801,12 @@ impl DataStore {
     // Glob reprocessing
     //
 
+    /// List webhook glob subscriptions which were last processed with a
+    /// database schema version earlier than the current one.
+    ///
+    /// Such subscriptions will need to be reprocessed (by the
+    /// [`DataStore::webhook_glob_reprocess`] function), as event classes
+    /// matching those globs may have been added in a later schema version.
     pub async fn webhook_glob_list_outdated(
         &self,
         opctx: &OpContext,
@@ -811,6 +817,12 @@ impl DataStore {
                 e.internal_context("couldn't load db schema version")
             })?;
 
+        // Perform some checks to make sure we can actually attempt glob
+        // reprocessing at this time.
+        //
+        // First, ensure we're not in the process of applying a schema
+        // migration. If we are, glob reprocessing will have to wait until the
+        // migration has completed.
         if let Some(target) = target_version {
             return Err(Error::InternalError {
                 internal_message: format!(
@@ -819,6 +831,21 @@ impl DataStore {
                 ),
             });
         }
+
+        // If this Nexus is operating with a schema version that is newer or
+        // older than the current version active in CRDB, bail out now and don't
+        // attempt to reprocess globs.
+        //
+        // Note that, at present, this defensive code guards against a scenario
+        // that isn't actually possible: Nexus will fail to construct the
+        // `DataStore` type at all if its schema is not up to date, and at
+        // present, schema updates are only applied via mupdate, stopping all
+        // Nexus processes. However, we can potentially imagine a Nexus compiled
+        // against a schema version that's newer or older than the currently
+        // active one running while an online update is in progress, so we check
+        // for that situation just in case. Depending on how online Nexus
+        // updates are actually implemented, this scenario may or may not
+        // actually be possible, but let's check regardless.
         if current_version != SCHEMA_VERSION {
             return Err(Error::InternalError {
                 internal_message: format!(
@@ -843,6 +870,14 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// Updates the list of exact subscriptions generated for the provided glob
+    /// subscription to the latest schema version.
+    ///
+    /// This method ensures that exact subscription records exist for all
+    /// currently known event classes matching the provided glob. The webhook
+    /// dispatcher must ensure that all glob subscriptions are up-to-date before
+    /// dispatching events, as a receiver with outdated globs may have a glob
+    /// matching a new event class but no corresponding exact subscription yet.
     pub async fn webhook_glob_reprocess(
         &self,
         opctx: &OpContext,
