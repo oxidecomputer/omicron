@@ -204,10 +204,8 @@ impl DataStore {
         opctx: &OpContext,
         rx_id: &WebhookReceiverUuid,
         cfg: &DeliveryConfig,
-    ) -> Result<
-        impl Iterator<Item = DeliveryAndEvent> + ExactSizeIterator + 'static,
-        Error,
-    > {
+    ) -> Result<impl ExactSizeIterator<Item = DeliveryAndEvent> + 'static, Error>
+    {
         let conn = self.pool_connection_authorized(opctx).await?;
         let now =
             diesel::dsl::now.into_sql::<diesel::pg::sql_types::Timestamptz>();
