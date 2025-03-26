@@ -140,6 +140,13 @@ impl WebhookDispatcher {
             paginator = p.found_batch(&batch, &|glob| {
                 (glob.rx_id.into_untyped_uuid(), glob.glob.glob.clone())
             });
+
+            slog::trace!(
+                &opctx.log,
+                "reprocessing {} outdated webhook globs...",
+                batch.len(),
+            );
+
             for glob in batch {
                 let result = self
                     .datastore
@@ -232,21 +239,30 @@ impl WebhookDispatcher {
                 }
             };
 
-            let deliveries: Vec<WebhookDelivery> = rxs.into_iter().map(|(rx, sub)| {
-                // NOTE: In the future, if we add support for webhook receivers
-                // with roles other than 'fleet.viewer' (as described in
-                // https://rfd.shared.oxide.computer/rfd/538#rbac-filtering),
-                // this might be where we filter the actual dispatched payload
-                // based on the individual receiver's permissions.
-                slog::trace!(&opctx.log, "webhook receiver is subscribed to event";
-                    "rx_name" => %rx.name(),
-                    "rx_id" => ?rx.id(),
-                    "event_id" => ?event.id(),
-                    "event_class" => %event.event_class,
-                    "glob" => ?sub.glob,
-                );
-                WebhookDelivery::new(&event.id(), &rx.id(), WebhookDeliveryTrigger::Event)
-            }).collect();
+            let deliveries: Vec<WebhookDelivery> = rxs
+                .into_iter()
+                .map(|(rx, sub)| {
+                    // NOTE: In the future, if we add support for webhook receivers
+                    // with roles other than 'fleet.viewer' (as described in
+                    // https://rfd.shared.oxide.computer/rfd/538#rbac-filtering),
+                    // this might be where we filter the actual dispatched payload
+                    // based on the individual receiver's permissions.
+                    slog::trace!(
+                        &opctx.log,
+                        "webhook receiver is subscribed to event";
+                        "rx_name" => %rx.name(),
+                        "rx_id" => ?rx.id(),
+                        "event_id" => ?event.id(),
+                        "event_class" => %event.event_class,
+                        "glob" => ?sub.glob,
+                    );
+                    WebhookDelivery::new(
+                        &event.id(),
+                        &rx.id(),
+                        WebhookDeliveryTrigger::Event,
+                    )
+                })
+                .collect();
 
             let subscribed = if !deliveries.is_empty() {
                 let subscribed = deliveries.len();
@@ -257,13 +273,19 @@ impl WebhookDispatcher {
                 {
                     Ok(created) => created,
                     Err(error) => {
-                        slog::error!(&opctx.log, "failed to insert webhook deliveries";
+                        slog::error!(&opctx.log,
+                            "failed to insert webhook deliveries";
                             "event_id" => ?event.id(),
                             "event_class" => %event.event_class,
                             "error" => %error,
                             "num_subscribed" => ?subscribed,
                         );
-                        status.errors.push(format!("failed to insert {subscribed} webhook deliveries for event {} ({}): {error}", event.id(), event.event_class));
+                        status.errors.push(format!(
+                            "failed to insert {subscribed} webhook deliveries \
+                             for event {} ({}): {error}",
+                            event.id(),
+                            event.event_class,
+                        ));
                         // We weren't able to create deliveries for this event, so
                         // *don't* mark it as dispatched.
                         continue;
@@ -299,13 +321,20 @@ impl WebhookDispatcher {
                 .webhook_event_mark_dispatched(&opctx, &event.id(), subscribed)
                 .await
             {
-                slog::error!(&opctx.log, "failed to mark webhook event as dispatched";
+                slog::error!(
+                    &opctx.log,
+                    "failed to mark webhook event as dispatched";
                     "event_id" => ?event.id(),
                     "event_class" => %event.event_class,
                     "error" => %error,
                     "num_subscribed" => subscribed,
                 );
-                status.errors.push(format!("failed to mark webhook event {} ({}) as dispatched: {error}", event.id(), event.event_class));
+                status.errors.push(format!(
+                    "failed to mark webhook event {} ({}) as dispatched: \
+                     {error}",
+                    event.id(),
+                    event.event_class,
+                ));
             }
         }
         Ok(())

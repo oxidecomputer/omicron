@@ -118,7 +118,11 @@ impl BackgroundTask for WebhookDeliverator {
                 error: None,
             };
             if let Err(e) = self.actually_activate(opctx, &mut status).await {
-                slog::error!(&opctx.log, "webhook delivery failed"; "error" => %e);
+                slog::error!(
+                    &opctx.log,
+                    "webhook delivery failed";
+                    "error" => %e,
+                );
                 status.error = Some(e.to_string());
             }
 
@@ -167,18 +171,18 @@ impl WebhookDeliverator {
             for rx in rxs {
                 let rx_id = rx.rx.id();
                 let opctx = opctx.child(maplit::btreemap! {
-                    "receiver_id".to_string() => rx_id.to_string(),
-                    "receiver_name".to_string() => rx.rx.name().to_string(),
+                    "rx_id".to_string() => rx_id.to_string(),
+                    "rx_name".to_string() => rx.rx.name().to_string(),
                 });
                 let deliverator = self.clone();
                 tasks.spawn(async move {
-                    let status = match deliverator.rx_deliver(&opctx, rx).await {
+                    let status = match deliverator.rx_deliver(&opctx, rx).await
+                    {
                         Ok(status) => status,
                         Err(e) => {
                             slog::error!(
                                 &opctx.log,
-                                "failed to deliver webhook events to a receiver";
-                                "rx_id" => ?rx_id,
+                                "failed to deliver webhook events to receiver";
                                 "error" => %e,
                             );
                             WebhookRxDeliveryStatus {
@@ -251,7 +255,8 @@ impl WebhookDeliverator {
                 Ok(DeliveryAttemptState::AlreadyCompleted(time)) => {
                     slog::debug!(
                         &opctx.log,
-                        "delivery of this webhook event was already completed at {time:?}";
+                        "delivery of this webhook event was already completed \
+                         at {time:?}";
                         "event_id" => %delivery.event_id,
                         "event_class" => %event_class,
                         "delivery_id" => %delivery_id,
@@ -263,7 +268,8 @@ impl WebhookDeliverator {
                 Ok(DeliveryAttemptState::InProgress { nexus_id, started }) => {
                     slog::debug!(
                         &opctx.log,
-                        "delivery of this webhook event is in progress by another Nexus";
+                        "delivery of this webhook event is in progress by \
+                         another Nexus";
                         "event_id" => %delivery.event_id,
                         "event_class" => %event_class,
                         "delivery_id" => %delivery_id,
@@ -276,7 +282,8 @@ impl WebhookDeliverator {
                 Err(error) => {
                     slog::error!(
                         &opctx.log,
-                        "unexpected database error error starting webhook delivery attempt";
+                        "unexpected database error error starting webhook \
+                         delivery attempt";
                         "event_id" => %delivery.event_id,
                         "event_class" => %event_class,
                         "delivery_id" => %delivery_id,

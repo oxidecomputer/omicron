@@ -519,7 +519,8 @@ impl Nexus {
         {
             slog::debug!(
                 &opctx.log,
-                "webhook liveness probe succeeded, resending failed deliveries...";
+                "webhook liveness probe succeeded, resending failed \
+                 deliveries...";
                 "rx_id" => %authz_rx.id(),
                 "rx_name" => %rx.name(),
                 "delivery_id" => %delivery.id,
@@ -533,6 +534,15 @@ impl Nexus {
                 })?
                 .into_iter()
                 .map(|event| {
+                    slog::trace!(
+                        &opctx.log,
+                        "will resend webhook event after probe success";
+                        "rx_id" => ?authz_rx.id(),
+                        "rx_name" => %rx.name(),
+                        "delivery_id" => ?delivery.id,
+                        "event_id" => ?event.id(),
+                        "event_class" => %event.event_class,
+                    );
                     WebhookDelivery::new(
                         &event.id(),
                         &rx_id,
@@ -540,13 +550,8 @@ impl Nexus {
                     )
                 })
                 .collect::<Vec<_>>();
-            slog::trace!(
-                &opctx.log,
-                "found {} failed events to resend", deliveries.len();
-                "rx_id" => %authz_rx.id(),
-                "rx_name" => %rx.name(),
-                "delivery_id" => %delivery.id,
-            );
+            let events_found = deliveries.len();
+
             let started = datastore
                 .webhook_delivery_create_batch(&opctx, deliveries)
                 .await
@@ -559,16 +564,30 @@ impl Nexus {
             if started > 0 {
                 slog::info!(
                     &opctx.log,
-                    "webhook liveness probe succeeded, created {started} re-deliveries";
+                    "webhook liveness probe succeeded, created {started} \
+                     re-deliveries";
                     "rx_id" => %authz_rx.id(),
                     "rx_name" => %rx.name(),
                     "delivery_id" => %delivery.id,
+                    "events_found" => events_found,
+                    "deliveries_started" => started,
                 );
                 // If new deliveries were created, activate the webhook
                 // deliverator background task to start actually delivering
                 // them.
                 self.background_tasks.task_webhook_deliverator.activate();
+            } else {
+                slog::debug!(
+                    &opctx.log,
+                    "webhook liveness probe succeeded, but no failed events \
+                     were re-delivered";
+                    "rx_id" => %authz_rx.id(),
+                    "rx_name" => %rx.name(),
+                    "delivery_id" => %delivery.id,
+                    "events_found" => events_found,
+                );
             }
+
             Some(started)
         } else {
             None
