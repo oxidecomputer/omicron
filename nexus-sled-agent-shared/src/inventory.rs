@@ -617,6 +617,25 @@ impl ZoneKind {
             ZoneKind::Oximeter => "oximeter",
         }
     }
+
+    /// Return a string used as an artifact name for control-plane zones.
+    /// This is **not guaranteed** to be stable.
+    pub fn artifact_name(self) -> &'static str {
+        match self {
+            ZoneKind::BoundaryNtp => "ntp",
+            ZoneKind::Clickhouse => "clickhouse",
+            ZoneKind::ClickhouseKeeper => "clickhouse_keeper",
+            ZoneKind::ClickhouseServer => "clickhouse",
+            ZoneKind::CockroachDb => "cockroachdb",
+            ZoneKind::Crucible => "crucible-zone",
+            ZoneKind::CruciblePantry => "crucible-pantry-zone",
+            ZoneKind::ExternalDns => "external-dns",
+            ZoneKind::InternalDns => "internal-dns",
+            ZoneKind::InternalNtp => "ntp",
+            ZoneKind::Nexus => "nexus",
+            ZoneKind::Oximeter => "oximeter",
+        }
+    }
 }
 
 /// Where Sled Agent should get the image for a zone.

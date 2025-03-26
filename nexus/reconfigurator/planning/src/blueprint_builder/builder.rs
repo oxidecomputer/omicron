@@ -33,6 +33,7 @@ use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
+use nexus_types::deployment::BlueprintZoneImageVersion;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
@@ -82,6 +83,7 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use thiserror::Error;
+use tufaceous_artifact::KnownArtifactKind;
 
 use super::ClickhouseZonesThatShouldBeRunning;
 use super::clickhouse::ClickhouseAllocator;
@@ -1159,13 +1161,14 @@ impl<'a> BlueprintBuilder<'a> {
                 gz_address: dns_subnet.gz_address(),
                 gz_address_index,
             });
+        let image_source = self.zone_image_source(zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: self.rng.sled_rng(sled_id).next_zone(),
             filesystem_pool: zpool,
             zone_type,
-            image_source: BlueprintZoneImageSource::InstallDataset,
+            image_source,
         };
 
         self.sled_add_zone(sled_id, zone)
@@ -1211,13 +1214,14 @@ impl<'a> BlueprintBuilder<'a> {
                 dns_address,
                 nic,
             });
+        let image_source = self.zone_image_source(zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
             filesystem_pool: pool_name,
             zone_type,
-            image_source: BlueprintZoneImageSource::InstallDataset,
+            image_source,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1250,13 +1254,14 @@ impl<'a> BlueprintBuilder<'a> {
             });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
+        let image_source = self.zone_image_source(zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: self.rng.sled_rng(sled_id).next_zone(),
             filesystem_pool,
             zone_type,
-            image_source: BlueprintZoneImageSource::InstallDataset,
+            image_source,
         };
 
         self.sled_add_zone(sled_id, zone)?;
@@ -1402,13 +1407,14 @@ impl<'a> BlueprintBuilder<'a> {
         });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
+        let image_source = self.zone_image_source(zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: nexus_id,
             filesystem_pool,
             zone_type,
-            image_source: BlueprintZoneImageSource::InstallDataset,
+            image_source,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1427,13 +1433,14 @@ impl<'a> BlueprintBuilder<'a> {
             });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
+        let image_source = self.zone_image_source(zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: oximeter_id,
             filesystem_pool,
             zone_type,
-            image_source: BlueprintZoneImageSource::InstallDataset,
+            image_source,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1451,13 +1458,14 @@ impl<'a> BlueprintBuilder<'a> {
         );
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
+        let image_source = self.zone_image_source(zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: pantry_id,
             filesystem_pool,
             zone_type,
-            image_source: BlueprintZoneImageSource::InstallDataset,
+            image_source,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1485,13 +1493,14 @@ impl<'a> BlueprintBuilder<'a> {
                 dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
             });
         let filesystem_pool = pool_name;
+        let image_source = self.zone_image_source(zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
             filesystem_pool,
             zone_type,
-            image_source: BlueprintZoneImageSource::InstallDataset,
+            image_source,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1511,13 +1520,14 @@ impl<'a> BlueprintBuilder<'a> {
                 address,
                 dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
             });
+        let image_source = self.zone_image_source(zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
             filesystem_pool: pool_name,
             zone_type,
-            image_source: BlueprintZoneImageSource::InstallDataset,
+            image_source,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1539,13 +1549,14 @@ impl<'a> BlueprintBuilder<'a> {
             },
         );
         let filesystem_pool = pool_name;
+        let image_source = self.zone_image_source(zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
             filesystem_pool,
             zone_type,
-            image_source: BlueprintZoneImageSource::InstallDataset,
+            image_source,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1567,13 +1578,14 @@ impl<'a> BlueprintBuilder<'a> {
             },
         );
         let filesystem_pool = pool_name;
+        let image_source = self.zone_image_source(zone_type.kind());
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
             filesystem_pool,
             zone_type,
-            image_source: BlueprintZoneImageSource::InstallDataset,
+            image_source,
         };
         self.sled_add_zone(sled_id, zone)
     }
@@ -1693,6 +1705,7 @@ impl<'a> BlueprintBuilder<'a> {
             });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;
+        let image_source = self.zone_image_source(zone_type.kind());
 
         self.sled_add_zone(
             sled_id,
@@ -1701,7 +1714,7 @@ impl<'a> BlueprintBuilder<'a> {
                 id: new_zone_id,
                 filesystem_pool,
                 zone_type,
-                image_source: BlueprintZoneImageSource::InstallDataset,
+                image_source,
             },
         )
     }
@@ -1888,6 +1901,36 @@ impl<'a> BlueprintBuilder<'a> {
         baseboard_id: &Arc<BaseboardId>,
     ) {
         self.pending_mgs_updates.remove(baseboard_id);
+    }
+
+    /// Try to find an artifact in the release repo that contains an image
+    /// for a zone of the given kind. Defaults to the install dataset.
+    pub(crate) fn zone_image_source(
+        &self,
+        zone_kind: ZoneKind,
+    ) -> BlueprintZoneImageSource {
+        self.input
+            .tuf_repo()
+            .and_then(|repo| {
+                repo.artifacts
+                    .iter()
+                    .find(|artifact| {
+                        artifact
+                            .id
+                            .kind
+                            .to_known()
+                            .map(|kind| matches!(kind, KnownArtifactKind::Zone))
+                            .unwrap_or(false)
+                            && artifact.id.name == zone_kind.artifact_name()
+                    })
+                    .map(|artifact| BlueprintZoneImageSource::Artifact {
+                        version: BlueprintZoneImageVersion::Available {
+                            version: artifact.id.version.clone(),
+                        },
+                        hash: artifact.hash,
+                    })
+            })
+            .unwrap_or(BlueprintZoneImageSource::InstallDataset)
     }
 }
 
