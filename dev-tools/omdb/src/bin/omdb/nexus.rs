@@ -181,7 +181,7 @@ enum BlueprintsCommands {
     /// Show a blueprint
     Show(BlueprintIdArgs),
     /// Diff two blueprints
-    Diff(BlueprintIdsArgs),
+    Diff(BlueprintDiffArgs),
     /// Delete a blueprint
     Delete(BlueprintIdArgs),
     /// Interact with the current target blueprint
@@ -261,6 +261,15 @@ struct BlueprintIdsArgs {
     blueprint1_id: BlueprintIdOrCurrentTarget,
     /// id of second blueprint (or `target` for the current target)
     blueprint2_id: BlueprintIdOrCurrentTarget,
+}
+
+#[derive(Debug, Args)]
+struct BlueprintDiffArgs {
+    #[clap(flatten)]
+    ids: BlueprintIdsArgs,
+    /// Exit with 1 if there were differences, 0 if no differences.
+    #[arg(long, default_value_t = false)]
+    exit_code: bool,
 }
 
 #[derive(Debug, Args)]
@@ -2595,15 +2604,18 @@ async fn cmd_nexus_blueprints_show(
 
 async fn cmd_nexus_blueprints_diff(
     client: &nexus_client::Client,
-    args: &BlueprintIdsArgs,
+    args: &BlueprintDiffArgs,
 ) -> Result<(), anyhow::Error> {
     let (b1, b2) = try_join(
-        args.blueprint1_id.resolve_to_blueprint(client),
-        args.blueprint2_id.resolve_to_blueprint(client),
+        args.ids.blueprint1_id.resolve_to_blueprint(client),
+        args.ids.blueprint2_id.resolve_to_blueprint(client),
     )
     .await?;
     let diff = b2.diff_since_blueprint(&b1);
     println!("{}", diff.display());
+    if args.exit_code && diff.has_changes() {
+        std::process::exit(1);
+    }
     Ok(())
 }
 
