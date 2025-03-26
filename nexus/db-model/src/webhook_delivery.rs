@@ -14,7 +14,6 @@ use crate::serde_time_delta::optional_time_delta;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, TimeDelta, Utc};
 use nexus_types::external_api::views;
-use nexus_types::identity::Asset;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::{
     OmicronZoneKind, OmicronZoneUuid, WebhookDeliveryKind, WebhookDeliveryUuid,
@@ -51,9 +50,6 @@ pub struct WebhookDelivery {
     /// Describes why this delivery was triggered.
     pub triggered_by: WebhookDeliveryTrigger,
 
-    /// The data payload as sent to this receiver.
-    pub payload: serde_json::Value,
-
     /// Attempt count
     pub attempts: SqlU8,
 
@@ -73,16 +69,15 @@ pub struct WebhookDelivery {
 
 impl WebhookDelivery {
     pub fn new(
-        event: &WebhookEvent,
+        event_id: &WebhookEventUuid,
         rx_id: &WebhookReceiverUuid,
         trigger: WebhookDeliveryTrigger,
     ) -> Self {
         Self {
             id: WebhookDeliveryUuid::new_v4().into(),
-            event_id: event.id().into(),
+            event_id: (*event_id).into(),
             rx_id: (*rx_id).into(),
             triggered_by: trigger,
-            payload: event.event.clone(),
             attempts: SqlU8::new(0),
             time_created: Utc::now(),
             time_completed: None,
@@ -109,7 +104,6 @@ impl WebhookDelivery {
             rx_id: (*rx_id).into(),
             triggered_by: WebhookDeliveryTrigger::Probe,
             state: WebhookDeliveryState::Pending,
-            payload: serde_json::json!({}),
             attempts: SqlU8::new(0),
             time_created: Utc::now(),
             time_completed: None,

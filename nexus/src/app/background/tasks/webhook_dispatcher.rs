@@ -233,6 +233,11 @@ impl WebhookDispatcher {
             };
 
             let deliveries: Vec<WebhookDelivery> = rxs.into_iter().map(|(rx, sub)| {
+                // NOTE: In the future, if we add support for webhook receivers
+                // with roles other than 'fleet.viewer' (as described in
+                // https://rfd.shared.oxide.computer/rfd/538#rbac-filtering),
+                // this might be where we filter the actual dispatched payload
+                // based on the individual receiver's permissions.
                 slog::trace!(&opctx.log, "webhook receiver is subscribed to event";
                     "rx_name" => %rx.name(),
                     "rx_id" => ?rx.id(),
@@ -240,7 +245,7 @@ impl WebhookDispatcher {
                     "event_class" => %event.event_class,
                     "glob" => ?sub.glob,
                 );
-                WebhookDelivery::new(&event, &rx.id(), WebhookDeliveryTrigger::Event)
+                WebhookDelivery::new(&event.id(), &rx.id(), WebhookDeliveryTrigger::Event)
             }).collect();
 
             let subscribed = if !deliveries.is_empty() {

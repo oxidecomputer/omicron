@@ -35,6 +35,7 @@ use crate::app::webhook::ReceiverClient;
 use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::webhook_delivery::DeliveryAndEvent;
 use nexus_db_queries::db::datastore::webhook_delivery::DeliveryAttemptState;
 pub use nexus_db_queries::db::datastore::webhook_delivery::DeliveryConfig;
 use nexus_db_queries::db::model::WebhookDeliveryAttemptResult;
@@ -225,7 +226,7 @@ impl WebhookDeliverator {
             ..Default::default()
         };
 
-        for (delivery, event_class) in deliveries {
+        for DeliveryAndEvent { delivery, event_class, event } in deliveries {
             let attempt = (*delivery.attempts) + 1;
             let delivery_id = WebhookDeliveryUuid::from(delivery.id);
             match self
@@ -290,7 +291,7 @@ impl WebhookDeliverator {
 
             // okay, actually do the thing...
             let delivery_attempt = match client
-                .send_delivery_request(opctx, &delivery, event_class)
+                .send_delivery_request(opctx, &delivery, event_class, &event)
                 .await
             {
                 Ok(delivery) => delivery,

@@ -9,8 +9,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery (
 
     triggered_by omicron.public.webhook_delivery_trigger NOT NULL,
 
-    payload JSONB NOT NULL,
-
     --- Delivery attempt count. Starts at 0.
     attempts INT2 NOT NULL,
 

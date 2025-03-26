@@ -2246,7 +2246,6 @@ table! {
         event_id -> Uuid,
         rx_id -> Uuid,
         triggered_by -> crate::WebhookDeliveryTriggerEnum,
-        payload -> Jsonb,
         attempts -> Int2,
         time_created -> Timestamptz,
         time_completed -> Nullable<Timestamptz>,

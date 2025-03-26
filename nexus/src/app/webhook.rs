@@ -157,6 +157,7 @@ use nexus_db_queries::db::model::WebhookReceiverConfig;
 use nexus_db_queries::db::model::WebhookSecret;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
+use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -175,6 +176,7 @@ use omicron_uuid_kinds::WebhookReceiverUuid;
 use omicron_uuid_kinds::WebhookSecretUuid;
 use sha2::Sha256;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::time::Duration;
 use std::time::Instant;
 use uuid::Uuid;
@@ -481,24 +483,28 @@ impl Nexus {
         let mut delivery = WebhookDelivery::new_probe(&rx_id, &self.id);
 
         const CLASS: WebhookEventClass = WebhookEventClass::Probe;
+        static DATA: LazyLock<serde_json::Value> =
+            LazyLock::new(|| serde_json::json!({}));
 
-        let attempt =
-            match client.send_delivery_request(opctx, &delivery, CLASS).await {
-                Ok(attempt) => attempt,
-                Err(e) => {
-                    slog::error!(
-                        &opctx.log,
-                        "failed to probe webhook receiver";
-                        "rx_id" => %authz_rx.id(),
-                        "rx_name" => %rx.name(),
-                        "delivery_id" => %delivery.id,
-                        "error" => %e,
-                    );
-                    return Err(Error::InternalError {
-                        internal_message: e.to_string(),
-                    });
-                }
-            };
+        let attempt = match client
+            .send_delivery_request(opctx, &delivery, CLASS, &DATA)
+            .await
+        {
+            Ok(attempt) => attempt,
+            Err(e) => {
+                slog::error!(
+                    &opctx.log,
+                    "failed to probe webhook receiver";
+                    "rx_id" => %authz_rx.id(),
+                    "rx_name" => %rx.name(),
+                    "delivery_id" => %delivery.id,
+                    "error" => %e,
+                );
+                return Err(Error::InternalError {
+                    internal_message: e.to_string(),
+                });
+            }
+        };
 
         // Update the delivery state based on the result of the probe attempt.
         // Otherwise, it will still appear "pending", which is obviously wrong.
@@ -528,7 +534,7 @@ impl Nexus {
                 .into_iter()
                 .map(|event| {
                     WebhookDelivery::new(
-                        &event,
+                        &event.id(),
                         &rx_id,
                         WebhookDeliveryTrigger::Resend,
                     )
@@ -596,7 +602,7 @@ impl Nexus {
         }
 
         let delivery = WebhookDelivery::new(
-            &event,
+            &event.id(),
             &authz_rx.id(),
             WebhookDeliveryTrigger::Resend,
         );
@@ -744,6 +750,7 @@ impl<'a> ReceiverClient<'a> {
         opctx: &OpContext,
         delivery: &WebhookDelivery,
         event_class: WebhookEventClass,
+        data: &serde_json::Value,
     ) -> Result<WebhookDeliveryAttempt, anyhow::Error> {
         const HDR_DELIVERY_ID: HeaderName =
             HeaderName::from_static("x-oxide-delivery-id");
@@ -778,7 +785,7 @@ impl<'a> ReceiverClient<'a> {
         let payload = Payload {
             event_class,
             event_id: delivery.event_id.into(),
-            data: &delivery.payload,
+            data,
             delivery: DeliveryMetadata {
                 id: delivery.id.into(),
                 webhook_id: self.rx.id(),
