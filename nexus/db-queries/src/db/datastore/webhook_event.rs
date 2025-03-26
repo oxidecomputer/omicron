@@ -73,6 +73,21 @@ impl DataStore {
         let conn = self.pool_connection_authorized(&opctx).await?;
         diesel::update(event_dsl::webhook_event)
             .filter(event_dsl::id.eq(event_id.into_untyped_uuid()))
+            .filter(
+                // Update the event record if one of the following is true:
+                // - The `time_dispatched`` field has not already been set, or
+                // - `time_dispatched` IS set, but `num_dispatched` is less than
+                //   the number of deliveries we believe has been dispatched.
+                //   This may be the case if a webhook receiver which is
+                //   subscribed to this event was added concurrently with
+                //   another Nexus' dispatching the event, and we dispatched the
+                //   event to that receiver but the other Nexus did not. In that
+                //   case, we would like to update the record to indicate the
+                //   correct number of subscribers.
+                event_dsl::time_dispatched
+                    .is_null()
+                    .or(event_dsl::num_dispatched.le(subscribed)),
+            )
             .set((
                 event_dsl::time_dispatched.eq(diesel::dsl::now),
                 event_dsl::num_dispatched.eq(subscribed),

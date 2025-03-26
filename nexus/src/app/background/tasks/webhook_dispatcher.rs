@@ -277,7 +277,8 @@ impl WebhookDispatcher {
                 {
                     Ok(created) => created,
                     Err(error) => {
-                        slog::error!(&opctx.log,
+                        slog::error!(
+                            &opctx.log,
                             "failed to insert webhook deliveries";
                             "event_id" => ?event.id(),
                             "event_class" => %event.event_class,
