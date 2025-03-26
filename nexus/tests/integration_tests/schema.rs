@@ -1753,6 +1753,199 @@ fn after_125_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
+fn before_133_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async {
+        // To test the size_used upgrader, create a few crucible datasets and
+        // regions
+
+        // First, a crucible dataset with no regions
+        let dataset_id: Uuid =
+            "00000001-0000-0000-0000-000000000000".parse().unwrap();
+        let pool_id = Uuid::new_v4();
+        let size_used = 0;
+
+        ctx.client
+            .batch_execute(&format!(
+                "INSERT INTO crucible_dataset VALUES (
+                    '{dataset_id}',
+                    now(),
+                    now(),
+                    null,
+                    1,
+                    '{pool_id}',
+                    '::1',
+                    10000,
+                    {size_used}
+                )"
+            ))
+            .await
+            .expect("inserted");
+
+        // Then, a crucible dataset with 1 region
+        let dataset_id: Uuid =
+            "00000002-0000-0000-0000-000000000000".parse().unwrap();
+
+        let region_id = Uuid::new_v4();
+        let pool_id = Uuid::new_v4();
+        let volume_id = Uuid::new_v4();
+        let block_size = 512;
+        let blocks_per_extent = 64;
+        let extent_count = 1000;
+
+        ctx.client
+            .batch_execute(&format!(
+                "INSERT INTO region VALUES (
+                    '{region_id}',
+                    now(),
+                    now(),
+                    '{dataset_id}',
+                    '{volume_id}',
+                    {block_size},
+                    {blocks_per_extent},
+                    {extent_count},
+                    5000,
+                    false,
+                    false
+                )"
+            ))
+            .await
+            .expect("inserted");
+
+        let size_used = block_size * blocks_per_extent * extent_count;
+
+        ctx.client
+            .batch_execute(&format!(
+                "INSERT INTO crucible_dataset VALUES (
+                    '{dataset_id}',
+                    now(),
+                    now(),
+                    null,
+                    1,
+                    '{pool_id}',
+                    '::1',
+                    10000,
+                    {size_used}
+                )"
+            ))
+            .await
+            .expect("inserted");
+
+        // Finally, a crucible dataset with 3 regions
+        let dataset_id: Uuid =
+            "00000003-0000-0000-0000-000000000000".parse().unwrap();
+        let pool_id = Uuid::new_v4();
+
+        let block_size = 512;
+        let blocks_per_extent = 64;
+        let extent_count = 7000;
+
+        for _ in 0..3 {
+            let region_id = Uuid::new_v4();
+            let volume_id = Uuid::new_v4();
+
+            ctx.client
+                .batch_execute(&format!(
+                    "INSERT INTO region VALUES (
+                        '{region_id}',
+                        now(),
+                        now(),
+                        '{dataset_id}',
+                        '{volume_id}',
+                        {block_size},
+                        {blocks_per_extent},
+                        {extent_count},
+                        5000,
+                        false,
+                        false
+                    )"
+                ))
+                .await
+                .expect("inserted");
+        }
+
+        let size_used = 3 * block_size * blocks_per_extent * extent_count;
+
+        ctx.client
+            .batch_execute(&format!(
+                "INSERT INTO crucible_dataset VALUES (
+                    '{dataset_id}',
+                    now(),
+                    now(),
+                    null,
+                    1,
+                    '{pool_id}',
+                    '::1',
+                    10000,
+                    {size_used}
+                )"
+            ))
+            .await
+            .expect("inserted");
+    })
+}
+
+fn after_133_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async {
+        // The first crucible dataset still has size_used = 0
+        let rows = ctx
+            .client
+            .query(
+                "SELECT size_used FROM crucible_dataset WHERE
+                id = '00000001-0000-0000-0000-000000000000'",
+                &[],
+            )
+            .await
+            .expect("select");
+
+        let records = process_rows(&rows);
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].values,
+            vec![ColumnValue::new("size_used", 0i64)],
+        );
+
+        // Note: the default crucible reservation factor is 1.25
+
+        // The second crucible dataset has
+        //  size_used = 1.25 * (512 * 64 * 1000)
+        let rows = ctx
+            .client
+            .query(
+                "SELECT size_used FROM crucible_dataset WHERE
+                id = '00000002-0000-0000-0000-000000000000'",
+                &[],
+            )
+            .await
+            .expect("select");
+
+        let records = process_rows(&rows);
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].values,
+            vec![ColumnValue::new("size_used", 40960000i64)],
+        );
+
+        // The third crucible dataset has
+        //  size_used = 1.25 * (3 * 512 * 64 * 7000)
+        let rows = ctx
+            .client
+            .query(
+                "SELECT size_used FROM crucible_dataset WHERE
+                id = '00000003-0000-0000-0000-000000000000'",
+                &[],
+            )
+            .await
+            .expect("select");
+
+        let records = process_rows(&rows);
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].values,
+            vec![ColumnValue::new("size_used", 860160000i64)],
+        );
+    })
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -1800,6 +1993,10 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     map.insert(
         Version::new(125, 0, 0),
         DataMigrationFns::new().before(before_125_0_0).after(after_125_0_0),
+    );
+    map.insert(
+        Version::new(133, 0, 0),
+        DataMigrationFns::new().before(before_133_0_0).after(after_133_0_0),
     );
 
     map

@@ -55,9 +55,16 @@ pub struct Region {
     // Shared read-only regions require a "deleting" flag to avoid a
     // use-after-free scenario
     deleting: bool,
+
+    // The Agent will reserve space for Downstairs overhead when creating the
+    // corresponding ZFS dataset. Nexus has to account for that: store that
+    // reservation factor here as it may change in the future, and it can be
+    // used during Crucible related accounting.
+    reservation_factor: f64,
 }
 
 impl Region {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         dataset_id: DatasetUuid,
         volume_id: VolumeUuid,
@@ -66,6 +73,7 @@ impl Region {
         extent_count: u64,
         port: u16,
         read_only: bool,
+        reservation_factor: f64,
     ) -> Self {
         Self {
             identity: RegionIdentity::new(Uuid::new_v4()),
@@ -77,6 +85,7 @@ impl Region {
             port: Some(port.into()),
             read_only,
             deleting: false,
+            reservation_factor,
         }
     }
 
@@ -111,5 +120,19 @@ impl Region {
     }
     pub fn deleting(&self) -> bool {
         self.deleting
+    }
+
+    /// The size of the Region without accounting for any overhead
+    pub fn requested_size(&self) -> u64 {
+        self.block_size().to_bytes()
+            * self.blocks_per_extent()
+            * self.extent_count()
+    }
+
+    /// The size the Crucible agent would have reserved during ZFS creation,
+    /// which is some factor higher than the requested region size to account
+    /// for on-disk overhead.
+    pub fn reserved_size(&self) -> u64 {
+        (self.requested_size() as f64 * self.reservation_factor).round() as u64
     }
 }

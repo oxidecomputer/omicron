@@ -1459,7 +1459,7 @@ async fn test_region_allocation_for_snapshot(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Create four 10 GiB zpools, each with one dataset.
+    // Create four zpools, each with one dataset.
     //
     // We add one more than the "three" default to avoid failing
     // with "not enough storage".
@@ -1469,9 +1469,6 @@ async fn test_region_allocation_for_snapshot(
         .with_zpool_count(4)
         .build()
         .await;
-
-    // Assert default is still 10 GiB
-    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
     // Create a disk
     let client = &cptestctx.external_client;
@@ -1654,11 +1651,8 @@ async fn test_snapshot_expunge(cptestctx: &ControlPlaneTestContext) {
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Create three 10 GiB zpools, each with one dataset.
+    // Create three zpools, each with one dataset.
     let _disk_test = DiskTest::new(&cptestctx).await;
-
-    // Assert default is still 10 GiB
-    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
     // Create a disk, then a snapshot of that disk
     let client = &cptestctx.external_client;

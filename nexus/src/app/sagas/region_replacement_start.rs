@@ -926,6 +926,7 @@ pub(crate) mod test {
                 10,
                 1001,
                 false,
+                1.0,
             ),
             Region::new(
                 datasets[1].id(),
@@ -935,6 +936,7 @@ pub(crate) mod test {
                 10,
                 1002,
                 false,
+                1.0,
             ),
             Region::new(
                 datasets[2].id(),
@@ -944,6 +946,7 @@ pub(crate) mod test {
                 10,
                 1003,
                 false,
+                1.0,
             ),
             Region::new(
                 datasets[3].id(),
@@ -953,6 +956,7 @@ pub(crate) mod test {
                 10,
                 1004,
                 false,
+                1.0,
             ),
         ];
 
@@ -1027,7 +1031,7 @@ pub(crate) mod test {
         for zpool in test.zpools() {
             for dataset in &zpool.datasets {
                 if datastore
-                    .regions_total_occupied_size(dataset.id)
+                    .regions_total_reserved_size(dataset.id)
                     .await
                     .unwrap()
                     != 0

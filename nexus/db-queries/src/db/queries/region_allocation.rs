@@ -117,8 +117,14 @@ pub fn allocation_query(
 
     let seed = seed.to_le_bytes().to_vec();
 
-    let size_delta =
+    // The Crucible Agent's current reservation factor
+    const RESERVATION_FACTOR: f64 = 1.25;
+
+    let requested_size: u64 =
         params.block_size * params.blocks_per_extent * params.extent_count;
+    let size_delta: u64 =
+        (requested_size as f64 * RESERVATION_FACTOR).round() as u64;
+
     let redundancy: i64 = i64::try_from(redundancy).unwrap();
 
     let mut builder = QueryBuilder::new();
@@ -272,7 +278,8 @@ pub fn allocation_query(
       ").param().sql(" AS extent_count,
       NULL AS port,
       ").param().sql(" AS read_only,
-      FALSE as deleting
+      FALSE as deleting,
+      ").param().sql(" AS reservation_factor
     FROM shuffled_candidate_datasets")
   // Only select the *additional* number of candidate regions for the required
   // redundancy level
@@ -286,6 +293,7 @@ pub fn allocation_query(
     .bind::<sql_types::BigInt, _>(params.blocks_per_extent as i64)
     .bind::<sql_types::BigInt, _>(params.extent_count as i64)
     .bind::<sql_types::Bool, _>(params.read_only)
+    .bind::<sql_types::Float8, _>(RESERVATION_FACTOR)
     .bind::<sql_types::BigInt, _>(redundancy)
 
     // A subquery which summarizes the changes we intend to make, showing:
@@ -298,7 +306,17 @@ pub fn allocation_query(
     SELECT
       candidate_regions.dataset_id AS id,
       crucible_dataset.pool_id AS pool_id,
-      ((candidate_regions.block_size * candidate_regions.blocks_per_extent) * candidate_regions.extent_count) AS size_used_delta
+      CAST(
+       CAST(
+        candidate_regions.block_size *
+        candidate_regions.blocks_per_extent *
+        candidate_regions.extent_count
+        AS FLOAT
+       )
+       * candidate_regions.reservation_factor
+       AS INT
+      )
+    AS size_used_delta
     FROM (candidate_regions INNER JOIN crucible_dataset ON (crucible_dataset.id = candidate_regions.dataset_id))
   ),")
 
@@ -385,7 +403,7 @@ pub fn allocation_query(
     .sql("
   inserted_regions AS (
     INSERT INTO region
-      (id, time_created, time_modified, dataset_id, volume_id, block_size, blocks_per_extent, extent_count, port, read_only, deleting)
+      (id, time_created, time_modified, dataset_id, volume_id, block_size, blocks_per_extent, extent_count, port, read_only, deleting, reservation_factor)
     SELECT ").sql(AllColumnsOfRegion::with_prefix("candidate_regions")).sql("
     FROM candidate_regions
     WHERE
