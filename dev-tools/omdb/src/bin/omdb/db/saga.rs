@@ -138,6 +138,35 @@ async fn cmd_sagas_inject_error(
         should_colorize(omdb.output.color, supports_color::Stream::Stdout);
     let conn = datastore.pool_connection_for_tests().await?;
 
+    // Add a confirmation prompt reminding the caller of the risks of this
+    // injection
+
+    let text = r#"
+WARNING: Injecting an error into a saga will (hopefully) cause it to be
+unwound, but if the actions into which errors are injected have taken effect,
+those effects will not be undone. This can result in corruption of control
+plane state, even if the Nexus assigned to this saga is not currently running.
+You should only do this if:
+
+- you've stopped Nexus and then verified that the currently-running nodes
+  either have no side effects, have not made any changes to the system, or
+  you've already undone them by hand
+
+- this is a development system whose state can be wiped
+
+Proceed?
+"#;
+
+    if should_print_color {
+        println!("{}", text.red().bold());
+    } else {
+        println!("{text}");
+    }
+
+    let mut prompt = ConfirmationPrompt::new();
+    prompt.read_and_validate("y/N", "y")?;
+    drop(prompt);
+
     // Before doing anything: find the current SEC for the saga, and ping it to
     // ensure that the Nexus is down.
     if !args.bypass_sec_check {
