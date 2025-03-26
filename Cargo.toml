@@ -124,6 +124,7 @@ members = [
     "sled-storage",
     "sp-sim",
     "test-utils",
+    "trust-quorum/gfss",
     "typed-rng",
     "update-common",
     "update-engine",
@@ -264,6 +265,7 @@ default-members = [
     "sled-hardware/types",
     "sled-storage",
     "sp-sim",
+    "trust-quorum/gfss",
     "test-utils",
     "typed-rng",
     "update-common",
@@ -865,6 +867,8 @@ opt-level = 3
 [profile.dev.package.inout]
 opt-level = 3
 [profile.dev.package.keccak]
+opt-level = 3
+[profile.dev.package.gfss]
 opt-level = 3
 
 
