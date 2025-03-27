@@ -218,6 +218,8 @@ pub struct DatasetProperties {
     pub id: Option<DatasetUuid>,
     /// The full name of the dataset.
     pub name: String,
+    /// Identifies whether or not the dataset is mount.
+    pub mounted: bool,
     /// Remaining space in the dataset and descendants.
     pub avail: ByteCount,
     /// Space used by dataset and descendants.
@@ -237,7 +239,7 @@ pub struct DatasetProperties {
 
 impl DatasetProperties {
     const ZFS_GET_PROPS: &'static str =
-        "oxide:uuid,name,avail,used,quota,reservation,compression";
+        "oxide:uuid,name,mounted,avail,used,quota,reservation,compression";
 }
 
 impl TryFrom<&DatasetProperties> for SharedDatasetConfig {
@@ -307,6 +309,11 @@ impl DatasetProperties {
                     })
                     .transpose()?;
                 let name = dataset_name.to_string();
+                let mounted = props
+                    .get("mounted")
+                    .map(|(prop, _source)| prop.to_string())
+                    .ok_or(anyhow!("Missing 'mounted'"))?
+                    == "yes";
                 let avail = props
                     .get("available")
                     .map(|(prop, _source)| prop)
@@ -353,6 +360,7 @@ impl DatasetProperties {
                 Ok(DatasetProperties {
                     id,
                     name,
+                    mounted,
                     avail,
                     used,
                     quota,
@@ -420,19 +428,37 @@ fn build_zfs_set_key_value_pairs(
     props
 }
 
+/// Describes the ZFS "canmount" options.
+pub enum CanMount {
+    On,
+    Off,
+    NoAuto,
+}
+
 /// Arguments to [Zfs::ensure_dataset].
 pub struct DatasetEnsureArgs<'a> {
     /// The full path of the ZFS dataset.
     pub name: &'a str,
 
     /// The expected mountpoint of this filesystem.
+    ///
     /// If the filesystem already exists, and is not mounted here, an error is
     /// returned.
+    ///
+    /// If creating a dataset, this adds the "mountpoint=..." option.
     pub mountpoint: Mountpoint,
 
-    /// Identifies whether or not this filesystem should be
-    /// used in a zone. Only used when creating a new filesystem - ignored
-    /// if the filesystem already exists.
+    /// Identifies whether or not hte dataset should be mounted.
+    ///
+    /// If "On": The dataset is mounted (unless it is also zoned).
+    /// If "Off/NoAuto": The dataset is not mounted.
+    ///
+    /// If creating a dataset, this adds the "canmount=..." option.
+    pub can_mount: CanMount,
+
+    /// Identifies whether or not this filesystem should be used in a zone.
+    ///
+    /// If creating a dataset, this add the "zoned=on" option.
     pub zoned: bool,
 
     /// Ensures a filesystem as an encryption root.
@@ -574,6 +600,7 @@ impl Zfs {
         DatasetEnsureArgs {
             name,
             mountpoint,
+            can_mount,
             zoned,
             encryption_details,
             size_details,
@@ -585,6 +612,9 @@ impl Zfs {
 
         let props = build_zfs_set_key_value_pairs(size_details, id);
         if exists {
+            // If the dataset already exists: Update properties which might
+            // have changed, and ensure it has been mounted if it needs
+            // to be mounted.
             Self::set_values(name, props.as_slice()).map_err(|err| {
                 EnsureDatasetError {
                     name: name.to_string(),
@@ -592,18 +622,10 @@ impl Zfs {
                 }
             })?;
 
-            if encryption_details.is_none() {
-                // If the dataset exists, we're done. Unencrypted datasets are
-                // automatically mounted.
-                return Ok(());
-            } else {
-                if mounted {
-                    // The dataset exists and is mounted
-                    return Ok(());
-                }
-                // We need to load the encryption key and mount the filesystem
-                return Self::mount_encrypted_dataset(name);
+            if !mounted && !zoned && matches!(can_mount, CanMount::On) {
+                Self::mount_dataset(name)?;
             }
+            return Ok(());
         }
 
         // If it doesn't exist, make it.
@@ -626,6 +648,12 @@ impl Zfs {
                 &epoch,
             ]);
         }
+
+        match can_mount {
+            CanMount::On => cmd.args(&["-o", "canmount=on"]),
+            CanMount::Off => cmd.args(&["-o", "canmount=off"]),
+            CanMount::NoAuto => cmd.args(&["-o", "canmount=noauto"]),
+        };
 
         if let Some(opts) = additional_options {
             for o in &opts {
@@ -660,7 +688,8 @@ impl Zfs {
         Ok(())
     }
 
-    fn mount_encrypted_dataset(name: &str) -> Result<(), EnsureDatasetError> {
+    // Mounts a dataset, loading keys if necessary.
+    fn mount_dataset(name: &str) -> Result<(), EnsureDatasetError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "mount", "-l", name]);
         execute(cmd).map_err(|err| EnsureDatasetError {
@@ -989,6 +1018,7 @@ mod test {
         let input = "dataset_name\tavailable\t1234\t-\n\
              dataset_name\tused\t5678\t-\n\
              dataset_name\tname\tI_AM_IGNORED\t-\n\
+             dataset_name\tmounted\tyes\t-\n\
              dataset_name\tcompression\toff\tinherited from parent";
         let props = DatasetProperties::parse_many(&input)
             .expect("Should have parsed data");
@@ -996,6 +1026,7 @@ mod test {
 
         assert_eq!(props[0].id, None);
         assert_eq!(props[0].name, "dataset_name");
+        assert_eq!(props[0].mounted, true);
         assert_eq!(props[0].avail.to_bytes(), 1234);
         assert_eq!(props[0].used.to_bytes(), 5678);
         assert_eq!(props[0].quota, None);
@@ -1008,6 +1039,7 @@ mod test {
         let input = "dataset_name\tavailable\t1234\t-\tEXTRA\n\
              dataset_name\tused\t5678\t-\n\
              dataset_name\tname\tI_AM_IGNORED\t-\n\
+             dataset_name\tmounted\tyes\t-\n\
              dataset_name\tcompression\toff\tinherited from parent";
         let err = DatasetProperties::parse_many(&input)
             .expect_err("Should have parsed data");
@@ -1020,6 +1052,7 @@ mod test {
     #[test]
     fn parse_dataset_props_with_optionals() {
         let input = "dataset_name\toxide:uuid\td4e1e554-7b98-4413-809e-4a42561c3d0c\tlocal\n\
+             dataset_name\tmounted\tyes\t-\n\
              dataset_name\tavailable\t1234\t-\n\
              dataset_name\tused\t5678\t-\n\
              dataset_name\tquota\t111\t-\n\
@@ -1033,6 +1066,7 @@ mod test {
             Some("d4e1e554-7b98-4413-809e-4a42561c3d0c".parse().unwrap())
         );
         assert_eq!(props[0].name, "dataset_name");
+        assert_eq!(props[0].mounted, true);
         assert_eq!(props[0].avail.to_bytes(), 1234);
         assert_eq!(props[0].used.to_bytes(), 5678);
         assert_eq!(props[0].quota.map(|q| q.to_bytes()), Some(111));
@@ -1057,6 +1091,7 @@ mod test {
     #[test]
     fn parse_dataset_bad_avail() {
         let input = "dataset_name\tavailable\tBADAVAIL\t-\n\
+             dataset_name\tmounted\t-\t-\n\
              dataset_name\tused\t5678\t-";
         let err = DatasetProperties::parse_many(&input)
             .expect_err("Should have failed to parse");
@@ -1069,6 +1104,7 @@ mod test {
     #[test]
     fn parse_dataset_bad_usage() {
         let input = "dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tmounted\t-\t-\n\
              dataset_name\tused\tBADUSAGE\t-";
         let err = DatasetProperties::parse_many(&input)
             .expect_err("Should have failed to parse");
@@ -1082,6 +1118,7 @@ mod test {
     fn parse_dataset_bad_quota() {
         let input = "dataset_name\tavailable\t1234\t-\n\
              dataset_name\tused\t5678\t-\n\
+             dataset_name\tmounted\t-\t-\n\
              dataset_name\tquota\tBADQUOTA\t-";
         let err = DatasetProperties::parse_many(&input)
             .expect_err("Should have failed to parse");
@@ -1096,6 +1133,7 @@ mod test {
         let input = "dataset_name\tavailable\t1234\t-\n\
              dataset_name\tused\t5678\t-\n\
              dataset_name\tquota\t111\t-\n\
+             dataset_name\tmounted\t-\t-\n\
              dataset_name\treservation\tBADRES\t-";
         let err = DatasetProperties::parse_many(&input)
             .expect_err("Should have failed to parse");
@@ -1118,6 +1156,7 @@ mod test {
             "dataset_name\tused\t5678\t-\n\
              dataset_name\tquota\t111\t-\n\
              dataset_name\treservation\t222\t-\n\
+             dataset_name\tmounted\ttrue\t-\n\
              dataset_name\tcompression\toff\tinherited",
             "'available'",
         );
@@ -1125,6 +1164,7 @@ mod test {
             "dataset_name\tavailable\t1234\t-\n\
              dataset_name\tquota\t111\t-\n\
              dataset_name\treservation\t222\t-\n\
+             dataset_name\tmounted\ttrue\t-\n\
              dataset_name\tcompression\toff\tinherited",
             "'used'",
         );
@@ -1132,8 +1172,16 @@ mod test {
             "dataset_name\tavailable\t1234\t-\n\
              dataset_name\tused\t5678\t-\n\
              dataset_name\tquota\t111\t-\n\
+             dataset_name\tmounted\ttrue\t-\n\
              dataset_name\treservation\t222\t-",
             "'compression'",
+        );
+        expect_missing(
+            "dataset_name\tavailable\t1234\t-\n\
+             dataset_name\tused\t5678\t-\n\
+             dataset_name\tquota\t111\t-\n\
+             dataset_name\treservation\t222\t-",
+            "'mounted'",
         );
     }
 
@@ -1142,6 +1190,7 @@ mod test {
         let input = "dataset_name\toxide:uuid\tb8698ede-60c2-4e16-b792-d28c165cfd12\tinherited from parent\n\
              dataset_name\tavailable\t1234\t-\n\
              dataset_name\tused\t5678\t-\n\
+             dataset_name\tmounted\t-\t-\n\
              dataset_name\tcompression\toff\t-";
         let props = DatasetProperties::parse_many(&input)
             .expect("Should have parsed data");
@@ -1154,6 +1203,7 @@ mod test {
         let input = "dataset_name\toxide:uuid\t-\t-\n\
              dataset_name\tavailable\t1234\t-\n\
              dataset_name\tused\t5678\t-\n\
+             dataset_name\tmounted\t-\t-\n\
              dataset_name\tcompression\toff\t-";
         let props = DatasetProperties::parse_many(&input)
             .expect("Should have parsed data");
@@ -1166,6 +1216,7 @@ mod test {
         let input = "dataset_name\tquota\t0\tdefault\n\
              dataset_name\tavailable\t1234\t-\n\
              dataset_name\tused\t5678\t-\n\
+             dataset_name\tmounted\t-\t-\n\
              dataset_name\tcompression\toff\t-";
         let props = DatasetProperties::parse_many(&input)
             .expect("Should have parsed data");
@@ -1178,6 +1229,7 @@ mod test {
         let input = "dataset_name\treservation\t0\tdefault\n\
              dataset_name\tavailable\t1234\t-\n\
              dataset_name\tused\t5678\t-\n\
+             dataset_name\tmounted\t-\t-\n\
              dataset_name\tcompression\toff\t-";
         let props = DatasetProperties::parse_many(&input)
             .expect("Should have parsed data");
@@ -1193,7 +1245,10 @@ mod test {
              foo\tavailable\t111\t-\n\
              foo\tused\t111\t-\n\
              foo\tcompression\toff\t-\n\
+             foo\tmounted\t-\t-\n\
+             foo\tmounted\t-\t-\n\
              bar\tavailable\t222\t-\n\
+             bar\tmounted\tyes\t-\n\
              bar\tused\t222\t-\n\
              bar\tcompression\toff\t-";
 
@@ -1202,7 +1257,9 @@ mod test {
         assert_eq!(props.len(), 2);
         assert_eq!(props[0].name, "bar");
         assert_eq!(props[0].used, 222.into());
+        assert_eq!(props[0].mounted, true);
         assert_eq!(props[1].name, "foo");
         assert_eq!(props[1].used, 111.into());
+        assert_eq!(props[1].mounted, false);
     }
 }
