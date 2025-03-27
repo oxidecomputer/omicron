@@ -157,7 +157,6 @@ impl SledAgent {
 
         let repo_depot = ArtifactStore::new(&log, SimArtifactStorage::new())
             .await
-            .unwrap()
             .start(&log, &config.dropshot);
 
         Arc::new(SledAgent {
