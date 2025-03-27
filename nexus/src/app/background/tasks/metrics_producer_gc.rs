@@ -132,7 +132,7 @@ mod tests {
         producer_id: Uuid,
         time_modified: DateTime<Utc>,
     ) {
-        use nexus_db_queries::db::schema::metric_producer::dsl;
+        use nexus_db_schema::schema::metric_producer::dsl;
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         if let Err(err) = diesel::update(dsl::metric_producer)

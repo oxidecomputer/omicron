@@ -5,10 +5,10 @@
 use super::{Generation, Ipv6Net, Name, VpcFirewallRule, VpcSubnet};
 use crate::Vni;
 use crate::collection::DatastoreCollectionConfig;
-use crate::schema::{vpc, vpc_firewall_rule, vpc_subnet};
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use ipnetwork::IpNetwork;
+use nexus_db_schema::schema::{vpc, vpc_firewall_rule, vpc_subnet};
 use nexus_defaults as defaults;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;

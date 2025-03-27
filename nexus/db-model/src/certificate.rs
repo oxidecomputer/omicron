@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::ServiceKind;
-use crate::schema::certificate;
 use db_macros::Resource;
+use nexus_db_schema::schema::certificate;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;

@@ -83,7 +83,6 @@ mod region_snapshot_replacement_step;
 mod role_assignment;
 mod role_builtin;
 pub mod saga_types;
-pub mod schema;
 mod schema_versions;
 mod service_kind;
 mod silo;
@@ -248,20 +247,17 @@ pub use zpool::*;
 /// sample usage.
 macro_rules! impl_enum_wrapper {
     (
-        $(#[$enum_meta:meta])*
-        pub struct $diesel_type:ident;
+        $diesel_type:ident:
 
         $(#[$model_meta:meta])*
         pub struct $model_type:ident(pub $ext_type:ty);
         $($enum_item:ident => $sql_value:literal)+
     ) => {
-        $(#[$enum_meta])*
-        pub struct $diesel_type;
-
         $(#[$model_meta])*
+        #[diesel(sql_type = ::nexus_db_schema::enums::$diesel_type)]
         pub struct $model_type(pub $ext_type);
 
-        impl ::diesel::serialize::ToSql<$diesel_type, ::diesel::pg::Pg> for $model_type {
+        impl ::diesel::serialize::ToSql<::nexus_db_schema::enums::$diesel_type, ::diesel::pg::Pg> for $model_type {
             fn to_sql<'a>(
                 &'a self,
                 out: &mut ::diesel::serialize::Output<'a, '_, ::diesel::pg::Pg>,
@@ -277,7 +273,7 @@ macro_rules! impl_enum_wrapper {
             }
         }
 
-        impl ::diesel::deserialize::FromSql<$diesel_type, ::diesel::pg::Pg> for $model_type {
+        impl ::diesel::deserialize::FromSql<::nexus_db_schema::enums::$diesel_type, ::diesel::pg::Pg> for $model_type {
             fn from_sql(bytes: <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue<'_>) -> ::diesel::deserialize::Result<Self> {
                 match <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue::<'_>::as_bytes(&bytes) {
                     $(
@@ -303,25 +299,22 @@ pub(crate) use impl_enum_wrapper;
 /// [`VpcRouterKind`] for a sample usage
 macro_rules! impl_enum_type {
     (
-        $(#[$enum_meta:meta])*
-        pub struct $diesel_type:ident;
+        $diesel_type:ident:
 
         $(#[$model_meta:meta])*
         pub enum $model_type:ident;
 
         $($enum_item:ident => $sql_value:literal)+
     ) => {
-        $(#[$enum_meta])*
-        pub struct $diesel_type;
-
         $(#[$model_meta])*
+        #[diesel(sql_type = ::nexus_db_schema::enums::$diesel_type)]
         pub enum $model_type {
             $(
                 $enum_item,
             )*
         }
 
-        impl ::diesel::serialize::ToSql<$diesel_type, ::diesel::pg::Pg> for $model_type {
+        impl ::diesel::serialize::ToSql<::nexus_db_schema::enums::$diesel_type, ::diesel::pg::Pg> for $model_type {
             fn to_sql<'a>(
                 &'a self,
                 out: &mut ::diesel::serialize::Output<'a, '_, ::diesel::pg::Pg>,
@@ -338,7 +331,7 @@ macro_rules! impl_enum_type {
             }
         }
 
-        impl ::diesel::deserialize::FromSql<$diesel_type, ::diesel::pg::Pg> for $model_type {
+        impl ::diesel::deserialize::FromSql<::nexus_db_schema::enums::$diesel_type, ::diesel::pg::Pg> for $model_type {
             fn from_sql(bytes: <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue<'_>) -> ::diesel::deserialize::Result<Self> {
                 match <::diesel::pg::Pg as ::diesel::backend::Backend>::RawValue::<'_>::as_bytes(&bytes) {
                     $(

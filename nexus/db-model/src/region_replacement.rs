@@ -4,22 +4,19 @@
 
 use super::impl_enum_type;
 use crate::Region;
-use crate::schema::region_replacement;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::DateTime;
 use chrono::Utc;
+use nexus_db_schema::schema::region_replacement;
 use omicron_uuid_kinds::VolumeKind;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "region_replacement_state", schema = "public"))]
-    pub struct RegionReplacementStateEnum;
+    RegionReplacementStateEnum:
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[diesel(sql_type = RegionReplacementStateEnum)]
     pub enum RegionReplacementState;
 
     // Enum values
