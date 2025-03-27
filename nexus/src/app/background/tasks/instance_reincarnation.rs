@@ -387,6 +387,7 @@ mod test {
                     ssh_public_keys: None,
                     start: state == InstanceState::Vmm,
                     auto_restart_policy,
+                    anti_affinity_groups: Vec::new(),
                 },
             )
             .await;

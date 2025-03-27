@@ -42,6 +42,7 @@ use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -72,6 +73,63 @@ const INSTANCE_MAX_AFFINITY_GROUPS: usize = 16;
 const INSTANCE_MAX_ANTI_AFFINITY_GROUPS: usize = 16;
 
 impl DataStore {
+    pub async fn anti_affinity_groups_batch_lookup(
+        &self,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        groups: &Vec<NameOrId>,
+    ) -> ListResultVec<AntiAffinityGroupUuid> {
+        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
+
+        let mut names: Vec<Name> = vec![];
+        let mut ids: Vec<Uuid> = vec![];
+        for group in groups.iter() {
+            match group {
+                NameOrId::Name(name) => names.push(name.clone().into()),
+                NameOrId::Id(id) => ids.push(*id),
+            }
+        }
+
+        use db::schema::anti_affinity_group::dsl;
+        let result: Vec<(Uuid, Name)> = dsl::anti_affinity_group
+            .filter(
+                dsl::id.eq_any(ids.clone()).or(dsl::name.eq_any(names.clone())),
+            )
+            .filter(dsl::project_id.eq(authz_project.id()))
+            .filter(dsl::time_deleted.is_null())
+            .select((dsl::id, dsl::name))
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        // If a group isn't present in the result that was present in the input
+        // that means it either doesn't exist or isn't owned by the user. Either
+        // way we want to give a specific lookup error for at least the first
+        // result. It would be nice to include an aggregate error with all the
+        // missing groups.
+        for name in names.iter() {
+            if !result.iter().any(|(_, n)| n == name) {
+                return Err(Error::not_found_by_name(
+                    ResourceType::AntiAffinityGroup,
+                    name,
+                ));
+            }
+        }
+        for id in ids.iter() {
+            if !result.iter().any(|&(i, _)| i == *id) {
+                return Err(Error::not_found_by_id(
+                    ResourceType::AntiAffinityGroup,
+                    id,
+                ));
+            }
+        }
+
+        return Ok(result
+            .iter()
+            .map(|&(id, _)| AntiAffinityGroupUuid::from_untyped_uuid(id))
+            .collect());
+    }
+
     /// List affinity groups associated with a given instance
     pub async fn instance_list_affinity_groups(
         &self,
