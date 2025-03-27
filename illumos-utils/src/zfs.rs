@@ -218,7 +218,7 @@ pub struct DatasetProperties {
     pub id: Option<DatasetUuid>,
     /// The full name of the dataset.
     pub name: String,
-    /// Identifies whether or not the dataset is mount.
+    /// Identifies whether or not the dataset is mounted.
     pub mounted: bool,
     /// Remaining space in the dataset and descendants.
     pub avail: ByteCount,
@@ -309,6 +309,10 @@ impl DatasetProperties {
                     })
                     .transpose()?;
                 let name = dataset_name.to_string();
+                // Although the illumos man pages say the only valid options for
+                // "mounted" are "yes" and "no", "-" is also an observed output.
+                // We interpret that value, and anything other than "yes"
+                // explicitly as "not mounted".
                 let mounted = props
                     .get("mounted")
                     .map(|(prop, _source)| prop.to_string())
@@ -448,7 +452,7 @@ pub struct DatasetEnsureArgs<'a> {
     /// If creating a dataset, this adds the "mountpoint=..." option.
     pub mountpoint: Mountpoint,
 
-    /// Identifies whether or not hte dataset should be mounted.
+    /// Identifies whether or not the dataset should be mounted.
     ///
     /// If "On": The dataset is mounted (unless it is also zoned).
     /// If "Off/NoAuto": The dataset is not mounted.
