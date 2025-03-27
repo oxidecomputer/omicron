@@ -65,7 +65,7 @@ pub enum Operation {
 
 /// Errors from issuing [`zone::Adm`] commands.
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to execute zoneadm command '{op:?}' for zone '{zone}': {err}")]
+#[error("Failed to execute zoneadm command '{op:?}' for zone '{zone}'")]
 pub struct AdmError {
     op: Operation,
     zone: String,

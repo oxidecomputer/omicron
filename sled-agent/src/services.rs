@@ -4980,7 +4980,7 @@ impl ServiceManager {
     }
 }
 
-fn internal_dns_addrobj_name(gz_address_index: u32) -> String {
+pub(crate) fn internal_dns_addrobj_name(gz_address_index: u32) -> String {
     format!("internaldns{gz_address_index}")
 }
 
