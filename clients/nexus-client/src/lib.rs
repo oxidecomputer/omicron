@@ -31,6 +31,7 @@ progenitor::generate_api!(
         Blueprint = nexus_types::deployment::Blueprint,
         BlueprintPhysicalDiskConfig = nexus_types::deployment::BlueprintPhysicalDiskConfig,
         BlueprintPhysicalDiskDisposition = nexus_types::deployment::BlueprintPhysicalDiskDisposition,
+        BlueprintZoneImageSource = nexus_types::deployment::BlueprintZoneImageSource,
         Certificate = omicron_common::api::internal::nexus::Certificate,
         ClickhouseMode = nexus_types::deployment::ClickhouseMode,
         ClickhousePolicy = nexus_types::deployment::ClickhousePolicy,
