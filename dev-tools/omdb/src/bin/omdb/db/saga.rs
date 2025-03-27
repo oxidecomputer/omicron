@@ -4,10 +4,10 @@
 
 //! `omdb db saga` subcommands
 
-use crate::ConfirmationPrompt;
 use crate::Omdb;
 use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::db::datetime_rfc3339_concise;
+use crate::helpers::ConfirmationPrompt;
 use crate::helpers::should_colorize;
 use anyhow::Context;
 use anyhow::bail;
@@ -184,13 +184,17 @@ Proceed?
                 // it's up. Would we see this if the saga was Requested but not
                 // started?
                 let text = "warning: saga has no assigned SEC, so cannot \
-                verify that the saga is not still running!";
+                verify that the saga is not still running! Proceed?";
 
                 if should_print_color {
                     println!("{}", text.yellow().bold());
                 } else {
                     println!("{text}");
                 }
+
+                let mut prompt = ConfirmationPrompt::new();
+                prompt.read_and_validate("y/N", "y")?;
+                drop(prompt);
             }
 
             Some(current_sec) => {

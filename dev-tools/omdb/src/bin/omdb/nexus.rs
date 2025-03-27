@@ -4,11 +4,11 @@
 
 //! omdb commands that query or update specific Nexus instances
 
-use crate::ConfirmationPrompt;
 use crate::Omdb;
 use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::db::DbUrlOptions;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
+use crate::helpers::ConfirmationPrompt;
 use crate::helpers::const_max_len;
 use crate::helpers::should_colorize;
 use anyhow::Context;
