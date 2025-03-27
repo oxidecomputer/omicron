@@ -1160,7 +1160,7 @@ mod test {
             "dataset_name\tused\t5678\t-\n\
              dataset_name\tquota\t111\t-\n\
              dataset_name\treservation\t222\t-\n\
-             dataset_name\tmounted\ttrue\t-\n\
+             dataset_name\tmounted\tyes\t-\n\
              dataset_name\tcompression\toff\tinherited",
             "'available'",
         );
@@ -1168,7 +1168,7 @@ mod test {
             "dataset_name\tavailable\t1234\t-\n\
              dataset_name\tquota\t111\t-\n\
              dataset_name\treservation\t222\t-\n\
-             dataset_name\tmounted\ttrue\t-\n\
+             dataset_name\tmounted\tyes\t-\n\
              dataset_name\tcompression\toff\tinherited",
             "'used'",
         );
@@ -1176,7 +1176,7 @@ mod test {
             "dataset_name\tavailable\t1234\t-\n\
              dataset_name\tused\t5678\t-\n\
              dataset_name\tquota\t111\t-\n\
-             dataset_name\tmounted\ttrue\t-\n\
+             dataset_name\tmounted\tyes\t-\n\
              dataset_name\treservation\t222\t-",
             "'compression'",
         );
