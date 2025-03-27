@@ -11,6 +11,7 @@ use nexus_db_model::WebhookEventClass;
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::http_testing::AuthnMode;
+use nexus_test_utils::http_testing::Collection;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers;
@@ -104,6 +105,22 @@ fn resend_url(
     let rx = webhook_name_or_id.into();
     format!("{DELIVERIES_BASE_PATH}/{event_id}/resend?receiver={rx}")
 }
+
+async fn webhook_deliveries_list(
+    client: &ClientTestContext,
+    webhook_name_or_id: impl Into<NameOrId>,
+) -> Collection<views::WebhookDelivery> {
+    let rx = webhook_name_or_id.into();
+    NexusRequest::iter_collection_authn(
+        client,
+        &format!("{DELIVERIES_BASE_PATH}?receiver={rx}"),
+        "",
+        None,
+    )
+    .await
+    .unwrap()
+}
+
 async fn webhook_delivery_resend(
     client: &ClientTestContext,
     webhook_name_or_id: impl Into<NameOrId>,
@@ -270,6 +287,34 @@ fn signature_verifies(
             .expect("HMAC secrets can be any length");
         mac.update(req.body().as_ref());
         mac.verify_slice(&sig_bytes).is_ok()
+    }
+}
+
+struct ExpectAttempt {
+    result: views::WebhookDeliveryAttemptResult,
+    status: Option<u16>,
+}
+
+/// Helper for making assertions about webhook deliveries, while ignoring things
+/// such as timestamps, which are variable.
+#[track_caller]
+fn expect_delivery_attempts(
+    actual: &[views::WebhookDeliveryAttempt],
+    expected: &[ExpectAttempt],
+) {
+    assert_eq!(
+        actual.len(),
+        expected.len(),
+        "expected {} delivery attempts, found: {actual:?}",
+        expected.len()
+    );
+    for (n, (actual, ExpectAttempt { result, status })) in
+        actual.iter().zip(expected.iter()).enumerate()
+    {
+        dbg!(&actual);
+        assert_eq!(actual.attempt, n + 1);
+        assert_eq!(&actual.result, result);
+        assert_eq!(actual.response.as_ref().map(|rsp| rsp.status), *status);
     }
 }
 
@@ -833,6 +878,31 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
 
     mock.assert_calls_async(1).await;
 
+    let deliveries = webhook_deliveries_list(
+        &cptestctx.external_client,
+        webhook.identity.id,
+    )
+    .await;
+    assert_eq!(
+        deliveries.all_items.len(),
+        1,
+        "expected one delivery, but found: {:?}",
+        deliveries.all_items
+    );
+
+    let delivery = dbg!(&deliveries.all_items[0]);
+    assert_eq!(delivery.webhook_id.into_untyped_uuid(), webhook.identity.id);
+    assert_eq!(delivery.event_id, id);
+    assert_eq!(delivery.event_class, "test.foo");
+    assert_eq!(delivery.state, views::WebhookDeliveryState::Pending);
+    expect_delivery_attempts(
+        &delivery.attempts,
+        &[ExpectAttempt {
+            status: Some(500),
+            result: views::WebhookDeliveryAttemptResult::FailedHttpError,
+        }],
+    );
+
     // Okay, we are now in backoff. Activate the deliverator again --- no new
     // event should be delivered.
     dbg!(
@@ -884,6 +954,37 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
     mock.assert_calls_async(1).await;
     mock.delete_async().await;
 
+    let deliveries = webhook_deliveries_list(
+        &cptestctx.external_client,
+        webhook.identity.id,
+    )
+    .await;
+    assert_eq!(
+        deliveries.all_items.len(),
+        1,
+        "expected one delivery, but found: {:?}",
+        deliveries.all_items
+    );
+
+    let delivery = dbg!(&deliveries.all_items[0]);
+    assert_eq!(delivery.webhook_id.into_untyped_uuid(), webhook.identity.id);
+    assert_eq!(delivery.event_id, id);
+    assert_eq!(delivery.event_class, "test.foo");
+    assert_eq!(delivery.state, views::WebhookDeliveryState::Pending);
+    expect_delivery_attempts(
+        &delivery.attempts,
+        &[
+            ExpectAttempt {
+                status: Some(500),
+                result: views::WebhookDeliveryAttemptResult::FailedHttpError,
+            },
+            ExpectAttempt {
+                status: Some(503),
+                result: views::WebhookDeliveryAttemptResult::FailedHttpError,
+            },
+        ],
+    );
+
     // Finally, allow the request to succeed.
     let mock = {
         let webhook = webhook.clone();
@@ -923,6 +1024,41 @@ async fn test_retry_backoff(cptestctx: &ControlPlaneTestContext) {
         activate_background_task(internal_client, "webhook_deliverator").await
     );
     mock.assert_async().await;
+
+    // Make sure the deliveries endpoint correctly records the request history.
+    let deliveries = webhook_deliveries_list(
+        &cptestctx.external_client,
+        webhook.identity.id,
+    )
+    .await;
+    assert_eq!(
+        deliveries.all_items.len(),
+        1,
+        "expected one delivery, but found: {:?}",
+        deliveries.all_items
+    );
+    let delivery = dbg!(&deliveries.all_items[0]);
+    assert_eq!(delivery.webhook_id.into_untyped_uuid(), webhook.identity.id);
+    assert_eq!(delivery.event_id, id);
+    assert_eq!(delivery.event_class, "test.foo");
+    assert_eq!(delivery.state, views::WebhookDeliveryState::Delivered);
+    expect_delivery_attempts(
+        &delivery.attempts,
+        &[
+            ExpectAttempt {
+                status: Some(500),
+                result: views::WebhookDeliveryAttemptResult::FailedHttpError,
+            },
+            ExpectAttempt {
+                status: Some(503),
+                result: views::WebhookDeliveryAttemptResult::FailedHttpError,
+            },
+            ExpectAttempt {
+                status: Some(200),
+                result: views::WebhookDeliveryAttemptResult::Succeeded,
+            },
+        ],
+    );
 }
 
 #[nexus_test]
