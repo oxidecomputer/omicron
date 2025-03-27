@@ -77,11 +77,7 @@ async fn region_create(
     let params = body.into_inner();
     let crucible = rc.context();
 
-    let region = crucible.create(params).map_err(|e| {
-        HttpError::for_internal_error(
-            format!("region create failure: {:?}", e,),
-        )
-    })?;
+    let region = crucible.create(params)?;
 
     Ok(HttpResponseOk(region))
 }

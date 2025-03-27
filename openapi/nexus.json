@@ -975,7 +975,7 @@
             "in": "query",
             "name": "sort_by",
             "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
+              "$ref": "#/components/schemas/NameOrIdSortMode"
             }
           },
           {
@@ -1451,7 +1451,7 @@
             "in": "query",
             "name": "sort_by",
             "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
+              "$ref": "#/components/schemas/NameOrIdSortMode"
             }
           },
           {
@@ -3277,6 +3277,158 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
+        }
+      }
+    },
+    "/v1/instances/{instance}/affinity-groups": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "List affinity groups containing instance",
+        "operationId": "instance_affinity_group_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "description": "Name or ID of the instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AffinityGroupResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/instances/{instance}/anti-affinity-groups": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "List anti-affinity groups containing instance",
+        "operationId": "instance_anti_affinity_group_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "description": "Name or ID of the instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AntiAffinityGroupResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
         }
       }
     },
@@ -12274,10 +12426,10 @@
         ]
       },
       "AffinityGroupMember": {
-        "description": "A member of an Affinity Group\n\nMembership in a group is not exclusive - members may belong to multiple affinity / anti-affinity groups.",
+        "description": "A member of an Affinity Group\n\nMembership in a group is not exclusive - members may belong to multiple affinity / anti-affinity groups.\n\nAffinity Groups can contain up to 32 members.",
         "oneOf": [
           {
-            "description": "An instance belonging to this group, identified by UUID.",
+            "description": "An instance belonging to this group\n\nInstances can belong to up to 16 affinity groups.",
             "type": "object",
             "properties": {
               "type": {
@@ -12287,7 +12439,23 @@
                 ]
               },
               "value": {
-                "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+                  },
+                  "name": {
+                    "$ref": "#/components/schemas/Name"
+                  },
+                  "run_state": {
+                    "$ref": "#/components/schemas/InstanceState"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "run_state"
+                ]
               }
             },
             "required": [
@@ -12558,10 +12726,10 @@
         ]
       },
       "AntiAffinityGroupMember": {
-        "description": "A member of an Anti-Affinity Group\n\nMembership in a group is not exclusive - members may belong to multiple affinity / anti-affinity groups.",
+        "description": "A member of an Anti-Affinity Group\n\nMembership in a group is not exclusive - members may belong to multiple affinity / anti-affinity groups.\n\nAnti-Affinity Groups can contain up to 32 members.",
         "oneOf": [
           {
-            "description": "An instance belonging to this group, identified by UUID.",
+            "description": "An instance belonging to this group\n\nInstances can belong to up to 16 anti-affinity groups.",
             "type": "object",
             "properties": {
               "type": {
@@ -12571,7 +12739,23 @@
                 ]
               },
               "value": {
-                "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+                  },
+                  "name": {
+                    "$ref": "#/components/schemas/Name"
+                  },
+                  "run_state": {
+                    "$ref": "#/components/schemas/InstanceState"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "run_state"
+                ]
               }
             },
             "required": [
@@ -17666,21 +17850,6 @@
               "id",
               "type"
             ]
-          },
-          {
-            "description": "Boot the Alpine ISO that ships with the Propolis zone. Intended for development purposes only.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "you_can_boot_anything_as_long_as_its_alpine"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
           }
         ]
       },
@@ -17882,6 +18051,14 @@
         "description": "Create-time parameters for an `Instance`",
         "type": "object",
         "properties": {
+          "anti_affinity_groups": {
+            "description": "Anti-Affinity groups which this instance should be added.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
           "auto_restart_policy": {
             "nullable": true,
             "description": "The auto-restart policy for this instance.\n\nThis policy determines whether the instance should be automatically restarted by the control plane on failure. If this is `null`, no auto-restart policy will be explicitly configured for this instance, and the control plane will select the default policy when determining whether the instance can be automatically restarted.\n\nCurrently, the global default auto-restart policy is \"best-effort\", so instances with `null` auto-restart policies will be automatically restarted. However, in the future, the default policy may be configurable through other mechanisms, such as on a per-project basis. In that case, any configured default policy will be used if this is `null`.",

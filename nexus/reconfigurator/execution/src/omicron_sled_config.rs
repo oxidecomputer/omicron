@@ -277,7 +277,7 @@ mod tests {
         zones.insert(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
-            filesystem_pool: Some(dataset_pool.clone()),
+            filesystem_pool: dataset_pool.clone(),
             zone_type: BlueprintZoneType::Oximeter(
                 blueprint_zone_type::Oximeter {
                     address: "[::1]:0".parse().unwrap(),
@@ -291,7 +291,7 @@ mod tests {
                 ready_for_cleanup: false,
             },
             id: OmicronZoneUuid::new_v4(),
-            filesystem_pool: Some(dataset_pool.clone()),
+            filesystem_pool: dataset_pool.clone(),
             zone_type: BlueprintZoneType::Oximeter(
                 blueprint_zone_type::Oximeter {
                     address: "[::1]:0".parse().unwrap(),

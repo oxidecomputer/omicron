@@ -454,7 +454,7 @@ pub struct BpOmicronZone {
     disposition_expunged_ready_for_cleanup: bool,
 
     pub external_ip_id: Option<DbTypedUuid<ExternalIpKind>>,
-    pub filesystem_pool: Option<DbTypedUuid<ZpoolKind>>,
+    pub filesystem_pool: DbTypedUuid<ZpoolKind>,
 }
 
 impl BpOmicronZone {
@@ -482,10 +482,7 @@ impl BpOmicronZone {
             sled_id: sled_id.into(),
             id: blueprint_zone.id.into(),
             external_ip_id,
-            filesystem_pool: blueprint_zone
-                .filesystem_pool
-                .as_ref()
-                .map(|pool| pool.id().into()),
+            filesystem_pool: blueprint_zone.filesystem_pool.id().into(),
             disposition,
             disposition_expunged_as_of_generation,
             disposition_expunged_ready_for_cleanup,
@@ -883,9 +880,9 @@ impl BpOmicronZone {
         Ok(BlueprintZoneConfig {
             disposition: disposition_cols.try_into()?,
             id: self.id.into(),
-            filesystem_pool: self
-                .filesystem_pool
-                .map(|id| ZpoolName::new_external(id.into())),
+            filesystem_pool: ZpoolName::new_external(
+                self.filesystem_pool.into(),
+            ),
             zone_type,
             image_source: BlueprintZoneImageSource::InstallDataset,
         })

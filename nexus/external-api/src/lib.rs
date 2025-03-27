@@ -1264,6 +1264,34 @@ pub trait NexusExternalApi {
         disk_to_detach: TypedBody<params::DiskPath>,
     ) -> Result<HttpResponseAccepted<Disk>, HttpError>;
 
+    /// List affinity groups containing instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/affinity-groups",
+        tags = ["instances"],
+    }]
+    async fn instance_affinity_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
+        path_params: Path<params::InstancePath>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AffinityGroup>>, HttpError>;
+
+    /// List anti-affinity groups containing instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/anti-affinity-groups",
+        tags = ["instances"],
+    }]
+    async fn instance_anti_affinity_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
+        path_params: Path<params::InstancePath>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AntiAffinityGroup>>, HttpError>;
+
     // Affinity Groups
 
     /// List affinity groups
@@ -1297,7 +1325,9 @@ pub trait NexusExternalApi {
     }]
     async fn affinity_group_member_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
         path_params: Path<params::AffinityGroupPath>,
     ) -> Result<HttpResponseOk<ResultsPage<AffinityGroupMember>>, HttpError>;
 
@@ -1405,7 +1435,9 @@ pub trait NexusExternalApi {
     }]
     async fn anti_affinity_group_member_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
         path_params: Path<params::AntiAffinityGroupPath>,
     ) -> Result<HttpResponseOk<ResultsPage<AntiAffinityGroupMember>>, HttpError>;
 
