@@ -626,7 +626,11 @@ impl Zfs {
                 }
             })?;
 
-            if !mounted && !zoned && matches!(can_mount, CanMount::On) {
+            let want_to_mount = !zoned
+                && matches!(can_mount, CanMount::On)
+                && matches!(mountpoint, Mountpoint::Path(_));
+
+            if !mounted && want_to_mount {
                 Self::mount_dataset(name)?;
             }
             return Ok(());
