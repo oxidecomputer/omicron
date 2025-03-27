@@ -596,6 +596,20 @@ pub static DEMO_INSTANCE_DISKS_DETACH_URL: LazyLock<String> =
             *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
         )
     });
+pub static DEMO_INSTANCE_AFFINITY_GROUPS_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/instances/{}/affinity-groups?{}",
+            *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
+        )
+    });
+pub static DEMO_INSTANCE_ANTI_AFFINITY_GROUPS_URL: LazyLock<String> =
+    LazyLock::new(|| {
+        format!(
+            "/v1/instances/{}/anti-affinity-groups?{}",
+            *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
+        )
+    });
 pub static DEMO_INSTANCE_EPHEMERAL_IP_URL: LazyLock<String> =
     LazyLock::new(|| {
         format!(
@@ -641,6 +655,7 @@ pub static DEMO_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
+        anti_affinity_groups: Vec::new(),
     });
 pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
     LazyLock::new(|| params::InstanceCreate {
@@ -661,6 +676,7 @@ pub static DEMO_STOPPED_INSTANCE_CREATE: LazyLock<params::InstanceCreate> =
         boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
+        anti_affinity_groups: Vec::new(),
     });
 pub static DEMO_INSTANCE_UPDATE: LazyLock<params::InstanceUpdate> =
     LazyLock::new(|| params::InstanceUpdate {
@@ -1909,6 +1925,18 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> =
                     })
                     .unwrap(),
                 )],
+            },
+            VerifyEndpoint {
+                url: &DEMO_INSTANCE_AFFINITY_GROUPS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
+            },
+            VerifyEndpoint {
+                url: &DEMO_INSTANCE_ANTI_AFFINITY_GROUPS_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![AllowedMethod::Get],
             },
             /* Affinity Groups */
             VerifyEndpoint {

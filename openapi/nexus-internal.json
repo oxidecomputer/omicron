@@ -2272,7 +2272,6 @@
             ]
           },
           "filesystem_pool": {
-            "nullable": true,
             "description": "zpool used for the zone's (transient) root filesystem",
             "allOf": [
               {
@@ -2292,6 +2291,7 @@
         },
         "required": [
           "disposition",
+          "filesystem_pool",
           "id",
           "image_source",
           "zone_type"

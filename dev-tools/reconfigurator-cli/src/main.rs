@@ -37,7 +37,6 @@ use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
 use omicron_common::policy::NEXUS_REDUNDANCY;
-use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -53,6 +52,7 @@ use std::io::BufRead;
 use std::io::IsTerminal;
 use swrite::{SWrite, swriteln};
 use tabled::Tabled;
+use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::ArtifactVersionError;
 

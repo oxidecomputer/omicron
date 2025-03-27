@@ -28,6 +28,7 @@ static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
+        KnownVersion::new(133, "bp-omicron-zone-filesystem-pool-not-null"),
         KnownVersion::new(132, "blueprint-zone-image-source"),
         KnownVersion::new(131, "tuf-generation"),
         KnownVersion::new(130, "bp-sled-agent-generation"),

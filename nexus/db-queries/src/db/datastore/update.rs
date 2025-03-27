@@ -25,6 +25,7 @@ use omicron_common::api::external::{
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
 use swrite::{SWrite, swrite};
+use tufaceous_artifact::ArtifactVersion;
 use uuid::Uuid;
 
 /// The return value of [`DataStore::update_tuf_repo_insert`].
@@ -241,12 +242,20 @@ async fn insert_impl(
 
         let mut filter_dsl = dsl::tuf_artifact.into_boxed();
         for artifact in desc.artifacts.clone() {
-            filter_dsl = filter_dsl.or_filter(
-                dsl::name
-                    .eq(artifact.name)
-                    .and(dsl::version.eq(artifact.version))
-                    .and(dsl::kind.eq(artifact.kind)),
-            );
+            filter_dsl = filter_dsl
+                .or_filter(
+                    // Look up artifacts by name/version/kind.
+                    dsl::name
+                        .eq(artifact.name)
+                        .and(dsl::version.eq(artifact.version))
+                        .and(dsl::kind.eq(artifact.kind.clone())),
+                )
+                .or_filter(
+                    // Also look up artifacts by kind/hash.
+                    dsl::kind
+                        .eq(artifact.kind)
+                        .and(dsl::sha256.eq(artifact.sha256)),
+                );
         }
 
         let results = filter_dsl
@@ -255,7 +264,7 @@ async fn insert_impl(
             .await?;
         debug!(
             log,
-            "found {} existing artifacts", results.len();
+            "found {} existing artifacts with nvk lookup", results.len();
             "results" => ?results,
         );
 
@@ -263,42 +272,99 @@ async fn insert_impl(
             .iter()
             .map(|artifact| (artifact.nvk(), artifact))
             .collect::<HashMap<_, _>>();
+        let results_by_hash_id = results
+            .iter()
+            .map(|artifact| ((&artifact.kind, artifact.sha256), artifact))
+            .collect::<HashMap<_, _>>();
 
         // uploaded_and_existing contains non-matching artifacts in pairs of
         // (uploaded, currently in db).
-        let mut uploaded_and_existing = Vec::new();
+        let mut nvk_mismatch = Vec::new();
+        let mut hash_id_mismatch = Vec::new();
         let mut new_artifacts = Vec::new();
         let mut all_artifacts = Vec::new();
 
-        for uploaded_artifact in desc.artifacts.clone() {
-            let Some(&existing_artifact) =
-                results_by_id.get(&uploaded_artifact.nvk())
-            else {
-                // This is a new artifact.
-                new_artifacts.push(uploaded_artifact.clone());
-                all_artifacts.push(uploaded_artifact);
-                continue;
-            };
+        enum ArtifactStatus {
+            New,
+            Existing,
+            Mismatch,
+        }
 
-            if existing_artifact.sha256 != uploaded_artifact.sha256
-                || existing_artifact.artifact_size()
-                    != uploaded_artifact.artifact_size()
-            {
-                uploaded_and_existing.push((
-                    uploaded_artifact.clone(),
-                    existing_artifact.clone(),
-                ));
-            } else {
-                all_artifacts.push(uploaded_artifact);
+        impl ArtifactStatus {
+            fn mark_existing(&mut self) {
+                match self {
+                    ArtifactStatus::New => *self = ArtifactStatus::Existing,
+                    ArtifactStatus::Existing | ArtifactStatus::Mismatch => (),
+                }
+            }
+
+            fn mark_mismatch(&mut self) {
+                match self {
+                    ArtifactStatus::New | ArtifactStatus::Existing => {
+                        *self = ArtifactStatus::Mismatch
+                    }
+                    ArtifactStatus::Mismatch => (),
+                }
             }
         }
 
-        if !uploaded_and_existing.is_empty() {
+        for uploaded_artifact in desc.artifacts.clone() {
+            let mut status = ArtifactStatus::New;
+            if let Some(&existing_nvk) =
+                results_by_id.get(&uploaded_artifact.nvk())
+            {
+                status.mark_existing();
+                if existing_nvk.sha256 != uploaded_artifact.sha256
+                    || existing_nvk.artifact_size()
+                        != uploaded_artifact.artifact_size()
+                {
+                    nvk_mismatch.push((
+                        uploaded_artifact.clone(),
+                        existing_nvk.clone(),
+                    ));
+                    status.mark_mismatch();
+                }
+            };
+
+            if let Some(&existing_hash) = results_by_hash_id
+                .get(&(&uploaded_artifact.kind, uploaded_artifact.sha256))
+            {
+                status.mark_existing();
+                if existing_hash.name != uploaded_artifact.name
+                    || existing_hash.version != uploaded_artifact.version
+                {
+                    hash_id_mismatch.push((
+                        uploaded_artifact.clone(),
+                        existing_hash.clone(),
+                    ));
+                    status.mark_mismatch();
+                }
+            };
+
+            // This is a new artifact.
+            match status {
+                ArtifactStatus::New => {
+                    new_artifacts.push(uploaded_artifact.clone());
+                    all_artifacts.push(uploaded_artifact);
+                }
+                ArtifactStatus::Existing => {
+                    all_artifacts.push(uploaded_artifact);
+                }
+                ArtifactStatus::Mismatch => {
+                    // This is an error case -- we'll return an error before
+                    // `all_artifacts` is considered.
+                }
+            }
+        }
+
+        if !nvk_mismatch.is_empty() || !hash_id_mismatch.is_empty() {
             debug!(log, "uploaded artifacts don't match existing artifacts";
-                "uploaded_and_existing" => ?uploaded_and_existing,
+                "nvk_mismatch" => ?nvk_mismatch,
+                "hash_id_mismatch" => ?hash_id_mismatch,
             );
             return Err(err.bail(InsertError::ArtifactMismatch {
-                uploaded_and_existing,
+                nvk_mismatch,
+                hash_id_mismatch,
             }));
         }
 
@@ -397,11 +463,16 @@ enum InsertError {
         uploaded: ArtifactHash,
         existing: ArtifactHash,
     },
-    /// The SHA256 or length of one or more artifacts doesn't match the
-    /// corresponding entries in the database.
+    /// Some uploaded artifacts doesn't match the corresponding entries in the
+    /// database.
     ArtifactMismatch {
-        // Pairs of (uploaded, existing) artifacts.
-        uploaded_and_existing: Vec<(TufArtifact, TufArtifact)>,
+        // Artifacts for which the name/version/kind were the same, but the hash
+        // or length were different.
+        nvk_mismatch: Vec<(TufArtifact, TufArtifact)>,
+
+        // Artifacts for which the kind/hash were the same, but the name or
+        // version were different.
+        hash_id_mismatch: Vec<(TufArtifact, TufArtifact)>,
     },
 }
 
@@ -417,23 +488,40 @@ impl From<InsertError> for external::Error {
                      {}, but existing repository has SHA256 hash {}.",
                 system_version, uploaded, existing,
             )),
-            InsertError::ArtifactMismatch { uploaded_and_existing } => {
+            InsertError::ArtifactMismatch {
+                nvk_mismatch,
+                hash_id_mismatch,
+            } => {
                 // Build a message out of uploaded and existing artifacts.
                 let mut message = "Uploaded artifacts don't match existing \
                                    artifacts with same IDs:\n"
                     .to_string();
-                for (uploaded, existing) in uploaded_and_existing {
+                for (uploaded, existing) in nvk_mismatch {
+                    // Uploaded and existing artifacts are matched by their
+                    // name/version/kinds.
                     swrite!(
                         message,
-                        "- Uploaded artifact {} has SHA256 hash {} and length \
-                         {}, but existing artifact {} has SHA256 hash {} and \
+                        "- For artifact {}, uploaded SHA256 hash {} and length \
+                         {}, but existing artifact has SHA256 hash {} and \
                          length {}.\n",
-                        uploaded.id,
+                        display_nvk(uploaded.nvk()),
                         uploaded.sha256,
                         uploaded.artifact_size(),
-                        existing.id,
                         existing.sha256,
                         existing.artifact_size(),
+                    );
+                }
+
+                for (uploaded, existing) in hash_id_mismatch {
+                    swrite!(
+                        message,
+                        "- For artifact {}, uploaded name {} and version {}, \
+                           but existing artifact has name {} and version {}.\n",
+                        display_kind_hash(&uploaded.kind, uploaded.sha256),
+                        uploaded.name,
+                        uploaded.version,
+                        existing.name,
+                        existing.version,
                     );
                 }
 
@@ -441,4 +529,14 @@ impl From<InsertError> for external::Error {
             }
         }
     }
+}
+
+fn display_nvk(
+    (name, version, kind): (&str, &ArtifactVersion, &str),
+) -> String {
+    format!("(name: {name}, version: {version}, kind: {kind})")
+}
+
+fn display_kind_hash(kind: &str, hash: ArtifactHash) -> String {
+    format!("(kind: {kind}, hash: {hash})")
 }

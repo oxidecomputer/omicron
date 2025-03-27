@@ -231,11 +231,31 @@ fn check_dataset_zpool_uniqueness(blippy: &mut Blippy<'_>) {
         .blueprint()
         .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
     {
-        // Check "one kind per zpool" for durable datasets...
-        if let Some(dataset) = zone.zone_type.durable_dataset() {
+        // Check "one kind per zpool" for transient datasets...
+        let filesystem_dataset = zone.filesystem_dataset();
+        let kind = zone.zone_type.kind();
+        if let Some(previous) = transient_kinds_by_zpool
+            .entry(filesystem_dataset.pool().id())
+            .or_default()
+            .insert(kind, zone)
+        {
+            blippy.push_sled_note(
+                sled_id,
+                Severity::Fatal,
+                SledKind::ZoneFilesystemDatasetCollision {
+                    zone1: previous.clone(),
+                    zone2: zone.clone(),
+                    zpool: filesystem_dataset.pool().clone(),
+                },
+            );
+        }
+
+        if let Some(durable_dataset) = zone.zone_type.durable_dataset() {
             let kind = zone.zone_type.kind();
+
+            // ... and durable datasets.
             if let Some(previous) = durable_kinds_by_zpool
-                .entry(dataset.dataset.pool_name.id())
+                .entry(durable_dataset.dataset.pool_name.id())
                 .or_default()
                 .insert(kind, zone)
             {
@@ -245,47 +265,27 @@ fn check_dataset_zpool_uniqueness(blippy: &mut Blippy<'_>) {
                     SledKind::ZoneDurableDatasetCollision {
                         zone1: previous.clone(),
                         zone2: zone.clone(),
-                        zpool: dataset.dataset.pool_name.clone(),
+                        zpool: durable_dataset.dataset.pool_name.clone(),
                     },
                 );
             }
-        }
 
-        // ... and transient datasets.
-        if let Some(dataset) = zone.filesystem_dataset() {
-            let kind = zone.zone_type.kind();
-            if let Some(previous) = transient_kinds_by_zpool
-                .entry(dataset.pool().id())
-                .or_default()
-                .insert(kind, zone)
-            {
-                blippy.push_sled_note(
-                    sled_id,
-                    Severity::Fatal,
-                    SledKind::ZoneFilesystemDatasetCollision {
-                        zone1: previous.clone(),
-                        zone2: zone.clone(),
-                        zpool: dataset.into_parts().0,
-                    },
-                );
-            }
-        }
-
-        // If a zone has both durable and transient datasets, they should be on
-        // the same pool.
-        match (zone.zone_type.durable_zpool(), zone.filesystem_pool.as_ref()) {
-            (Some(durable), Some(transient)) if durable != transient => {
+            // If a zone has a durable dataset, it should be on the same pool as
+            // its transient filesystem dataset.
+            if durable_dataset.dataset.pool_name != *filesystem_dataset.pool() {
                 blippy.push_sled_note(
                     sled_id,
                     Severity::Fatal,
                     SledKind::ZoneWithDatasetsOnDifferentZpools {
                         zone: zone.clone(),
-                        durable_zpool: durable.clone(),
-                        transient_zpool: transient.clone(),
+                        durable_zpool: durable_dataset
+                            .dataset
+                            .pool_name
+                            .clone(),
+                        transient_zpool: filesystem_dataset.pool().clone(),
                     },
                 );
             }
-            _ => (),
         }
     }
 }
@@ -400,31 +400,19 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
         for zone_config in
             sled_config.zones.iter().filter(|z| z.disposition.is_in_service())
         {
-            match &zone_config.filesystem_dataset() {
+            let dataset = zone_config.filesystem_dataset();
+            match sled_datasets
+                .get(&dataset.pool().id())
+                .and_then(|by_zpool| by_zpool.get(dataset.kind()))
+            {
                 Some(dataset) => {
-                    match sled_datasets
-                        .get(&dataset.pool().id())
-                        .and_then(|by_zpool| by_zpool.get(dataset.kind()))
-                    {
-                        Some(dataset) => {
-                            expected_datasets.insert(dataset.id);
-                        }
-                        None => {
-                            blippy.push_sled_note(
-                                sled_id,
-                                Severity::Fatal,
-                                SledKind::ZoneMissingFilesystemDataset {
-                                    zone: zone_config.clone(),
-                                },
-                            );
-                        }
-                    }
+                    expected_datasets.insert(dataset.id);
                 }
                 None => {
                     blippy.push_sled_note(
                         sled_id,
-                        Severity::BackwardsCompatibility,
-                        SledKind::ZoneMissingFilesystemPool {
+                        Severity::Fatal,
+                        SledKind::ZoneMissingFilesystemDataset {
                             zone: zone_config.clone(),
                         },
                     );
@@ -1035,7 +1023,7 @@ mod tests {
                     kind: SledKind::ZoneWithDatasetsOnDifferentZpools {
                         zone: dns1.clone(),
                         durable_zpool: dup_zpool.clone(),
-                        transient_zpool: dns1.filesystem_pool.clone().unwrap(),
+                        transient_zpool: dns1.filesystem_pool.clone(),
                     },
                 },
             },
@@ -1081,12 +1069,8 @@ mod tests {
             dns_iter.next().expect("at least two external DNS zones");
         assert_ne!(dns0_sled_id, dns1_sled_id);
 
-        let dup_zpool = dns0
-            .filesystem_pool
-            .as_ref()
-            .expect("external DNS has a filesystem zpool")
-            .clone();
-        dns1.filesystem_pool = Some(dup_zpool.clone());
+        let dup_zpool = dns0.filesystem_pool.clone();
+        dns1.filesystem_pool = dup_zpool.clone();
 
         let dns0 = dns0.into_ref().clone();
         let dns1 = dns1.into_ref().clone();
@@ -1303,7 +1287,7 @@ mod tests {
                 == *durable_zone.zone_type.durable_zpool().unwrap())
                 && (dataset.kind
                     == durable_zone.zone_type.durable_dataset().unwrap().kind);
-            let root_dataset = root_zone.filesystem_dataset().unwrap();
+            let root_dataset = root_zone.filesystem_dataset();
             let matches_root = (dataset.pool == *root_dataset.pool())
                 && (dataset.kind == *root_dataset.kind());
             !matches_durable && !matches_root
@@ -1375,7 +1359,7 @@ mod tests {
             .retain(|z| z.id != durable_zone.id && z.id != root_zone.id);
 
         let durable_dataset = durable_zone.zone_type.durable_dataset().unwrap();
-        let root_dataset = root_zone.filesystem_dataset().unwrap();
+        let root_dataset = root_zone.filesystem_dataset();
 
         // Find the datasets we expect to have been orphaned.
         let expected_notes = sled_config
