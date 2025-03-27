@@ -16,9 +16,9 @@ use chrono::{DateTime, TimeDelta, Utc};
 use nexus_types::external_api::views;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::{
-    OmicronZoneKind, OmicronZoneUuid, WebhookDeliveryKind, WebhookDeliveryUuid,
-    WebhookEventKind, WebhookEventUuid, WebhookReceiverKind,
-    WebhookReceiverUuid,
+    OmicronZoneKind, OmicronZoneUuid, WebhookDeliveryAttemptKind,
+    WebhookDeliveryKind, WebhookDeliveryUuid, WebhookEventKind,
+    WebhookEventUuid, WebhookReceiverKind, WebhookReceiverUuid,
 };
 use serde::Deserialize;
 use serde::Serialize;
@@ -152,6 +152,8 @@ impl WebhookDelivery {
 )]
 #[diesel(table_name = webhook_delivery_attempt)]
 pub struct WebhookDeliveryAttempt {
+    pub id: DbTypedUuid<WebhookDeliveryAttemptKind>,
+
     /// ID of the delivery entry (foreign key into `webhook_delivery`).
     pub delivery_id: DbTypedUuid<WebhookDeliveryKind>,
 

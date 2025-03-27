@@ -2262,7 +2262,8 @@ allow_tables_to_appear_in_same_query!(webhook_delivery_attempt, webhook_event);
 joinable!(webhook_delivery -> webhook_event (event_id));
 
 table! {
-    webhook_delivery_attempt (delivery_id, attempt) {
+    webhook_delivery_attempt (id) {
+        id -> Uuid,
         delivery_id -> Uuid,
         attempt -> Int2,
         rx_id -> Uuid,

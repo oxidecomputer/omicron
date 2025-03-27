@@ -10,7 +10,6 @@ use crate::db::IncompleteOnConflictExt;
 use crate::db::datastore::RunnableQuery;
 use crate::db::error::ErrorHandler;
 use crate::db::error::public_error_from_diesel;
-use crate::db::model::SqlU8;
 use crate::db::model::WebhookDelivery;
 use crate::db::model::WebhookDeliveryAttempt;
 use crate::db::model::WebhookDeliveryAttemptResult;
@@ -347,7 +346,7 @@ impl DataStore {
         opctx: &OpContext,
         delivery: &WebhookDelivery,
         nexus_id: &OmicronZoneUuid,
-        attempt: &mut WebhookDeliveryAttempt,
+        attempt: &WebhookDeliveryAttempt,
     ) -> Result<(), Error> {
         const MAX_ATTEMPTS: u8 = 3;
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -379,6 +378,19 @@ impl DataStore {
                 (None, None)
             };
 
+        // First, insert the attempt record.
+        diesel::insert_into(attempt_dsl::webhook_delivery_attempt)
+            .values(attempt.clone())
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context(
+                        "failed to insert delivery attempt record",
+                    )
+            })?;
+
+        // Next, update the delivery record based on the outcome of this attempt.
         let UpdateAndQueryResult { status, found } =
             diesel::update(dsl::webhook_delivery)
                 .filter(dsl::id.eq(delivery.id.into_untyped_uuid()))
@@ -401,34 +413,6 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-
-        // Mutating the delivery attempt model like this is a little bit
-        // goofy, but hear me out. We would, if possible, always like to
-        // have an attempt record in the database for every HTTP request that
-        // was actually sent to the receiver, even if we sent more than we were
-        // supposed to (e.g. if we had leased the delivery and then got stuck
-        // for long enough for our lease to time out).
-        //
-        // When we construct the `WebhookDeliveryAttempt` model, it has the
-        // attempt number that we *think* is correct based on the
-        // `WebhookDelivery` as we initially queried it. But, if we lost the
-        // lease, someone else may have also inserted deliveries. Therefore, we
-        // want to insert this `WebhookDeliveryAttempt` record with the actual
-        // number of attempts plus one, so that we can record it even if another
-        // attempt occurred in the meantime.
-        attempt.attempt = SqlU8(found.attempts.0 + 1);
-        diesel::insert_into(attempt_dsl::webhook_delivery_attempt)
-            .values(attempt.clone())
-            .on_conflict((attempt_dsl::delivery_id, attempt_dsl::attempt))
-            .do_nothing()
-            .execute_async(&*conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-                    .internal_context(
-                        "failed to insert delivery attempt record",
-                    )
-            })?;
 
         if status == UpdateStatus::Updated {
             return Ok(());

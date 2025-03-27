@@ -5305,6 +5305,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.webhook_delivery_attempt_result as ENUM
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery_attempt (
+    -- Primary key
+    id UUID PRIMARY KEY,
     -- Foreign key into `omicron.public.webhook_delivery`.
     delivery_id UUID NOT NULL,
     -- attempt number.
@@ -5323,8 +5325,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery_attempt (
     time_created TIMESTAMPTZ NOT NULL,
     -- UUID of the Nexus who did this delivery attempt.
     deliverator_id UUID NOT NULL,
-
-    PRIMARY KEY (delivery_id, attempt),
 
     -- Attempt numbers start at 1
     CONSTRAINT attempts_start_at_1 CHECK (attempt >= 1),

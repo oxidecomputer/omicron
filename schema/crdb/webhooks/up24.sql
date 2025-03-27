@@ -1,5 +1,6 @@
-
 CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery_attempt (
+    -- Primary key
+    id UUID PRIMARY KEY,
     -- Foreign key into `omicron.public.webhook_delivery`.
     delivery_id UUID NOT NULL,
     -- attempt number.
@@ -10,6 +11,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery_attempt (
     rx_id UUID NOT NULL,
 
     result omicron.public.webhook_delivery_attempt_result NOT NULL,
+
     -- This is an INT4 to ensure we can store any unsigned 16-bit number,
     -- although status code > 599 would be Very Surprising...
     response_status INT4,
@@ -17,8 +19,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.webhook_delivery_attempt (
     time_created TIMESTAMPTZ NOT NULL,
     -- UUID of the Nexus who did this delivery attempt.
     deliverator_id UUID NOT NULL,
-
-    PRIMARY KEY (delivery_id, attempt),
 
     -- Attempt numbers start at 1
     CONSTRAINT attempts_start_at_1 CHECK (attempt >= 1),

@@ -81,6 +81,7 @@ impl_typed_uuid_kind! {
     WebhookEvent => "webhook_event",
     WebhookReceiver => "webhook_receiver",
     WebhookDelivery => "webhook_delivery",
+    WebhookDeliveryAttempt => "webhook_delivery_attempt",
     WebhookSecret => "webhook_secret",
     Zpool => "zpool",
 }

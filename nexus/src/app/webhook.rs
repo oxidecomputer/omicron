@@ -170,6 +170,7 @@ use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::WebhookDeliveryAttemptUuid;
 use omicron_uuid_kinds::WebhookDeliveryUuid;
 use omicron_uuid_kinds::WebhookEventUuid;
 use omicron_uuid_kinds::WebhookReceiverUuid;
@@ -982,6 +983,7 @@ impl<'a> ReceiverClient<'a> {
         });
 
         Ok(WebhookDeliveryAttempt {
+            id: WebhookDeliveryAttemptUuid::new_v4().into(),
             delivery_id: delivery.id,
             rx_id: delivery.rx_id,
             attempt: SqlU8::new(delivery.attempts.0 + 1),
