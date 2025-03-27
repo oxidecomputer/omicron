@@ -721,8 +721,7 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_nvmeadm_info(
         _request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
         method_unimplemented()
     }
 
@@ -749,15 +748,13 @@ impl SledAgentApi for SledAgentSimImpl {
 
     async fn support_zfs_info(
         _request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
         method_unimplemented()
     }
 
     async fn support_zpool_info(
         _request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
         method_unimplemented()
     }
 }

@@ -650,7 +650,7 @@ pub trait SledAgentApi {
     }]
     async fn support_nvmeadm_info(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError>;
 
     #[endpoint {
         method = GET,
@@ -682,7 +682,7 @@ pub trait SledAgentApi {
     }]
     async fn support_zfs_info(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError>;
 
     #[endpoint {
         method = GET,
@@ -690,7 +690,7 @@ pub trait SledAgentApi {
     }]
     async fn support_zpool_info(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError>;
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]

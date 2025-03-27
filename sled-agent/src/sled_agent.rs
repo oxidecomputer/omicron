@@ -1419,7 +1419,7 @@ impl SledAgent {
 
     pub(crate) async fn support_nvmeadm_info(
         &self,
-    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+    ) -> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
         sled_diagnostics::nvmeadm_info().await
     }
 
@@ -1443,13 +1443,13 @@ impl SledAgent {
 
     pub(crate) async fn support_zfs_info(
         &self,
-    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+    ) -> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
         sled_diagnostics::zfs_info().await
     }
 
     pub(crate) async fn support_zpool_info(
         &self,
-    ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
+    ) -> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
         sled_diagnostics::zpool_info().await
     }
 }

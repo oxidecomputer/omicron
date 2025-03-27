@@ -993,16 +993,10 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn support_nvmeadm_info(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
         let sa = request_context.context();
-        Ok(HttpResponseOk(
-            sa.support_nvmeadm_info()
-                .await
-                .into_iter()
-                .map(|cmd| cmd.get_output())
-                .collect::<Vec<_>>(),
-        ))
+        let res = sa.support_nvmeadm_info().await;
+        Ok(HttpResponseOk(res.get_output()))
     }
 
     async fn support_pargs_info(
@@ -1049,29 +1043,17 @@ impl SledAgentApi for SledAgentImpl {
 
     async fn support_zfs_info(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
         let sa = request_context.context();
-        Ok(HttpResponseOk(
-            sa.support_zfs_info()
-                .await
-                .into_iter()
-                .map(|cmd| cmd.get_output())
-                .collect::<Vec<_>>(),
-        ))
+        let res = sa.support_zfs_info().await;
+        Ok(HttpResponseOk(res.get_output()))
     }
 
     async fn support_zpool_info(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError> {
         let sa = request_context.context();
-        Ok(HttpResponseOk(
-            sa.support_zpool_info()
-                .await
-                .into_iter()
-                .map(|cmd| cmd.get_output())
-                .collect::<Vec<_>>(),
-        ))
+        let res = sa.support_zpool_info().await;
+        Ok(HttpResponseOk(res.get_output()))
     }
 }
