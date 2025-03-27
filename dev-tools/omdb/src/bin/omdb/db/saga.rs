@@ -153,8 +153,6 @@ You should only do this if:
   you've already undone them by hand
 
 - this is a development system whose state can be wiped
-
-Proceed?
 "#;
 
     if should_print_color {
@@ -162,10 +160,6 @@ Proceed?
     } else {
         println!("{text}");
     }
-
-    let mut prompt = ConfirmationPrompt::new();
-    prompt.read_and_validate("y/N", "y")?;
-    drop(prompt);
 
     // Before doing anything: find the current SEC for the saga, and ping it to
     // ensure that the Nexus is down.
@@ -191,10 +185,6 @@ Proceed?
                 } else {
                     println!("{text}");
                 }
-
-                let mut prompt = ConfirmationPrompt::new();
-                prompt.read_and_validate("y/N", "y")?;
-                drop(prompt);
             }
 
             Some(current_sec) => {
@@ -298,9 +288,6 @@ Proceed?
                                 "saw {e} when trying to ping Nexus with id \
                                 {current_sec}. Proceed?"
                             );
-
-                            let mut prompt = ConfirmationPrompt::new();
-                            prompt.read_and_validate("y/N", "y")?;
                         }
                     },
                 }
@@ -317,6 +304,12 @@ Proceed?
             println!("{text}");
         }
     }
+
+    // Before making any changes, ask for confirmation
+
+    let mut prompt = ConfirmationPrompt::new();
+    prompt.read_and_validate("y/N", "y")?;
+    drop(prompt);
 
     // Find all the nodes where there is a started record but not a done record
 
