@@ -871,7 +871,7 @@
         ]
       },
       "ArtifactHashId": {
-        "description": "A hash-based identifier for an artifact.\n\nSome places, e.g. the installinator, request artifacts by hash rather than by name and version. This type indicates that.",
+        "description": "A hash-based identifier for an artifact or deployment unit: the kind and hash.",
         "type": "object",
         "properties": {
           "hash": {

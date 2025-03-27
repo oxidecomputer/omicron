@@ -944,10 +944,10 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars",
- "semver 1.0.25",
  "serde",
  "sled-agent-types",
  "sled-hardware-types",
+ "tufaceous-artifact",
 ]
 
 [[package]]
@@ -962,7 +962,6 @@ dependencies = [
  "regress",
  "reqwest",
  "schemars",
- "semver 1.0.25",
  "serde",
  "serde_json",
  "sled-hardware-types",
@@ -3504,6 +3503,7 @@ dependencies = [
  "termios",
  "tokio",
  "tokio-tungstenite 0.23.1",
+ "tufaceous-artifact",
  "uuid",
 ]
 
@@ -3602,6 +3602,7 @@ dependencies = [
  "omicron-workspace-hack",
  "schemars",
  "serde",
+ "tufaceous-artifact",
  "uuid",
 ]
 
@@ -4777,6 +4778,7 @@ dependencies = [
  "schemars",
  "serde",
  "slog",
+ "tufaceous-artifact",
  "uuid",
 ]
 
@@ -4918,6 +4920,7 @@ dependencies = [
  "serde",
  "test-strategy",
  "thiserror 1.0.69",
+ "tufaceous-artifact",
  "uuid",
 ]
 
@@ -6347,6 +6350,7 @@ dependencies = [
  "sled-hardware-types",
  "strum",
  "thiserror 1.0.69",
+ "tufaceous-artifact",
  "uuid",
 ]
 
@@ -6997,6 +7001,7 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite 0.23.1",
  "toml 0.8.20",
+ "tufaceous-artifact",
  "uuid",
 ]
 
@@ -7482,7 +7487,6 @@ dependencies = [
  "repo-depot-client",
  "reqwest",
  "schemars",
- "semver 1.0.25",
  "serde",
  "serde_human_bytes",
  "serde_json",
@@ -7513,6 +7517,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "toml 0.8.20",
+ "tufaceous-artifact",
  "tufaceous-brand-metadata",
  "usdt",
  "uuid",
@@ -9918,10 +9923,10 @@ name = "repo-depot-api"
 version = "0.1.0"
 dependencies = [
  "dropshot 0.16.0",
- "omicron-common",
  "omicron-workspace-hack",
  "schemars",
  "serde",
+ "tufaceous-artifact",
 ]
 
 [[package]]
@@ -11051,6 +11056,7 @@ dependencies = [
  "sled-agent-types",
  "sled-diagnostics",
  "sled-hardware-types",
+ "tufaceous-artifact",
  "uuid",
 ]
 
@@ -12629,7 +12635,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#69e2896b5905aba61445e519aaa40f02d59638b2"
+source = "git+https://github.com//oxidecomputer/tufaceous?rev=f51642e0a9e5324cb9460b6e74726bd763b24a18#f51642e0a9e5324cb9460b6e74726bd763b24a18"
 dependencies = [
  "anyhow",
  "camino",
@@ -12650,9 +12656,10 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#69e2896b5905aba61445e519aaa40f02d59638b2"
+source = "git+https://github.com//oxidecomputer/tufaceous?rev=f51642e0a9e5324cb9460b6e74726bd763b24a18#f51642e0a9e5324cb9460b6e74726bd763b24a18"
 dependencies = [
  "daft",
+ "hex",
  "parse-display",
  "proptest",
  "schemars",
@@ -12667,18 +12674,19 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#69e2896b5905aba61445e519aaa40f02d59638b2"
+source = "git+https://github.com//oxidecomputer/tufaceous?rev=f51642e0a9e5324cb9460b6e74726bd763b24a18#f51642e0a9e5324cb9460b6e74726bd763b24a18"
 dependencies = [
  "semver 1.0.25",
  "serde",
  "serde_json",
  "tar",
+ "tufaceous-artifact",
 ]
 
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#69e2896b5905aba61445e519aaa40f02d59638b2"
+source = "git+https://github.com//oxidecomputer/tufaceous?rev=f51642e0a9e5324cb9460b6e74726bd763b24a18#f51642e0a9e5324cb9460b6e74726bd763b24a18"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12689,12 +12697,14 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
+ "daft",
  "debug-ignore",
  "flate2",
  "fs-err",
  "futures",
  "hex",
  "hubtools",
+ "indent_write",
  "itertools 0.13.0",
  "parse-size",
  "rand 0.8.5",
@@ -12705,6 +12715,7 @@ dependencies = [
  "sha2",
  "slog",
  "tar",
+ "thiserror 2.0.12",
  "tokio",
  "toml 0.8.20",
  "tough",
@@ -13543,6 +13554,7 @@ dependencies = [
  "tokio",
  "toml 0.8.20",
  "transceiver-controller",
+ "tufaceous-artifact",
  "update-engine",
 ]
 
@@ -13665,6 +13677,7 @@ dependencies = [
  "serde",
  "sled-hardware-types",
  "slog",
+ "tufaceous-artifact",
  "wicket-common",
 ]
 
