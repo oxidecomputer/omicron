@@ -415,7 +415,7 @@ impl DataStore {
         // lease, someone else may have also inserted deliveries. Therefore, we
         // want to insert this `WebhookDeliveryAttempt` record with the actual
         // number of attempts plus one, so that we can record it even if another
-        // attempt occurred in the meantime.`
+        // attempt occurred in the meantime.
         attempt.attempt = SqlU8(found.attempts.0 + 1);
         diesel::insert_into(attempt_dsl::webhook_delivery_attempt)
             .values(attempt.clone())
