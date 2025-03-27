@@ -269,7 +269,7 @@ pub fn zfs_list() -> Command {
         .arg(ZFS)
         .arg("list")
         .arg("-o")
-        .arg("name,used,avail,quota,reservation,mountpoint");
+        .arg("name,used,avail,quota,reservation,mountpoint,mounted");
     cmd
 }
 
