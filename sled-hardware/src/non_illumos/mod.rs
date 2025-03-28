@@ -45,6 +45,10 @@ impl HardwareManager {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 
+    pub fn usable_physical_pages(&self) -> u64 {
+        unimplemented!("Accessing hardware unsupported on non-illumos");
+    }
+
     pub fn usable_physical_ram_bytes(&self) -> u64 {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }

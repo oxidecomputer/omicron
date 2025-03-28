@@ -205,6 +205,7 @@ struct HardwareView {
     disks: HashMap<DiskIdentity, UnparsedDisk>,
     baseboard: Option<Baseboard>,
     online_processor_count: u32,
+    usable_physical_pages: u64,
     usable_physical_ram_bytes: u64,
 }
 
@@ -220,6 +221,7 @@ impl HardwareView {
             disks: HashMap::new(),
             baseboard: None,
             online_processor_count: sysconf::online_processor_count()?,
+            usable_physical_pages: sysconf::usable_physical_pages()?,
             usable_physical_ram_bytes: sysconf::usable_physical_ram_bytes()?,
         })
     }
@@ -230,6 +232,7 @@ impl HardwareView {
             disks: HashMap::new(),
             baseboard: None,
             online_processor_count: sysconf::online_processor_count()?,
+            usable_physical_pages: sysconf::usable_physical_pages()?,
             usable_physical_ram_bytes: sysconf::usable_physical_ram_bytes()?,
         })
     }
@@ -796,6 +799,10 @@ impl HardwareManager {
 
     pub fn online_processor_count(&self) -> u32 {
         self.inner.lock().unwrap().online_processor_count
+    }
+
+    pub fn usable_physical_pages(&self) -> u64 {
+        self.inner.lock().unwrap().usable_physical_pages
     }
 
     pub fn usable_physical_ram_bytes(&self) -> u64 {
