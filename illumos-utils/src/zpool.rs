@@ -227,14 +227,11 @@ impl Zpool {
         Ok(())
     }
 
-    pub fn destroy(name: &ZpoolName, force: bool) -> Result<(), DestroyError> {
+    pub fn destroy(name: &ZpoolName) -> Result<(), DestroyError> {
         let mut cmd = std::process::Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
         cmd.arg(ZPOOL).arg("destroy");
-        if force {
-            cmd.arg("-f");
-        }
         cmd.arg(&name.to_string());
         execute(&mut cmd).map_err(Error::from)?;
         Ok(())

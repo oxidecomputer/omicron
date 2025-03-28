@@ -537,7 +537,6 @@ fn ensure_empty_immutable_mountpoint(
     {
         std::fs::create_dir_all(mountpoint)
             .map_err(|err| EnsureDatasetErrorRaw::CreateMountpoint(err))?;
-        make_directory_immutable(mountpoint)?;
 
         // We still fall-through to the logic below, even though we just created
         // this directory. It's technically possible someone put a file inside
@@ -554,15 +553,21 @@ fn ensure_empty_immutable_mountpoint(
     // "emptying it out" but before "making it immutable", we make
     // another attempt at making it empty.
     loop {
+        let immutablity = is_directory_immutable(mountpoint)?;
+
         if is_directory_empty(mountpoint)?
-            && is_directory_immutable(mountpoint)?
+            && immutablity.as_immutable_as_filesystem_allows()
         {
             return Ok(());
         }
 
-        make_directory_mutable(mountpoint)?;
+        if immutablity.can_set_immutable() {
+            make_directory_mutable(mountpoint)?;
+        }
         ensure_mountpoint_empty(mountpoint)?;
-        make_directory_immutable(mountpoint)?;
+        if immutablity.can_set_immutable() {
+            make_directory_immutable(mountpoint)?;
+        }
     }
 }
 
@@ -630,9 +635,33 @@ fn make_directory_mutable(
     Ok(())
 }
 
+enum Immutability {
+    Yes,
+    No,
+    Unsupported,
+}
+
+impl Immutability {
+    fn as_immutable_as_filesystem_allows(&self) -> bool {
+        match self {
+            Immutability::Yes => true,
+            Immutability::No => false,
+            Immutability::Unsupported => true,
+        }
+    }
+
+    fn can_set_immutable(&self) -> bool {
+        match self {
+            Immutability::Yes => true,
+            Immutability::No => true,
+            Immutability::Unsupported => false,
+        }
+    }
+}
+
 fn is_directory_immutable(
     path: &Utf8Path,
-) -> Result<bool, EnsureDatasetErrorRaw> {
+) -> Result<Immutability, EnsureDatasetErrorRaw> {
     let mut command = std::process::Command::new(PFEXEC);
     let cmd = command.args(&["ls", "-d/v", path.as_str()]);
     let output = execute(cmd)
@@ -647,7 +676,24 @@ fn is_directory_immutable(
             crate::ExecutionError::ParseFailure(stdout.to_string()),
         ));
     };
-    return Ok(attr_line.contains(",immutable,"));
+
+    let attrs = attr_line
+        .trim()
+        .trim_start_matches("{")
+        .trim_end_matches("}")
+        .split(",");
+
+    let mut result = Immutability::Unsupported;
+    for attr in attrs {
+        if attr == "immutable" {
+            result = Immutability::Yes;
+        }
+        if attr == "noimmutable" {
+            result = Immutability::No;
+        }
+    }
+
+    return Ok(result);
 }
 
 impl Zfs {
