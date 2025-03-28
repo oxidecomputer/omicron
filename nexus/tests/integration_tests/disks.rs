@@ -998,13 +998,13 @@ async fn test_disk_backed_by_multiple_region_sets(
 ) {
     let client = &cptestctx.external_client;
 
-    // Create three zpools, all 10 gibibytes, each with one dataset
+    // Create three zpools, each with one dataset
     let mut test = DiskTest::new(&cptestctx).await;
 
-    // Assert default is still 10 GiB
-    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
+    // Assert default is still 16 GiB
+    assert_eq!(16, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
-    // Create another three zpools, all 10 gibibytes, each with one dataset
+    // Create another three zpools, each with one dataset
     test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
     test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
     test.add_zpool_with_dataset(cptestctx.first_sled_id()).await;
@@ -1044,10 +1044,10 @@ async fn test_disk_too_big(cptestctx: &ControlPlaneTestContext) {
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(client).await;
 
-    // Assert default is still 10 GiB
-    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
+    // Assert default is still 16 GiB
+    assert_eq!(16, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
-    // Ask for a 300 gibibyte disk (but only 10 is available)
+    // Ask for a 300 gibibyte disk (but only 16 is available)
     let disk_size = ByteCount::from_gibibytes_u32(300);
     let disks_url = get_disks_url();
     let new_disk = params::DiskCreate {
@@ -1546,11 +1546,11 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
-    // Create three 10 GiB zpools, each with one dataset.
+    // Create three zpools, each with one dataset.
     let test = DiskTest::new(&cptestctx).await;
 
-    // Assert default is still 10 GiB
-    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
+    // Assert default is still 16 GiB
+    assert_eq!(16, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
     create_project_and_pool(client).await;
 
@@ -1559,10 +1559,19 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
         for dataset in &zpool.datasets {
             assert_eq!(
                 datastore
-                    .regions_total_occupied_size(dataset.id)
+                    .regions_total_reserved_size(dataset.id)
                     .await
                     .unwrap(),
                 0
+            );
+
+            assert_eq!(
+                datastore
+                    .crucible_dataset_get(dataset.id)
+                    .await
+                    .unwrap()
+                    .size_used,
+                0,
             );
         }
     }
@@ -1594,21 +1603,22 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
 
     // Total occupied size is 7 GiB * 3 (each Crucible disk requires three
     // regions to make a region set for an Upstairs, one region per dataset)
+    // plus reservation overhead
     for zpool in test.zpools() {
         for dataset in &zpool.datasets {
             assert_eq!(
                 datastore
-                    .regions_total_occupied_size(dataset.id)
+                    .regions_total_reserved_size(dataset.id)
                     .await
                     .unwrap(),
-                ByteCount::from_gibibytes_u32(7).to_bytes(),
+                ByteCount::from_mebibytes_u32(8960).to_bytes(),
             );
         }
     }
 
-    // Ask for a 4 gibibyte disk, this should fail because there isn't space
+    // Ask for a 6 gibibyte disk, this should fail because there isn't space
     // available.
-    let disk_size = ByteCount::from_gibibytes_u32(4);
+    let disk_size = ByteCount::from_gibibytes_u32(6);
     let disk_two = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk-two".parse().unwrap(),
@@ -1628,17 +1638,17 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("unexpected success creating 4 GiB disk");
+    .expect("unexpected success creating 6 GiB disk");
 
-    // Total occupied size is still 7 GiB * 3
+    // Total occupied size is still 7 GiB * 3 (plus overhead)
     for zpool in test.zpools() {
         for dataset in &zpool.datasets {
             assert_eq!(
                 datastore
-                    .regions_total_occupied_size(dataset.id)
+                    .regions_total_reserved_size(dataset.id)
                     .await
                     .unwrap(),
-                ByteCount::from_gibibytes_u32(7).to_bytes(),
+                ByteCount::from_mebibytes_u32(8960).to_bytes(),
             );
         }
     }
@@ -1659,7 +1669,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
         for dataset in &zpool.datasets {
             assert_eq!(
                 datastore
-                    .regions_total_occupied_size(dataset.id)
+                    .regions_total_reserved_size(dataset.id)
                     .await
                     .unwrap(),
                 0,
@@ -1690,15 +1700,15 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     .await
     .expect("unexpected failure creating 10 GiB disk");
 
-    // Total occupied size should be 10 GiB * 3
+    // Total occupied size should be 10 GiB * 3 plus overhead
     for zpool in test.zpools() {
         for dataset in &zpool.datasets {
             assert_eq!(
                 datastore
-                    .regions_total_occupied_size(dataset.id)
+                    .regions_total_reserved_size(dataset.id)
                     .await
                     .unwrap(),
-                ByteCount::from_gibibytes_u32(10).to_bytes(),
+                ByteCount::from_mebibytes_u32(12800).to_bytes(),
             );
         }
     }
@@ -1711,15 +1721,12 @@ async fn test_multiple_disks_multiple_zpools(
 ) {
     let client = &cptestctx.external_client;
 
-    // Create six 10 GB zpools, each with one dataset
+    // Create six zpools, each with one dataset
     let _test = DiskTestBuilder::new(&cptestctx)
         .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(6)
         .build()
         .await;
-
-    // Assert default is still 10 GiB
-    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
     create_project_and_pool(client).await;
 
@@ -2086,11 +2093,8 @@ async fn test_single_region_allocate(cptestctx: &ControlPlaneTestContext) {
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Create three 10 GiB zpools, each with one dataset.
+    // Create three zpools, each with one dataset.
     let disk_test = DiskTest::new(&cptestctx).await;
-
-    // Assert default is still 10 GiB
-    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
     // Allocate a single 1 GB region
     let volume_id = VolumeUuid::new_v4();
@@ -2133,11 +2137,11 @@ async fn test_single_region_allocate(cptestctx: &ControlPlaneTestContext) {
     for zpool in disk_test.zpools() {
         for dataset in &zpool.datasets {
             let total_size = datastore
-                .regions_total_occupied_size(dataset.id)
+                .regions_total_reserved_size(dataset.id)
                 .await
                 .unwrap();
 
-            if total_size == 1073741824 {
+            if total_size == allocated_region.reserved_size() {
                 number_of_matching_regions += 1;
             } else if total_size == 0 {
                 // ok, unallocated
@@ -2160,15 +2164,12 @@ async fn test_region_allocation_strategy_random_is_idempotent(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Create four 10 GiB zpools, each with one dataset.
+    // Create four zpools, each with one dataset.
     let _test = DiskTestBuilder::new(&cptestctx)
         .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
-
-    // Assert default is still 10 GiB
-    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
     // Create a disk
     let client = &cptestctx.external_client;
@@ -2230,15 +2231,12 @@ async fn test_region_allocation_strategy_random_is_idempotent_arbitrary(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Create four 10 GiB zpools, each with one dataset.
+    // Create four zpools, each with one dataset.
     let _test = DiskTestBuilder::new(&cptestctx)
         .on_specific_sled(cptestctx.first_sled_id())
         .with_zpool_count(4)
         .build()
         .await;
-
-    // Assert default is still 10 GiB
-    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
     // Call region allocation in isolation
     let volume_id = VolumeUuid::new_v4();
@@ -2293,7 +2291,7 @@ async fn test_single_region_allocate_for_replace(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Create four 10 GiB zpools, each with one dataset.
+    // Create four zpools, each with one dataset.
     //
     // We add one more then the "three" default to meet `region_allocate`'s
     // redundancy requirements.
@@ -2302,9 +2300,6 @@ async fn test_single_region_allocate_for_replace(
         .with_zpool_count(4)
         .build()
         .await;
-
-    // Assert default is still 10 GiB
-    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
     // Create a disk
     let client = &cptestctx.external_client;
@@ -2387,11 +2382,8 @@ async fn test_single_region_allocate_for_replace_not_enough_zpools(
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Create three 10 GiB zpools, each with one dataset.
+    // Create three zpools, each with one dataset.
     let _disk_test = DiskTest::new(&cptestctx).await;
-
-    // Assert default is still 10 GiB
-    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
     // Create a disk
     let client = &cptestctx.external_client;
@@ -2558,11 +2550,8 @@ async fn test_disk_expunge(cptestctx: &ControlPlaneTestContext) {
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    // Create three 10 GiB zpools, each with one dataset.
+    // Create three zpools, each with one dataset.
     let _disk_test = DiskTest::new(&cptestctx).await;
-
-    // Assert default is still 10 GiB
-    assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
     // Create a disk
     let client = &cptestctx.external_client;

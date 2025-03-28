@@ -1125,6 +1125,8 @@ table! {
         read_only -> Bool,
 
         deleting -> Bool,
+
+        reservation_percent -> crate::RegionReservationPercentEnum,
     }
 }
 
