@@ -712,11 +712,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_SledDiagnosticsQueryOutput",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SledDiagnosticsQueryOutput"
-                  }
+                  "$ref": "#/components/schemas/SledDiagnosticsQueryOutput"
                 }
               }
             }
@@ -820,11 +816,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_SledDiagnosticsQueryOutput",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SledDiagnosticsQueryOutput"
-                  }
+                  "$ref": "#/components/schemas/SledDiagnosticsQueryOutput"
                 }
               }
             }
@@ -870,11 +862,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_SledDiagnosticsQueryOutput",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SledDiagnosticsQueryOutput"
-                  }
+                  "$ref": "#/components/schemas/SledDiagnosticsQueryOutput"
                 }
               }
             }
