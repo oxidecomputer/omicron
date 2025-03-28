@@ -74,6 +74,7 @@ omicron-test-utils = { workspace = true, optional = true }
 [features]
 # Enable to export `TestDatabase`
 testing = ["omicron-test-utils"]
+omdb = []
 
 [dev-dependencies]
 assert_matches.workspace = true

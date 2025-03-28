@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{CrucibleDataset, Generation};
+use crate::ByteCount;
 use crate::collection::DatastoreCollectionConfig;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
@@ -29,6 +30,10 @@ pub struct Zpool {
 
     // The physical disk to which this Zpool is attached.
     pub physical_disk_id: DbTypedUuid<PhysicalDiskKind>,
+
+    /// How much storage to prevent Crucible from allocating for regions on a
+    /// given pool.
+    control_plane_storage_buffer: i64,
 }
 
 impl Zpool {
@@ -36,6 +41,7 @@ impl Zpool {
         id: Uuid,
         sled_id: Uuid,
         physical_disk_id: PhysicalDiskUuid,
+        control_plane_storage_buffer: ByteCount,
     ) -> Self {
         Self {
             identity: ZpoolIdentity::new(id),
@@ -43,7 +49,16 @@ impl Zpool {
             rcgen: Generation::new(),
             sled_id,
             physical_disk_id: physical_disk_id.into(),
+            control_plane_storage_buffer: control_plane_storage_buffer.into(),
         }
+    }
+
+    pub fn time_deleted(&self) -> Option<DateTime<Utc>> {
+        self.time_deleted
+    }
+
+    pub fn control_plane_storage_buffer(&self) -> i64 {
+        self.control_plane_storage_buffer
     }
 }
 

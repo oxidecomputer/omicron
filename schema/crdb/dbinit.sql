@@ -541,7 +541,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.zpool (
     sled_id UUID NOT NULL,
 
     /* FK into the Physical Disk table */
-    physical_disk_id UUID NOT NULL
+    physical_disk_id UUID NOT NULL,
+
+    /*
+     * How many bytes to reserve for non-Crucible control plane storage
+     */
+    control_plane_storage_buffer INT NOT NULL
 );
 
 /* Create an index on the physical disk id */
@@ -604,7 +609,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.crucible_dataset (
      * dataset that contains the regions (which is larger than the the actual
      * region size).
      */
-    size_used INT NOT NULL
+    size_used INT NOT NULL,
+
+    /* Do not consider this dataset during region allocation */
+    no_provision BOOL NOT NULL
 );
 
 /* Create an index on the size usage for any Crucible dataset */
@@ -5018,7 +5026,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '134.0.0', NULL)
+    (TRUE, NOW(), NOW(), '135.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

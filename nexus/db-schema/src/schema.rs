@@ -1071,6 +1071,8 @@ table! {
 
         sled_id -> Uuid,
         physical_disk_id -> Uuid,
+
+        control_plane_storage_buffer -> Int8,
     }
 }
 
@@ -1093,6 +1095,8 @@ table! {
         port -> Int4,
 
         size_used -> Int8,
+
+        no_provision -> Bool,
     }
 }
 

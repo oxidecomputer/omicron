@@ -135,7 +135,7 @@ impl QueryBuilder {
         Value: diesel::serialize::ToSql<BindSt, Pg> + Send + 'static,
         BindSt: Send + 'static,
     {
-        self.query = self.query.take().map(|q| q.bind(b));
+        self.query = self.query.take().map(|q| q.bind::<BindSt, Value>(b));
         self
     }
 
