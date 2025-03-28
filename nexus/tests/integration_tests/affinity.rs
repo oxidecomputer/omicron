@@ -75,6 +75,11 @@ impl<T: AffinityGroupish> ProjectScopedApiHelper<'_, T> {
         .await
     }
 
+    async fn instance_groups_list(&self, instance: &str) -> Vec<T::Group> {
+        let url = instance_groups_url(T::URL_COMPONENT, instance, self.project);
+        objects_list_page_authz(&self.client, &url).await.items
+    }
+
     async fn groups_list(&self) -> Vec<T::Group> {
         let url = groups_url(T::URL_COMPONENT, self.project);
         objects_list_page_authz(&self.client, &url).await.items
@@ -399,6 +404,15 @@ impl AffinityGroupish for AntiAffinityType {
             },
         }
     }
+}
+
+fn instance_groups_url(
+    ty: &str,
+    instance: &str,
+    project: Option<&str>,
+) -> String {
+    let query_params = project_query_param_suffix(project);
+    format!("/v1/instances/{instance}/{ty}{query_params}")
 }
 
 fn groups_url(ty: &str, project: Option<&str>) -> String {
@@ -753,6 +767,49 @@ async fn test_group_crud<T: AffinityGroupish>(client: &ClientTestContext) {
     project_api.group_get_expect_error(GROUP_NAME, StatusCode::NOT_FOUND).await;
     let groups = project_api.groups_list().await;
     assert!(groups.is_empty());
+}
+
+#[nexus_test]
+async fn test_affinity_instance_group_list(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let external_client = &cptestctx.external_client;
+    test_instance_group_list::<AffinityType>(external_client).await;
+}
+
+#[nexus_test]
+async fn test_anti_affinity_instance_group_list(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let external_client = &cptestctx.external_client;
+    test_instance_group_list::<AntiAffinityType>(external_client).await;
+}
+
+async fn test_instance_group_list<T: AffinityGroupish>(
+    client: &ClientTestContext,
+) {
+    const PROJECT_NAME: &'static str = "test-project";
+
+    let api = ApiHelper::new(client);
+
+    // Create an IP pool and project that we'll use for testing.
+    create_default_ip_pool(&client).await;
+    api.create_project(PROJECT_NAME).await;
+
+    let project_api = api.use_project::<T>(PROJECT_NAME);
+
+    project_api.create_stopped_instance("test-instance").await;
+    let groups = project_api.instance_groups_list("test-instance").await;
+    assert!(groups.is_empty(), "New instance should not belong to any groups");
+
+    project_api.group_create("yes-group").await;
+    project_api.group_create("no-group").await;
+
+    project_api.group_member_add("yes-group", "test-instance").await;
+
+    let groups = project_api.instance_groups_list("test-instance").await;
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].identity().name, "yes-group");
 }
 
 #[nexus_test]

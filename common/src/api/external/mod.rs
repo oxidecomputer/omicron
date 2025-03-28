@@ -1339,10 +1339,16 @@ pub enum FailureDomain {
 ///
 /// Membership in a group is not exclusive - members may belong to multiple
 /// affinity / anti-affinity groups.
+///
+/// Affinity Groups can contain up to 32 members.
+// See: AFFINITY_GROUP_MAX_MEMBERS
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum AffinityGroupMember {
     /// An instance belonging to this group
+    ///
+    /// Instances can belong to up to 16 affinity groups.
+    // See: INSTANCE_MAX_AFFINITY_GROUPS
     Instance { id: InstanceUuid, name: Name, run_state: InstanceState },
 }
 
@@ -1364,10 +1370,16 @@ impl SimpleIdentityOrName for AffinityGroupMember {
 ///
 /// Membership in a group is not exclusive - members may belong to multiple
 /// affinity / anti-affinity groups.
+///
+/// Anti-Affinity Groups can contain up to 32 members.
+// See: ANTI_AFFINITY_GROUP_MAX_MEMBERS
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum AntiAffinityGroupMember {
     /// An instance belonging to this group
+    ///
+    /// Instances can belong to up to 16 anti-affinity groups.
+    // See: INSTANCE_MAX_ANTI_AFFINITY_GROUPS
     Instance { id: InstanceUuid, name: Name, run_state: InstanceState },
 }
 

@@ -1812,6 +1812,7 @@ mod tests {
     use omicron_common::api::internal::shared::NetworkInterface;
     use omicron_common::api::internal::shared::NetworkInterfaceKind;
     use omicron_common::disk::DiskIdentity;
+    use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::poll::wait_for_condition;
@@ -2582,7 +2583,7 @@ mod tests {
             BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: zone_id,
-                filesystem_pool: None,
+                filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
                 zone_type: BlueprintZoneType::Nexus(
                     blueprint_zone_type::Nexus {
                         internal_address: SocketAddrV6::new(
@@ -2811,8 +2812,9 @@ mod tests {
         // target changes.
         //
         // More on this in the block comment below.
-        let _external_ips = QueryBuilder::new()
-            .sql("SELECT id FROM omicron.public.external_ip WHERE time_deleted IS NULL")
+        let mut query = QueryBuilder::new();
+        query.sql("SELECT id FROM omicron.public.external_ip WHERE time_deleted IS NULL");
+        let _external_ips = query
             .query::<diesel::sql_types::Uuid>()
             .load_async::<uuid::Uuid>(&*conn)
             .await

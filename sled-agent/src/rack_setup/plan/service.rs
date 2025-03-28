@@ -111,7 +111,7 @@ impl SledConfig {
     /// durable datasets.
     pub fn add_zone_and_datasets(&mut self, zone: BlueprintZoneConfig) {
         let fs_dataset_name = DatasetName::new(
-            zone.filesystem_pool.clone().expect("Missing pool"),
+            zone.filesystem_pool.clone(),
             DatasetKind::TransientZone {
                 name: illumos_utils::zone::zone_name(
                     zone.zone_type.kind().zone_prefix(),
@@ -409,7 +409,7 @@ impl Plan {
                 .unwrap();
             let dataset_name =
                 sled.alloc_dataset_from_u2s(DatasetKind::InternalDns)?;
-            let filesystem_pool = Some(dataset_name.pool().clone());
+            let filesystem_pool = dataset_name.pool().clone();
 
             sled.request.add_zone_and_datasets(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
@@ -446,7 +446,7 @@ impl Plan {
                 .unwrap();
             let dataset_name =
                 sled.alloc_dataset_from_u2s(DatasetKind::Cockroach)?;
-            let filesystem_pool = Some(dataset_name.pool().clone());
+            let filesystem_pool = dataset_name.pool().clone();
             sled.request.add_zone_and_datasets(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id,
@@ -494,7 +494,7 @@ impl Plan {
             );
             let dataset_kind = DatasetKind::ExternalDns;
             let dataset_name = sled.alloc_dataset_from_u2s(dataset_kind)?;
-            let filesystem_pool = Some(dataset_name.pool().clone());
+            let filesystem_pool = dataset_name.pool().clone();
 
             sled.request.add_zone_and_datasets(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
@@ -533,7 +533,7 @@ impl Plan {
                 )
                 .unwrap();
             let (nic, external_ip) = svc_port_builder.next_nexus(id)?;
-            let filesystem_pool = Some(sled.alloc_zpool_from_u2s()?);
+            let filesystem_pool = sled.alloc_zpool_from_u2s()?;
             sled.request.add_zone_and_datasets(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id,
@@ -578,7 +578,7 @@ impl Plan {
             dns_builder
                 .host_zone_with_one_backend(id, ServiceName::Oximeter, address)
                 .unwrap();
-            let filesystem_pool = Some(sled.alloc_zpool_from_u2s()?);
+            let filesystem_pool = sled.alloc_zpool_from_u2s()?;
             sled.request.add_zone_and_datasets(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id,
@@ -611,7 +611,7 @@ impl Plan {
                 .unwrap();
             let dataset_name =
                 sled.alloc_dataset_from_u2s(DatasetKind::Clickhouse)?;
-            let filesystem_pool = Some(dataset_name.pool().clone());
+            let filesystem_pool = dataset_name.pool().clone();
             sled.request.add_zone_and_datasets(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id,
@@ -640,7 +640,7 @@ impl Plan {
             let port = omicron_common::address::CRUCIBLE_PANTRY_PORT;
             let address = SocketAddrV6::new(ip, port, 0, 0);
             let id = OmicronZoneUuid::new_v4();
-            let filesystem_pool = Some(sled.alloc_zpool_from_u2s()?);
+            let filesystem_pool = sled.alloc_zpool_from_u2s()?;
             dns_builder
                 .host_zone_with_one_backend(
                     id,
@@ -686,7 +686,7 @@ impl Plan {
                             },
                         },
                     ),
-                    filesystem_pool: Some(pool.clone()),
+                    filesystem_pool: pool.clone(),
                     image_source: BlueprintZoneImageSource::InstallDataset,
                 });
             }
@@ -700,7 +700,7 @@ impl Plan {
             let id = OmicronZoneUuid::new_v4();
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
             let ntp_address = SocketAddrV6::new(ip, NTP_PORT, 0, 0);
-            let filesystem_pool = Some(sled.alloc_zpool_from_u2s()?);
+            let filesystem_pool = sled.alloc_zpool_from_u2s()?;
 
             let (zone_type, svcname) = if idx < BOUNDARY_NTP_REDUNDANCY {
                 boundary_ntp_servers
