@@ -21,7 +21,7 @@ PACKAGES=(
   "dendrite-stub"
 )
 
-REPO="oxidecomputer/dendrite"
+REPO="oxidecomputer/dendrite-os"
 
 . "$SOURCE_DIR/update_helpers.sh"
 
