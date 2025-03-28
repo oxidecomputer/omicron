@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
+atomicwrites.workspace = true
 base64.workspace = true
 bootstore.workspace = true
 bootstrap-agent-api.workspace = true
