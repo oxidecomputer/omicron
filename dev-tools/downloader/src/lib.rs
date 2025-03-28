@@ -664,7 +664,7 @@ impl Downloader<'_> {
             get_values_from_file(["COMMIT", "SHA2"], &checksums_path).await?;
 
         let url = format!(
-            "{BUILDOMAT_URL}/oxidecomputer/dendrite/openapi/{commit}/dpd.json"
+            "{BUILDOMAT_URL}/oxidecomputer/dendrite-os/openapi/{commit}/dpd.json"
         );
         let path = download_dir.join(format!("dpd-{commit}.json"));
 
@@ -708,7 +708,7 @@ impl Downloader<'_> {
 
         let tarball_file = "dendrite-stub.tar.gz";
         let tarball_path = download_dir.join(tarball_file);
-        let repo = "oxidecomputer/dendrite";
+        let repo = "oxidecomputer/dendrite-os";
         let url_base = format!("{BUILDOMAT_URL}/{repo}/image/{commit}");
 
         tokio::fs::create_dir_all(&download_dir).await?;

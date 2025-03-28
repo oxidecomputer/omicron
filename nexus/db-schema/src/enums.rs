@@ -2,17 +2,34 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! Enumerations used in the database schema.
+
 use diesel::SqlType;
 use diesel::query_builder::QueryId;
 
-/// Enumerations used in the database schema.
-
+/// Macro to define enums with static query IDs.
 macro_rules! define_enums {
     ($($enum_name:ident => $postgres_name:literal),* $(,)?) => {
         $(
             #[derive(Clone, Copy, Debug, PartialEq, SqlType, QueryId)]
             #[diesel(postgres_type(name = $postgres_name, schema = "public"))]
             pub struct $enum_name;
+        )*
+    };
+}
+
+/// Macro to define enums without static query IDs.
+macro_rules! define_enums_non_static {
+    ($($enum_name:ident => $postgres_name:literal),* $(,)?) => {
+        $(
+            #[derive(Clone, Copy, Debug, PartialEq, SqlType)]
+            #[diesel(postgres_type(name = $postgres_name, schema = "public"))]
+            pub struct $enum_name;
+
+            impl diesel::query_builder::QueryId for $enum_name {
+                type QueryId = ();
+                const HAS_STATIC_QUERY_ID: bool = false;
+            }
         )*
     };
 }
@@ -31,8 +48,6 @@ define_enums! {
     ClickhouseModeEnum => "clickhouse_mode",
     DatasetKindEnum => "dataset_kind",
     DbSwitchInterfaceKindEnum => "switch_interface_kind",
-    // TODO: HAS_STATIC_QUERY_ID = false
-    DnsGroupEnum => "dns_group",
     DownstairsClientStopRequestReasonEnum => "downstairs_client_stop_request_reason_type",
     DownstairsClientStoppedReasonEnum => "downstairs_client_stopped_reason_type",
     FailureDomainEnum => "failure_domain",
@@ -40,10 +55,6 @@ define_enums! {
     HwRotSlotEnum => "hw_rot_slot",
     IdentityProviderTypeEnum => "provider_type",
     IdentityTypeEnum => "identity_type",
-    // TODO: HAS_STATIC_QUERY_ID = false
-    InstanceAutoRestartPolicyEnum => "instance_auto_restart",
-    // TODO: HAS_STATIC_QUERY_ID = false
-    InstanceStateEnum => "instance_state_v2",
     IpAttachStateEnum => "ip_attach_state",
     IpKindEnum => "ip_kind_enum",
     IpPoolResourceTypeEnum => "ip_pool_resource_type",
@@ -76,8 +87,6 @@ define_enums! {
     UpstairsRepairNotificationTypeEnum => "upstairs_repair_notification_type",
     UpstairsRepairTypeEnum => "upstairs_repair_type",
     UserProvisionTypeEnum => "user_provision_type",
-    // XXX: VmmState has HAS_STATIC_QUERY_ID = false
-    VmmStateEnum => "vmm_state",
     VolumeResourceUsageTypeEnum => "volume_resource_usage_type",
     VpcFirewallRuleActionEnum => "vpc_firewall_rule_action",
     VpcFirewallRuleDirectionEnum => "vpc_firewall_rule_direction",
@@ -85,4 +94,12 @@ define_enums! {
     VpcFirewallRuleStatusEnum => "vpc_firewall_rule_status",
     VpcRouterKindEnum => "vpc_router_kind",
     ZoneTypeEnum => "zone_type",
+}
+
+define_enums_non_static! {
+    // Please keep this list in alphabetical order.
+    DnsGroupEnum => "dns_group",
+    InstanceAutoRestartPolicyEnum => "instance_auto_restart",
+    InstanceStateEnum => "instance_state_v2",
+    VmmStateEnum => "vmm_state",
 }

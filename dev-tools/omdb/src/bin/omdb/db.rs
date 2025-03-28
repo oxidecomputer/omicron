@@ -159,6 +159,8 @@ use strum::IntoEnumIterator;
 use tabled::Tabled;
 use uuid::Uuid;
 
+mod saga;
+
 const NO_ACTIVE_PROPOLIS_MSG: &str = "<no active Propolis>";
 const NOT_ON_SLED_MSG: &str = "<not on any sled>";
 
@@ -343,6 +345,8 @@ enum DbCommands {
     /// Query for information about region snapshot replacements, optionally
     /// manually triggering one.
     RegionSnapshotReplacement(RegionSnapshotReplacementArgs),
+    /// Commands for querying and interacting with sagas
+    Saga(saga::SagaArgs),
     /// Print information about sleds
     Sleds(SledsArgs),
     /// Print information about customer instances.
@@ -1063,6 +1067,9 @@ impl DbArgs {
                             &opctx, &datastore, args, token,
                         )
                         .await
+                    }
+                    DbCommands::Saga(args) => {
+                        args.exec(&omdb, &opctx, &datastore).await
                     }
                     DbCommands::Sleds(args) => {
                         cmd_db_sleds(&opctx, &datastore, &fetch_opts, args).await

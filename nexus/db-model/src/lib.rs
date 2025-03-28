@@ -295,8 +295,7 @@ macro_rules! impl_enum_wrapper {
 pub(crate) use impl_enum_wrapper;
 
 /// This macro implements serialization and deserialization of an enum type from
-/// our database into our model types. See [`VpcRouterKindEnum`] and
-/// [`VpcRouterKind`] for a sample usage
+/// our database into our model types. See [`VpcRouterKind`] for a sample usage.
 macro_rules! impl_enum_type {
     (
         $diesel_type:ident:

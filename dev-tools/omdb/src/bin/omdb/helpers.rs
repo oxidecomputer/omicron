@@ -4,7 +4,11 @@
 
 //! Utility helpers for the omdb CLI.
 
+use anyhow::bail;
 use clap::ColorChoice;
+use reedline::DefaultPrompt;
+use reedline::DefaultPromptSegment;
+use reedline::Reedline;
 use supports_color::Stream;
 
 pub(crate) const CONNECTION_OPTIONS_HEADING: &str = "Connection Options";
@@ -30,4 +34,37 @@ pub(crate) const fn const_max_len(strs: &[&str]) -> usize {
         i += 1;
     }
     max
+}
+
+pub(crate) struct ConfirmationPrompt(Reedline);
+
+impl ConfirmationPrompt {
+    pub(crate) fn new() -> Self {
+        Self(Reedline::create())
+    }
+
+    fn read(&mut self, message: &str) -> Result<String, anyhow::Error> {
+        let prompt = DefaultPrompt::new(
+            DefaultPromptSegment::Basic(message.to_string()),
+            DefaultPromptSegment::Empty,
+        );
+        if let Ok(reedline::Signal::Success(input)) = self.0.read_line(&prompt)
+        {
+            Ok(input)
+        } else {
+            bail!("operation aborted")
+        }
+    }
+
+    pub(crate) fn read_and_validate(
+        &mut self,
+        message: &str,
+        expected: &str,
+    ) -> Result<(), anyhow::Error> {
+        let input = self.read(message)?;
+        if input != expected {
+            bail!("Aborting, input did not match expected value");
+        }
+        Ok(())
+    }
 }

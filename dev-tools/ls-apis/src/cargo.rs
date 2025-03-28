@@ -420,11 +420,11 @@ fn dendrite_workaround(
     cmd.env("CARGO_NET_GIT_FETCH_WITH_CLI", "true");
     cmd.env(
         format!("GIT_CONFIG_KEY_{count}"),
-        "url.git@github.com:oxidecomputer/dendrite.insteadOf",
+        "url.git@github.com:oxidecomputer/dendrite-os.insteadOf",
     );
     cmd.env(
         format!("GIT_CONFIG_VALUE_{count}"),
-        "https://github.com/oxidecomputer/dendrite",
+        "https://github.com/oxidecomputer/dendrite-os",
     );
     cmd.env("GIT_CONFIG_COUNT", (count + 1).to_string());
     cmd.exec().map_err(|err| {
