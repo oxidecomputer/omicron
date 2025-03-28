@@ -381,6 +381,62 @@ fn generate_chrony_config(
     args: ChronySetupArgs,
     log: &Logger,
 ) -> anyhow::Result<()> {
+    // Rack Time Synchronisation
+    // -------------------------
+    //
+    // Within an Oxide rack, every sled in the cluster runs an NTP server zone.
+    // Two of these zones are nominated to be "Boundary NTP Servers" which
+    // means that they have external connectivity via boundary networking
+    // services and are configured with the NTP server address(es)/name(s)
+    // provided during RSS. The other zones are "Internal NTP Servers", do not
+    // have external connectivity, and synchronise with the boundary servers
+    // across the rack's underlay network.
+    //
+    // Every sled initially starts up with the notion that it is late December
+    // 1986, and there are a number of challenges in order to reach consensus
+    // around time in the rack, particularly in situations where one of more
+    // boundary servers lacks external connectivity, either at startup or
+    // later. A number of strategies are employed in the configurations
+    // below.
+    //
+    // - Each boundary server can authoratitively advertise time at stratum
+    //   10 based on its local clock and will do this when there are no
+    //   "selectable" upstream servers. However, to avoid the situation
+    //   where December 1986 is advertised with authority, they will not use
+    //   this local source until the clock has been successfully
+    //   synchronised to an upstream source at least once. In the event that
+    //   a rack starts up with no external NTP connectivity everything
+    //   stops, waiting for time synchronisation to occur (that is, for the
+    //   networking issue to be resolved).
+    //
+    // - Each boundary server has its upstream sources configured with:
+    //   - maximum poll interval 2^5 (32 seconds). When a time source is
+    //     considered trustworthy and relatively stable over time, the rate
+    //     at which it is queried is reduced. We set a ceiling on the
+    //     polling rate so that we can still react relatively quickly to
+    //     events such as loss of external connectivity. Note that if
+    //     an update fails, the poll interval will rapidly decrease back
+    //     down towards one second.
+    //   - maximum number of retained samples is 8. This sets an upper limit
+    //     on the number of samples so that trust degrades more quickly in
+    //     the event the source is not contactable.
+    //   - The "failfast" flag causes the source to be immediately marked as
+    //     "unselectable" if it has not been contactable for several
+    //     consecutive attempts. Without this flag, the source would remain
+    //     selected and its root dispersion (and therefore its distance)
+    //     would increase fairly slowly. The source would become
+    //     unselectable after around an hour given the rest of the
+    //     configuration, which is far too slow.
+    //
+    // - The boundary servers include each other in their list of sources.
+    //   While they will see themselves in their source list, they will
+    //   automatically discount that to prevent a loop. Due to the "orphan"
+    //   tab on the local source mentioned earlier, when both boundary
+    //   servers fall back to their local clock source, the one with the
+    //   lowest reference ID will be preferred, protecting against a split
+    //   brain scenario when neither server has upstream connectivity and
+    //   both are are advertising their local clock with authority.
+
     let internal_ntp_tpl = "#
 # Configuration file for an internal NTP server - one which communicates with
 # boundary NTP servers within the rack.
@@ -432,18 +488,25 @@ allow @ALLOW@
 # appears synchronised even if there are currently no active upstreams. When
 # in this mode, we report as stratum 10 to clients. The `distance' parameter
 # controls when we will decide to abandon the upstreams and switch to the local
-# reference. By setting `activate`, we prevent the server from ever activating
-# its local reference until it has synchronised with upstream at least once and
-# the root distance has dropped below the provided threshold. This prevents
-# a boundary server in a cold booted rack from authoritatively advertising a
-# time from the 1980s prior to gaining external connectivity.
+# reference, although this is largely redundant due to the upstream sources
+# being flagged as 'failfast'. By setting `activate`, we prevent the server
+# from ever activating its local reference until it has synchronised with
+# upstream at least once and the root distance has dropped below the
+# provided threshold. This prevents a boundary server in a cold booted rack
+# from authoritatively advertising a time from the 1980s prior to gaining
+# external connectivity.
 #
 # distance: Distance from root above which we use the local reference, opting
 #           to ignore the upstream.
 # activate: Distance from root below which we must fall once to ever consider
 #           the local reference.
+# orphan:   This option enables orphan mode, where sources with the same
+#           stratum as our local are ignored unless no other source is
+#           selectable and their reference IDs are smaller than ours. This
+#           protects against a split brain situation when neither boundary
+#           server has connectivity.
 #
-local stratum 10 distance 0.4 activate 0.5
+local stratum 10 orphan distance 0.4 activate 0.5
 
 # makestep <threshold> <limit>
 # We allow chrony to step the system clock during the first three time updates
@@ -453,6 +516,13 @@ makestep 0.1 3
 # When a leap second occurs we slew the clock over approximately 37 seconds.
 leapsecmode slew
 maxslewrate 2708.333
+
+# Refresh boundary NTP servers every two minutes instead of every two weeks
+refresh 120
+
+# When a source is unreachable, increase its dispersion by 60 microseconds/s
+# instead of the default of 1.
+maxclockerror 60
 
 ";
 
@@ -481,17 +551,17 @@ maxslewrate 2708.333
         for s in servers {
             writeln!(
                 &mut new_config,
-                "pool {s} iburst maxdelay 0.1 minpoll 0 maxpoll 3 maxsources 16"
+                "pool {s} iburst maxdelay 0.1 maxsources 16 \
+                 minpoll 0 maxpoll 5 maxsamples 8 failfast"
             )
             .expect("write to String is infallible");
         }
-    } else {
-        writeln!(
-            &mut new_config,
-            "pool {boundary_pool} iburst maxdelay 0.1 maxsources 16",
-        )
-        .expect("write to String is infallible");
     }
+    writeln!(
+        &mut new_config,
+        "pool {boundary_pool} iburst maxdelay 0.1 maxsources 16",
+    )
+    .expect("write to String is infallible");
 
     // We read the contents from the old configuration file if it existed
     // so that we can verify if it changed.
