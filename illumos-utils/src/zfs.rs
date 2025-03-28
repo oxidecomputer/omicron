@@ -9,6 +9,7 @@ use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
 use camino::{Utf8Path, Utf8PathBuf};
+use camino_tempfile::Utf8TempDir;
 use itertools::Itertools;
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::CompressionAlgorithm;
@@ -77,6 +78,18 @@ enum EnsureDatasetErrorRaw {
 
     #[error("Failed to mount overlay filesystem: {0}")]
     MountOverlayFsFailed(crate::ExecutionError),
+
+    #[error("Failed to create mountpoint: {0}")]
+    CreateMountpoint(std::io::Error),
+
+    #[error("Failed to make mountpoint immutable")]
+    MakeImmutable(crate::ExecutionError),
+
+    #[error("Cannot parse immutable attribute")]
+    ParseImmutable(crate::ExecutionError),
+
+    #[error("Invalid mountpoint: {0}")]
+    BadMountpoint(Utf8PathBuf),
 }
 
 /// Error returned by [`Zfs::ensure_dataset`].
@@ -493,6 +506,196 @@ pub struct DatasetEnsureArgs<'a> {
     pub additional_options: Option<Vec<String>>,
 }
 
+// If this dataset will have a well-defined mountpoint, we ensure an immutable directory exists
+// here.
+//
+// This is intended to mitigate issues like:
+// - https://github.com/oxidecomputer/omicron/issues/7874
+// - https://github.com/oxidecomputer/omicron/issues/4203
+//
+// Suppose we have a dataset, named "crypt/debug", within a parent dataset named "crypt".
+//
+// Suppose "crypt" is mounted at "/storage/crypt", and we want to mount "crypt/debug" as
+// "/storage/crypt/debug".
+//
+// When we create the debug dataset, we are creating a directory within the "crypt" dataset, and
+// mounting our new dataset on top of it. Without modification, this presents a threat: the
+// "/storage/crypt/debug" directory is a regular directory, and if the underlying dataset is
+// unmounted (explicitly, or due to a reboot) data could be placed UNDERNEATH the mount point.
+//
+// To mitigate this issue, we create the mountpoint ahead-of-time, and set the immutable
+// property on it. This prevents the mountpoint from being used as anything other than a
+// mountpoint.
+//
+// NOTE: This must only be called on mountpoints for datasets which ARE NOT MOUNTED.
+fn ensure_empty_immutable_mountpoint(
+    mountpoint: &Utf8Path,
+) -> Result<(), EnsureDatasetErrorRaw> {
+    if !mountpoint
+        .try_exists()
+        .map_err(|err| EnsureDatasetErrorRaw::CreateMountpoint(err))?
+    {
+        std::fs::create_dir_all(mountpoint)
+            .map_err(|err| EnsureDatasetErrorRaw::CreateMountpoint(err))?;
+
+        // We still fall-through to the logic below, even though we just created
+        // this directory. It's technically possible someone put a file inside
+        // it.
+    }
+
+    // "making a directory empty" and "making a directory immutable" cannot
+    // be atomic together. Here's how we cope:
+    //
+    // - If necessary, we make the directory mutable, and try to clear it out.
+    // - We then re-set the directory to immutable.
+    //
+    // This means that if someone adds a file to our mountpoint after
+    // "emptying it out" but before "making it immutable", we make
+    // another attempt at making it empty.
+    loop {
+        let immutablity = is_directory_immutable(mountpoint)?;
+
+        if is_directory_empty(mountpoint)?
+            && immutablity.as_immutable_as_filesystem_allows()
+        {
+            return Ok(());
+        }
+
+        if immutablity.can_set_immutable() {
+            make_directory_mutable(mountpoint)?;
+        }
+        ensure_mountpoint_empty(mountpoint)?;
+        if immutablity.can_set_immutable() {
+            make_directory_immutable(mountpoint)?;
+        }
+    }
+}
+
+fn is_directory_empty(path: &Utf8Path) -> Result<bool, EnsureDatasetErrorRaw> {
+    Ok(path
+        .read_dir_utf8()
+        .map_err(|err| EnsureDatasetErrorRaw::CreateMountpoint(err))?
+        .next()
+        .is_none())
+}
+
+fn ensure_mountpoint_empty(
+    path: &Utf8Path,
+) -> Result<(), EnsureDatasetErrorRaw> {
+    if is_directory_empty(path)? {
+        return Ok(());
+    }
+
+    let (Some(parent), Some(file)) = (path.parent(), path.file_name()) else {
+        return Err(EnsureDatasetErrorRaw::BadMountpoint(path.to_path_buf()));
+    };
+
+    // The directory is not empty. Let's make a new directory,
+    // with the "old-under-mountpoint-" prefix, and move all data there.
+
+    let prefix = format!("old-under-mountpoint-{file}");
+    let destination_dir = Utf8TempDir::with_prefix_in(prefix, parent)
+        .map_err(|err| EnsureDatasetErrorRaw::CreateMountpoint(err))?
+        .into_path();
+
+    let entries = path
+        .read_dir_utf8()
+        .map_err(|err| EnsureDatasetErrorRaw::CreateMountpoint(err))?;
+    for entry in entries {
+        let entry = entry
+            .map_err(|err| EnsureDatasetErrorRaw::CreateMountpoint(err))?;
+
+        // This would not work for renaming recursively, but we're only renaming
+        // a single directory's worth of files.
+        let src = entry.path();
+        let dst = destination_dir.as_path().join(entry.file_name());
+
+        std::fs::rename(src, dst)
+            .map_err(|err| EnsureDatasetErrorRaw::CreateMountpoint(err))?;
+    }
+
+    Ok(())
+}
+
+fn make_directory_immutable(
+    path: &Utf8Path,
+) -> Result<(), EnsureDatasetErrorRaw> {
+    let mut command = std::process::Command::new(PFEXEC);
+    let cmd = command.args(&["chmod", "S+ci", path.as_str()]);
+    execute(cmd).map_err(|err| EnsureDatasetErrorRaw::MakeImmutable(err))?;
+    Ok(())
+}
+
+fn make_directory_mutable(
+    path: &Utf8Path,
+) -> Result<(), EnsureDatasetErrorRaw> {
+    let mut command = std::process::Command::new(PFEXEC);
+    let cmd = command.args(&["chmod", "S-ci", path.as_str()]);
+    execute(cmd).map_err(|err| EnsureDatasetErrorRaw::MakeImmutable(err))?;
+    Ok(())
+}
+
+enum Immutability {
+    Yes,
+    No,
+    Unsupported,
+}
+
+impl Immutability {
+    fn as_immutable_as_filesystem_allows(&self) -> bool {
+        match self {
+            Immutability::Yes => true,
+            Immutability::No => false,
+            Immutability::Unsupported => true,
+        }
+    }
+
+    fn can_set_immutable(&self) -> bool {
+        match self {
+            Immutability::Yes => true,
+            Immutability::No => true,
+            Immutability::Unsupported => false,
+        }
+    }
+}
+
+fn is_directory_immutable(
+    path: &Utf8Path,
+) -> Result<Immutability, EnsureDatasetErrorRaw> {
+    let mut command = std::process::Command::new(PFEXEC);
+    let cmd = command.args(&["ls", "-d/v", path.as_str()]);
+    let output = execute(cmd)
+        .map_err(|err| EnsureDatasetErrorRaw::MakeImmutable(err))?;
+
+    // NOTE: It's probably worthwhile figuring out how to use stat for this
+    // instead?
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut lines = stdout.trim().lines();
+    let Some(attr_line) = lines.nth(1) else {
+        return Err(EnsureDatasetErrorRaw::ParseImmutable(
+            crate::ExecutionError::ParseFailure(stdout.to_string()),
+        ));
+    };
+
+    let attrs = attr_line
+        .trim()
+        .trim_start_matches("{")
+        .trim_end_matches("}")
+        .split(",");
+
+    let mut result = Immutability::Unsupported;
+    for attr in attrs {
+        if attr == "immutable" {
+            result = Immutability::Yes;
+        }
+        if attr == "noimmutable" {
+            result = Immutability::No;
+        }
+    }
+
+    return Ok(result);
+}
+
 impl Zfs {
     /// Lists all datasets within a pool or existing dataset.
     ///
@@ -601,6 +804,14 @@ impl Zfs {
     ///
     /// Refer to [DatasetEnsureArgs] for details on the supplied arguments.
     pub fn ensure_dataset(
+        args: DatasetEnsureArgs,
+    ) -> Result<(), EnsureDatasetError> {
+        let name = args.name.to_string();
+        Self::ensure_dataset_inner(args)
+            .map_err(|err| EnsureDatasetError { name, err })
+    }
+
+    fn ensure_dataset_inner(
         DatasetEnsureArgs {
             name,
             mountpoint,
@@ -611,7 +822,7 @@ impl Zfs {
             id,
             additional_options,
         }: DatasetEnsureArgs,
-    ) -> Result<(), EnsureDatasetError> {
+    ) -> Result<(), EnsureDatasetErrorRaw> {
         let (exists, mounted) = Self::dataset_exists(name, &mountpoint)?;
 
         let props = build_zfs_set_key_value_pairs(size_details, id);
@@ -619,24 +830,29 @@ impl Zfs {
             // If the dataset already exists: Update properties which might
             // have changed, and ensure it has been mounted if it needs
             // to be mounted.
-            Self::set_values(name, props.as_slice()).map_err(|err| {
-                EnsureDatasetError {
-                    name: name.to_string(),
-                    err: err.err.into(),
+            Self::set_values(name, props.as_slice())
+                .map_err(|err| EnsureDatasetErrorRaw::from(err.err))?;
+
+            if !zoned && !mounted {
+                if let (CanMount::On, Mountpoint::Path(path)) =
+                    (&can_mount, &mountpoint)
+                {
+                    ensure_empty_immutable_mountpoint(&path)?;
+                    Self::mount_dataset(name)?;
                 }
-            })?;
-
-            let want_to_mount = !zoned
-                && matches!(can_mount, CanMount::On)
-                && matches!(mountpoint, Mountpoint::Path(_));
-
-            if !mounted && want_to_mount {
-                Self::mount_dataset(name)?;
             }
             return Ok(());
         }
 
-        // If it doesn't exist, make it.
+        // If the dataset doesn't exist, create it.
+        if !zoned {
+            if let (CanMount::On, Mountpoint::Path(path)) =
+                (&can_mount, &mountpoint)
+            {
+                ensure_empty_immutable_mountpoint(&path)?;
+            }
+        }
+
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "create"]);
         if zoned {
@@ -671,10 +887,7 @@ impl Zfs {
 
         cmd.args(&["-o", &format!("mountpoint={}", mountpoint), name]);
 
-        execute(cmd).map_err(|err| EnsureDatasetError {
-            name: name.to_string(),
-            err: err.into(),
-        })?;
+        execute(cmd).map_err(|err| EnsureDatasetErrorRaw::from(err))?;
 
         // We ensure that the currently running process has the ability to
         // act on the underlying mountpoint.
@@ -683,26 +896,21 @@ impl Zfs {
             let user = whoami::username();
             let mount = format!("{mountpoint}");
             let cmd = command.args(["chown", "-R", &user, &mount]);
-            execute(cmd).map_err(|err| EnsureDatasetError {
-                name: name.to_string(),
-                err: err.into(),
-            })?;
+            execute(cmd).map_err(|err| EnsureDatasetErrorRaw::from(err))?;
         }
 
-        Self::set_values(name, props.as_slice()).map_err(|err| {
-            EnsureDatasetError { name: name.to_string(), err: err.err.into() }
-        })?;
+        Self::set_values(name, props.as_slice())
+            .map_err(|err| EnsureDatasetErrorRaw::from(err.err))?;
 
         Ok(())
     }
 
     // Mounts a dataset, loading keys if necessary.
-    fn mount_dataset(name: &str) -> Result<(), EnsureDatasetError> {
+    fn mount_dataset(name: &str) -> Result<(), EnsureDatasetErrorRaw> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "mount", "-l", name]);
-        execute(cmd).map_err(|err| EnsureDatasetError {
-            name: name.to_string(),
-            err: EnsureDatasetErrorRaw::MountEncryptedFsFailed(err),
+        execute(cmd).map_err(|err| {
+            EnsureDatasetErrorRaw::MountEncryptedFsFailed(err)
         })?;
         Ok(())
     }
@@ -722,7 +930,7 @@ impl Zfs {
     fn dataset_exists(
         name: &str,
         mountpoint: &Mountpoint,
-    ) -> Result<(bool, bool), EnsureDatasetError> {
+    ) -> Result<(bool, bool), EnsureDatasetErrorRaw> {
         let mut command = std::process::Command::new(ZFS);
         let cmd = command.args(&[
             "list",
@@ -735,10 +943,7 @@ impl Zfs {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let values: Vec<&str> = stdout.trim().split('\t').collect();
             if &values[..3] != &[name, "filesystem", &mountpoint.to_string()] {
-                return Err(EnsureDatasetError {
-                    name: name.to_string(),
-                    err: EnsureDatasetErrorRaw::Output(stdout.to_string()),
-                });
+                return Err(EnsureDatasetErrorRaw::Output(stdout.to_string()));
             }
             let mounted = values[3] == "yes";
             Ok((true, mounted))
