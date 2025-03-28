@@ -9,6 +9,7 @@ use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
 use camino::{Utf8Path, Utf8PathBuf};
+use camino_tempfile::Utf8TempDir;
 use itertools::Itertools;
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::CompressionAlgorithm;
@@ -77,6 +78,15 @@ enum EnsureDatasetErrorRaw {
 
     #[error("Failed to mount overlay filesystem: {0}")]
     MountOverlayFsFailed(crate::ExecutionError),
+
+    #[error("Failed to create mountpoint: {0}")]
+    CreateMountpoint(std::io::Error),
+
+    #[error("Failed to make mountpoint immutable")]
+    MakeImmutable(crate::ExecutionError),
+
+    #[error("Invalid mountpoint: {0}")]
+    BadMountpoint(Utf8PathBuf),
 }
 
 /// Error returned by [`Zfs::ensure_dataset`].
@@ -493,6 +503,82 @@ pub struct DatasetEnsureArgs<'a> {
     pub additional_options: Option<Vec<String>>,
 }
 
+// If this dataset will have a well-defined mountpoint, we ensure an immutable directory exists
+// here.
+//
+// This is intended to mitigate issues like:
+// - https://github.com/oxidecomputer/omicron/issues/7874
+// - https://github.com/oxidecomputer/omicron/issues/4203
+//
+// Suppose we have a dataset, named "crypt/debug", within a parent dataset named "crypt".
+//
+// Suppose "crypt" is mounted at "/storage/crypt", and we want to mount "crypt/debug" as
+// "/storage/crypt/debug".
+//
+// When we create the debug dataset, we are creating a directory within the "crypt" dataset, and
+// mounting our new dataset on top of it. Without modification, this presents a threat: the
+// "/storage/crypt/debug" directory is a regular directory, and if the underlying dataset is
+// unmounted (explicitly, or due to a reboot) data could be placed UNDERNEATH the mount point.
+//
+// To mitigate this issue, we create the mountpoint ahead-of-time, and set the immutable
+// property on it. This prevents the mountpoint from being used as anything other than a
+// mountpoint.
+//
+// NOTE: This must only be called on mountpoints for datasets which ARE NOT MOUNTED.
+fn ensure_immutable_mountpoint(
+    mountpoint: &Utf8Path,
+) -> Result<(), EnsureDatasetErrorRaw> {
+    // If the mountpoint directory already exists, update permissions non-atomically.
+    //
+    // It may already have contents, but this is already out of our control. Just prevent it from
+    // getting used any more.
+    if mountpoint
+        .try_exists()
+        .map_err(|err| EnsureDatasetErrorRaw::CreateMountpoint(err))?
+    {
+        make_directory_immutable(mountpoint)?;
+        return Ok(());
+    }
+
+    // Otherwise, create the mountpoint as a temporary directory, make it immutable, and
+    // rename it to the desired mountpoint.
+    //
+    // This prevents the mountpoint from ever appearing as mutable.
+
+    let (Some(parent), Some(dir_name)) =
+        (mountpoint.parent(), mountpoint.file_name())
+    else {
+        return Err(EnsureDatasetErrorRaw::BadMountpoint(
+            mountpoint.to_path_buf(),
+        ));
+    };
+
+    std::fs::create_dir_all(parent)
+        .map_err(|err| EnsureDatasetErrorRaw::CreateMountpoint(err))?;
+
+    let tempdir = Utf8TempDir::with_prefix_in(dir_name, parent)
+        .map_err(|err| EnsureDatasetErrorRaw::CreateMountpoint(err))?;
+
+    make_directory_immutable(tempdir.path())?;
+
+    std::fs::rename(tempdir.path(), mountpoint)
+        .map_err(|err| EnsureDatasetErrorRaw::CreateMountpoint(err))?;
+
+    // Prevent the temporary directory from being deleted.
+    let _ = tempdir.into_path();
+
+    Ok(())
+}
+
+fn make_directory_immutable(
+    path: &Utf8Path,
+) -> Result<(), EnsureDatasetErrorRaw> {
+    let mut command = std::process::Command::new(PFEXEC);
+    let cmd = command.args(&["chmod", "S+ci", path.as_str()]);
+    execute(cmd).map_err(|err| EnsureDatasetErrorRaw::MakeImmutable(err))?;
+    Ok(())
+}
+
 impl Zfs {
     /// Lists all datasets within a pool or existing dataset.
     ///
@@ -629,14 +715,22 @@ impl Zfs {
             let want_to_mount = !zoned
                 && matches!(can_mount, CanMount::On)
                 && matches!(mountpoint, Mountpoint::Path(_));
-
             if !mounted && want_to_mount {
                 Self::mount_dataset(name)?;
             }
             return Ok(());
         }
 
-        // If it doesn't exist, make it.
+        // If the dataset doesn't exist, create it.
+
+        if let (CanMount::On, Mountpoint::Path(path)) =
+            (&can_mount, &mountpoint)
+        {
+            ensure_immutable_mountpoint(&path).map_err(|err| {
+                EnsureDatasetError { name: name.to_string(), err }
+            })?;
+        }
+
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "create"]);
         if zoned {
