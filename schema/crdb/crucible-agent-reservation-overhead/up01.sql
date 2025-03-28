@@ -1,2 +1,3 @@
-ALTER TABLE omicron.public.region
-  ADD COLUMN IF NOT EXISTS reservation_factor FLOAT NOT NULL DEFAULT 1.25;
+CREATE TYPE IF NOT EXISTS omicron.public.region_reservation_percent AS ENUM (
+  '25'
+);

@@ -1126,7 +1126,7 @@ table! {
 
         deleting -> Bool,
 
-        reservation_factor -> Float8,
+        reservation_percent -> crate::RegionReservationPercentEnum,
     }
 }
 

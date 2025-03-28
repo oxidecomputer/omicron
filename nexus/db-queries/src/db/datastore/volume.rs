@@ -4715,7 +4715,6 @@ mod tests {
                 region.extent_count(),
                 111,
                 false, // read-write
-                1.0,
             );
 
             use nexus_db_model::schema::region::dsl;
@@ -4953,7 +4952,6 @@ mod tests {
                 region.extent_count(),
                 111,
                 true, // read-only
-                1.0,
             );
 
             use nexus_db_model::schema::region::dsl;

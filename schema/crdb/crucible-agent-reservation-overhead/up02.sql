@@ -1,2 +1,2 @@
 ALTER TABLE omicron.public.region
-  ALTER COLUMN reservation_factor DROP DEFAULT;
+  ADD COLUMN IF NOT EXISTS reservation_percent omicron.public.region_reservation_percent NOT NULL DEFAULT '25';

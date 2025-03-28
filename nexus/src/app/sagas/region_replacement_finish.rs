@@ -253,7 +253,6 @@ pub(crate) mod test {
                 10,
                 12345,
                 false,
-                1.0,
             )
         };
 

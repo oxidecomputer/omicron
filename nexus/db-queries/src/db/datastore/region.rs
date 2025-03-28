@@ -269,7 +269,7 @@ impl DataStore {
             },
             allocation_strategy,
             num_regions_required,
-        );
+        )?;
 
         let conn = self.pool_connection_authorized(&opctx).await?;
 
@@ -317,7 +317,7 @@ impl DataStore {
                     // Update datasets to which the regions belonged.
                     // XXX put this file somewhere else
                     sql_query(include_str!(
-                        "../../../../../schema/crdb/crucible-agent-reservation-overhead/up03.sql"
+                        "../../../../../schema/crdb/crucible-agent-reservation-overhead/up04.sql"
                     ))
                     .execute_async(&conn)
                     .await?;

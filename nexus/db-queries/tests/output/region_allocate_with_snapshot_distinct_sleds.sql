@@ -13,7 +13,7 @@ WITH
         region.port,
         region.read_only,
         region.deleting,
-        region.reservation_factor
+        region.reservation_percent
       FROM
         region
       WHERE
@@ -127,7 +127,7 @@ WITH
         NULL AS port,
         $12 AS read_only,
         false AS deleting,
-        $13 AS reservation_factor
+        $13 AS reservation_percent
       FROM
         shuffled_candidate_datasets
       LIMIT
@@ -138,17 +138,7 @@ WITH
       SELECT
         candidate_regions.dataset_id AS id,
         crucible_dataset.pool_id AS pool_id,
-        CAST(
-          CAST(
-            candidate_regions.block_size
-            * candidate_regions.blocks_per_extent
-            * candidate_regions.extent_count
-              AS FLOAT8
-          )
-          * candidate_regions.reservation_factor
-            AS INT8
-        )
-          AS size_used_delta
+        $15 AS size_used_delta
       FROM
         candidate_regions
         INNER JOIN crucible_dataset ON crucible_dataset.id = candidate_regions.dataset_id
@@ -158,7 +148,7 @@ WITH
       SELECT
         (
           (
-            (SELECT count(*) FROM old_regions LIMIT 1) < $15
+            (SELECT count(*) FROM old_regions LIMIT 1) < $16
             AND CAST(
                 IF(
                   (
@@ -168,7 +158,7 @@ WITH
                         + (SELECT count(*) FROM existing_zpools LIMIT 1)
                       )
                     )
-                    >= $16
+                    >= $17
                   ),
                   'TRUE',
                   'Not enough space'
@@ -185,7 +175,7 @@ WITH
                       + (SELECT count(*) FROM old_regions LIMIT 1)
                     )
                   )
-                  >= $17
+                  >= $18
                 ),
                 'TRUE',
                 'Not enough datasets'
@@ -224,7 +214,7 @@ WITH
                       1
                   )
                 )
-                >= $18
+                >= $19
               ),
               'TRUE',
               'Not enough unique zpools selected'
@@ -250,7 +240,7 @@ WITH
             port,
             read_only,
             deleting,
-            reservation_factor
+            reservation_percent
           )
       SELECT
         candidate_regions.id,
@@ -264,7 +254,7 @@ WITH
         candidate_regions.port,
         candidate_regions.read_only,
         candidate_regions.deleting,
-        candidate_regions.reservation_factor
+        candidate_regions.reservation_percent
       FROM
         candidate_regions
       WHERE
@@ -281,7 +271,7 @@ WITH
         region.port,
         region.read_only,
         region.deleting,
-        region.reservation_factor
+        region.reservation_percent
     ),
   updated_datasets
     AS (
@@ -336,7 +326,7 @@ WITH
     old_regions.port,
     old_regions.read_only,
     old_regions.deleting,
-    old_regions.reservation_factor
+    old_regions.reservation_percent
   FROM
     old_regions INNER JOIN crucible_dataset ON old_regions.dataset_id = crucible_dataset.id
 )
@@ -363,7 +353,7 @@ UNION
       inserted_regions.port,
       inserted_regions.read_only,
       inserted_regions.deleting,
-      inserted_regions.reservation_factor
+      inserted_regions.reservation_percent
     FROM
       inserted_regions
       INNER JOIN updated_datasets ON inserted_regions.dataset_id = updated_datasets.id

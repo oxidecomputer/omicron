@@ -615,6 +615,10 @@ CREATE INDEX IF NOT EXISTS lookup_crucible_dataset_by_zpool ON
 CREATE INDEX IF NOT EXISTS lookup_crucible_dataset_by_ip ON
   omicron.public.crucible_dataset (ip);
 
+CREATE TYPE IF NOT EXISTS omicron.public.region_reservation_percent AS ENUM (
+  '25'
+);
+
 /*
  * A region of space allocated to Crucible Downstairs, within a dataset.
  */
@@ -641,7 +645,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.region (
 
     deleting BOOL NOT NULL,
 
-    reservation_factor FLOAT NOT NULL
+    reservation_percent omicron.public.region_reservation_percent NOT NULL
 );
 
 /*
