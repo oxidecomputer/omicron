@@ -598,6 +598,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.crucible_dataset (
      * Reconfigurator rendezvous process, this field is set to 0. Reconfigurator
      * otherwise ignores this field. It's updated by Nexus as region allocations
      * and deletions are performed using this dataset.
+     *
+     * Note that this is the size *reserved* by the Crucible agent for regions,
+     * not the actual region size.
      */
     size_used INT NOT NULL
 );
@@ -645,6 +648,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.region (
 
     deleting BOOL NOT NULL,
 
+    /*
+     * The Crucible Agent will reserve space for a region with overhead for
+     * on-disk metadata that the downstairs needs to store. Record here the
+     * overhead associated with a specific region as this may change or be
+     * configurable in the future.
+     */
     reservation_percent omicron.public.region_reservation_percent NOT NULL
 );
 
