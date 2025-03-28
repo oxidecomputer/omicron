@@ -638,10 +638,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "45a02266851f344a49fc83a0f7096ef49cc04ce5"
+source.commit = "5a0d6edd0ecc7f26225a5bf3849d8508956682d0"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "210af105e924e32a27f5a79154adcf0e90a798add4928d171bc7b695719aad28"
+source.sha256 = "2a3991a1e18198cec86dbf8a19cee4777e2ef8b1dd1e38a61304adfd86a02365"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -654,10 +654,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "45a02266851f344a49fc83a0f7096ef49cc04ce5"
+source.commit = "5a0d6edd0ecc7f26225a5bf3849d8508956682d0"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "2a6257644b9e1d121ed99a947ee140c2a7d506f58319f28ad8a142bea59f4ab9"
+source.sha256 = "d68f11b0d06db3de959992c2ecd28f3fa479330398bf0bc61f47eda821615a10"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -669,7 +669,7 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "45a02266851f344a49fc83a0f7096ef49cc04ce5"
+source.commit = "5a0d6edd0ecc7f26225a5bf3849d8508956682d0"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
 source.sha256 = "bd1af5a7a5dfadce307f7dc75028311618ce313cc86fafe38bcf5cdd0a813d08"
