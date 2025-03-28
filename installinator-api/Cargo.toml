@@ -17,4 +17,5 @@ omicron-workspace-hack.workspace = true
 schemars.workspace = true
 serde.workspace = true
 slog.workspace = true
+tufaceous-artifact.workspace = true
 uuid.workspace = true

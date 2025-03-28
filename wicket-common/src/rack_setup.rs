@@ -17,7 +17,6 @@ use omicron_common::api::internal::shared::PortSpeed;
 use omicron_common::api::internal::shared::RouteConfig;
 use omicron_common::api::internal::shared::TxEqConfig;
 use omicron_common::api::internal::shared::UplinkAddressConfig;
-use omicron_common::update::ArtifactHash;
 use owo_colors::OwoColorize;
 use owo_colors::Style;
 use oxnet::IpNet;
@@ -35,6 +34,7 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::str::FromStr;
+use tufaceous_artifact::ArtifactHash;
 
 use crate::inventory::SpIdentifier;
 

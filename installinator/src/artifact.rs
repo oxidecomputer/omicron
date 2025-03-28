@@ -10,8 +10,8 @@ use futures::StreamExt;
 use installinator_client::ClientError;
 use installinator_common::EventReport;
 use ipcc::{InstallinatorImageId, Ipcc};
-use omicron_common::update::{ArtifactHash, ArtifactHashId};
 use tokio::sync::mpsc;
+use tufaceous_artifact::{ArtifactHash, ArtifactHashId};
 use uuid::Uuid;
 
 use crate::{errors::HttpError, peers::FetchReceiver};

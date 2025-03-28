@@ -78,7 +78,6 @@ use nexus_types::internal_api::background::{
     TufArtifactReplicationRequest, TufArtifactReplicationStatus,
 };
 use omicron_common::api::external::Generation;
-use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::{GenericUuid, SledUuid};
 use rand::seq::SliceRandom;
 use serde_json::json;
@@ -86,6 +85,7 @@ use sled_agent_client::types::ArtifactConfig;
 use slog_error_chain::InlineErrorChain;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
+use tufaceous_artifact::ArtifactHash;
 use update_common::artifacts::{
     ArtifactsWithPlan, ExtractedArtifactDataHandle,
 };

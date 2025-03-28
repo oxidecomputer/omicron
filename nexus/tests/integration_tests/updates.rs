@@ -275,7 +275,7 @@ async fn test_repo_upload() -> Result<()> {
     {
         let tweaks = &[
             ManifestTweak::SystemVersion("2.0.0".parse().unwrap()),
-            ManifestTweak::ArtifactContents {
+            ManifestTweak::ArtifactSize {
                 kind: KnownArtifactKind::ControlPlane,
                 size_delta: 1024,
             },

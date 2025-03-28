@@ -5,7 +5,6 @@
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::Generation;
-use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -15,6 +14,7 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 use std::sync::Arc;
+use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 /// The status of a `region_replacement` background task activation

@@ -3,9 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use dropshot::{FreeformBody, HttpError, HttpResponseOk, Path, RequestContext};
-use omicron_common::update::ArtifactHash;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tufaceous_artifact::ArtifactHash;
 
 #[dropshot::api_description]
 pub trait RepoDepotApi {

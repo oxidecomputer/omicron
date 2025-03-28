@@ -41,11 +41,11 @@ slog-term.workspace = true
 smf.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
+tufaceous-artifact.workspace = true
 tufaceous-lib.workspace = true
 update-engine.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
-tufaceous-artifact.workspace = true
 
 [dev-dependencies]
 omicron-test-utils.workspace = true

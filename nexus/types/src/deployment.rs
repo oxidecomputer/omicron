@@ -36,7 +36,6 @@ use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_common::disk::SharedDatasetConfig;
-use omicron_common::update::ArtifactHash;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -52,6 +51,7 @@ use std::fmt;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use strum::EnumIter;
+use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 
 mod blueprint_diff;

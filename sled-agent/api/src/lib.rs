@@ -26,7 +26,6 @@ use omicron_common::{
     },
     disk::{DatasetsConfig, DiskVariant, OmicronPhysicalDisksConfig},
     ledger::Ledgerable,
-    update::ArtifactHash,
 };
 use omicron_uuid_kinds::{
     DatasetUuid, PropolisUuid, SupportBundleUuid, ZpoolUuid,
@@ -54,6 +53,7 @@ use sled_agent_types::{
     },
 };
 use sled_diagnostics::SledDiagnosticsQueryOutput;
+use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
 // Host OS images are just over 800 MiB currently; set this to 2 GiB to give

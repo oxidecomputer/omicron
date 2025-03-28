@@ -7,6 +7,7 @@
 use bootstrap_agent_api::Component;
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
+use tufaceous_artifact::ArtifactVersionError;
 use tufaceous_brand_metadata::Metadata;
 
 #[derive(thiserror::Error, Debug)]
@@ -25,8 +26,8 @@ pub enum Error {
         err: std::io::Error,
     },
 
-    #[error("Cannot parse semver in {path}")]
-    Semver { path: Utf8PathBuf, err: semver::Error },
+    #[error("Cannot parse artifact version in {path}")]
+    ArtifactVersion { path: Utf8PathBuf, err: ArtifactVersionError },
 }
 
 fn default_zone_artifact_path() -> Utf8PathBuf {
@@ -99,12 +100,13 @@ impl UpdateManager {
                     .await
                     .map_err(|err| io_err(&version_path, err))?;
 
-                // Extract the name and semver version
+                // Extract the name and artifact version
                 let name = "sled-agent".to_string();
-                let version = version.parse().map_err(|err| Error::Semver {
-                    path: version_path.to_path_buf(),
-                    err,
-                })?;
+                let version =
+                    version.parse().map_err(|err| Error::ArtifactVersion {
+                        path: version_path.to_path_buf(),
+                        err,
+                    })?;
 
                 components.push(crate::updates::Component { name, version });
             }
@@ -119,9 +121,9 @@ mod test {
     use super::*;
     use camino_tempfile::NamedUtf8TempFile;
     use flate2::write::GzEncoder;
-    use semver::Version;
     use std::io::Write;
     use tar::Builder;
+    use tufaceous_artifact::ArtifactVersion;
 
     #[tokio::test]
     async fn test_query_no_components() {
@@ -172,7 +174,7 @@ mod test {
             um.components_get().await.expect("Failed to get components");
         assert_eq!(components.len(), 1);
         assert_eq!(components[0].name, "test-pkg".to_string());
-        assert_eq!(components[0].version, Version::new(2, 0, 0));
+        assert_eq!(components[0].version, ArtifactVersion::new_const("2.0.0"));
     }
 
     #[tokio::test]
@@ -194,6 +196,6 @@ mod test {
             um.components_get().await.expect("Failed to get components");
         assert_eq!(components.len(), 1);
         assert_eq!(components[0].name, "sled-agent".to_string());
-        assert_eq!(components[0].version, Version::new(1, 2, 3));
+        assert_eq!(components[0].version, ArtifactVersion::new_const("1.2.3"));
     }
 }

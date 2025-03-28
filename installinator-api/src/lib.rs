@@ -16,9 +16,9 @@ use dropshot::{
 };
 use hyper::header;
 use installinator_common::EventReport;
-use omicron_common::update::ArtifactHashId;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tufaceous_artifact::ArtifactHashId;
 use uuid::Uuid;
 
 const PROGRESS_REPORT_MAX_BYTES: usize = 4 * 1024 * 1024;

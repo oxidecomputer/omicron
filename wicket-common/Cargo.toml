@@ -26,6 +26,7 @@ slog.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 transceiver-controller.workspace = true
+tufaceous-artifact.workspace = true
 update-engine.workspace = true
 
 [dev-dependencies]
