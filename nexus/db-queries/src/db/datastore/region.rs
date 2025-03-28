@@ -306,7 +306,7 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let region_ids = region_ids.clone();
                 async move {
-                    use db::schema::region::dsl as dsl;
+                    use db::schema::region::dsl;
 
                     // Remove the regions
                     diesel::delete(dsl::region)
@@ -315,7 +315,8 @@ impl DataStore {
                         .await?;
 
                     // Update datasets to which the regions belonged.
-                    sql_query(r#"
+                    sql_query(
+                        r#"
 WITH size_used_with_reservation AS (
   SELECT
     crucible_dataset.id AS crucible_dataset_id,
@@ -338,10 +339,10 @@ WITH size_used_with_reservation AS (
 UPDATE crucible_dataset
 SET size_used = size_used_with_reservation.reserved_size
 FROM size_used_with_reservation
-WHERE crucible_dataset.id = size_used_with_reservation.crucible_dataset_id"#
-                        )
-                        .execute_async(&conn)
-                        .await?;
+WHERE crucible_dataset.id = size_used_with_reservation.crucible_dataset_id"#,
+                    )
+                    .execute_async(&conn)
+                    .await?;
 
                     // Whenever a region is hard-deleted, validate invariants
                     // for all volumes
