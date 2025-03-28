@@ -17,7 +17,8 @@ use futures::Stream;
 use futures::StreamExt;
 use futures::future::FutureExt;
 use illumos_utils::zfs::{
-    DatasetEnsureArgs, DatasetProperties, Mountpoint, WhichDatasets, Zfs,
+    CanMount, DatasetEnsureArgs, DatasetProperties, Mountpoint, WhichDatasets,
+    Zfs,
 };
 use illumos_utils::zpool::{ZPOOL_MOUNTPOINT_ROOT, ZpoolName};
 use key_manager::StorageKeyRequester;
@@ -1028,6 +1029,17 @@ impl StorageManager {
             );
             return Ok(false);
         }
+
+        if !config.name.kind().zoned() && !old_dataset.mounted {
+            info!(
+                log,
+                "Dataset might need to be mounted";
+                "old_dataset" => ?old_dataset,
+                "requested_props" => ?config.inner,
+            );
+            return Ok(false);
+        }
+
         info!(log, "No changes necessary, returning early");
         return Ok(true);
     }
@@ -1463,6 +1475,7 @@ impl StorageManager {
         Zfs::ensure_dataset(DatasetEnsureArgs {
             name: &full_name,
             mountpoint: mountpoint.clone(),
+            can_mount: CanMount::On,
             zoned: *zoned,
             encryption_details,
             size_details,
@@ -1498,6 +1511,7 @@ impl StorageManager {
         Zfs::ensure_dataset(DatasetEnsureArgs {
             name: fs_name,
             mountpoint: Mountpoint::Path(Utf8PathBuf::from("/data")),
+            can_mount: CanMount::On,
             zoned,
             encryption_details,
             size_details,
@@ -2147,6 +2161,89 @@ mod tests {
         let status =
             harness.handle().datasets_ensure(config.clone()).await.unwrap();
         assert!(!status.has_error());
+
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    async fn is_mounted(dataset: &DatasetName) -> bool {
+        let mut command = tokio::process::Command::new(illumos_utils::zfs::ZFS);
+        let cmd =
+            command.args(&["list", "-Hpo", "mounted", &dataset.full_name()]);
+        let output = cmd.output().await.unwrap();
+        assert!(output.status.success(), "Failed to list dataset: {output:?}");
+        String::from_utf8_lossy(&output.stdout).trim() == "yes"
+    }
+
+    async fn unmount(dataset: &DatasetName) {
+        let mut command = tokio::process::Command::new(illumos_utils::PFEXEC);
+        let cmd = command.args(&[
+            illumos_utils::zfs::ZFS,
+            "unmount",
+            "-f",
+            &dataset.full_name(),
+        ]);
+        let output = cmd.output().await.unwrap();
+        assert!(
+            output.status.success(),
+            "Failed to unmount dataset: {output:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn ensure_datasets_get_mounted() {
+        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
+        let logctx = test_setup_log("ensure_datasets_get_mounted");
+        let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
+
+        // Test setup: Add a U.2 and M.2, adopt them into the "control plane"
+        // for usage.
+        harness.handle().key_manager_ready().await;
+        let raw_disks =
+            harness.add_vdevs(&["u2_under_test.vdev", "m2_helping.vdev"]).await;
+        let config = harness.make_config(1, &raw_disks);
+        let result = harness
+            .handle()
+            .omicron_physical_disks_ensure(config.clone())
+            .await
+            .expect("Ensuring disks should work after key manager is ready");
+        assert!(!result.has_error(), "{:?}", result);
+
+        // Create a dataset on the newly formatted U.2
+        let id = DatasetUuid::new_v4();
+        let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
+        let name = DatasetName::new(zpool_name.clone(), DatasetKind::Debug);
+        let datasets = BTreeMap::from([(
+            id,
+            DatasetConfig {
+                id,
+                name: name.clone(),
+                inner: SharedDatasetConfig::default(),
+            },
+        )]);
+        // "Generation = 1" is reserved as "no requests seen yet", so we jump
+        // past it.
+        let generation = Generation::new().next();
+        let config = DatasetsConfig { generation, datasets };
+
+        let status =
+            harness.handle().datasets_ensure(config.clone()).await.unwrap();
+        assert!(!status.has_error());
+
+        // Creating the dataset should have mounted it
+        assert!(is_mounted(&name).await);
+
+        // We can unmount the dataset manually
+        unmount(&name).await;
+        assert!(!is_mounted(&name).await);
+
+        // We can re-apply the same config...
+        let status =
+            harness.handle().datasets_ensure(config.clone()).await.unwrap();
+        assert!(!status.has_error());
+
+        // ... and doing so mounts the dataset again.
+        assert!(is_mounted(&name).await);
 
         harness.cleanup().await;
         logctx.cleanup_successful();

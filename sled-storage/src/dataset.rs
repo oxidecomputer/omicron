@@ -265,6 +265,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
         let result = Zfs::ensure_dataset(zfs::DatasetEnsureArgs {
             name: &format!("{}/{}", zpool_name, dataset),
             mountpoint: Mountpoint::Path(mountpoint),
+            can_mount: zfs::CanMount::On,
             zoned,
             encryption_details: Some(encryption_details),
             size_details: None,
@@ -327,6 +328,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
         Zfs::ensure_dataset(zfs::DatasetEnsureArgs {
             name,
             mountpoint: Mountpoint::Path(mountpoint),
+            can_mount: zfs::CanMount::On,
             zoned,
             encryption_details,
             size_details,

@@ -277,6 +277,7 @@ fn ensure_zfs_ramdisk_dataset() -> Result<(), StartError> {
         mountpoint: zfs::Mountpoint::Path(Utf8PathBuf::from(
             zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT,
         )),
+        can_mount: zfs::CanMount::On,
         zoned: false,
         encryption_details: None,
         size_details: None,
