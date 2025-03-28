@@ -646,6 +646,14 @@ pub trait SledAgentApi {
 
     #[endpoint {
         method = GET,
+        path = "/support/nvmeadm-info",
+    }]
+    async fn support_nvmeadm_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError>;
+
+    #[endpoint {
+        method = GET,
         path = "/support/pargs-info",
     }]
     async fn support_pargs_info(
@@ -667,6 +675,22 @@ pub trait SledAgentApi {
     async fn support_pfiles_info(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/zfs-info",
+    }]
+    async fn support_zfs_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/zpool-info",
+    }]
+    async fn support_zpool_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError>;
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
