@@ -6151,6 +6151,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-reconfigurator-cli-integration-tests"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "camino-tempfile",
+ "clap",
+ "nexus-client",
+ "nexus-db-queries",
+ "nexus-reconfigurator-preparation",
+ "nexus-test-utils",
+ "nexus-test-utils-macros",
+ "nexus-types",
+ "omicron-common",
+ "omicron-nexus",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "reconfigurator-cli",
+ "serde",
+ "serde_json",
+ "slog",
+ "subprocess",
+ "swrite",
+ "tokio",
+]
+
+[[package]]
 name = "nexus-reconfigurator-execution"
 version = "0.1.0"
 dependencies = [
@@ -9762,19 +9790,13 @@ dependencies = [
  "indent_write",
  "internal-dns-types",
  "itertools 0.14.0",
- "nexus-client",
- "nexus-db-queries",
  "nexus-inventory",
  "nexus-reconfigurator-blippy",
  "nexus-reconfigurator-planning",
- "nexus-reconfigurator-preparation",
  "nexus-reconfigurator-simulation",
  "nexus-sled-agent-shared",
- "nexus-test-utils",
- "nexus-test-utils-macros",
  "nexus-types",
  "omicron-common",
- "omicron-nexus",
  "omicron-rpaths",
  "omicron-test-utils",
  "omicron-uuid-kinds",
