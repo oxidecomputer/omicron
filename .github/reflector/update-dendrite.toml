@@ -12,7 +12,7 @@ requires_token = true
 # Run in response to the image buildomat job in dendrite completing
 
 [[on]]
-repository = "oxidecomputer/dendrite-os"
+repository = "oxidecomputer/dendrite"
 event = "check_run"
 action = "completed"
 check = "image"
