@@ -5,19 +5,16 @@
 use super::impl_enum_type;
 use crate::SqlU16;
 use crate::ipv6;
-use crate::schema::region_replacement_step;
 use chrono::{DateTime, Utc};
+use nexus_db_schema::schema::region_replacement_step;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "region_replacement_step_type", schema = "public"))]
-    pub struct RegionReplacementStepTypeEnum;
+    RegionReplacementStepTypeEnum:
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[diesel(sql_type = RegionReplacementStepTypeEnum)]
     pub enum RegionReplacementStepType;
 
     // What is driving the repair forward?

@@ -7,13 +7,13 @@
 use crate::db::column_walker::AllColumnsOf;
 use crate::db::model::{CrucibleDataset, Region};
 use crate::db::raw_query_builder::{QueryBuilder, TypedSqlQuery};
-use crate::db::schema;
 use crate::db::true_or_cast_error::matches_sentinel;
 use const_format::concatcp;
 use diesel::pg::Pg;
 use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use nexus_config::RegionAllocationStrategy;
+use nexus_db_schema::schema;
 use omicron_common::api::external;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::VolumeUuid;

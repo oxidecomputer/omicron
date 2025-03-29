@@ -12,12 +12,9 @@ use std::fmt;
 use std::io::Write;
 
 impl_enum_wrapper!(
-    #[derive(Clone, SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "migration_state", schema = "public"))]
-    pub struct MigrationStateEnum;
+    MigrationStateEnum:
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq, Eq)]
-    #[diesel(sql_type = MigrationStateEnum)]
     pub struct MigrationState(pub nexus::MigrationState);
 
     // Enum values

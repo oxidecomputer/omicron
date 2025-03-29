@@ -1,5 +1,5 @@
-use crate::schema::{bootstore_config, bootstore_keys};
 use chrono::{DateTime, Utc};
+use nexus_db_schema::schema::{bootstore_config, bootstore_keys};
 use serde::{Deserialize, Serialize};
 
 pub const NETWORK_KEY: &str = "network_key";

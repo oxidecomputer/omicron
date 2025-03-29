@@ -382,7 +382,7 @@ mod test {
         {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-            use nexus_db_model::schema::region::dsl;
+            use nexus_db_schema::schema::region::dsl;
             diesel::insert_into(dsl::region)
                 .values(old_region.clone())
                 .execute_async(&*conn)
@@ -494,7 +494,7 @@ mod test {
         {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-            use nexus_db_model::schema::region::dsl;
+            use nexus_db_schema::schema::region::dsl;
             diesel::insert_into(dsl::region)
                 .values(old_region.clone())
                 .execute_async(&*conn)
@@ -650,7 +650,7 @@ mod test {
         {
             let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-            use nexus_db_model::schema::region::dsl;
+            use nexus_db_schema::schema::region::dsl;
             diesel::insert_into(dsl::region)
                 .values(old_region.clone())
                 .execute_async(&*conn)

@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
-use crate::schema::volume_resource_usage;
 use crate::typed_uuid::DbTypedUuid;
+use nexus_db_schema::schema::volume_resource_usage;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::VolumeKind;
@@ -12,14 +12,9 @@ use omicron_uuid_kinds::VolumeUuid;
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(
-        postgres_type(name = "volume_resource_usage_type", schema = "public")
-    )]
-    pub struct VolumeResourceUsageTypeEnum;
+    VolumeResourceUsageTypeEnum:
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq, Eq, Hash)]
-    #[diesel(sql_type = VolumeResourceUsageTypeEnum)]
     pub enum VolumeResourceUsageType;
 
     ReadOnlyRegion => b"read_only_region"

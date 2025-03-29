@@ -7,7 +7,6 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::error::ErrorHandler;
 use crate::db::error::public_error_from_diesel;
 use crate::db::pagination::paginated;
@@ -18,11 +17,11 @@ use diesel::QueryDsl;
 use diesel::dsl::sql_query;
 use diesel::expression::SelectableHelper;
 use diesel::sql_types;
-use nexus_db_model::ClickhouseModeEnum;
 use nexus_db_model::ClickhousePolicy as DbClickhousePolicy;
 use nexus_db_model::DbClickhouseMode;
 use nexus_db_model::SqlU8;
 use nexus_db_model::SqlU32;
+use nexus_db_schema::enums::ClickhouseModeEnum;
 use nexus_types::deployment::ClickhousePolicy;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -34,7 +33,7 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, SqlU32>,
     ) -> ListResultVec<ClickhousePolicy> {
-        use db::schema::clickhouse_policy;
+        use nexus_db_schema::schema::clickhouse_policy;
 
         opctx
             .authorize(authz::Action::ListChildren, &authz::BLUEPRINT_CONFIG)
@@ -61,7 +60,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        use db::schema::clickhouse_policy::dsl;
+        use nexus_db_schema::schema::clickhouse_policy::dsl;
 
         let latest_policy = dsl::clickhouse_policy
             .order_by(dsl::version.desc())

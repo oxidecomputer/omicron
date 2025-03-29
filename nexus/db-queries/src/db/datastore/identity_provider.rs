@@ -79,7 +79,7 @@ impl DataStore {
     ) -> ListResultVec<IdentityProvider> {
         opctx.authorize(authz::Action::ListChildren, authz_idp_list).await?;
 
-        use db::schema::identity_provider::dsl;
+        use nexus_db_schema::schema::identity_provider::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::identity_provider, dsl::id, pagparams)
@@ -117,7 +117,7 @@ impl DataStore {
                 let provider = provider.clone();
                 async move {
                     // insert silo identity provider record with type Saml
-                    use db::schema::identity_provider::dsl as idp_dsl;
+                    use nexus_db_schema::schema::identity_provider::dsl as idp_dsl;
                     diesel::insert_into(idp_dsl::identity_provider)
                         .values(db::model::IdentityProvider {
                             identity: db::model::IdentityProviderIdentity {
@@ -139,7 +139,7 @@ impl DataStore {
                         .await?;
 
                     // insert silo saml identity provider record
-                    use db::schema::saml_identity_provider::dsl;
+                    use nexus_db_schema::schema::saml_identity_provider::dsl;
                     let result =
                         diesel::insert_into(dsl::saml_identity_provider)
                             .values(provider)

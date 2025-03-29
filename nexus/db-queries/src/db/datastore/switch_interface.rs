@@ -5,7 +5,6 @@ use super::DataStore;
 
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::datastore::address_lot::{
     ReserveBlockError, ReserveBlockTxnError,
 };
@@ -35,7 +34,7 @@ impl DataStore {
         id: Option<TypedUuid<LoopbackAddressKind>>,
         authz_address_lot: &authz::AddressLot,
     ) -> CreateResult<LoopbackAddress> {
-        use db::schema::loopback_address::dsl;
+        use nexus_db_schema::schema::loopback_address::dsl;
 
         #[derive(Debug)]
         enum LoopbackAddressCreateError {
@@ -121,8 +120,8 @@ impl DataStore {
         opctx: &OpContext,
         authz_loopback_address: &authz::LoopbackAddress,
     ) -> DeleteResult {
-        use db::schema::address_lot_rsvd_block::dsl as rsvd_block_dsl;
-        use db::schema::loopback_address::dsl;
+        use nexus_db_schema::schema::address_lot_rsvd_block::dsl as rsvd_block_dsl;
+        use nexus_db_schema::schema::loopback_address::dsl;
 
         let id = authz_loopback_address.id();
 
@@ -154,8 +153,8 @@ impl DataStore {
         opctx: &OpContext,
         authz_loopback_address: &authz::LoopbackAddress,
     ) -> LookupResult<LoopbackAddress> {
-        use db::schema::loopback_address;
-        use db::schema::loopback_address::dsl as loopback_dsl;
+        use nexus_db_schema::schema::loopback_address;
+        use nexus_db_schema::schema::loopback_address::dsl as loopback_dsl;
 
         let id = authz_loopback_address.id();
 
@@ -175,7 +174,7 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<LoopbackAddress> {
-        use db::schema::loopback_address::dsl;
+        use nexus_db_schema::schema::loopback_address::dsl;
 
         paginated(dsl::loopback_address, dsl::id, &pagparams)
             .select(LoopbackAddress::as_select())

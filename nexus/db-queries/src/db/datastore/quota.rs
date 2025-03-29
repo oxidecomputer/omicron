@@ -1,7 +1,6 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::error::ErrorHandler;
 use crate::db::error::public_error_from_diesel;
 use crate::db::pagination::paginated;
@@ -33,7 +32,7 @@ impl DataStore {
         quotas: SiloQuotas,
     ) -> Result<(), Error> {
         let silo_id = authz_silo.id();
-        use db::schema::silo_quotas::dsl;
+        use nexus_db_schema::schema::silo_quotas::dsl;
 
         diesel::insert_into(dsl::silo_quotas)
             .values(quotas)
@@ -61,7 +60,7 @@ impl DataStore {
         // Silo we just check for delete permission on the silo itself.
         opctx.authorize(authz::Action::Delete, authz_silo).await?;
 
-        use db::schema::silo_quotas::dsl;
+        use nexus_db_schema::schema::silo_quotas::dsl;
         diesel::delete(dsl::silo_quotas)
             .filter(dsl::silo_id.eq(authz_silo.id()))
             .execute_async(conn)
@@ -78,7 +77,7 @@ impl DataStore {
         updates: SiloQuotasUpdate,
     ) -> UpdateResult<SiloQuotas> {
         opctx.authorize(authz::Action::Modify, authz_silo).await?;
-        use db::schema::silo_quotas::dsl;
+        use nexus_db_schema::schema::silo_quotas::dsl;
         let silo_id = authz_silo.id();
         diesel::update(dsl::silo_quotas)
             .filter(dsl::silo_id.eq(silo_id))
@@ -103,7 +102,7 @@ impl DataStore {
         authz_silo: &authz::Silo,
     ) -> Result<SiloQuotas, Error> {
         opctx.authorize(authz::Action::Read, authz_silo).await?;
-        use db::schema::silo_quotas::dsl;
+        use nexus_db_schema::schema::silo_quotas::dsl;
         dsl::silo_quotas
             .filter(dsl::silo_id.eq(authz_silo.id()))
             .first_async(&*self.pool_connection_authorized(opctx).await?)
@@ -117,7 +116,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SiloQuotas> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        use db::schema::silo_quotas::dsl;
+        use nexus_db_schema::schema::silo_quotas::dsl;
         paginated(dsl::silo_quotas, dsl::silo_id, pagparams)
             .select(SiloQuotas::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)

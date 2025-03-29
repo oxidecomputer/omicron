@@ -707,7 +707,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     ) -> Migration {
         use async_bb8_diesel::AsyncRunQueryDsl;
         use diesel::prelude::*;
-        use nexus_db_queries::db::schema::migration::dsl;
+        use nexus_db_schema::schema::migration::dsl;
 
         let datastore =
             cptestctx.server.server_context().nexus.datastore().clone();

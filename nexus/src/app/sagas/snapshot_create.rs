@@ -2088,7 +2088,7 @@ mod test {
 
     async fn no_snapshot_records_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::Snapshot;
-        use nexus_db_queries::db::schema::snapshot::dsl;
+        use nexus_db_schema::schema::snapshot::dsl;
 
         dsl::snapshot
             .filter(dsl::time_deleted.is_null())
@@ -2104,7 +2104,7 @@ mod test {
 
     async fn no_region_snapshot_records_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::RegionSnapshot;
-        use nexus_db_queries::db::schema::region_snapshot::dsl;
+        use nexus_db_schema::schema::region_snapshot::dsl;
 
         dsl::region_snapshot
             .select(RegionSnapshot::as_select())

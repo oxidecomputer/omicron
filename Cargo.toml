@@ -78,6 +78,7 @@ members = [
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
+    "nexus/db-schema",
     "nexus/defaults",
     "nexus/external-api",
     "nexus/internal-api",
@@ -219,6 +220,7 @@ default-members = [
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
+    "nexus/db-schema",
     "nexus/defaults",
     "nexus/external-api",
     "nexus/internal-api",
@@ -483,6 +485,7 @@ nexus-config = { path = "nexus-config" }
 nexus-db-fixed-data = { path = "nexus/db-fixed-data" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
+nexus-db-schema = { path = "nexus/db-schema" }
 nexus-defaults = { path = "nexus/defaults" }
 nexus-external-api = { path = "nexus/external-api" }
 nexus-inventory = { path = "nexus/inventory" }

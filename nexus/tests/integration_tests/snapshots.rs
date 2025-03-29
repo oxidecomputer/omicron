@@ -1568,10 +1568,10 @@ async fn test_region_allocation_for_snapshot(
             let conn = datastore.pool_connection_for_tests().await.unwrap();
 
             use async_bb8_diesel::AsyncRunQueryDsl;
-            use db::schema::region_snapshot::dsl;
             use diesel::ExpressionMethods;
             use diesel::QueryDsl;
             use diesel::SelectableHelper;
+            use nexus_db_schema::schema::region_snapshot::dsl;
 
             let region_snapshots: Vec<db::model::RegionSnapshot> =
                 dsl::region_snapshot

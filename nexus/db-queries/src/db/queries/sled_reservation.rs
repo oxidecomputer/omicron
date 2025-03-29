@@ -4,12 +4,12 @@
 
 //! Implementation of queries for affinity groups
 
-use crate::db::model::AffinityPolicyEnum;
 use crate::db::model::Resources;
 use crate::db::model::SledResourceVmm;
 use crate::db::raw_query_builder::QueryBuilder;
 use crate::db::raw_query_builder::TypedSqlQuery;
 use diesel::sql_types;
+use nexus_db_schema::enums::AffinityPolicyEnum;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 

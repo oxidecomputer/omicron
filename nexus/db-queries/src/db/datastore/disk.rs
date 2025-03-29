@@ -59,7 +59,7 @@ impl DataStore {
         authz_instance: &authz::Instance,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<Disk> {
-        use db::schema::disk::dsl;
+        use nexus_db_schema::schema::disk::dsl;
 
         opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
 
@@ -87,7 +87,7 @@ impl DataStore {
         authz_project: &authz::Project,
         disk: Disk,
     ) -> CreateResult<Disk> {
-        use db::schema::disk::dsl;
+        use nexus_db_schema::schema::disk::dsl;
 
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
@@ -137,7 +137,7 @@ impl DataStore {
     ) -> ListResultVec<Disk> {
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
-        use db::schema::disk::dsl;
+        use nexus_db_schema::schema::disk::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::disk, dsl::id, &pagparams)
@@ -167,7 +167,7 @@ impl DataStore {
         authz_disk: &authz::Disk,
         max_disks: u32,
     ) -> Result<(Instance, Disk), Error> {
-        use db::schema::{disk, instance};
+        use nexus_db_schema::schema::{disk, instance};
 
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
         opctx.authorize(authz::Action::Modify, authz_disk).await?;
@@ -307,7 +307,7 @@ impl DataStore {
         authz_instance: &authz::Instance,
         authz_disk: &authz::Disk,
     ) -> Result<Disk, Error> {
-        use db::schema::{disk, instance};
+        use nexus_db_schema::schema::{disk, instance};
 
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
         opctx.authorize(authz::Action::Modify, authz_disk).await?;
@@ -466,7 +466,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, authz_disk).await?;
 
         let disk_id = authz_disk.id();
-        use db::schema::disk::dsl;
+        use nexus_db_schema::schema::disk::dsl;
         let updated = diesel::update(dsl::disk)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(disk_id))
@@ -498,7 +498,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, authz_disk).await?;
 
         let disk_id = authz_disk.id();
-        use db::schema::disk::dsl;
+        use nexus_db_schema::schema::disk::dsl;
         let updated = diesel::update(dsl::disk)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(disk_id))
@@ -528,7 +528,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, authz_disk).await?;
 
         let disk_id = authz_disk.id();
-        use db::schema::disk::dsl;
+        use nexus_db_schema::schema::disk::dsl;
         let updated = diesel::update(dsl::disk)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(disk_id))
@@ -605,7 +605,7 @@ impl DataStore {
         disk_id: &Uuid,
         ok_to_delete_states: &[api::external::DiskState],
     ) -> Result<db::model::Disk, Error> {
-        use db::schema::disk::dsl;
+        use nexus_db_schema::schema::disk::dsl;
         let conn = self.pool_connection_unauthorized().await?;
         let now = Utc::now();
 
@@ -687,7 +687,7 @@ impl DataStore {
         &self,
         disk_id: &Uuid,
     ) -> Result<(), Error> {
-        use db::schema::disk::dsl;
+        use nexus_db_schema::schema::disk::dsl;
         let conn = self.pool_connection_unauthorized().await?;
 
         let faulted = api::external::DiskState::Faulted.label();
@@ -751,9 +751,9 @@ impl DataStore {
     /// it was in could not be deleted (due to an erroneous number of bytes
     /// "still provisioned").
     pub async fn find_phantom_disks(&self) -> ListResultVec<Disk> {
-        use db::schema::disk::dsl;
-        use db::schema::virtual_provisioning_resource::dsl as resource_dsl;
-        use db::schema::volume::dsl as volume_dsl;
+        use nexus_db_schema::schema::disk::dsl;
+        use nexus_db_schema::schema::virtual_provisioning_resource::dsl as resource_dsl;
+        use nexus_db_schema::schema::volume::dsl as volume_dsl;
 
         let conn = self.pool_connection_unauthorized().await?;
 
@@ -830,7 +830,7 @@ impl DataStore {
     ) -> LookupResult<Option<Disk>> {
         let conn = self.pool_connection_unauthorized().await?;
 
-        use db::schema::disk::dsl;
+        use nexus_db_schema::schema::disk::dsl;
         dsl::disk
             .filter(dsl::volume_id.eq(to_db_typed_uuid(volume_id)))
             .select(Disk::as_select())

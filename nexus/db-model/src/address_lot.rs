@@ -3,9 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::impl_enum_type;
-use crate::schema::{address_lot, address_lot_block, address_lot_rsvd_block};
 use db_macros::Resource;
 use ipnetwork::IpNetwork;
+use nexus_db_schema::schema::{
+    address_lot, address_lot_block, address_lot_rsvd_block,
+};
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use serde::{Deserialize, Serialize};
@@ -14,9 +16,7 @@ use uuid::Uuid;
 pub const INFRA_LOT: &str = "initial-infra";
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, Clone, Copy, QueryId)]
-    #[diesel(postgres_type(name = "address_lot_kind", schema = "public"))]
-    pub struct AddressLotKindEnum;
+    AddressLotKindEnum:
 
     #[derive(
         Clone,
@@ -28,7 +28,6 @@ impl_enum_type!(
         Serialize,
         Deserialize,
     )]
-    #[diesel(sql_type = AddressLotKindEnum)]
     pub enum AddressLotKind;
 
     Infra => b"infra"

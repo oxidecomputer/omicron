@@ -43,7 +43,6 @@ pub mod test_utils;
 pub use nexus_db_fixed_data as fixed_data;
 pub use nexus_db_model as model;
 use nexus_db_model::saga_types;
-pub use nexus_db_model::schema;
 
 pub use crate::db::error::TransactionError;
 pub use config::Config;

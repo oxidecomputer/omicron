@@ -167,7 +167,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         service_id: Uuid,
     ) -> ListResultVec<ServiceNetworkInterface> {
-        use db::schema::service_network_interface::dsl;
+        use nexus_db_schema::schema::service_network_interface::dsl;
         dsl::service_network_interface
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::service_id.eq(service_id))
@@ -183,7 +183,7 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<ServiceNetworkInterface> {
-        use db::schema::service_network_interface::dsl;
+        use nexus_db_schema::schema::service_network_interface::dsl;
 
         // See the comment in `service_create_network_interface`. There's no
         // obvious parent for a service network interface (as opposed to
@@ -294,7 +294,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         interface: IncompleteNetworkInterface,
     ) -> Result<NetworkInterface, network_interface::InsertError> {
-        use db::schema::network_interface::dsl;
+        use nexus_db_schema::schema::network_interface::dsl;
         let subnet_id = interface.subnet.identity.id;
         let query = network_interface::InsertQuery::new(interface.clone());
         VpcSubnet::insert_resource(
@@ -326,7 +326,7 @@ impl DataStore {
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
 
-        use db::schema::network_interface::dsl;
+        use nexus_db_schema::schema::network_interface::dsl;
         let now = Utc::now();
         diesel::update(dsl::network_interface)
             .filter(dsl::parent_id.eq(authz_instance.id()))
@@ -350,7 +350,7 @@ impl DataStore {
         opctx: &OpContext,
         probe_id: Uuid,
     ) -> DeleteResult {
-        use db::schema::network_interface::dsl;
+        use nexus_db_schema::schema::network_interface::dsl;
         let now = Utc::now();
         diesel::update(dsl::network_interface)
             .filter(dsl::parent_id.eq(probe_id))
@@ -476,12 +476,14 @@ impl DataStore {
     async fn derive_network_interface_info(
         &self,
         opctx: &OpContext,
-        partial_query: BoxedQuery<db::schema::network_interface::table>,
+        partial_query: BoxedQuery<
+            nexus_db_schema::schema::network_interface::table,
+        >,
     ) -> ListResultVec<omicron_common::api::internal::shared::NetworkInterface>
     {
-        use db::schema::network_interface;
-        use db::schema::vpc;
-        use db::schema::vpc_subnet;
+        use nexus_db_schema::schema::network_interface;
+        use nexus_db_schema::schema::vpc;
+        use nexus_db_schema::schema::vpc_subnet;
 
         let rows = partial_query
             .filter(network_interface::time_deleted.is_null())
@@ -529,7 +531,7 @@ impl DataStore {
     {
         opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
 
-        use db::schema::network_interface;
+        use nexus_db_schema::schema::network_interface;
         self.derive_network_interface_info(
             opctx,
             network_interface::table
@@ -548,7 +550,7 @@ impl DataStore {
         probe_id: Uuid,
     ) -> ListResultVec<omicron_common::api::internal::shared::NetworkInterface>
     {
-        use db::schema::network_interface;
+        use nexus_db_schema::schema::network_interface;
         self.derive_network_interface_info(
             opctx,
             network_interface::table
@@ -569,7 +571,7 @@ impl DataStore {
     {
         opctx.authorize(authz::Action::ListChildren, authz_vpc).await?;
 
-        use db::schema::network_interface;
+        use nexus_db_schema::schema::network_interface;
         self.derive_network_interface_info(
             opctx,
             network_interface::table
@@ -589,7 +591,7 @@ impl DataStore {
     {
         opctx.authorize(authz::Action::ListChildren, authz_subnet).await?;
 
-        use db::schema::network_interface;
+        use nexus_db_schema::schema::network_interface;
         self.derive_network_interface_info(
             opctx,
             network_interface::table
@@ -608,7 +610,7 @@ impl DataStore {
     ) -> ListResultVec<InstanceNetworkInterface> {
         opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
 
-        use db::schema::instance_network_interface::dsl;
+        use nexus_db_schema::schema::instance_network_interface::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::instance_network_interface, dsl::id, &pagparams)
@@ -637,7 +639,7 @@ impl DataStore {
     ) -> LookupResult<InstanceNetworkInterface> {
         opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
 
-        use db::schema::instance_network_interface::dsl;
+        use nexus_db_schema::schema::instance_network_interface::dsl;
         dsl::instance_network_interface
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::instance_id.eq(authz_instance.id()))
@@ -662,7 +664,7 @@ impl DataStore {
         opctx: &OpContext,
         probe_id: Uuid,
     ) -> LookupResult<NetworkInterface> {
-        use db::schema::network_interface::dsl;
+        use nexus_db_schema::schema::network_interface::dsl;
 
         dsl::network_interface
             .filter(dsl::time_deleted.is_null())
@@ -712,7 +714,7 @@ impl DataStore {
         let instance_id = authz_instance.id();
         let interface_id = authz_interface.id();
         let find_primary_query = {
-            use crate::db::schema::instance_network_interface::dsl;
+            use nexus_db_schema::schema::instance_network_interface::dsl;
             dsl::instance_network_interface
                 .filter(dsl::instance_id.eq(instance_id))
                 .filter(dsl::is_primary.eq(true))
@@ -722,7 +724,7 @@ impl DataStore {
 
         // This returns the state of the associated instance.
         let instance_query = {
-            use crate::db::schema::instance::dsl;
+            use nexus_db_schema::schema::instance::dsl;
             dsl::instance
                 .filter(dsl::id.eq(instance_id))
                 .filter(dsl::time_deleted.is_null())
@@ -736,7 +738,7 @@ impl DataStore {
         // the update to rows of `kind = 'instance'`.
         let primary = matches!(updates.primary, Some(true));
         let update_target_query = {
-            use crate::db::schema::network_interface::dsl;
+            use nexus_db_schema::schema::network_interface::dsl;
             diesel::update(dsl::network_interface)
                 .filter(dsl::id.eq(interface_id))
                 .filter(dsl::kind.eq(NetworkInterfaceKind::Instance))
@@ -775,7 +777,7 @@ impl DataStore {
                         // If the target and primary are different, we need to toggle
                         // the primary into a secondary.
                         if primary_interface.identity.id != interface_id {
-                            use crate::db::schema::network_interface::dsl;
+                            use nexus_db_schema::schema::network_interface::dsl;
                             if let Err(e) = diesel::update(dsl::network_interface)
                                 .filter(dsl::id.eq(primary_interface.identity.id))
                                 .filter(dsl::kind.eq(NetworkInterfaceKind::Instance))
@@ -875,7 +877,7 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<InstanceNetworkInterface> {
-        use db::schema::instance_network_interface::dsl;
+        use nexus_db_schema::schema::instance_network_interface::dsl;
 
         // See the comment in `service_create_network_interface`. There's no
         // obvious parent for a service network interface (as opposed to

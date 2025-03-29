@@ -7,7 +7,6 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::error::ErrorHandler;
 use crate::db::error::public_error_from_diesel;
 use crate::db::lookup::LookupPath;
@@ -91,8 +90,8 @@ impl DataStore {
                 let err = err.clone();
 
                 async move {
-                    use db::schema::rendezvous_debug_dataset::dsl as dataset_dsl;
-                    use db::schema::support_bundle::dsl as support_bundle_dsl;
+                    use nexus_db_schema::schema::rendezvous_debug_dataset::dsl as dataset_dsl;
+                    use nexus_db_schema::schema::support_bundle::dsl as support_bundle_dsl;
 
                     // Observe all "non-deleted, debug datasets".
                     //
@@ -174,7 +173,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SupportBundle> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        use db::schema::support_bundle::dsl;
+        use nexus_db_schema::schema::support_bundle::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
         paginated(dsl::support_bundle, dsl::id, pagparams)
@@ -194,7 +193,7 @@ impl DataStore {
         states: Vec<SupportBundleState>,
     ) -> ListResultVec<SupportBundle> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        use db::schema::support_bundle::dsl;
+        use nexus_db_schema::schema::support_bundle::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
         paginated(dsl::support_bundle, dsl::id, pagparams)
@@ -256,7 +255,7 @@ impl DataStore {
                 let invalid_nexus_zones = invalid_nexus_zones.clone();
                 let invalid_datasets = invalid_datasets.clone();
                 async move {
-                    use db::schema::support_bundle::dsl;
+                    use nexus_db_schema::schema::support_bundle::dsl;
 
                     // Find all bundles without backing storage.
                     let bundles_with_bad_datasets = dsl::support_bundle
@@ -410,7 +409,7 @@ impl DataStore {
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, authz_bundle).await?;
 
-        use db::schema::support_bundle::dsl;
+        use nexus_db_schema::schema::support_bundle::dsl;
 
         let id = authz_bundle.id().into_untyped_uuid();
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -445,7 +444,7 @@ impl DataStore {
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Delete, authz_bundle).await?;
 
-        use db::schema::support_bundle::dsl;
+        use nexus_db_schema::schema::support_bundle::dsl;
 
         let id = authz_bundle.id().into_untyped_uuid();
         let conn = self.pool_connection_authorized(opctx).await?;

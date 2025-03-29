@@ -9,9 +9,7 @@ use serde::Serialize;
 use std::fmt;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "instance_state_v2", schema = "public"))]
-    pub struct InstanceStateEnum;
+    InstanceStateEnum:
 
     #[derive(
         Copy,
@@ -24,7 +22,6 @@ impl_enum_type!(
         Deserialize,
         strum::VariantArray,
     )]
-    #[diesel(sql_type = InstanceStateEnum)]
     pub enum InstanceState;
 
     // Enum values
@@ -89,11 +86,6 @@ impl std::str::FromStr for InstanceState {
 
         Err(InstanceStateParseError(()))
     }
-}
-
-impl diesel::query_builder::QueryId for InstanceStateEnum {
-    type QueryId = ();
-    const HAS_STATIC_QUERY_ID: bool = false;
 }
 
 #[derive(Debug, Eq, PartialEq)]

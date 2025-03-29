@@ -7,7 +7,6 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::error::ErrorHandler;
 use crate::db::error::public_error_from_diesel;
 use crate::db::model::DeviceAccessToken;
@@ -36,7 +35,7 @@ impl DataStore {
             )
             .await?;
 
-        use db::schema::device_auth_request::dsl;
+        use nexus_db_schema::schema::device_auth_request::dsl;
         diesel::insert_into(dsl::device_auth_request)
             .values(auth_request)
             .returning(DeviceAuthRequest::as_returning())
@@ -59,11 +58,11 @@ impl DataStore {
         opctx.authorize(authz::Action::Delete, authz_request).await?;
         opctx.authorize(authz::Action::CreateChild, authz_user).await?;
 
-        use db::schema::device_auth_request::dsl as request_dsl;
+        use nexus_db_schema::schema::device_auth_request::dsl as request_dsl;
         let delete_request = diesel::delete(request_dsl::device_auth_request)
             .filter(request_dsl::user_code.eq(authz_request.id()));
 
-        use db::schema::device_access_token::dsl as token_dsl;
+        use nexus_db_schema::schema::device_access_token::dsl as token_dsl;
         let insert_token = diesel::insert_into(token_dsl::device_access_token)
             .values(access_token)
             .returning(DeviceAccessToken::as_returning());
@@ -125,7 +124,7 @@ impl DataStore {
         client_id: Uuid,
         device_code: String,
     ) -> LookupResult<DeviceAccessToken> {
-        use db::schema::device_access_token::dsl;
+        use nexus_db_schema::schema::device_access_token::dsl;
         dsl::device_access_token
             .filter(dsl::client_id.eq(client_id))
             .filter(dsl::device_code.eq(device_code))

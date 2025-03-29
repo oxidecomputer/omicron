@@ -4,9 +4,9 @@
 
 use super::{Generation, Region};
 use crate::collection::DatastoreCollectionConfig;
-use crate::schema::{region, volume};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
+use nexus_db_schema::schema::{region, volume};
 use omicron_uuid_kinds::VolumeUuid;
 use uuid::Uuid;
 

@@ -9,7 +9,6 @@ use std::collections::HashMap;
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::error::{ErrorHandler, public_error_from_diesel};
 use crate::db::model::SemverVersion;
 use crate::db::pagination::paginated;
@@ -49,8 +48,8 @@ async fn artifacts_for_repo(
     repo_id: TypedUuid<TufRepoKind>,
     conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
 ) -> Result<Vec<TufArtifact>, DieselError> {
-    use db::schema::tuf_artifact::dsl as tuf_artifact_dsl;
-    use db::schema::tuf_repo_artifact::dsl as tuf_repo_artifact_dsl;
+    use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
+    use nexus_db_schema::schema::tuf_repo_artifact::dsl as tuf_repo_artifact_dsl;
 
     let join_on_dsl =
         tuf_artifact_dsl::id.eq(tuf_repo_artifact_dsl::tuf_artifact_id);
@@ -113,7 +112,7 @@ impl DataStore {
     ) -> LookupResult<TufRepoDescription> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
-        use db::schema::tuf_repo::dsl;
+        use nexus_db_schema::schema::tuf_repo::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -147,7 +146,7 @@ impl DataStore {
     ) -> ListResultVec<TufArtifact> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
-        use db::schema::tuf_artifact::dsl;
+        use nexus_db_schema::schema::tuf_artifact::dsl;
 
         let generation = nexus_db_model::Generation(generation);
         paginated(dsl::tuf_artifact, dsl::id, pagparams)
@@ -187,7 +186,7 @@ async fn insert_impl(
     let desc = TufRepoDescription::from_external(desc.clone(), new_generation);
 
     let repo = {
-        use db::schema::tuf_repo::dsl;
+        use nexus_db_schema::schema::tuf_repo::dsl;
 
         // Load the existing repo by the system version, if any.
         let existing_repo = dsl::tuf_repo
@@ -233,7 +232,7 @@ async fn insert_impl(
     // Since we've inserted a new repo, we also need to insert the
     // corresponding artifacts.
     let all_artifacts = {
-        use db::schema::tuf_artifact::dsl;
+        use nexus_db_schema::schema::tuf_artifact::dsl;
 
         // Multiple repos can have the same artifacts, so we shouldn't error
         // out if we find an existing artifact. However, we should check that
@@ -329,7 +328,7 @@ async fn insert_impl(
 
     // Finally, insert all the associations into the tuf_repo_artifact table.
     {
-        use db::schema::tuf_repo_artifact::dsl;
+        use nexus_db_schema::schema::tuf_repo_artifact::dsl;
 
         let mut values = Vec::new();
         for artifact in desc.artifacts.clone() {
@@ -360,7 +359,7 @@ async fn insert_impl(
 async fn get_generation(
     conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
 ) -> Result<Generation, DieselError> {
-    use db::schema::tuf_generation::dsl;
+    use nexus_db_schema::schema::tuf_generation::dsl;
 
     let generation: nexus_db_model::Generation = dsl::tuf_generation
         .filter(dsl::singleton.eq(true))
@@ -375,7 +374,7 @@ async fn put_generation(
     old_generation: nexus_db_model::Generation,
     new_generation: nexus_db_model::Generation,
 ) -> Result<nexus_db_model::Generation, DieselError> {
-    use db::schema::tuf_generation::dsl;
+    use nexus_db_schema::schema::tuf_generation::dsl;
 
     // We use `get_result_async` instead of `execute_async` to check that we
     // updated exactly one row.

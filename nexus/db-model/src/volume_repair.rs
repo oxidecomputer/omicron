@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::schema::volume_repair;
 use crate::typed_uuid::DbTypedUuid;
+use nexus_db_schema::schema::volume_repair;
 use omicron_uuid_kinds::VolumeKind;
 use uuid::Uuid;
 

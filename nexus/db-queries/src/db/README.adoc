@@ -65,7 +65,7 @@ struct Instance {
   ...
 }
 
-use db::schema::instance::dsl;
+use nexus_db_schema::schema::::instance::dsl;
 let insert_query = diesel::insert_into(dsl::instance)
   .values(Instance::new());
 ----
@@ -79,7 +79,7 @@ struct Instance {
   ...
 }
 
-use db::schema::instance::dsl;
+use nexus_db_schema::schema::instance::dsl;
 let lookup_query = dsl::instance.filter(dsl::id.eq(id_to_lookup));
 ----
 
@@ -92,7 +92,7 @@ struct InstanceUpdate {
   ...
 }
 
-use db::schema::instance::dsl;
+use nexus_db_schema::schema::instance::dsl;
 let update_query = diesel::update(dsl::instance).set(InstanceUpdate::new());
 ----
 

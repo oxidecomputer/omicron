@@ -41,7 +41,7 @@ impl DataStore {
         volume_id: VolumeUuid,
         repair_id: Uuid,
     ) -> Result<(), diesel::result::Error> {
-        use db::schema::volume_repair::dsl;
+        use nexus_db_schema::schema::volume_repair::dsl;
 
         // If a lock that matches the arguments exists already, return Ok
         //
@@ -127,7 +127,7 @@ impl DataStore {
         volume_id: VolumeUuid,
         repair_id: Uuid,
     ) -> impl RunnableQuery<VolumeRepair> {
-        use db::schema::volume_repair::dsl;
+        use nexus_db_schema::schema::volume_repair::dsl;
 
         diesel::delete(
             dsl::volume_repair
@@ -155,7 +155,7 @@ impl DataStore {
         volume_id: VolumeUuid,
         repair_id: Uuid,
     ) -> Result<VolumeRepair, DieselError> {
-        use db::schema::volume_repair::dsl;
+        use nexus_db_schema::schema::volume_repair::dsl;
 
         dsl::volume_repair
             .filter(dsl::repair_id.eq(repair_id))

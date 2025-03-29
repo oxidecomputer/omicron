@@ -173,7 +173,7 @@ impl<'a> UpdateArtifact<'a> {
         v1: &i64,
         v2: &KnownArtifactKind,
     ) -> LookupResult<(authz::UpdateArtifact, nexus_db_model::UpdateArtifact)> {
-        use db::schema::update_artifact::dsl;
+        use ::nexus_db_schema::schema::update_artifact::dsl;
         let db_row = dsl::update_artifact
             .filter(dsl::name.eq(v0.clone()))
             .filter(dsl::version.eq(v1.clone()))

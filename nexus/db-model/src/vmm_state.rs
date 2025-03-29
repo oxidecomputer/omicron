@@ -9,9 +9,7 @@ use serde::Serialize;
 use std::fmt;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, Clone)]
-    #[diesel(postgres_type(name = "vmm_state", schema = "public"))]
-    pub struct VmmStateEnum;
+    VmmStateEnum:
 
     #[derive(
         Copy,
@@ -24,7 +22,6 @@ impl_enum_type!(
         Deserialize,
         strum::VariantArray,
     )]
-    #[diesel(sql_type = VmmStateEnum)]
     pub enum VmmState;
 
     Creating => b"creating"
@@ -167,11 +164,6 @@ impl From<VmmState> for omicron_common::api::external::InstanceState {
             VmmState::Destroyed => Output::Destroyed,
         }
     }
-}
-
-impl diesel::query_builder::QueryId for VmmStateEnum {
-    type QueryId = ();
-    const HAS_STATIC_QUERY_ID: bool = false;
 }
 
 impl std::str::FromStr for VmmState {

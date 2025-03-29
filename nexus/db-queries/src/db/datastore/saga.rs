@@ -28,7 +28,7 @@ impl DataStore {
         &self,
         saga: &db::saga_types::Saga,
     ) -> Result<(), Error> {
-        use db::schema::saga::dsl;
+        use nexus_db_schema::schema::saga::dsl;
 
         diesel::insert_into(dsl::saga)
             .values(saga.clone())
@@ -42,7 +42,7 @@ impl DataStore {
         &self,
         event: &db::saga_types::SagaNodeEvent,
     ) -> Result<(), Error> {
-        use db::schema::saga_node_event::dsl;
+        use nexus_db_schema::schema::saga_node_event::dsl;
 
         // TODO-robustness This INSERT ought to be conditional on this SEC still
         // owning this saga.
@@ -91,7 +91,7 @@ impl DataStore {
         new_state: steno::SagaCachedState,
         current_sec: db::saga_types::SecId,
     ) -> Result<(), Error> {
-        use db::schema::saga::dsl;
+        use nexus_db_schema::schema::saga::dsl;
 
         let saga_id: db::saga_types::SagaId = saga_id.into();
         let result = diesel::update(dsl::saga)
@@ -140,7 +140,7 @@ impl DataStore {
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         let conn = self.pool_connection_authorized(opctx).await?;
         while let Some(p) = paginator.next() {
-            use db::schema::saga::dsl;
+            use nexus_db_schema::schema::saga::dsl;
 
             let mut batch =
                 paginated(dsl::saga, dsl::id, &p.current_pagparams())
@@ -174,7 +174,7 @@ impl DataStore {
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         let conn = self.pool_connection_authorized(opctx).await?;
         while let Some(p) = paginator.next() {
-            use db::schema::saga_node_event::dsl;
+            use nexus_db_schema::schema::saga_node_event::dsl;
             let batch = paginated_multicolumn(
                 dsl::saga_node_event,
                 (dsl::node_id, dsl::event_type),
@@ -232,7 +232,7 @@ impl DataStore {
         // not appear to support the UPDATE ... LIMIT syntax using the normal
         // builder.  In practice, it's extremely unlikely we'd have so many
         // in-progress sagas that this would be a problem.
-        use db::schema::saga::dsl;
+        use nexus_db_schema::schema::saga::dsl;
         diesel::update(
             dsl::saga
                 .filter(dsl::current_sec.is_not_null())
@@ -292,7 +292,7 @@ mod test {
             .pool_connection_unauthorized()
             .await
             .expect("Failed to access db connection");
-        diesel::insert_into(db::schema::saga::dsl::saga)
+        diesel::insert_into(nexus_db_schema::schema::saga::dsl::saga)
             .values(inserted_sagas.clone())
             .execute_async(&*conn)
             .await
@@ -361,11 +361,13 @@ mod test {
             .pool_connection_unauthorized()
             .await
             .expect("Failed to access db connection");
-        diesel::insert_into(db::schema::saga_node_event::dsl::saga_node_event)
-            .values(inserted_nodes.clone())
-            .execute_async(&*conn)
-            .await
-            .expect("Failed to insert test setup data");
+        diesel::insert_into(
+            nexus_db_schema::schema::saga_node_event::dsl::saga_node_event,
+        )
+        .values(inserted_nodes.clone())
+        .execute_async(&*conn)
+        .await
+        .expect("Failed to insert test setup data");
 
         // List them, expect to see them all in order by ID.
         let observed_nodes = datastore
@@ -636,7 +638,7 @@ mod test {
 
         // Insert the sagas.
         let count = {
-            use db::schema::saga::dsl;
+            use nexus_db_schema::schema::saga::dsl;
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             diesel::insert_into(dsl::saga)
                 .values(sagas_to_insert)
@@ -660,7 +662,7 @@ mod test {
             .await
             .unwrap()
             .transaction_async(|conn| async move {
-                use db::schema::saga::dsl;
+                use nexus_db_schema::schema::saga::dsl;
                 conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
                 dsl::saga
                     .select(nexus_db_model::Saga::as_select())

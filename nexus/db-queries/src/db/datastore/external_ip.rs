@@ -9,7 +9,6 @@ use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::authz::ApiResource;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::collection_attach::AttachError;
 use crate::db::collection_attach::DatastoreAttachTarget;
 use crate::db::collection_detach::DatastoreDetachTarget;
@@ -175,7 +174,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         service_id: Uuid,
     ) -> LookupResult<Vec<ExternalIp>> {
-        use db::schema::external_ip::dsl;
+        use nexus_db_schema::schema::external_ip::dsl;
         dsl::external_ip
             .filter(dsl::is_service.eq(true))
             .filter(dsl::parent_id.eq(service_id))
@@ -355,7 +354,7 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<ExternalIp> {
-        use db::schema::external_ip::dsl;
+        use nexus_db_schema::schema::external_ip::dsl;
 
         let (authz_pool, _pool) = self.ip_pools_service_lookup(opctx).await?;
         opctx.authorize(authz::Action::ListChildren, &authz_pool).await?;
@@ -411,12 +410,12 @@ impl DataStore {
         kind: IpKind,
         creating_instance: bool,
     ) -> Result<Option<(ExternalIp, bool)>, Error> {
-        use db::schema::external_ip::dsl;
-        use db::schema::external_ip::table;
-        use db::schema::instance::dsl as inst_dsl;
-        use db::schema::instance::table as inst_table;
         use diesel::result::DatabaseErrorKind::UniqueViolation;
         use diesel::result::Error::DatabaseError;
+        use nexus_db_schema::schema::external_ip::dsl;
+        use nexus_db_schema::schema::external_ip::table;
+        use nexus_db_schema::schema::instance::dsl as inst_dsl;
+        use nexus_db_schema::schema::instance::table as inst_table;
 
         let safe_states = if creating_instance {
             &SAFE_TO_ATTACH_INSTANCE_STATES_CREATING[..]
@@ -544,10 +543,10 @@ impl DataStore {
         kind: IpKind,
         creating_instance: bool,
     ) -> UpdateResult<Option<(ExternalIp, bool)>> {
-        use db::schema::external_ip::dsl;
-        use db::schema::external_ip::table;
-        use db::schema::instance::dsl as inst_dsl;
-        use db::schema::instance::table as inst_table;
+        use nexus_db_schema::schema::external_ip::dsl;
+        use nexus_db_schema::schema::external_ip::table;
+        use nexus_db_schema::schema::instance::dsl as inst_dsl;
+        use nexus_db_schema::schema::instance::table as inst_table;
 
         let safe_states = if creating_instance {
             &SAFE_TO_ATTACH_INSTANCE_STATES_CREATING[..]
@@ -668,7 +667,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         ip_id: Uuid,
     ) -> Result<bool, Error> {
-        use db::schema::external_ip::dsl;
+        use nexus_db_schema::schema::external_ip::dsl;
         let now = Utc::now();
         diesel::update(dsl::external_ip)
             .filter(dsl::time_deleted.is_null())
@@ -722,7 +721,7 @@ impl DataStore {
         opctx: &OpContext,
         instance_id: Uuid,
     ) -> Result<usize, Error> {
-        use db::schema::external_ip::dsl;
+        use nexus_db_schema::schema::external_ip::dsl;
         let now = Utc::now();
         diesel::update(dsl::external_ip)
             .filter(dsl::time_deleted.is_null())
@@ -750,7 +749,7 @@ impl DataStore {
         opctx: &OpContext,
         probe_id: Uuid,
     ) -> Result<usize, Error> {
-        use db::schema::external_ip::dsl;
+        use nexus_db_schema::schema::external_ip::dsl;
         let now = Utc::now();
         diesel::update(dsl::external_ip)
             .filter(dsl::time_deleted.is_null())
@@ -775,7 +774,7 @@ impl DataStore {
         opctx: &OpContext,
         instance_id: Uuid,
     ) -> Result<usize, Error> {
-        use db::schema::external_ip::dsl;
+        use nexus_db_schema::schema::external_ip::dsl;
         diesel::update(dsl::external_ip)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::is_service.eq(false))
@@ -798,7 +797,7 @@ impl DataStore {
         opctx: &OpContext,
         instance_id: InstanceUuid,
     ) -> LookupResult<Vec<ExternalIp>> {
-        use db::schema::external_ip::dsl;
+        use nexus_db_schema::schema::external_ip::dsl;
         dsl::external_ip
             .filter(dsl::is_service.eq(false))
             .filter(dsl::is_probe.eq(false))
@@ -830,7 +829,7 @@ impl DataStore {
         opctx: &OpContext,
         probe_id: Uuid,
     ) -> LookupResult<Vec<ExternalIp>> {
-        use db::schema::external_ip::dsl;
+        use nexus_db_schema::schema::external_ip::dsl;
         dsl::external_ip
             .filter(dsl::is_probe.eq(true))
             .filter(dsl::parent_id.eq(probe_id))
@@ -848,7 +847,7 @@ impl DataStore {
         authz_project: &authz::Project,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<FloatingIp> {
-        use db::schema::floating_ip::dsl;
+        use nexus_db_schema::schema::floating_ip::dsl;
 
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
@@ -877,7 +876,7 @@ impl DataStore {
         authz_fip: &authz::FloatingIp,
         update: FloatingIpUpdate,
     ) -> UpdateResult<ExternalIp> {
-        use db::schema::external_ip::dsl;
+        use nexus_db_schema::schema::external_ip::dsl;
 
         opctx.authorize(authz::Action::Modify, authz_fip).await?;
 
@@ -902,7 +901,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_fip: &authz::FloatingIp,
     ) -> DeleteResult {
-        use db::schema::external_ip::dsl;
+        use nexus_db_schema::schema::external_ip::dsl;
 
         opctx.authorize(authz::Action::Delete, authz_fip).await?;
 
@@ -1038,7 +1037,7 @@ impl DataStore {
         expected_state: IpAttachState,
         target_state: IpAttachState,
     ) -> Result<usize, Error> {
-        use db::schema::external_ip::dsl;
+        use nexus_db_schema::schema::external_ip::dsl;
 
         if matches!(
             expected_state,

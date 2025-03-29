@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::SemverVersion;
-use crate::schema::db_metadata;
 use chrono::{DateTime, Utc};
+use nexus_db_schema::schema::db_metadata;
 use serde::{Deserialize, Serialize};
 
 /// Internal database metadata

@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
-use crate::schema::support_bundle;
 use crate::typed_uuid::DbTypedUuid;
+use nexus_db_schema::schema::support_bundle;
 
 use chrono::{DateTime, Utc};
 use nexus_types::external_api::shared::SupportBundleInfo as SupportBundleView;
@@ -20,12 +20,9 @@ use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "support_bundle_state", schema = "public"))]
-    pub struct SupportBundleStateEnum;
+    SupportBundleStateEnum:
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[diesel(sql_type = SupportBundleStateEnum)]
     pub enum SupportBundleState;
 
     // Enum values

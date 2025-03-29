@@ -5,11 +5,11 @@
 use super::{ByteCount, Generation, SledState, SqlU16, SqlU32};
 use crate::collection::DatastoreCollectionConfig;
 use crate::ipv6;
-use crate::schema::{physical_disk, sled, zpool};
 use crate::sled::shared::Baseboard;
 use crate::sled_policy::DbSledPolicy;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
+use nexus_db_schema::schema::{physical_disk, sled, zpool};
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::deployment::execution;
 use nexus_types::{
@@ -374,16 +374,13 @@ impl SledReservationConstraintBuilder {
 }
 
 mod diesel_util {
-    use crate::{
-        schema::sled::{sled_policy, sled_state},
-        sled_policy::DbSledPolicy,
-        to_db_sled_policy,
-    };
+    use crate::{sled_policy::DbSledPolicy, to_db_sled_policy};
     use diesel::{
         helper_types::{And, EqAny},
         prelude::*,
         query_dsl::methods::FilterDsl,
     };
+    use nexus_db_schema::schema::sled::{sled_policy, sled_state};
     use nexus_types::{
         deployment::SledFilter,
         external_api::views::{SledPolicy, SledState},
@@ -410,7 +407,7 @@ mod diesel_util {
         type Output = E::Output;
 
         fn sled_filter(self, filter: SledFilter) -> Self::Output {
-            use crate::schema::sled::dsl as sled_dsl;
+            use nexus_db_schema::schema::sled::dsl as sled_dsl;
 
             // These are only boxed for ease of reference above.
             let all_matching_policies: BoxedIterator<DbSledPolicy> = Box::new(

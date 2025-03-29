@@ -1354,7 +1354,7 @@ fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         {
             use async_bb8_diesel::AsyncRunQueryDsl;
             use nexus_db_model::Instance;
-            use nexus_db_model::schema::instance::dsl;
+            use nexus_db_schema::schema::instance::dsl;
             use nexus_types::external_api::params;
             use omicron_common::api::external::IdentityMetadataCreateParams;
             use omicron_uuid_kinds::InstanceUuid;

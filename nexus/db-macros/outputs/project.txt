@@ -272,7 +272,7 @@ impl<'a> Project<'a> {
         authz_silo: &authz::Silo,
         name: &Name,
     ) -> LookupResult<(authz::Project, nexus_db_model::Project)> {
-        use db::schema::project::dsl;
+        use ::nexus_db_schema::schema::project::dsl;
         dsl::project
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::name.eq(name.clone()))
@@ -331,7 +331,7 @@ impl<'a> Project<'a> {
         datastore: &DataStore,
         v0: &Uuid,
     ) -> LookupResult<(authz::Silo, authz::Project, nexus_db_model::Project)> {
-        use db::schema::project::dsl;
+        use ::nexus_db_schema::schema::project::dsl;
         let db_row = dsl::project
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(v0.clone()))

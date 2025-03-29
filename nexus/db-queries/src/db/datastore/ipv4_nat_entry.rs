@@ -1,6 +1,5 @@
 use super::DataStore;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::error::ErrorHandler;
 use crate::db::error::public_error_from_diesel;
 use crate::db::model::{Ipv4NatEntry, Ipv4NatValues};
@@ -29,8 +28,8 @@ impl DataStore {
         opctx: &OpContext,
         nat_entry: Ipv4NatValues,
     ) -> CreateResult<Ipv4NatEntry> {
-        use db::schema::ipv4_nat_entry::dsl;
         use diesel::sql_types;
+        use nexus_db_schema::schema::ipv4_nat_entry::dsl;
 
         // Look up any NAT entries that already have the exact parameters
         // we're trying to INSERT.
@@ -107,7 +106,7 @@ impl DataStore {
         opctx: &OpContext,
         nat_entries: &[Ipv4NatValues],
     ) -> CreateResult<usize> {
-        use db::schema::ipv4_nat_entry::dsl;
+        use nexus_db_schema::schema::ipv4_nat_entry::dsl;
 
         let vni = nexus_db_model::Vni(Vni::SERVICES_VNI);
 
@@ -182,7 +181,7 @@ impl DataStore {
         opctx: &OpContext,
         nat_entry: &Ipv4NatEntry,
     ) -> DeleteResult {
-        use db::schema::ipv4_nat_entry::dsl;
+        use nexus_db_schema::schema::ipv4_nat_entry::dsl;
 
         let updated_rows = diesel::update(dsl::ipv4_nat_entry)
             .set((
@@ -213,7 +212,7 @@ impl DataStore {
         opctx: &OpContext,
         id: uuid::Uuid,
     ) -> LookupResult<Ipv4NatEntry> {
-        use db::schema::ipv4_nat_entry::dsl;
+        use nexus_db_schema::schema::ipv4_nat_entry::dsl;
 
         let result = dsl::ipv4_nat_entry
             .filter(dsl::id.eq(id))
@@ -235,7 +234,7 @@ impl DataStore {
         opctx: &OpContext,
         external_ip: &ExternalIp,
     ) -> DeleteResult {
-        use db::schema::ipv4_nat_entry::dsl;
+        use nexus_db_schema::schema::ipv4_nat_entry::dsl;
 
         let updated_rows = diesel::update(dsl::ipv4_nat_entry)
             .set((
@@ -267,7 +266,7 @@ impl DataStore {
         opctx: &OpContext,
         values: Ipv4NatValues,
     ) -> LookupResult<Ipv4NatEntry> {
-        use db::schema::ipv4_nat_entry::dsl;
+        use nexus_db_schema::schema::ipv4_nat_entry::dsl;
         let result = dsl::ipv4_nat_entry
             .filter(dsl::external_address.eq(values.external_address))
             .filter(dsl::first_port.eq(values.first_port))
@@ -295,7 +294,7 @@ impl DataStore {
         version: i64,
         limit: u32,
     ) -> ListResultVec<Ipv4NatEntry> {
-        use db::schema::ipv4_nat_entry::dsl;
+        use nexus_db_schema::schema::ipv4_nat_entry::dsl;
 
         let list = dsl::ipv4_nat_entry
             .filter(
@@ -318,7 +317,7 @@ impl DataStore {
         version: i64,
         limit: u32,
     ) -> ListResultVec<Ipv4NatEntryView> {
-        use db::schema::ipv4_nat_changes::dsl;
+        use nexus_db_schema::schema::ipv4_nat_changes::dsl;
 
         let nat_changes = dsl::ipv4_nat_changes
             .filter(dsl::version.gt(version))
@@ -338,7 +337,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> LookupResult<i64> {
-        use db::schema::ipv4_nat_version::dsl;
+        use nexus_db_schema::schema::ipv4_nat_version::dsl;
 
         let latest: Option<i64> = dsl::ipv4_nat_version
             .select(diesel::dsl::max(dsl::last_value))
@@ -358,7 +357,7 @@ impl DataStore {
         version: i64,
         before_timestamp: DateTime<Utc>,
     ) -> DeleteResult {
-        use db::schema::ipv4_nat_entry::dsl;
+        use nexus_db_schema::schema::ipv4_nat_entry::dsl;
 
         diesel::delete(dsl::ipv4_nat_entry)
             .filter(dsl::version_removed.lt(version))

@@ -424,7 +424,7 @@ pub(crate) mod test {
         cptestctx: &ControlPlaneTestContext,
         instance_id: Uuid,
     ) {
-        use nexus_db_queries::db::schema::external_ip::dsl;
+        use nexus_db_schema::schema::external_ip::dsl;
 
         let opctx = test_helpers::test_opctx(cptestctx);
         let sled_agent = cptestctx.first_sled_agent();

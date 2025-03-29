@@ -281,8 +281,8 @@ mod tests {
                 ExpressionMethods, OptionalExtension, QueryDsl,
                 SelectableHelper,
             };
-            use nexus_db_queries::db::schema::sled_resource_vmm::dsl as sled_resource_vmm_dsl;
-            use nexus_db_queries::db::schema::vmm::dsl as vmm_dsl;
+            use nexus_db_schema::schema::sled_resource_vmm::dsl as sled_resource_vmm_dsl;
+            use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             let fetched_vmm = vmm_dsl::vmm

@@ -7,7 +7,7 @@
 //! [device_auth.rs](nexus/src/app/device_auth.rs) for an overview of how these are
 //! used.
 
-use crate::schema::{device_access_token, device_auth_request};
+use nexus_db_schema::schema::{device_access_token, device_auth_request};
 
 use chrono::{DateTime, Duration, Utc};
 use nexus_types::external_api::views;

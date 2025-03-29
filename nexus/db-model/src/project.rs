@@ -8,12 +8,12 @@ use super::{
 };
 use crate::Image;
 use crate::collection::DatastoreCollectionConfig;
-use crate::schema::{
+use chrono::{DateTime, Utc};
+use db_macros::Resource;
+use nexus_db_schema::schema::{
     affinity_group, anti_affinity_group, disk, image, instance, project,
     snapshot, vpc,
 };
-use chrono::{DateTime, Utc};
-use db_macros::Resource;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;

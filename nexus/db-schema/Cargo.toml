@@ -1,0 +1,15 @@
+[package]
+name = "nexus-db-schema"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+# NOTE: This list of dependencies is kept very small so that this code (which is
+# expensive to compile) can be parallelized with other parts of Omicron. Please
+# avoid adding dependencies to other parts of Omicron here!
+diesel.workspace = true
+omicron-workspace-hack.workspace = true

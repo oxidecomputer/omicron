@@ -7,19 +7,16 @@ use std::time::Duration;
 
 use super::SqlU16;
 use crate::impl_enum_type;
-use crate::schema::metric_producer;
 use db_macros::Asset;
+use nexus_db_schema::schema::metric_producer;
 use nexus_types::identity::Asset;
 use omicron_common::api::internal;
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Copy, Clone, Debug, QueryId)]
-    #[diesel(postgres_type(name = "producer_kind", schema = "public"))]
-    pub struct ProducerKindEnum;
+    ProducerKindEnum:
 
     #[derive(AsExpression, Copy, Clone, Debug, FromSqlRow, PartialEq)]
-    #[diesel(sql_type = ProducerKindEnum)]
     pub enum ProducerKind;
 
     ManagementGateway => b"management_gateway"

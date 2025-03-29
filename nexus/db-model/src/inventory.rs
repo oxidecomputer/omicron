@@ -6,14 +6,6 @@
 
 use crate::PhysicalDiskKind;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
-use crate::schema::{
-    hw_baseboard_id, inv_caboose, inv_clickhouse_keeper_membership,
-    inv_collection, inv_collection_error, inv_dataset, inv_nvme_disk_firmware,
-    inv_omicron_zone, inv_omicron_zone_nic, inv_physical_disk,
-    inv_root_of_trust, inv_root_of_trust_page, inv_service_processor,
-    inv_sled_agent, inv_sled_omicron_zones, inv_zpool, sw_caboose,
-    sw_root_of_trust_page,
-};
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
     ByteCount, Generation, MacAddr, Name, ServiceKind, SqlU8, SqlU16, SqlU32,
@@ -30,6 +22,14 @@ use diesel::pg::Pg;
 use diesel::serialize::ToSql;
 use diesel::{serialize, sql_types};
 use ipnetwork::IpNetwork;
+use nexus_db_schema::schema::{
+    hw_baseboard_id, inv_caboose, inv_clickhouse_keeper_membership,
+    inv_collection, inv_collection_error, inv_dataset, inv_nvme_disk_firmware,
+    inv_omicron_zone, inv_omicron_zone_nic, inv_physical_disk,
+    inv_root_of_trust, inv_root_of_trust_page, inv_service_processor,
+    inv_sled_agent, inv_sled_omicron_zones, inv_zpool, sw_caboose,
+    sw_root_of_trust_page,
+};
 use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneDataset, OmicronZoneImageSource,
     OmicronZoneType,
@@ -55,12 +55,9 @@ use uuid::Uuid;
 
 // See [`nexus_types::inventory::PowerState`].
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "hw_power_state", schema = "public"))]
-    pub struct HwPowerStateEnum;
+    HwPowerStateEnum:
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
-    #[diesel(sql_type = HwPowerStateEnum)]
     pub enum HwPowerState;
 
     // Enum values
@@ -91,12 +88,9 @@ impl From<HwPowerState> for PowerState {
 
 // See [`nexus_types::inventory::RotSlot`].
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "hw_rot_slot", schema = "public"))]
-    pub struct HwRotSlotEnum;
+    HwRotSlotEnum:
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
-    #[diesel(sql_type = HwRotSlotEnum)]
     pub enum HwRotSlot;
 
     // Enum values
@@ -124,12 +118,9 @@ impl From<HwRotSlot> for RotSlot {
 
 // See [`nexus_types::inventory::CabooseWhich`].
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "caboose_which", schema = "public"))]
-    pub struct CabooseWhichEnum;
+    CabooseWhichEnum:
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
-    #[diesel(sql_type = CabooseWhichEnum)]
     pub enum CabooseWhich;
 
     // Enum values
@@ -175,12 +166,9 @@ impl From<CabooseWhich> for nexus_types::inventory::CabooseWhich {
 
 // See [`nexus_types::inventory::RotPageWhich`].
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "root_of_trust_page_which", schema = "public"))]
-    pub struct RotPageWhichEnum;
+    RotPageWhichEnum:
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
-    #[diesel(sql_type = RotPageWhichEnum)]
     pub enum RotPageWhich;
 
     // Enum values
@@ -228,12 +216,9 @@ impl From<RotPageWhich> for nexus_types::inventory::RotPageWhich {
 
 // See [`nexus_types::inventory::RotImageError`].
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "rot_image_error", schema = "public"))]
-    pub struct RotImageErrorEnum;
+    RotImageErrorEnum:
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
-    #[diesel(sql_type = RotImageErrorEnum)]
     pub enum RotImageError;
 
     // Enum values
@@ -347,9 +332,7 @@ impl From<RotImageError> for nexus_types::inventory::RotImageError {
 
 // See [`nexus_types::inventory::SpType`].
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "sp_type", schema = "public"))]
-    pub struct SpTypeEnum;
+    SpTypeEnum:
 
     #[derive(
         Copy,
@@ -362,7 +345,6 @@ impl_enum_type!(
         PartialEq,
         Eq
     )]
-    #[diesel(sql_type = SpTypeEnum)]
     pub enum SpType;
 
     // Enum values
@@ -747,9 +729,7 @@ pub struct InvRotPage {
 
 // See [`nexus_types::inventory::SledRole`].
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "sled_role"))]
-    pub struct SledRoleEnum;
+    SledRoleEnum:
 
     #[derive(
         Copy,
@@ -762,7 +742,6 @@ impl_enum_type!(
         PartialEq,
         Eq
     )]
-    #[diesel(sql_type = SledRoleEnum)]
     pub enum SledRole;
 
     // Enum values
@@ -1213,12 +1192,9 @@ impl InvSledOmicronZones {
 }
 
 impl_enum_type!(
-    #[derive(Clone, SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "zone_type"))]
-    pub struct ZoneTypeEnum;
+    ZoneTypeEnum:
 
     #[derive(Clone, Copy, Debug, Eq, AsExpression, FromSqlRow, PartialEq)]
-    #[diesel(sql_type = ZoneTypeEnum)]
     pub enum ZoneType;
 
     // Enum values

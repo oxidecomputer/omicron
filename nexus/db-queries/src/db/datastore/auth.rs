@@ -4,7 +4,6 @@
 
 //! Implements the [Storage] interface for [nexus_auth] integration.
 
-use crate::db;
 use crate::db::error::ErrorHandler;
 use crate::db::error::public_error_from_diesel;
 
@@ -30,8 +29,8 @@ impl Storage for super::DataStore {
         resource_type: ResourceType,
         resource_id: Uuid,
     ) -> Result<Vec<RoleAssignment>, Error> {
-        use db::schema::role_assignment::dsl as role_dsl;
-        use db::schema::silo_group_membership::dsl as group_dsl;
+        use nexus_db_schema::schema::role_assignment::dsl as role_dsl;
+        use nexus_db_schema::schema::silo_group_membership::dsl as group_dsl;
 
         // There is no resource-specific authorization check because all
         // authenticated users need to be able to list their own roles --

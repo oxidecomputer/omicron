@@ -2,12 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::schema::{
-    bgp_announce_set, bgp_announcement, bgp_config, bgp_peer_view,
-};
 use crate::{SqlU16, SqlU32};
 use db_macros::Resource;
 use ipnetwork::IpNetwork;
+use nexus_db_schema::schema::{
+    bgp_announce_set, bgp_announcement, bgp_config, bgp_peer_view,
+};
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::{self, IdentityMetadataCreateParams};

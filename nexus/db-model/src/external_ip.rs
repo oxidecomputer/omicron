@@ -9,14 +9,14 @@ use crate::Name;
 use crate::ServiceNetworkInterface;
 use crate::SqlU16;
 use crate::impl_enum_type;
-use crate::schema::external_ip;
-use crate::schema::floating_ip;
 use chrono::DateTime;
 use chrono::Utc;
 use db_macros::Resource;
 use diesel::Queryable;
 use diesel::Selectable;
 use ipnetwork::IpNetwork;
+use nexus_db_schema::schema::external_ip;
+use nexus_db_schema::schema::floating_ip;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalIp;
@@ -43,32 +43,26 @@ use std::net::IpAddr;
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, Clone, Copy, QueryId)]
-    #[diesel(postgres_type(name = "ip_kind", schema = "public"))]
-     pub struct IpKindEnum;
+    IpKindEnum:
 
-     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-     #[diesel(sql_type = IpKindEnum)]
-     pub enum IpKind;
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+    pub enum IpKind;
 
-     SNat => b"snat"
-     Ephemeral => b"ephemeral"
-     Floating => b"floating"
+    SNat => b"snat"
+    Ephemeral => b"ephemeral"
+    Floating => b"floating"
 );
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, Clone, Copy, QueryId)]
-    #[diesel(postgres_type(name = "ip_attach_state"))]
-     pub struct IpAttachStateEnum;
+    IpAttachStateEnum:
 
-     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-     #[diesel(sql_type = IpAttachStateEnum)]
-     pub enum IpAttachState;
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+    pub enum IpAttachState;
 
-     Detached => b"detached"
-     Attached => b"attached"
-     Detaching => b"detaching"
-     Attaching => b"attaching"
+    Detached => b"detached"
+    Attached => b"attached"
+    Detaching => b"detaching"
+    Attaching => b"attaching"
 );
 
 impl std::fmt::Display for IpAttachState {

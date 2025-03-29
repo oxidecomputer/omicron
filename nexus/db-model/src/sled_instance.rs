@@ -1,7 +1,7 @@
 use crate::Name;
 use crate::VmmState;
-use crate::schema::sled_instance;
 use db_macros::Asset;
+use nexus_db_schema::schema::sled_instance;
 use nexus_types::external_api::views;
 use nexus_types::identity::Asset;
 use serde::Deserialize;

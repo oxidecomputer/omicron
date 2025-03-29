@@ -11,12 +11,9 @@ use std::fmt;
 use strum::EnumIter;
 
 impl_enum_type!(
-    #[derive(Clone, SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "physical_disk_state", schema = "public"))]
-    pub struct PhysicalDiskStateEnum;
+    PhysicalDiskStateEnum:
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq, Eq, EnumIter)]
-    #[diesel(sql_type = PhysicalDiskStateEnum)]
     pub enum PhysicalDiskState;
 
     // Enum values

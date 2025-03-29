@@ -9,12 +9,9 @@ use serde::Serialize;
 use std::fmt;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "instance_auto_restart", schema = "public"))]
-    pub struct InstanceAutoRestartPolicyEnum;
+    InstanceAutoRestartPolicyEnum:
 
     #[derive(Copy, Clone, Debug, PartialEq, AsExpression, FromSqlRow, Serialize, Deserialize)]
-    #[diesel(sql_type = InstanceAutoRestartPolicyEnum)]
     pub enum InstanceAutoRestartPolicy;
 
     // Enum values
@@ -53,9 +50,4 @@ impl From<external::InstanceAutoRestartPolicy> for InstanceAutoRestartPolicy {
             external::InstanceAutoRestartPolicy::BestEffort => Self::BestEffort,
         }
     }
-}
-
-impl diesel::query_builder::QueryId for InstanceAutoRestartPolicyEnum {
-    type QueryId = ();
-    const HAS_STATIC_QUERY_ID: bool = false;
 }

@@ -805,7 +805,7 @@ mod tests {
         ) {
             use async_bb8_diesel::AsyncRunQueryDsl;
             use diesel::prelude::*;
-            use nexus_db_model::schema::external_ip::dsl;
+            use nexus_db_schema::schema::external_ip::dsl;
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             let ips: Vec<(Uuid, Option<DateTime<Utc>>)> = datastore
@@ -856,7 +856,7 @@ mod tests {
         ) {
             use async_bb8_diesel::AsyncRunQueryDsl;
             use diesel::prelude::*;
-            use nexus_db_model::schema::service_network_interface::dsl;
+            use nexus_db_schema::schema::service_network_interface::dsl;
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             let nics: Vec<(Uuid, Option<DateTime<Utc>>)> = datastore

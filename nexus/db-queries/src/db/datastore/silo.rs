@@ -64,8 +64,8 @@ impl DataStore {
 
         debug!(opctx.log, "attempting to create built-in silos");
 
-        use db::schema::silo::dsl;
-        use db::schema::silo_quotas::dsl as quotas_dsl;
+        use nexus_db_schema::schema::silo::dsl;
+        use nexus_db_schema::schema::silo_quotas::dsl as quotas_dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
 
         let count = self
@@ -116,7 +116,7 @@ impl DataStore {
             opctx.authorize(authz::Action::ModifyPolicy, &authz::FLEET).await?;
         }
 
-        use db::schema::silo::dsl;
+        use nexus_db_schema::schema::silo::dsl;
         Ok(diesel::insert_into(dsl::silo)
             .values(silo)
             .returning(Silo::as_returning()))
@@ -279,7 +279,7 @@ impl DataStore {
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(Error::from)?;
                 {
-                    use db::schema::certificate::dsl;
+                    use nexus_db_schema::schema::certificate::dsl;
                     diesel::insert_into(dsl::certificate)
                         .values(certificates)
                         .execute_async(&conn)
@@ -314,7 +314,7 @@ impl DataStore {
     ) -> ListResultVec<Silo> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
-        use db::schema::silo::dsl;
+        use nexus_db_schema::schema::silo::dsl;
         paginated(dsl::silo, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::discoverable.eq(true))
@@ -332,7 +332,7 @@ impl DataStore {
     ) -> ListResultVec<Silo> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
-        use db::schema::silo::dsl;
+        use nexus_db_schema::schema::silo::dsl;
         let mut query = match pagparams {
             PaginatedBy::Id(params) => paginated(dsl::silo, dsl::id, &params),
             PaginatedBy::Name(params) => paginated(
@@ -394,12 +394,12 @@ impl DataStore {
         assert_eq!(authz_silo.id(), db_silo.id());
         opctx.authorize(authz::Action::Delete, authz_silo).await?;
 
-        use db::schema::project;
-        use db::schema::silo;
-        use db::schema::silo_group;
-        use db::schema::silo_group_membership;
-        use db::schema::silo_user;
-        use db::schema::silo_user_password_hash;
+        use nexus_db_schema::schema::project;
+        use nexus_db_schema::schema::silo;
+        use nexus_db_schema::schema::silo_group;
+        use nexus_db_schema::schema::silo_group_membership;
+        use nexus_db_schema::schema::silo_user;
+        use nexus_db_schema::schema::silo_user_password_hash;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -546,7 +546,7 @@ impl DataStore {
         );
 
         // delete all silo identity providers
-        use db::schema::identity_provider::dsl as idp_dsl;
+        use nexus_db_schema::schema::identity_provider::dsl as idp_dsl;
 
         let updated_rows = diesel::update(idp_dsl::identity_provider)
             .filter(idp_dsl::silo_id.eq(id))
@@ -558,7 +558,7 @@ impl DataStore {
 
         debug!(opctx.log, "deleted {} silo IdPs for silo {}", updated_rows, id);
 
-        use db::schema::saml_identity_provider::dsl as saml_idp_dsl;
+        use nexus_db_schema::schema::saml_identity_provider::dsl as saml_idp_dsl;
 
         let updated_rows = diesel::update(saml_idp_dsl::saml_identity_provider)
             .filter(saml_idp_dsl::silo_id.eq(id))
@@ -574,7 +574,7 @@ impl DataStore {
         );
 
         // delete certificates
-        use db::schema::certificate::dsl as cert_dsl;
+        use nexus_db_schema::schema::certificate::dsl as cert_dsl;
 
         let updated_rows = diesel::update(cert_dsl::certificate)
             .filter(cert_dsl::silo_id.eq(id))
@@ -587,7 +587,7 @@ impl DataStore {
         debug!(opctx.log, "deleted {} silo IdPs for silo {}", updated_rows, id);
 
         // delete IP pool links (not IP pools, just the links)
-        use db::schema::ip_pool_resource;
+        use nexus_db_schema::schema::ip_pool_resource;
 
         let updated_rows = diesel::delete(ip_pool_resource::table)
             .filter(ip_pool_resource::resource_id.eq(id))

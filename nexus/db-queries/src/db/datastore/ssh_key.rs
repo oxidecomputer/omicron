@@ -53,7 +53,7 @@ impl DataStore {
             }
         }
 
-        use db::schema::ssh_key::dsl;
+        use nexus_db_schema::schema::ssh_key::dsl;
         let result: Vec<(Uuid, Name)> = dsl::ssh_key
             .filter(dsl::id.eq_any(ids).or(dsl::name.eq_any(names)))
             .filter(dsl::silo_user_id.eq(authz_user.id()))
@@ -104,7 +104,7 @@ impl DataStore {
     ) -> ListResultVec<SshKey> {
         opctx.authorize(authz::Action::ListChildren, authz_user).await?;
 
-        use db::schema::ssh_key::dsl;
+        use nexus_db_schema::schema::ssh_key::dsl;
         dsl::ssh_key
             .filter(dsl::id.eq_any(keys.to_owned()))
             .filter(dsl::silo_user_id.eq(authz_user.id()))
@@ -130,7 +130,7 @@ impl DataStore {
         let instance_ssh_keys: Vec<db::model::InstanceSshKey> = match keys {
             // If the keys are None, use the fallback behavior of assigning all the users keys
             None => {
-                use db::schema::ssh_key::dsl;
+                use nexus_db_schema::schema::ssh_key::dsl;
                 dsl::ssh_key
                     .filter(dsl::silo_user_id.eq(authz_user.id()))
                     .filter(dsl::time_deleted.is_null())
@@ -161,7 +161,7 @@ impl DataStore {
                 .collect(),
         };
 
-        use db::schema::instance_ssh_key::dsl;
+        use nexus_db_schema::schema::instance_ssh_key::dsl;
 
         diesel::insert_into(dsl::instance_ssh_key)
             .values(instance_ssh_keys)
@@ -178,8 +178,8 @@ impl DataStore {
         authz_instance: &authz::Instance,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<SshKey> {
-        use db::schema::instance_ssh_key::dsl as inst_dsl;
-        use db::schema::ssh_key::dsl;
+        use nexus_db_schema::schema::instance_ssh_key::dsl as inst_dsl;
+        use nexus_db_schema::schema::ssh_key::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::ssh_key, dsl::id, &pagparams)
@@ -191,7 +191,7 @@ impl DataStore {
             ),
         }
         .inner_join(
-            db::schema::instance_ssh_key::table
+            nexus_db_schema::schema::instance_ssh_key::table
                 .on(dsl::id.eq(inst_dsl::ssh_key_id)),
         )
         .filter(inst_dsl::instance_id.eq(authz_instance.id()))
@@ -207,7 +207,7 @@ impl DataStore {
         opctx: &OpContext,
         instance_id: InstanceUuid,
     ) -> DeleteResult {
-        use db::schema::instance_ssh_key::dsl;
+        use nexus_db_schema::schema::instance_ssh_key::dsl;
         diesel::delete(dsl::instance_ssh_key)
             .filter(dsl::instance_id.eq(instance_id.into_untyped_uuid()))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
@@ -224,7 +224,7 @@ impl DataStore {
     ) -> ListResultVec<SshKey> {
         opctx.authorize(authz::Action::ListChildren, authz_user).await?;
 
-        use db::schema::ssh_key::dsl;
+        use nexus_db_schema::schema::ssh_key::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::ssh_key, dsl::id, &pagparams)
@@ -254,7 +254,7 @@ impl DataStore {
         opctx.authorize(authz::Action::CreateChild, authz_user).await?;
         let name = ssh_key.name().to_string();
 
-        use db::schema::ssh_key::dsl;
+        use nexus_db_schema::schema::ssh_key::dsl;
         diesel::insert_into(dsl::ssh_key)
             .values(ssh_key)
             .returning(SshKey::as_returning())
@@ -276,7 +276,7 @@ impl DataStore {
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Delete, authz_ssh_key).await?;
 
-        use db::schema::ssh_key::dsl;
+        use nexus_db_schema::schema::ssh_key::dsl;
         diesel::update(dsl::ssh_key)
             .filter(dsl::id.eq(authz_ssh_key.id()))
             .filter(dsl::time_deleted.is_null())

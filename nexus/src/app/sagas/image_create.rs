@@ -495,7 +495,7 @@ pub(crate) mod test {
 
     async fn no_image_records_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::Image;
-        use nexus_db_queries::db::schema::image::dsl;
+        use nexus_db_schema::schema::image::dsl;
 
         // `new_test_params` creates a silo image, so search for those
         dsl::image

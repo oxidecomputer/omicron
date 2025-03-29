@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{Name, impl_enum_wrapper};
-use crate::schema::router_route;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use diesel::backend::Backend;
@@ -11,6 +10,7 @@ use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
+use nexus_db_schema::schema::router_route;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
@@ -18,12 +18,9 @@ use std::io::Write;
 use uuid::Uuid;
 
 impl_enum_wrapper!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "router_route_kind", schema = "public"))]
-    pub struct RouterRouteKindEnum;
+    RouterRouteKindEnum:
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow)]
-    #[diesel(sql_type = RouterRouteKindEnum)]
     pub struct RouterRouteKind(pub external::RouterRouteKind);
 
     // Enum values

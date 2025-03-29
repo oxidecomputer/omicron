@@ -2,11 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::schema::silo_user_password_hash;
 use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
+use nexus_db_schema::schema::silo_user_password_hash;
 use parse_display::Display;
 use ref_cast::RefCast;
 use uuid::Uuid;

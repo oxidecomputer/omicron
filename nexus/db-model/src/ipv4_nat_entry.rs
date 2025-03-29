@@ -1,9 +1,7 @@
 use super::MacAddr;
-use crate::{
-    Ipv4Net, Ipv6Net, SqlU16, Vni, schema::ipv4_nat_changes,
-    schema::ipv4_nat_entry,
-};
+use crate::{Ipv4Net, Ipv6Net, SqlU16, Vni};
 use chrono::{DateTime, Utc};
+use nexus_db_schema::schema::{ipv4_nat_changes, ipv4_nat_entry};
 use nexus_types::internal_api::views::Ipv4NatEntryView;
 use serde::Deserialize;
 use serde::Serialize;

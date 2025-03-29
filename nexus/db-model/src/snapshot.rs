@@ -5,9 +5,9 @@
 use super::{ByteCount, impl_enum_type};
 use crate::BlockSize;
 use crate::Generation;
-use crate::schema::snapshot;
 use crate::typed_uuid::DbTypedUuid;
 use db_macros::Resource;
+use nexus_db_schema::schema::snapshot;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
 use omicron_uuid_kinds::VolumeKind;
@@ -16,12 +16,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "snapshot_state", schema = "public"))]
-    pub struct SnapshotStateEnum;
+    SnapshotStateEnum:
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[diesel(sql_type = SnapshotStateEnum)]
     pub enum SnapshotState;
 
     Creating => b"creating"

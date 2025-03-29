@@ -8,12 +8,9 @@ use omicron_common::api::internal;
 use serde::{Deserialize, Serialize};
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "dataset_kind", schema = "public"))]
-    pub struct DatasetKindEnum;
+    DatasetKindEnum:
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[diesel(sql_type = DatasetKindEnum)]
     pub enum DatasetKind;
 
     // Enum values

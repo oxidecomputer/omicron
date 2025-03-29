@@ -1,6 +1,6 @@
 use super::ByteCount;
-use crate::schema::silo_quotas;
 use chrono::{DateTime, Utc};
+use nexus_db_schema::schema::silo_quotas;
 use nexus_types::external_api::{params, views};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

@@ -396,7 +396,7 @@ pub async fn count_virtual_provisioning_resource_records(
     cptestctx: &ControlPlaneTestContext,
 ) -> usize {
     use nexus_db_queries::db::model::VirtualProvisioningResource;
-    use nexus_db_queries::db::schema::virtual_provisioning_resource::dsl;
+    use nexus_db_schema::schema::virtual_provisioning_resource::dsl;
 
     let datastore = cptestctx.server.server_context().nexus.datastore().clone();
     let conn = datastore.pool_connection_for_tests().await.unwrap();
@@ -433,7 +433,7 @@ pub async fn count_virtual_provisioning_collection_records_using_instances(
     cptestctx: &ControlPlaneTestContext,
 ) -> usize {
     use nexus_db_queries::db::model::VirtualProvisioningCollection;
-    use nexus_db_queries::db::schema::virtual_provisioning_collection::dsl;
+    use nexus_db_schema::schema::virtual_provisioning_collection::dsl;
 
     let datastore = cptestctx.server.server_context().nexus.datastore().clone();
     let conn = datastore.pool_connection_for_tests().await.unwrap();
@@ -466,7 +466,7 @@ pub async fn no_sled_resource_vmm_records_exist(
     cptestctx: &ControlPlaneTestContext,
 ) -> bool {
     use nexus_db_queries::db::model::SledResourceVmm;
-    use nexus_db_queries::db::schema::sled_resource_vmm::dsl;
+    use nexus_db_schema::schema::sled_resource_vmm::dsl;
 
     let datastore = cptestctx.server.server_context().nexus.datastore();
     let conn = datastore.pool_connection_for_tests().await.unwrap();
@@ -496,7 +496,7 @@ pub async fn sled_resource_vmms_exist_for_vmm(
     vmm_id: PropolisUuid,
 ) -> bool {
     use nexus_db_queries::db::model::SledResourceVmm;
-    use nexus_db_queries::db::schema::sled_resource_vmm::dsl;
+    use nexus_db_schema::schema::sled_resource_vmm::dsl;
 
     let datastore = cptestctx.server.server_context().nexus.datastore();
     let conn = datastore.pool_connection_for_tests().await.unwrap();
@@ -774,7 +774,7 @@ pub(crate) async fn assert_no_failed_undo_steps(
     let saga_node_events: Vec<SagaNodeEvent> = datastore
         .transaction_retry_wrapper("assert_no_failed_undo_steps")
         .transaction(&conn, |conn| async move {
-            use nexus_db_queries::db::schema::saga_node_event::dsl;
+            use nexus_db_schema::schema::saga_node_event::dsl;
 
             conn.batch_execute_async(
                 nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,

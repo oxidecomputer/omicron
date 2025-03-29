@@ -7,12 +7,9 @@ use nexus_types::external_api;
 use serde::{Deserialize, Serialize};
 
 impl_enum_type!(
-    #[derive(Clone, SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "physical_disk_kind", schema = "public"))]
-    pub struct PhysicalDiskKindEnum;
+    PhysicalDiskKindEnum:
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[diesel(sql_type = PhysicalDiskKindEnum)]
     pub enum PhysicalDiskKind;
 
     // Enum values

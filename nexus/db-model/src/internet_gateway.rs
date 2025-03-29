@@ -1,10 +1,10 @@
 use super::Generation;
 use crate::DatastoreCollectionConfig;
-use crate::schema::{
-    internet_gateway, internet_gateway_ip_address, internet_gateway_ip_pool,
-};
 use db_macros::Resource;
 use ipnetwork::IpNetwork;
+use nexus_db_schema::schema::{
+    internet_gateway, internet_gateway_ip_address, internet_gateway_ip_pool,
+};
 use nexus_types::external_api::{params, views};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::IdentityMetadataCreateParams;

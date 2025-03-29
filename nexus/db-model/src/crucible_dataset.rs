@@ -5,9 +5,9 @@
 use super::{Generation, Region, SqlU16};
 use crate::collection::DatastoreCollectionConfig;
 use crate::ipv6;
-use crate::schema::{crucible_dataset, region};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
+use nexus_db_schema::schema::{crucible_dataset, region};
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;

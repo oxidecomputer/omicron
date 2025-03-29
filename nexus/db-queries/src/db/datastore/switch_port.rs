@@ -7,7 +7,6 @@ use std::net::IpAddr;
 
 use super::DataStore;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::datastore::UpdatePrecondition;
 use crate::db::datastore::address_lot::{
     ReserveBlockError, ReserveBlockTxnError,
@@ -168,7 +167,7 @@ impl DataStore {
         opctx: &OpContext,
         name: Name,
     ) -> LookupResult<Uuid> {
-        use db::schema::switch_port_settings::{
+        use nexus_db_schema::schema::switch_port_settings::{
             self, dsl as port_settings_dsl,
         };
 
@@ -189,7 +188,7 @@ impl DataStore {
         opctx: &OpContext,
         switch_port_settings_id: Uuid,
     ) -> LookupResult<Vec<(Uuid, Name)>> {
-        use db::schema::switch_port::{self, dsl};
+        use nexus_db_schema::schema::switch_port::{self, dsl};
 
         let pool = self.pool_connection_authorized(opctx).await?;
 
@@ -354,7 +353,7 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<SwitchPortSettings> {
-        use db::schema::switch_port_settings::dsl;
+        use nexus_db_schema::schema::switch_port_settings::dsl;
 
         match pagparams {
             PaginatedBy::Id(pagparams) => {
@@ -393,10 +392,10 @@ impl DataStore {
                 let err = err.clone();
                 async move {
                 // get the top level port settings object
-                use db::schema::switch_port_settings::{
+                use nexus_db_schema::schema::switch_port_settings::{
                     self, dsl as port_settings_dsl,
                 };
-                use db::schema::{
+                use nexus_db_schema::schema::{
                     switch_port_settings_bgp_peer_config_allow_import::dsl as allow_import_dsl,
                     switch_port_settings_bgp_peer_config_allow_export::dsl as allow_export_dsl,
                     switch_port_settings_bgp_peer_config_communities::dsl as bgp_communities_dsl,
@@ -449,7 +448,7 @@ impl DataStore {
                         .await?;
 
                 // get the port config
-                use db::schema::switch_port_settings_port_config::{
+                use nexus_db_schema::schema::switch_port_settings_port_config::{
                     self as port_config, dsl as port_config_dsl,
                 };
                 let port: SwitchPortConfig =
@@ -465,7 +464,7 @@ impl DataStore {
                     SwitchPortSettingsCombinedResult::new(settings, port);
 
                 // get the link configs
-                use db::schema::switch_port_settings_link_config::{
+                use nexus_db_schema::schema::switch_port_settings_link_config::{
                     self as link_config, dsl as link_config_dsl,
                 };
 
@@ -481,7 +480,7 @@ impl DataStore {
                     .filter_map(|link| link.lldp_link_config_id)
                     .collect();
 
-                use db::schema::lldp_link_config;
+                use nexus_db_schema::schema::lldp_link_config;
                 result.link_lldp = lldp_link_config::dsl::lldp_link_config
                     .filter(lldp_link_config::id.eq_any(lldp_link_ids))
                     .select(LldpLinkConfig::as_select())
@@ -500,7 +499,7 @@ impl DataStore {
                     .flatten()
                     .collect();
 
-                use db::schema::tx_eq_config;
+                use nexus_db_schema::schema::tx_eq_config;
                 let configs = tx_eq_config::dsl::tx_eq_config
                     .filter(tx_eq_config::id.eq_any(tx_eq_ids))
                     .select(TxEqConfig::as_select())
@@ -515,7 +514,7 @@ impl DataStore {
 			    }).collect();
 
                 // get the interface configs
-                use db::schema::switch_port_settings_interface_config::{
+                use nexus_db_schema::schema::switch_port_settings_interface_config::{
                     self as interface_config, dsl as interface_config_dsl,
                 };
 
@@ -526,8 +525,8 @@ impl DataStore {
                         .load_async::<SwitchInterfaceConfig>(&conn)
                         .await?;
 
-                use db::schema::switch_vlan_interface_config as vlan_config;
-                use db::schema::switch_vlan_interface_config::dsl as vlan_dsl;
+                use nexus_db_schema::schema::switch_vlan_interface_config as vlan_config;
+                use nexus_db_schema::schema::switch_vlan_interface_config::dsl as vlan_dsl;
                 let interface_ids: Vec<Uuid> = result
                     .interfaces
                     .iter()
@@ -541,7 +540,7 @@ impl DataStore {
                     .await?;
 
                 // get the route configs
-                use db::schema::switch_port_settings_route_config::{
+                use nexus_db_schema::schema::switch_port_settings_route_config::{
                     self as route_config, dsl as route_config_dsl,
                 };
 
@@ -552,7 +551,7 @@ impl DataStore {
                     .await?;
 
                 // get the bgp peer configs
-                use db::schema::switch_port_settings_bgp_peer_config::{
+                use nexus_db_schema::schema::switch_port_settings_bgp_peer_config::{
                     self as bgp_peer, dsl as bgp_peer_dsl,
                 };
 
@@ -637,7 +636,7 @@ impl DataStore {
                 }
 
                 // get the address configs
-                use db::schema::switch_port_settings_address_config::{
+                use nexus_db_schema::schema::switch_port_settings_address_config::{
                     self as address_config, dsl as address_config_dsl,
                 };
 
@@ -705,8 +704,8 @@ impl DataStore {
                 let err = err.clone();
                 let switch_port = switch_port.clone();
                 async move {
-                    use db::schema::rack;
-                    use db::schema::rack::dsl as rack_dsl;
+                    use nexus_db_schema::schema::rack;
+                    use nexus_db_schema::schema::rack::dsl as rack_dsl;
                     rack_dsl::rack
                         .filter(rack::id.eq(rack_id))
                         .select(rack::id)
@@ -721,7 +720,7 @@ impl DataStore {
                         })?;
 
                     // insert switch port
-                    use db::schema::switch_port::dsl as switch_port_dsl;
+                    use nexus_db_schema::schema::switch_port::dsl as switch_port_dsl;
                     let db_switch_port: SwitchPort =
                         diesel::insert_into(switch_port_dsl::switch_port)
                             .values(switch_port)
@@ -777,8 +776,8 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    use db::schema::switch_port;
-                    use db::schema::switch_port::dsl as switch_port_dsl;
+                    use nexus_db_schema::schema::switch_port;
+                    use nexus_db_schema::schema::switch_port::dsl as switch_port_dsl;
 
                     let switch_location = params.switch_location.to_string();
                     let port_name = portname.to_string();
@@ -842,7 +841,7 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SwitchPort> {
-        use db::schema::switch_port::dsl;
+        use nexus_db_schema::schema::switch_port::dsl;
 
         paginated(dsl::switch_port, dsl::id, pagparams)
             .select(SwitchPort::as_select())
@@ -856,8 +855,8 @@ impl DataStore {
         opctx: &OpContext,
         id: uuid::Uuid,
     ) -> LookupResult<SwitchPort> {
-        use db::schema::switch_port;
-        use db::schema::switch_port::dsl as switch_port_dsl;
+        use nexus_db_schema::schema::switch_port;
+        use nexus_db_schema::schema::switch_port::dsl as switch_port_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -877,10 +876,10 @@ impl DataStore {
         port_settings_id: Option<Uuid>,
         current: UpdatePrecondition<Uuid>,
     ) -> UpdateResult<()> {
-        use db::schema::bgp_config::dsl as bgp_config_dsl;
-        use db::schema::switch_port;
-        use db::schema::switch_port::dsl as switch_port_dsl;
-        use db::schema::switch_port_settings_bgp_peer_config::dsl as bgp_peer_dsl;
+        use nexus_db_schema::schema::bgp_config::dsl as bgp_config_dsl;
+        use nexus_db_schema::schema::switch_port;
+        use nexus_db_schema::schema::switch_port::dsl as switch_port_dsl;
+        use nexus_db_schema::schema::switch_port_settings_bgp_peer_config::dsl as bgp_peer_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -1043,8 +1042,8 @@ impl DataStore {
         switch_location: Name,
         port_name: Name,
     ) -> LookupResult<Uuid> {
-        use db::schema::switch_port;
-        use db::schema::switch_port::dsl as switch_port_dsl;
+        use nexus_db_schema::schema::switch_port;
+        use nexus_db_schema::schema::switch_port::dsl as switch_port_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
         let id: Uuid = switch_port_dsl::switch_port
@@ -1069,8 +1068,8 @@ impl DataStore {
         opctx: &OpContext,
         name: Name,
     ) -> LookupResult<Uuid> {
-        use db::schema::switch_port_settings;
-        use db::schema::switch_port_settings::dsl as port_settings_dsl;
+        use nexus_db_schema::schema::switch_port_settings;
+        use nexus_db_schema::schema::switch_port_settings::dsl as port_settings_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -1096,7 +1095,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> ListResultVec<SwitchPort> {
-        use db::schema::{
+        use nexus_db_schema::schema::{
             switch_port::dsl as switch_port_dsl,
             switch_port_settings_bgp_peer_config::dsl as bgp_peer_config_dsl,
             switch_port_settings_route_config::dsl as route_config_dsl,
@@ -1149,7 +1148,7 @@ async fn do_switch_port_settings_create(
     params: &params::SwitchPortSettingsCreate,
     err: OptionalError<SwitchPortSettingsCreateError>,
 ) -> Result<SwitchPortSettingsCombinedResult, diesel::result::Error> {
-    use db::schema::{
+    use nexus_db_schema::schema::{
         lldp_link_config::dsl as lldp_link_config_dsl,
         switch_port_settings::dsl as port_settings_dsl,
         switch_port_settings_address_config::dsl as address_config_dsl,
@@ -1334,7 +1333,7 @@ async fn do_switch_port_settings_create(
     for (interface_name, peer_config) in &params.bgp_peers {
         for p in &peer_config.peers {
             peer_by_addr.insert(p.addr, &p);
-            use db::schema::bgp_config;
+            use nexus_db_schema::schema::bgp_config;
             let bgp_config_id = match &p.bgp_config {
                 NameOrId::Id(id) => bgp_config::table
                     .filter(bgp_config::time_deleted.is_null())
@@ -1479,7 +1478,7 @@ async fn do_switch_port_settings_create(
     }
 
     let mut address_config = Vec::new();
-    use db::schema::address_lot;
+    use nexus_db_schema::schema::address_lot;
     for (interface_name, a) in &params.addresses {
         for address in &a.addresses {
             let address_lot_id = match &address.address_lot {
@@ -1563,8 +1562,8 @@ async fn do_switch_port_settings_delete(
     selector: &NameOrId,
     err: OptionalError<SwitchPortSettingsDeleteError>,
 ) -> Result<(), diesel::result::Error> {
-    use db::schema::switch_port_settings;
-    use db::schema::switch_port_settings::dsl as port_settings_dsl;
+    use nexus_db_schema::schema::switch_port_settings;
+    use nexus_db_schema::schema::switch_port_settings::dsl as port_settings_dsl;
     let id = match selector {
         NameOrId::Id(id) => switch_port_settings::table
             .filter(switch_port_settings::time_deleted.is_null())
@@ -1604,7 +1603,7 @@ async fn do_switch_port_settings_delete(
         .await?;
 
     // delete the port config object
-    use db::schema::switch_port_settings_port_config::{
+    use nexus_db_schema::schema::switch_port_settings_port_config::{
         self as sps_port_config, dsl as port_config_dsl,
     };
     diesel::delete(port_config_dsl::switch_port_settings_port_config)
@@ -1613,7 +1612,7 @@ async fn do_switch_port_settings_delete(
         .await?;
 
     // delete the link configs
-    use db::schema::switch_port_settings_link_config::{
+    use nexus_db_schema::schema::switch_port_settings_link_config::{
         self as sps_link_config, dsl as link_config_dsl,
     };
     let links: Vec<SwitchPortLinkConfig> =
@@ -1623,7 +1622,7 @@ async fn do_switch_port_settings_delete(
             .get_results_async(conn)
             .await?;
     // delete lldp configs
-    use db::schema::lldp_link_config;
+    use nexus_db_schema::schema::lldp_link_config;
     let lldp_link_ids: Vec<Uuid> =
         links.iter().filter_map(|link| link.lldp_link_config_id).collect();
     diesel::delete(lldp_link_config::dsl::lldp_link_config)
@@ -1632,7 +1631,7 @@ async fn do_switch_port_settings_delete(
         .await?;
 
     // delete tx_eq configs
-    use db::schema::tx_eq_config;
+    use nexus_db_schema::schema::tx_eq_config;
     let tx_eq_ids: Vec<Uuid> =
         links.iter().filter_map(|link| link.tx_eq_config_id).collect();
     diesel::delete(tx_eq_config::dsl::tx_eq_config)
@@ -1641,7 +1640,7 @@ async fn do_switch_port_settings_delete(
         .await?;
 
     // delete interface configs
-    use db::schema::switch_port_settings_interface_config::{
+    use nexus_db_schema::schema::switch_port_settings_interface_config::{
         self as sps_interface_config, dsl as interface_config_dsl,
     };
 
@@ -1654,7 +1653,7 @@ async fn do_switch_port_settings_delete(
     .await?;
 
     // delete any vlan interfaces
-    use db::schema::switch_vlan_interface_config::{
+    use nexus_db_schema::schema::switch_vlan_interface_config::{
         self, dsl as vlan_config_dsl,
     };
     let interface_ids: Vec<Uuid> =
@@ -1669,8 +1668,8 @@ async fn do_switch_port_settings_delete(
         .await?;
 
     // delete route configs
-    use db::schema::switch_port_settings_route_config;
-    use db::schema::switch_port_settings_route_config::dsl as route_config_dsl;
+    use nexus_db_schema::schema::switch_port_settings_route_config;
+    use nexus_db_schema::schema::switch_port_settings_route_config::dsl as route_config_dsl;
 
     diesel::delete(route_config_dsl::switch_port_settings_route_config)
         .filter(switch_port_settings_route_config::port_settings_id.eq(id))
@@ -1678,8 +1677,8 @@ async fn do_switch_port_settings_delete(
         .await?;
 
     // delete bgp configurations
-    use db::schema::switch_port_settings_bgp_peer_config as bgp_peer;
-    use db::schema::switch_port_settings_bgp_peer_config::dsl as bgp_peer_dsl;
+    use nexus_db_schema::schema::switch_port_settings_bgp_peer_config as bgp_peer;
+    use nexus_db_schema::schema::switch_port_settings_bgp_peer_config::dsl as bgp_peer_dsl;
 
     diesel::delete(bgp_peer_dsl::switch_port_settings_bgp_peer_config)
         .filter(bgp_peer::port_settings_id.eq(id))
@@ -1687,8 +1686,8 @@ async fn do_switch_port_settings_delete(
         .await?;
 
     // delete allowed exports
-    use db::schema::switch_port_settings_bgp_peer_config_allow_export as allow_export;
-    use db::schema::switch_port_settings_bgp_peer_config_allow_export::dsl as allow_export_dsl;
+    use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_export as allow_export;
+    use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_export::dsl as allow_export_dsl;
     diesel::delete(
         allow_export_dsl::switch_port_settings_bgp_peer_config_allow_export,
     )
@@ -1697,8 +1696,8 @@ async fn do_switch_port_settings_delete(
     .await?;
 
     // delete allowed imports
-    use db::schema::switch_port_settings_bgp_peer_config_allow_import as allow_import;
-    use db::schema::switch_port_settings_bgp_peer_config_allow_import::dsl as allow_import_dsl;
+    use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_import as allow_import;
+    use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_allow_import::dsl as allow_import_dsl;
     diesel::delete(
         allow_import_dsl::switch_port_settings_bgp_peer_config_allow_import,
     )
@@ -1707,8 +1706,8 @@ async fn do_switch_port_settings_delete(
     .await?;
 
     // delete communities
-    use db::schema::switch_port_settings_bgp_peer_config_communities as bgp_communities;
-    use db::schema::switch_port_settings_bgp_peer_config_communities::dsl as bgp_communities_dsl;
+    use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_communities as bgp_communities;
+    use nexus_db_schema::schema::switch_port_settings_bgp_peer_config_communities::dsl as bgp_communities_dsl;
     diesel::delete(
         bgp_communities_dsl::switch_port_settings_bgp_peer_config_communities,
     )
@@ -1717,7 +1716,7 @@ async fn do_switch_port_settings_delete(
     .await?;
 
     // delete address configs
-    use db::schema::switch_port_settings_address_config::{
+    use nexus_db_schema::schema::switch_port_settings_address_config::{
         self as address_config, dsl as address_config_dsl,
     };
 
@@ -1728,7 +1727,7 @@ async fn do_switch_port_settings_delete(
             .get_results_async(conn)
             .await?;
 
-    use db::schema::address_lot_rsvd_block::dsl as rsvd_block_dsl;
+    use nexus_db_schema::schema::address_lot_rsvd_block::dsl as rsvd_block_dsl;
 
     for ps in &port_settings_addrs {
         diesel::delete(rsvd_block_dsl::address_lot_rsvd_block)

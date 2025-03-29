@@ -3,10 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
-use crate::schema::downstairs_client_stop_request_notification;
-use crate::schema::downstairs_client_stopped_notification;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
+use nexus_db_schema::schema::downstairs_client_stop_request_notification;
+use nexus_db_schema::schema::downstairs_client_stopped_notification;
 use omicron_common::api::internal;
 use omicron_uuid_kinds::DownstairsKind;
 use omicron_uuid_kinds::UpstairsKind;
@@ -15,12 +15,9 @@ use serde::{Deserialize, Serialize};
 // Types for stop request notification
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "downstairs_client_stop_request_reason_type", schema = "public"))]
-    pub struct DownstairsClientStopRequestReasonEnum;
+    DownstairsClientStopRequestReasonEnum:
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[diesel(sql_type = DownstairsClientStopRequestReasonEnum)]
     pub enum DownstairsClientStopRequestReason;
 
     // Reason types
@@ -75,12 +72,9 @@ pub struct DownstairsClientStopRequestNotification {
 // Types for stopped notification
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "downstairs_client_stopped_reason_type", schema = "public"))]
-    pub struct DownstairsClientStoppedReasonEnum;
+    DownstairsClientStoppedReasonEnum:
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[diesel(sql_type = DownstairsClientStoppedReasonEnum)]
     pub enum DownstairsClientStoppedReason;
 
     // Reason types

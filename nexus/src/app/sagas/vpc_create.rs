@@ -835,7 +835,7 @@ pub(crate) mod test {
 
     async fn no_vpcs_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::Vpc;
-        use nexus_db_queries::db::schema::vpc::dsl;
+        use nexus_db_schema::schema::vpc::dsl;
 
         dsl::vpc
             .filter(dsl::time_deleted.is_null())
@@ -856,7 +856,7 @@ pub(crate) mod test {
 
     async fn no_routers_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::VpcRouter;
-        use nexus_db_queries::db::schema::vpc_router::dsl;
+        use nexus_db_schema::schema::vpc_router::dsl;
 
         dsl::vpc_router
             .filter(dsl::time_deleted.is_null())
@@ -877,7 +877,7 @@ pub(crate) mod test {
 
     async fn no_gateways_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::InternetGateway;
-        use nexus_db_queries::db::schema::internet_gateway::dsl;
+        use nexus_db_schema::schema::internet_gateway::dsl;
 
         dsl::internet_gateway
             .filter(dsl::time_deleted.is_null())
@@ -898,7 +898,7 @@ pub(crate) mod test {
 
     async fn no_gateway_links_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::InternetGatewayIpPool;
-        use nexus_db_queries::db::schema::internet_gateway_ip_pool::dsl;
+        use nexus_db_schema::schema::internet_gateway_ip_pool::dsl;
 
         dsl::internet_gateway_ip_pool
             .filter(dsl::time_deleted.is_null())
@@ -920,8 +920,8 @@ pub(crate) mod test {
 
     async fn no_routes_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::RouterRoute;
-        use nexus_db_queries::db::schema::router_route::dsl;
-        use nexus_db_queries::db::schema::vpc_router::dsl as vpc_router_dsl;
+        use nexus_db_schema::schema::router_route::dsl;
+        use nexus_db_schema::schema::vpc_router::dsl as vpc_router_dsl;
 
         dsl::router_route
             .filter(dsl::time_deleted.is_null())
@@ -949,7 +949,7 @@ pub(crate) mod test {
 
     async fn no_subnets_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::VpcSubnet;
-        use nexus_db_queries::db::schema::vpc_subnet::dsl;
+        use nexus_db_schema::schema::vpc_subnet::dsl;
 
         dsl::vpc_subnet
             .filter(dsl::time_deleted.is_null())
@@ -970,7 +970,7 @@ pub(crate) mod test {
 
     async fn no_firewall_rules_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::VpcFirewallRule;
-        use nexus_db_queries::db::schema::vpc_firewall_rule::dsl;
+        use nexus_db_schema::schema::vpc_firewall_rule::dsl;
 
         dsl::vpc_firewall_rule
             .filter(dsl::time_deleted.is_null())

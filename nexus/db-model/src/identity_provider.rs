@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::impl_enum_type;
-use crate::schema::{identity_provider, saml_identity_provider};
 use db_macros::Resource;
+use nexus_db_schema::schema::{identity_provider, saml_identity_provider};
 use nexus_types::identity::Resource;
 
 use nexus_types::external_api::views;
@@ -12,12 +12,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "provider_type", schema = "public"))]
-    pub struct IdentityProviderTypeEnum;
+    IdentityProviderTypeEnum:
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[diesel(sql_type = IdentityProviderTypeEnum)]
     pub enum IdentityProviderType;
 
     // Enum values

@@ -154,7 +154,7 @@ impl<'a> Sled<'a> {
         datastore: &DataStore,
         v0: &::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::SledKind>,
     ) -> LookupResult<(authz::Sled, nexus_db_model::Sled)> {
-        use db::schema::sled::dsl;
+        use ::nexus_db_schema::schema::sled::dsl;
         let db_row = dsl::sled
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(::nexus_db_model::to_db_typed_uuid(v0.clone())))

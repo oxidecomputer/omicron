@@ -1,5 +1,6 @@
 use crate::ByteCount;
-use crate::{Name, schema::silo_utilization};
+use crate::Name;
+use nexus_db_schema::schema::silo_utilization;
 use nexus_types::external_api::views;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

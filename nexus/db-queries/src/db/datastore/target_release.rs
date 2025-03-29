@@ -9,10 +9,10 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::error::{ErrorHandler, public_error_from_diesel};
 use crate::db::model::{SemverVersion, TargetRelease, TargetReleaseSource};
-use crate::db::schema::target_release::dsl;
 use async_bb8_diesel::AsyncRunQueryDsl as _;
 use diesel::insert_into;
 use diesel::prelude::*;
+use nexus_db_schema::schema::target_release::dsl;
 use nexus_types::external_api::views;
 use omicron_common::api::external::{CreateResult, Error, LookupResult};
 
@@ -81,7 +81,7 @@ impl DataStore {
                 views::TargetReleaseSource::Unspecified
             }
             TargetReleaseSource::SystemVersion => {
-                use crate::db::schema::tuf_repo;
+                use nexus_db_schema::schema::tuf_repo;
                 if let Some(tuf_repo_id) = target_release.tuf_repo_id {
                     views::TargetReleaseSource::SystemVersion {
                         version: tuf_repo::table

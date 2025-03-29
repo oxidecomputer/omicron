@@ -1,5 +1,5 @@
-use crate::schema::probe;
 use db_macros::Resource;
+use nexus_db_schema::schema::probe;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;

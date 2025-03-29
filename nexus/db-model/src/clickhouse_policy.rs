@@ -5,19 +5,17 @@
 //! Database representation of a clickhouse deployment policy
 
 use super::impl_enum_type;
+use crate::SqlU8;
 use crate::SqlU32;
-use crate::{SqlU8, schema::clickhouse_policy};
 use chrono::{DateTime, Utc};
+use nexus_db_schema::schema::clickhouse_policy;
 use nexus_types::deployment;
 use serde::{Deserialize, Serialize};
 
 impl_enum_type!(
-    #[derive(Clone, SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "clickhouse_mode", schema = "public"))]
-    pub struct ClickhouseModeEnum;
+    ClickhouseModeEnum:
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[diesel(sql_type = ClickhouseModeEnum)]
     pub enum DbClickhouseMode;
 
     // Enum values
