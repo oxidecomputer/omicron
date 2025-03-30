@@ -14,6 +14,7 @@ members = [
     "clients/ddm-admin-client",
     "clients/dns-service-client",
     "clients/dpd-client",
+    "clients/ereport-client",
     "clients/gateway-client",
     "clients/installinator-client",
     "clients/nexus-client",
@@ -43,11 +44,14 @@ members = [
     "dev-tools/oxlog",
     "dev-tools/pins",
     "dev-tools/reconfigurator-cli",
+    "dev-tools/reconfigurator-exec-unsafe",
     "dev-tools/releng",
     "dev-tools/xtask",
     "dns-server",
     "dns-server-api",
     "end-to-end-tests",
+    "ereport/api",
+    "ereport/types",
     "gateway",
     "gateway-api",
     "gateway-cli",
@@ -149,6 +153,7 @@ default-members = [
     "clients/ddm-admin-client",
     "clients/dns-service-client",
     "clients/dpd-client",
+    "clients/ereport-client",
     "clients/gateway-client",
     "clients/installinator-client",
     "clients/nexus-client",
@@ -178,6 +183,7 @@ default-members = [
     "dev-tools/oxlog",
     "dev-tools/pins",
     "dev-tools/reconfigurator-cli",
+    "dev-tools/reconfigurator-exec-unsafe",
     "dev-tools/releng",
     # Do not include xtask in the list of default members, because this causes
     # hakari to not work as well and build times to be longer.
@@ -185,6 +191,8 @@ default-members = [
     "dns-server",
     "dns-server-api",
     "end-to-end-tests",
+    "ereport/api",
+    "ereport/types",
     "gateway",
     "gateway-api",
     "gateway-cli",
@@ -316,7 +324,7 @@ approx = "0.5.1"
 assert_matches = "1.5.0"
 assert_cmd = "2.0.16"
 async-bb8-diesel = "0.2"
-async-trait = "0.1.87"
+async-trait = "0.1.88"
 atomicwrites = "0.4.4"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
@@ -359,10 +367,10 @@ crossterm = { version = "0.28.1", features = ["event-stream"] }
 # NOTE: if you change the pinned revision of the `crucible` dependencies, you
 # must also update the references in package-manifest.toml to match the new
 # revision.
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "81a3528adacdbde18fcbf3938247fef17233db11" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "81a3528adacdbde18fcbf3938247fef17233db11" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "81a3528adacdbde18fcbf3938247fef17233db11" }
-crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "81a3528adacdbde18fcbf3938247fef17233db11" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "da3cf198a0e000bb89efc3a1c77d7ba09340a600" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "da3cf198a0e000bb89efc3a1c77d7ba09340a600" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "da3cf198a0e000bb89efc3a1c77d7ba09340a600" }
+crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "da3cf198a0e000bb89efc3a1c77d7ba09340a600" }
 # NOTE: See above!
 csv = "1.3.1"
 curve25519-dalek = "4"
@@ -383,6 +391,9 @@ dpd-client = { path = "clients/dpd-client" }
 dropshot = { version = "0.16.0", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.19"
 either = "1.14.0"
+ereport-api = { path = "ereport/api" }
+ereport-client = { path = "clients/ereport-client" }
+ereport-types = { path = "ereport/types" }
 expectorate = "1.1.0"
 fatfs = "0.3.6"
 filetime = "0.2.25"
@@ -463,8 +474,8 @@ macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 mockall = "0.13"
 newtype_derive = "0.1.6"
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "caafd889f31faacfaa51e02902990c220c20ef60" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "caafd889f31faacfaa51e02902990c220c20ef60" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "5a0d6edd0ecc7f26225a5bf3849d8508956682d0" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "5a0d6edd0ecc7f26225a5bf3849d8508956682d0" }
 multimap = "0.10.0"
 nexus-auth = { path = "nexus/auth" }
 nexus-client = { path = "clients/nexus-client" }
@@ -563,10 +574,10 @@ progenitor-client = "0.9.1"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "6b5f2af796a3ea57405721407ab70520a93ec73f" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "6b5f2af796a3ea57405721407ab70520a93ec73f" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "6b5f2af796a3ea57405721407ab70520a93ec73f" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "6b5f2af796a3ea57405721407ab70520a93ec73f" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "e5c85d84b0a51803caffb335a1063612edb02f6d" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "e5c85d84b0a51803caffb335a1063612edb02f6d" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "e5c85d84b0a51803caffb335a1063612edb02f6d" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "e5c85d84b0a51803caffb335a1063612edb02f6d" }
 # NOTE: see above!
 proptest = "1.6.0"
 qorb = "0.2.1"

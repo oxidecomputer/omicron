@@ -12,6 +12,7 @@ use slog::Logger;
 use slog::info;
 use std::net::{IpAddr, Ipv6Addr};
 
+use crate::ExecutionError;
 use crate::addrobj::AddrObject;
 use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
 use crate::zpool::PathInPool;
@@ -69,7 +70,25 @@ pub struct AdmError {
     op: Operation,
     zone: String,
     #[source]
-    err: zone::ZoneError,
+    err: AdmErrorKind,
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum AdmErrorKind {
+    /// The zone is currently in a state in which it cannot be uninstalled.
+    /// These states are generally transient, so this error is likely to be
+    /// retryable.
+    #[error("this operation cannot be performed in the '{:?}' state", .0)]
+    InvalidState(zone::State),
+    /// Another zoneadm error occurred.
+    #[error(transparent)]
+    Zoneadm(#[from] zone::ZoneError),
+}
+
+impl AdmError {
+    pub fn is_invalid_state(&self) -> bool {
+        matches!(self.err, AdmErrorKind::InvalidState(_))
+    }
 }
 
 /// Errors which may be encountered when deleting addresses.
@@ -235,6 +254,16 @@ impl Zones {
                     // For zones where we never performed installation, simply
                     // delete the zone - uninstallation is invalid.
                     zone::State::Configured => (false, false),
+                    // Attempting to uninstall a zone in the "down" state will
+                    // fail. Instead, the caller must wait until the zone
+                    // transitions to "installed".
+                    zone::State::Down | zone::State::ShuttingDown => {
+                        return Err(AdmError {
+                            op: Operation::Uninstall,
+                            zone: name.to_string(),
+                            err: AdmErrorKind::InvalidState(state),
+                        });
+                    }
                     // For most zone states, perform uninstallation.
                     _ => (false, true),
                 };
@@ -244,7 +273,7 @@ impl Zones {
                         AdmError {
                             op: Operation::Halt,
                             zone: name.to_string(),
-                            err,
+                            err: err.into(),
                         }
                     })?;
                 }
@@ -255,7 +284,7 @@ impl Zones {
                         .map_err(|err| AdmError {
                             op: Operation::Uninstall,
                             zone: name.to_string(),
-                            err,
+                            err: err.into(),
                         })?;
                 }
                 zone::Config::new(name)
@@ -265,7 +294,7 @@ impl Zones {
                     .map_err(|err| AdmError {
                     op: Operation::Delete,
                     zone: name.to_string(),
-                    err,
+                    err: err.into(),
                 })?;
                 Ok(Some(state))
             }
@@ -359,7 +388,7 @@ impl Zones {
         cfg.run().await.map_err(|err| AdmError {
             op: Operation::Configure,
             zone: zone_name.to_string(),
-            err,
+            err: err.into(),
         })?;
 
         info!(log, "Installing Omicron zone: {}", zone_name);
@@ -373,7 +402,7 @@ impl Zones {
             .map_err(|err| AdmError {
                 op: Operation::Install,
                 zone: zone_name.to_string(),
-                err,
+                err: err.into(),
             })?;
         Ok(())
     }
@@ -383,7 +412,7 @@ impl Zones {
         zone::Adm::new(name).boot().await.map_err(|err| AdmError {
             op: Operation::Boot,
             zone: name.to_string(),
-            err,
+            err: err.into(),
         })?;
         Ok(())
     }
@@ -397,7 +426,7 @@ impl Zones {
             .map_err(|err| AdmError {
                 op: Operation::List,
                 zone: "<all>".to_string(),
-                err,
+                err: err.into(),
             })?
             .into_iter()
             .filter(|z| z.name().starts_with(ZONE_PREFIX))
@@ -687,11 +716,21 @@ impl Zones {
         Ok(())
     }
 
+    /// Delete an address object.
+    ///
+    /// This method attempts to be idempotent: deleting a nonexistent address
+    /// object returns `Ok(())`.
     #[allow(clippy::needless_lifetimes)]
     pub fn delete_address<'a>(
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<(), DeleteAddressError> {
+        // Expected output on stderr if we try to delete an address that doesn't
+        // exist. (We look for this error and return `Ok(_)`, making this method
+        // idempotent.)
+        const OBJECT_NOT_FOUND: &str =
+            "could not delete address: Object not found";
+
         let mut command = std::process::Command::new(PFEXEC);
         let mut args = vec![];
         if let Some(zone) = zone {
@@ -704,12 +743,19 @@ impl Zones {
         args.push(addrobj.to_string());
 
         let cmd = command.args(args);
-        execute(cmd).map_err(|err| DeleteAddressError {
-            zone: zone.unwrap_or("global").to_string(),
-            addrobj: addrobj.clone(),
-            err,
-        })?;
-        Ok(())
+        match execute(cmd) {
+            Ok(_) => Ok(()),
+            Err(ExecutionError::CommandFailure(err))
+                if err.stderr.contains(OBJECT_NOT_FOUND) =>
+            {
+                Ok(())
+            }
+            Err(err) => Err(DeleteAddressError {
+                zone: zone.unwrap_or("global").to_string(),
+                addrobj: addrobj.clone(),
+                err,
+            }),
+        }
     }
 
     /// Ensures a link-local IPv6 exists with the name provided in `addrobj`.
@@ -877,6 +923,22 @@ mod tests {
             let parsed = parse_ip_network(s).unwrap();
             assert_eq!(parsed.ip(), ip);
             assert_eq!(parsed.prefix(), prefix);
+        }
+    }
+
+    // This test validates that we correctly detect an attempt to delete an
+    // address that does not exist and return `Ok(())`.
+    #[cfg(target_os = "illumos")]
+    #[test]
+    fn delete_nonexistent_address() {
+        // We'll pick a name that hopefully no system actually has...
+        let addr = AddrObject::new("nonsense", "shouldnotexist").unwrap();
+        match Zones::delete_address(None, &addr) {
+            Ok(()) => (),
+            Err(err) => panic!(
+                "unexpected error deleting nonexistent address: {}",
+                slog_error_chain::InlineErrorChain::new(&err)
+            ),
         }
     }
 }

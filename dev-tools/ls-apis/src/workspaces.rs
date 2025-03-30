@@ -180,7 +180,7 @@ impl Workspaces {
             })
             .collect();
 
-        // TODO As of this writing, we have two distinct packages called
+        // TODO As of this writing, we have three distinct packages called
         // "dpd-client":
         //
         // - There's one in the "dendrite" repo.  This is used by:
@@ -189,6 +189,8 @@ impl Workspaces {
         //   - `ddm` (in Maghemite)
         //   - `ddmd` (in Maghemite)
         //   - `mgd` (via `mg-lower`) (in Maghemite)
+        // - There's one in the "lldpd" repo.  This is used by:
+        //   - `lldpd` (in lldpd)
         // - There's one in the "omicron" repo.  This is used by:
         //   - `wicketd` (in Omicron)
         //   - `omicron-sled-agent` (in Omicron)
@@ -211,12 +213,11 @@ impl Workspaces {
         //
         // To keep things working, we just have this function always report the
         // one in the Omicron repo.
-        if server_pkgname == "dpd-client" && found_in_workspaces.len() == 2 {
-            if found_in_workspaces[0].0.name() == "omicron" {
-                return Ok(found_in_workspaces[0]);
-            }
-            if found_in_workspaces[1].0.name() == "omicron" {
-                return Ok(found_in_workspaces[1]);
+        if server_pkgname == "dpd-client" && found_in_workspaces.len() == 3 {
+            if let Some(rv) =
+                found_in_workspaces.iter().find(|w| w.0.name() == "omicron")
+            {
+                return Ok(*rv);
             }
         }
         ensure!(

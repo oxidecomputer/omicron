@@ -319,7 +319,7 @@ mod test {
                 ready_for_cleanup: true,
             },
             id: OmicronZoneUuid::new_v4(),
-            filesystem_pool: Some(ZpoolName::new_external(ZpoolUuid::new_v4())),
+            filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
             zone_type: BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb {
                     address: "[::1]:0".parse().unwrap(),

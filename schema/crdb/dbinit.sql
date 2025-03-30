@@ -2396,8 +2396,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
     -- The length of the artifact, in bytes.
     artifact_size INT8 NOT NULL,
 
+    -- The generation number this artifact was added for.
+    generation_added INT8 NOT NULL,
+
     CONSTRAINT unique_name_version_kind UNIQUE (name, version, kind)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS tuf_artifact_added
+    ON omicron.public.tuf_artifact (generation_added, id)
+    STORING (name, version, kind, time_created, sha256, artifact_size);
 
 -- Reflects that a particular artifact was provided by a particular TUF repo.
 -- This is a many-many mapping.
@@ -2407,6 +2414,28 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo_artifact (
 
     PRIMARY KEY (tuf_repo_id, tuf_artifact_id)
 );
+
+-- Generation number for the current list of TUF artifacts the system wants.
+-- This is incremented whenever a TUF repo is added or removed.
+CREATE TABLE IF NOT EXISTS omicron.public.tuf_generation (
+    -- There should only be one row of this table for the whole DB.
+    -- It's a little goofy, but filter on "singleton = true" before querying
+    -- or applying updates, and you'll access the singleton row.
+    --
+    -- We also add a constraint on this table to ensure it's not possible to
+    -- access the version of this table with "singleton = false".
+    singleton BOOL NOT NULL PRIMARY KEY,
+    -- Generation number owned and incremented by Nexus
+    generation INT8 NOT NULL,
+
+    CHECK (singleton = true)
+);
+INSERT INTO omicron.public.tuf_generation (
+    singleton,
+    generation
+) VALUES
+    (TRUE, 1)
+ON CONFLICT DO NOTHING;
 
 /*******************************************************************/
 
@@ -3967,9 +3996,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     -- created yet.
     external_ip_id UUID,
 
-    -- TODO: This is nullable for backwards compatibility.
-    -- Eventually, that nullability should be removed.
-    filesystem_pool UUID,
+    filesystem_pool UUID NOT NULL,
 
     -- Zone disposition
     disposition omicron.public.bp_zone_disposition NOT NULL,
@@ -4974,7 +5001,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '130.0.0', NULL)
+    (TRUE, NOW(), NOW(), '132.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

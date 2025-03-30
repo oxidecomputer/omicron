@@ -10,7 +10,9 @@ use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_reconfigurator_execution::RealizeBlueprintOutput;
+use nexus_reconfigurator_execution::{
+    RealizeBlueprintOutput, RequiredRealizeArgs,
+};
 use nexus_types::deployment::{
     Blueprint, BlueprintTarget, execution::EventBuffer,
 };
@@ -100,12 +102,15 @@ impl BlueprintExecutor {
         });
 
         let result = nexus_reconfigurator_execution::realize_blueprint(
-            opctx,
-            &self.datastore,
-            &self.resolver,
-            blueprint,
-            self.nexus_id,
-            sender,
+            RequiredRealizeArgs {
+                opctx,
+                datastore: &self.datastore,
+                resolver: &self.resolver,
+                creator: self.nexus_id,
+                blueprint,
+                sender,
+            }
+            .as_nexus(self.nexus_id),
         )
         .await;
 
@@ -403,7 +408,7 @@ mod test {
             [BlueprintZoneConfig {
                 disposition,
                 id: zone_id,
-                filesystem_pool: Some(ZpoolName::new_external(pool_id)),
+                filesystem_pool: ZpoolName::new_external(pool_id),
                 zone_type: BlueprintZoneType::InternalDns(
                     blueprint_zone_type::InternalDns {
                         dataset: OmicronZoneDataset {
