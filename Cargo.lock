@@ -6166,6 +6166,7 @@ dependencies = [
  "nexus-types",
  "omicron-common",
  "omicron-nexus",
+ "omicron-rpaths",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
