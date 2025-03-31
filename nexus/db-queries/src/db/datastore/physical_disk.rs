@@ -120,7 +120,7 @@ impl DataStore {
         disk: PhysicalDisk,
     ) -> Result<PhysicalDisk, TransactionError<Error>> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        use db::schema::physical_disk::dsl;
+        use nexus_db_schema::schema::physical_disk::dsl;
 
         let sled_id = disk.sled_id;
         let disk_in_db = Sled::insert_resource(
@@ -153,7 +153,7 @@ impl DataStore {
         policy: PhysicalDiskPolicy,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        use db::schema::physical_disk::dsl;
+        use nexus_db_schema::schema::physical_disk::dsl;
         let now = Utc::now();
 
         diesel::update(
@@ -174,7 +174,7 @@ impl DataStore {
         state: PhysicalDiskState,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        use db::schema::physical_disk::dsl;
+        use nexus_db_schema::schema::physical_disk::dsl;
         let now = Utc::now();
 
         diesel::update(
@@ -203,9 +203,9 @@ impl DataStore {
     ) -> ListResultVec<InvPhysicalDisk> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
-        use db::schema::inv_physical_disk::dsl as inv_physical_disk_dsl;
-        use db::schema::physical_disk::dsl as physical_disk_dsl;
-        use db::schema::sled::dsl as sled_dsl;
+        use nexus_db_schema::schema::inv_physical_disk::dsl as inv_physical_disk_dsl;
+        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
+        use nexus_db_schema::schema::sled::dsl as sled_dsl;
 
         sled_dsl::sled
             // If the sled is not in-service, drop the list immediately.
@@ -256,7 +256,7 @@ impl DataStore {
         disk_filter: DiskFilter,
     ) -> ListResultVec<PhysicalDisk> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        use db::schema::physical_disk::dsl;
+        use nexus_db_schema::schema::physical_disk::dsl;
         paginated(dsl::physical_disk, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
             .physical_disk_filter(disk_filter)
@@ -273,7 +273,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<PhysicalDisk> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        use db::schema::physical_disk::dsl;
+        use nexus_db_schema::schema::physical_disk::dsl;
         paginated(dsl::physical_disk, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::sled_id.eq(sled_id))
@@ -292,7 +292,7 @@ impl DataStore {
         id: PhysicalDiskUuid,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        use db::schema::physical_disk::dsl;
+        use nexus_db_schema::schema::physical_disk::dsl;
         let now = Utc::now();
         let conn = &*self.pool_connection_authorized(&opctx).await?;
         diesel::update(dsl::physical_disk)
@@ -318,7 +318,7 @@ impl DataStore {
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let now = Utc::now();
-        use db::schema::physical_disk::dsl;
+        use nexus_db_schema::schema::physical_disk::dsl;
         diesel::update(dsl::physical_disk)
             .filter(dsl::id.eq(to_db_typed_uuid(id)))
             .filter(dsl::time_deleted.is_null())
@@ -966,7 +966,7 @@ mod test {
 
         // Expunge some disks, observe that they do not re-appear as
         // initialized.
-        use db::schema::physical_disk::dsl;
+        use nexus_db_schema::schema::physical_disk::dsl;
 
         // Set a disk to "deleted".
         let now = Utc::now();

@@ -223,7 +223,7 @@ mod test {
         // Simulate the configuration going backwards.  This should not be
         // possible, but it's easy to check that we at least don't panic.
         {
-            use nexus_db_queries::db::schema::dns_version::dsl;
+            use nexus_db_schema::schema::dns_version::dsl;
             diesel::delete(dsl::dns_version.filter(dsl::version.eq(2)))
                 .execute_async(
                     &*datastore.pool_connection_for_tests().await.unwrap(),
@@ -256,19 +256,19 @@ mod test {
                 .await
                 .unwrap();
                 diesel::delete(
-                    nexus_db_queries::db::schema::dns_version::dsl::dns_version,
+                    nexus_db_schema::schema::dns_version::dsl::dns_version,
                 )
                 .execute_async(&conn)
                 .await
                 .unwrap();
                 diesel::delete(
-                    nexus_db_queries::db::schema::dns_name::dsl::dns_name,
+                    nexus_db_schema::schema::dns_name::dsl::dns_name,
                 )
                 .execute_async(&conn)
                 .await
                 .unwrap();
                 diesel::delete(
-                    nexus_db_queries::db::schema::dns_zone::dsl::dns_zone,
+                    nexus_db_schema::schema::dns_zone::dsl::dns_zone,
                 )
                 .execute_async(&conn)
                 .await
