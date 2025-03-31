@@ -102,7 +102,7 @@ impl<'a> ValidShares<'a> {
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct Share {
     pub x_coordinate: Gf256,
-    pub y_coordinates: Vec<Gf256>,
+    pub y_coordinates: Box<[Gf256]>,
 }
 
 pub struct SecretShares {
@@ -152,7 +152,7 @@ fn split_secret_impl<R: Rng>(
     let shares: Vec<_> = (1..=n)
         .map(|i| {
             let x_coordinate = Gf256::new(i);
-            let y_coordinates =
+            let y_coordinates: Box<[Gf256]> =
                 polynomials.iter().map(|p| p.eval(x_coordinate)).collect();
             Share { x_coordinate, y_coordinates }
         })
@@ -178,7 +178,8 @@ pub fn combine_shares(
 /// Calling this function for `x=0` reveals the secret.
 pub fn interpolate_polynomials(shares: ValidShares, x: Gf256) -> Share {
     // Our output value: `f(x)` for all polynomials
-    let mut output = vec![gf256::ZERO; shares.num_y_coordinates()];
+    let mut output =
+        vec![gf256::ZERO; shares.num_y_coordinates()].into_boxed_slice();
 
     // We enumerate so that we don't have to use constant time equality
     // comparing each x value. The order of the polynomials is public, so this
@@ -206,6 +207,8 @@ pub fn interpolate_polynomials(shares: ValidShares, x: Gf256) -> Share {
 
 #[cfg(test)]
 mod tests {
+    use std::mem;
+
     use super::*;
     use crate::test_utils::test_rng_strategy;
     use proptest::{collection::size_range, test_runner::TestRng};
@@ -263,16 +266,21 @@ mod tests {
                 }
 
                 // Trying to combine shares with a mismatched number
-                // of y-coordinates fails
-                let mut copy: Vec<_> =
-                    shares.shares.expose_secret().iter().cloned().collect();
-                let z = copy.get_mut(0).unwrap().y_coordinates.pop().unwrap();
+                // of y-coordinates fails.
+                //
+                // We have to use mem::swap, because we can't change a boxed
+                // slice's length
+                let mut copy: Vec<_> = shares.shares.expose_secret().to_vec();
+                let y_coordinates = &mut copy.get_mut(0).unwrap().y_coordinates;
+                let len = y_coordinates.len();
+                let mut y_coordinates_bad: Box<[Gf256]> =
+                    y_coordinates.iter().cloned().take(len - 1).collect();
+                mem::swap(&mut *y_coordinates, &mut y_coordinates_bad);
                 assert!(combine_shares(&copy).is_err());
 
-                // Put back the popped share, then duplicate an x-coordinate
-                // This should also cause an error
+                // Duplicate an x-coordinate. This should also cause an error.
+                let mut copy: Vec<_> = shares.shares.expose_secret().to_vec();
                 let first_share = copy.get_mut(0).unwrap();
-                first_share.y_coordinates.push(z);
                 // The first share is at x-coordinate 1
                 first_share.x_coordinate = Gf256::new(2);
                 assert!(combine_shares(&copy).is_err());
