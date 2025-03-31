@@ -22,7 +22,7 @@ use crate::contract_stub::ContractError;
 
 const DLADM: &str = "/usr/sbin/dladm";
 const IPADM: &str = "/usr/sbin/ipadm";
-const NVMEADM: &str = "/usr/bin/nvmeadm";
+const NVMEADM: &str = "/usr/sbin/nvmeadm";
 const PFEXEC: &str = "/usr/bin/pfexec";
 const PFILES: &str = "/usr/bin/pfiles";
 const PSTACK: &str = "/usr/bin/pstack";
