@@ -3655,6 +3655,7 @@ dependencies = [
 name = "gfss"
 version = "0.1.0"
 dependencies = [
+ "omicron-workspace-hack",
  "proptest",
  "rand 0.8.5",
  "secrecy",
