@@ -112,7 +112,8 @@ impl Display for Polynomial {
 mod tests {
     use super::*;
     use crate::gf256::Gf256;
-    use rand::thread_rng;
+    use crate::test_utils::test_rng_strategy;
+    use proptest::test_runner::TestRng;
     use test_strategy::{Arbitrary, proptest};
 
     impl Polynomial {
@@ -154,15 +155,16 @@ mod tests {
         secret: u8,
         #[strategy(2..255u8)]
         threshold: u8,
+        #[strategy(test_rng_strategy())]
+        rng: TestRng,
     }
 
     #[proptest]
-    fn test_polynomial_eval(input: TestInput) {
+    fn test_polynomial_eval(mut input: TestInput) {
         // TODO: Replace this with the proptest rng
         let n = input.threshold;
-        let mut rng = thread_rng();
         let p = Polynomial::random_with_constant_term(
-            &mut rng,
+            &mut input.rng,
             ValidThreshold::new(n, input.threshold).unwrap(),
             Gf256::new(input.secret),
         );

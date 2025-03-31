@@ -207,7 +207,8 @@ pub fn interpolate_polynomials(shares: ValidShares, x: Gf256) -> Share {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::collection::size_range;
+    use crate::test_utils::test_rng_strategy;
+    use proptest::{collection::size_range, test_runner::TestRng};
     use secrecy::ExposeSecret;
     use test_strategy::{Arbitrary, proptest};
 
@@ -219,12 +220,19 @@ mod tests {
         total_shares: u8,
         #[any(size_range(2..64).lift())]
         secret: Vec<u8>,
+        #[strategy(test_rng_strategy())]
+        rng: TestRng,
     }
 
     // TODO: pass in the proptest rng to `split_secret`
     #[proptest]
-    fn split_and_combine(input: TestInput) {
-        match split_secret(&input.secret, input.total_shares, input.threshold) {
+    fn split_and_combine(mut input: TestInput) {
+        match split_secret_inner(
+            &input.secret,
+            input.total_shares,
+            input.threshold,
+            &mut input.rng,
+        ) {
             Ok(shares) => {
                 // Combining at least k shares succeeds and returns our secret
                 let n = input.threshold as usize;

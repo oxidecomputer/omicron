@@ -43,3 +43,5 @@
 pub mod gf256;
 pub mod polynomial;
 pub mod shamir;
+#[cfg(test)]
+mod test_utils;
