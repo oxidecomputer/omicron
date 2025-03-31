@@ -10,7 +10,7 @@ use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::gf256::{self, Gf256};
-use crate::polynomial::{Polynomial, ValidThreshold};
+use crate::polynomial::Polynomial;
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum SplitError {
@@ -28,6 +28,33 @@ pub enum CombineError {
     DuplicateXCoordinates,
     #[error("all shares must be of equivalent length")]
     InvalidShareLengths,
+}
+
+/// A parsed type where the threshold has been validated to be greater than 2
+/// and less than or equal to 255, and where it's guaranteed to be lower than
+/// the total number of shares created via calls to `split_secret`.
+#[derive(Debug, Clone, Copy)]
+pub struct ValidThreshold(u8);
+
+impl ValidThreshold {
+    /// Create a threshold that is known to be valid
+    ///
+    /// `n` is the total number of shares, and `k` is the threshold
+    pub fn new(n: u8, k: u8) -> Result<ValidThreshold, SplitError> {
+        if k < 2 {
+            return Err(SplitError::ThresholdToSmall);
+        }
+        if n < k {
+            return Err(SplitError::TooFewTotalShares { n, k });
+        }
+
+        Ok(ValidThreshold(k))
+    }
+
+    /// Return the underlying threshold as a `u8`
+    pub fn inner(&self) -> u8 {
+        self.0
+    }
 }
 
 /// A set of shares that have been validated
@@ -48,8 +75,8 @@ impl<'a> ValidShares<'a> {
             if share.y_coordinates.len() != len {
                 return Err(CombineError::InvalidShareLengths);
             }
-            // We only allow constant time comparison of coordinates
-            // and so we must compare each share, with the share that follows it.
+            // We only allow constant time comparison of coordinates, so we must
+            // compare each share with the share that follows it.
             //
             // It might be cheaper to store the x-coordinate in a set and check
             // for duplicates on insert, but we can't do that because we don't
@@ -89,19 +116,12 @@ pub fn split_secret(
     n: u8,
     k: u8,
 ) -> Result<SecretShares, SplitError> {
-    if k < 2 {
-        return Err(SplitError::ThresholdToSmall);
-    }
-    if n < k {
-        return Err(SplitError::TooFewTotalShares { n, k });
-    }
+    let threshold = ValidThreshold::new(n, k)?;
 
     // We hardcode this for security. We *may* end up wanting a separate
     // internal method for property based deterministic tests, but can wait
     // until we have those.
     let mut rng = OsRng;
-
-    let threshold = ValidThreshold(k);
 
     // Construct `secret.len()` polynomials of order `k-1`
     //
@@ -123,7 +143,6 @@ pub fn split_secret(
     // The polynomial evaluated at x=0 is our secret, so we always start
     // from x=1 when creating our shares.
     let shares: Vec<_> = (1..=n)
-        .into_iter()
         .map(|i| {
             let x_coordinate = Gf256::new(i);
             let y_coordinates =
@@ -142,15 +161,15 @@ pub fn combine_shares(
     shares: &[Share],
 ) -> Result<Secret<Vec<u8>>, CombineError> {
     let shares = ValidShares::new(shares)?;
-    let share = interpolate_polynomial(shares, gf256::ZERO);
-    Ok(Secret::new(share.y_coordinates.iter().map(|y| y.unwrap_u8()).collect()))
+    let share = interpolate_polynomials(shares, gf256::ZERO);
+    Ok(Secret::new(share.y_coordinates.iter().map(|y| y.into_u8()).collect()))
 }
 
 /// Interpolate the points for each polynomial to find the value `y = f(x)`
 /// and then concatenate them and return the corrseponding [`Share`].
 ///
 /// Calling this function for `x=0` reveals the secret.
-pub fn interpolate_polynomial(shares: ValidShares, x: Gf256) -> Share {
+pub fn interpolate_polynomials(shares: ValidShares, x: Gf256) -> Share {
     // Our output value: `f(x)` for all polynomials
     let mut output = vec![gf256::ZERO; shares.num_y_coordinates()];
 
@@ -171,7 +190,7 @@ pub fn interpolate_polynomial(shares: ValidShares, x: Gf256) -> Share {
         // Multiply each lagrange basis times the y-coordinates and accumulate
         // the output.
         for (y, y_i) in output.iter_mut().zip(y_coordinates) {
-            *y += li * *y_i;
+            *y += li * y_i;
         }
     }
 

@@ -10,11 +10,7 @@ use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::gf256::{self, Gf256};
-
-/// A parsed type where the threshold has been validated to be greater than 2
-/// and less than or equal to 255.
-#[derive(Debug, Clone, Copy)]
-pub struct ValidThreshold(pub u8);
+use crate::shamir::ValidThreshold;
 
 /// A polynomial of degree `k-1` with random coefficients in GF(256) for
 /// non-constant terms, and a seeded constant term.
@@ -48,7 +44,7 @@ impl Polynomial {
         k: ValidThreshold,
         constant_term: Gf256,
     ) -> Polynomial {
-        let degree = (k.0 - 1) as usize;
+        let degree = (k.inner() - 1) as usize;
         // We need to store the 0th term which is a constant, so we add back 1
         // to the degree.
         let mut inner: Vec<Gf256> =
@@ -80,7 +76,7 @@ impl Polynomial {
         let mut iter = self.0.iter().rev();
         let mut y = *(iter.next().unwrap());
         for coefficient in iter {
-            y = y * x + *coefficient
+            y = y * x + coefficient
         }
         y
     }
@@ -163,10 +159,11 @@ mod tests {
     #[proptest]
     fn test_polynomial_eval(input: TestInput) {
         // TODO: Replace this with the proptest rng
+        let n = input.threshold;
         let mut rng = thread_rng();
         let p = Polynomial::random_with_constant_term(
             &mut rng,
-            ValidThreshold(input.threshold),
+            ValidThreshold::new(n, input.threshold).unwrap(),
             Gf256::new(input.secret),
         );
         for i in 0..255 {

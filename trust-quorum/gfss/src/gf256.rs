@@ -18,6 +18,9 @@
 //! notes](https://web.stanford.edu/~marykw/classes/CS250_W19/readings/
 //! Forney_Introduction_to_Finite_Fields.pdf) are handy.
 
+// Don't tell me what operations to use in my implementations
+#![allow(clippy::suspicious_arithmetic_impl)]
+
 use core::fmt::{self, Binary, Display, Formatter, LowerHex, UpperHex};
 use core::ops::{Add, AddAssign, Div, Mul, MulAssign, Sub};
 use rand::Rng;
@@ -39,9 +42,7 @@ impl Gf256 {
     }
 
     /// Return the underlying u8.
-    ///
-    /// This should be used with care.
-    pub fn unwrap_u8(&self) -> u8 {
+    pub fn into_u8(self) -> u8 {
         self.0
     }
 
@@ -114,6 +115,13 @@ impl Add for Gf256 {
 
     fn add(self, rhs: Self) -> Self::Output {
         Gf256(self.0 ^ rhs.0)
+    }
+}
+
+impl Add<&Gf256> for Gf256 {
+    type Output = Self;
+    fn add(self, rhs: &Gf256) -> Self::Output {
+        self + *rhs
     }
 }
 
@@ -211,13 +219,13 @@ impl Mul for Gf256 {
             // previous line.
             rhs.0 >>= 1;
 
-            // Track if the rightmost bit is currently set in `self`.
-            // If it is, then we have an x^7 term, and multiplying by X
-            // will require a modulo reduction to stay within our field.
+            // Track if the hibh bit is currently set in `self`. If it is, then
+            // we have an `x^7` term, and multiplying by `x` will require a
+            // modulo reduction to stay within our field.
             let carry: u8 = self.0 >> 7;
 
             // Shift `self` left a bit.
-            // This multiplies `self` by `x`i
+            // This multiplies `self` by `x`.
             self.0 <<= 1;
 
             // If there was a carry, then we need to add `x^8 mod m(x)`, which
@@ -230,6 +238,13 @@ impl Mul for Gf256 {
         }
 
         Gf256(product)
+    }
+}
+
+impl Mul<&Gf256> for Gf256 {
+    type Output = Gf256;
+    fn mul(self, rhs: &Self) -> Self::Output {
+        self * *rhs
     }
 }
 
