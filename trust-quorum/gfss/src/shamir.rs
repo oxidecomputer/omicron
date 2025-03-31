@@ -4,7 +4,7 @@
 
 //! Shamir secret sharing over GF(2^8)
 
-use rand::rngs::OsRng;
+use rand::{Rng, rngs::OsRng};
 use secrecy::Secret;
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -116,12 +116,19 @@ pub fn split_secret(
     n: u8,
     k: u8,
 ) -> Result<SecretShares, SplitError> {
-    let threshold = ValidThreshold::new(n, k)?;
-
-    // We hardcode this for security. We *may* end up wanting a separate
-    // internal method for property based deterministic tests, but can wait
-    // until we have those.
+    // We hardcode this for security.
     let mut rng = OsRng;
+    split_secret_inner(secret, n, k, &mut rng)
+}
+
+/// An internal method that allows us to use a different RNG during testing
+fn split_secret_inner<R: Rng>(
+    secret: &[u8],
+    n: u8,
+    k: u8,
+    rng: &mut R,
+) -> Result<SecretShares, SplitError> {
+    let threshold = ValidThreshold::new(n, k)?;
 
     // Construct `secret.len()` polynomials of order `k-1`
     //
@@ -131,7 +138,7 @@ pub fn split_secret(
         .iter()
         .map(|s| {
             Polynomial::random_with_constant_term(
-                &mut rng,
+                rng,
                 threshold,
                 Gf256::new(*s),
             )
