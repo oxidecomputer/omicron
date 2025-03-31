@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 impl_enum_type!(
-    DbSwitchInterfaceKindEnum:
+    SwitchInterfaceKindEnum:
 
     #[derive(
         Clone,
