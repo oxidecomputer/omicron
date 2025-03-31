@@ -52,6 +52,7 @@ serde_json.workspace = true
 sled-agent-client.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
+steno.workspace = true
 strum.workspace = true
 supports-color.workspace = true
 tabled.workspace = true
@@ -67,6 +68,7 @@ multimap.workspace = true
 indicatif.workspace = true
 petgraph.workspace = true
 oxnet.workspace = true
+owo-colors.workspace = true
 
 [dev-dependencies]
 camino-tempfile.workspace = true

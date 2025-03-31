@@ -1791,7 +1791,7 @@ table! {
         disposition_expunged_as_of_generation -> Nullable<Int8>,
         disposition_expunged_ready_for_cleanup -> Bool,
         external_ip_id -> Nullable<Uuid>,
-        filesystem_pool -> Nullable<Uuid>,
+        filesystem_pool -> Uuid,
     }
 }
 

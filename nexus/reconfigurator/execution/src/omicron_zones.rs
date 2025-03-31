@@ -54,7 +54,7 @@ async fn clean_up_expunged_zones_impl<R: CleanupResolver>(
     zones_to_clean_up: impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)>,
 ) -> Result<(), Vec<anyhow::Error>> {
     let errors: Vec<anyhow::Error> = stream::iter(zones_to_clean_up)
-        .filter_map(|(sled_id, config)| async move {
+        .filter_map(async |(sled_id, config)| {
             let log = opctx.log.new(slog::o!(
                 "sled_id" => sled_id.to_string(),
                 "zone_id" => config.id.to_string(),
@@ -319,7 +319,7 @@ mod test {
                 ready_for_cleanup: true,
             },
             id: OmicronZoneUuid::new_v4(),
-            filesystem_pool: Some(ZpoolName::new_external(ZpoolUuid::new_v4())),
+            filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
             zone_type: BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb {
                     address: "[::1]:0".parse().unwrap(),

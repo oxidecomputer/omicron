@@ -408,7 +408,7 @@ mod test {
             [BlueprintZoneConfig {
                 disposition,
                 id: zone_id,
-                filesystem_pool: Some(ZpoolName::new_external(pool_id)),
+                filesystem_pool: ZpoolName::new_external(pool_id),
                 zone_type: BlueprintZoneType::InternalDns(
                     blueprint_zone_type::InternalDns {
                         dataset: OmicronZoneDataset {
