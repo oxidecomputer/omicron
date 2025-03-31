@@ -500,6 +500,7 @@ impl SledAgent {
         // We expect certain amounts of memory to be set aside for kernel,
         // buffer, or control plane uses.
         let memory_sizes = MemoryReservations::new(
+            parent_log.new(o!("component" => "MemoryReservations")),
             long_running_task_handles.hardware_manager.clone(),
             config.control_plane_memory_earmark_mb,
         );

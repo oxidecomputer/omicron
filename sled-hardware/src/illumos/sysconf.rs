@@ -39,7 +39,10 @@ pub fn usable_physical_ram_bytes() -> Result<u64, Error> {
         .map_err(|e| Error::Sysconf { arg: "physical page size", e })?
         .try_into()?;
 
-    // XXX: if we eventually have pages with mixed sizes, this may be wrong!
-    // I'm not even sure how we'd calculate this in such a world!
+    // Note that `_SC_PHYS_PAGES` counts, specifically, the number of
+    // `_SC_PAGESIZE` pages of physical memory. This means the multiplication
+    // below yields the total physical RAM bytes, even if in some sense there
+    // are fewer "actual" physical pages in page tables (such as if there were
+    // 2MiB pages mixed in on x86).
     Ok(usable_physical_pages()? * page_size)
 }

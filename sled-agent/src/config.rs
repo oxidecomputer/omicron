@@ -57,10 +57,15 @@ pub struct Config {
     pub sled_mode: SledMode,
     // TODO: Remove once this can be auto-detected.
     pub sidecar_revision: SidecarRevision,
-    /// Optional percentage of DRAM to reserve for guest memory
+    /// Optional percentage of otherwise-unbudgeted DRAM to reserve for guest
+    /// memory, after accounting for expected host OS memory consumption and, if
+    /// set, `vmm_reservoir_size_mb`.
     pub vmm_reservoir_percentage: Option<f32>,
     /// Optional DRAM to reserve for guest memory in MiB (mutually exclusive
-    /// option with vmm_reservoir_percentage).
+    /// option with vmm_reservoir_percentage). This can be at most the amount of
+    /// otherwise-unbudgeted memory on the slde - a setting high enough to
+    /// oversubscribe physical memory results in a `sled-agent` error at
+    /// startup.
     pub vmm_reservoir_size_mb: Option<u32>,
     /// Amount of memory to set aside in anticipation of use for services that
     /// will have roughly constant memory use. These are services that may have

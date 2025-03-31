@@ -4,6 +4,7 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use slog::{Logger, info};
 
 cfg_if::cfg_if! {
     if #[cfg(target_os = "illumos")] {
@@ -79,6 +80,7 @@ pub enum SledMode {
 /// Accounting for high watermark memory usage for various system purposes
 #[derive(Clone)]
 pub struct MemoryReservations {
+    log: Logger,
     hardware_manager: HardwareManager,
     /// The amount of memory expected to be used if "control plane" services all
     /// running on this sled. "control plane" here refers to services that have
@@ -103,6 +105,7 @@ pub struct MemoryReservations {
 
 impl MemoryReservations {
     pub fn new(
+        log: Logger,
         hardware_manager: HardwareManager,
         control_plane_earmark_mib: Option<u32>,
     ) -> MemoryReservations {
@@ -110,7 +113,7 @@ impl MemoryReservations {
         let control_plane_earmark_bytes =
             u64::from(control_plane_earmark_mib.unwrap_or(0)) * MIB;
 
-        Self { hardware_manager, control_plane_earmark_bytes }
+        Self { log, hardware_manager, control_plane_earmark_bytes }
     }
 
     /// Compute the amount of physical memory that could be set aside for the
@@ -127,11 +130,22 @@ impl MemoryReservations {
         // other hand, the last time page_t changed was illumos-gate commit
         // a5652762e5 from 2006.
         const PAGE_T_SIZE: u64 = 120;
-        let max_page_t_space =
+        let max_page_t_bytes =
             self.hardware_manager.usable_physical_pages() * PAGE_T_SIZE;
 
-        hardware_physical_ram_bytes
-            - max_page_t_space
-            - self.control_plane_earmark_bytes
+        let vmm_eligible = hardware_physical_ram_bytes
+            - max_page_t_bytes
+            - self.control_plane_earmark_bytes;
+
+        info!(
+            self.log,
+            "Calculated {vmm_eligible} bytes for VMM \
+            reservoir: {hardware_physical_ram_bytes} physical RAM bytes \
+            - {max_page_t_bytes} bytes for maximum page_t structures \
+            - {} bytes held back for services on the sled",
+            self.control_plane_earmark_bytes
+        );
+
+        vmm_eligible
     }
 }
