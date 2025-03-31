@@ -90,6 +90,11 @@ enum EnsureDatasetErrorRaw {
 
     #[error("Invalid mountpoint: {0}")]
     BadMountpoint(Utf8PathBuf),
+
+    #[error(
+        "Directory not empty; cannot be mountpoint: {0}. Is someone concurrently adding files here?"
+    )]
+    DirectoryNotEmpty(Utf8PathBuf),
 }
 
 /// Error returned by [`Zfs::ensure_dataset`].
@@ -548,27 +553,33 @@ fn ensure_empty_immutable_mountpoint(
     //
     // - If necessary, we make the directory mutable, and try to clear it out.
     // - We then re-set the directory to immutable.
-    //
-    // This means that if someone adds a file to our mountpoint after
-    // "emptying it out" but before "making it immutable", we make
-    // another attempt at making it empty.
-    loop {
-        let immutablity = is_directory_immutable(mountpoint)?;
-
-        if is_directory_empty(mountpoint)?
-            && immutablity.as_immutable_as_filesystem_allows()
-        {
-            return Ok(());
-        }
-
-        if immutablity.can_set_immutable() {
-            make_directory_mutable(mountpoint)?;
-        }
-        ensure_mountpoint_empty(mountpoint)?;
-        if immutablity.can_set_immutable() {
-            make_directory_immutable(mountpoint)?;
-        }
+    let immutablity = is_directory_immutable(mountpoint)?;
+    if is_directory_empty(mountpoint)?
+        && immutablity.as_immutable_as_filesystem_allows()
+    {
+        return Ok(());
     }
+
+    if immutablity.can_set_immutable() {
+        make_directory_mutable(mountpoint)?;
+    }
+    ensure_mountpoint_empty(mountpoint)?;
+    if immutablity.can_set_immutable() {
+        make_directory_immutable(mountpoint)?;
+    }
+
+    // This concurrent error case is a bit exceptional: we briefly made the
+    // directory mutable, tried to empty it out, and made it immutable again.
+    // However, while this was happening, someone must have added entries to the
+    // directory.
+    //
+    // This is probably a bug on the side of "whoever is adding these files".
+    if !is_directory_empty(mountpoint)? {
+        return Err(EnsureDatasetErrorRaw::DirectoryNotEmpty(
+            mountpoint.to_path_buf(),
+        ));
+    }
+    return Ok(());
 }
 
 fn is_directory_empty(path: &Utf8Path) -> Result<bool, EnsureDatasetErrorRaw> {
