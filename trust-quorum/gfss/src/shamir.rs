@@ -166,7 +166,7 @@ fn split_secret_impl<R: Rng>(
 /// The secret is the concatenation of the y-coordinates at x=0.
 pub fn combine_shares(
     shares: &[Share],
-) -> Result<Secret<Vec<u8>>, CombineError> {
+) -> Result<Secret<Box<[u8]>>, CombineError> {
     let shares = ValidShares::new(shares)?;
     let share = interpolate_polynomials(shares, gf256::ZERO);
     Ok(Secret::new(share.y_coordinates.iter().map(|y| y.into_u8()).collect()))
@@ -239,14 +239,15 @@ mod tests {
                 // Combining at least k shares succeeds and returns our secret
                 let n = input.threshold as usize;
                 let k = shares.threshold.0 as usize;
+                let input_secret = input.secret.into_boxed_slice();
                 let secret =
                     combine_shares(&shares.shares.expose_secret()[0..k])
                         .expect("combining succeeds");
-                assert_eq!(*secret.expose_secret(), input.secret);
+                assert_eq!(*secret.expose_secret(), input_secret);
                 let secret =
                     combine_shares(&shares.shares.expose_secret()[n - k..])
                         .expect("combining succeeds");
-                assert_eq!(*secret.expose_secret(), input.secret);
+                assert_eq!(*secret.expose_secret(), input_secret);
 
                 if k > 2 {
                     // Combining fewer than k shares returns nonsense
@@ -254,7 +255,7 @@ mod tests {
                         &shares.shares.expose_secret()[0..k - 1],
                     )
                     .expect("combining succeeds");
-                    assert_ne!(*secret.expose_secret(), input.secret);
+                    assert_ne!(*secret.expose_secret(), input_secret);
                 } else {
                     // Attempting to combine too few shares fails
                     assert!(

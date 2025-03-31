@@ -21,7 +21,7 @@ use crate::shamir::ValidThreshold;
 /// We only store the coefficients. The coeffecients are pushed from low (0) to
 /// high (k-1). We include all coefficients, even zero ones, for a few reasons:
 ///   1. So that we don't also have to track exponents, as that is implicit in
-///      the length of the inner Vec.
+///      the length of the inner boxed slice.
 ///   2. To allow direct indexing if desired.
 ///   3. To not provide any data dependent performance differences in
 ///      construction. The degree of the polynomial can be considered public,
@@ -36,7 +36,7 @@ use crate::shamir::ValidThreshold;
 /// the `x^(k-1)` term is nonzero, while allowing a value of zero for all other
 /// terms.
 #[derive(Debug, Zeroize, ZeroizeOnDrop)]
-pub struct Polynomial(Vec<Gf256>);
+pub struct Polynomial(Box<[Gf256]>);
 
 impl Polynomial {
     pub fn random_with_constant_term<R: Rng + Sized>(
@@ -47,7 +47,7 @@ impl Polynomial {
         let degree = (k.inner() - 1) as usize;
         // We need to store the 0th term which is a constant, so we add back 1
         // to the degree.
-        let mut inner: Vec<Gf256> =
+        let mut inner: Box<[Gf256]> =
             rng.sample_iter(distributions::Standard).take(degree + 1).collect();
 
         // Overwrite the constant term
