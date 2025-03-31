@@ -61,6 +61,11 @@ pub async fn dladm_info()
         .await
 }
 
+pub async fn nvmeadm_info()
+-> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
+    execute_command_with_timeout(nvmeadm_list(), DEFAULT_TIMEOUT).await
+}
+
 pub async fn pargs_oxide_processes(
     log: &Logger,
 ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
@@ -122,4 +127,16 @@ pub async fn pfiles_oxide_processes(
         .collect::<FuturesUnordered<_>>()
         .collect::<Vec<Result<_, _>>>()
         .await
+}
+
+/// Retrieve various `zfs` command output for the system.
+pub async fn zfs_info()
+-> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
+    execute_command_with_timeout(zfs_list(), DEFAULT_TIMEOUT).await
+}
+
+/// Retrieve various `zpool` command output for the system.
+pub async fn zpool_info()
+-> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
+    execute_command_with_timeout(zpool_status(), DEFAULT_TIMEOUT).await
 }
