@@ -161,7 +161,6 @@ mod tests {
 
     #[proptest]
     fn test_polynomial_eval(mut input: TestInput) {
-        // TODO: Replace this with the proptest rng
         let n = input.threshold;
         let p = Polynomial::random_with_constant_term(
             &mut input.rng,

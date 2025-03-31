@@ -118,11 +118,11 @@ pub fn split_secret(
 ) -> Result<SecretShares, SplitError> {
     // We hardcode this for security.
     let mut rng = OsRng;
-    split_secret_inner(secret, n, k, &mut rng)
+    split_secret_impl(secret, n, k, &mut rng)
 }
 
 /// An internal method that allows us to use a different RNG during testing
-fn split_secret_inner<R: Rng>(
+fn split_secret_impl<R: Rng>(
     secret: &[u8],
     n: u8,
     k: u8,
@@ -224,10 +224,9 @@ mod tests {
         rng: TestRng,
     }
 
-    // TODO: pass in the proptest rng to `split_secret`
     #[proptest]
     fn split_and_combine(mut input: TestInput) {
-        match split_secret_inner(
+        match split_secret_impl(
             &input.secret,
             input.total_shares,
             input.threshold,
