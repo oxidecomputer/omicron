@@ -75,7 +75,7 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
         policy = EndpointTagPolicy::ExactlyOne,
         tags = {
             "affinity" = {
-                description = "Affinity and anti-affinity groups give control over instance placement.",
+                description = "Anti-affinity groups give control over instance placement.",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/affinity"
                 }
@@ -1268,7 +1268,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/instances/{instance}/affinity-groups",
-        tags = ["instances"],
+        tags = ["hidden"],
     }]
     async fn instance_affinity_group_list(
         rqctx: RequestContext<Self::Context>,
@@ -1298,7 +1298,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/affinity-groups",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_list(
         rqctx: RequestContext<Self::Context>,
@@ -1309,7 +1309,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/affinity-groups/{affinity_group}",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_view(
         rqctx: RequestContext<Self::Context>,
@@ -1321,7 +1321,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/affinity-groups/{affinity_group}/members",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_member_list(
         rqctx: RequestContext<Self::Context>,
@@ -1335,7 +1335,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/affinity-groups/{affinity_group}/members/instance/{instance}",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_member_instance_view(
         rqctx: RequestContext<Self::Context>,
@@ -1347,7 +1347,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = POST,
         path = "/v1/affinity-groups/{affinity_group}/members/instance/{instance}",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_member_instance_add(
         rqctx: RequestContext<Self::Context>,
@@ -1359,7 +1359,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = DELETE,
         path = "/v1/affinity-groups/{affinity_group}/members/instance/{instance}",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_member_instance_delete(
         rqctx: RequestContext<Self::Context>,
@@ -1371,7 +1371,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = POST,
         path = "/v1/affinity-groups",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_create(
         rqctx: RequestContext<Self::Context>,
@@ -1383,7 +1383,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = PUT,
         path = "/v1/affinity-groups/{affinity_group}",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_update(
         rqctx: RequestContext<Self::Context>,
@@ -1396,7 +1396,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = DELETE,
         path = "/v1/affinity-groups/{affinity_group}",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_delete(
         rqctx: RequestContext<Self::Context>,

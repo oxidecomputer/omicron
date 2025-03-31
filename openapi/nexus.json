@@ -686,7 +686,7 @@
     "/v1/affinity-groups": {
       "get": {
         "tags": [
-          "affinity"
+          "hidden"
         ],
         "summary": "List affinity groups",
         "operationId": "affinity_group_list",
@@ -753,7 +753,7 @@
       },
       "post": {
         "tags": [
-          "affinity"
+          "hidden"
         ],
         "summary": "Create affinity group",
         "operationId": "affinity_group_create",
@@ -801,7 +801,7 @@
     "/v1/affinity-groups/{affinity_group}": {
       "get": {
         "tags": [
-          "affinity"
+          "hidden"
         ],
         "summary": "Fetch affinity group",
         "operationId": "affinity_group_view",
@@ -845,7 +845,7 @@
       },
       "put": {
         "tags": [
-          "affinity"
+          "hidden"
         ],
         "summary": "Update affinity group",
         "operationId": "affinity_group_update",
@@ -899,7 +899,7 @@
       },
       "delete": {
         "tags": [
-          "affinity"
+          "hidden"
         ],
         "summary": "Delete affinity group",
         "operationId": "affinity_group_delete",
@@ -938,7 +938,7 @@
     "/v1/affinity-groups/{affinity_group}/members": {
       "get": {
         "tags": [
-          "affinity"
+          "hidden"
         ],
         "summary": "List affinity group members",
         "operationId": "affinity_group_member_list",
@@ -1014,7 +1014,7 @@
     "/v1/affinity-groups/{affinity_group}/members/instance/{instance}": {
       "get": {
         "tags": [
-          "affinity"
+          "hidden"
         ],
         "summary": "Fetch affinity group member",
         "operationId": "affinity_group_member_instance_view",
@@ -1065,7 +1065,7 @@
       },
       "post": {
         "tags": [
-          "affinity"
+          "hidden"
         ],
         "summary": "Add member to affinity group",
         "operationId": "affinity_group_member_instance_add",
@@ -1116,7 +1116,7 @@
       },
       "delete": {
         "tags": [
-          "affinity"
+          "hidden"
         ],
         "summary": "Remove member from affinity group",
         "operationId": "affinity_group_member_instance_delete",
@@ -3283,7 +3283,7 @@
     "/v1/instances/{instance}/affinity-groups": {
       "get": {
         "tags": [
-          "instances"
+          "hidden"
         ],
         "summary": "List affinity groups containing instance",
         "operationId": "instance_affinity_group_list",
@@ -18051,6 +18051,14 @@
         "description": "Create-time parameters for an `Instance`",
         "type": "object",
         "properties": {
+          "anti_affinity_groups": {
+            "description": "Anti-Affinity groups which this instance should be added.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
           "auto_restart_policy": {
             "nullable": true,
             "description": "The auto-restart policy for this instance.\n\nThis policy determines whether the instance should be automatically restarted by the control plane on failure. If this is `null`, no auto-restart policy will be explicitly configured for this instance, and the control plane will select the default policy when determining whether the instance can be automatically restarted.\n\nCurrently, the global default auto-restart policy is \"best-effort\", so instances with `null` auto-restart policies will be automatically restarted. However, in the future, the default policy may be configurable through other mechanisms, such as on a per-project basis. In that case, any configured default policy will be used if this is `null`.",
@@ -24891,7 +24899,7 @@
   "tags": [
     {
       "name": "affinity",
-      "description": "Affinity and anti-affinity groups give control over instance placement.",
+      "description": "Anti-affinity groups give control over instance placement.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/affinity"
       }
