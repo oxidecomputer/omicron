@@ -52,6 +52,7 @@ use std::io::BufRead;
 use std::io::IsTerminal;
 use swrite::{SWrite, swriteln};
 use tabled::Tabled;
+use tufaceous_artifact::ArtifactVersion;
 
 mod log_capture;
 
@@ -463,7 +464,7 @@ enum ImageSourceArgs {
     /// the zone image comes from the `install` dataset
     InstallDataset,
     /// the zone image comes from a specific TUF repo artifact
-    Artifact { version: semver::Version, hash: ArtifactHash },
+    Artifact { version: ArtifactVersion, hash: ArtifactHash },
 }
 
 impl From<ImageSourceArgs> for BlueprintZoneImageSource {

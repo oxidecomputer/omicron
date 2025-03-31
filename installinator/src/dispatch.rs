@@ -211,7 +211,7 @@ impl InstallOpts {
                 InstallinatorComponent::HostPhase2,
                 InstallinatorStepId::Download,
                 "Downloading host phase 2 artifact",
-                |cx| async move {
+                async move |cx| {
                     let host_phase_2_artifact =
                         fetch_artifact(&cx, &host_phase_2_id, discovery, log)
                             .await?;
@@ -256,7 +256,7 @@ impl InstallOpts {
                 InstallinatorComponent::ControlPlane,
                 InstallinatorStepId::Download,
                 "Downloading control plane artifact",
-                |cx| async move {
+                async move |cx| {
                     let control_plane_artifact =
                         fetch_artifact(&cx, &control_plane_id, discovery, log)
                             .await?;
@@ -292,9 +292,7 @@ impl InstallOpts {
                     InstallinatorComponent::Both,
                     InstallinatorStepId::Scan,
                     "Scanning hardware to find M.2 disks",
-                    move |cx| async move {
-                        scan_hardware_with_retries(&cx, &log).await
-                    },
+                    async move |cx| scan_hardware_with_retries(&cx, &log).await,
                 )
                 .register()
         } else {
@@ -309,7 +307,7 @@ impl InstallOpts {
                 InstallinatorComponent::ControlPlane,
                 InstallinatorStepId::UnpackControlPlaneArtifact,
                 "Unpacking composite control plane artifact",
-                move |cx| async move {
+                async move |cx| {
                     let control_plane_artifact =
                         control_plane_artifact.into_value(cx.token()).await;
                     let zones = tokio::task::spawn_blocking(|| {
@@ -333,7 +331,7 @@ impl InstallOpts {
                 InstallinatorComponent::Both,
                 InstallinatorStepId::Write,
                 "Writing host and control plane artifacts",
-                |cx| async move {
+                async move |cx| {
                     let destination = destination.into_value(cx.token()).await;
                     let host_phase_2_artifact =
                         host_phase_2_artifact.into_value(cx.token()).await;

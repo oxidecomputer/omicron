@@ -626,6 +626,12 @@ impl BundleCollection<'_> {
                     .boxed(),
                     save_diag_cmd_output_or_error(
                         &sled_path,
+                        "nvmeadm",
+                        sled_client.support_nvmeadm_info(),
+                    )
+                    .boxed(),
+                    save_diag_cmd_output_or_error(
+                        &sled_path,
                         "pargs",
                         sled_client.support_pargs_info(),
                     )
@@ -640,6 +646,18 @@ impl BundleCollection<'_> {
                         &sled_path,
                         "pstack",
                         sled_client.support_pstack_info(),
+                    )
+                    .boxed(),
+                    save_diag_cmd_output_or_error(
+                        &sled_path,
+                        "zfs",
+                        sled_client.support_zfs_info(),
+                    )
+                    .boxed(),
+                    save_diag_cmd_output_or_error(
+                        &sled_path,
+                        "zpool",
+                        sled_client.support_zpool_info(),
                     )
                     .boxed(),
                 ])

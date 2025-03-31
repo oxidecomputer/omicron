@@ -315,6 +315,7 @@ struct TerminateRequest {
 // This task communicates with the "InstanceRunner" task to report status.
 struct InstanceMonitorRunner {
     client: Arc<PropolisClient>,
+    zone_name: String,
     tx_monitor: mpsc::Sender<InstanceMonitorRequest>,
     log: slog::Logger,
 }
@@ -382,6 +383,53 @@ impl InstanceMonitorRunner {
             Err(e) if self.tx_monitor.is_closed() => {
                 Err(BackoffError::permanent(e))
             }
+            // If we couldn't communicate with propolis-server, let's make sure
+            // the zone is still there...
+            Err(e @ PropolisClientError::CommunicationError(_)) => {
+                match Zones::find(&self.zone_name).await {
+                    Ok(None) => {
+                        // Oh it's GONE!
+                        info!(
+                            self.log,
+                            "Propolis zone is Way Gone!";
+                            "zone" => %self.zone_name,
+                        );
+                        Ok(InstanceMonitorUpdate::ZoneGone)
+                    }
+                    Ok(Some(zone)) if zone.state() == zone::State::Running => {
+                        warn!(
+                            self.log,
+                            "communication error checking up on Propolis, but \
+                             the zone is still running...";
+                            "error" => %e,
+                            "zone" => %self.zone_name,
+                        );
+                        Err(BackoffError::transient(e))
+                    }
+                    Ok(Some(zone)) => {
+                        info!(
+                            self.log,
+                            "Propolis zone is no longer running!";
+                            "error" => %e,
+                            "zone" => %self.zone_name,
+                            "zone_state" => ?zone.state(),
+                        );
+                        Ok(InstanceMonitorUpdate::ZoneGone)
+                    }
+                    Err(zoneadm_error) => {
+                        // If we couldn't figure out whether the zone is still
+                        // running, just keep retrying
+                        error!(
+                            self.log,
+                            "error checking if Propolis zone still exists after \
+                             commuication error";
+                            "error" => %zoneadm_error,
+                            "zone" => %self.zone_name,
+                        );
+                        Err(BackoffError::transient(e))
+                    }
+                }
+            }
             // Otherwise, was there a known error code from Propolis?
             Err(e) => propolis_error_code(&self.log, &e)
                 // If we were able to parse a known error code, send it along to
@@ -396,6 +444,7 @@ impl InstanceMonitorRunner {
 
 enum InstanceMonitorUpdate {
     State(propolis_client::types::InstanceStateMonitorResponse),
+    ZoneGone,
     Error(PropolisErrorCode),
 }
 
@@ -520,7 +569,20 @@ impl InstanceRunner {
                                 warn!(self.log, "InstanceRunner failed to send to InstanceMonitorRunner");
                             }
                         },
-                         Some(InstanceMonitorRequest { update: Error(code), tx }) => {
+                        // The Propolis zone has abruptly vanished. It's not supposed
+                        // to do that! Move it to failed.
+                        Some(InstanceMonitorRequest { update: ZoneGone, tx }) => {
+                            warn!(
+                                self.log,
+                                "Propolis zone has gone away entirely! Moving \
+                                 to Failed"
+                            );
+                            self.terminate(true).await;
+                            if let Err(_) = tx.send(Reaction::Terminate) {
+                                warn!(self.log, "InstanceRunner failed to send to InstanceMonitorRunner");
+                            }
+                        }
+                        Some(InstanceMonitorRequest { update: Error(code), tx }) => {
                             let reaction = if code == PropolisErrorCode::NoInstance {
                                 // If we see a `NoInstance` error code from
                                 // Propolis after the instance has been ensured,
@@ -969,7 +1031,6 @@ impl InstanceRunner {
             types::{
                 BlobStorageBackend, Board, BootOrderEntry, BootSettings,
                 Chipset, ComponentV0, CrucibleStorageBackend,
-                GuestHypervisorInterface, HyperVFeatureFlag,
                 InstanceInitializationMethod, NvmeDisk, QemuPvpanic,
                 ReplacementComponent, SerialPort, SerialPortNumber, VirtioDisk,
                 VirtioNetworkBackend, VirtioNic,
@@ -1176,11 +1237,7 @@ impl InstanceRunner {
                     cpus: self.vcpus,
                     memory_mb: self.memory_mib,
                     cpuid: None,
-                    guest_hv_interface: Some(
-                        GuestHypervisorInterface::HyperV {
-                            features: vec![HyperVFeatureFlag::ReferenceTsc],
-                        },
-                    ),
+                    guest_hv_interface: None,
                 },
                 components: Default::default(),
             };
@@ -1307,6 +1364,7 @@ impl InstanceRunner {
         // it exited or because the Propolis server was terminated by other
         // means).
         let runner = InstanceMonitorRunner {
+            zone_name: running_zone.name().to_string(),
             client: client.clone(),
             tx_monitor: self.tx_monitor.clone(),
             log: self.log.clone(),
@@ -1379,7 +1437,31 @@ impl InstanceRunner {
         // `RunningZone::stop` in case we're called between creating the
         // zone and assigning `running_state`.
         warn!(self.log, "Halting and removing zone: {}", zname);
-        Zones::halt_and_remove_logged(&self.log, &zname).await.unwrap();
+        let result = tokio::time::timeout(
+            Duration::from_secs(60 * 5),
+            omicron_common::backoff::retry(
+                omicron_common::backoff::retry_policy_local(),
+                || async {
+                    Zones::halt_and_remove_logged(&self.log, &zname)
+                        .await
+                        .map_err(|e| {
+                            if e.is_invalid_state() {
+                                BackoffError::transient(e)
+                            } else {
+                                BackoffError::permanent(e)
+                            }
+                        })
+                },
+            ),
+        )
+        .await;
+        match result {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => panic!("{e}"),
+            Err(_) => {
+                panic!("Zone {zname:?} could not be halted within 5 minutes")
+            }
+        }
 
         // Remove ourselves from the instance manager's map of instances.
         self.instance_ticket.deregister();

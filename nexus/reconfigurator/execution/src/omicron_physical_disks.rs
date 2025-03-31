@@ -40,7 +40,7 @@ async fn decommission_expunged_disks_impl(
     expunged_disks: impl Iterator<Item = (SledUuid, PhysicalDiskUuid)>,
 ) -> Result<(), Vec<anyhow::Error>> {
     let errors: Vec<anyhow::Error> = stream::iter(expunged_disks)
-        .filter_map(|(sled_id, disk_id)| async move {
+        .filter_map(async |(sled_id, disk_id)| {
             let log = opctx.log.new(slog::o!(
                 "sled_id" => sled_id.to_string(),
                 "disk_id" => disk_id.to_string(),

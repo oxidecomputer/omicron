@@ -31,6 +31,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
+use nexus_db_queries::db::datastore::InstanceStateComputer;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
@@ -263,6 +264,56 @@ pub(crate) struct InstanceEnsureRegisteredApiResources {
     pub(crate) authz_instance: nexus_auth::authz::Instance,
 }
 
+async fn normalize_ssh_keys(
+    datastore: &DataStore,
+    opctx: &OpContext,
+    ssh_public_keys: &Option<Vec<NameOrId>>,
+) -> Result<Option<Vec<NameOrId>>, Error> {
+    let actor = opctx
+        .authn
+        .actor_required()
+        .internal_context("loading current user's ssh keys for new Instance")?;
+    let (.., authz_user) = LookupPath::new(opctx, &datastore)
+        .silo_user_id(actor.actor_id())
+        .lookup_for(authz::Action::ListChildren)
+        .await?;
+
+    let ssh_keys = match ssh_public_keys {
+        Some(keys) => Some(
+            datastore
+                .ssh_keys_batch_lookup(opctx, &authz_user, keys)
+                .await?
+                .iter()
+                .map(|id| NameOrId::Id(*id))
+                .collect::<Vec<NameOrId>>(),
+        ),
+        None => None,
+    };
+    if let Some(ssh_keys) = &ssh_keys {
+        if ssh_keys.len() > MAX_SSH_KEYS_PER_INSTANCE.try_into().unwrap() {
+            return Err(Error::invalid_request(format!(
+                "cannot attach more than {} ssh keys to the instance",
+                MAX_SSH_KEYS_PER_INSTANCE
+            )));
+        }
+    }
+    Ok(ssh_keys)
+}
+
+async fn normalize_anti_affinity_groups(
+    datastore: &DataStore,
+    opctx: &OpContext,
+    authz_project: &authz::Project,
+    groups: &Vec<NameOrId>,
+) -> Result<Vec<NameOrId>, Error> {
+    Ok(datastore
+        .anti_affinity_groups_batch_lookup(opctx, authz_project, groups)
+        .await?
+        .iter()
+        .map(|id| NameOrId::Id(id.into_untyped_uuid()))
+        .collect::<Vec<NameOrId>>())
+}
+
 impl super::Nexus {
     pub fn instance_lookup<'a>(
         &'a self,
@@ -410,33 +461,30 @@ impl super::Nexus {
             }
         }
 
-        let actor = opctx.authn.actor_required().internal_context(
-            "loading current user's ssh keys for new Instance",
-        )?;
-        let (.., authz_user) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_user_id(actor.actor_id())
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
+        // Normalize "NameOrId" references into UUIDs.
+        //
+        // This allows us to act on a stable set of objects, rather than acting
+        // on names, which may be altered after the saga starts.
+        //
+        // TODO: It would be nice to actually transform the type here! This will
+        // require two flavors of "InstanceCreate" - one for the
+        // externally-facing options, and one for the validated internal
+        // options.
 
-        let ssh_keys = match &params.ssh_public_keys {
-            Some(keys) => Some(
-                self.db_datastore
-                    .ssh_keys_batch_lookup(opctx, &authz_user, keys)
-                    .await?
-                    .iter()
-                    .map(|id| NameOrId::Id(*id))
-                    .collect::<Vec<NameOrId>>(),
-            ),
-            None => None,
-        };
-        if let Some(ssh_keys) = &ssh_keys {
-            if ssh_keys.len() > MAX_SSH_KEYS_PER_INSTANCE.try_into().unwrap() {
-                return Err(Error::invalid_request(format!(
-                    "cannot attach more than {} ssh keys to the instance",
-                    MAX_SSH_KEYS_PER_INSTANCE
-                )));
-            }
-        }
+        let ssh_keys = normalize_ssh_keys(
+            &self.db_datastore,
+            opctx,
+            &params.ssh_public_keys,
+        )
+        .await?;
+
+        let anti_affinity_groups = normalize_anti_affinity_groups(
+            &self.db_datastore,
+            opctx,
+            &authz_project,
+            &params.anti_affinity_groups,
+        )
+        .await?;
 
         // It is deceptively inconvenient to do an early check that the boot
         // disk is valid here! We accept boot disk by name or ID, but disk
@@ -451,6 +499,7 @@ impl super::Nexus {
             project_id: authz_project.id(),
             create_params: params::InstanceCreate {
                 ssh_public_keys: ssh_keys,
+                anti_affinity_groups,
                 ..params.clone()
             },
             boundary_switches: self
@@ -780,10 +829,9 @@ impl super::Nexus {
         vmm_state: &Option<db::model::Vmm>,
         requested: &InstanceStateChangeRequest,
     ) -> Result<InstanceStateChangeRequestAction, Error> {
-        let effective_state = InstanceAndActiveVmm::determine_effective_state(
-            instance_state,
-            vmm_state.as_ref(),
-        );
+        let effective_state =
+            InstanceStateComputer::new(instance_state, vmm_state.as_ref())
+                .compute_state();
 
         // Requests that operate on active instances have to be directed to the
         // instance's current sled agent. If there is none, the request needs to
@@ -1521,6 +1569,38 @@ impl super::Nexus {
             .instance_detach_disk(&opctx, &authz_instance, &authz_disk)
             .await?;
         Ok(disk)
+    }
+
+    /// Lists affinity groups to which this instance belongs
+    pub(crate) async fn instance_list_affinity_groups(
+        &self,
+        opctx: &OpContext,
+        instance_lookup: &lookup::Instance<'_>,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<db::model::AffinityGroup> {
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::ListChildren).await?;
+        self.db_datastore
+            .instance_list_affinity_groups(opctx, &authz_instance, pagparams)
+            .await
+    }
+
+    /// Lists anti-affinity groups to which this instance belongs
+    pub(crate) async fn instance_list_anti_affinity_groups(
+        &self,
+        opctx: &OpContext,
+        instance_lookup: &lookup::Instance<'_>,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<db::model::AntiAffinityGroup> {
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::ListChildren).await?;
+        self.db_datastore
+            .instance_list_anti_affinity_groups(
+                opctx,
+                &authz_instance,
+                pagparams,
+            )
+            .await
     }
 
     /// Invoked by a sled agent to publish an updated runtime state for an
@@ -2410,6 +2490,7 @@ mod tests {
             ssh_public_keys: None,
             start: false,
             auto_restart_policy: Default::default(),
+            anti_affinity_groups: Vec::new(),
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());

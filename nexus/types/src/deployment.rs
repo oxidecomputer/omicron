@@ -44,7 +44,6 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
-use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -53,6 +52,7 @@ use std::fmt;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use strum::EnumIter;
+use tufaceous_artifact::ArtifactVersion;
 
 mod blueprint_diff;
 mod blueprint_display;
@@ -734,7 +734,7 @@ pub struct BlueprintZoneConfig {
 
     pub id: OmicronZoneUuid,
     /// zpool used for the zone's (transient) root filesystem
-    pub filesystem_pool: Option<ZpoolName>,
+    pub filesystem_pool: ZpoolName,
     pub zone_type: BlueprintZoneType,
     pub image_source: BlueprintZoneImageSource,
 }
@@ -757,14 +757,13 @@ impl BlueprintZoneConfig {
     }
 
     /// Returns the dataset used for the the zone's (transient) root filesystem.
-    pub fn filesystem_dataset(&self) -> Option<DatasetName> {
-        let pool_name = self.filesystem_pool.clone()?;
+    pub fn filesystem_dataset(&self) -> DatasetName {
         let name = illumos_utils::zone::zone_name(
             self.zone_type.kind().zone_prefix(),
             Some(self.id),
         );
         let kind = DatasetKind::TransientZone { name };
-        Some(DatasetName::new(pool_name, kind))
+        DatasetName::new(self.filesystem_pool.clone(), kind)
     }
 
     pub fn kind(&self) -> ZoneKind {
@@ -783,7 +782,7 @@ impl From<BlueprintZoneConfig> for OmicronZoneConfig {
         } = z;
         Self {
             id,
-            filesystem_pool,
+            filesystem_pool: Some(filesystem_pool),
             zone_type: zone_type.into(),
             image_source: image_source.into(),
         }
@@ -934,7 +933,7 @@ pub enum BlueprintZoneImageSource {
     /// This originates from TUF repos uploaded to Nexus which are then
     /// replicated out to all sleds.
     #[serde(rename_all = "snake_case")]
-    Artifact { version: Version, hash: ArtifactHash },
+    Artifact { version: ArtifactVersion, hash: ArtifactHash },
 }
 
 impl From<BlueprintZoneImageSource> for OmicronZoneImageSource {

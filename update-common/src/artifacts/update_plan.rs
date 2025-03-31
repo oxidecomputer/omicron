@@ -36,6 +36,7 @@ use std::io;
 use tokio::io::AsyncReadExt;
 use tokio::runtime::Handle;
 use tufaceous_artifact::ArtifactKind;
+use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactKind;
 use tufaceous_lib::ControlPlaneZoneImages;
 use tufaceous_lib::HostPhaseImages;
@@ -932,7 +933,7 @@ impl<'a> UpdatePlanBuilder<'a> {
 
             let artifact_id = ArtifactId {
                 name: info.pkg.clone(),
-                version: info.version.clone(),
+                version: ArtifactVersion::new(info.version.to_string())?,
                 kind: KnownArtifactKind::Zone.into(),
             };
             self.record_extracted_artifact(
@@ -1465,13 +1466,15 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_bad_rot_versions() {
-        const VERSION_0: Version = Version::new(0, 0, 0);
-        const VERSION_1: Version = Version::new(0, 0, 1);
+        const ARTIFACT_VERSION_0: ArtifactVersion =
+            ArtifactVersion::new_const("0.0.0");
+        const ARTIFACT_VERSION_1: ArtifactVersion =
+            ArtifactVersion::new_const("0.0.1");
 
         let logctx = test_setup_log("test_bad_rot_version");
 
         let mut plan_builder = UpdatePlanBuilder::new(
-            VERSION_0,
+            "0.0.0".parse().unwrap(),
             ControlPlaneZonesMode::Composite,
             &logctx.log,
         )
@@ -1485,7 +1488,7 @@ mod tests {
             let hash = ArtifactHash(Sha256::digest(&data).into());
             let id = ArtifactId {
                 name: format!("{kind:?}"),
-                version: VERSION_0,
+                version: ARTIFACT_VERSION_0,
                 kind: kind.into(),
             };
             plan_builder
@@ -1512,7 +1515,7 @@ mod tests {
                 let hash = ArtifactHash(Sha256::digest(&data).into());
                 let id = ArtifactId {
                     name: board.to_string(),
-                    version: VERSION_0,
+                    version: ARTIFACT_VERSION_0,
                     kind: kind.into(),
                 };
                 plan_builder
@@ -1539,7 +1542,7 @@ mod tests {
             let hash = ArtifactHash(Sha256::digest(data).into());
             let id = ArtifactId {
                 name: format!("{kind:?}"),
-                version: VERSION_0,
+                version: ARTIFACT_VERSION_0,
                 kind: kind.into(),
             };
             plan_builder
@@ -1568,7 +1571,7 @@ mod tests {
             let hash = ArtifactHash(Sha256::digest(data).into());
             let id = ArtifactId {
                 name: format!("{kind:?}"),
-                version: VERSION_0,
+                version: ARTIFACT_VERSION_0,
                 kind: kind.into(),
             };
             plan_builder
@@ -1586,7 +1589,7 @@ mod tests {
         let hash = ArtifactHash(Sha256::digest(data).into());
         let id = ArtifactId {
             name: format!("{bad_kind:?}"),
-            version: VERSION_1,
+            version: ARTIFACT_VERSION_1,
             kind: bad_kind.into(),
         };
         plan_builder
@@ -1615,7 +1618,7 @@ mod tests {
             let hash = ArtifactHash(Sha256::digest(&artifact).into());
             let id = ArtifactId {
                 name: format!("{kind:?}"),
-                version: VERSION_0,
+                version: ARTIFACT_VERSION_0,
                 kind: kind.into(),
             };
             plan_builder
@@ -1637,8 +1640,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_multi_rot_version() {
-        const VERSION_0: Version = Version::new(0, 0, 0);
-        const VERSION_1: Version = Version::new(0, 0, 1);
+        const ARTIFACT_VERSION_0: ArtifactVersion =
+            ArtifactVersion::new_const("0.0.0");
+        const ARTIFACT_VERSION_1: ArtifactVersion =
+            ArtifactVersion::new_const("0.0.1");
 
         let logctx = test_setup_log("test_multi_rot_version");
 
@@ -1657,7 +1662,7 @@ mod tests {
             let hash = ArtifactHash(Sha256::digest(&data).into());
             let id = ArtifactId {
                 name: format!("{kind:?}"),
-                version: VERSION_0,
+                version: ARTIFACT_VERSION_0,
                 kind: kind.into(),
             };
             plan_builder
@@ -1684,7 +1689,7 @@ mod tests {
                 let hash = ArtifactHash(Sha256::digest(&data).into());
                 let id = ArtifactId {
                     name: board.to_string(),
-                    version: VERSION_0,
+                    version: ARTIFACT_VERSION_0,
                     kind: kind.into(),
                 };
                 plan_builder
@@ -1711,7 +1716,7 @@ mod tests {
             let hash = ArtifactHash(Sha256::digest(data).into());
             let id = ArtifactId {
                 name: format!("{kind:?}"),
-                version: VERSION_0,
+                version: ARTIFACT_VERSION_0,
                 kind: kind.into(),
             };
             plan_builder
@@ -1742,7 +1747,7 @@ mod tests {
             let hash = ArtifactHash(Sha256::digest(data).into());
             let id = ArtifactId {
                 name: format!("{kind:?}"),
-                version: VERSION_0,
+                version: ARTIFACT_VERSION_0,
                 kind: kind.into(),
             };
             plan_builder
@@ -1764,7 +1769,7 @@ mod tests {
             let hash = ArtifactHash(Sha256::digest(data).into());
             let id = ArtifactId {
                 name: format!("{kind:?}"),
-                version: VERSION_1,
+                version: ARTIFACT_VERSION_1,
                 kind: kind.into(),
             };
             plan_builder
@@ -1798,7 +1803,7 @@ mod tests {
             let hash = ArtifactHash(Sha256::digest(&artifact).into());
             let id = ArtifactId {
                 name: format!("{kind:?}"),
-                version: VERSION_0,
+                version: ARTIFACT_VERSION_0,
                 kind: kind.into(),
             };
             plan_builder
@@ -1826,7 +1831,8 @@ mod tests {
     // is required.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_update_plan_from_artifacts() {
-        const VERSION_0: Version = Version::new(0, 0, 0);
+        const ARTIFACT_VERSION_0: ArtifactVersion =
+            ArtifactVersion::new_const("0.0.0");
 
         let logctx = test_setup_log("test_update_plan_from_artifacts");
 
@@ -1846,7 +1852,7 @@ mod tests {
             let hash = ArtifactHash(Sha256::digest(&data).into());
             let id = ArtifactId {
                 name: kind.to_string(),
-                version: VERSION_0,
+                version: ARTIFACT_VERSION_0,
                 kind: kind.parse().unwrap(),
             };
             expected_unknown_artifacts.insert(id.clone());
@@ -1868,7 +1874,7 @@ mod tests {
             let hash = ArtifactHash(Sha256::digest(&data).into());
             let id = ArtifactId {
                 name: format!("{kind:?}"),
-                version: VERSION_0,
+                version: ARTIFACT_VERSION_0,
                 kind: kind.into(),
             };
             plan_builder
@@ -1895,7 +1901,7 @@ mod tests {
                 let hash = ArtifactHash(Sha256::digest(&data).into());
                 let id = ArtifactId {
                     name: board.to_string(),
-                    version: VERSION_0,
+                    version: ARTIFACT_VERSION_0,
                     kind: kind.into(),
                 };
                 plan_builder
@@ -1922,7 +1928,7 @@ mod tests {
             let hash = ArtifactHash(Sha256::digest(data).into());
             let id = ArtifactId {
                 name: format!("{kind:?}"),
-                version: VERSION_0,
+                version: ARTIFACT_VERSION_0,
                 kind: kind.into(),
             };
             plan_builder
@@ -1948,7 +1954,7 @@ mod tests {
             let hash = ArtifactHash(Sha256::digest(data).into());
             let id = ArtifactId {
                 name: format!("{kind:?}"),
-                version: VERSION_0,
+                version: ARTIFACT_VERSION_0,
                 kind: kind.into(),
             };
             plan_builder
@@ -1982,7 +1988,7 @@ mod tests {
             let hash = ArtifactHash(Sha256::digest(&artifact).into());
             let id = ArtifactId {
                 name: format!("{kind:?}"),
-                version: VERSION_0,
+                version: ARTIFACT_VERSION_0,
                 kind: kind.into(),
             };
             plan_builder
@@ -2131,7 +2137,8 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_bad_hubris_cabooses() {
-        const VERSION_0: Version = Version::new(0, 0, 0);
+        const ARTIFACT_VERSION_0: ArtifactVersion =
+            ArtifactVersion::new_const("0.0.0");
 
         let logctx = test_setup_log("test_bad_hubris_cabooses");
 
@@ -2155,7 +2162,7 @@ mod tests {
             let hash = ArtifactHash(Sha256::digest(data).into());
             let id = ArtifactId {
                 name: format!("{kind:?}"),
-                version: VERSION_0,
+                version: ARTIFACT_VERSION_0,
                 kind: kind.into(),
             };
             match plan_builder
@@ -2188,7 +2195,7 @@ mod tests {
             let hash = ArtifactHash(Sha256::digest(&artifact).into());
             let id = ArtifactId {
                 name: format!("{kind:?}"),
-                version: VERSION_0,
+                version: ARTIFACT_VERSION_0,
                 kind: kind.into(),
             };
             match plan_builder
@@ -2209,8 +2216,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_too_many_rot_bootloaders() {
-        const VERSION_0: Version = Version::new(0, 0, 0);
-        const VERSION_1: Version = Version::new(0, 0, 1);
+        const ARTIFACT_VERSION_0: ArtifactVersion =
+            ArtifactVersion::new_const("0.0.0");
+        const ARTIFACT_VERSION_1: ArtifactVersion =
+            ArtifactVersion::new_const("0.0.1");
 
         // The regular RoT can have multiple versions but _not_ the
         // bootloader
@@ -2233,7 +2242,7 @@ mod tests {
         let hash = ArtifactHash(Sha256::digest(&gimlet_rot_bootloader).into());
         let id = ArtifactId {
             name: format!("{kind:?}"),
-            version: VERSION_0,
+            version: ARTIFACT_VERSION_0,
             kind: kind.into(),
         };
         plan_builder
@@ -2248,7 +2257,7 @@ mod tests {
         let hash = ArtifactHash(Sha256::digest(&gimlet2_rot_bootloader).into());
         let id = ArtifactId {
             name: format!("{kind:?}"),
-            version: VERSION_1,
+            version: ARTIFACT_VERSION_1,
             kind: kind.into(),
         };
         match plan_builder
@@ -2278,7 +2287,8 @@ mod tests {
         // YYYY     BBBB     2.0.0
         // YYYY     CCCC     2.0.0
 
-        const VERSION_0: Version = Version::new(0, 0, 0);
+        const ARTIFACT_VERSION_0: ArtifactVersion =
+            ArtifactVersion::new_const("0.0.0");
 
         let logctx = test_setup_log("test_update_plan_from_artifacts");
 
@@ -2297,7 +2307,7 @@ mod tests {
             let hash = ArtifactHash(Sha256::digest(&data).into());
             let id = ArtifactId {
                 name: format!("{kind:?}"),
-                version: VERSION_0,
+                version: ARTIFACT_VERSION_0,
                 kind: kind.into(),
             };
             plan_builder
@@ -2324,7 +2334,7 @@ mod tests {
                 let hash = ArtifactHash(Sha256::digest(&data).into());
                 let id = ArtifactId {
                     name: board.to_string(),
-                    version: VERSION_0,
+                    version: ARTIFACT_VERSION_0,
                     kind: kind.into(),
                 };
                 plan_builder
@@ -2351,7 +2361,7 @@ mod tests {
             let hash = ArtifactHash(Sha256::digest(data).into());
             let id = ArtifactId {
                 name: format!("{kind:?}"),
-                version: VERSION_0,
+                version: ARTIFACT_VERSION_0,
                 kind: kind.into(),
             };
             plan_builder
@@ -2380,7 +2390,7 @@ mod tests {
             let hash = ArtifactHash(Sha256::digest(data).into());
             let id = ArtifactId {
                 name: format!("{kind:?}"),
-                version: VERSION_0,
+                version: ARTIFACT_VERSION_0,
                 kind: kind.into(),
             };
             plan_builder
@@ -2414,7 +2424,7 @@ mod tests {
             let hash = ArtifactHash(Sha256::digest(&artifact).into());
             let id = ArtifactId {
                 name: format!("{kind:?}"),
-                version: VERSION_0,
+                version: ARTIFACT_VERSION_0,
                 kind: kind.into(),
             };
             plan_builder
@@ -2442,7 +2452,8 @@ mod tests {
         // YYYY     BBBB
         // YYYY     CCCC
 
-        const VERSION_0: Version = Version::new(0, 0, 0);
+        const ARTIFACT_VERSION_0: ArtifactVersion =
+            ArtifactVersion::new_const("0.0.0");
 
         let logctx = test_setup_log("test_update_plan_from_artifacts");
 
@@ -2462,7 +2473,7 @@ mod tests {
         let hash = ArtifactHash(Sha256::digest(data).into());
         let id = ArtifactId {
             name: format!("{kind:?}"),
-            version: VERSION_0,
+            version: ARTIFACT_VERSION_0,
             kind: kind.into(),
         };
         plan_builder
@@ -2474,7 +2485,7 @@ mod tests {
         let hash = ArtifactHash(Sha256::digest(data).into());
         let id = ArtifactId {
             name: format!("{kind:?}"),
-            version: VERSION_0,
+            version: ARTIFACT_VERSION_0,
             kind: kind.into(),
         };
         match plan_builder
@@ -2491,6 +2502,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_split_control_plane() {
         const VERSION_0: Version = Version::new(0, 0, 0);
+        const ARTIFACT_VERSION_0: ArtifactVersion =
+            ArtifactVersion::new_const("0.0.0");
 
         let logctx = test_setup_log("test_split_control_plane");
 
@@ -2502,7 +2515,7 @@ mod tests {
             ));
             let metadata = Metadata::new(ArchiveType::Layer(LayerInfo {
                 pkg: name.to_owned(),
-                version: VERSION_0,
+                version: ARTIFACT_VERSION_0,
             }));
             metadata.append_to_tar(&mut tar, 0).unwrap();
             let data = tar.into_inner().unwrap().finish().unwrap();
@@ -2533,7 +2546,7 @@ mod tests {
         let hash = ArtifactHash(Sha256::digest(&data).into());
         let id = ArtifactId {
             name: "control_plane".into(),
-            version: VERSION_0,
+            version: ARTIFACT_VERSION_0,
             kind: KnownArtifactKind::ControlPlane.into(),
         };
         plan_builder
@@ -2548,7 +2561,7 @@ mod tests {
             let content =
                 &zones.iter().find(|(name, _)| *name == id.name).unwrap().1;
             let expected_hash = ArtifactHash(Sha256::digest(content).into());
-            assert_eq!(id.version, VERSION_0);
+            assert_eq!(id.version, ARTIFACT_VERSION_0);
             assert_eq!(id.kind, KnownArtifactKind::Zone.into());
             assert_eq!(
                 vec,

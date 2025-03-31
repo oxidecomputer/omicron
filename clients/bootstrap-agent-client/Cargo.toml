@@ -21,4 +21,3 @@ uuid.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 oxnet.workspace = true
-semver.workspace = true

@@ -1393,6 +1393,7 @@ table! {
         time_created -> Timestamptz,
         sha256 -> Text,
         artifact_size -> Int8,
+        generation_added -> Int8,
     }
 }
 
@@ -1410,6 +1411,13 @@ allow_tables_to_appear_in_same_query!(
 );
 joinable!(tuf_repo_artifact -> tuf_repo (tuf_repo_id));
 joinable!(tuf_repo_artifact -> tuf_artifact (tuf_artifact_id));
+
+table! {
+    tuf_generation (singleton) {
+        singleton -> Bool,
+        generation -> Int8,
+    }
+}
 
 table! {
     target_release (generation) {
@@ -1783,7 +1791,7 @@ table! {
         disposition_expunged_as_of_generation -> Nullable<Int8>,
         disposition_expunged_ready_for_cleanup -> Bool,
         external_ip_id -> Nullable<Uuid>,
-        filesystem_pool -> Nullable<Uuid>,
+        filesystem_pool -> Uuid,
     }
 }
 

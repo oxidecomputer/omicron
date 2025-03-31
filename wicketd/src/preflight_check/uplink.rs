@@ -230,7 +230,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
         .new_step(
             UplinkPreflightStepId::WaitForL1Link,
             "Waiting for L1 link up",
-            move |cx| async move {
+            async move |cx| {
                 let (port_id, link_id) = prev_step.into_value(cx.token()).await;
 
                 // Wait for link up.
@@ -289,7 +289,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
         .new_step(
             UplinkPreflightStepId::ConfigureAddress,
             "Configuring IP address in host OS",
-            move |cx| async move {
+            async move |cx| {
                 let level1 = match prev_step.into_value(cx.token()).await {
                     Ok(level1) => level1,
                     Err(failure) => {
@@ -413,7 +413,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
         .new_step(
             UplinkPreflightStepId::ConfigureRouting,
             "Configuring routing in host OS",
-            move |cx| async move {
+            async move |cx| {
                 let level2 = match prev_step.into_value(cx.token()).await {
                     Ok(level2) => level2,
                     Err(failure) => {
@@ -464,7 +464,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
         .new_step(
             UplinkPreflightStepId::CheckExternalDnsConnectivity,
             "Checking for external DNS connectivity",
-            move |cx| async move {
+            async move |cx| {
                 let level2 = match prev_step.into_value(cx.token()).await {
                     Ok(level2) => level2,
                     Err(err) => {
@@ -489,7 +489,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
         .new_step(
             UplinkPreflightStepId::CheckExternalNtpConnectivity,
             "Checking for external NTP connectivity",
-            move |cx| async move {
+            async move |cx| {
                 let (level2, ntp_ips) =
                     match prev_step.into_value(cx.token()).await {
                         Ok((level2, ntp_ips)) => (level2, ntp_ips),
@@ -590,7 +590,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
         .new_step(
             UplinkPreflightStepId::CleanupRouting,
             "Cleaning up host OS routing configuration",
-            move |cx| async move {
+            async move |cx| {
                 let remove_host_route: bool;
                 let level2 = match prev_step.into_value(cx.token()).await {
                     Ok(RoutingSuccess { level2 }) => {
@@ -642,7 +642,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
             .new_step(
                 UplinkPreflightStepId::CleanupAddress,
                 "Cleaning up host OS IP address configuration",
-                move |cx| async move {
+                async move |cx| {
                     let mut uplink_property_to_remove = None;
                     let level1 = match prev_step.into_value(cx.token()).await {
                         Ok(L2Success { level1, uplink_property }) => {
@@ -716,7 +716,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
         .new_step(
             UplinkPreflightStepId::CleanupL1,
             "Cleaning up switch configuration",
-            move |cx| async move {
+            async move |cx| {
                 let (port_id, _link_id) =
                     match prev_step.into_value(cx.token()).await {
                         Ok(L1Success { port_id, link_id })
