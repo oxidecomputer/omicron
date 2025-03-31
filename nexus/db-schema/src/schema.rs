@@ -184,7 +184,7 @@ table! {
         id -> Uuid,
         interface_name -> Text,
         v6_enabled -> Bool,
-        kind -> crate::enums::DbSwitchInterfaceKindEnum,
+        kind -> crate::enums::SwitchInterfaceKindEnum,
     }
 }
 
