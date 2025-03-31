@@ -8,7 +8,6 @@ use super::DataStore;
 use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::TransactionError;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
@@ -73,7 +72,7 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<IpPool> {
-        use db::schema::ip_pool;
+        use nexus_db_schema::schema::ip_pool;
 
         opctx
             .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
@@ -104,8 +103,8 @@ impl DataStore {
         opctx: &OpContext,
         ip_pool_id: Uuid,
     ) -> LookupResult<IpPoolResource> {
-        use db::schema::ip_pool;
-        use db::schema::ip_pool_resource;
+        use nexus_db_schema::schema::ip_pool;
+        use nexus_db_schema::schema::ip_pool_resource;
 
         let authz_silo = opctx.authn.silo_required().internal_context(
             "fetching link from an IP pool to current silo",
@@ -137,8 +136,8 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> LookupResult<(authz::IpPool, IpPool)> {
-        use db::schema::ip_pool;
-        use db::schema::ip_pool_resource;
+        use nexus_db_schema::schema::ip_pool;
+        use nexus_db_schema::schema::ip_pool_resource;
 
         let authz_silo_id = opctx.authn.silo_required()?.id();
 
@@ -204,7 +203,7 @@ impl DataStore {
         opctx: &OpContext,
         pool: IpPool,
     ) -> CreateResult<IpPool> {
-        use db::schema::ip_pool::dsl;
+        use nexus_db_schema::schema::ip_pool::dsl;
         opctx
             .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
             .await?;
@@ -229,9 +228,9 @@ impl DataStore {
         authz_pool: &authz::IpPool,
         db_pool: &IpPool,
     ) -> DeleteResult {
-        use db::schema::ip_pool::dsl;
-        use db::schema::ip_pool_range;
-        use db::schema::ip_pool_resource;
+        use nexus_db_schema::schema::ip_pool::dsl;
+        use nexus_db_schema::schema::ip_pool_range;
+        use nexus_db_schema::schema::ip_pool_resource;
         opctx.authorize(authz::Action::Delete, authz_pool).await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -297,7 +296,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_pool: &authz::IpPool,
     ) -> LookupResult<bool> {
-        use db::schema::ip_pool;
+        use nexus_db_schema::schema::ip_pool;
 
         ip_pool::table
             .filter(ip_pool::id.eq(authz_pool.id()))
@@ -321,7 +320,7 @@ impl DataStore {
         authz_pool: &authz::IpPool,
         updates: IpPoolUpdate,
     ) -> UpdateResult<IpPool> {
-        use db::schema::ip_pool::dsl;
+        use nexus_db_schema::schema::ip_pool::dsl;
         opctx.authorize(authz::Action::Modify, authz_pool).await?;
 
         diesel::update(dsl::ip_pool)
@@ -346,9 +345,9 @@ impl DataStore {
     ) -> Result<IpsAllocated, Error> {
         opctx.authorize(authz::Action::Read, authz_pool).await?;
 
-        use db::schema::external_ip;
         use diesel::dsl::sql;
         use diesel::sql_types::BigInt;
+        use nexus_db_schema::schema::external_ip;
 
         let (ipv4, ipv6) = external_ip::table
             .filter(external_ip::ip_pool_id.eq(authz_pool.id()))
@@ -380,7 +379,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, authz_pool).await?;
         opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
 
-        use db::schema::ip_pool_range;
+        use nexus_db_schema::schema::ip_pool_range;
 
         let ranges = ip_pool_range::table
             .filter(ip_pool_range::ip_pool_id.eq(authz_pool.id()))
@@ -425,9 +424,9 @@ impl DataStore {
         authz_pool: &authz::IpPool,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<IpPoolResource> {
-        use db::schema::ip_pool;
-        use db::schema::ip_pool_resource;
-        use db::schema::silo;
+        use nexus_db_schema::schema::ip_pool;
+        use nexus_db_schema::schema::ip_pool_resource;
+        use nexus_db_schema::schema::silo;
 
         paginated(
             ip_pool_resource::table,
@@ -456,8 +455,8 @@ impl DataStore {
         authz_silo: &authz::Silo,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<(IpPool, IpPoolResource)> {
-        use db::schema::ip_pool;
-        use db::schema::ip_pool_resource;
+        use nexus_db_schema::schema::ip_pool;
+        use nexus_db_schema::schema::ip_pool_resource;
 
         match pagparams {
             PaginatedBy::Id(pagparams) => {
@@ -484,7 +483,7 @@ impl DataStore {
         opctx: &OpContext,
         ip_pool_resource: IpPoolResource,
     ) -> CreateResult<IpPoolResource> {
-        use db::schema::ip_pool_resource::dsl;
+        use nexus_db_schema::schema::ip_pool_resource::dsl;
         opctx
             .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
             .await?;
@@ -530,10 +529,10 @@ impl DataStore {
         ip_pool_id: Uuid,
         conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
     ) -> UpdateResult<()> {
-        use db::schema::internet_gateway::dsl as igw_dsl;
-        use db::schema::internet_gateway_ip_pool::dsl as igw_ip_pool_dsl;
-        use db::schema::project::dsl as project_dsl;
-        use db::schema::vpc::dsl as vpc_dsl;
+        use nexus_db_schema::schema::internet_gateway::dsl as igw_dsl;
+        use nexus_db_schema::schema::internet_gateway_ip_pool::dsl as igw_ip_pool_dsl;
+        use nexus_db_schema::schema::project::dsl as project_dsl;
+        use nexus_db_schema::schema::vpc::dsl as vpc_dsl;
 
         let projects = project_dsl::project
             .filter(project_dsl::time_deleted.is_null())
@@ -623,10 +622,10 @@ impl DataStore {
         ip_pool_id: Uuid,
         conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
     ) -> UpdateResult<()> {
-        use db::schema::internet_gateway::dsl as igw_dsl;
-        use db::schema::internet_gateway_ip_pool::dsl as igw_ip_pool_dsl;
-        use db::schema::project::dsl as project_dsl;
-        use db::schema::vpc::dsl as vpc_dsl;
+        use nexus_db_schema::schema::internet_gateway::dsl as igw_dsl;
+        use nexus_db_schema::schema::internet_gateway_ip_pool::dsl as igw_ip_pool_dsl;
+        use nexus_db_schema::schema::project::dsl as project_dsl;
+        use nexus_db_schema::schema::vpc::dsl as vpc_dsl;
 
         let projects = project_dsl::project
             .filter(project_dsl::time_deleted.is_null())
@@ -685,7 +684,7 @@ impl DataStore {
         authz_silo: &authz::Silo,
         is_default: bool,
     ) -> UpdateResult<IpPoolResource> {
-        use db::schema::ip_pool_resource::dsl;
+        use nexus_db_schema::schema::ip_pool_resource::dsl;
 
         opctx.authorize(authz::Action::Modify, authz_ip_pool).await?;
         opctx.authorize(authz::Action::Modify, authz_silo).await?;
@@ -817,9 +816,9 @@ impl DataStore {
         authz_pool: &authz::IpPool,
         authz_silo: &authz::Silo,
     ) -> Result<(), Error> {
-        use db::schema::external_ip;
-        use db::schema::instance;
-        use db::schema::project;
+        use nexus_db_schema::schema::external_ip;
+        use nexus_db_schema::schema::instance;
+        use nexus_db_schema::schema::project;
 
         let existing_ips = external_ip::table
             .inner_join(
@@ -866,8 +865,8 @@ impl DataStore {
         authz_pool: &authz::IpPool,
         authz_silo: &authz::Silo,
     ) -> Result<(), Error> {
-        use db::schema::external_ip;
-        use db::schema::project;
+        use nexus_db_schema::schema::external_ip;
+        use nexus_db_schema::schema::project;
 
         let existing_ips = external_ip::table
             .inner_join(project::table.on(external_ip::project_id.eq(project::id.nullable())))
@@ -910,7 +909,7 @@ impl DataStore {
         authz_pool: &authz::IpPool,
         authz_silo: &authz::Silo,
     ) -> DeleteResult {
-        use db::schema::ip_pool_resource;
+        use nexus_db_schema::schema::ip_pool_resource;
 
         opctx.authorize(authz::Action::Modify, authz_pool).await?;
         opctx.authorize(authz::Action::Modify, authz_silo).await?;
@@ -954,7 +953,7 @@ impl DataStore {
         authz_pool: &authz::IpPool,
         pag_params: &DataPageParams<'_, IpNetwork>,
     ) -> ListResultVec<IpPoolRange> {
-        use db::schema::ip_pool_range::dsl;
+        use nexus_db_schema::schema::ip_pool_range::dsl;
         opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
         paginated(dsl::ip_pool_range, dsl::first_address, pag_params)
             .filter(dsl::ip_pool_id.eq(authz_pool.id()))
@@ -1016,7 +1015,7 @@ impl DataStore {
         authz_pool: &authz::IpPool,
         range: &IpRange,
     ) -> CreateResult<IpPoolRange> {
-        use db::schema::ip_pool_range::dsl;
+        use nexus_db_schema::schema::ip_pool_range::dsl;
         opctx.authorize(authz::Action::CreateChild, authz_pool).await?;
         let pool_id = authz_pool.id();
         let new_range = IpPoolRange::new(range, pool_id);
@@ -1062,8 +1061,8 @@ impl DataStore {
         authz_pool: &authz::IpPool,
         range: &IpRange,
     ) -> DeleteResult {
-        use db::schema::external_ip;
-        use db::schema::ip_pool_range::dsl;
+        use nexus_db_schema::schema::external_ip;
+        use nexus_db_schema::schema::ip_pool_range::dsl;
         opctx.authorize(authz::Action::Modify, authz_pool).await?;
 
         let pool_id = authz_pool.id();

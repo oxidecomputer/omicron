@@ -34,6 +34,7 @@ httptest.workspace = true
 ipnetwork.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries = { workspace = true, features = ["testing"] }
+nexus-db-schema.workspace = true
 nexus-test-utils.workspace = true
 nexus-types.workspace = true
 omicron-test-utils.workspace = true
