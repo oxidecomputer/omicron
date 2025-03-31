@@ -11,12 +11,13 @@
 //! shamir secret sharing. This keeps the surface area small and
 //! minimizes the amount of auditing we need to do.
 //!
-//! For a basic overview of galois fields, the docs from the [gf256 crate]
-//! (https://docs.rs/gf256/0.3.0/gf256/gf/index.html) are excellent.
+//! For a basic overview of galois fields, the docs from the
+//! [gf256 crate](https://docs.rs/gf256/0.3.0/gf256/gf/index.html)
+//! are excellent.
 //!
-//! For a more comprehensive introduction to the math, these [lecture
-//! notes](https://web.stanford.edu/~marykw/classes/CS250_W19/readings/
-//! Forney_Introduction_to_Finite_Fields.pdf) are handy.
+//! For a more comprehensive introduction to the math, these
+//! [lecture notes](https://web.stanford.edu/~marykw/classes/CS250_W19/readings/Forney_Introduction_to_Finite_Fields.pdf)
+//! are handy.
 
 // Don't tell me what operations to use in my implementations
 #![allow(clippy::suspicious_arithmetic_impl)]
@@ -53,8 +54,7 @@ impl Gf256 {
     /// It turns out that self^-1 = self^254 for GF(2^8), so we calculate that
     /// in a simple, unrolled fashion.
     ///
-    /// This strategy was borrowed from https://github.com/dsprenkels/sss/
-    /// blob/16c3fdb175497b25eb90b966991fa7ff19fbdcfe/hazmat.c#L247-L266
+    /// This strategy was borrowed from <https://github.com/dsprenkels/sss/blob/16c3fdb175497b25eb90b966991fa7ff19fbdcfe/hazmat.c#L247-L266>
     #[rustfmt::skip]
     pub fn invert(&self) -> Gf256 {
         let mut result = *self * *self;     // self^2
@@ -196,16 +196,15 @@ impl Div for Gf256 {
 ///    `x^8 mod m(x) = x^4 + x^3 + x + 1 = 0x1b`
 ///
 /// A rationale and description of this algorithm can be found in sections 7.9
-/// and 7.10 of the lecture notes at https://engineering.purdue.edu/kak/compsec/
-/// NewLectures/Lecture7.pdf
+/// and 7.10 of the lecture notes at
+/// <https://engineering.purdue.edu/kak/compsec/NewLectures/Lecture7.pdf>
 ///
-/// It is also explained on a wikipedia section about
-/// the [AES finite field](https://en.wikipedia.org/wiki/
-/// Finite_field_arithmetic#Rijndael's_(AES)_finite_field)
+/// It is also explained on a wikipedia section about the
+/// [AES finite field](https://en.wikipedia.org/wiki/Finite_field_arithmetic#Rijndael's_(AES)_finite_field)
 ///
-/// This is roughly the same algorithm used in [vsss-rs](https://github.com/
-/// mikelodder7/vsss-rs) and many other existing implementations.
-///
+/// This is roughly the same algorithm used in
+/// [vsss-rs](https://github.com/mikelodder7/vsss-rs) and many other existing
+/// implementations.
 impl Mul for Gf256 {
     type Output = Self;
     fn mul(mut self, mut rhs: Self) -> Self::Output {

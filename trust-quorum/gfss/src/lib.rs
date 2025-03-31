@@ -35,10 +35,11 @@
 //! [thwart our best efforts](https://eprint.iacr.org/2025/435).
 //!
 //! As we move towards Zen4+ architectures we may be able to limit our reliance
-//! on best effort rust attempts via hardware operations like [GFNI](https://
-//! en.wikipedia.org/wiki/ AVX-512#GFNI) for multiplication. Old hardware will
-//! still rely on software implementations. Furthermore, our interpolation
-//! algorithm is likely to remain in rust and not assembly for the time being.
+//! on best effort rust attempts via hardware operations like
+//! [GFNI](https://en.wikipedia.org/wiki/AVX-512#GFNI) for multiplication.
+//! Old hardware will still rely on software implementations. Furthermore, our
+//! interpolation algorithm is likely to remain in rust and not assembly for the
+//! time being.
 
 pub mod gf256;
 pub mod polynomial;
