@@ -646,6 +646,7 @@ fn make_directory_mutable(
     Ok(())
 }
 
+#[derive(Debug)]
 enum Immutability {
     Yes,
     No,
@@ -678,8 +679,9 @@ fn is_directory_immutable(
     let output = execute(cmd)
         .map_err(|err| EnsureDatasetErrorRaw::MakeImmutable(err))?;
 
-    // NOTE: It's probably worthwhile figuring out how to use stat for this
-    // instead?
+    // NOTE: Experimenting with "truss ls -d/v" shows that it seems to be using
+    // the https://illumos.org/man/2/acl API, but we will need to likely bring
+    // our own bindings here to call those APIs from Rust.
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut lines = stdout.trim().lines();
     let Some(attr_line) = lines.nth(1) else {
@@ -1206,6 +1208,26 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[cfg(target_os = "illumos")]
+    #[test]
+    fn directory_mutability() {
+        let dir = Utf8TempDir::new_in("/var/tmp").unwrap();
+        let immutablity = is_directory_immutable(dir.path()).unwrap();
+        assert!(
+            matches!(immutablity, Immutability::No),
+            "new directory should be mutable, is: {:?}",
+            immutablity
+        );
+
+        make_directory_immutable(dir.path()).unwrap();
+        let immutablity = is_directory_immutable(dir.path()).unwrap();
+        assert!(matches!(immutablity, Immutability::Yes), "directory should be immutable");
+
+        make_directory_mutable(dir.path()).unwrap();
+        let immutablity = is_directory_immutable(dir.path()).unwrap();
+        assert!(matches!(immutablity, Immutability::No), "directory should be mutable");
+    }
 
     // This test validates that "get_values" at least parses correctly.
     //
