@@ -1222,11 +1222,17 @@ mod test {
 
         make_directory_immutable(dir.path()).unwrap();
         let immutablity = is_directory_immutable(dir.path()).unwrap();
-        assert!(matches!(immutablity, Immutability::Yes), "directory should be immutable");
+        assert!(
+            matches!(immutablity, Immutability::Yes),
+            "directory should be immutable"
+        );
 
         make_directory_mutable(dir.path()).unwrap();
         let immutablity = is_directory_immutable(dir.path()).unwrap();
-        assert!(matches!(immutablity, Immutability::No), "directory should be mutable");
+        assert!(
+            matches!(immutablity, Immutability::No),
+            "directory should be mutable"
+        );
     }
 
     // This test validates that "get_values" at least parses correctly.
