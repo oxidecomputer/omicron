@@ -5,7 +5,6 @@
 //! Datastore methods involving CockroachDB node IDs.
 
 use super::DataStore;
-use crate::db;
 use crate::db::error::ErrorHandler;
 use crate::db::error::public_error_from_diesel;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -32,7 +31,7 @@ impl DataStore {
         opctx: &OpContext,
         omicron_zone_id: OmicronZoneUuid,
     ) -> LookupResult<Option<String>> {
-        use db::schema::cockroachdb_zone_id_to_node_id::dsl;
+        use nexus_db_schema::schema::cockroachdb_zone_id_to_node_id::dsl;
 
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -57,7 +56,7 @@ impl DataStore {
         omicron_zone_id: OmicronZoneUuid,
         crdb_node_id: String,
     ) -> Result<(), Error> {
-        use db::schema::cockroachdb_zone_id_to_node_id::dsl;
+        use nexus_db_schema::schema::cockroachdb_zone_id_to_node_id::dsl;
 
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;

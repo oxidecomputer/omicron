@@ -5,7 +5,6 @@
 //! Specialized queries for inserting database records, usually to maintain
 //! complex invariants that are most accurately expressed in a single query.
 
-pub mod affinity;
 pub mod disk;
 pub mod external_ip;
 pub mod ip_pool;
@@ -14,6 +13,7 @@ mod next_item;
 pub mod network_interface;
 pub mod oximeter;
 pub mod region_allocation;
+pub mod sled_reservation;
 pub mod virtual_provisioning_collection_update;
 pub mod vpc;
 pub mod vpc_subnet;

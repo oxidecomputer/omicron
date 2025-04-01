@@ -563,6 +563,7 @@ pub async fn create_instance_with(
             boot_disk: None,
             start,
             auto_restart_policy,
+            anti_affinity_groups: Vec::new(),
         },
     )
     .await
@@ -1233,7 +1234,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
 
     pub async fn add_blueprint_disks(&mut self, blueprint: &Blueprint) {
         for (sled_id, sled_config) in blueprint.sleds.iter() {
-            for disk in &sled_config.disks_config.disks {
+            for disk in &sled_config.disks {
                 self.add_zpool_with_dataset_ext(
                     *sled_id,
                     disk.id,
@@ -1314,7 +1315,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                 })
                 .collect();
 
-            let generation = Generation::new();
+            let generation = Generation::new().next();
             let dataset_config = DatasetsConfig { generation, datasets };
             let res = sled_agent.datasets_ensure(dataset_config).expect(
                 "Should have been able to ensure datasets, but could not.

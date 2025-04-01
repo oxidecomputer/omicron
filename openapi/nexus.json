@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "20250212.0.0"
+    "version": "20250409.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -686,7 +686,7 @@
     "/v1/affinity-groups": {
       "get": {
         "tags": [
-          "affinity"
+          "hidden"
         ],
         "summary": "List affinity groups",
         "operationId": "affinity_group_list",
@@ -753,7 +753,7 @@
       },
       "post": {
         "tags": [
-          "affinity"
+          "hidden"
         ],
         "summary": "Create affinity group",
         "operationId": "affinity_group_create",
@@ -801,7 +801,7 @@
     "/v1/affinity-groups/{affinity_group}": {
       "get": {
         "tags": [
-          "affinity"
+          "hidden"
         ],
         "summary": "Fetch affinity group",
         "operationId": "affinity_group_view",
@@ -845,7 +845,7 @@
       },
       "put": {
         "tags": [
-          "affinity"
+          "hidden"
         ],
         "summary": "Update affinity group",
         "operationId": "affinity_group_update",
@@ -899,7 +899,7 @@
       },
       "delete": {
         "tags": [
-          "affinity"
+          "hidden"
         ],
         "summary": "Delete affinity group",
         "operationId": "affinity_group_delete",
@@ -938,7 +938,7 @@
     "/v1/affinity-groups/{affinity_group}/members": {
       "get": {
         "tags": [
-          "affinity"
+          "hidden"
         ],
         "summary": "List affinity group members",
         "operationId": "affinity_group_member_list",
@@ -975,7 +975,7 @@
             "in": "query",
             "name": "sort_by",
             "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
+              "$ref": "#/components/schemas/NameOrIdSortMode"
             }
           },
           {
@@ -1014,7 +1014,7 @@
     "/v1/affinity-groups/{affinity_group}/members/instance/{instance}": {
       "get": {
         "tags": [
-          "affinity"
+          "hidden"
         ],
         "summary": "Fetch affinity group member",
         "operationId": "affinity_group_member_instance_view",
@@ -1065,7 +1065,7 @@
       },
       "post": {
         "tags": [
-          "affinity"
+          "hidden"
         ],
         "summary": "Add member to affinity group",
         "operationId": "affinity_group_member_instance_add",
@@ -1116,7 +1116,7 @@
       },
       "delete": {
         "tags": [
-          "affinity"
+          "hidden"
         ],
         "summary": "Remove member from affinity group",
         "operationId": "affinity_group_member_instance_delete",
@@ -1451,7 +1451,7 @@
             "in": "query",
             "name": "sort_by",
             "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
+              "$ref": "#/components/schemas/NameOrIdSortMode"
             }
           },
           {
@@ -3277,6 +3277,158 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
+        }
+      }
+    },
+    "/v1/instances/{instance}/affinity-groups": {
+      "get": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "List affinity groups containing instance",
+        "operationId": "instance_affinity_group_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "description": "Name or ID of the instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AffinityGroupResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/instances/{instance}/anti-affinity-groups": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "List anti-affinity groups containing instance",
+        "operationId": "instance_anti_affinity_group_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "description": "Name or ID of the instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AntiAffinityGroupResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
         }
       }
     },
@@ -10064,7 +10216,7 @@
         ],
         "summary": "Get the current target release of the rack's system software",
         "description": "This may not correspond to the actual software running on the rack at the time of request; it is instead the release that the rack reconfigurator should be moving towards as a goal state. After some number of planning and execution phases, the software running on the rack should eventually correspond to the release described here.",
-        "operationId": "target_release_get",
+        "operationId": "target_release_view",
         "responses": {
           "200": {
             "description": "successful operation",
@@ -10090,7 +10242,7 @@
         ],
         "summary": "Set the current target release of the rack's system software",
         "description": "The rack reconfigurator will treat the software specified here as a goal state for the rack's software, and attempt to asynchronously update to that release.",
-        "operationId": "target_release_set",
+        "operationId": "target_release_update",
         "requestBody": {
           "content": {
             "application/json": {
@@ -12197,7 +12349,7 @@
         ]
       },
       "AffinityGroup": {
-        "description": "Identity-related metadata that's included in nearly all public API objects",
+        "description": "View of an Affinity Group",
         "type": "object",
         "properties": {
           "description": {
@@ -12223,6 +12375,10 @@
           "policy": {
             "$ref": "#/components/schemas/AffinityPolicy"
           },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -12240,6 +12396,7 @@
           "id",
           "name",
           "policy",
+          "project_id",
           "time_created",
           "time_modified"
         ]
@@ -12269,10 +12426,10 @@
         ]
       },
       "AffinityGroupMember": {
-        "description": "A member of an Affinity Group\n\nMembership in a group is not exclusive - members may belong to multiple affinity / anti-affinity groups.",
+        "description": "A member of an Affinity Group\n\nMembership in a group is not exclusive - members may belong to multiple affinity / anti-affinity groups.\n\nAffinity Groups can contain up to 32 members.",
         "oneOf": [
           {
-            "description": "An instance belonging to this group, identified by UUID.",
+            "description": "An instance belonging to this group\n\nInstances can belong to up to 16 affinity groups.",
             "type": "object",
             "properties": {
               "type": {
@@ -12282,7 +12439,23 @@
                 ]
               },
               "value": {
-                "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+                  },
+                  "name": {
+                    "$ref": "#/components/schemas/Name"
+                  },
+                  "run_state": {
+                    "$ref": "#/components/schemas/InstanceState"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "run_state"
+                ]
               }
             },
             "required": [
@@ -12476,7 +12649,7 @@
         ]
       },
       "AntiAffinityGroup": {
-        "description": "Identity-related metadata that's included in nearly all public API objects",
+        "description": "View of an Anti-Affinity Group",
         "type": "object",
         "properties": {
           "description": {
@@ -12502,6 +12675,10 @@
           "policy": {
             "$ref": "#/components/schemas/AffinityPolicy"
           },
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -12519,6 +12696,7 @@
           "id",
           "name",
           "policy",
+          "project_id",
           "time_created",
           "time_modified"
         ]
@@ -12548,10 +12726,10 @@
         ]
       },
       "AntiAffinityGroupMember": {
-        "description": "A member of an Anti-Affinity Group\n\nMembership in a group is not exclusive - members may belong to multiple affinity / anti-affinity groups.",
+        "description": "A member of an Anti-Affinity Group\n\nMembership in a group is not exclusive - members may belong to multiple affinity / anti-affinity groups.\n\nAnti-Affinity Groups can contain up to 32 members.",
         "oneOf": [
           {
-            "description": "An instance belonging to this group, identified by UUID.",
+            "description": "An instance belonging to this group\n\nInstances can belong to up to 16 anti-affinity groups.",
             "type": "object",
             "properties": {
               "type": {
@@ -12561,7 +12739,23 @@
                 ]
               },
               "value": {
-                "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+                  },
+                  "name": {
+                    "$ref": "#/components/schemas/Name"
+                  },
+                  "run_state": {
+                    "$ref": "#/components/schemas/InstanceState"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "run_state"
+                ]
               }
             },
             "required": [
@@ -17656,21 +17850,6 @@
               "id",
               "type"
             ]
-          },
-          {
-            "description": "Boot the Alpine ISO that ships with the Propolis zone. Intended for development purposes only.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "you_can_boot_anything_as_long_as_its_alpine"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
           }
         ]
       },
@@ -17872,6 +18051,14 @@
         "description": "Create-time parameters for an `Instance`",
         "type": "object",
         "properties": {
+          "anti_affinity_groups": {
+            "description": "Anti-Affinity groups which this instance should be added.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
           "auto_restart_policy": {
             "nullable": true,
             "description": "The auto-restart policy for this instance.\n\nThis policy determines whether the instance should be automatically restarted by the control plane on failure. If this is `null`, no auto-restart policy will be explicitly configured for this instance, and the control plane will select the default policy when determining whether the instance can be automatically restarted.\n\nCurrently, the global default auto-restart policy is \"best-effort\", so instances with `null` auto-restart policies will be automatically restarted. However, in the future, the default policy may be configurable through other mechanisms, such as on a per-project basis. In that case, any configured default policy will be used if this is `null`.",
@@ -24712,7 +24899,7 @@
   "tags": [
     {
       "name": "affinity",
-      "description": "Affinity and anti-affinity groups give control over instance placement.",
+      "description": "Anti-affinity groups give control over instance placement.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/affinity"
       }

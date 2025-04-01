@@ -160,7 +160,7 @@ mod tests {
 
         // Clean up from any previous proptest cases
         {
-            use nexus_db_model::schema::rendezvous_debug_dataset::dsl;
+            use nexus_db_schema::schema::rendezvous_debug_dataset::dsl;
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             datastore
                 .transaction_non_retry_wrapper("proptest_prep_cleanup")

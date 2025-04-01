@@ -42,6 +42,9 @@ Dendrite DPD (client: dpd-client)
 
 Downstairs Controller (debugging only) (client: dsc-client)
 
+ereport (client: ereport-client)
+    consumed by: omicron-nexus (omicron/nexus) via 1 path
+
 Management Gateway Service (client: gateway-client)
     consumed by: dpd (dendrite/dpd) via 1 path
     consumed by: omicron-nexus (omicron/nexus) via 3 paths
@@ -53,6 +56,7 @@ Wicketd Installinator (client: installinator-client)
 
 LLDP daemon (client: lldpd-client)
     consumed by: omicron-nexus (omicron/nexus) via 1 path
+    consumed by: tfportd (dendrite/tfportd) via 1 path
 
 Maghemite MG Admin (client: mg-admin-client)
     consumed by: omicron-nexus (omicron/nexus) via 1 path

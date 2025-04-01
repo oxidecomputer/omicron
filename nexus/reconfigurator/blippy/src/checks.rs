@@ -231,11 +231,31 @@ fn check_dataset_zpool_uniqueness(blippy: &mut Blippy<'_>) {
         .blueprint()
         .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
     {
-        // Check "one kind per zpool" for durable datasets...
-        if let Some(dataset) = zone.zone_type.durable_dataset() {
+        // Check "one kind per zpool" for transient datasets...
+        let filesystem_dataset = zone.filesystem_dataset();
+        let kind = zone.zone_type.kind();
+        if let Some(previous) = transient_kinds_by_zpool
+            .entry(filesystem_dataset.pool().id())
+            .or_default()
+            .insert(kind, zone)
+        {
+            blippy.push_sled_note(
+                sled_id,
+                Severity::Fatal,
+                SledKind::ZoneFilesystemDatasetCollision {
+                    zone1: previous.clone(),
+                    zone2: zone.clone(),
+                    zpool: filesystem_dataset.pool().clone(),
+                },
+            );
+        }
+
+        if let Some(durable_dataset) = zone.zone_type.durable_dataset() {
             let kind = zone.zone_type.kind();
+
+            // ... and durable datasets.
             if let Some(previous) = durable_kinds_by_zpool
-                .entry(dataset.dataset.pool_name.id())
+                .entry(durable_dataset.dataset.pool_name.id())
                 .or_default()
                 .insert(kind, zone)
             {
@@ -245,47 +265,27 @@ fn check_dataset_zpool_uniqueness(blippy: &mut Blippy<'_>) {
                     SledKind::ZoneDurableDatasetCollision {
                         zone1: previous.clone(),
                         zone2: zone.clone(),
-                        zpool: dataset.dataset.pool_name.clone(),
+                        zpool: durable_dataset.dataset.pool_name.clone(),
                     },
                 );
             }
-        }
 
-        // ... and transient datasets.
-        if let Some(dataset) = zone.filesystem_dataset() {
-            let kind = zone.zone_type.kind();
-            if let Some(previous) = transient_kinds_by_zpool
-                .entry(dataset.pool().id())
-                .or_default()
-                .insert(kind, zone)
-            {
-                blippy.push_sled_note(
-                    sled_id,
-                    Severity::Fatal,
-                    SledKind::ZoneFilesystemDatasetCollision {
-                        zone1: previous.clone(),
-                        zone2: zone.clone(),
-                        zpool: dataset.into_parts().0,
-                    },
-                );
-            }
-        }
-
-        // If a zone has both durable and transient datasets, they should be on
-        // the same pool.
-        match (zone.zone_type.durable_zpool(), zone.filesystem_pool.as_ref()) {
-            (Some(durable), Some(transient)) if durable != transient => {
+            // If a zone has a durable dataset, it should be on the same pool as
+            // its transient filesystem dataset.
+            if durable_dataset.dataset.pool_name != *filesystem_dataset.pool() {
                 blippy.push_sled_note(
                     sled_id,
                     Severity::Fatal,
                     SledKind::ZoneWithDatasetsOnDifferentZpools {
                         zone: zone.clone(),
-                        durable_zpool: durable.clone(),
-                        transient_zpool: transient.clone(),
+                        durable_zpool: durable_dataset
+                            .dataset
+                            .pool_name
+                            .clone(),
+                        transient_zpool: filesystem_dataset.pool().clone(),
                     },
                 );
             }
-            _ => (),
         }
     }
 }
@@ -312,10 +312,8 @@ impl<'a> DatasetsBySledCache<'a> {
             }
         };
 
-        let config = &sled_config.datasets_config;
         let mut by_zpool = BTreeMap::new();
-
-        for dataset in config.datasets.iter() {
+        for dataset in sled_config.datasets.iter() {
             let by_kind: &mut BTreeMap<_, _> =
                 by_zpool.entry(dataset.pool.id()).or_default();
 
@@ -357,11 +355,8 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
     for (&sled_id, sled_config) in &blippy.blueprint().sleds {
         let sled_datasets = datasets.get_cached(blippy, sled_id, sled_config);
 
-        for disk in sled_config
-            .disks_config
-            .disks
-            .iter()
-            .filter(|d| d.disposition.is_in_service())
+        for disk in
+            sled_config.disks.iter().filter(|d| d.disposition.is_in_service())
         {
             let sled_datasets = sled_datasets.get(&disk.pool_id);
 
@@ -402,37 +397,22 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
 
         // There should be a dataset for every dataset referenced by a running
         // zone (filesystem or durable).
-        for zone_config in sled_config
-            .zones_config
-            .zones
-            .iter()
-            .filter(|z| z.disposition.is_in_service())
+        for zone_config in
+            sled_config.zones.iter().filter(|z| z.disposition.is_in_service())
         {
-            match &zone_config.filesystem_dataset() {
+            let dataset = zone_config.filesystem_dataset();
+            match sled_datasets
+                .get(&dataset.pool().id())
+                .and_then(|by_zpool| by_zpool.get(dataset.kind()))
+            {
                 Some(dataset) => {
-                    match sled_datasets
-                        .get(&dataset.pool().id())
-                        .and_then(|by_zpool| by_zpool.get(dataset.kind()))
-                    {
-                        Some(dataset) => {
-                            expected_datasets.insert(dataset.id);
-                        }
-                        None => {
-                            blippy.push_sled_note(
-                                sled_id,
-                                Severity::Fatal,
-                                SledKind::ZoneMissingFilesystemDataset {
-                                    zone: zone_config.clone(),
-                                },
-                            );
-                        }
-                    }
+                    expected_datasets.insert(dataset.id);
                 }
                 None => {
                     blippy.push_sled_note(
                         sled_id,
-                        Severity::BackwardsCompatibility,
-                        SledKind::ZoneMissingFilesystemPool {
+                        Severity::Fatal,
+                        SledKind::ZoneMissingFilesystemDataset {
                             zone: zone_config.clone(),
                         },
                     );
@@ -601,15 +581,13 @@ mod tests {
         // Copy the underlay IP from one Nexus to another.
         let mut nexus_iter =
             blueprint.sleds.iter_mut().flat_map(|(sled_id, sled_config)| {
-                sled_config.zones_config.zones.iter_mut().filter_map(
-                    move |zone| {
-                        if zone.zone_type.is_nexus() {
-                            Some((*sled_id, zone))
-                        } else {
-                            None
-                        }
-                    },
-                )
+                sled_config.zones.iter_mut().filter_map(move |zone| {
+                    if zone.zone_type.is_nexus() {
+                        Some((*sled_id, zone))
+                    } else {
+                        None
+                    }
+                })
             });
         let (nexus0_sled_id, nexus0) =
             nexus_iter.next().expect("at least one Nexus zone");
@@ -635,13 +613,8 @@ mod tests {
         let nexus0 = nexus0.into_ref().clone();
         let nexus1 = nexus1.into_ref().clone();
         let (mixed_underlay_zone1, mixed_underlay_zone2) = {
-            let mut sled1_zones = blueprint
-                .sleds
-                .get(&nexus1_sled_id)
-                .unwrap()
-                .zones_config
-                .zones
-                .iter();
+            let mut sled1_zones =
+                blueprint.sleds.get(&nexus1_sled_id).unwrap().zones.iter();
             let sled1_zone1 = sled1_zones.next().expect("at least one zone");
             let sled1_zone2 = sled1_zones.next().expect("at least two zones");
             if sled1_zone1.id == nexus1.id {
@@ -706,15 +679,13 @@ mod tests {
         // subnet.
         let mut internal_dns_iter =
             blueprint.sleds.iter_mut().flat_map(|(sled_id, sled_config)| {
-                sled_config.zones_config.zones.iter_mut().filter_map(
-                    move |zone| {
-                        if zone.zone_type.is_internal_dns() {
-                            Some((*sled_id, zone))
-                        } else {
-                            None
-                        }
-                    },
-                )
+                sled_config.zones.iter_mut().filter_map(move |zone| {
+                    if zone.zone_type.is_internal_dns() {
+                        Some((*sled_id, zone))
+                    } else {
+                        None
+                    }
+                })
             });
         let (dns0_sled_id, dns0) =
             internal_dns_iter.next().expect("at least one internal DNS zone");
@@ -792,15 +763,13 @@ mod tests {
         // Copy the external IP from one Nexus to another.
         let mut nexus_iter =
             blueprint.sleds.iter_mut().flat_map(|(sled_id, sled_config)| {
-                sled_config.zones_config.zones.iter_mut().filter_map(
-                    move |zone| {
-                        if zone.zone_type.is_nexus() {
-                            Some((*sled_id, zone))
-                        } else {
-                            None
-                        }
-                    },
-                )
+                sled_config.zones.iter_mut().filter_map(move |zone| {
+                    if zone.zone_type.is_nexus() {
+                        Some((*sled_id, zone))
+                    } else {
+                        None
+                    }
+                })
             });
         let (nexus0_sled_id, nexus0) =
             nexus_iter.next().expect("at least one Nexus zone");
@@ -866,15 +835,13 @@ mod tests {
         // Copy the external IP from one Nexus to another.
         let mut nexus_iter =
             blueprint.sleds.iter_mut().flat_map(|(sled_id, sled_config)| {
-                sled_config.zones_config.zones.iter_mut().filter_map(
-                    move |zone| {
-                        if zone.zone_type.is_nexus() {
-                            Some((*sled_id, zone))
-                        } else {
-                            None
-                        }
-                    },
-                )
+                sled_config.zones.iter_mut().filter_map(move |zone| {
+                    if zone.zone_type.is_nexus() {
+                        Some((*sled_id, zone))
+                    } else {
+                        None
+                    }
+                })
             });
         let (nexus0_sled_id, nexus0) =
             nexus_iter.next().expect("at least one Nexus zone");
@@ -935,15 +902,13 @@ mod tests {
         // Copy the external IP from one Nexus to another.
         let mut nexus_iter =
             blueprint.sleds.iter_mut().flat_map(|(sled_id, sled_config)| {
-                sled_config.zones_config.zones.iter_mut().filter_map(
-                    move |zone| {
-                        if zone.zone_type.is_nexus() {
-                            Some((*sled_id, zone))
-                        } else {
-                            None
-                        }
-                    },
-                )
+                sled_config.zones.iter_mut().filter_map(move |zone| {
+                    if zone.zone_type.is_nexus() {
+                        Some((*sled_id, zone))
+                    } else {
+                        None
+                    }
+                })
             });
         let (nexus0_sled_id, nexus0) =
             nexus_iter.next().expect("at least one Nexus zone");
@@ -1008,15 +973,13 @@ mod tests {
         // Copy the durable zpool from one external DNS to another.
         let mut dns_iter =
             blueprint.sleds.iter_mut().flat_map(|(sled_id, sled_config)| {
-                sled_config.zones_config.zones.iter_mut().filter_map(
-                    move |zone| {
-                        if zone.zone_type.is_external_dns() {
-                            Some((*sled_id, zone))
-                        } else {
-                            None
-                        }
-                    },
-                )
+                sled_config.zones.iter_mut().filter_map(move |zone| {
+                    if zone.zone_type.is_external_dns() {
+                        Some((*sled_id, zone))
+                    } else {
+                        None
+                    }
+                })
             });
         let (dns0_sled_id, dns0) =
             dns_iter.next().expect("at least one external DNS zone");
@@ -1060,7 +1023,7 @@ mod tests {
                     kind: SledKind::ZoneWithDatasetsOnDifferentZpools {
                         zone: dns1.clone(),
                         durable_zpool: dup_zpool.clone(),
-                        transient_zpool: dns1.filesystem_pool.clone().unwrap(),
+                        transient_zpool: dns1.filesystem_pool.clone(),
                     },
                 },
             },
@@ -1092,15 +1055,13 @@ mod tests {
         // Copy the filesystem zpool from one external DNS to another.
         let mut dns_iter =
             blueprint.sleds.iter_mut().flat_map(|(sled_id, sled_config)| {
-                sled_config.zones_config.zones.iter_mut().filter_map(
-                    move |zone| {
-                        if zone.zone_type.is_external_dns() {
-                            Some((*sled_id, zone))
-                        } else {
-                            None
-                        }
-                    },
-                )
+                sled_config.zones.iter_mut().filter_map(move |zone| {
+                    if zone.zone_type.is_external_dns() {
+                        Some((*sled_id, zone))
+                    } else {
+                        None
+                    }
+                })
             });
         let (dns0_sled_id, dns0) =
             dns_iter.next().expect("at least one external DNS zone");
@@ -1108,12 +1069,8 @@ mod tests {
             dns_iter.next().expect("at least two external DNS zones");
         assert_ne!(dns0_sled_id, dns1_sled_id);
 
-        let dup_zpool = dns0
-            .filesystem_pool
-            .as_ref()
-            .expect("external DNS has a filesystem zpool")
-            .clone();
-        dns1.filesystem_pool = Some(dup_zpool.clone());
+        let dup_zpool = dns0.filesystem_pool.clone();
+        dns1.filesystem_pool = dup_zpool.clone();
 
         let dns0 = dns0.into_ref().clone();
         let dns1 = dns1.into_ref().clone();
@@ -1173,12 +1130,8 @@ mod tests {
         let mut dataset1 = None;
         let mut dataset2 = None;
         let mut zpool = None;
-        'outer: for (sled_id, datasets_config) in blueprint
-            .sleds
-            .iter_mut()
-            .map(|(id, c)| (id, &mut c.datasets_config))
-        {
-            for mut dataset in datasets_config.datasets.iter_mut() {
+        'outer: for (sled_id, sled_config) in blueprint.sleds.iter_mut() {
+            for mut dataset in sled_config.datasets.iter_mut() {
                 if let Some(prev) =
                     by_kind.insert(dataset.kind.clone(), dataset.clone())
                 {
@@ -1230,16 +1183,12 @@ mod tests {
 
         // Drop the Debug dataset from one zpool and the ZoneRoot dataset from
         // another; we should catch both errors.
-        let (sled_id, datasets_config) = blueprint
-            .sleds
-            .iter_mut()
-            .next()
-            .map(|(id, c)| (id, &mut c.datasets_config))
-            .expect("at least one sled");
+        let (sled_id, sled_config) =
+            blueprint.sleds.iter_mut().next().expect("at least one sled");
 
         let mut debug_dataset = None;
         let mut zoneroot_dataset = None;
-        for dataset in &mut datasets_config.datasets.iter_mut() {
+        for dataset in &mut sled_config.datasets.iter_mut() {
             match &dataset.kind {
                 DatasetKind::Debug if debug_dataset.is_none() => {
                     debug_dataset = Some(dataset.clone());
@@ -1265,7 +1214,7 @@ mod tests {
         assert_ne!(debug_dataset.pool, zoneroot_dataset.pool);
 
         // Actually strip these from the blueprint.
-        datasets_config.datasets.retain(|dataset| {
+        sled_config.datasets.retain(|dataset| {
             dataset.id != debug_dataset.id && dataset.id != zoneroot_dataset.id
         });
 
@@ -1316,7 +1265,7 @@ mod tests {
         // with a filesystem_pool dataset to remove.
         let mut durable_zone = None;
         let mut root_zone = None;
-        for z in &sled_config.zones_config.zones {
+        for z in &sled_config.zones {
             if durable_zone.is_none() {
                 if z.zone_type.durable_zpool().is_some() {
                     durable_zone = Some(z.clone());
@@ -1333,12 +1282,12 @@ mod tests {
         assert_ne!(durable_zone.filesystem_pool, root_zone.filesystem_pool);
 
         // Actually strip these from the blueprint.
-        sled_config.datasets_config.datasets.retain(|dataset| {
+        sled_config.datasets.retain(|dataset| {
             let matches_durable = (dataset.pool
                 == *durable_zone.zone_type.durable_zpool().unwrap())
                 && (dataset.kind
                     == durable_zone.zone_type.durable_dataset().unwrap().kind);
-            let root_dataset = root_zone.filesystem_dataset().unwrap();
+            let root_dataset = root_zone.filesystem_dataset();
             let matches_root = (dataset.pool == *root_dataset.pool())
                 && (dataset.kind == *root_dataset.kind());
             !matches_durable && !matches_root
@@ -1391,7 +1340,7 @@ mod tests {
             blueprint.sleds.iter_mut().next().expect("at least one sled");
         let mut durable_zone = None;
         let mut root_zone = None;
-        for z in &sled_config.zones_config.zones {
+        for z in &sled_config.zones {
             if durable_zone.is_none() {
                 if z.zone_type.durable_zpool().is_some() {
                     durable_zone = Some(z.clone());
@@ -1406,16 +1355,14 @@ mod tests {
         let root_zone =
             root_zone.expect("found zone with root dataset to prune");
         sled_config
-            .zones_config
             .zones
             .retain(|z| z.id != durable_zone.id && z.id != root_zone.id);
 
         let durable_dataset = durable_zone.zone_type.durable_dataset().unwrap();
-        let root_dataset = root_zone.filesystem_dataset().unwrap();
+        let root_dataset = root_zone.filesystem_dataset();
 
         // Find the datasets we expect to have been orphaned.
         let expected_notes = sled_config
-            .datasets_config
             .datasets
             .iter()
             .filter_map(|dataset| {
@@ -1460,21 +1407,20 @@ mod tests {
 
         // Remove one zpool from one sled, then check that all datasets on that
         // zpool produce report notes.
-        let (sled_id, disks_config) = blueprint
+        let (sled_id, sled_config) = blueprint
             .sleds
             .iter_mut()
-            .map(|(id, c)| (*id, &mut c.disks_config))
+            .map(|(id, c)| (*id, c))
             .next()
             .expect("at least one sled");
-        let first = disks_config.disks.first().unwrap().id;
-        let removed_disk = disks_config.disks.remove(&first).unwrap();
+        let first = sled_config.disks.first().unwrap().id;
+        let removed_disk = sled_config.disks.remove(&first).unwrap();
         eprintln!("removed disk {removed_disk:?}");
 
         let expected_notes = blueprint
             .sleds
             .get(&sled_id)
             .unwrap()
-            .datasets_config
             .datasets
             .iter()
             .filter_map(|dataset| {
@@ -1558,12 +1504,8 @@ mod tests {
         let mut set_non_crucible_addr = false;
         let mut expected_notes = Vec::new();
 
-        for (sled_id, datasets_config) in blueprint
-            .sleds
-            .iter_mut()
-            .map(|(id, c)| (id, &mut c.datasets_config))
-        {
-            for mut dataset in datasets_config.datasets.iter_mut() {
+        for (sled_id, sled_config) in blueprint.sleds.iter_mut() {
+            for mut dataset in sled_config.datasets.iter_mut() {
                 match dataset.kind {
                     DatasetKind::Crucible => {
                         let bad_address = if !cleared_crucible_addr {

@@ -5,7 +5,6 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::TransactionError;
 use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::error::ErrorHandler;
@@ -52,7 +51,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, String>,
     ) -> ListResultVec<DnsZone> {
         opctx.authorize(authz::Action::Read, &authz::DNS_CONFIG).await?;
-        use db::schema::dns_zone::dsl;
+        use nexus_db_schema::schema::dns_zone::dsl;
         paginated(dsl::dns_zone, dsl::zone_name, pagparams)
             .filter(dsl::dns_group.eq(dns_group))
             .select(DnsZone::as_select())
@@ -84,7 +83,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         dns_group: DnsGroup,
     ) -> Result<Vec<DnsZone>, TransactionError<Error>> {
-        use db::schema::dns_zone::dsl;
+        use nexus_db_schema::schema::dns_zone::dsl;
         const LIMIT: usize = 5;
 
         opctx.authorize(authz::Action::Read, &authz::DNS_CONFIG).await?;
@@ -128,7 +127,7 @@ impl DataStore {
         dns_group: DnsGroup,
     ) -> Result<DnsVersion, TransactionError<Error>> {
         opctx.authorize(authz::Action::Read, &authz::DNS_CONFIG).await?;
-        use db::schema::dns_version::dsl;
+        use nexus_db_schema::schema::dns_version::dsl;
         let versions = dsl::dns_version
             .filter(dsl::dns_group.eq(dns_group))
             .order_by(dsl::version.desc())
@@ -157,7 +156,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, String>,
     ) -> ListResultVec<(String, Vec<DnsRecord>)> {
         opctx.authorize(authz::Action::Read, &authz::DNS_CONFIG).await?;
-        use db::schema::dns_name::dsl;
+        use nexus_db_schema::schema::dns_name::dsl;
         Ok(paginated(dsl::dns_name, dsl::name, pagparams)
             .filter(dsl::dns_zone_id.eq(dns_zone_id))
             .filter(dsl::version_added.le(version))
@@ -300,7 +299,7 @@ impl DataStore {
         dns: InitialDnsGroup,
     ) -> Result<(), Error> {
         {
-            use db::schema::dns_zone::dsl;
+            use nexus_db_schema::schema::dns_zone::dsl;
             diesel::insert_into(dsl::dns_zone)
                 .values(dns.row_for_zone())
                 .on_conflict((dsl::dns_group, dsl::zone_name))
@@ -313,7 +312,7 @@ impl DataStore {
         }
 
         {
-            use db::schema::dns_version::dsl;
+            use nexus_db_schema::schema::dns_version::dsl;
             diesel::insert_into(dsl::dns_version)
                 .values(dns.row_for_version())
                 .on_conflict((dsl::dns_group, dsl::version))
@@ -326,7 +325,7 @@ impl DataStore {
         }
 
         {
-            use db::schema::dns_name::dsl;
+            use nexus_db_schema::schema::dns_name::dsl;
             diesel::insert_into(dsl::dns_name)
                 .values(dns.rows_for_names()?)
                 .on_conflict((dsl::dns_zone_id, dsl::version_added, dsl::name))
@@ -521,7 +520,7 @@ impl DataStore {
         let ntoadd = new_names.len();
 
         {
-            use db::schema::dns_version::dsl;
+            use nexus_db_schema::schema::dns_version::dsl;
             diesel::insert_into(dsl::dns_version)
                 .values(new_version)
                 .execute_async(conn)
@@ -529,7 +528,7 @@ impl DataStore {
         }
 
         {
-            use db::schema::dns_name::dsl;
+            use nexus_db_schema::schema::dns_name::dsl;
 
             // Remove any names that we're removing first.  This is important,
             // as the database will enforce a constraint that the same name not
@@ -717,7 +716,7 @@ impl DataStoreDnsTest for DataStore {
         version: omicron_common::api::external::Generation,
     ) -> BoxFuture<'a, Result<DnsConfigParams, Error>> {
         async move {
-            use db::schema::dns_version::dsl;
+            use nexus_db_schema::schema::dns_version::dsl;
             let dns_version = dsl::dns_version
                 .filter(dsl::dns_group.eq(dns_group))
                 .filter(dsl::version.eq(Generation::from(version)))
@@ -798,7 +797,7 @@ mod test {
         let now = Utc::now();
         {
             use crate::db::model::DnsVersion;
-            use crate::db::schema::dns_version::dsl;
+            use nexus_db_schema::schema::dns_version::dsl;
             use omicron_common::api::external::Generation;
 
             diesel::insert_into(dsl::dns_version)
@@ -1058,7 +1057,7 @@ mod test {
         // Set up the database state exactly as we want it.
         // First, insert the DNS zones.
         {
-            use crate::db::schema::dns_zone::dsl;
+            use nexus_db_schema::schema::dns_zone::dsl;
             diesel::insert_into(dsl::dns_zone)
                 .values(vec![
                     DnsZone {
@@ -1096,7 +1095,7 @@ mod test {
 
         // Next, insert the DNS versions.
         {
-            use crate::db::schema::dns_version::dsl;
+            use nexus_db_schema::schema::dns_version::dsl;
             diesel::insert_into(dsl::dns_version)
                 .values(vec![
                     v1.clone(),
@@ -1114,7 +1113,7 @@ mod test {
 
         // Finally, insert all DNS names for all versions of all zones.
         {
-            use crate::db::schema::dns_name::dsl;
+            use nexus_db_schema::schema::dns_name::dsl;
             diesel::insert_into(dsl::dns_name)
                 .values(vec![
                     // External zone "z1" records test that:
@@ -1339,7 +1338,7 @@ mod test {
 
         // There cannot be two DNS zones in the same group with the same name.
         {
-            use crate::db::schema::dns_zone::dsl;
+            use nexus_db_schema::schema::dns_zone::dsl;
             let error = diesel::insert_into(dsl::dns_zone)
                 .values(vec![
                     DnsZone {
@@ -1370,7 +1369,7 @@ mod test {
         // There cannot be two DNS version records with the same group and
         // version number.
         {
-            use crate::db::schema::dns_version::dsl;
+            use nexus_db_schema::schema::dns_version::dsl;
             let error = diesel::insert_into(dsl::dns_version)
                 .values(vec![
                     DnsVersion {
@@ -1403,7 +1402,7 @@ mod test {
         // There cannot be two DNS names in the same zone with the same name
         // created in the same generation.
         {
-            use crate::db::schema::dns_name::dsl;
+            use nexus_db_schema::schema::dns_name::dsl;
             let dns_zone_id = Uuid::new_v4();
             let name = "n1".to_string();
             let g1 = Generation(1u32.try_into().unwrap());
@@ -1542,7 +1541,7 @@ mod test {
 
         {
             // Create those initial zones.
-            use crate::db::schema::dns_zone::dsl;
+            use nexus_db_schema::schema::dns_zone::dsl;
             diesel::insert_into(dsl::dns_zone)
                 .values(vec![
                     dns_zone1.clone(),
@@ -1557,7 +1556,7 @@ mod test {
         }
         {
             // Create initial versions of each DNS group.
-            use crate::db::schema::dns_version::dsl;
+            use nexus_db_schema::schema::dns_version::dsl;
             diesel::insert_into(dsl::dns_version)
                 .values(vec![
                     DnsVersion {

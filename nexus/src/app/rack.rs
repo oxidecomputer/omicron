@@ -926,13 +926,14 @@ impl super::Nexus {
             reqwest_client,
             self.log.new(o!("sled_agent_url" => sa_url.clone())),
         );
-        sa.sled_add(&req).await.map_err(|e| Error::InternalError {
-            internal_message: format!(
-                "failed to add sled with baseboard {:?} to rack {}: {e}",
-                sled, allocation.rack_id
-            ),
+        sa.sled_add(&req).await.map_err(|e| {
+            Error::internal_error(&format!(
+                "failed to add sled with baseboard {:?} to rack {}: {}",
+                sled,
+                allocation.rack_id,
+                InlineErrorChain::new(&e)
+            ))
         })?;
-
         Ok(allocation.sled_id.into())
     }
 

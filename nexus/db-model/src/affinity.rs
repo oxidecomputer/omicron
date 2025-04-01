@@ -8,13 +8,13 @@
 
 use super::Name;
 use super::impl_enum_type;
-use crate::schema::affinity_group;
-use crate::schema::affinity_group_instance_membership;
-use crate::schema::anti_affinity_group;
-use crate::schema::anti_affinity_group_instance_membership;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
+use nexus_db_schema::schema::affinity_group;
+use nexus_db_schema::schema::affinity_group_instance_membership;
+use nexus_db_schema::schema::anti_affinity_group;
+use nexus_db_schema::schema::anti_affinity_group_instance_membership;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use omicron_common::api::external;
@@ -28,12 +28,9 @@ use omicron_uuid_kinds::InstanceUuid;
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "affinity_policy", schema = "public"))]
-    pub struct AffinityPolicyEnum;
+    AffinityPolicyEnum:
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq, Eq, Ord, PartialOrd)]
-    #[diesel(sql_type = AffinityPolicyEnum)]
     pub enum AffinityPolicy;
 
     // Enum values
@@ -60,12 +57,9 @@ impl From<external::AffinityPolicy> for AffinityPolicy {
 }
 
 impl_enum_type!(
-    #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "failure_domain", schema = "public"))]
-    pub struct FailureDomainEnum;
+    FailureDomainEnum:
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
-    #[diesel(sql_type = FailureDomainEnum)]
     pub enum FailureDomain;
 
     // Enum values
@@ -125,6 +119,7 @@ impl From<AffinityGroup> for views::AffinityGroup {
         };
         Self {
             identity,
+            project_id: group.project_id,
             policy: group.policy.into(),
             failure_domain: group.failure_domain.into(),
         }
@@ -190,6 +185,7 @@ impl From<AntiAffinityGroup> for views::AntiAffinityGroup {
         };
         Self {
             identity,
+            project_id: group.project_id,
             policy: group.policy.into(),
             failure_domain: group.failure_domain.into(),
         }
@@ -226,11 +222,17 @@ impl AffinityGroupInstanceMembership {
     pub fn new(group_id: AffinityGroupUuid, instance_id: InstanceUuid) -> Self {
         Self { group_id: group_id.into(), instance_id: instance_id.into() }
     }
-}
 
-impl From<AffinityGroupInstanceMembership> for external::AffinityGroupMember {
-    fn from(member: AffinityGroupInstanceMembership) -> Self {
-        Self::Instance(member.instance_id.into())
+    pub fn to_external(
+        self,
+        member_name: external::Name,
+        run_state: external::InstanceState,
+    ) -> external::AffinityGroupMember {
+        external::AffinityGroupMember::Instance {
+            id: self.instance_id.into(),
+            name: member_name,
+            run_state,
+        }
     }
 }
 
@@ -248,12 +250,16 @@ impl AntiAffinityGroupInstanceMembership {
     ) -> Self {
         Self { group_id: group_id.into(), instance_id: instance_id.into() }
     }
-}
 
-impl From<AntiAffinityGroupInstanceMembership>
-    for external::AntiAffinityGroupMember
-{
-    fn from(member: AntiAffinityGroupInstanceMembership) -> Self {
-        Self::Instance(member.instance_id.into())
+    pub fn to_external(
+        self,
+        member_name: external::Name,
+        run_state: external::InstanceState,
+    ) -> external::AntiAffinityGroupMember {
+        external::AntiAffinityGroupMember::Instance {
+            id: self.instance_id.into(),
+            name: member_name,
+            run_state,
+        }
     }
 }

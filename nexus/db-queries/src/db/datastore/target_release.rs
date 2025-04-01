@@ -9,10 +9,10 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::error::{ErrorHandler, public_error_from_diesel};
 use crate::db::model::{SemverVersion, TargetRelease, TargetReleaseSource};
-use crate::db::schema::target_release::dsl;
 use async_bb8_diesel::AsyncRunQueryDsl as _;
 use diesel::insert_into;
 use diesel::prelude::*;
+use nexus_db_schema::schema::target_release::dsl;
 use nexus_types::external_api::views;
 use omicron_common::api::external::{CreateResult, Error, LookupResult};
 
@@ -81,7 +81,7 @@ impl DataStore {
                 views::TargetReleaseSource::Unspecified
             }
             TargetReleaseSource::SystemVersion => {
-                use crate::db::schema::tuf_repo;
+                use nexus_db_schema::schema::tuf_repo;
                 if let Some(tuf_repo_id) = target_release.tuf_repo_id {
                     views::TargetReleaseSource::SystemVersion {
                         version: tuf_repo::table
@@ -111,15 +111,16 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::db::model::{
-        ArtifactHash, Generation, SemverVersion, TargetReleaseSource,
-        TufArtifact, TufRepo, TufRepoDescription,
-    };
+    use crate::db::model::{Generation, TargetReleaseSource};
     use crate::db::pub_test_utils::TestDatabase;
     use chrono::{TimeDelta, Utc};
+    use omicron_common::api::external::{
+        TufArtifactMeta, TufRepoDescription, TufRepoMeta,
+    };
     use omicron_common::update::ArtifactId;
     use omicron_test_utils::dev;
-    use tufaceous_artifact::ArtifactKind;
+    use semver::Version;
+    use tufaceous_artifact::{ArtifactKind, ArtifactVersion};
 
     #[tokio::test]
     async fn target_release_datastore() {
@@ -180,39 +181,40 @@ mod test {
         assert_eq!(target_release.generation, Generation(3.into()));
 
         // Now add a new TUF repo and use it as the source.
-        let version = SemverVersion::new(0, 0, 1);
-        let hash = ArtifactHash(
+        let version = Version::new(0, 0, 1);
+        const ARTIFACT_VERSION: ArtifactVersion =
+            ArtifactVersion::new_const("0.0.1");
+        let hash =
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
                 .parse()
-                .expect("SHA256('')"),
-        );
+                .expect("SHA256('')");
         let repo = datastore
             .update_tuf_repo_insert(
                 opctx,
-                TufRepoDescription {
-                    repo: TufRepo::new(
+                &TufRepoDescription {
+                    repo: TufRepoMeta {
                         hash,
-                        0,
-                        Utc::now(),
-                        version.clone(),
-                        String::from(""),
-                    ),
-                    artifacts: vec![TufArtifact::new(
-                        ArtifactId {
-                            name: String::from(""),
-                            version: version.clone().into(),
+                        targets_role_version: 0,
+                        valid_until: Utc::now(),
+                        system_version: version.clone(),
+                        file_name: String::new(),
+                    },
+                    artifacts: vec![TufArtifactMeta {
+                        id: ArtifactId {
+                            name: String::new(),
+                            version: ARTIFACT_VERSION,
                             kind: ArtifactKind::from_static("empty"),
                         },
                         hash,
-                        0,
-                    )],
+                        size: 0,
+                    }],
                 },
             )
             .await
             .unwrap()
             .recorded
             .repo;
-        assert_eq!(repo.system_version, version);
+        assert_eq!(repo.system_version, version.into());
         let tuf_repo_id = repo.id;
 
         let before = Utc::now();

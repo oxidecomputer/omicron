@@ -4,9 +4,7 @@
 
 //! Manages deployment of Omicron zones to Sled Agents
 
-use crate::Sled;
 use anyhow::Context;
-use anyhow::anyhow;
 use anyhow::bail;
 use cockroach_admin_client::types::NodeDecommission;
 use cockroach_admin_client::types::NodeId;
@@ -21,7 +19,6 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
-use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_common::address::COCKROACH_ADMIN_PORT;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -30,75 +27,8 @@ use slog::Logger;
 use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
-use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
-
-/// Idempotently ensure that the specified Omicron zones are deployed to the
-/// corresponding sleds
-pub(crate) async fn deploy_zones<'a, I>(
-    opctx: &OpContext,
-    sleds_by_id: &BTreeMap<SledUuid, Sled>,
-    zones: I,
-) -> Result<(), Vec<anyhow::Error>>
-where
-    I: Iterator<Item = (SledUuid, &'a BlueprintZonesConfig)>,
-{
-    let errors: Vec<_> = stream::iter(zones)
-        .filter_map(|(sled_id, config)| async move {
-            let db_sled = match sleds_by_id.get(&sled_id) {
-                Some(sled) => sled,
-                None => {
-                    if config.are_all_zones_expunged() {
-                        info!(
-                            opctx.log,
-                            "Skipping zone deployment to expunged sled";
-                            "sled_id" => %sled_id
-                        );
-                        return None;
-                    }
-                    let err = anyhow!("sled not found in db list: {sled_id}");
-                    warn!(opctx.log, "{err:#}");
-                    return Some(err);
-                }
-            };
-
-            let client = nexus_networking::sled_client_from_address(
-                sled_id.into_untyped_uuid(),
-                db_sled.sled_agent_address(),
-                &opctx.log,
-            );
-            let omicron_zones =
-                config.clone().into_running_omicron_zones_config();
-            let result = client
-                .omicron_zones_put(&omicron_zones)
-                .await
-                .with_context(|| {
-                    format!(
-                        "Failed to put {omicron_zones:#?} to sled {sled_id}"
-                    )
-                });
-            match result {
-                Err(error) => {
-                    warn!(opctx.log, "{error:#}");
-                    Some(error)
-                }
-                Ok(_) => {
-                    info!(
-                        opctx.log,
-                        "Successfully deployed zones for sled agent";
-                        "sled_id" => %sled_id,
-                        "generation" => %config.generation,
-                    );
-                    None
-                }
-            }
-        })
-        .collect()
-        .await;
-
-    if errors.is_empty() { Ok(()) } else { Err(errors) }
-}
 
 /// Idempontently perform any cleanup actions necessary for expunged zones.
 pub(crate) async fn clean_up_expunged_zones<R: CleanupResolver>(
@@ -124,7 +54,7 @@ async fn clean_up_expunged_zones_impl<R: CleanupResolver>(
     zones_to_clean_up: impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)>,
 ) -> Result<(), Vec<anyhow::Error>> {
     let errors: Vec<anyhow::Error> = stream::iter(zones_to_clean_up)
-        .filter_map(|(sled_id, config)| async move {
+        .filter_map(async |(sled_id, config)| {
             let log = opctx.log.new(slog::o!(
                 "sled_id" => sled_id.to_string(),
                 "zone_id" => config.id.to_string(),
@@ -349,324 +279,25 @@ async fn decommission_cockroachdb_node<R: CleanupResolver>(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::Sled;
     use cockroach_admin_client::types::NodeMembership;
     use httptest::Expectation;
     use httptest::matchers::{all_of, json_decoded, request};
     use httptest::responders::{json_encoded, status_code};
-    use nexus_sled_agent_shared::inventory::{
-        OmicronZoneDataset, OmicronZonesConfig, SledRole,
-    };
+    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
-        Blueprint, BlueprintDatasetsConfig, BlueprintPhysicalDisksConfig,
-        BlueprintSledConfig, BlueprintTarget, BlueprintZoneImageSource,
-        CockroachDbPreserveDowngrade, blueprint_zone_type,
+        BlueprintZoneImageSource, blueprint_zone_type,
     };
-    use nexus_types::external_api::views::SledState;
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
-    use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use std::collections::BTreeMap;
     use std::iter;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
-
-    fn create_blueprint(
-        blueprint_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
-    ) -> (BlueprintTarget, Blueprint) {
-        let id = BlueprintUuid::new_v4();
-        (
-            BlueprintTarget {
-                target_id: id,
-                enabled: true,
-                time_made_target: chrono::Utc::now(),
-            },
-            Blueprint {
-                id,
-                sleds: blueprint_zones
-                    .into_iter()
-                    .map(|(sled_id, zones_config)| {
-                        (
-                            sled_id,
-                            BlueprintSledConfig {
-                                state: SledState::Active,
-                                zones_config,
-                                disks_config:
-                                    BlueprintPhysicalDisksConfig::default(),
-                                datasets_config:
-                                    BlueprintDatasetsConfig::default(),
-                            },
-                        )
-                    })
-                    .collect(),
-                cockroachdb_setting_preserve_downgrade:
-                    CockroachDbPreserveDowngrade::DoNotModify,
-                parent_blueprint_id: None,
-                internal_dns_version: Generation::new(),
-                external_dns_version: Generation::new(),
-                cockroachdb_fingerprint: String::new(),
-                clickhouse_cluster_config: None,
-                time_created: chrono::Utc::now(),
-                creator: "test".to_string(),
-                comment: "test blueprint".to_string(),
-            },
-        )
-    }
-
-    #[nexus_test]
-    async fn test_deploy_omicron_zones(cptestctx: &ControlPlaneTestContext) {
-        let nexus = &cptestctx.server.server_context().nexus;
-        let datastore = nexus.datastore();
-        let opctx = OpContext::for_tests(
-            cptestctx.logctx.log.clone(),
-            datastore.clone(),
-        );
-
-        // Create some fake sled-agent servers to respond to zone puts and add
-        // sleds to CRDB.
-        let mut s1 = httptest::Server::run();
-        let mut s2 = httptest::Server::run();
-        let sled_id1 = SledUuid::new_v4();
-        let sled_id2 = SledUuid::new_v4();
-        let sleds_by_id: BTreeMap<SledUuid, Sled> =
-            [(sled_id1, &s1), (sled_id2, &s2)]
-                .into_iter()
-                .map(|(sled_id, server)| {
-                    let SocketAddr::V6(addr) = server.addr() else {
-                        panic!("Expected Ipv6 address. Got {}", server.addr());
-                    };
-                    let sled = Sled::new(sled_id, addr, SledRole::Gimlet);
-                    (sled_id, sled)
-                })
-                .collect();
-
-        // Get a success result back when the blueprint has an empty set of
-        // zones.
-        let (_, blueprint) = create_blueprint(BTreeMap::new());
-        _ = deploy_zones(
-            &opctx,
-            &sleds_by_id,
-            blueprint
-                .sleds
-                .iter()
-                .map(|(sled_id, config)| (*sled_id, &config.zones_config)),
-        )
-        .await
-        .expect("failed to deploy no zones");
-
-        // Zones are updated in a particular order, but each request contains
-        // the full set of zones that must be running.
-        // See `rack_setup::service::ServiceInner::run` for more details.
-        fn make_zones() -> BlueprintZonesConfig {
-            let zpool = ZpoolName::new_external(ZpoolUuid::new_v4());
-            let zone_id = OmicronZoneUuid::new_v4();
-            BlueprintZonesConfig {
-                generation: Generation::new(),
-                zones: [BlueprintZoneConfig {
-                    disposition: BlueprintZoneDisposition::InService,
-                    id: zone_id,
-                    filesystem_pool: Some(zpool.clone()),
-                    zone_type: BlueprintZoneType::InternalDns(
-                        blueprint_zone_type::InternalDns {
-                            dataset: OmicronZoneDataset { pool_name: zpool },
-                            dns_address: "[::1]:0".parse().unwrap(),
-                            gz_address: "::1".parse().unwrap(),
-                            gz_address_index: 0,
-                            http_address: "[::1]:0".parse().unwrap(),
-                        },
-                    ),
-                    image_source: BlueprintZoneImageSource::InstallDataset,
-                }]
-                .into_iter()
-                .collect(),
-            }
-        }
-
-        // Create a blueprint with only the `InternalDns` zone for both servers
-        // We reuse the same `OmicronZonesConfig` because the details don't
-        // matter for this test.
-        let mut zones1 = make_zones();
-        let mut zones2 = make_zones();
-        let (_, blueprint) = create_blueprint(BTreeMap::from([
-            (sled_id1, zones1.clone()),
-            (sled_id2, zones2.clone()),
-        ]));
-
-        // Set expectations for the initial requests sent to the fake
-        // sled-agents.
-        for s in [&mut s1, &mut s2] {
-            s.expect(
-                Expectation::matching(all_of![
-                    request::method_path("PUT", "/omicron-zones",),
-                    // Our generation number should be 1 and there should
-                    // be only a single zone.
-                    request::body(json_decoded(|c: &OmicronZonesConfig| {
-                        c.generation == 1u32.into() && c.zones.len() == 1
-                    }))
-                ])
-                .respond_with(status_code(204)),
-            );
-        }
-
-        // Execute it.
-        _ = deploy_zones(
-            &opctx,
-            &sleds_by_id,
-            blueprint
-                .sleds
-                .iter()
-                .map(|(sled_id, config)| (*sled_id, &config.zones_config)),
-        )
-        .await
-        .expect("failed to deploy initial zones");
-
-        s1.verify_and_clear();
-        s2.verify_and_clear();
-
-        // Do it again. This should trigger the same request.
-        for s in [&mut s1, &mut s2] {
-            s.expect(
-                Expectation::matching(request::method_path(
-                    "PUT",
-                    "/omicron-zones",
-                ))
-                .respond_with(status_code(204)),
-            );
-        }
-        _ = deploy_zones(
-            &opctx,
-            &sleds_by_id,
-            blueprint
-                .sleds
-                .iter()
-                .map(|(sled_id, config)| (*sled_id, &config.zones_config)),
-        )
-        .await
-        .expect("failed to deploy same zones");
-        s1.verify_and_clear();
-        s2.verify_and_clear();
-
-        // Take another lap, but this time, have one server fail the request and
-        // try again.
-        s1.expect(
-            Expectation::matching(request::method_path(
-                "PUT",
-                "/omicron-zones",
-            ))
-            .respond_with(status_code(204)),
-        );
-        s2.expect(
-            Expectation::matching(request::method_path(
-                "PUT",
-                "/omicron-zones",
-            ))
-            .respond_with(status_code(500)),
-        );
-
-        let errors = deploy_zones(
-            &opctx,
-            &sleds_by_id,
-            blueprint
-                .sleds
-                .iter()
-                .map(|(sled_id, config)| (*sled_id, &config.zones_config)),
-        )
-        .await
-        .expect_err("unexpectedly succeeded in deploying zones");
-
-        println!("{:?}", errors);
-        assert_eq!(errors.len(), 1);
-        assert!(
-            errors[0]
-                .to_string()
-                .starts_with("Failed to put OmicronZonesConfig")
-        );
-        s1.verify_and_clear();
-        s2.verify_and_clear();
-
-        // Add an `InternalNtp` zone for our next update
-        fn append_zone(
-            zones: &mut BlueprintZonesConfig,
-            disposition: BlueprintZoneDisposition,
-        ) {
-            zones.zones.insert(BlueprintZoneConfig {
-                disposition,
-                id: OmicronZoneUuid::new_v4(),
-                filesystem_pool: Some(ZpoolName::new_external(
-                    ZpoolUuid::new_v4(),
-                )),
-                zone_type: BlueprintZoneType::InternalNtp(
-                    blueprint_zone_type::InternalNtp {
-                        address: "[::1]:0".parse().unwrap(),
-                    },
-                ),
-                image_source: BlueprintZoneImageSource::InstallDataset,
-            });
-        }
-
-        // In-service zones should be deployed.
-        //
-        // The expunged zones should not be deployed.
-        append_zone(&mut zones1, BlueprintZoneDisposition::InService);
-        append_zone(
-            &mut zones1,
-            BlueprintZoneDisposition::Expunged {
-                as_of_generation: Generation::new(),
-                ready_for_cleanup: false,
-            },
-        );
-        append_zone(&mut zones2, BlueprintZoneDisposition::InService);
-        append_zone(
-            &mut zones2,
-            BlueprintZoneDisposition::Expunged {
-                as_of_generation: Generation::new(),
-                ready_for_cleanup: false,
-            },
-        );
-        // Bump the generation for each config
-        zones1.generation = zones1.generation.next();
-        zones2.generation = zones2.generation.next();
-
-        let (_, blueprint) = create_blueprint(BTreeMap::from([
-            (sled_id1, zones1),
-            (sled_id2, zones2),
-        ]));
-
-        // Set our new expectations
-        for s in [&mut s1, &mut s2] {
-            s.expect(
-                Expectation::matching(all_of![
-                    request::method_path("PUT", "/omicron-zones",),
-                    // Our generation number should be bumped and there should
-                    // be two zones.
-                    request::body(json_decoded(|c: &OmicronZonesConfig| {
-                        c.generation == 2u32.into() && c.zones.len() == 2
-                    }))
-                ])
-                .respond_with(status_code(204)),
-            );
-        }
-
-        // Activate the task
-        _ = deploy_zones(
-            &opctx,
-            &sleds_by_id,
-            blueprint
-                .sleds
-                .iter()
-                .map(|(sled_id, config)| (*sled_id, &config.zones_config)),
-        )
-        .await
-        .expect("failed to deploy last round of zones");
-        s1.verify_and_clear();
-        s2.verify_and_clear();
-    }
 
     #[nexus_test]
     async fn test_clean_up_cockroach_zones(
@@ -688,7 +319,7 @@ mod test {
                 ready_for_cleanup: true,
             },
             id: OmicronZoneUuid::new_v4(),
-            filesystem_pool: Some(ZpoolName::new_external(ZpoolUuid::new_v4())),
+            filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
             zone_type: BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb {
                     address: "[::1]:0".parse().unwrap(),

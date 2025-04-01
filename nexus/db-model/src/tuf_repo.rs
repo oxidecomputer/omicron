@@ -4,13 +4,10 @@
 
 use std::str::FromStr;
 
-use crate::{
-    SemverVersion,
-    schema::{tuf_artifact, tuf_repo, tuf_repo_artifact},
-    typed_uuid::DbTypedUuid,
-};
+use crate::{Generation, SemverVersion, typed_uuid::DbTypedUuid};
 use chrono::{DateTime, Utc};
 use diesel::{deserialize::FromSql, serialize::ToSql, sql_types::Text};
+use nexus_db_schema::schema::{tuf_artifact, tuf_repo, tuf_repo_artifact};
 use omicron_common::{
     api::external,
     update::{ArtifactHash as ExternalArtifactHash, ArtifactId},
@@ -18,9 +15,10 @@ use omicron_common::{
 use omicron_uuid_kinds::TufArtifactKind;
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
+use parse_display::Display;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use tufaceous_artifact::ArtifactKind;
+use tufaceous_artifact::{ArtifactKind, ArtifactVersion};
 use uuid::Uuid;
 
 /// A description of a TUF update: a repo, along with the artifacts it
@@ -43,13 +41,18 @@ impl TufRepoDescription {
     /// This is not implemented as a `From` impl because we insert new fields
     /// as part of the process, which `From` doesn't necessarily communicate
     /// and can be surprising.
-    pub fn from_external(description: external::TufRepoDescription) -> Self {
+    pub fn from_external(
+        description: external::TufRepoDescription,
+        generation_added: external::Generation,
+    ) -> Self {
         Self {
             repo: TufRepo::from_external(description.repo),
             artifacts: description
                 .artifacts
                 .into_iter()
-                .map(TufArtifact::from_external)
+                .map(|artifact| {
+                    TufArtifact::from_external(artifact, generation_added)
+                })
                 .collect(),
         }
     }
@@ -149,11 +152,12 @@ impl TufRepo {
 pub struct TufArtifact {
     pub id: DbTypedUuid<TufArtifactKind>,
     pub name: String,
-    pub version: SemverVersion,
+    pub version: DbArtifactVersion,
     pub kind: String,
     pub time_created: DateTime<Utc>,
     pub sha256: ArtifactHash,
     artifact_size: i64,
+    pub generation_added: Generation,
 }
 
 impl TufArtifact {
@@ -162,6 +166,7 @@ impl TufArtifact {
         artifact_id: ArtifactId,
         sha256: ArtifactHash,
         artifact_size: u64,
+        generation_added: external::Generation,
     ) -> Self {
         Self {
             id: TypedUuid::new_v4().into(),
@@ -171,6 +176,7 @@ impl TufArtifact {
             time_created: Utc::now(),
             sha256,
             artifact_size: artifact_size as i64,
+            generation_added: generation_added.into(),
         }
     }
 
@@ -180,8 +186,16 @@ impl TufArtifact {
     /// This is not implemented as a `From` impl because we insert new fields
     /// as part of the process, which `From` doesn't necessarily communicate
     /// and can be surprising.
-    pub fn from_external(artifact: external::TufArtifactMeta) -> Self {
-        Self::new(artifact.id, artifact.hash.into(), artifact.size)
+    pub fn from_external(
+        artifact: external::TufArtifactMeta,
+        generation_added: external::Generation,
+    ) -> Self {
+        Self::new(
+            artifact.id,
+            artifact.hash.into(),
+            artifact.size,
+            generation_added,
+        )
     }
 
     /// Converts self into [`external::TufArtifactMeta`].
@@ -204,13 +218,57 @@ impl TufArtifact {
 
     /// Returns the artifact's name, version, and kind, which is unique across
     /// all artifacts.
-    pub fn nvk(&self) -> (&str, &SemverVersion, &str) {
+    pub fn nvk(&self) -> (&str, &ArtifactVersion, &str) {
         (&self.name, &self.version, &self.kind)
     }
 
     /// Returns the artifact length in bytes.
     pub fn artifact_size(&self) -> u64 {
         self.artifact_size as u64
+    }
+}
+
+/// Artifact version in the database: a freeform identifier.
+#[derive(
+    Clone,
+    Debug,
+    AsExpression,
+    FromSqlRow,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Hash,
+    Display,
+)]
+#[diesel(sql_type = Text)]
+#[serde(transparent)]
+#[display("{0}")]
+pub struct DbArtifactVersion(pub ArtifactVersion);
+
+NewtypeFrom! { () pub struct DbArtifactVersion(ArtifactVersion); }
+NewtypeDeref! { () pub struct DbArtifactVersion(ArtifactVersion); }
+
+impl ToSql<Text, diesel::pg::Pg> for DbArtifactVersion {
+    fn to_sql<'a>(
+        &'a self,
+        out: &mut diesel::serialize::Output<'a, '_, diesel::pg::Pg>,
+    ) -> diesel::serialize::Result {
+        <String as ToSql<Text, diesel::pg::Pg>>::to_sql(
+            &self.0.to_string(),
+            &mut out.reborrow(),
+        )
+    }
+}
+
+impl FromSql<Text, diesel::pg::Pg> for DbArtifactVersion {
+    fn from_sql(
+        bytes: diesel::pg::PgValue<'_>,
+    ) -> diesel::deserialize::Result<Self> {
+        let s = <String as FromSql<Text, diesel::pg::Pg>>::from_sql(bytes)?;
+        s.parse::<ArtifactVersion>()
+            .map(DbArtifactVersion)
+            .map_err(|e| e.into())
     }
 }
 

@@ -1054,7 +1054,8 @@ impl StorageManager {
             }
         }
 
-        let mountpoint_root = &self.resources.disks().mount_config().root;
+        let disks = self.resources.disks();
+        let mountpoint_root = &disks.mount_config().root;
         let mountpoint_path = config.name.mountpoint(mountpoint_root);
         let details = DatasetCreationDetails {
             zoned: config.name.kind().zoned(),

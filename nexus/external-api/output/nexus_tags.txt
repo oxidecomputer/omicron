@@ -1,14 +1,5 @@
 API operations found with tag "affinity"
 OPERATION ID                             METHOD   URL PATH
-affinity_group_create                    POST     /v1/affinity-groups
-affinity_group_delete                    DELETE   /v1/affinity-groups/{affinity_group}
-affinity_group_list                      GET      /v1/affinity-groups
-affinity_group_member_instance_add       POST     /v1/affinity-groups/{affinity_group}/members/instance/{instance}
-affinity_group_member_instance_delete    DELETE   /v1/affinity-groups/{affinity_group}/members/instance/{instance}
-affinity_group_member_instance_view      GET      /v1/affinity-groups/{affinity_group}/members/instance/{instance}
-affinity_group_member_list               GET      /v1/affinity-groups/{affinity_group}/members
-affinity_group_update                    PUT      /v1/affinity-groups/{affinity_group}
-affinity_group_view                      GET      /v1/affinity-groups/{affinity_group}
 anti_affinity_group_create               POST     /v1/anti-affinity-groups
 anti_affinity_group_delete               DELETE   /v1/anti-affinity-groups/{anti_affinity_group}
 anti_affinity_group_list                 GET      /v1/anti-affinity-groups
@@ -43,9 +34,19 @@ floating_ip_view                         GET      /v1/floating-ips/{floating_ip}
 
 API operations found with tag "hidden"
 OPERATION ID                             METHOD   URL PATH
+affinity_group_create                    POST     /v1/affinity-groups
+affinity_group_delete                    DELETE   /v1/affinity-groups/{affinity_group}
+affinity_group_list                      GET      /v1/affinity-groups
+affinity_group_member_instance_add       POST     /v1/affinity-groups/{affinity_group}/members/instance/{instance}
+affinity_group_member_instance_delete    DELETE   /v1/affinity-groups/{affinity_group}/members/instance/{instance}
+affinity_group_member_instance_view      GET      /v1/affinity-groups/{affinity_group}/members/instance/{instance}
+affinity_group_member_list               GET      /v1/affinity-groups/{affinity_group}/members
+affinity_group_update                    PUT      /v1/affinity-groups/{affinity_group}
+affinity_group_view                      GET      /v1/affinity-groups/{affinity_group}
 device_access_token                      POST     /device/token
 device_auth_confirm                      POST     /device/confirm
 device_auth_request                      POST     /device/auth
+instance_affinity_group_list             GET      /v1/instances/{instance}/affinity-groups
 logout                                   POST     /v1/logout
 probe_create                             POST     /experimental/v1/probes
 probe_delete                             DELETE   /experimental/v1/probes/{probe}
@@ -60,8 +61,8 @@ support_bundle_head_file                 HEAD     /experimental/v1/system/suppor
 support_bundle_index                     GET      /experimental/v1/system/support-bundles/{support_bundle}/index
 support_bundle_list                      GET      /experimental/v1/system/support-bundles
 support_bundle_view                      GET      /experimental/v1/system/support-bundles/{support_bundle}
-target_release_get                       GET      /v1/system/update/target-release
-target_release_set                       PUT      /v1/system/update/target-release
+target_release_update                    PUT      /v1/system/update/target-release
+target_release_view                      GET      /v1/system/update/target-release
 timeseries_query                         POST     /v1/timeseries/query
 
 API operations found with tag "images"
@@ -75,6 +76,7 @@ image_view                               GET      /v1/images/{image}
 
 API operations found with tag "instances"
 OPERATION ID                             METHOD   URL PATH
+instance_anti_affinity_group_list        GET      /v1/instances/{instance}/anti-affinity-groups
 instance_create                          POST     /v1/instances
 instance_delete                          DELETE   /v1/instances/{instance}
 instance_disk_attach                     POST     /v1/instances/{instance}/disks/attach

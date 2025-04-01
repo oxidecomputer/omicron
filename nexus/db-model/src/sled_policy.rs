@@ -18,9 +18,7 @@ use nexus_types::external_api::views::{SledPolicy, SledProvisionPolicy};
 use serde::{Deserialize, Serialize};
 
 impl_enum_type!(
-    #[derive(Clone, SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "sled_policy", schema = "public"))]
-    pub struct SledPolicyEnum;
+    SledPolicyEnum:
 
     /// This type is not actually public, because [`SledPolicy`] has a somewhat
     /// different, friendlier shape while being equivalent -- external code
@@ -30,7 +28,6 @@ impl_enum_type!(
     /// type `DbSledPolicy` in public interface`. Marking this type `pub`,
     /// without actually making it public, tricks rustc in a desirable way.
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[diesel(sql_type = SledPolicyEnum)]
     pub enum DbSledPolicy;
 
     // Enum values

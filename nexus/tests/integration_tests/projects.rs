@@ -171,6 +171,7 @@ async fn test_project_deletion_with_instance(
             boot_disk: None,
             start: false,
             auto_restart_policy: Default::default(),
+            anti_affinity_groups: Vec::new(),
         },
     )
     .await;

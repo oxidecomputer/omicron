@@ -6,7 +6,6 @@
 
 use super::DataStore;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::error::ErrorHandler;
 use crate::db::error::public_error_from_diesel;
 use crate::db::model::LldpLinkConfig;
@@ -50,10 +49,10 @@ impl DataStore {
         switch_location: Name,
         port_name: Name,
     ) -> LookupResult<Uuid> {
-        use db::schema::switch_port;
-        use db::schema::switch_port::dsl as switch_port_dsl;
-        use db::schema::switch_port_settings_link_config;
-        use db::schema::switch_port_settings_link_config::dsl as config_dsl;
+        use nexus_db_schema::schema::switch_port;
+        use nexus_db_schema::schema::switch_port::dsl as switch_port_dsl;
+        use nexus_db_schema::schema::switch_port_settings_link_config;
+        use nexus_db_schema::schema::switch_port_settings_link_config::dsl as config_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -106,8 +105,8 @@ impl DataStore {
         switch_location: Name,
         port_name: Name,
     ) -> LookupResult<external::LldpLinkConfig> {
-        use db::schema::lldp_link_config;
-        use db::schema::lldp_link_config::dsl;
+        use nexus_db_schema::schema::lldp_link_config;
+        use nexus_db_schema::schema::lldp_link_config::dsl;
 
         let id = self
             .lldp_config_id_get(opctx, rack_id, switch_location, port_name)
@@ -147,7 +146,7 @@ impl DataStore {
         port_name: Name,
         config: external::LldpLinkConfig,
     ) -> UpdateResult<()> {
-        use db::schema::lldp_link_config::dsl;
+        use nexus_db_schema::schema::lldp_link_config::dsl;
 
         let id = self
             .lldp_config_id_get(opctx, rack_id, switch_location, port_name)

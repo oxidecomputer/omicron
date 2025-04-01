@@ -4,9 +4,10 @@
 
 use super::{BlockSize, ByteCount, DiskState, Generation};
 use crate::typed_uuid::DbTypedUuid;
-use crate::{schema::disk, unsigned::SqlU8};
+use crate::unsigned::SqlU8;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
+use nexus_db_schema::schema::disk;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;

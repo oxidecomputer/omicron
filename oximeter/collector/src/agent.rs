@@ -684,6 +684,7 @@ mod tests {
     use omicron_common::api::internal::nexus::ProducerKind;
     use omicron_test_utils::dev::test_setup_log;
     use oximeter::types::ProducerResults;
+    use reqwest::StatusCode;
     use std::net::Ipv6Addr;
     use std::net::SocketAddr;
     use std::net::SocketAddrV6;
@@ -969,17 +970,36 @@ mod tests {
             .unwrap()
             .statistics()
             .await;
-        let count = stats
-            .failed_collections
-            .get(&FailureReason::Other(
-                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
-            ))
-            .unwrap()
-            .datum
-            .value() as usize;
 
-        assert_eq!(stats.collections.datum.value(), 0);
+        // The collections _should_ always fail due to a 500, but it's possible
+        // that we also get collections failing because there's already one in
+        // progress. See
+        // https://github.com/oxidecomputer/omicron/issues/7255#issuecomment-2711537164
+        // for example.
+        //
+        // Sum over all the expected reasons to get the correct count. We should
+        // never get anything but a 500, or possibly an in-progress error.
+        dbg!(&stats.failed_collections);
+        let count: usize = stats
+            .failed_collections
+            .iter()
+            .map(|(reason, value)| {
+                let value = match reason {
+                    FailureReason::CollectionsInProgress => value,
+                    FailureReason::Other(sc)
+                        if sc == &StatusCode::INTERNAL_SERVER_ERROR =>
+                    {
+                        value
+                    }
+                    _ => panic!("Unexpected failure reason: {reason:?}"),
+                };
+                value.datum.value() as usize
+            })
+            .sum();
         assert!(count != 0);
+
+        // In any case, we should never have a _successful_ collection.
+        assert_eq!(stats.collections.datum.value(), 0);
 
         // The server may have handled a request that we've not yet recorded on
         // our collection task side, so we allow the server count to be greater
@@ -993,12 +1013,6 @@ mod tests {
             "number of collections reported by the collection \
             task ({count}) differs from the number reported by the always-ded \
             producer server itself ({server_count})"
-        );
-        assert_eq!(
-            stats.failed_collections.len(),
-            1,
-            "unexpected failed_collections content: {:?}",
-            stats.failed_collections,
         );
         logctx.cleanup_successful();
     }

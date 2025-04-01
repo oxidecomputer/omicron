@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::SqlU16;
-use crate::schema::oximeter;
 use chrono::{DateTime, Utc};
+use nexus_db_schema::schema::oximeter;
 use nexus_types::internal_api;
 use uuid::Uuid;
 

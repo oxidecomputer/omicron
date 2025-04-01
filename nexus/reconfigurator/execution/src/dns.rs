@@ -300,6 +300,7 @@ mod test {
     use crate::Sled;
     use crate::test_utils::overridables_for_test;
     use crate::test_utils::realize_blueprint_and_expect;
+    use id_map::IdMap;
     use internal_dns_resolver::Resolver;
     use internal_dns_types::config::Host;
     use internal_dns_types::config::Zone;
@@ -326,15 +327,12 @@ mod test {
     use nexus_test_utils::resource_helpers::create_silo;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::Blueprint;
-    use nexus_types::deployment::BlueprintDatasetsConfig;
-    use nexus_types::deployment::BlueprintPhysicalDisksConfig;
     use nexus_types::deployment::BlueprintSledConfig;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
-    use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::CockroachDbClusterVersion;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::CockroachDbSettings;
@@ -602,7 +600,14 @@ mod test {
         Ok(BlueprintZoneConfig {
             disposition,
             id: config.id,
-            filesystem_pool: config.filesystem_pool,
+            // This is *VERY* incorrect, in terms of a real system, but is not
+            // harmful to our DNS tests below. We should not introduce any new
+            // callers of
+            // `deprecated_omicron_zone_config_to_blueprint_zone_config`, so
+            // hopefully this doesn't cause us too much pain in the future.
+            filesystem_pool: config.filesystem_pool.unwrap_or_else(|| {
+                ZpoolName::new_external(ZpoolUuid::new_v4())
+            }),
             zone_type,
             image_source,
         })
@@ -645,34 +650,32 @@ mod test {
 
         for (sled_id, sa) in collection.sled_agents {
             // Convert the inventory `OmicronZonesConfig`s into
-            // `BlueprintZonesConfig`. This is going to get more painful over
+            // `BlueprintZoneConfig`s. This is going to get more painful over
             // time as we add to blueprints, but for now we can make this work.
-            let zones_config = BlueprintZonesConfig {
-                generation: sa.omicron_zones.generation,
-                zones: sa
-                    .omicron_zones
-                    .zones
-                    .into_iter()
-                    .map(|config| -> BlueprintZoneConfig {
-                        deprecated_omicron_zone_config_to_blueprint_zone_config(
-                            config,
-                            BlueprintZoneDisposition::InService,
-                            // We don't get external IP IDs in inventory
-                            // collections. We'll just make one up for every
-                            // zone that needs one here. This is gross.
-                            Some(ExternalIpUuid::new_v4()),
-                        )
-                        .expect("failed to convert zone config")
-                    })
-                    .collect(),
-            };
+            let zones = sa
+                .omicron_zones
+                .zones
+                .into_iter()
+                .map(|config| -> BlueprintZoneConfig {
+                    deprecated_omicron_zone_config_to_blueprint_zone_config(
+                        config,
+                        BlueprintZoneDisposition::InService,
+                        // We don't get external IP IDs in inventory
+                        // collections. We'll just make one up for every
+                        // zone that needs one here. This is gross.
+                        Some(ExternalIpUuid::new_v4()),
+                    )
+                    .expect("failed to convert zone config")
+                })
+                .collect();
             blueprint_sleds.insert(
                 sled_id,
                 BlueprintSledConfig {
                     state: SledState::Active,
-                    disks_config: BlueprintPhysicalDisksConfig::default(),
-                    datasets_config: BlueprintDatasetsConfig::default(),
-                    zones_config,
+                    sled_agent_generation: sa.omicron_zones.generation,
+                    disks: IdMap::new(),
+                    datasets: IdMap::new(),
+                    zones,
                 },
             );
         }
@@ -698,16 +701,14 @@ mod test {
         // not currently in service.
         let out_of_service_id = OmicronZoneUuid::new_v4();
         let out_of_service_addr = Ipv6Addr::LOCALHOST;
-        blueprint.sleds.values_mut().next().unwrap().zones_config.zones.insert(
+        blueprint.sleds.values_mut().next().unwrap().zones.insert(
             BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::Expunged {
                     as_of_generation: Generation::new(),
                     ready_for_cleanup: false,
                 },
                 id: out_of_service_id,
-                filesystem_pool: Some(ZpoolName::new_external(
-                    ZpoolUuid::new_v4(),
-                )),
+                filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
                 zone_type: BlueprintZoneType::Oximeter(
                     blueprint_zone_type::Oximeter {
                         address: SocketAddrV6::new(
@@ -1051,9 +1052,8 @@ mod test {
         // Change the zone disposition to expunged for the nexus zone on the
         // first sled. This should ensure we don't get an external DNS record
         // back for that sled.
-        let bp_zones_config =
-            &mut blueprint.sleds.values_mut().next().unwrap().zones_config;
-        let mut nexus_zone = bp_zones_config
+        let bp_sled_config = &mut blueprint.sleds.values_mut().next().unwrap();
+        let mut nexus_zone = bp_sled_config
             .zones
             .iter_mut()
             .find(|z| z.zone_type.is_nexus())

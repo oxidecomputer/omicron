@@ -1476,6 +1476,31 @@
         }
       }
     },
+    "/v1/ping": {
+      "get": {
+        "summary": "Ping API",
+        "description": "Always responds with Ok if it responds at all.",
+        "operationId": "ping",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ping"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/vmms/{propolis_id}": {
       "put": {
         "summary": "Report updated state for a VMM.",
@@ -1594,6 +1619,11 @@
             ]
           }
         ]
+      },
+      "ArtifactVersion": {
+        "description": "An artifact version.\n\nThis is a freeform identifier with some basic validation. It may be the serialized form of a semver version, or a custom identifier that uses the same character set as a semver, plus `_`.\n\nThe exact pattern accepted is `^[a-zA-Z0-9._+-]{1,63}$`.\n\n# Ord implementation\n\n`ArtifactVersion`s are not intended to be sorted, just compared for equality. `ArtifactVersion` implements `Ord` only for storage within sorted collections.",
+        "type": "string",
+        "pattern": "^[a-zA-Z0-9._+-]{1,63}$"
       },
       "BackgroundTask": {
         "description": "Background tasks\n\nThese are currently only intended for observability by developers.  We will eventually want to flesh this out into something more observable for end users.",
@@ -2058,22 +2088,6 @@
           }
         ]
       },
-      "BlueprintDatasetsConfig": {
-        "description": "Information about Omicron datasets as recorded in a blueprint.",
-        "type": "object",
-        "properties": {
-          "datasets": {
-            "$ref": "#/components/schemas/IdMapBlueprintDatasetConfig"
-          },
-          "generation": {
-            "$ref": "#/components/schemas/Generation"
-          }
-        },
-        "required": [
-          "datasets",
-          "generation"
-        ]
-      },
       "BlueprintMetadata": {
         "description": "Describe high-level metadata about a blueprint",
         "type": "object",
@@ -2242,44 +2256,37 @@
           }
         ]
       },
-      "BlueprintPhysicalDisksConfig": {
-        "description": "Information about Omicron physical disks as recorded in a blueprint.\n\nPart of [`Blueprint`].",
-        "type": "object",
-        "properties": {
-          "disks": {
-            "$ref": "#/components/schemas/IdMapBlueprintPhysicalDiskConfig"
-          },
-          "generation": {
-            "$ref": "#/components/schemas/Generation"
-          }
-        },
-        "required": [
-          "disks",
-          "generation"
-        ]
-      },
       "BlueprintSledConfig": {
         "description": "Information about the configuration of a sled as recorded in a blueprint.\n\nPart of [`Blueprint`].",
         "type": "object",
         "properties": {
-          "datasets_config": {
-            "$ref": "#/components/schemas/BlueprintDatasetsConfig"
+          "datasets": {
+            "$ref": "#/components/schemas/IdMapBlueprintDatasetConfig"
           },
-          "disks_config": {
-            "$ref": "#/components/schemas/BlueprintPhysicalDisksConfig"
+          "disks": {
+            "$ref": "#/components/schemas/IdMapBlueprintPhysicalDiskConfig"
+          },
+          "sled_agent_generation": {
+            "description": "Generation number used when this type is converted into an `OmicronSledConfig` for use by sled-agent.\n\nThis field is explicitly named `sled_agent_generation` to indicate that it is only required to cover information that changes what Reconfigurator sends to sled agent. For example, changing the sled `state` from `Active` to `Decommissioned` would not require a bump to `sled_agent_generation`, because a `Decommissioned` sled will never be sent an `OmicronSledConfig`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
           },
           "state": {
             "$ref": "#/components/schemas/SledState"
           },
-          "zones_config": {
-            "$ref": "#/components/schemas/BlueprintZonesConfig"
+          "zones": {
+            "$ref": "#/components/schemas/IdMapBlueprintZoneConfig"
           }
         },
         "required": [
-          "datasets_config",
-          "disks_config",
+          "datasets",
+          "disks",
+          "sled_agent_generation",
           "state",
-          "zones_config"
+          "zones"
         ]
       },
       "BlueprintTarget": {
@@ -2327,7 +2334,7 @@
         ]
       },
       "BlueprintZoneConfig": {
-        "description": "Describes one Omicron-managed zone in a blueprint.\n\nPart of [`BlueprintZonesConfig`].",
+        "description": "Describes one Omicron-managed zone in a blueprint.\n\nPart of [`BlueprintSledConfig`].",
         "type": "object",
         "properties": {
           "disposition": {
@@ -2339,7 +2346,6 @@
             ]
           },
           "filesystem_pool": {
-            "nullable": true,
             "description": "zpool used for the zone's (transient) root filesystem",
             "allOf": [
               {
@@ -2359,6 +2365,7 @@
         },
         "required": [
           "disposition",
+          "filesystem_pool",
           "id",
           "image_source",
           "zone_type"
@@ -2446,8 +2453,7 @@
                 ]
               },
               "version": {
-                "type": "string",
-                "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+                "$ref": "#/components/schemas/ArtifactVersion"
               }
             },
             "required": [
@@ -2807,32 +2813,6 @@
               "type"
             ]
           }
-        ]
-      },
-      "BlueprintZonesConfig": {
-        "description": "Information about an Omicron zone as recorded in a blueprint.\n\nCurrently, this is similar to [`OmicronZonesConfig`], but also contains a per-zone [`BlueprintZoneDisposition`].\n\nPart of [`Blueprint`].",
-        "type": "object",
-        "properties": {
-          "generation": {
-            "description": "Generation number of this configuration.\n\nThis generation number is owned by the control plane. See [`OmicronZonesConfig::generation`] for more details.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          },
-          "zones": {
-            "description": "The set of running zones.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IdMapBlueprintZoneConfig"
-              }
-            ]
-          }
-        },
-        "required": [
-          "generation",
-          "zones"
         ]
       },
       "ByteCount": {
@@ -4800,6 +4780,28 @@
           "sled_id",
           "variant",
           "vendor"
+        ]
+      },
+      "Ping": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "description": "Whether the external API is reachable. Will always be Ok if the endpoint returns anything at all.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PingStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "PingStatus": {
+        "type": "string",
+        "enum": [
+          "ok"
         ]
       },
       "PortConfigV2": {

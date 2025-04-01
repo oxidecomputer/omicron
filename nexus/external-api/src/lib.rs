@@ -23,7 +23,7 @@ use omicron_common::api::external::{
 use openapi_manager_types::ValidationContext;
 use openapiv3::OpenAPI;
 
-pub const API_VERSION: &str = "20250212.0.0";
+pub const API_VERSION: &str = "20250409.0.0";
 
 const MIB: usize = 1024 * 1024;
 const GIB: usize = 1024 * MIB;
@@ -75,7 +75,7 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
         policy = EndpointTagPolicy::ExactlyOne,
         tags = {
             "affinity" = {
-                description = "Affinity and anti-affinity groups give control over instance placement.",
+                description = "Anti-affinity groups give control over instance placement.",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/affinity"
                 }
@@ -1264,13 +1264,41 @@ pub trait NexusExternalApi {
         disk_to_detach: TypedBody<params::DiskPath>,
     ) -> Result<HttpResponseAccepted<Disk>, HttpError>;
 
+    /// List affinity groups containing instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/affinity-groups",
+        tags = ["hidden"],
+    }]
+    async fn instance_affinity_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
+        path_params: Path<params::InstancePath>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AffinityGroup>>, HttpError>;
+
+    /// List anti-affinity groups containing instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/anti-affinity-groups",
+        tags = ["instances"],
+    }]
+    async fn instance_anti_affinity_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
+        path_params: Path<params::InstancePath>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::AntiAffinityGroup>>, HttpError>;
+
     // Affinity Groups
 
     /// List affinity groups
     #[endpoint {
         method = GET,
         path = "/v1/affinity-groups",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_list(
         rqctx: RequestContext<Self::Context>,
@@ -1281,7 +1309,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/affinity-groups/{affinity_group}",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_view(
         rqctx: RequestContext<Self::Context>,
@@ -1293,11 +1321,13 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/affinity-groups/{affinity_group}/members",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_member_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
         path_params: Path<params::AffinityGroupPath>,
     ) -> Result<HttpResponseOk<ResultsPage<AffinityGroupMember>>, HttpError>;
 
@@ -1305,7 +1335,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/affinity-groups/{affinity_group}/members/instance/{instance}",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_member_instance_view(
         rqctx: RequestContext<Self::Context>,
@@ -1317,7 +1347,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = POST,
         path = "/v1/affinity-groups/{affinity_group}/members/instance/{instance}",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_member_instance_add(
         rqctx: RequestContext<Self::Context>,
@@ -1329,7 +1359,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = DELETE,
         path = "/v1/affinity-groups/{affinity_group}/members/instance/{instance}",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_member_instance_delete(
         rqctx: RequestContext<Self::Context>,
@@ -1341,7 +1371,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = POST,
         path = "/v1/affinity-groups",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_create(
         rqctx: RequestContext<Self::Context>,
@@ -1353,7 +1383,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = PUT,
         path = "/v1/affinity-groups/{affinity_group}",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_update(
         rqctx: RequestContext<Self::Context>,
@@ -1366,7 +1396,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = DELETE,
         path = "/v1/affinity-groups/{affinity_group}",
-        tags = ["affinity"],
+        tags = ["hidden"],
     }]
     async fn affinity_group_delete(
         rqctx: RequestContext<Self::Context>,
@@ -1405,7 +1435,9 @@ pub trait NexusExternalApi {
     }]
     async fn anti_affinity_group_member_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
         path_params: Path<params::AntiAffinityGroupPath>,
     ) -> Result<HttpResponseOk<ResultsPage<AntiAffinityGroupMember>>, HttpError>;
 
@@ -2899,7 +2931,7 @@ pub trait NexusExternalApi {
         path = "/v1/system/update/target-release",
         tags = ["hidden"], // "system/update"
     }]
-    async fn target_release_get(
+    async fn target_release_view(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<views::TargetRelease>, HttpError>;
 
@@ -2913,7 +2945,7 @@ pub trait NexusExternalApi {
         path = "/v1/system/update/target-release",
         tags = ["hidden"], // "system/update"
     }]
-    async fn target_release_set(
+    async fn target_release_update(
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<params::SetTargetReleaseParams>,
     ) -> Result<HttpResponseCreated<views::TargetRelease>, HttpError>;

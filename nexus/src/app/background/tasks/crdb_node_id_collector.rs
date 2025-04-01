@@ -263,18 +263,17 @@ mod tests {
             iter::once(sled_id),
             "test",
         );
-        let bp_zones = &mut blueprint
+        let bp_sled = &mut blueprint
             .sleds
             .get_mut(&sled_id)
-            .expect("found entry for test sled")
-            .zones_config;
+            .expect("found entry for test sled");
 
         let zpool_id = ZpoolUuid::new_v4();
         let make_crdb_zone_config =
             |disposition, id, addr: SocketAddrV6| BlueprintZoneConfig {
                 disposition,
                 id,
-                filesystem_pool: Some(ZpoolName::new_external(zpool_id)),
+                filesystem_pool: ZpoolName::new_external(zpool_id),
                 zone_type: BlueprintZoneType::CockroachDb(
                     blueprint_zone_type::CockroachDb {
                         address: addr,
@@ -297,12 +296,12 @@ mod tests {
         let crdb_addr1: SocketAddrV6 = "[2001:db8::1]:1111".parse().unwrap();
         let crdb_addr2: SocketAddrV6 = "[2001:db8::2]:1234".parse().unwrap();
         let crdb_addr3: SocketAddrV6 = "[2001:db8::3]:1234".parse().unwrap();
-        bp_zones.zones.insert(make_crdb_zone_config(
+        bp_sled.zones.insert(make_crdb_zone_config(
             BlueprintZoneDisposition::InService,
             crdb_id1,
             crdb_addr1,
         ));
-        bp_zones.zones.insert(make_crdb_zone_config(
+        bp_sled.zones.insert(make_crdb_zone_config(
             BlueprintZoneDisposition::Expunged {
                 as_of_generation: Generation::new(),
                 ready_for_cleanup: false,
@@ -310,17 +309,17 @@ mod tests {
             crdb_id2,
             crdb_addr2,
         ));
-        bp_zones.zones.insert(make_crdb_zone_config(
+        bp_sled.zones.insert(make_crdb_zone_config(
             BlueprintZoneDisposition::InService,
             crdb_id3,
             crdb_addr3,
         ));
 
         // Also add a non-CRDB zone to ensure it's filtered out.
-        bp_zones.zones.insert(BlueprintZoneConfig {
+        bp_sled.zones.insert(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: OmicronZoneUuid::new_v4(),
-            filesystem_pool: Some(ZpoolName::new_external(ZpoolUuid::new_v4())),
+            filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
             zone_type: BlueprintZoneType::CruciblePantry(
                 blueprint_zone_type::CruciblePantry {
                     address: "[::1]:0".parse().unwrap(),

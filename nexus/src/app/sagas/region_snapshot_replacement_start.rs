@@ -1469,7 +1469,7 @@ pub(crate) mod test {
         use diesel::QueryDsl;
         use diesel::SelectableHelper;
         use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
-        use nexus_db_queries::db::schema::region::dsl;
+        use nexus_db_schema::schema::region::dsl;
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
