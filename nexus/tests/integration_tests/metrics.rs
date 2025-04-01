@@ -472,8 +472,10 @@ async fn test_project_timeseries_query(
     let _p2 = create_project(&client, "project2").await;
 
     // Create resources in each project
-    let i1 = create_instance(&client, "project1", "instance1").await;
-    let _i2 = create_instance(&client, "project2", "instance2").await;
+    let i1p1 = create_instance(&client, "project1", "instance1").await;
+    // need a second instance to test group_by
+    let _i2p1 = create_instance(&client, "project1", "instance2").await;
+    let _i3p2 = create_instance(&client, "project2", "instance3").await;
 
     let internal_client = &cptestctx.internal_client;
 
@@ -519,6 +521,7 @@ async fn test_project_timeseries_query(
     let q2 = &format!("{} | filter project_id == \"{}\"", q1, p1.identity.id);
 
     let result = metrics_querier.project_timeseries_query("project1", q2).await;
+    // assert_eq!(dbg!(result.clone()).len(), 1);
     assert_eq!(result.len(), 1);
     assert!(result[0].timeseries().len() > 0);
 
@@ -527,7 +530,8 @@ async fn test_project_timeseries_query(
     assert_eq!(result[0].timeseries().len(), 0);
 
     // with instance specified
-    let q3 = &format!("{} | filter instance_id == \"{}\"", q1, i1.identity.id);
+    let q3 =
+        &format!("{} | filter instance_id == \"{}\"", q1, i1p1.identity.id);
 
     // project containing instance gives me something
     let result = metrics_querier.project_timeseries_query("project1", q3).await;
@@ -539,11 +543,22 @@ async fn test_project_timeseries_query(
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].timeseries().len(), 0);
 
+    // now let's test it with group_by. TODO: shit, it's broken
+    let q4 = &format!(
+        "{} | align mean_within(1m) | group_by [instance_id], sum",
+        q2
+    );
+    let result = metrics_querier.project_timeseries_query("project1", q4).await;
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].timeseries().len(), 1);
+
+    // TODO: test with a set of subqueries
+
     // expect error when querying a metric that has no project_id on it
-    let q4 = "get integration_target:integration_metric";
+    let q5 = "get integration_target:integration_metric";
     let url = "/v1/timeseries/query?project=project1";
     let body = nexus_types::external_api::params::TimeseriesQuery {
-        query: q4.to_string(),
+        query: q5.to_string(),
     };
     let result =
         object_create_error(client, url, &body, StatusCode::BAD_REQUEST).await;
@@ -563,7 +578,7 @@ async fn test_project_timeseries_query(
     // nonexistent project
     let url = "/v1/timeseries/query?project=nonexistent";
     let body = nexus_types::external_api::params::TimeseriesQuery {
-        query: q4.to_string(),
+        query: q5.to_string(),
     };
     let result =
         object_create_error(client, url, &body, StatusCode::NOT_FOUND).await;
@@ -606,7 +621,7 @@ async fn test_project_timeseries_query(
         .execute_and_parse_unwrap::<OxqlQueryResult>()
         .await;
     assert_eq!(result.tables.len(), 1);
-    assert_eq!(result.tables[0].timeseries().len(), 1);
+    assert_eq!(result.tables[0].timeseries().len(), 2); // two instances
 }
 
 #[nexus_test]
