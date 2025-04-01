@@ -1092,7 +1092,8 @@ impl StorageManager {
             .await
         {
             warn!(log, "Failed to ensure dataset"; "dataset" => ?status.dataset_name, "err" => ?err);
-            status.err = Some(slog_error_chain::InlineErrorChain::new(&err).to_string());
+            status.err =
+                Some(slog_error_chain::InlineErrorChain::new(&err).to_string());
         };
 
         status
