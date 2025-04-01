@@ -1128,7 +1128,7 @@ table! {
 
         deleting -> Bool,
 
-        reservation_percent -> crate::RegionReservationPercentEnum,
+        reservation_percent -> crate::enums::RegionReservationPercentEnum,
     }
 }
 

@@ -405,7 +405,7 @@ pub fn allocation_query(
     .bind::<sql_types::BigInt, _>(params.blocks_per_extent as i64)
     .bind::<sql_types::BigInt, _>(params.extent_count as i64)
     .bind::<sql_types::Bool, _>(params.read_only)
-    .bind::<crate::db::model::RegionReservationPercentEnum, _>(reservation_percent)
+    .bind::<nexus_db_schema::enums::RegionReservationPercentEnum, _>(reservation_percent)
     .bind::<sql_types::BigInt, _>(redundancy)
 
     // A subquery which summarizes the changes we intend to make, showing:

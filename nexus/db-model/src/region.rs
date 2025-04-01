@@ -5,7 +5,6 @@
 use super::ByteCount;
 use crate::SqlU16;
 use crate::impl_enum_type;
-use crate::schema::region;
 use crate::typed_uuid::DbTypedUuid;
 use db_macros::Asset;
 use nexus_db_schema::schema::region;
@@ -18,12 +17,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "region_reservation_percent", schema = "public"))]
-    pub struct RegionReservationPercentEnum;
+    RegionReservationPercentEnum:
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[diesel(sql_type = RegionReservationPercentEnum)]
     pub enum RegionReservationPercent;
 
     // Enum values
