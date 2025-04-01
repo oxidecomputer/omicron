@@ -28,6 +28,8 @@ pub enum CombineError {
     DuplicateXCoordinates,
     #[error("all shares must be of equivalent length")]
     InvalidShareLengths,
+    #[error("compute share cannot be called with x=0")]
+    InvalidShareId,
 }
 
 /// A parsed type where the threshold has been validated to be greater than 2
@@ -164,7 +166,7 @@ fn split_secret_impl<R: Rng>(
 /// Combine the shares to reconstruct the secret
 ///
 /// The secret is the concatenation of the y-coordinates at x=0.
-pub fn combine_shares(
+pub fn compute_secret(
     shares: &[Share],
 ) -> Result<Secret<Box<[u8]>>, CombineError> {
     let shares = ValidShares::new(shares)?;
@@ -172,11 +174,26 @@ pub fn combine_shares(
     Ok(Secret::new(share.y_coordinates.iter().map(|y| y.into_u8()).collect()))
 }
 
+/// Combine the shares to compute an unknown share at the given x-coordinate.
+///
+/// Returns an error if `x=0`, as that is the secret. Callers
+/// that need the secret should call `combine_shares`.
+pub fn compute_share(
+    shares: &[Share],
+    x: Gf256,
+) -> Result<Share, CombineError> {
+    if x.ct_eq(&gf256::ZERO).into() {
+        return Err(CombineError::InvalidShareId);
+    }
+    let shares = ValidShares::new(shares)?;
+    Ok(interpolate_polynomials(shares, x))
+}
+
 /// Interpolate the points for each polynomial to find the value `y = f(x)`
 /// and then concatenate them and return the corrseponding [`Share`].
 ///
 /// Calling this function for `x=0` reveals the secret.
-pub fn interpolate_polynomials(shares: ValidShares, x: Gf256) -> Share {
+fn interpolate_polynomials(shares: ValidShares, x: Gf256) -> Share {
     // Our output value: `f(x)` for all polynomials
     let mut output =
         vec![gf256::ZERO; shares.num_y_coordinates()].into_boxed_slice();
@@ -241,17 +258,17 @@ mod tests {
                 let k = shares.threshold.0 as usize;
                 let input_secret = input.secret.into_boxed_slice();
                 let secret =
-                    combine_shares(&shares.shares.expose_secret()[0..k])
+                    compute_secret(&shares.shares.expose_secret()[0..k])
                         .expect("combining succeeds");
                 assert_eq!(*secret.expose_secret(), input_secret);
                 let secret =
-                    combine_shares(&shares.shares.expose_secret()[n - k..])
+                    compute_secret(&shares.shares.expose_secret()[n - k..])
                         .expect("combining succeeds");
                 assert_eq!(*secret.expose_secret(), input_secret);
 
                 if k > 2 {
                     // Combining fewer than k shares returns nonsense
-                    let secret = combine_shares(
+                    let secret = compute_secret(
                         &shares.shares.expose_secret()[0..k - 1],
                     )
                     .expect("combining succeeds");
@@ -259,7 +276,7 @@ mod tests {
                 } else {
                     // Attempting to combine too few shares fails
                     assert!(
-                        combine_shares(
+                        compute_secret(
                             &shares.shares.expose_secret()[0..k - 1]
                         )
                         .is_err()
@@ -277,14 +294,14 @@ mod tests {
                 let mut y_coordinates_bad: Box<[Gf256]> =
                     y_coordinates.iter().cloned().take(len - 1).collect();
                 mem::swap(&mut *y_coordinates, &mut y_coordinates_bad);
-                assert!(combine_shares(&copy).is_err());
+                assert!(compute_secret(&copy).is_err());
 
                 // Duplicate an x-coordinate. This should also cause an error.
                 let mut copy: Vec<_> = shares.shares.expose_secret().to_vec();
                 let first_share = copy.get_mut(0).unwrap();
                 // The first share is at x-coordinate 1
                 first_share.x_coordinate = Gf256::new(2);
-                assert!(combine_shares(&copy).is_err());
+                assert!(compute_secret(&copy).is_err());
             }
             Err(SplitError::ThresholdToSmall) => {
                 assert!(input.threshold < 2);
@@ -293,5 +310,25 @@ mod tests {
                 assert!(k > n);
             }
         }
+    }
+
+    #[test]
+    fn test_share_reconstruction() {
+        let secret = b"some-secret";
+        let shares = split_secret(&secret[..], 10, 7).unwrap();
+
+        // Generate enough shares to recompute the secret
+        let computed: Vec<_> = (20..27u8)
+            .into_iter()
+            .map(|x| {
+                let shares = shares.shares.expose_secret();
+                compute_share(&shares, Gf256::new(x)).unwrap()
+            })
+            .collect();
+
+        // Recompute secret from computed shares
+        let computed_secret = compute_secret(&computed).unwrap();
+
+        assert_eq!(&secret[..], &computed_secret.expose_secret()[..]);
     }
 }
