@@ -494,7 +494,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
-            filesystem_pool: Some(ZpoolName::new_external(zpool_id)),
+            filesystem_pool: ZpoolName::new_external(zpool_id),
             zone_type: BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb {
                     address,
@@ -545,7 +545,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
-            filesystem_pool: Some(ZpoolName::new_external(zpool_id)),
+            filesystem_pool: ZpoolName::new_external(zpool_id),
             zone_type: BlueprintZoneType::Clickhouse(
                 blueprint_zone_type::Clickhouse {
                     address: http_address,
@@ -737,7 +737,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: nexus_id,
-            filesystem_pool: Some(ZpoolName::new_external(ZpoolUuid::new_v4())),
+            filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
             zone_type: BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 external_dns_servers: self
                     .config
@@ -857,39 +857,35 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
                 let zones = if let Some(zones) = maybe_zones {
                     for zone in zones {
-                        if let Some(zpool) = &zone.filesystem_pool {
-                            disks.insert(BlueprintPhysicalDiskConfig {
-                                disposition:
-                                    BlueprintPhysicalDiskDisposition::InService,
-                                identity: omicron_common::disk::DiskIdentity {
-                                    vendor: "nexus-tests".to_string(),
-                                    model: "nexus-test-model".to_string(),
-                                    serial: format!(
-                                        "nexus-test-disk-{disk_index}"
-                                    ),
-                                },
-                                id: PhysicalDiskUuid::new_v4(),
-                                pool_id: zpool.id(),
-                            });
-                            disk_index += 1;
-                            let id = DatasetUuid::new_v4();
-                            datasets.insert(BlueprintDatasetConfig {
-                                disposition:
-                                    BlueprintDatasetDisposition::InService,
-                                id,
-                                pool: zpool.clone(),
-                                kind: DatasetKind::TransientZone {
-                                    name: illumos_utils::zone::zone_name(
-                                        zone.zone_type.kind().zone_prefix(),
-                                        Some(zone.id),
-                                    ),
-                                },
-                                address: None,
-                                quota: None,
-                                reservation: None,
-                                compression: CompressionAlgorithm::Off,
-                            });
-                        }
+                        let zpool = &zone.filesystem_pool;
+                        disks.insert(BlueprintPhysicalDiskConfig {
+                            disposition:
+                                BlueprintPhysicalDiskDisposition::InService,
+                            identity: omicron_common::disk::DiskIdentity {
+                                vendor: "nexus-tests".to_string(),
+                                model: "nexus-test-model".to_string(),
+                                serial: format!("nexus-test-disk-{disk_index}"),
+                            },
+                            id: PhysicalDiskUuid::new_v4(),
+                            pool_id: zpool.id(),
+                        });
+                        disk_index += 1;
+                        let id = DatasetUuid::new_v4();
+                        datasets.insert(BlueprintDatasetConfig {
+                            disposition: BlueprintDatasetDisposition::InService,
+                            id,
+                            pool: zpool.clone(),
+                            kind: DatasetKind::TransientZone {
+                                name: illumos_utils::zone::zone_name(
+                                    zone.zone_type.kind().zone_prefix(),
+                                    Some(zone.id),
+                                ),
+                            },
+                            address: None,
+                            quota: None,
+                            reservation: None,
+                            compression: CompressionAlgorithm::Off,
+                        });
                     }
                     zones.iter().cloned().collect()
                 } else {
@@ -1176,7 +1172,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
-            filesystem_pool: Some(ZpoolName::new_external(ZpoolUuid::new_v4())),
+            filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
             zone_type: BlueprintZoneType::CruciblePantry(
                 blueprint_zone_type::CruciblePantry { address },
             ),
@@ -1218,7 +1214,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
-            filesystem_pool: Some(ZpoolName::new_external(zpool_id)),
+            filesystem_pool: ZpoolName::new_external(zpool_id),
             zone_type: BlueprintZoneType::ExternalDns(
                 blueprint_zone_type::ExternalDns {
                     dataset: OmicronZoneDataset { pool_name },
@@ -1281,7 +1277,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
-            filesystem_pool: Some(ZpoolName::new_external(zpool_id)),
+            filesystem_pool: ZpoolName::new_external(zpool_id),
             zone_type: BlueprintZoneType::InternalDns(
                 blueprint_zone_type::InternalDns {
                     dataset: OmicronZoneDataset { pool_name },

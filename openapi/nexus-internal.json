@@ -1427,6 +1427,31 @@
         }
       }
     },
+    "/v1/ping": {
+      "get": {
+        "summary": "Ping API",
+        "description": "Always responds with Ok if it responds at all.",
+        "operationId": "ping",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ping"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/vmms/{propolis_id}": {
       "put": {
         "summary": "Report updated state for a VMM.",
@@ -1564,6 +1589,11 @@
           "hash",
           "kind"
         ]
+      },
+      "ArtifactVersion": {
+        "description": "An artifact version.\n\nThis is a freeform identifier with some basic validation. It may be the serialized form of a semver version, or a custom identifier that uses the same character set as a semver, plus `_`.\n\nThe exact pattern accepted is `^[a-zA-Z0-9._+-]{1,63}$`.\n\n# Ord implementation\n\n`ArtifactVersion`s are not intended to be sorted, just compared for equality. `ArtifactVersion` implements `Ord` only for storage within sorted collections.",
+        "type": "string",
+        "pattern": "^[a-zA-Z0-9._+-]{1,63}$"
       },
       "BackgroundTask": {
         "description": "Background tasks\n\nThese are currently only intended for observability by developers.  We will eventually want to flesh this out into something more observable for end users.",
@@ -2312,7 +2342,6 @@
             ]
           },
           "filesystem_pool": {
-            "nullable": true,
             "description": "zpool used for the zone's (transient) root filesystem",
             "allOf": [
               {
@@ -2332,6 +2361,7 @@
         },
         "required": [
           "disposition",
+          "filesystem_pool",
           "id",
           "image_source",
           "zone_type"
@@ -2419,8 +2449,7 @@
                 ]
               },
               "version": {
-                "type": "string",
-                "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+                "$ref": "#/components/schemas/ArtifactVersion"
               }
             },
             "required": [
@@ -4733,6 +4762,28 @@
           "sled_id",
           "variant",
           "vendor"
+        ]
+      },
+      "Ping": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "description": "Whether the external API is reachable. Will always be Ok if the endpoint returns anything at all.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PingStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "PingStatus": {
+        "type": "string",
+        "enum": [
+          "ok"
         ]
       },
       "PortConfigV2": {

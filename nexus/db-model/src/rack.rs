@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::schema::rack;
 use db_macros::Asset;
 use ipnetwork::IpNetwork;
+use nexus_db_schema::schema::rack;
 use nexus_types::{external_api::views, identity::Asset};
 use uuid::Uuid;
 

@@ -13,12 +13,12 @@ use dropshot::{
 };
 use omicron_uuid_kinds::{RackInitUuid, RackResetUuid};
 use schemars::JsonSchema;
-use semver::Version;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::{
     rack_init::RackInitializeRequest, rack_ops::RackOperationStatus,
 };
 use sled_hardware_types::Baseboard;
+use tufaceous_artifact::ArtifactVersion;
 
 #[dropshot::api_description]
 pub trait BootstrapAgentApi {
@@ -86,5 +86,5 @@ pub trait BootstrapAgentApi {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct Component {
     pub name: String,
-    pub version: Version,
+    pub version: ArtifactVersion,
 }

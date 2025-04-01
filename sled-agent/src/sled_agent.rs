@@ -578,6 +578,7 @@ impl SledAgent {
             .await?;
 
         let repo_depot = ArtifactStore::new(&log, storage_manager.clone())
+            .await?
             .start(sled_address, &config.dropshot)
             .await?;
 
@@ -1416,6 +1417,12 @@ impl SledAgent {
         sled_diagnostics::dladm_info().await
     }
 
+    pub(crate) async fn support_nvmeadm_info(
+        &self,
+    ) -> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
+        sled_diagnostics::nvmeadm_info().await
+    }
+
     pub(crate) async fn support_pargs_info(
         &self,
     ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
@@ -1432,6 +1439,18 @@ impl SledAgent {
         &self,
     ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
         sled_diagnostics::pfiles_oxide_processes(&self.log).await
+    }
+
+    pub(crate) async fn support_zfs_info(
+        &self,
+    ) -> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
+        sled_diagnostics::zfs_info().await
+    }
+
+    pub(crate) async fn support_zpool_info(
+        &self,
+    ) -> Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError> {
+        sled_diagnostics::zpool_info().await
     }
 }
 
