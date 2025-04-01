@@ -9,9 +9,9 @@
 //! silo_id and an optional project_id to cover both possibilities.
 
 use super::{BlockSize, ByteCount, Digest};
-use crate::schema::{image, project_image, silo_image};
 use crate::typed_uuid::DbTypedUuid;
 use db_macros::Resource;
+use nexus_db_schema::schema::{image, project_image, silo_image};
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
