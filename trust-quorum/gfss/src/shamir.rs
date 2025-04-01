@@ -319,7 +319,6 @@ mod tests {
 
         // Generate enough shares to recompute the secret
         let computed: Vec<_> = (20..27u8)
-            .into_iter()
             .map(|x| {
                 let shares = shares.shares.expose_secret();
                 compute_share(&shares, Gf256::new(x)).unwrap()
