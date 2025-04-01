@@ -177,7 +177,7 @@ pub fn compute_secret(
 /// Combine the shares to compute an unknown share at the given x-coordinate.
 ///
 /// Returns an error if `x=0`, as that is the secret. Callers
-/// that need the secret should call `combine_shares`.
+/// that need the secret should call `compute_secret`.
 pub fn compute_share(
     shares: &[Share],
     x: Gf256,
