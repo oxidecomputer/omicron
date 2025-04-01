@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::schema::rendezvous_debug_dataset;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
+use nexus_db_schema::schema::rendezvous_debug_dataset;
 use omicron_uuid_kinds::BlueprintKind;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetKind;

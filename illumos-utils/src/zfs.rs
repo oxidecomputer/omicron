@@ -65,6 +65,72 @@ pub struct DestroyDatasetError {
     pub err: DestroyDatasetErrorVariant,
 }
 
+/// When the sled agent creates a mountpoint directory for a dataset,
+/// it needs that directory to be empty.
+///
+/// If the directory is not empty, we create a new directory in the
+/// same filesystem, and move old data there.
+pub const MOUNTPOINT_TRANSFER_PREFIX: &str = "old-under-mountpoint-";
+
+// Errors related to initializing a mountpoint.
+//
+// Note that this is passed back as part of a larger "EnsureDatasetErrorRaw",
+// which includes the path of the mountpoint -- there's no need for individual
+// error variants to include the path.
+#[derive(thiserror::Error, Debug)]
+enum MountpointError {
+    #[error("Something is already mounted on the mountpoint")]
+    AlreadyMounted,
+
+    #[error("Invalid mountpoint (cannot split parent/child paths)")]
+    BadMountpoint,
+
+    #[error("Cannot query for existence of mountpoint")]
+    CheckExists(#[source] std::io::Error),
+
+    #[error("Cannot check if mountpoint is already mounted")]
+    CheckMounted(#[source] crate::ExecutionError),
+
+    #[error("Cannot parse the parent mountpoint of the directory: {0}")]
+    CheckMountedParse(String),
+
+    #[error("Cannot 'create_dir_all' the mountpoint directory")]
+    CreateMountpointDirectory(#[source] std::io::Error),
+
+    #[error(
+        "Failed to create 'transfer' directory to hold old mountpoint contents"
+    )]
+    CreateTransferDirectory(#[source] std::io::Error),
+
+    #[error(
+        "Mountpoint directoyr not empty. Is someone concurrently adding files here?"
+    )]
+    DirectoryNotEmpty,
+
+    #[error("Failed to make mountpoint immutable")]
+    MakeImmutable(#[source] crate::ExecutionError),
+
+    #[error("Failed to make mountpoint mutable")]
+    MakeMutable(#[source] crate::ExecutionError),
+
+    #[error("Cannot parse immutable attribute")]
+    ParseImmutable(#[source] crate::ExecutionError),
+
+    #[error("Failed to read directory")]
+    Readdir(#[source] std::io::Error),
+
+    #[error("Failed to read directory entry")]
+    ReaddirEntry(#[source] std::io::Error),
+
+    #[error("Failed to rename entry away from mountpoint ({src} -> {dst})")]
+    Rename {
+        src: Utf8PathBuf,
+        dst: Utf8PathBuf,
+        #[source]
+        err: std::io::Error,
+    },
+}
+
 #[derive(thiserror::Error, Debug)]
 enum EnsureDatasetErrorRaw {
     #[error("ZFS execution error: {0}")]
@@ -73,28 +139,18 @@ enum EnsureDatasetErrorRaw {
     #[error("Unexpected output from ZFS commands: {0}")]
     Output(String),
 
-    #[error("Failed to mount encrypted filesystem: {0}")]
-    MountEncryptedFsFailed(crate::ExecutionError),
+    #[error("Failed to mount encrypted filesystem")]
+    MountEncryptedFsFailed(#[source] crate::ExecutionError),
 
-    #[error("Failed to mount overlay filesystem: {0}")]
-    MountOverlayFsFailed(crate::ExecutionError),
+    #[error("Failed to mount overlay filesystem")]
+    MountOverlayFsFailed(#[source] crate::ExecutionError),
 
-    #[error("Failed to create mountpoint: {0}")]
-    CreateMountpoint(std::io::Error),
-
-    #[error("Failed to make mountpoint immutable")]
-    MakeImmutable(crate::ExecutionError),
-
-    #[error("Cannot parse immutable attribute")]
-    ParseImmutable(crate::ExecutionError),
-
-    #[error("Invalid mountpoint: {0}")]
-    BadMountpoint(Utf8PathBuf),
-
-    #[error(
-        "Directory not empty; cannot be mountpoint: {0}. Is someone concurrently adding files here?"
-    )]
-    DirectoryNotEmpty(Utf8PathBuf),
+    #[error("Failed to initialize mountpoint at {mountpoint}")]
+    MountpointCreation {
+        mountpoint: Utf8PathBuf,
+        #[source]
+        err: MountpointError,
+    },
 }
 
 /// Error returned by [`Zfs::ensure_dataset`].
@@ -532,20 +588,56 @@ pub struct DatasetEnsureArgs<'a> {
 // property on it. This prevents the mountpoint from being used as anything other than a
 // mountpoint.
 //
-// NOTE: This must only be called on mountpoints for datasets which ARE NOT MOUNTED.
+// If this function is called on a mountwhich which is already mounted, an error
+// is returned.
 fn ensure_empty_immutable_mountpoint(
     mountpoint: &Utf8Path,
-) -> Result<(), EnsureDatasetErrorRaw> {
-    if !mountpoint
+) -> Result<(), MountpointError> {
+    if mountpoint
         .try_exists()
-        .map_err(|err| EnsureDatasetErrorRaw::CreateMountpoint(err))?
+        .map_err(|err| MountpointError::CheckExists(err))?
     {
-        std::fs::create_dir_all(mountpoint)
-            .map_err(|err| EnsureDatasetErrorRaw::CreateMountpoint(err))?;
+        // If the mountpoint exists, confirm nothing is already mounted
+        // on it.
+        let mut command = std::process::Command::new(ZFS);
+        let cmd = command.args(&[
+            "get",
+            "-Hpo",
+            "value",
+            "mountpoint",
+            mountpoint.as_str(),
+        ]);
+        let output =
+            execute(cmd).map_err(|err| MountpointError::CheckMounted(err))?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let Some(dir_mountpoint) = stdout.trim().lines().next() else {
+            return Err(MountpointError::CheckMountedParse(stdout.to_string()));
+        };
 
-        // We still fall-through to the logic below, even though we just created
-        // this directory. It's technically possible someone put a file inside
-        // it.
+        // If this is a viable mount directory, we'd see something like:
+        //
+        // Root directory:      /
+        // Proposed Mountpoint: /foo
+        //
+        // $ zfs get -Hpo value mountpoint /foo
+        // /
+        //
+        // This means: The mountpoint of "/foo" is the root directory, "/"
+        //
+        // However, if "/foo" was already used as a mountpoint, we'd see:
+        //
+        // $ zfs get -Hpo value mountpoint /foo
+        // /foo
+        //
+        // This means: The mountpoint of "/foo" is "/foo" - it is already
+        // mounted!
+        if dir_mountpoint == mountpoint {
+            return Err(MountpointError::AlreadyMounted);
+        }
+    } else {
+        // If the mountpoint did not exist, create it
+        std::fs::create_dir_all(mountpoint)
+            .map_err(|err| MountpointError::CreateMountpointDirectory(err))?;
     }
 
     // "making a directory empty" and "making a directory immutable" cannot
@@ -575,74 +667,67 @@ fn ensure_empty_immutable_mountpoint(
     //
     // This is probably a bug on the side of "whoever is adding these files".
     if !is_directory_empty(mountpoint)? {
-        return Err(EnsureDatasetErrorRaw::DirectoryNotEmpty(
-            mountpoint.to_path_buf(),
-        ));
+        return Err(MountpointError::DirectoryNotEmpty);
     }
     return Ok(());
 }
 
-fn is_directory_empty(path: &Utf8Path) -> Result<bool, EnsureDatasetErrorRaw> {
+fn is_directory_empty(path: &Utf8Path) -> Result<bool, MountpointError> {
     Ok(path
         .read_dir_utf8()
-        .map_err(|err| EnsureDatasetErrorRaw::CreateMountpoint(err))?
+        .map_err(|err| MountpointError::Readdir(err))?
         .next()
         .is_none())
 }
 
-fn ensure_mountpoint_empty(
-    path: &Utf8Path,
-) -> Result<(), EnsureDatasetErrorRaw> {
+fn ensure_mountpoint_empty(path: &Utf8Path) -> Result<(), MountpointError> {
     if is_directory_empty(path)? {
         return Ok(());
     }
 
     let (Some(parent), Some(file)) = (path.parent(), path.file_name()) else {
-        return Err(EnsureDatasetErrorRaw::BadMountpoint(path.to_path_buf()));
+        return Err(MountpointError::BadMountpoint);
     };
 
     // The directory is not empty. Let's make a new directory,
     // with the "old-under-mountpoint-" prefix, and move all data there.
 
-    let prefix = format!("old-under-mountpoint-{file}");
+    let prefix = format!("{MOUNTPOINT_TRANSFER_PREFIX}{file}");
     let destination_dir = Utf8TempDir::with_prefix_in(prefix, parent)
-        .map_err(|err| EnsureDatasetErrorRaw::CreateMountpoint(err))?
+        .map_err(|err| MountpointError::CreateTransferDirectory(err))?
         .into_path();
 
-    let entries = path
-        .read_dir_utf8()
-        .map_err(|err| EnsureDatasetErrorRaw::CreateMountpoint(err))?;
+    let entries =
+        path.read_dir_utf8().map_err(|err| MountpointError::Readdir(err))?;
     for entry in entries {
-        let entry = entry
-            .map_err(|err| EnsureDatasetErrorRaw::CreateMountpoint(err))?;
+        let entry = entry.map_err(|err| MountpointError::ReaddirEntry(err))?;
 
         // This would not work for renaming recursively, but we're only renaming
         // a single directory's worth of files.
         let src = entry.path();
         let dst = destination_dir.as_path().join(entry.file_name());
 
-        std::fs::rename(src, dst)
-            .map_err(|err| EnsureDatasetErrorRaw::CreateMountpoint(err))?;
+        std::fs::rename(src, &dst).map_err(|err| MountpointError::Rename {
+            src: src.to_path_buf(),
+            dst,
+            err,
+        })?;
     }
 
     Ok(())
 }
 
-fn make_directory_immutable(
-    path: &Utf8Path,
-) -> Result<(), EnsureDatasetErrorRaw> {
+fn make_directory_immutable(path: &Utf8Path) -> Result<(), MountpointError> {
     let mut command = std::process::Command::new(PFEXEC);
     let cmd = command.args(&["chmod", "S+ci", path.as_str()]);
-    execute(cmd).map_err(|err| EnsureDatasetErrorRaw::MakeImmutable(err))?;
+    execute(cmd).map_err(|err| MountpointError::MakeImmutable(err))?;
     Ok(())
 }
 
-fn make_directory_mutable(
-    path: &Utf8Path,
-) -> Result<(), EnsureDatasetErrorRaw> {
+fn make_directory_mutable(path: &Utf8Path) -> Result<(), MountpointError> {
     let mut command = std::process::Command::new(PFEXEC);
     let cmd = command.args(&["chmod", "S-ci", path.as_str()]);
-    execute(cmd).map_err(|err| EnsureDatasetErrorRaw::MakeImmutable(err))?;
+    execute(cmd).map_err(|err| MountpointError::MakeMutable(err))?;
     Ok(())
 }
 
@@ -673,19 +758,21 @@ impl Immutability {
 
 fn is_directory_immutable(
     path: &Utf8Path,
-) -> Result<Immutability, EnsureDatasetErrorRaw> {
+) -> Result<Immutability, MountpointError> {
     let mut command = std::process::Command::new(PFEXEC);
     let cmd = command.args(&["ls", "-d/v", path.as_str()]);
-    let output = execute(cmd)
-        .map_err(|err| EnsureDatasetErrorRaw::MakeImmutable(err))?;
+    let output =
+        execute(cmd).map_err(|err| MountpointError::MakeImmutable(err))?;
 
     // NOTE: Experimenting with "truss ls -d/v" shows that it seems to be using
     // the https://illumos.org/man/2/acl API, but we will need to likely bring
     // our own bindings here to call those APIs from Rust.
+    //
+    // See: https://github.com/oxidecomputer/omicron/issues/7900
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut lines = stdout.trim().lines();
     let Some(attr_line) = lines.nth(1) else {
-        return Err(EnsureDatasetErrorRaw::ParseImmutable(
+        return Err(MountpointError::ParseImmutable(
             crate::ExecutionError::ParseFailure(stdout.to_string()),
         ));
     };
@@ -850,7 +937,12 @@ impl Zfs {
                 if let (CanMount::On, Mountpoint::Path(path)) =
                     (&can_mount, &mountpoint)
                 {
-                    ensure_empty_immutable_mountpoint(&path)?;
+                    ensure_empty_immutable_mountpoint(&path).map_err(
+                        |err| EnsureDatasetErrorRaw::MountpointCreation {
+                            mountpoint: path.to_path_buf(),
+                            err,
+                        },
+                    )?;
                     Self::mount_dataset(name)?;
                 }
             }
@@ -862,7 +954,12 @@ impl Zfs {
             if let (CanMount::On, Mountpoint::Path(path)) =
                 (&can_mount, &mountpoint)
             {
-                ensure_empty_immutable_mountpoint(&path)?;
+                ensure_empty_immutable_mountpoint(&path).map_err(|err| {
+                    EnsureDatasetErrorRaw::MountpointCreation {
+                        mountpoint: path.to_path_buf(),
+                        err,
+                    }
+                })?;
             }
         }
 

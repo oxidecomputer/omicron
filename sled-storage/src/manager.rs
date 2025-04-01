@@ -1092,7 +1092,7 @@ impl StorageManager {
             .await
         {
             warn!(log, "Failed to ensure dataset"; "dataset" => ?status.dataset_name, "err" => ?err);
-            status.err = Some(err.to_string());
+            status.err = Some(slog_error_chain::InlineErrorChain::new(&err).to_string());
         };
 
         status
@@ -2316,7 +2316,7 @@ mod tests {
 
         let status =
             harness.handle().datasets_ensure(config.clone()).await.unwrap();
-        assert!(!status.has_error());
+        assert!(!status.has_error(), "{status:?}");
 
         // Creating the dataset should have mounted it
         assert!(is_mounted(&name).await);

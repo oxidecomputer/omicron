@@ -5,7 +5,6 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::datastore::PgConnection;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
@@ -42,8 +41,8 @@ impl DataStore {
         opctx: &OpContext,
         params: &params::AddressLotCreate,
     ) -> CreateResult<AddressLotCreateResult> {
-        use db::schema::address_lot::dsl as lot_dsl;
-        use db::schema::address_lot_block::dsl as block_dsl;
+        use nexus_db_schema::schema::address_lot::dsl as lot_dsl;
+        use nexus_db_schema::schema::address_lot_block::dsl as block_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -156,9 +155,9 @@ impl DataStore {
         opctx: &OpContext,
         authz_address_lot: &authz::AddressLot,
     ) -> DeleteResult {
-        use db::schema::address_lot::dsl as lot_dsl;
-        use db::schema::address_lot_block::dsl as block_dsl;
-        use db::schema::address_lot_rsvd_block::dsl as rsvd_block_dsl;
+        use nexus_db_schema::schema::address_lot::dsl as lot_dsl;
+        use nexus_db_schema::schema::address_lot_block::dsl as block_dsl;
+        use nexus_db_schema::schema::address_lot_rsvd_block::dsl as rsvd_block_dsl;
 
         opctx.authorize(authz::Action::Delete, authz_address_lot).await?;
 
@@ -226,7 +225,7 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<AddressLot> {
-        use db::schema::address_lot::dsl;
+        use nexus_db_schema::schema::address_lot::dsl;
 
         match pagparams {
             PaginatedBy::Id(pagparams) => {
@@ -251,7 +250,7 @@ impl DataStore {
         authz_address_lot: &authz::AddressLot,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<AddressLotBlock> {
-        use db::schema::address_lot_block::dsl;
+        use nexus_db_schema::schema::address_lot_block::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -270,8 +269,8 @@ impl DataStore {
     ) -> LookupResult<Uuid> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        use db::schema::address_lot_block;
-        use db::schema::address_lot_block::dsl as block_dsl;
+        use nexus_db_schema::schema::address_lot_block;
+        use nexus_db_schema::schema::address_lot_block::dsl as block_dsl;
 
         let address_lot_id = block_dsl::address_lot_block
             .filter(address_lot_block::id.eq(address_lot_block_id))
@@ -292,8 +291,8 @@ impl DataStore {
     ) -> LookupResult<Vec<AddressLotBlock>> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        use db::schema::address_lot::dsl as lot_dsl;
-        use db::schema::address_lot_block::dsl as block_dsl;
+        use nexus_db_schema::schema::address_lot::dsl as lot_dsl;
+        use nexus_db_schema::schema::address_lot_block::dsl as block_dsl;
 
         let address_lot_id = lot_dsl::address_lot
             .filter(lot_dsl::name.eq(name))
@@ -327,10 +326,10 @@ pub(crate) async fn try_reserve_block(
     anycast: bool,
     conn: &Connection<DTraceConnection<PgConnection>>,
 ) -> Result<(AddressLotBlock, AddressLotReservedBlock), ReserveBlockTxnError> {
-    use db::schema::address_lot_block;
-    use db::schema::address_lot_block::dsl as block_dsl;
-    use db::schema::address_lot_rsvd_block;
-    use db::schema::address_lot_rsvd_block::dsl as rsvd_block_dsl;
+    use nexus_db_schema::schema::address_lot_block;
+    use nexus_db_schema::schema::address_lot_block::dsl as block_dsl;
+    use nexus_db_schema::schema::address_lot_rsvd_block;
+    use nexus_db_schema::schema::address_lot_rsvd_block::dsl as rsvd_block_dsl;
 
     // Ensure a lot block exists with the requested address.
 

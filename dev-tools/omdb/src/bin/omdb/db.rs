@@ -1322,7 +1322,7 @@ async fn lookup_instance(
     datastore: &DataStore,
     instance_id: Uuid,
 ) -> anyhow::Result<Option<Instance>> {
-    use db::schema::instance::dsl;
+    use nexus_db_schema::schema::instance::dsl;
 
     let conn = datastore.pool_connection_for_tests().await?;
     dsl::instance
@@ -1384,7 +1384,7 @@ async fn lookup_probe(
     datastore: &DataStore,
     probe_id: Uuid,
 ) -> anyhow::Result<Option<Probe>> {
-    use db::schema::probe::dsl;
+    use nexus_db_schema::schema::probe::dsl;
 
     let conn = datastore.pool_connection_for_tests().await?;
     dsl::probe
@@ -1402,7 +1402,7 @@ async fn lookup_project(
     datastore: &DataStore,
     project_id: Uuid,
 ) -> anyhow::Result<Option<Project>> {
-    use db::schema::project::dsl;
+    use nexus_db_schema::schema::project::dsl;
 
     let conn = datastore.pool_connection_for_tests().await?;
     dsl::project
@@ -1444,7 +1444,7 @@ async fn cmd_db_disk_list(
 ) -> Result<(), anyhow::Error> {
     let ctx = || "listing disks".to_string();
 
-    use db::schema::disk::dsl;
+    use nexus_db_schema::schema::disk::dsl;
     let mut query = dsl::disk.into_boxed();
     if !fetch_opts.include_deleted {
         query = query.filter(dsl::time_deleted.is_null());
@@ -1686,7 +1686,7 @@ async fn cmd_db_disk_info(
         physical_disk: String,
     }
 
-    use db::schema::disk::dsl as disk_dsl;
+    use nexus_db_schema::schema::disk::dsl as disk_dsl;
 
     let conn = datastore.pool_connection_for_tests().await?;
 
@@ -1709,8 +1709,8 @@ async fn cmd_db_disk_info(
     // about that instance.
     let usr = if let Some(instance_uuid) = disk.runtime().attach_instance_id {
         // Get the instance this disk is attached to
-        use db::schema::instance::dsl as instance_dsl;
-        use db::schema::vmm::dsl as vmm_dsl;
+        use nexus_db_schema::schema::instance::dsl as instance_dsl;
+        use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
         let instances: Vec<InstanceAndActiveVmm> = instance_dsl::instance
             .filter(instance_dsl::id.eq(instance_uuid))
             .left_join(
@@ -1831,7 +1831,7 @@ async fn get_and_display_vcr(
     datastore: &DataStore,
 ) -> Result<(), anyhow::Error> {
     // Get the VCR from the volume and display selected parts.
-    use db::schema::volume::dsl as volume_dsl;
+    use nexus_db_schema::schema::volume::dsl as volume_dsl;
     let volumes = volume_dsl::volume
         .filter(volume_dsl::id.eq(to_db_typed_uuid(volume_id)))
         .limit(1)
@@ -1864,7 +1864,7 @@ async fn cmd_db_disk_physical(
     let conn = datastore.pool_connection_for_tests().await?;
 
     // We start by finding any zpools that are using the physical disk.
-    use db::schema::zpool::dsl as zpool_dsl;
+    use nexus_db_schema::schema::zpool::dsl as zpool_dsl;
     let mut query = zpool_dsl::zpool.into_boxed();
     if !fetch_opts.include_deleted {
         query = query.filter(zpool_dsl::time_deleted.is_null());
@@ -1893,7 +1893,7 @@ async fn cmd_db_disk_physical(
         sled_ids.insert(zp.sled_id);
 
         // Next, we find all the Crucible datasets that are on our zpool.
-        use db::schema::crucible_dataset::dsl as dataset_dsl;
+        use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
         let mut query = dataset_dsl::crucible_dataset.into_boxed();
         if !fetch_opts.include_deleted {
             query = query.filter(dataset_dsl::time_deleted.is_null());
@@ -1934,7 +1934,7 @@ async fn cmd_db_disk_physical(
     // to see if any of them are on the dataset.  If we find a region that
     // is on one of our datasets, then record the volume ID of that region.
     for did in dataset_ids.clone().into_iter() {
-        use db::schema::region::dsl as region_dsl;
+        use nexus_db_schema::schema::region::dsl as region_dsl;
         let regions = region_dsl::region
             .filter(region_dsl::dataset_id.eq(to_db_typed_uuid(did)))
             .select(Region::as_select())
@@ -1951,7 +1951,7 @@ async fn cmd_db_disk_physical(
     // that is part of a dataset on a pool on our disk.  The next step is
     // to find the virtual disks associated with these volume IDs and
     // display information about those disks.
-    use db::schema::disk::dsl;
+    use nexus_db_schema::schema::disk::dsl;
     let mut query = dsl::disk.into_boxed();
     if !fetch_opts.include_deleted {
         query = query.filter(dsl::time_deleted.is_null());
@@ -1984,7 +1984,7 @@ async fn cmd_db_disk_physical(
         let instance_name =
             if let Some(instance_uuid) = disk.runtime().attach_instance_id {
                 // Get the instance this disk is attached to
-                use db::schema::instance::dsl as instance_dsl;
+                use nexus_db_schema::schema::instance::dsl as instance_dsl;
                 let instance = instance_dsl::instance
                     .filter(instance_dsl::id.eq(instance_uuid))
                     .limit(1)
@@ -2022,7 +2022,7 @@ async fn cmd_db_disk_physical(
         dataset_ids.into_iter().map(|did| to_db_typed_uuid(did)).collect();
 
     let limit = fetch_opts.fetch_limit;
-    use db::schema::region_snapshot::dsl as region_snapshot_dsl;
+    use nexus_db_schema::schema::region_snapshot::dsl as region_snapshot_dsl;
     let region_snapshots = region_snapshot_dsl::region_snapshot
         .filter(region_snapshot_dsl::dataset_id.eq_any(dataset_ids))
         .limit(i64::from(u32::from(limit)))
@@ -2069,7 +2069,7 @@ async fn cmd_db_disk_physical(
 
     // Get the snapshots from the list of IDs we built above.
     // Display information about those snapshots.
-    use db::schema::snapshot::dsl as snapshot_dsl;
+    use nexus_db_schema::schema::snapshot::dsl as snapshot_dsl;
     let mut query = snapshot_dsl::snapshot.into_boxed();
     if !fetch_opts.include_deleted {
         query = query.filter(snapshot_dsl::time_deleted.is_null());
@@ -2205,7 +2205,7 @@ async fn cmd_db_snapshot_list(
     let ctx = || "listing snapshots".to_string();
     let limit = fetch_opts.fetch_limit;
 
-    use db::schema::snapshot::dsl;
+    use nexus_db_schema::schema::snapshot::dsl;
     let mut query = dsl::snapshot.into_boxed();
     if !fetch_opts.include_deleted {
         query = query.filter(dsl::time_deleted.is_null());
@@ -2248,7 +2248,7 @@ async fn cmd_db_snapshot_info(
         physical_disk: String,
     }
 
-    use db::schema::snapshot::dsl as snapshot_dsl;
+    use nexus_db_schema::schema::snapshot::dsl as snapshot_dsl;
     let mut snapshots = snapshot_dsl::snapshot
         .filter(snapshot_dsl::id.eq(args.uuid))
         .limit(1)
@@ -2274,7 +2274,7 @@ async fn cmd_db_snapshot_info(
     println!("     source_volume_id: {}", snap.source_volume_id);
     println!("destination_volume_id: {}", snap.destination_volume_id);
 
-    use db::schema::region_snapshot::dsl as region_snapshot_dsl;
+    use nexus_db_schema::schema::region_snapshot::dsl as region_snapshot_dsl;
     let region_snapshots = region_snapshot_dsl::region_snapshot
         .filter(region_snapshot_dsl::snapshot_id.eq(args.uuid))
         .select(RegionSnapshot::as_select())
@@ -2421,7 +2421,7 @@ async fn cmd_db_volume_list(
 
     let ctx = || "listing volumes".to_string();
 
-    use db::schema::volume::dsl;
+    use nexus_db_schema::schema::volume::dsl;
     let mut query = dsl::volume.into_boxed();
     if !fetch_opts.include_deleted {
         query = query.filter(dsl::time_deleted.is_null());
@@ -2469,7 +2469,7 @@ async fn cmd_db_volume_info(
         deleted: String,
     }
 
-    use db::schema::volume::dsl as volume_dsl;
+    use nexus_db_schema::schema::volume::dsl as volume_dsl;
 
     let volumes = volume_dsl::volume
         .filter(volume_dsl::id.eq(args.uuid))
@@ -2677,7 +2677,7 @@ async fn get_volume_lock_holder(
     repair_id: Uuid,
 ) -> Result<VolumeLockHolder, anyhow::Error> {
     let maybe_region_replacement = {
-        use db::schema::region_replacement::dsl;
+        use nexus_db_schema::schema::region_replacement::dsl;
 
         dsl::region_replacement
             .filter(dsl::id.eq(repair_id))
@@ -2692,7 +2692,7 @@ async fn get_volume_lock_holder(
     }
 
     let maybe_region_snapshot_replacement = {
-        use db::schema::region_snapshot_replacement::dsl;
+        use nexus_db_schema::schema::region_snapshot_replacement::dsl;
 
         dsl::region_snapshot_replacement
             .filter(dsl::id.eq(repair_id))
@@ -2707,7 +2707,7 @@ async fn get_volume_lock_holder(
     }
 
     let maybe_region_snapshot_replacement_step = {
-        use db::schema::region_snapshot_replacement_step::dsl;
+        use nexus_db_schema::schema::region_snapshot_replacement_step::dsl;
 
         dsl::region_snapshot_replacement_step
             .filter(dsl::id.eq(repair_id))
@@ -2759,7 +2759,7 @@ async fn cmd_db_volume_lock_holder(
         .pool_connection_for_tests()
         .await?
         .transaction_async(async move |conn| {
-            use db::schema::volume_repair::dsl;
+            use nexus_db_schema::schema::volume_repair::dsl;
 
             conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
@@ -2805,7 +2805,7 @@ async fn cmd_db_volume_cannot_activate(
 
     let mut paginator = Paginator::new(SQL_BATCH_SIZE);
     while let Some(p) = paginator.next() {
-        use db::schema::volume::dsl;
+        use nexus_db_schema::schema::volume::dsl;
         let batch = paginated(dsl::volume, dsl::id, &p.current_pagparams())
             .filter(dsl::time_deleted.is_null())
             .select(Volume::as_select())
@@ -2941,7 +2941,7 @@ async fn cmd_db_region_list(
     fetch_opts: &DbFetchOptions,
     args: &RegionListArgs,
 ) -> Result<(), anyhow::Error> {
-    use db::schema::region::dsl;
+    use nexus_db_schema::schema::region::dsl;
 
     let regions: Vec<Region> = paginated(
         dsl::region,
@@ -3017,7 +3017,7 @@ async fn volume_used_by(
             .pool_connection_for_tests()
             .await?
             .transaction_async(async move |conn| {
-                use db::schema::disk::dsl;
+                use nexus_db_schema::schema::disk::dsl;
 
                 conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
@@ -3044,7 +3044,7 @@ async fn volume_used_by(
             .pool_connection_for_tests()
             .await?
             .transaction_async(async move |conn| {
-                use db::schema::snapshot::dsl;
+                use nexus_db_schema::schema::snapshot::dsl;
 
                 conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
@@ -3075,7 +3075,7 @@ async fn volume_used_by(
             .pool_connection_for_tests()
             .await?
             .transaction_async(async move |conn| {
-                use db::schema::image::dsl;
+                use nexus_db_schema::schema::image::dsl;
 
                 conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
@@ -3165,7 +3165,7 @@ async fn cmd_db_region_used_by(
     fetch_opts: &DbFetchOptions,
     args: &RegionUsedByArgs,
 ) -> Result<(), anyhow::Error> {
-    use db::schema::region::dsl;
+    use nexus_db_schema::schema::region::dsl;
 
     let regions: Vec<Region> = paginated(
         dsl::region,
@@ -3280,7 +3280,7 @@ async fn cmd_db_region_replacement_list(
     let requests: Vec<RegionReplacement> = {
         let conn = datastore.pool_connection_for_tests().await?;
 
-        use db::schema::region_replacement::dsl;
+        use nexus_db_schema::schema::region_replacement::dsl;
 
         match (args.state, args.after) {
             (Some(state), Some(after)) => {
@@ -3365,7 +3365,7 @@ async fn cmd_db_region_replacement_status(
     let requests: Vec<RegionReplacement> = {
         let conn = datastore.pool_connection_for_tests().await?;
 
-        use db::schema::region_replacement::dsl;
+        use nexus_db_schema::schema::region_replacement::dsl;
 
         dsl::region_replacement
             .filter(dsl::replacement_state.ne(RegionReplacementState::Complete))
@@ -3673,13 +3673,13 @@ async fn cmd_db_instance_info(
     fetch_opts: &DbFetchOptions,
     args: &InstanceInfoArgs,
 ) -> Result<(), anyhow::Error> {
-    use nexus_db_model::schema::{
-        disk::dsl as disk_dsl, instance::dsl as instance_dsl,
-        migration::dsl as migration_dsl, vmm::dsl as vmm_dsl,
-    };
     use nexus_db_model::{
         Instance, InstanceKarmicStatus, InstanceRuntimeState, Migration,
         Reincarnatability,
+    };
+    use nexus_db_schema::schema::{
+        disk::dsl as disk_dsl, instance::dsl as instance_dsl,
+        migration::dsl as migration_dsl, vmm::dsl as vmm_dsl,
     };
     let &InstanceInfoArgs { ref id, history, resources, all } = args;
 
@@ -4017,7 +4017,7 @@ async fn cmd_db_instance_info(
     }
 
     if resources || all {
-        use db::schema::virtual_provisioning_resource::dsl as resource_dsl;
+        use nexus_db_schema::schema::virtual_provisioning_resource::dsl as resource_dsl;
         let resources = resource_dsl::virtual_provisioning_resource
             .filter(resource_dsl::id.eq(id.into_untyped_uuid()))
             .select(db::model::VirtualProvisioningResource::as_select())
@@ -4193,8 +4193,8 @@ async fn cmd_db_instances(
     fetch_opts: &DbFetchOptions,
     &InstanceListArgs { running, ref states }: &InstanceListArgs,
 ) -> Result<(), anyhow::Error> {
-    use db::schema::instance::dsl;
-    use db::schema::vmm::dsl as vmm_dsl;
+    use nexus_db_schema::schema::instance::dsl;
+    use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
 
     let limit = fetch_opts.fetch_limit;
     let mut query = dsl::instance.into_boxed();
@@ -4345,7 +4345,7 @@ async fn load_zones_version(
     check_limit(&group_zones, limit, ctx);
 
     // Now load the full version info.
-    use nexus_db_queries::db::schema::dns_version::dsl;
+    use nexus_db_schema::schema::dns_version::dsl;
     let version = Generation::try_from(i64::from(args.version)).unwrap();
     let versions = dsl::dns_version
         .filter(dsl::dns_group.eq(group))
@@ -4388,7 +4388,7 @@ async fn cmd_db_dns_diff(
         println!("version created because:    {}", version.comment);
 
         // Load the added and removed items.
-        use nexus_db_queries::db::schema::dns_name::dsl;
+        use nexus_db_schema::schema::dns_name::dsl;
 
         let added = dsl::dns_name
             .filter(dsl::dns_zone_id.eq(zone.id))
@@ -4485,7 +4485,7 @@ async fn cmd_db_eips(
     fetch_opts: &DbFetchOptions,
     verbose: bool,
 ) -> Result<(), anyhow::Error> {
-    use db::schema::external_ip::dsl;
+    use nexus_db_schema::schema::external_ip::dsl;
     let mut query = dsl::external_ip.into_boxed();
     if !fetch_opts.include_deleted {
         query = query.filter(dsl::time_deleted.is_null());
@@ -4646,7 +4646,7 @@ async fn cmd_db_eips(
                 }
             }
         } else if let Some(project_id) = ip.project_id {
-            use db::schema::project::dsl as project_dsl;
+            use nexus_db_schema::schema::project::dsl as project_dsl;
             let project = match project_dsl::project
                 .filter(project_dsl::id.eq(project_id))
                 .limit(1)
@@ -4711,7 +4711,7 @@ async fn cmd_db_network_list_vnics(
         parent_id: Uuid,
         parent_name: String,
     }
-    use db::schema::network_interface::dsl;
+    use nexus_db_schema::schema::network_interface::dsl;
     let mut query = dsl::network_interface.into_boxed();
     if !fetch_opts.include_deleted {
         query = query.filter(dsl::time_deleted.is_null());
@@ -4798,7 +4798,7 @@ async fn cmd_db_network_list_vnics(
         };
 
         let subnet = {
-            use db::schema::vpc_subnet::dsl;
+            use nexus_db_schema::schema::vpc_subnet::dsl;
             let subnet = match dsl::vpc_subnet
                 .filter(dsl::id.eq(nic.subnet_id))
                 .limit(1)
@@ -4859,7 +4859,7 @@ async fn cmd_db_region_snapshot_replacement_list(
     let requests: Vec<RegionSnapshotReplacement> = {
         let conn = datastore.pool_connection_for_tests().await?;
 
-        use db::schema::region_snapshot_replacement::dsl;
+        use nexus_db_schema::schema::region_snapshot_replacement::dsl;
 
         match (args.state, args.after) {
             (Some(state), Some(after)) => {
@@ -4946,7 +4946,7 @@ async fn cmd_db_region_snapshot_replacement_status(
     let requests: Vec<RegionSnapshotReplacement> = {
         let conn = datastore.pool_connection_for_tests().await?;
 
-        use db::schema::region_snapshot_replacement::dsl;
+        use nexus_db_schema::schema::region_snapshot_replacement::dsl;
 
         dsl::region_snapshot_replacement
             .filter(
@@ -5069,7 +5069,7 @@ async fn cmd_db_region_snapshot_replacement_request(
     // `insert_snapshot_replacement_request_with_volume_id` instead.
 
     let db_snapshots = {
-        use db::schema::snapshot::dsl;
+        use nexus_db_schema::schema::snapshot::dsl;
         let conn = datastore.pool_connection_for_tests().await?;
         dsl::snapshot
             .filter(dsl::id.eq(args.snapshot_id))
@@ -5158,7 +5158,7 @@ async fn cmd_db_region_snapshot_replacement_waiting(
 
         for reference in read_only_target_volume_references {
             let maybe_volume_repair_record = {
-                use db::schema::volume_repair::dsl;
+                use nexus_db_schema::schema::volume_repair::dsl;
 
                 conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
@@ -5273,7 +5273,7 @@ async fn cmd_db_validate_volume_references(
                 // Selecting all region snapshots requires a full table scan
                 conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
-                use db::schema::region_snapshot::dsl;
+                use nexus_db_schema::schema::region_snapshot::dsl;
                 dsl::region_snapshot
                     .select(RegionSnapshot::as_select())
                     .get_results_async(&conn)
@@ -5310,7 +5310,7 @@ async fn cmd_db_validate_volume_references(
 
                     let pattern = format!("%{}%", &snapshot_addr);
 
-                    use db::schema::volume::dsl;
+                    use nexus_db_schema::schema::volume::dsl;
 
                     // Find all volumes that have not been deleted that contain
                     // this snapshot_addr. If a Volume has been soft deleted,
@@ -5424,8 +5424,8 @@ async fn cmd_db_validate_regions(
             // Selecting all datasets and regions requires a full table scan
             conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
-            use db::schema::crucible_dataset::dsl as dataset_dsl;
-            use db::schema::region::dsl;
+            use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
+            use nexus_db_schema::schema::region::dsl;
 
             dsl::region
                 .inner_join(
@@ -5559,7 +5559,7 @@ async fn cmd_db_validate_regions(
             // Selecting all datasets and regions requires a full table scan
             conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
-            use db::schema::crucible_dataset::dsl;
+            use nexus_db_schema::schema::crucible_dataset::dsl;
 
             dsl::crucible_dataset
                 .select(CrucibleDataset::as_select())
@@ -5684,8 +5684,8 @@ async fn cmd_db_validate_region_snapshots(
                     // full table scan
                     conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
-                    use db::schema::crucible_dataset::dsl as dataset_dsl;
-                    use db::schema::region_snapshot::dsl;
+                    use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
+                    use nexus_db_schema::schema::region_snapshot::dsl;
 
                     dsl::region_snapshot
                         .inner_join(
@@ -5787,7 +5787,7 @@ async fn cmd_db_validate_region_snapshots(
                             // destroyed.
 
                             let snapshot: Snapshot = {
-                                use db::schema::snapshot::dsl;
+                                use nexus_db_schema::schema::snapshot::dsl;
 
                                 dsl::snapshot
                                     .filter(
@@ -5870,7 +5870,7 @@ async fn cmd_db_validate_region_snapshots(
         }
 
         let snapshot: Snapshot = {
-            use db::schema::snapshot::dsl;
+            use nexus_db_schema::schema::snapshot::dsl;
 
             dsl::snapshot
                 .filter(dsl::id.eq(region_snapshot.snapshot_id))
@@ -5899,8 +5899,8 @@ async fn cmd_db_validate_region_snapshots(
                 // Selecting all datasets and regions requires a full table scan
                 conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
 
-                use db::schema::crucible_dataset::dsl as dataset_dsl;
-                use db::schema::region::dsl;
+                use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
+                use nexus_db_schema::schema::region::dsl;
 
                 dsl::region
                     .inner_join(
@@ -6113,7 +6113,7 @@ async fn cmd_db_inventory_baseboard_ids(
         serial_number: String,
     }
 
-    use db::schema::hw_baseboard_id::dsl;
+    use nexus_db_schema::schema::hw_baseboard_id::dsl;
     let baseboard_ids = dsl::hw_baseboard_id
         .order_by((dsl::part_number, dsl::serial_number))
         .limit(i64::from(u32::from(limit)))
@@ -6152,7 +6152,7 @@ async fn cmd_db_inventory_cabooses(
         version: String,
     }
 
-    use db::schema::sw_caboose::dsl;
+    use nexus_db_schema::schema::sw_caboose::dsl;
     let mut cabooses = dsl::sw_caboose
         .limit(i64::from(u32::from(limit)))
         .select(SwCaboose::as_select())
@@ -6198,8 +6198,8 @@ async fn cmd_db_inventory_physical_disks(
         next_firmware: String,
     }
 
-    use db::schema::inv_nvme_disk_firmware::dsl as firmware_dsl;
-    use db::schema::inv_physical_disk::dsl as disk_dsl;
+    use nexus_db_schema::schema::inv_nvme_disk_firmware::dsl as firmware_dsl;
+    use nexus_db_schema::schema::inv_physical_disk::dsl as disk_dsl;
 
     let mut query = disk_dsl::inv_physical_disk.into_boxed();
     query = query.limit(i64::from(u32::from(limit)));
@@ -6273,7 +6273,7 @@ async fn cmd_db_inventory_rot_pages(
         data_base64: String,
     }
 
-    use db::schema::sw_root_of_trust_page::dsl;
+    use nexus_db_schema::schema::sw_root_of_trust_page::dsl;
     let mut rot_pages = dsl::sw_root_of_trust_page
         .limit(i64::from(u32::from(limit)))
         .select(SwRotPage::as_select())
@@ -6312,7 +6312,7 @@ async fn cmd_db_inventory_collections_list(
     }
 
     let collections = {
-        use db::schema::inv_collection::dsl;
+        use nexus_db_schema::schema::inv_collection::dsl;
         dsl::inv_collection
             .order_by(dsl::time_started)
             .limit(i64::from(u32::from(limit)))
@@ -6326,7 +6326,7 @@ async fn cmd_db_inventory_collections_list(
     let mut rows = Vec::new();
     for collection in collections {
         let nerrors = {
-            use db::schema::inv_collection_error::dsl;
+            use nexus_db_schema::schema::inv_collection_error::dsl;
             dsl::inv_collection_error
                 .filter(dsl::inv_collection_id.eq(collection.id))
                 .select(diesel::dsl::count_star())
@@ -6336,7 +6336,7 @@ async fn cmd_db_inventory_collections_list(
         };
 
         let nsps = {
-            use db::schema::inv_service_processor::dsl;
+            use nexus_db_schema::schema::inv_service_processor::dsl;
             dsl::inv_service_processor
                 .filter(dsl::inv_collection_id.eq(collection.id))
                 .select(diesel::dsl::count_star())
@@ -6778,7 +6778,7 @@ async fn cmd_db_migrations_list(
     fetch_opts: &DbFetchOptions,
     args: &MigrationsListArgs,
 ) -> Result<(), anyhow::Error> {
-    use db::schema::migration::dsl;
+    use nexus_db_schema::schema::migration::dsl;
     use omicron_common::api::internal::nexus;
 
     let mut state_filters = Vec::new();
@@ -6956,9 +6956,9 @@ async fn cmd_db_vmm_info(
     fetch_opts: &DbFetchOptions,
     &VmmInfoArgs { uuid }: &VmmInfoArgs,
 ) -> Result<(), anyhow::Error> {
-    use db::schema::migration::dsl as migration_dsl;
-    use db::schema::sled_resource_vmm::dsl as resource_dsl;
-    use db::schema::vmm::dsl as vmm_dsl;
+    use nexus_db_schema::schema::migration::dsl as migration_dsl;
+    use nexus_db_schema::schema::sled_resource_vmm::dsl as resource_dsl;
+    use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
 
     let vmm = vmm_dsl::vmm
         .filter(vmm_dsl::id.eq(uuid))
@@ -7161,7 +7161,7 @@ async fn cmd_db_vmm_list(
     &VmmListArgs { ref states, verbose }: &VmmListArgs,
 ) -> Result<(), anyhow::Error> {
     use db::model::VmmState;
-    use db::schema::{sled::dsl as sled_dsl, vmm::dsl};
+    use nexus_db_schema::schema::{sled::dsl as sled_dsl, vmm::dsl};
 
     let ctx = || "loading VMMs";
     let mut query = dsl::vmm.into_boxed();
@@ -7387,7 +7387,7 @@ async fn cmd_db_oximeter_list_producers(
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
 ) -> Result<(), anyhow::Error> {
-    use db::schema::metric_producer::dsl;
+    use nexus_db_schema::schema::metric_producer::dsl;
     let rows = dsl::metric_producer
         .order_by(dsl::oximeter_id)
         .limit(i64::from(u32::from(fetch_opts.fetch_limit)))

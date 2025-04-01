@@ -78,6 +78,7 @@ members = [
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
+    "nexus/db-schema",
     "nexus/defaults",
     "nexus/external-api",
     "nexus/internal-api",
@@ -219,6 +220,7 @@ default-members = [
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
+    "nexus/db-schema",
     "nexus/defaults",
     "nexus/external-api",
     "nexus/internal-api",
@@ -483,6 +485,7 @@ nexus-config = { path = "nexus-config" }
 nexus-db-fixed-data = { path = "nexus/db-fixed-data" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
+nexus-db-schema = { path = "nexus/db-schema" }
 nexus-defaults = { path = "nexus/defaults" }
 nexus-external-api = { path = "nexus/external-api" }
 nexus-inventory = { path = "nexus/inventory" }
@@ -678,7 +681,7 @@ tokio-tungstenite = "0.23.1"
 tokio-util = { version = "0.7.13", features = ["io", "io-util"] }
 toml = "0.8.20"
 toml_edit = "0.22.24"
-tough = { version = "0.19.0", features = [ "http" ] }
+tough = { version = "0.20.0", features = [ "http" ] }
 transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
 trybuild = "1.0.103"
 tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
