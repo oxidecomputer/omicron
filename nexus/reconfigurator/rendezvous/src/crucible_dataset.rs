@@ -156,9 +156,9 @@ mod tests {
 
         // Clean up from any previous proptest cases
         {
-            use nexus_db_model::schema::crucible_dataset::dsl as dataset_dsl;
-            use nexus_db_model::schema::sled::dsl as sled_dsl;
-            use nexus_db_model::schema::zpool::dsl as zpool_dsl;
+            use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
+            use nexus_db_schema::schema::sled::dsl as sled_dsl;
+            use nexus_db_schema::schema::zpool::dsl as zpool_dsl;
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             datastore
                 .transaction_non_retry_wrapper("proptest_prep_cleanup")

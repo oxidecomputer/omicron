@@ -214,7 +214,7 @@ impl ArtifactsWithPlan {
                 .repo()
                 .targets()
                 .signed
-                .find_target(&target_name)
+                .find_target(&target_name, false)
                 .map_err(|error| RepositoryError::TargetHashRead {
                     target: artifact.target.clone(),
                     error: Box::new(error),

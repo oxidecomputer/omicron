@@ -8,6 +8,7 @@ use crate::impl_enum_type;
 use crate::schema::region;
 use crate::typed_uuid::DbTypedUuid;
 use db_macros::Asset;
+use nexus_db_schema::schema::region;
 use omicron_common::api::external;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;

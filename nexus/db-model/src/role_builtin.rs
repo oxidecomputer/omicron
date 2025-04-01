@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::schema::role_builtin;
+use nexus_db_schema::schema::role_builtin;
 use nexus_types::external_api::views;
 use omicron_common::api::external::RoleName;
 

@@ -67,8 +67,8 @@ impl DataStore {
     pub(super) fn get_allocated_regions_query(
         volume_id: VolumeUuid,
     ) -> impl RunnableQuery<(CrucibleDataset, Region)> {
-        use db::schema::crucible_dataset::dsl as dataset_dsl;
-        use db::schema::region::dsl as region_dsl;
+        use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
+        use nexus_db_schema::schema::region::dsl as region_dsl;
         region_dsl::region
             .filter(region_dsl::volume_id.eq(to_db_typed_uuid(volume_id)))
             .inner_join(
@@ -96,7 +96,7 @@ impl DataStore {
     }
 
     pub async fn get_region(&self, region_id: Uuid) -> Result<Region, Error> {
-        use db::schema::region::dsl;
+        use nexus_db_schema::schema::region::dsl;
         dsl::region
             .filter(dsl::id.eq(region_id))
             .select(Region::as_select())
@@ -111,7 +111,7 @@ impl DataStore {
         &self,
         region_id: Uuid,
     ) -> Result<Option<Region>, Error> {
-        use db::schema::region::dsl;
+        use nexus_db_schema::schema::region::dsl;
         dsl::region
             .filter(dsl::id.eq(region_id))
             .select(Region::as_select())
@@ -306,7 +306,7 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let region_ids = region_ids.clone();
                 async move {
-                    use db::schema::region::dsl;
+                    use nexus_db_schema::schema::region::dsl;
 
                     // Remove the regions
                     diesel::delete(dsl::region)
@@ -362,7 +362,7 @@ WHERE crucible_dataset.id = size_used_with_reservation.crucible_dataset_id"#,
         &self,
         dataset_id: DatasetUuid,
     ) -> Result<u64, Error> {
-        use db::schema::region::dsl;
+        use nexus_db_schema::schema::region::dsl;
 
         let dataset_regions: Vec<Region> = dsl::region
             .filter(dsl::dataset_id.eq(to_db_typed_uuid(dataset_id)))
@@ -381,10 +381,10 @@ WHERE crucible_dataset.id = size_used_with_reservation.crucible_dataset_id"#,
     ) -> LookupResult<Vec<Region>> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        use db::schema::crucible_dataset::dsl as dataset_dsl;
-        use db::schema::physical_disk::dsl as physical_disk_dsl;
-        use db::schema::region::dsl as region_dsl;
-        use db::schema::zpool::dsl as zpool_dsl;
+        use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
+        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
+        use nexus_db_schema::schema::region::dsl as region_dsl;
+        use nexus_db_schema::schema::zpool::dsl as zpool_dsl;
 
         region_dsl::region
             .filter(region_dsl::dataset_id.eq_any(
@@ -417,10 +417,10 @@ WHERE crucible_dataset.id = size_used_with_reservation.crucible_dataset_id"#,
     ) -> LookupResult<Vec<Region>> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        use db::schema::crucible_dataset::dsl as dataset_dsl;
-        use db::schema::physical_disk::dsl as physical_disk_dsl;
-        use db::schema::region::dsl as region_dsl;
-        use db::schema::zpool::dsl as zpool_dsl;
+        use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
+        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
+        use nexus_db_schema::schema::region::dsl as region_dsl;
+        use nexus_db_schema::schema::zpool::dsl as zpool_dsl;
 
         region_dsl::region
             .filter(region_dsl::dataset_id.eq_any(
@@ -451,7 +451,7 @@ WHERE crucible_dataset.id = size_used_with_reservation.crucible_dataset_id"#,
         region_id: Uuid,
         region_port: u16,
     ) -> UpdateResult<()> {
-        use db::schema::region::dsl;
+        use nexus_db_schema::schema::region::dsl;
 
         let conn = self.pool_connection_unauthorized().await?;
 
@@ -512,7 +512,7 @@ WHERE crucible_dataset.id = size_used_with_reservation.crucible_dataset_id"#,
         let conn = self.pool_connection_authorized(opctx).await?;
 
         while let Some(p) = paginator.next() {
-            use db::schema::region::dsl;
+            use nexus_db_schema::schema::region::dsl;
 
             let batch = paginated(dsl::region, dsl::id, &p.current_pagparams())
                 .filter(dsl::port.is_null())
@@ -538,10 +538,10 @@ WHERE crucible_dataset.id = size_used_with_reservation.crucible_dataset_id"#,
     ) -> LookupResult<Vec<Region>> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        use db::schema::crucible_dataset::dsl as dataset_dsl;
-        use db::schema::physical_disk::dsl as physical_disk_dsl;
-        use db::schema::region::dsl as region_dsl;
-        use db::schema::zpool::dsl as zpool_dsl;
+        use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
+        use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
+        use nexus_db_schema::schema::region::dsl as region_dsl;
+        use nexus_db_schema::schema::zpool::dsl as zpool_dsl;
 
         region_dsl::region
             .filter(region_dsl::dataset_id.eq_any(

@@ -14,8 +14,8 @@
 
 use super::{Generation, VmmState};
 use crate::SqlU16;
-use crate::schema::vmm;
 use chrono::{DateTime, Utc};
+use nexus_db_schema::schema::vmm;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

@@ -3,22 +3,19 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
-use crate::schema::region_snapshot_replacement_step;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::DateTime;
 use chrono::Utc;
+use nexus_db_schema::schema::region_snapshot_replacement_step;
 use omicron_uuid_kinds::VolumeKind;
 use omicron_uuid_kinds::VolumeUuid;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "region_snapshot_replacement_step_state", schema = "public"))]
-    pub struct RegionSnapshotReplacementStepStateEnum;
+    RegionSnapshotReplacementStepStateEnum:
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[diesel(sql_type = RegionSnapshotReplacementStepStateEnum)]
     pub enum RegionSnapshotReplacementStepState;
 
     // Enum values
