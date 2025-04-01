@@ -1754,6 +1754,106 @@ fn after_125_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
+fn before_133_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async {
+        // This VMM will have a sled_resource_vmm record and a VMM record
+        let vmm1_id: Uuid =
+            "00000000-0000-0000-0000-000000000001".parse().unwrap();
+        // This VMM will have a sled_resource_vmm record only
+        let vmm2_id: Uuid =
+            "00000000-0000-0000-0000-000000000002".parse().unwrap();
+
+        let sled_id = Uuid::new_v4();
+        let instance1_id = Uuid::new_v4();
+        let instance2_id = Uuid::new_v4();
+
+        ctx.client
+            .batch_execute(&format!(
+                "
+                    INSERT INTO sled_resource_vmm (
+                        id,
+                        sled_id,
+                        hardware_threads,
+                        rss_ram,
+                        reservoir_ram,
+                        instance_id
+                    ) VALUES
+                    (
+                        '{vmm1_id}', '{sled_id}', 1, 0, 0, '{instance1_id}'
+                    ),
+                    (
+                        '{vmm2_id}', '{sled_id}', 1, 0, 0, '{instance2_id}'
+                    );
+
+                "
+            ))
+            .await
+            .expect("inserted record");
+
+        // Only insert a vmm record for one of these reservations
+        ctx.client
+            .batch_execute(&format!(
+                "
+                INSERT INTO vmm (
+                    id,
+                    time_created,
+                    time_deleted,
+                    instance_id,
+                    time_state_updated,
+                    state_generation,
+                    sled_id,
+                    propolis_ip,
+                    propolis_port,
+                    state
+                ) VALUES (
+                    '{vmm1_id}',
+                    now(),
+                    NULL,
+                    '{instance1_id}',
+                    now(),
+                    1,
+                    '{sled_id}',
+                    'fd00:1122:3344:104::1',
+                    12400,
+                    'running'
+                );
+            "
+            ))
+            .await
+            .expect("inserted record");
+    })
+}
+
+fn after_133_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async {
+        // This record should still have a sled_resource_vmm, and be the only
+        // one.
+        let vmm1_id: Uuid =
+            "00000000-0000-0000-0000-000000000001".parse().unwrap();
+
+        let rows = ctx
+            .client
+            .query(
+                r#"
+                SELECT id FROM sled_resource_vmm
+                "#,
+                &[],
+            )
+            .await
+            .expect("loaded sled_resource_vmm rows");
+
+        let records = process_rows(&rows);
+
+        assert_eq!(records.len(), 1, "{records:?}");
+
+        assert_eq!(
+            records[0].values,
+            vec![ColumnValue::new("id", vmm1_id),],
+            "Unexpected sled_resource_vmm record value",
+        );
+    })
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -1802,7 +1902,10 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
         Version::new(125, 0, 0),
         DataMigrationFns::new().before(before_125_0_0).after(after_125_0_0),
     );
-
+    map.insert(
+        Version::new(133, 0, 0),
+        DataMigrationFns::new().before(before_133_0_0).after(after_133_0_0),
+    );
     map
 }
 
