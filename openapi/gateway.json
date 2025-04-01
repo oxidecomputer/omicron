@@ -1110,6 +1110,87 @@
         }
       }
     },
+    "/sp/{type}/{slot}/ereports": {
+      "post": {
+        "summary": "Request ereports from the target service processor.",
+        "description": "Query parameters provide the ENAs of the initial ereport in the returned tranche, the SP's restart ID that the control plane believes is current, and the (optional) last committed ENA.",
+        "operationId": "sp_ereports_ingest",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          },
+          {
+            "in": "query",
+            "name": "committed",
+            "description": "The ENA of the last ereport committed to persistent storage from the requested reporter generation.\n\nIf the generation parameter matches the reporter's current generation, it is permitted to discard any ereports with ENAs up to and including this value. If the generation has changed from the provided generation, the reporter will not discard data.",
+            "schema": {
+              "$ref": "#/components/schemas/Ena"
+            }
+          },
+          {
+            "in": "query",
+            "name": "generation",
+            "description": "The generation (restart nonce) of the reporter at which all other query parameters are valid.\n\nIf this value does not match the reporter's current generation, the reporter's response will include the current generation, and will start at the earliest known ENA, rather than the provided `last_seen` ENA.`",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForEreporterGenerationKind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of ereports to return in this tranche.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_at",
+            "description": "If present, the reporter should not include ENAs earlier than this one in its response, provided that the query's requested generation matches the current generation.",
+            "schema": {
+              "$ref": "#/components/schemas/Ena"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ereports"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sp/{type}/{slot}/host-phase2-progress": {
       "get": {
         "summary": "Get the most recent host phase2 request we've seen from the target SP.",
@@ -1533,6 +1614,68 @@
           "secs"
         ]
       },
+      "Ena": {
+        "description": "An Error Numeric Association (ENA)",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
+      "Ereport": {
+        "description": "An ereport message.",
+        "type": "object",
+        "properties": {
+          "ena": {
+            "description": "The ENA of the ereport.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ena"
+              }
+            ]
+          },
+          "report": {
+            "description": "The body of the ereport.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReportKind"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ena",
+          "report"
+        ]
+      },
+      "Ereports": {
+        "description": "A tranche of ereports received from a reporter.",
+        "type": "object",
+        "properties": {
+          "generation": {
+            "description": "The reporter's current generation ID.\n\nIf this is not equal to the current known generation, then the reporter has restarted.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForEreporterGenerationKind"
+              }
+            ]
+          },
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ereport"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "generation",
+          "items"
+        ]
+      },
       "Error": {
         "description": "Error information from a response.",
         "type": "object",
@@ -1550,6 +1693,19 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "Event": {
+        "type": "object",
+        "properties": {
+          "class": {
+            "type": "string"
+          },
+          "data": {}
+        },
+        "required": [
+          "class",
+          "data"
         ]
       },
       "GetCfpaParams": {
@@ -1748,6 +1904,47 @@
             },
             "required": [
               "status"
+            ]
+          }
+        ]
+      },
+      "LossReport": {
+        "description": "The number of ereports that were discarded, if it is known.\n\nIf ereports are dropped because a buffer has reached its capacity, the reporter is strongly encouraged to attempt to count the number of ereports lost. In other cases, such as a reporter crashing and restarting, the reporter may not be capable of determining the number of ereports that were lost, or even *if* data loss actually occurred.",
+        "oneOf": [
+          {
+            "description": "An unknown number of ereports MAY have been lost.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The provided number of ereports are known to have been lost.",
+            "type": "object",
+            "properties": {
+              "lost": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "exact"
+                ]
+              }
+            },
+            "required": [
+              "lost",
+              "type"
             ]
           }
         ]
@@ -2319,6 +2516,37 @@
           "A0",
           "A1",
           "A2"
+        ]
+      },
+      "ReportKind": {
+        "description": "The body of an ereport: either an event is reported, or a loss report.",
+        "oneOf": [
+          {
+            "description": "An ereport.",
+            "type": "object",
+            "properties": {
+              "event": {
+                "$ref": "#/components/schemas/Event"
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "Ereports were lost, or may have been lost.",
+            "type": "object",
+            "properties": {
+              "loss": {
+                "$ref": "#/components/schemas/LossReport"
+              }
+            },
+            "required": [
+              "loss"
+            ],
+            "additionalProperties": false
+          }
         ]
       },
       "RotCfpa": {
@@ -3417,6 +3645,10 @@
             ]
           }
         ]
+      },
+      "TypedUuidForEreporterGenerationKind": {
+        "type": "string",
+        "format": "uuid"
       },
       "UpdateAbortBody": {
         "type": "object",

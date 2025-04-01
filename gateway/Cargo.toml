@@ -14,7 +14,6 @@ camino.workspace = true
 chrono.workspace = true
 clap.workspace = true
 dropshot.workspace = true
-ereport-api.workspace = true
 futures.workspace = true
 gateway-api.workspace = true
 gateway-messages.workspace = true

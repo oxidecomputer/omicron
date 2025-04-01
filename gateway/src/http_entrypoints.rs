@@ -932,6 +932,20 @@ impl GatewayApi for GatewayImpl {
         };
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }
+
+    async fn sp_ereports_ingest(
+        rqctx: RequestContext<Self::Context>,
+        path: Path<PathSp>,
+        query: Query<ereport_types::EreportQuery>,
+    ) -> Result<HttpResponseOk<ereport_types::Ereports>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            HttpError::for_internal_error(
+                "endpoint not yet implemented".to_string(),
+            )
+        };
+        apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
+    }
 }
 
 // wrap `SpComponent::try_from(&str)` into a usable form for dropshot endpoints

@@ -14,7 +14,6 @@ members = [
     "clients/ddm-admin-client",
     "clients/dns-service-client",
     "clients/dpd-client",
-    "clients/ereport-client",
     "clients/gateway-client",
     "clients/installinator-client",
     "clients/nexus-client",
@@ -50,7 +49,6 @@ members = [
     "dns-server",
     "dns-server-api",
     "end-to-end-tests",
-    "ereport/api",
     "ereport/types",
     "gateway",
     "gateway-api",
@@ -154,7 +152,6 @@ default-members = [
     "clients/ddm-admin-client",
     "clients/dns-service-client",
     "clients/dpd-client",
-    "clients/ereport-client",
     "clients/gateway-client",
     "clients/installinator-client",
     "clients/nexus-client",
@@ -192,7 +189,6 @@ default-members = [
     "dns-server",
     "dns-server-api",
     "end-to-end-tests",
-    "ereport/api",
     "ereport/types",
     "gateway",
     "gateway-api",
@@ -393,8 +389,6 @@ dpd-client = { path = "clients/dpd-client" }
 dropshot = { version = "0.16.0", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.19"
 either = "1.14.0"
-ereport-api = { path = "ereport/api" }
-ereport-client = { path = "clients/ereport-client" }
 ereport-types = { path = "ereport/types" }
 expectorate = "1.1.0"
 fatfs = "0.3.6"
