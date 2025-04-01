@@ -495,7 +495,7 @@ impl SledAgent {
             *sled_address.ip(),
         );
 
-        // The VMM reservior is configured with respect to what's left after
+        // The VMM reservoir is configured with respect to what's left after
         // accounting for relatively fixed and predictable uses.
         // We expect certain amounts of memory to be set aside for kernel,
         // buffer, or control plane uses.
