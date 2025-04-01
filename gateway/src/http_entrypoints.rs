@@ -935,8 +935,8 @@ impl GatewayApi for GatewayImpl {
 
     async fn sp_ereports_ingest(
         rqctx: RequestContext<Self::Context>,
-        path: Path<PathSp>,
-        query: Query<ereport_types::EreportQuery>,
+        _path: Path<PathSp>,
+        _query: Query<ereport_types::EreportQuery>,
     ) -> Result<HttpResponseOk<ereport_types::Ereports>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
