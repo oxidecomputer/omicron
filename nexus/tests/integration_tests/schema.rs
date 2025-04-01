@@ -1354,7 +1354,7 @@ fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         {
             use async_bb8_diesel::AsyncRunQueryDsl;
             use nexus_db_model::Instance;
-            use nexus_db_model::schema::instance::dsl;
+            use nexus_db_schema::schema::instance::dsl;
             use nexus_types::external_api::params;
             use omicron_common::api::external::IdentityMetadataCreateParams;
             use omicron_uuid_kinds::InstanceUuid;
@@ -1380,6 +1380,7 @@ fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                         disks: Vec::new(),
                         start: false,
                         auto_restart_policy: Default::default(),
+                        anti_affinity_groups: Vec::new(),
                     },
                 ))
                 .execute_async(&*pool_and_conn.conn)
@@ -1596,6 +1597,15 @@ fn before_125_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
         let expunged_zone_id: Uuid =
             "00000002-0000-0000-0000-000000000000".parse().unwrap();
 
+        // Fill in a filesystem pool for each zone. This column was NULLable
+        // prior to schema version 132.0.0, but became NOT NULL in that version,
+        // so it's simplest to go ahead and populate it here (otherwise our test
+        // migration to 132 will fail). Operationally, we confirmed via omdb
+        // that all deployed systems had non-NULL filesystem_pool values prior
+        // to upgrading to 132.
+        let filesystem_pool: Uuid =
+            "00000000-0000-0000-0000-0000706f6f6c".parse().unwrap();
+
         for bp_id in [bp1_id, bp2_id] {
             for (zone_id, disposition) in [
                 (in_service_zone_id, "in_service"),
@@ -1611,6 +1621,7 @@ fn before_125_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                             zone_type,
                             primary_service_ip,
                             primary_service_port,
+                            filesystem_pool,
                             disposition
                         ) VALUES (
                             '{bp_id}',
@@ -1619,6 +1630,7 @@ fn before_125_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                             'oximeter',
                             '::1',
                             0,
+                            '{filesystem_pool}',
                             '{disposition}'
                         );
                     "
@@ -1742,6 +1754,106 @@ fn after_125_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
+fn before_133_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async {
+        // This VMM will have a sled_resource_vmm record and a VMM record
+        let vmm1_id: Uuid =
+            "00000000-0000-0000-0000-000000000001".parse().unwrap();
+        // This VMM will have a sled_resource_vmm record only
+        let vmm2_id: Uuid =
+            "00000000-0000-0000-0000-000000000002".parse().unwrap();
+
+        let sled_id = Uuid::new_v4();
+        let instance1_id = Uuid::new_v4();
+        let instance2_id = Uuid::new_v4();
+
+        ctx.client
+            .batch_execute(&format!(
+                "
+                    INSERT INTO sled_resource_vmm (
+                        id,
+                        sled_id,
+                        hardware_threads,
+                        rss_ram,
+                        reservoir_ram,
+                        instance_id
+                    ) VALUES
+                    (
+                        '{vmm1_id}', '{sled_id}', 1, 0, 0, '{instance1_id}'
+                    ),
+                    (
+                        '{vmm2_id}', '{sled_id}', 1, 0, 0, '{instance2_id}'
+                    );
+
+                "
+            ))
+            .await
+            .expect("inserted record");
+
+        // Only insert a vmm record for one of these reservations
+        ctx.client
+            .batch_execute(&format!(
+                "
+                INSERT INTO vmm (
+                    id,
+                    time_created,
+                    time_deleted,
+                    instance_id,
+                    time_state_updated,
+                    state_generation,
+                    sled_id,
+                    propolis_ip,
+                    propolis_port,
+                    state
+                ) VALUES (
+                    '{vmm1_id}',
+                    now(),
+                    NULL,
+                    '{instance1_id}',
+                    now(),
+                    1,
+                    '{sled_id}',
+                    'fd00:1122:3344:104::1',
+                    12400,
+                    'running'
+                );
+            "
+            ))
+            .await
+            .expect("inserted record");
+    })
+}
+
+fn after_133_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async {
+        // This record should still have a sled_resource_vmm, and be the only
+        // one.
+        let vmm1_id: Uuid =
+            "00000000-0000-0000-0000-000000000001".parse().unwrap();
+
+        let rows = ctx
+            .client
+            .query(
+                r#"
+                SELECT id FROM sled_resource_vmm
+                "#,
+                &[],
+            )
+            .await
+            .expect("loaded sled_resource_vmm rows");
+
+        let records = process_rows(&rows);
+
+        assert_eq!(records.len(), 1, "{records:?}");
+
+        assert_eq!(
+            records[0].values,
+            vec![ColumnValue::new("id", vmm1_id),],
+            "Unexpected sled_resource_vmm record value",
+        );
+    })
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -1790,7 +1902,10 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
         Version::new(125, 0, 0),
         DataMigrationFns::new().before(before_125_0_0).after(after_125_0_0),
     );
-
+    map.insert(
+        Version::new(133, 0, 0),
+        DataMigrationFns::new().before(before_133_0_0).after(after_133_0_0),
+    );
     map
 }
 

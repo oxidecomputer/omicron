@@ -10,7 +10,6 @@ use crate::db::model::IncompleteNetworkInterface;
 use crate::db::pool::DbConnection;
 use crate::db::queries::next_item::DefaultShiftGenerator;
 use crate::db::queries::next_item::{NextItem, NextItemSelfJoined};
-use crate::db::schema::network_interface::dsl;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
@@ -27,8 +26,10 @@ use diesel::sql_types::{self, Nullable};
 use ipnetwork::IpNetwork;
 use ipnetwork::Ipv4Network;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+use nexus_db_model::SqlU8;
 use nexus_db_model::{MAX_NICS_PER_INSTANCE, NetworkInterfaceKind};
-use nexus_db_model::{NetworkInterfaceKindEnum, SqlU8};
+use nexus_db_schema::enums::NetworkInterfaceKindEnum;
+use nexus_db_schema::schema::network_interface::dsl;
 use omicron_common::api::external;
 use omicron_common::api::external::MacAddr;
 use slog_error_chain::SlogInlineError;
@@ -516,11 +517,11 @@ fn last_available_address(subnet: &IpNetwork) -> IpAddr {
 #[derive(Debug, Clone, Copy)]
 pub struct NextIpv4Address {
     inner: NextItemSelfJoined<
-        db::schema::network_interface::table,
+        nexus_db_schema::schema::network_interface::table,
         IpNetwork,
-        db::schema::network_interface::dsl::ip,
+        nexus_db_schema::schema::network_interface::dsl::ip,
         Uuid,
-        db::schema::network_interface::dsl::subnet_id,
+        nexus_db_schema::schema::network_interface::dsl::subnet_id,
     >,
 }
 
@@ -576,11 +577,11 @@ delegate_query_fragment_impl!(NextIpv4Address);
 #[derive(Debug, Clone, Copy)]
 pub struct NextNicSlot {
     inner: NextItem<
-        db::schema::network_interface::table,
+        nexus_db_schema::schema::network_interface::table,
         i16,
-        db::schema::network_interface::dsl::slot,
+        nexus_db_schema::schema::network_interface::dsl::slot,
         Uuid,
-        db::schema::network_interface::dsl::parent_id,
+        nexus_db_schema::schema::network_interface::dsl::parent_id,
     >,
 }
 
@@ -611,11 +612,11 @@ impl QueryFragment<Pg> for NextNicSlot {
 #[derive(Debug, Clone, Copy)]
 pub struct NextMacAddress {
     inner: NextItemSelfJoined<
-        db::schema::network_interface::table,
+        nexus_db_schema::schema::network_interface::table,
         db::model::MacAddr,
-        db::schema::network_interface::dsl::mac,
+        nexus_db_schema::schema::network_interface::dsl::mac,
         Uuid,
-        db::schema::network_interface::dsl::vpc_id,
+        nexus_db_schema::schema::network_interface::dsl::vpc_id,
     >,
 }
 
@@ -1046,7 +1047,7 @@ impl InsertQuery {
 type FromClause<T> =
     diesel::internal::table_macro::StaticQueryFragmentInstance<T>;
 type NetworkInterfaceFromClause =
-    FromClause<db::schema::network_interface::table>;
+    FromClause<nexus_db_schema::schema::network_interface::table>;
 const NETWORK_INTERFACE_FROM_CLAUSE: NetworkInterfaceFromClause =
     NetworkInterfaceFromClause::new();
 
@@ -1055,7 +1056,9 @@ impl QueryId for InsertQuery {
     const HAS_STATIC_QUERY_ID: bool = false;
 }
 
-impl Insertable<db::schema::network_interface::table> for InsertQuery {
+impl Insertable<nexus_db_schema::schema::network_interface::table>
+    for InsertQuery
+{
     type Values = InsertQueryValues;
 
     fn values(self) -> Self::Values {
@@ -1296,7 +1299,7 @@ impl QueryFragment<Pg> for IsPrimaryNic {
     }
 }
 
-type InstanceFromClause = FromClause<db::schema::instance::table>;
+type InstanceFromClause = FromClause<nexus_db_schema::schema::instance::table>;
 const INSTANCE_FROM_CLAUSE: InstanceFromClause = InstanceFromClause::new();
 
 // Subquery used to ensure an instance both exists and is either stopped (or
@@ -1363,41 +1366,59 @@ fn push_instance_state_verification_subquery<'a>(
     mut out: AstPass<'_, 'a, Pg>,
     failed_ok: bool,
 ) -> QueryResult<()> {
+    use nexus_db_schema::enums::InstanceStateEnum;
+
     out.push_sql("CAST(CASE COALESCE((SELECT ");
     out.push_sql("CASE WHEN ");
-    out.push_identifier(db::schema::instance::dsl::active_propolis_id::NAME)?;
+    out.push_identifier(
+        nexus_db_schema::schema::instance::dsl::active_propolis_id::NAME,
+    )?;
     out.push_sql(" IS NULL THEN ");
-    out.push_identifier(db::schema::instance::dsl::state::NAME)?;
+    out.push_identifier(nexus_db_schema::schema::instance::dsl::state::NAME)?;
     out.push_sql(" ELSE ");
-    out.push_bind_param::<db::model::InstanceStateEnum, db::model::InstanceState>(&INSTANCE_RUNNING)?;
+    out.push_bind_param::<InstanceStateEnum, db::model::InstanceState>(
+        &INSTANCE_RUNNING,
+    )?;
     out.push_sql(" END ");
     out.push_sql(" FROM ");
     INSTANCE_FROM_CLAUSE.walk_ast(out.reborrow())?;
     out.push_sql(" WHERE ");
-    out.push_identifier(db::schema::instance::dsl::id::NAME)?;
+    out.push_identifier(nexus_db_schema::schema::instance::dsl::id::NAME)?;
     out.push_sql(" = ");
     out.push_bind_param::<sql_types::Uuid, Uuid>(instance_id)?;
     out.push_sql(" AND ");
-    out.push_identifier(db::schema::instance::dsl::time_deleted::NAME)?;
+    out.push_identifier(
+        nexus_db_schema::schema::instance::dsl::time_deleted::NAME,
+    )?;
     out.push_sql(" IS NULL), ");
-    out.push_bind_param::<db::model::InstanceStateEnum, db::model::InstanceState>(&INSTANCE_DESTROYED)?;
+    out.push_bind_param::<InstanceStateEnum, db::model::InstanceState>(
+        &INSTANCE_DESTROYED,
+    )?;
     out.push_sql(") WHEN ");
-    out.push_bind_param::<db::model::InstanceStateEnum, db::model::InstanceState>(&INSTANCE_STOPPED)?;
+    out.push_bind_param::<InstanceStateEnum, db::model::InstanceState>(
+        &INSTANCE_STOPPED,
+    )?;
     out.push_sql(" THEN ");
     out.push_bind_param::<sql_types::Text, String>(instance_id_str)?;
     out.push_sql(" WHEN ");
-    out.push_bind_param::<db::model::InstanceStateEnum, db::model::InstanceState>(&INSTANCE_CREATING)?;
+    out.push_bind_param::<InstanceStateEnum, db::model::InstanceState>(
+        &INSTANCE_CREATING,
+    )?;
     out.push_sql(" THEN ");
     out.push_bind_param::<sql_types::Text, String>(instance_id_str)?;
     if failed_ok {
         // FAILED is ok for DeleteQuery, but not for InsertQuery!
         out.push_sql(" WHEN ");
-        out.push_bind_param::<db::model::InstanceStateEnum, db::model::InstanceState>(&INSTANCE_FAILED)?;
+        out.push_bind_param::<InstanceStateEnum, db::model::InstanceState>(
+            &INSTANCE_FAILED,
+        )?;
         out.push_sql(" THEN ");
         out.push_bind_param::<sql_types::Text, String>(instance_id_str)?;
     }
     out.push_sql(" WHEN ");
-    out.push_bind_param::<db::model::InstanceStateEnum, db::model::InstanceState>(&INSTANCE_DESTROYED)?;
+    out.push_bind_param::<InstanceStateEnum, db::model::InstanceState>(
+        &INSTANCE_DESTROYED,
+    )?;
     out.push_sql(" THEN ");
     out.push_bind_param::<sql_types::Text, String>(
         &NO_INSTANCE_SENTINEL_STRING,
@@ -1867,6 +1888,7 @@ mod tests {
             boot_disk: None,
             start: true,
             auto_restart_policy: Default::default(),
+            anti_affinity_groups: Vec::new(),
         };
 
         let instance = Instance::new(instance_id, project_id, &params);
@@ -1997,7 +2019,7 @@ mod tests {
             let (.., project) =
                 datastore.project_create(&opctx, project).await.unwrap();
 
-            use crate::db::schema::vpc_subnet::dsl::vpc_subnet;
+            use nexus_db_schema::schema::vpc_subnet::dsl::vpc_subnet;
             let conn =
                 datastore.pool_connection_authorized(&opctx).await.unwrap();
             let net1 = Network::new(n_subnets);

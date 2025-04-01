@@ -600,7 +600,14 @@ mod test {
         Ok(BlueprintZoneConfig {
             disposition,
             id: config.id,
-            filesystem_pool: config.filesystem_pool,
+            // This is *VERY* incorrect, in terms of a real system, but is not
+            // harmful to our DNS tests below. We should not introduce any new
+            // callers of
+            // `deprecated_omicron_zone_config_to_blueprint_zone_config`, so
+            // hopefully this doesn't cause us too much pain in the future.
+            filesystem_pool: config.filesystem_pool.unwrap_or_else(|| {
+                ZpoolName::new_external(ZpoolUuid::new_v4())
+            }),
             zone_type,
             image_source,
         })
@@ -702,9 +709,7 @@ mod test {
                     ready_for_cleanup: false,
                 },
                 id: out_of_service_id,
-                filesystem_pool: Some(ZpoolName::new_external(
-                    ZpoolUuid::new_v4(),
-                )),
+                filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
                 zone_type: BlueprintZoneType::Oximeter(
                     blueprint_zone_type::Oximeter {
                         address: SocketAddrV6::new(

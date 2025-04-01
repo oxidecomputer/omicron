@@ -14,6 +14,7 @@ use semver::Version;
 use serde::Deserialize;
 use slog::Logger;
 use slog::warn;
+use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactKind;
 use tufaceous_lib::assemble::DeserializedArtifactData;
 use tufaceous_lib::assemble::DeserializedArtifactSource;
@@ -83,8 +84,17 @@ pub(crate) async fn fetch_hubris_artifacts(
                     };
                     manifest.artifacts.entry(kind).or_default().push(
                         DeserializedArtifactData {
-                            name: artifact.name,
-                            version: artifact.version,
+                            name: artifact.name.clone(),
+                            version: artifact
+                                .version
+                                .to_string()
+                                .parse::<ArtifactVersion>()
+                                .with_context(|| {
+                                    format!(
+                                        "artifact {} has invalid version: {}",
+                                        artifact.name, artifact.version
+                                    )
+                                })?,
                             source,
                         },
                     );

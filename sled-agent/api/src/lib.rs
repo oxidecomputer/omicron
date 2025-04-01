@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use camino::Utf8PathBuf;
@@ -16,6 +16,7 @@ use nexus_sled_agent_shared::inventory::{
     Inventory, OmicronSledConfig, OmicronSledConfigResult, SledRole,
 };
 use omicron_common::{
+    api::external::Generation,
     api::internal::{
         nexus::{DiskRuntimeState, SledVmmState},
         shared::{
@@ -24,6 +25,7 @@ use omicron_common::{
         },
     },
     disk::{DatasetsConfig, DiskVariant, OmicronPhysicalDisksConfig},
+    ledger::Ledgerable,
     update::ArtifactHash,
 };
 use omicron_uuid_kinds::{
@@ -382,11 +384,28 @@ pub trait SledAgentApi {
 
     #[endpoint {
         method = GET,
+        path = "/artifacts-config"
+    }]
+    async fn artifact_config_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ArtifactConfig>, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/artifacts-config"
+    }]
+    async fn artifact_config_put(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<ArtifactConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = GET,
         path = "/artifacts"
     }]
     async fn artifact_list(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<BTreeMap<ArtifactHash, usize>>, HttpError>;
+    ) -> Result<HttpResponseOk<ArtifactListResponse>, HttpError>;
 
     #[endpoint {
         method = POST,
@@ -395,6 +414,7 @@ pub trait SledAgentApi {
     async fn artifact_copy_from_depot(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<ArtifactPathParam>,
+        query_params: Query<ArtifactQueryParam>,
         body: TypedBody<ArtifactCopyFromDepotBody>,
     ) -> Result<HttpResponseAccepted<ArtifactCopyFromDepotResponse>, HttpError>;
 
@@ -406,17 +426,9 @@ pub trait SledAgentApi {
     async fn artifact_put(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<ArtifactPathParam>,
+        query_params: Query<ArtifactQueryParam>,
         body: StreamingBody,
     ) -> Result<HttpResponseOk<ArtifactPutResponse>, HttpError>;
-
-    #[endpoint {
-        method = DELETE,
-        path = "/artifacts/{sha256}"
-    }]
-    async fn artifact_delete(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<ArtifactPathParam>,
-    ) -> Result<HttpResponseDeleted, HttpError>;
 
     /// Take a snapshot of a disk that is attached to an instance
     #[endpoint {
@@ -634,6 +646,14 @@ pub trait SledAgentApi {
 
     #[endpoint {
         method = GET,
+        path = "/support/nvmeadm-info",
+    }]
+    async fn support_nvmeadm_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError>;
+
+    #[endpoint {
+        method = GET,
         path = "/support/pargs-info",
     }]
     async fn support_pargs_info(
@@ -655,6 +675,22 @@ pub trait SledAgentApi {
     async fn support_pfiles_info(
         request_context: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<SledDiagnosticsQueryOutput>>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/zfs-info",
+    }]
+    async fn support_zfs_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError>;
+
+    #[endpoint {
+        method = GET,
+        path = "/support/zpool-info",
+    }]
+    async fn support_zpool_info(
+        request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<SledDiagnosticsQueryOutput>, HttpError>;
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -771,9 +807,35 @@ pub struct DiskPathParam {
     pub disk_id: Uuid,
 }
 
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
+pub struct ArtifactConfig {
+    pub generation: Generation,
+    pub artifacts: BTreeSet<ArtifactHash>,
+}
+
+impl Ledgerable for ArtifactConfig {
+    fn is_newer_than(&self, other: &ArtifactConfig) -> bool {
+        self.generation > other.generation
+    }
+
+    // No need to do this, the generation number is provided externally.
+    fn generation_bump(&mut self) {}
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct ArtifactPathParam {
     pub sha256: ArtifactHash,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ArtifactQueryParam {
+    pub generation: Generation,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ArtifactListResponse {
+    pub generation: Generation,
+    pub list: BTreeMap<ArtifactHash, usize>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -781,7 +843,7 @@ pub struct ArtifactCopyFromDepotBody {
     pub depot_base_url: String,
 }
 
-#[derive(Serialize, JsonSchema)]
+#[derive(Debug, Serialize, JsonSchema)]
 pub struct ArtifactCopyFromDepotResponse {}
 
 #[derive(Debug, Serialize, JsonSchema)]

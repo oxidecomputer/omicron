@@ -536,7 +536,7 @@ impl ModifiedZone {
                 zone: BlueprintZoneConfig {
                     disposition: *diff.disposition.after,
                     id: *diff.id.after,
-                    filesystem_pool: diff.filesystem_pool.after.cloned(),
+                    filesystem_pool: diff.filesystem_pool.after.clone(),
                     zone_type: diff.zone_type.after.clone(),
                     image_source: diff.image_source.after.clone(),
                 },

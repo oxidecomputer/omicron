@@ -15,7 +15,7 @@ use nexus_types::deployment::{
 use omicron_uuid_kinds::OmicronZoneUuid;
 use update_engine::TerminalKind;
 
-use crate::RealizeBlueprintOutput;
+use crate::{RealizeBlueprintOutput, RequiredRealizeArgs};
 use tokio::sync::watch;
 
 pub(crate) async fn realize_blueprint_and_expect(
@@ -36,16 +36,20 @@ pub(crate) async fn realize_blueprint_and_expect(
     });
 
     // XXX-dap
-    let (tx, _rx) = watch::channel(BTreeMap::new());
-    let output = crate::realize_blueprint_with_overrides(
-        opctx,
-        datastore,
-        resolver,
-        blueprint,
-        OmicronZoneUuid::new_v4(),
-        tx,
-        overrides,
-        sender,
+    let (mgs_updates, _rx) = watch::channel(BTreeMap::new());
+    let nexus_id = OmicronZoneUuid::new_v4();
+    let output = crate::realize_blueprint(
+        RequiredRealizeArgs {
+            opctx,
+            datastore,
+            resolver,
+            creator: nexus_id,
+            blueprint,
+            sender,
+            mgs_updates,
+        }
+        .with_overrides(overrides)
+        .as_nexus(OmicronZoneUuid::new_v4()),
     )
     .await
     // We expect here rather than in the caller because we want to assert that

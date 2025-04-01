@@ -607,9 +607,9 @@ mod tests {
                 BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: self.nexus_id,
-                    filesystem_pool: Some(ZpoolName::new_external(
+                    filesystem_pool: ZpoolName::new_external(
                         ZpoolUuid::new_v4(),
-                    )),
+                    ),
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
                             internal_address: "[::1]:0".parse().unwrap(),
@@ -624,9 +624,9 @@ mod tests {
                 BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: self.dns_id,
-                    filesystem_pool: Some(ZpoolName::new_external(
+                    filesystem_pool: ZpoolName::new_external(
                         ZpoolUuid::new_v4(),
-                    )),
+                    ),
                     zone_type: BlueprintZoneType::ExternalDns(
                         blueprint_zone_type::ExternalDns {
                             dataset: OmicronZoneDataset {
@@ -644,9 +644,9 @@ mod tests {
                 BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: self.ntp_id,
-                    filesystem_pool: Some(ZpoolName::new_external(
+                    filesystem_pool: ZpoolName::new_external(
                         ZpoolUuid::new_v4(),
-                    )),
+                    ),
                     zone_type: BlueprintZoneType::BoundaryNtp(
                         blueprint_zone_type::BoundaryNtp {
                             address: "[::1]:0".parse().unwrap(),
@@ -805,7 +805,7 @@ mod tests {
         ) {
             use async_bb8_diesel::AsyncRunQueryDsl;
             use diesel::prelude::*;
-            use nexus_db_model::schema::external_ip::dsl;
+            use nexus_db_schema::schema::external_ip::dsl;
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             let ips: Vec<(Uuid, Option<DateTime<Utc>>)> = datastore
@@ -856,7 +856,7 @@ mod tests {
         ) {
             use async_bb8_diesel::AsyncRunQueryDsl;
             use diesel::prelude::*;
-            use nexus_db_model::schema::service_network_interface::dsl;
+            use nexus_db_schema::schema::service_network_interface::dsl;
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             let nics: Vec<(Uuid, Option<DateTime<Utc>>)> = datastore

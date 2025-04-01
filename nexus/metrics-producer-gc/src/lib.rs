@@ -194,7 +194,7 @@ mod tests {
         datastore: &DataStore,
         producer_id: Uuid,
     ) -> DateTime<Utc> {
-        use nexus_db_queries::db::schema::metric_producer::dsl;
+        use nexus_db_schema::schema::metric_producer::dsl;
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         match dsl::metric_producer

@@ -3,13 +3,13 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{L4PortRange, SqlU16, impl_enum_wrapper};
-use crate::schema::vpc_firewall_rule;
 use db_macros::Resource;
 use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
 use diesel::pg::Pg;
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
+use nexus_db_schema::schema::vpc_firewall_rule;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use serde::Deserialize;
@@ -19,12 +19,9 @@ use std::io::Write;
 use uuid::Uuid;
 
 impl_enum_wrapper!(
-    #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "vpc_firewall_rule_status", schema = "public"))]
-    pub struct VpcFirewallRuleStatusEnum;
+    VpcFirewallRuleStatusEnum:
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
-    #[diesel(sql_type = VpcFirewallRuleStatusEnum)]
     pub struct VpcFirewallRuleStatus(pub external::VpcFirewallRuleStatus);
 
     Disabled => b"disabled"
@@ -34,12 +31,9 @@ NewtypeFrom! { () pub struct VpcFirewallRuleStatus(external::VpcFirewallRuleStat
 NewtypeDeref! { () pub struct VpcFirewallRuleStatus(external::VpcFirewallRuleStatus); }
 
 impl_enum_wrapper!(
-    #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "vpc_firewall_rule_direction", schema = "public"))]
-    pub struct VpcFirewallRuleDirectionEnum;
+    VpcFirewallRuleDirectionEnum:
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
-    #[diesel(sql_type = VpcFirewallRuleDirectionEnum)]
     pub struct VpcFirewallRuleDirection(pub external::VpcFirewallRuleDirection);
 
     Inbound => b"inbound"
@@ -49,12 +43,9 @@ NewtypeFrom! { () pub struct VpcFirewallRuleDirection(external::VpcFirewallRuleD
 NewtypeDeref! { () pub struct VpcFirewallRuleDirection(external::VpcFirewallRuleDirection); }
 
 impl_enum_wrapper!(
-    #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "vpc_firewall_rule_action", schema = "public"))]
-    pub struct VpcFirewallRuleActionEnum;
+    VpcFirewallRuleActionEnum:
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
-    #[diesel(sql_type = VpcFirewallRuleActionEnum)]
     pub struct VpcFirewallRuleAction(pub external::VpcFirewallRuleAction);
 
     Allow => b"allow"
@@ -64,12 +55,9 @@ NewtypeFrom! { () pub struct VpcFirewallRuleAction(external::VpcFirewallRuleActi
 NewtypeDeref! { () pub struct VpcFirewallRuleAction(external::VpcFirewallRuleAction); }
 
 impl_enum_wrapper!(
-    #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "vpc_firewall_rule_protocol", schema = "public"))]
-    pub struct VpcFirewallRuleProtocolEnum;
+    VpcFirewallRuleProtocolEnum:
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
-    #[diesel(sql_type = VpcFirewallRuleProtocolEnum)]
     pub struct VpcFirewallRuleProtocol(pub external::VpcFirewallRuleProtocol);
 
     Tcp => b"TCP"

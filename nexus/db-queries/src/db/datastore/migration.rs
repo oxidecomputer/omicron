@@ -13,13 +13,13 @@ use crate::db::model::Generation;
 use crate::db::model::Migration;
 use crate::db::model::MigrationState;
 use crate::db::pagination::paginated;
-use crate::db::schema::migration::dsl;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateAndQueryResult;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_schema::schema::migration::dsl;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::ListResultVec;
@@ -238,6 +238,7 @@ mod tests {
                         ssh_public_keys: None,
                         start: false,
                         auto_restart_policy: Default::default(),
+                        anti_affinity_groups: Vec::new(),
                     },
                 ),
             )

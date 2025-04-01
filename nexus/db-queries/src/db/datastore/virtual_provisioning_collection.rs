@@ -62,7 +62,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         virtual_provisioning_collection: VirtualProvisioningCollection,
     ) -> Result<Vec<VirtualProvisioningCollection>, DieselError> {
-        use db::schema::virtual_provisioning_collection::dsl;
+        use nexus_db_schema::schema::virtual_provisioning_collection::dsl;
 
         let provisions: Vec<VirtualProvisioningCollection> =
             diesel::insert_into(dsl::virtual_provisioning_collection)
@@ -81,7 +81,7 @@ impl DataStore {
         opctx: &OpContext,
         id: Uuid,
     ) -> Result<VirtualProvisioningCollection, Error> {
-        use db::schema::virtual_provisioning_collection::dsl;
+        use nexus_db_schema::schema::virtual_provisioning_collection::dsl;
 
         let virtual_provisioning_collection =
             dsl::virtual_provisioning_collection
@@ -118,7 +118,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         id: Uuid,
     ) -> Result<(), DieselError> {
-        use db::schema::virtual_provisioning_collection::dsl;
+        use nexus_db_schema::schema::virtual_provisioning_collection::dsl;
 
         // NOTE: We don't really need to extract the value we're deleting from
         // the DB, but by doing so, we can validate that we haven't
@@ -458,6 +458,7 @@ mod test {
                         ssh_public_keys: None,
                         start: false,
                         auto_restart_policy: Default::default(),
+                        anti_affinity_groups: Vec::new(),
                     },
                 ),
             )

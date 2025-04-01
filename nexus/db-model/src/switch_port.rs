@@ -2,7 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::schema::{
+use crate::{SqlU8, SqlU16};
+use crate::{SqlU32, impl_enum_type};
+use chrono::{DateTime, Utc};
+use db_macros::Resource;
+use diesel::AsChangeset;
+use ipnetwork::IpNetwork;
+use nexus_db_schema::schema::{
     lldp_link_config, switch_port, switch_port_settings,
     switch_port_settings_address_config, switch_port_settings_bgp_peer_config,
     switch_port_settings_bgp_peer_config_allow_export,
@@ -13,12 +19,6 @@ use crate::schema::{
     switch_port_settings_port_config, switch_port_settings_route_config,
     tx_eq_config,
 };
-use crate::{SqlU8, SqlU16};
-use crate::{SqlU32, impl_enum_type};
-use chrono::{DateTime, Utc};
-use db_macros::Resource;
-use diesel::AsChangeset;
-use ipnetwork::IpNetwork;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
@@ -28,9 +28,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, Clone, Copy)]
-    #[diesel(postgres_type(name = "switch_port_geometry", schema = "public"))]
-    pub struct SwitchPortGeometryEnum;
+    SwitchPortGeometryEnum:
 
     #[derive(
         Clone,
@@ -42,7 +40,6 @@ impl_enum_type!(
         Serialize,
         Deserialize
     )]
-    #[diesel(sql_type = SwitchPortGeometryEnum)]
     pub enum SwitchPortGeometry;
 
     Qsfp28x1 => b"Qsfp28x1"
@@ -51,9 +48,7 @@ impl_enum_type!(
 );
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, Clone, Copy)]
-    #[diesel(postgres_type(name = "switch_link_fec", schema = "public"))]
-    pub struct SwitchLinkFecEnum;
+    SwitchLinkFecEnum:
 
     #[derive(
         Clone,
@@ -65,7 +60,6 @@ impl_enum_type!(
         Serialize,
         Deserialize
     )]
-    #[diesel(sql_type = SwitchLinkFecEnum)]
     pub enum SwitchLinkFec;
 
     Firecode => b"Firecode"
@@ -74,9 +68,7 @@ impl_enum_type!(
 );
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, Clone, Copy)]
-    #[diesel(postgres_type(name = "switch_link_speed", schema = "public"))]
-    pub struct SwitchLinkSpeedEnum;
+    SwitchLinkSpeedEnum:
 
     #[derive(
         Clone,
@@ -88,7 +80,6 @@ impl_enum_type!(
         Serialize,
         Deserialize
     )]
-    #[diesel(sql_type = SwitchLinkSpeedEnum)]
     pub enum SwitchLinkSpeed;
 
     Speed0G => b"0G"
