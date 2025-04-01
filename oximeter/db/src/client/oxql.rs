@@ -198,6 +198,59 @@ impl Client {
         result
     }
 
+    /// Run a OxQL query.
+    pub async fn oxql_query_project(
+        &self,
+        query: impl AsRef<str>,
+        silo_id: Uuid,
+        project_id: Uuid,
+    ) -> Result<OxqlResult, Error> {
+        let query = query.as_ref();
+
+        let parsed_query = oxql::Query::new(query)?;
+        // this has to be used for everything
+        let filtered_query = parsed_query.add_filters(vec![
+            ("silo_id".to_string(), silo_id),
+            ("project_id".to_string(), project_id),
+        ]);
+
+        let plan = self.build_query_plan(&filtered_query).await?;
+        if plan.requires_full_table_scan() {
+            return Err(Error::Oxql(anyhow::anyhow!(
+                "This query requires at least one full table scan. \
+                Please rewrite the query to filter either the fields \
+                or timestamps, in order to reduce the amount of data \
+                fetched from the database."
+            )));
+        }
+        let query_id = Uuid::new_v4();
+        let query_log =
+            self.log.new(slog::o!("query_id" => query_id.to_string()));
+        debug!(
+            query_log,
+            "parsed OxQL query";
+            "query" => query,
+            "filtered_query" => ?filtered_query,
+            "parsed_query" => ?parsed_query,
+        );
+        let id = usdt::UniqueId::new();
+        probes::oxql__query__start!(|| (&id, &query_id, query));
+        let mut total_rows_fetched = 0;
+        let result = self
+            .run_oxql_query(
+                &query_log,
+                &mut self.claim_connection().await?,
+                query_id,
+                filtered_query,
+                &mut total_rows_fetched,
+                None,
+                None,
+            )
+            .await;
+        probes::oxql__query__done!(|| (&id, &query_id));
+        result
+    }
+
     /// Rewrite the predicates from an OxQL query so that they apply only to the
     /// field tables.
     fn rewrite_predicate_for_fields(

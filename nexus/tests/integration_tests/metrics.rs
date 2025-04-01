@@ -521,9 +521,9 @@ async fn test_project_timeseries_query(
     let q2 = &format!("{} | filter project_id == \"{}\"", q1, p1.identity.id);
 
     let result = metrics_querier.project_timeseries_query("project1", q2).await;
-    // assert_eq!(dbg!(result.clone()).len(), 1);
     assert_eq!(result.len(), 1);
-    assert!(result[0].timeseries().len() > 0);
+    // we get 2 timeseries because there are two instances
+    assert!(result[0].timeseries().len() == 2);
 
     let result = metrics_querier.project_timeseries_query("project2", q2).await;
     assert_eq!(result.len(), 1);
@@ -543,14 +543,14 @@ async fn test_project_timeseries_query(
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].timeseries().len(), 0);
 
-    // now let's test it with group_by. TODO: shit, it's broken
+    // now let's test it with group_by
     let q4 = &format!(
         "{} | align mean_within(1m) | group_by [instance_id], sum",
         q2
     );
     let result = metrics_querier.project_timeseries_query("project1", q4).await;
     assert_eq!(result.len(), 1);
-    assert_eq!(result[0].timeseries().len(), 1);
+    assert_eq!(result[0].timeseries().len(), 2);
 
     // TODO: test with a set of subqueries
 
@@ -571,7 +571,7 @@ async fn test_project_timeseries_query(
         The filter expression refers to \
         identifiers that are not valid for its input \
         table \"integration_target:integration_metric\". \
-        Invalid identifiers: [\"silo_id\", \"project_id\"], \
+        Invalid identifiers: [\"silo_id\"], \
         valid identifiers: [\"datum\", \"metric_name\", \"target_name\", \"timestamp\"]";
     assert!(result.message.ends_with(EXPECTED_ERROR_MESSAGE));
 

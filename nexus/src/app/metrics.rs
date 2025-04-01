@@ -161,17 +161,8 @@ impl super::Nexus {
         // Ensure the user has read access to the project
         let (authz_silo, authz_project) =
             project_lookup.lookup_for(authz::Action::Read).await?;
-
-        // Ensure the query only refers to the project
-        let filtered_query = format!(
-            "{} | filter silo_id == \"{}\" && project_id == \"{}\"",
-            query.as_ref(),
-            authz_silo.id(),
-            authz_project.id()
-        );
-
         self.timeseries_client
-            .oxql_query(filtered_query)
+            .oxql_query_project(query, authz_silo.id(), authz_project.id())
             .await
             .map(|result| result.tables)
             .map_err(map_timeseries_err)

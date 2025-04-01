@@ -9,12 +9,15 @@
 use std::collections::BTreeSet;
 
 use super::ast::SplitQuery;
+use super::ast::cmp::Comparison;
 use super::ast::ident::Ident;
+use super::ast::literal::Literal;
 use super::ast::logical_op::LogicalOp;
 use super::ast::table_ops::BasicTableOp;
 use super::ast::table_ops::TableOp;
 use super::ast::table_ops::filter::CompoundFilter;
 use super::ast::table_ops::filter::FilterExpr;
+use super::ast::table_ops::filter::SimpleFilter;
 use super::ast::table_ops::group_by::GroupBy;
 use super::ast::table_ops::limit::Limit;
 use crate::TimeseriesName;
@@ -25,6 +28,7 @@ use crate::oxql::ast::table_ops::filter::Filter;
 use crate::oxql::fmt_parse_error;
 use chrono::DateTime;
 use chrono::Utc;
+use uuid::Uuid;
 
 /// A parsed OxQL query.
 #[derive(Clone, Debug, PartialEq)]
@@ -362,6 +366,32 @@ impl Query {
     pub(crate) fn parsed_query(&self) -> &QueryNode {
         &self.parsed
     }
+
+    pub(crate) fn add_filters(&self, filters: Vec<(String, Uuid)>) -> Self {
+        let mut new_ops = self.parsed.table_ops().cloned().collect::<Vec<_>>();
+        let filters = filters
+            .iter()
+            .map(|(key, value)| {
+                let simple_filter = SimpleFilter {
+                    ident: Ident(key.to_string()),
+                    cmp: Comparison::Eq,
+                    value: Literal::Uuid(value.clone()),
+                };
+                let filter_expr = FilterExpr::Simple(simple_filter);
+                let filter_op = Filter { negated: false, expr: filter_expr };
+                TableOp::Basic(BasicTableOp::Filter(filter_op))
+            })
+            .collect::<Vec<_>>();
+
+        // TODO: I think ops can't be empty if it parses, so we can prob do an unreachable! here
+        if !new_ops.is_empty() {
+            new_ops.splice(1..1, filters);
+        } else {
+            new_ops.extend(filters);
+        }
+
+        Self { parsed: QueryNode::new(new_ops), end_time: self.end_time }
+    }
 }
 
 // Return a new filter containing only parts that refer to either:
@@ -423,6 +453,7 @@ mod tests {
     use chrono::NaiveDateTime;
     use chrono::Utc;
     use std::time::Duration;
+    use uuid::Uuid;
 
     #[test]
     fn test_restrict_filter_idents_single_atom() {
@@ -1005,5 +1036,34 @@ mod tests {
             "Should not coalesce a limit from the outer query, when the \
             inner query contains an incompatible timestamp filter"
         );
+    }
+
+    // TODO: actual asserts in these tests
+
+    #[test]
+    fn test_add_filters() {
+        let query = Query::new("get a:b | filter timestamp > @now()").unwrap();
+        let silo_id = Uuid::new_v4();
+        let project_id = Uuid::new_v4();
+        let new_query = dbg!(query.add_filters(vec![
+            ("silo_id".to_string(), silo_id),
+            ("project_id".to_string(), project_id)
+        ]));
+        assert!(true);
+    }
+
+    #[test]
+    fn test_add_filters_with_subqueries() {
+        let query =
+            Query::new("{ get a:b | filter timestamp > @now(); get c:d }")
+                .unwrap();
+        let silo_id = Uuid::new_v4();
+        let project_id = Uuid::new_v4();
+        // TODO: right now it adds the filters after the subquery. should it insert them into each subquery?
+        let new_query = dbg!(query.add_filters(vec![
+            ("silo_id".to_string(), silo_id),
+            ("project_id".to_string(), project_id)
+        ]));
+        assert!(true);
     }
 }
