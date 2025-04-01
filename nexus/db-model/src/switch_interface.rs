@@ -3,9 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 use crate::SqlU16;
 use crate::impl_enum_type;
-use crate::schema::{loopback_address, switch_vlan_interface_config};
 use db_macros::Asset;
 use ipnetwork::IpNetwork;
+use nexus_db_schema::schema::{loopback_address, switch_vlan_interface_config};
 use nexus_types::external_api::params;
 use nexus_types::identity::Asset;
 use omicron_common::api::external;
@@ -15,9 +15,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, Clone, Copy)]
-    #[diesel(postgres_type(name = "switch_interface_kind", schema = "public"))]
-    pub struct DbSwitchInterfaceKindEnum;
+    SwitchInterfaceKindEnum:
 
     #[derive(
         Clone,
@@ -29,7 +27,6 @@ impl_enum_type!(
         Serialize,
         Deserialize
     )]
-    #[diesel(sql_type = DbSwitchInterfaceKindEnum)]
     pub enum DbSwitchInterfaceKind;
 
     Primary => b"primary"

@@ -4,7 +4,6 @@
 
 use super::DataStore;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::error::{ErrorHandler, public_error_from_diesel};
 use crate::db::model::ApplySledFilterExt;
@@ -23,15 +22,15 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> ListResultVec<V2PMappingView> {
-        use db::schema::instance::dsl as instance_dsl;
-        use db::schema::network_interface::dsl as network_interface_dsl;
-        use db::schema::probe::dsl as probe_dsl;
-        use db::schema::sled::dsl as sled_dsl;
-        use db::schema::vmm::dsl as vmm_dsl;
-        use db::schema::vpc::dsl as vpc_dsl;
-        use db::schema::vpc_subnet::dsl as vpc_subnet_dsl;
+        use nexus_db_schema::schema::instance::dsl as instance_dsl;
+        use nexus_db_schema::schema::network_interface::dsl as network_interface_dsl;
+        use nexus_db_schema::schema::probe::dsl as probe_dsl;
+        use nexus_db_schema::schema::sled::dsl as sled_dsl;
+        use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
+        use nexus_db_schema::schema::vpc::dsl as vpc_dsl;
+        use nexus_db_schema::schema::vpc_subnet::dsl as vpc_subnet_dsl;
 
-        use db::schema::network_interface;
+        use nexus_db_schema::schema::network_interface;
 
         opctx.check_complex_operations_allowed()?;
 

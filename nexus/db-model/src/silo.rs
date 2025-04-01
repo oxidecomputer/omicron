@@ -4,9 +4,9 @@
 
 use super::{Generation, Project};
 use crate::collection::DatastoreCollectionConfig;
-use crate::schema::{image, project, silo};
 use crate::{DatabaseString, Image, impl_enum_type};
 use db_macros::Resource;
+use nexus_db_schema::schema::{image, project, silo};
 use nexus_types::external_api::shared::{
     FleetRole, SiloIdentityMode, SiloRole,
 };
@@ -19,12 +19,9 @@ use std::collections::BTreeSet;
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "authentication_mode", schema = "public"))]
-    pub struct AuthenticationModeEnum;
+    AuthenticationModeEnum:
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq, Eq)]
-    #[diesel(sql_type = AuthenticationModeEnum)]
     pub enum AuthenticationMode;
 
     // Enum values
@@ -51,12 +48,9 @@ impl From<AuthenticationMode> for shared::AuthenticationMode {
 }
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "user_provision_type", schema = "public"))]
-    pub struct UserProvisionTypeEnum;
+    UserProvisionTypeEnum:
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq, Eq)]
-    #[diesel(sql_type = UserProvisionTypeEnum)]
     pub enum UserProvisionType;
 
     // Enum values

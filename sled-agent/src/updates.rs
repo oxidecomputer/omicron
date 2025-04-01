@@ -27,7 +27,11 @@ pub enum Error {
     },
 
     #[error("Cannot parse artifact version in {path}")]
-    ArtifactVersion { path: Utf8PathBuf, err: ArtifactVersionError },
+    ArtifactVersion {
+        path: Utf8PathBuf,
+        #[source]
+        err: ArtifactVersionError,
+    },
 }
 
 fn default_zone_artifact_path() -> Utf8PathBuf {

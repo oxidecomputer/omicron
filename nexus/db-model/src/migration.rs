@@ -4,9 +4,9 @@
 
 use super::Generation;
 use crate::MigrationState;
-use crate::schema::migration;
 use chrono::DateTime;
 use chrono::Utc;
+use nexus_db_schema::schema::migration;
 use omicron_common::api::internal::nexus;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
