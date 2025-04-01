@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::schema::region_snapshot;
 use crate::typed_uuid::DbTypedUuid;
+use nexus_db_schema::schema::region_snapshot;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use serde::{Deserialize, Serialize};

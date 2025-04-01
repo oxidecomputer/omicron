@@ -10,7 +10,6 @@ use super::identity::Resource;
 use crate::{
     authz,
     context::OpContext,
-    db,
     db::error::{ErrorHandler, public_error_from_diesel},
 };
 use async_bb8_diesel::AsyncRunQueryDsl;
