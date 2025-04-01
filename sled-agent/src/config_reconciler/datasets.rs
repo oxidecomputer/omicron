@@ -214,8 +214,12 @@ impl DatasetTask {
         zfs: &mut T,
     ) {
         match req {
-            SupportBundleRequest::NestedDatasetEnsure { .. } => todo!(),
-            SupportBundleRequest::NestedDatasetDestroy { .. } => todo!(),
+            SupportBundleRequest::NestedDatasetEnsure { .. } => {
+                unimplemented!()
+            }
+            SupportBundleRequest::NestedDatasetDestroy { .. } => {
+                unimplemented!()
+            }
             SupportBundleRequest::NestedDatasetList { name, options, tx } => {
                 _ = tx
                     .0
@@ -383,5 +387,5 @@ mod tests {
     }
 
     // TODO-john more tests
-    // TODO-john address todo!() / unimplemented!()
+    // TODO-john address unimplemented!()
 }

@@ -734,9 +734,15 @@ struct StartZonesResult {
 
 // A running zone and the configuration which started it.
 #[derive(Debug)]
-struct OmicronZone {
+pub(crate) struct OmicronZone {
     runtime: RunningZone,
     config: OmicronZoneConfigLocal,
+}
+
+impl OmicronZone {
+    pub(crate) fn into_runtime(self) -> RunningZone {
+        self.runtime
+    }
 }
 
 impl OmicronZone {
@@ -3446,7 +3452,7 @@ impl ServiceManager {
     // - `all_u2_pools` provides a snapshot into durable storage on this sled,
     // which gives the storage manager an opportunity to validate the zone's
     // storage configuration against the reality of the current sled.
-    async fn start_omicron_zone(
+    pub(crate) async fn start_omicron_zone(
         &self,
         mount_config: &MountConfig,
         zone: &OmicronZoneConfig,
