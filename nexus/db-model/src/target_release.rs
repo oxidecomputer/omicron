@@ -3,20 +3,17 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{Generation, impl_enum_type};
-use crate::schema::target_release;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
+use nexus_db_schema::schema::target_release;
 use nexus_types::external_api::views;
 use omicron_uuid_kinds::TufRepoKind;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "target_release_source", schema = "public"))]
-    pub struct TargetReleaseSourceEnum;
+    TargetReleaseSourceEnum:
 
     /// The source of the software release that should be deployed to the rack.
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq, Eq, Hash)]
-    #[diesel(sql_type = TargetReleaseSourceEnum)]
     pub enum TargetReleaseSource;
 
     Unspecified => b"unspecified"

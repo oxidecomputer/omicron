@@ -6,15 +6,15 @@ use super::{MacAddr, VpcSubnet};
 use crate::Name;
 use crate::SqlU8;
 use crate::impl_enum_type;
-use crate::schema::instance_network_interface;
-use crate::schema::network_interface;
-use crate::schema::service_network_interface;
 use chrono::DateTime;
 use chrono::Utc;
 use db_macros::Resource;
 use diesel::AsChangeset;
 use ipnetwork::IpNetwork;
 use ipnetwork::NetworkSize;
+use nexus_db_schema::schema::instance_network_interface;
+use nexus_db_schema::schema::network_interface;
+use nexus_db_schema::schema::service_network_interface;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
@@ -33,12 +33,9 @@ use uuid::Uuid;
 pub const MAX_NICS_PER_INSTANCE: usize = 8;
 
 impl_enum_type! {
-    #[derive(SqlType, QueryId, Debug, Clone, Copy)]
-    #[diesel(postgres_type(name = "network_interface_kind", schema = "public"))]
-    pub struct NetworkInterfaceKindEnum;
+    NetworkInterfaceKindEnum:
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
-    #[diesel(sql_type = NetworkInterfaceKindEnum)]
     pub enum NetworkInterfaceKind;
 
     Instance => b"instance"

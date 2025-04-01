@@ -7,7 +7,6 @@
 use super::DataStore;
 use crate::authz;
 use crate::authz::ApiResource;
-use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::column_walker::AllColumnsOf;
@@ -23,11 +22,9 @@ use crate::db::model::AntiAffinityGroup;
 use crate::db::model::AntiAffinityGroupInstanceMembership;
 use crate::db::model::AntiAffinityGroupUpdate;
 use crate::db::model::InstanceState;
-use crate::db::model::InstanceStateEnum;
 use crate::db::model::Name;
 use crate::db::model::Project;
 use crate::db::model::VmmState;
-use crate::db::model::VmmStateEnum;
 use crate::db::pagination::RawPaginator;
 use crate::db::pagination::paginated;
 use crate::transaction_retry::OptionalError;
@@ -36,6 +33,8 @@ use chrono::Utc;
 use diesel::helper_types::AsSelect;
 use diesel::pg::Pg;
 use diesel::prelude::*;
+use nexus_db_schema::enums::InstanceStateEnum;
+use nexus_db_schema::enums::VmmStateEnum;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -90,7 +89,7 @@ impl DataStore {
             }
         }
 
-        use db::schema::anti_affinity_group::dsl;
+        use nexus_db_schema::schema::anti_affinity_group::dsl;
         let result: Vec<(Uuid, Name)> = dsl::anti_affinity_group
             .filter(
                 dsl::id.eq_any(ids.clone()).or(dsl::name.eq_any(names.clone())),
@@ -137,8 +136,8 @@ impl DataStore {
         authz_instance: &authz::Instance,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<AffinityGroup> {
-        use db::schema::affinity_group::dsl as group_dsl;
-        use db::schema::affinity_group_instance_membership::dsl as membership_dsl;
+        use nexus_db_schema::schema::affinity_group::dsl as group_dsl;
+        use nexus_db_schema::schema::affinity_group_instance_membership::dsl as membership_dsl;
 
         opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
 
@@ -175,8 +174,8 @@ impl DataStore {
         authz_instance: &authz::Instance,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<AntiAffinityGroup> {
-        use db::schema::anti_affinity_group::dsl as group_dsl;
-        use db::schema::anti_affinity_group_instance_membership::dsl as membership_dsl;
+        use nexus_db_schema::schema::anti_affinity_group::dsl as group_dsl;
+        use nexus_db_schema::schema::anti_affinity_group_instance_membership::dsl as membership_dsl;
 
         opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
 
@@ -214,7 +213,7 @@ impl DataStore {
         authz_project: &authz::Project,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<AffinityGroup> {
-        use db::schema::affinity_group::dsl;
+        use nexus_db_schema::schema::affinity_group::dsl;
 
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
@@ -241,7 +240,7 @@ impl DataStore {
         authz_project: &authz::Project,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<AntiAffinityGroup> {
-        use db::schema::anti_affinity_group::dsl;
+        use nexus_db_schema::schema::anti_affinity_group::dsl;
 
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
@@ -268,7 +267,7 @@ impl DataStore {
         authz_project: &authz::Project,
         group: AffinityGroup,
     ) -> CreateResult<AffinityGroup> {
-        use db::schema::affinity_group::dsl;
+        use nexus_db_schema::schema::affinity_group::dsl;
 
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
@@ -299,7 +298,7 @@ impl DataStore {
         authz_project: &authz::Project,
         group: AntiAffinityGroup,
     ) -> CreateResult<AntiAffinityGroup> {
-        use db::schema::anti_affinity_group::dsl;
+        use nexus_db_schema::schema::anti_affinity_group::dsl;
 
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
@@ -335,7 +334,7 @@ impl DataStore {
     ) -> UpdateResult<AffinityGroup> {
         opctx.authorize(authz::Action::Modify, authz_affinity_group).await?;
 
-        use db::schema::affinity_group::dsl;
+        use nexus_db_schema::schema::affinity_group::dsl;
         diesel::update(dsl::affinity_group)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_affinity_group.id()))
@@ -364,7 +363,7 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    use db::schema::affinity_group::dsl as group_dsl;
+                    use nexus_db_schema::schema::affinity_group::dsl as group_dsl;
                     let now = Utc::now();
 
                     // Delete the Affinity Group
@@ -387,7 +386,7 @@ impl DataStore {
                         })?;
 
                     // Ensure all memberships in the affinity group are deleted
-                    use db::schema::affinity_group_instance_membership::dsl as member_dsl;
+                    use nexus_db_schema::schema::affinity_group_instance_membership::dsl as member_dsl;
                     diesel::delete(member_dsl::affinity_group_instance_membership)
                         .filter(member_dsl::group_id.eq(authz_affinity_group.id()))
                         .execute_async(&conn)
@@ -421,7 +420,7 @@ impl DataStore {
             .authorize(authz::Action::Modify, authz_anti_affinity_group)
             .await?;
 
-        use db::schema::anti_affinity_group::dsl;
+        use nexus_db_schema::schema::anti_affinity_group::dsl;
         diesel::update(dsl::anti_affinity_group)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_anti_affinity_group.id()))
@@ -452,7 +451,7 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    use db::schema::anti_affinity_group::dsl as group_dsl;
+                    use nexus_db_schema::schema::anti_affinity_group::dsl as group_dsl;
                     let now = Utc::now();
 
                     // Delete the Anti Affinity Group
@@ -475,7 +474,7 @@ impl DataStore {
                         })?;
 
                     // Ensure all memberships in the anti affinity group are deleted
-                    use db::schema::anti_affinity_group_instance_membership::dsl as member_dsl;
+                    use nexus_db_schema::schema::anti_affinity_group_instance_membership::dsl as member_dsl;
                     diesel::delete(member_dsl::anti_affinity_group_instance_membership)
                         .filter(member_dsl::group_id.eq(authz_anti_affinity_group.id()))
                         .execute_async(&conn)
@@ -635,9 +634,9 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, authz_affinity_group).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        use db::schema::affinity_group_instance_membership::dsl;
-        use db::schema::instance::dsl as instance_dsl;
-        use db::schema::vmm::dsl as vmm_dsl;
+        use nexus_db_schema::schema::affinity_group_instance_membership::dsl;
+        use nexus_db_schema::schema::instance::dsl as instance_dsl;
+        use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
         dsl::affinity_group_instance_membership
             .filter(dsl::group_id.eq(authz_affinity_group.id()))
             .filter(dsl::instance_id.eq(instance_id.into_untyped_uuid()))
@@ -693,9 +692,9 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, authz_anti_affinity_group).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        use db::schema::anti_affinity_group_instance_membership::dsl;
-        use db::schema::instance::dsl as instance_dsl;
-        use db::schema::vmm::dsl as vmm_dsl;
+        use nexus_db_schema::schema::anti_affinity_group_instance_membership::dsl;
+        use nexus_db_schema::schema::instance::dsl as instance_dsl;
+        use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
         dsl::anti_affinity_group_instance_membership
             .filter(dsl::group_id.eq(authz_anti_affinity_group.id()))
             .filter(dsl::instance_id.eq(instance_id.into_untyped_uuid()))
@@ -755,10 +754,10 @@ impl DataStore {
         self.transaction_retry_wrapper("affinity_group_member_instance_add")
             .transaction(&conn, |conn| {
                 let err = err.clone();
-                use db::schema::affinity_group::dsl as group_dsl;
-                use db::schema::affinity_group_instance_membership::dsl as membership_dsl;
-                use db::schema::instance::dsl as instance_dsl;
-                use db::schema::sled_resource_vmm::dsl as resource_dsl;
+                use nexus_db_schema::schema::affinity_group::dsl as group_dsl;
+                use nexus_db_schema::schema::affinity_group_instance_membership::dsl as membership_dsl;
+                use nexus_db_schema::schema::instance::dsl as instance_dsl;
+                use nexus_db_schema::schema::sled_resource_vmm::dsl as resource_dsl;
 
                 async move {
                     // Check that the group exists
@@ -922,10 +921,10 @@ impl DataStore {
         self.transaction_retry_wrapper("anti_affinity_group_member_instance_add")
             .transaction(&conn, |conn| {
                 let err = err.clone();
-                use db::schema::anti_affinity_group::dsl as group_dsl;
-                use db::schema::anti_affinity_group_instance_membership::dsl as membership_dsl;
-                use db::schema::instance::dsl as instance_dsl;
-                use db::schema::sled_resource_vmm::dsl as resource_dsl;
+                use nexus_db_schema::schema::anti_affinity_group::dsl as group_dsl;
+                use nexus_db_schema::schema::anti_affinity_group_instance_membership::dsl as membership_dsl;
+                use nexus_db_schema::schema::instance::dsl as instance_dsl;
+                use nexus_db_schema::schema::sled_resource_vmm::dsl as resource_dsl;
 
                 async move {
                     // Check that the group exists
@@ -1070,7 +1069,7 @@ impl DataStore {
         opctx: &OpContext,
         instance_id: InstanceUuid,
     ) -> Result<(), Error> {
-        use db::schema::affinity_group_instance_membership::dsl;
+        use nexus_db_schema::schema::affinity_group_instance_membership::dsl;
 
         diesel::delete(dsl::affinity_group_instance_membership)
             .filter(dsl::instance_id.eq(instance_id.into_untyped_uuid()))
@@ -1085,7 +1084,7 @@ impl DataStore {
         opctx: &OpContext,
         instance_id: InstanceUuid,
     ) -> Result<(), Error> {
-        use db::schema::anti_affinity_group_instance_membership::dsl;
+        use nexus_db_schema::schema::anti_affinity_group_instance_membership::dsl;
 
         diesel::delete(dsl::anti_affinity_group_instance_membership)
             .filter(dsl::instance_id.eq(instance_id.into_untyped_uuid()))
@@ -1108,8 +1107,8 @@ impl DataStore {
         self.transaction_retry_wrapper("affinity_group_member_instance_delete")
             .transaction(&conn, |conn| {
                 let err = err.clone();
-                use db::schema::affinity_group::dsl as group_dsl;
-                use db::schema::affinity_group_instance_membership::dsl as membership_dsl;
+                use nexus_db_schema::schema::affinity_group::dsl as group_dsl;
+                use nexus_db_schema::schema::affinity_group_instance_membership::dsl as membership_dsl;
 
                 async move {
                     // Check that the group exists
@@ -1174,8 +1173,8 @@ impl DataStore {
         self.transaction_retry_wrapper("anti_affinity_group_member_instance_delete")
             .transaction(&conn, |conn| {
                 let err = err.clone();
-                use db::schema::anti_affinity_group::dsl as group_dsl;
-                use db::schema::anti_affinity_group_instance_membership::dsl as membership_dsl;
+                use nexus_db_schema::schema::anti_affinity_group::dsl as group_dsl;
+                use nexus_db_schema::schema::anti_affinity_group_instance_membership::dsl as membership_dsl;
 
                 async move {
                     // Check that the group exists
@@ -1304,7 +1303,7 @@ mod tests {
         datastore: &DataStore,
         instance: InstanceUuid,
     ) {
-        use db::schema::sled_resource_vmm::dsl;
+        use nexus_db_schema::schema::sled_resource_vmm::dsl;
         diesel::insert_into(dsl::sled_resource_vmm)
             .values(SledResourceVmm::new(
                 PropolisUuid::new_v4(),
@@ -1327,7 +1326,7 @@ mod tests {
         datastore: &DataStore,
         instance: InstanceUuid,
     ) {
-        use db::schema::sled_resource_vmm::dsl;
+        use nexus_db_schema::schema::sled_resource_vmm::dsl;
         diesel::delete(dsl::sled_resource_vmm)
             .filter(dsl::instance_id.eq(instance.into_untyped_uuid()))
             .execute_async(
