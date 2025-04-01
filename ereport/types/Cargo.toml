@@ -8,7 +8,6 @@ dropshot.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-uuid.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-uuid-kinds.workspace = true
 

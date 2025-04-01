@@ -59,7 +59,7 @@ impl_typed_uuid_kind! {
     DemoSaga => "demo_saga",
     Downstairs => "downstairs",
     DownstairsRegion => "downstairs_region",
-    EreporterGeneration => "ereporter_generation",
+    EreporterRestart => "ereporter_restart",
     ExternalIp => "external_ip",
     Instance => "instance",
     LoopbackAddress => "loopback_address",

@@ -1137,18 +1137,9 @@
           {
             "in": "query",
             "name": "committed",
-            "description": "The ENA of the last ereport committed to persistent storage from the requested reporter generation.\n\nIf the generation parameter matches the reporter's current generation, it is permitted to discard any ereports with ENAs up to and including this value. If the generation has changed from the provided generation, the reporter will not discard data.",
+            "description": "The ENA of the last ereport committed to persistent storage from the requested reporter restart generation.\n\nIf the restart ID parameter matches the reporter's current restart ID, it is permitted to discard any ereports with ENAs up to and including this value. If the restart ID has changed from the provided one, the reporter will not discard data.",
             "schema": {
               "$ref": "#/components/schemas/Ena"
-            }
-          },
-          {
-            "in": "query",
-            "name": "generation",
-            "description": "The generation (restart nonce) of the reporter at which all other query parameters are valid.\n\nIf this value does not match the reporter's current generation, the reporter's response will include the current generation, and will start at the earliest known ENA, rather than the provided `last_seen` ENA.`",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/TypedUuidForEreporterGenerationKind"
             }
           },
           {
@@ -1164,8 +1155,17 @@
           },
           {
             "in": "query",
+            "name": "restart_id",
+            "description": "The restart ID of the reporter at which all other query parameters are valid.\n\nIf this value does not match the reporter's restart ID, the reporter's response will include the current generation, and will start at the earliest known ENA, rather than the provided `start_at` ENA.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForEreporterRestartKind"
+            }
+          },
+          {
+            "in": "query",
             "name": "start_at",
-            "description": "If present, the reporter should not include ENAs earlier than this one in its response, provided that the query's requested generation matches the current generation.",
+            "description": "If present, the reporter should not include ENAs earlier than this one in its response, provided that the query's requested restart ID matches the current restart ID.",
             "schema": {
               "$ref": "#/components/schemas/Ena"
             }
@@ -1650,14 +1650,6 @@
         "description": "A tranche of ereports received from a reporter.",
         "type": "object",
         "properties": {
-          "generation": {
-            "description": "The reporter's current generation ID.\n\nIf this is not equal to the current known generation, then the reporter has restarted.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForEreporterGenerationKind"
-              }
-            ]
-          },
           "items": {
             "description": "list of items on this page of results",
             "type": "array",
@@ -1669,11 +1661,19 @@
             "nullable": true,
             "description": "token used to fetch the next page of results (if any)",
             "type": "string"
+          },
+          "restart_id": {
+            "description": "The reporter's current restart ID.\n\nIf this is not equal to the current known restart ID, then the reporter has restarted.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForEreporterRestartKind"
+              }
+            ]
           }
         },
         "required": [
-          "generation",
-          "items"
+          "items",
+          "restart_id"
         ]
       },
       "Error": {
@@ -3646,7 +3646,7 @@
           }
         ]
       },
-      "TypedUuidForEreporterGenerationKind": {
+      "TypedUuidForEreporterRestartKind": {
         "type": "string",
         "format": "uuid"
       },

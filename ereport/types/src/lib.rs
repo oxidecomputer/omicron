@@ -5,12 +5,11 @@
 //! Core types for representing ereports.
 
 use core::fmt;
-pub use omicron_uuid_kinds::EreporterGenerationUuid;
+pub use omicron_uuid_kinds::EreporterRestartUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::num::NonZeroU32;
-use uuid::Uuid;
 
 /// An ereport message.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -59,14 +58,6 @@ impl fmt::LowerHex for Ena {
         fmt::LowerHex::fmt(&self.0, f)
     }
 }
-/// Uniquely identifies the entity that generated an ereport.
-#[derive(
-    Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema,
-)]
-pub struct Reporter {
-    pub reporter_id: Uuid,
-    pub gen_id: EreporterGenerationUuid,
-}
 
 /// The body of an ereport: either an event is reported, or a loss report.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -105,26 +96,26 @@ pub struct Event {
 /// Query parameters to request a tranche of ereports from a reporter.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct EreportQuery {
-    /// The generation (restart nonce) of the reporter at which all other query
-    /// parameters are valid.
+    /// The restart ID of the reporter at which all other query parameters are
+    /// valid.
     ///
-    /// If this value does not match the reporter's current generation, the
+    /// If this value does not match the reporter's restart ID, the
     /// reporter's response will include the current generation, and will start
-    /// at the earliest known ENA, rather than the provided `last_seen` ENA.`
-    pub generation: EreporterGenerationUuid,
+    /// at the earliest known ENA, rather than the provided `start_at` ENA.
+    pub restart_id: EreporterRestartUuid,
 
     /// If present, the reporter should not include ENAs earlier than this one
-    /// in its response, provided that the query's requested generation matches
-    /// the current generation.
+    /// in its response, provided that the query's requested restart ID matches
+    /// the current restart ID.
     pub start_at: Option<Ena>,
 
     /// The ENA of the last ereport committed to persistent storage from the
-    /// requested reporter generation.
+    /// requested reporter restart generation.
     ///
-    /// If the generation parameter matches the reporter's current generation,
+    /// If the restart ID parameter matches the reporter's current restart ID,
     /// it is permitted to discard any ereports with ENAs up to and including
-    /// this value. If the generation has changed from the provided generation,
-    /// the reporter will not discard data.
+    /// this value. If the restart ID has changed from the provided one, the
+    /// reporter will not discard data.
     pub committed: Option<Ena>,
 
     /// Maximum number of ereports to return in this tranche.
@@ -134,11 +125,11 @@ pub struct EreportQuery {
 /// A tranche of ereports received from a reporter.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Ereports {
-    /// The reporter's current generation ID.
+    /// The reporter's current restart ID.
     ///
-    /// If this is not equal to the current known generation, then the reporter
+    /// If this is not equal to the current known restart ID, then the reporter
     /// has restarted.
-    pub generation: EreporterGenerationUuid,
+    pub restart_id: EreporterRestartUuid,
     /// The ereports in this tranche, and the ENA of the next page of ereports
     /// (if one exists).)
     #[serde(flatten)]
