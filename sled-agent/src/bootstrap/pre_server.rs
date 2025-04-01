@@ -147,6 +147,7 @@ impl BootstrapAgentStartup {
             config.switch_zone_maghemite_links.clone(),
             long_running_task_handles.storage_manager.clone(),
             long_running_task_handles.zone_bundler.clone(),
+            crate::services::RealSystemApi::new(),
         );
 
         // Inform the hardware monitor that the service manager is ready

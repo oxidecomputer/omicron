@@ -546,32 +546,6 @@ impl RunningZone {
         Ok(network)
     }
 
-    /// This is the API for creating a bootstrap address on the switch zone.
-    pub async fn ensure_bootstrap_address(
-        &self,
-        address: Ipv6Addr,
-    ) -> Result<(), EnsureAddressError> {
-        let vnic = self.inner.bootstrap_vnic.as_ref().ok_or_else(|| {
-            EnsureAddressError::MissingBootstrapVnic {
-                address: address.to_string(),
-                zone: self.inner.name.clone(),
-            }
-        })?;
-        let addrtype =
-            AddressRequest::new_static(std::net::IpAddr::V6(address), None);
-        let addrobj =
-            AddrObject::new(vnic.name(), "bootstrap6").map_err(|err| {
-                EnsureAddressError::AddrObject {
-                    request: addrtype,
-                    zone: self.inner.name.clone(),
-                    err,
-                }
-            })?;
-        let _ =
-            Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
-        Ok(())
-    }
-
     pub async fn ensure_address_for_port(
         &self,
         name: &str,
@@ -1246,6 +1220,7 @@ impl<'a> ZoneBuilder<'a> {
             return Err(InstallZoneError::IncompleteBuilder);
         };
 
+        // XXX
         let control_vnic =
             underlay_vnic_allocator.new_control(None).map_err(|err| {
                 InstallZoneError::CreateVnic {
@@ -1289,6 +1264,8 @@ impl<'a> ZoneBuilder<'a> {
         net_device_names.dedup();
 
         zone_root_path.path = zone_root_path.path.join(&full_zone_name);
+
+        // XXX-smklein
         Zones::install_omicron_zone(
             &log,
             &zone_root_path,
