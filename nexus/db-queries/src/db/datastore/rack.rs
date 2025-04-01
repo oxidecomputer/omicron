@@ -195,7 +195,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Rack> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        use db::schema::rack::dsl;
+        use nexus_db_schema::schema::rack::dsl;
         paginated(dsl::rack, dsl::id, pagparams)
             .select(Rack::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
@@ -209,7 +209,7 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Rack> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        use db::schema::rack::dsl;
+        use nexus_db_schema::schema::rack::dsl;
         paginated(dsl::rack, dsl::id, pagparams)
             .select(Rack::as_select())
             .filter(dsl::initialized.eq(true))
@@ -226,7 +226,7 @@ impl DataStore {
         opctx: &OpContext,
         rack: &Rack,
     ) -> Result<Rack, Error> {
-        use db::schema::rack::dsl;
+        use nexus_db_schema::schema::rack::dsl;
 
         diesel::insert_into(dsl::rack)
             .values(rack.clone())
@@ -259,7 +259,7 @@ impl DataStore {
             rack.id(),
             rack.rack_subnet
         );
-        use db::schema::rack::dsl;
+        use nexus_db_schema::schema::rack::dsl;
         diesel::update(dsl::rack)
             .filter(dsl::id.eq(rack.id()))
             .set(dsl::rack_subnet.eq(rack.rack_subnet))
@@ -278,7 +278,7 @@ impl DataStore {
     ) -> Result<IpNetwork, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        use db::schema::rack::dsl;
+        use nexus_db_schema::schema::rack::dsl;
         // It's safe to unwrap the returned `rack_subnet` because
         // we filter on `rack_subnet.is_not_null()`
         let subnet = dsl::rack
@@ -394,7 +394,7 @@ impl DataStore {
         rack_id: Uuid,
     ) -> Result<Vec<SledUnderlaySubnetAllocation>, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        use db::schema::sled_underlay_subnet_allocation::dsl as subnet_dsl;
+        use nexus_db_schema::schema::sled_underlay_subnet_allocation::dsl as subnet_dsl;
         subnet_dsl::sled_underlay_subnet_allocation
             .filter(subnet_dsl::rack_id.eq(rack_id))
             .select(SledUnderlaySubnetAllocation::as_select())
@@ -411,7 +411,7 @@ impl DataStore {
         allocation: &SledUnderlaySubnetAllocation,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        use db::schema::sled_underlay_subnet_allocation::dsl;
+        use nexus_db_schema::schema::sled_underlay_subnet_allocation::dsl;
         diesel::insert_into(dsl::sled_underlay_subnet_allocation)
             .values(allocation.clone())
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
@@ -456,7 +456,7 @@ impl DataStore {
             recovery_user_id.as_ref().to_owned(),
         );
         {
-            use db::schema::silo_user::dsl;
+            use nexus_db_schema::schema::silo_user::dsl;
             diesel::insert_into(dsl::silo_user)
                 .values(silo_user)
                 .execute_async(conn)
@@ -470,7 +470,7 @@ impl DataStore {
             PasswordHashString::from(recovery_user_password_hash),
         );
         {
-            use db::schema::silo_user_password_hash::dsl;
+            use nexus_db_schema::schema::silo_user_password_hash::dsl;
             diesel::insert_into(dsl::silo_user_password_hash)
                 .values(hash)
                 .execute_async(conn)
@@ -660,7 +660,7 @@ impl DataStore {
         opctx: &OpContext,
         rack_init: RackInit,
     ) -> UpdateResult<Rack> {
-        use db::schema::rack::dsl as rack_dsl;
+        use nexus_db_schema::schema::rack::dsl as rack_dsl;
 
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
@@ -832,7 +832,7 @@ impl DataStore {
                     info!(log, "Inserted zpools");
 
                     for dataset in datasets {
-                        use db::schema::crucible_dataset::dsl;
+                        use nexus_db_schema::schema::crucible_dataset::dsl;
                         let zpool_id = dataset.pool_id;
                         Zpool::insert_resource(
                             zpool_id,
@@ -1250,7 +1250,7 @@ mod test {
         ($table:ident, $model:ident) => {
             paste::paste! {
                 async fn [<get_all_ $table s>](db: &DataStore) -> Vec<$model> {
-                    use crate::db::schema::$table::dsl;
+                    use nexus_db_schema::schema::$table::dsl;
                     use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
                     let conn = db.pool_connection_for_tests()
                         .await

@@ -7,13 +7,6 @@
 
 use crate::inventory::ZoneType;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
-use crate::schema::{
-    blueprint, bp_clickhouse_cluster_config,
-    bp_clickhouse_keeper_zone_id_to_node_id,
-    bp_clickhouse_server_zone_id_to_node_id, bp_omicron_dataset,
-    bp_omicron_physical_disk, bp_omicron_zone, bp_omicron_zone_nic,
-    bp_sled_metadata, bp_target,
-};
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
     ArtifactHash, ByteCount, Generation, MacAddr, Name, SledState, SqlU8,
@@ -23,6 +16,13 @@ use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, Utc};
 use clickhouse_admin_types::{KeeperId, ServerId};
 use ipnetwork::IpNetwork;
+use nexus_db_schema::schema::{
+    blueprint, bp_clickhouse_cluster_config,
+    bp_clickhouse_keeper_zone_id_to_node_id,
+    bp_clickhouse_server_zone_id_to_node_id, bp_omicron_dataset,
+    bp_omicron_physical_disk, bp_omicron_zone, bp_omicron_zone_nic,
+    bp_sled_metadata, bp_target,
+};
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
@@ -147,9 +147,7 @@ pub struct BpSledMetadata {
 }
 
 impl_enum_type!(
-    #[derive(Clone, SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "bp_physical_disk_disposition", schema = "public"))]
-    pub struct DbBpPhysicalDiskDispositionEnum;
+    BpPhysicalDiskDispositionEnum:
 
     /// This type is not actually public, because [`BlueprintPhysicalDiskDisposition`]
     /// interacts with external logic.
@@ -158,7 +156,6 @@ impl_enum_type!(
     /// type `BpPhysicalDiskDispositionEnum` in public interface`. Marking this type `pub`,
     /// without actually making it public, tricks rustc in a desirable way.
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
-    #[diesel(sql_type = DbBpPhysicalDiskDispositionEnum)]
     pub enum DbBpPhysicalDiskDisposition;
 
     // Enum values
@@ -301,9 +298,7 @@ impl TryFrom<BpOmicronPhysicalDisk> for BlueprintPhysicalDiskConfig {
 }
 
 impl_enum_type!(
-    #[derive(Clone, SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "bp_dataset_disposition", schema = "public"))]
-    pub struct DbBpDatasetDispositionEnum;
+    BpDatasetDispositionEnum:
 
     /// This type is not actually public, because [`BlueprintDatasetDisposition`]
     /// interacts with external logic.
@@ -312,7 +307,6 @@ impl_enum_type!(
     /// type `BpDatasetDispositionEnum` in public interface`. Marking this type `pub`,
     /// without actually making it public, tricks rustc in a desirable way.
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
-    #[diesel(sql_type = DbBpDatasetDispositionEnum)]
     pub enum DbBpDatasetDisposition;
 
     // Enum values
@@ -910,9 +904,7 @@ impl BpOmicronZone {
 }
 
 impl_enum_type!(
-    #[derive(Clone, SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "bp_zone_disposition", schema = "public"))]
-    pub struct DbBpZoneDispositionEnum;
+    BpZoneDispositionEnum:
 
     /// This type is not actually public, because [`BlueprintZoneDisposition`]
     /// interacts with external logic.
@@ -921,7 +913,6 @@ impl_enum_type!(
     /// type `BpZoneDispositionEnum` in public interface`. Marking this type `pub`,
     /// without actually making it public, tricks rustc in a desirable way.
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
-    #[diesel(sql_type = DbBpZoneDispositionEnum)]
     pub enum DbBpZoneDisposition;
 
     // Enum values
@@ -988,12 +979,9 @@ impl TryFrom<DbBpZoneDispositionColumns> for BlueprintZoneDisposition {
 }
 
 impl_enum_type!(
-    #[derive(Clone, SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "bp_zone_image_source", schema = "public"))]
-    pub struct DbBpZoneImageSourceEnum;
+    BpZoneImageSourceEnum:
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
-    #[diesel(sql_type = DbBpZoneImageSourceEnum)]
     pub enum DbBpZoneImageSource;
 
     // Enum values

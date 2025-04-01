@@ -4,13 +4,10 @@
 
 use std::str::FromStr;
 
-use crate::{
-    Generation, SemverVersion,
-    schema::{tuf_artifact, tuf_repo, tuf_repo_artifact},
-    typed_uuid::DbTypedUuid,
-};
+use crate::{Generation, SemverVersion, typed_uuid::DbTypedUuid};
 use chrono::{DateTime, Utc};
 use diesel::{deserialize::FromSql, serialize::ToSql, sql_types::Text};
+use nexus_db_schema::schema::{tuf_artifact, tuf_repo, tuf_repo_artifact};
 use omicron_common::{api::external, update::ArtifactId};
 use omicron_uuid_kinds::TufArtifactKind;
 use omicron_uuid_kinds::TufRepoKind;

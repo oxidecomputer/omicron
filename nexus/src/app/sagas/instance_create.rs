@@ -1325,7 +1325,7 @@ pub mod test {
 
     async fn no_instance_records_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::Instance;
-        use nexus_db_queries::db::schema::instance::dsl;
+        use nexus_db_schema::schema::instance::dsl;
 
         dsl::instance
             .filter(dsl::time_deleted.is_null())
@@ -1342,7 +1342,7 @@ pub mod test {
     async fn no_network_interface_records_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::NetworkInterface;
         use nexus_db_queries::db::model::NetworkInterfaceKind;
-        use nexus_db_queries::db::schema::network_interface::dsl;
+        use nexus_db_schema::schema::network_interface::dsl;
 
         dsl::network_interface
             .filter(dsl::time_deleted.is_null())
@@ -1359,7 +1359,7 @@ pub mod test {
 
     async fn no_external_ip_records_exist(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::ExternalIp;
-        use nexus_db_queries::db::schema::external_ip::dsl;
+        use nexus_db_schema::schema::external_ip::dsl;
 
         dsl::external_ip
             .filter(dsl::time_deleted.is_null())
@@ -1376,7 +1376,7 @@ pub mod test {
 
     async fn disk_is_detached(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::Disk;
-        use nexus_db_queries::db::schema::disk::dsl;
+        use nexus_db_schema::schema::disk::dsl;
 
         dsl::disk
             .filter(dsl::time_deleted.is_null())
