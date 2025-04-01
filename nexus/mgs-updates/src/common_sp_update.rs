@@ -89,7 +89,7 @@ pub trait ReconfiguratorSpComponentUpdater {
         _mgs_clients: &'a mut MgsClients,
         _update: &'a PendingMgsUpdate,
     ) -> BoxFuture<'a, Result<VersionStatus, GatewayClientError>> {
-        // XXX-dap
+        // XXX-dap-blocks-test
         todo!();
     }
 
@@ -100,7 +100,7 @@ pub trait ReconfiguratorSpComponentUpdater {
         _mgs_clients: &'a mut MgsClients,
         _update: &'a PendingMgsUpdate,
     ) -> BoxFuture<'a, Result<(), GatewayClientError>> {
-        // XXX-dap
+        // XXX-dap-blocks-test
         todo!();
     }
 }
