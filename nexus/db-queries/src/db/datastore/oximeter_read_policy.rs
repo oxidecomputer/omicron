@@ -7,7 +7,6 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::error::ErrorHandler;
 use crate::db::error::public_error_from_diesel;
 use crate::db::pagination::paginated;
