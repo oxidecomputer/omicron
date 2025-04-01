@@ -7,7 +7,6 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::error::ErrorHandler;
 use crate::db::error::public_error_from_diesel;
 use crate::db::model::Certificate;
@@ -33,7 +32,7 @@ impl DataStore {
         opctx: &OpContext,
         certificate: Certificate,
     ) -> CreateResult<Certificate> {
-        use db::schema::certificate::dsl;
+        use nexus_db_schema::schema::certificate::dsl;
 
         let authz_silo = opctx
             .authn
@@ -69,7 +68,7 @@ impl DataStore {
         pagparams: &PaginatedBy<'_>,
         silo_only: bool,
     ) -> ListResultVec<Certificate> {
-        use db::schema::certificate::dsl;
+        use nexus_db_schema::schema::certificate::dsl;
 
         let silo = if silo_only {
             let authz_silo = opctx
@@ -129,7 +128,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_cert: &authz::Certificate,
     ) -> DeleteResult {
-        use db::schema::certificate::dsl;
+        use nexus_db_schema::schema::certificate::dsl;
 
         opctx.authorize(authz::Action::Delete, authz_cert).await?;
 

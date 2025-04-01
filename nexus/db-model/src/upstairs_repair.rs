@@ -5,10 +5,10 @@
 use super::impl_enum_type;
 use crate::SqlU16;
 use crate::ipv6;
-use crate::schema::upstairs_repair_notification;
-use crate::schema::upstairs_repair_progress;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
+use nexus_db_schema::schema::upstairs_repair_notification;
+use nexus_db_schema::schema::upstairs_repair_progress;
 use omicron_common::api::internal;
 use omicron_uuid_kinds::DownstairsRegionKind;
 use omicron_uuid_kinds::TypedUuid;
@@ -19,12 +19,9 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddrV6; // internal::nexus::UpstairsRepairType;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "upstairs_repair_notification_type", schema = "public"))]
-    pub struct UpstairsRepairNotificationTypeEnum;
+    UpstairsRepairNotificationTypeEnum:
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[diesel(sql_type = UpstairsRepairNotificationTypeEnum)]
     pub enum UpstairsRepairNotificationType;
 
     // Notification types
@@ -34,12 +31,9 @@ impl_enum_type!(
 );
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "upstairs_repair_type", schema = "public"))]
-    pub struct UpstairsRepairTypeEnum;
+    UpstairsRepairTypeEnum:
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq, Eq, Hash)]
-    #[diesel(sql_type = UpstairsRepairTypeEnum)]
     pub enum UpstairsRepairType;
 
     // Types of repair a Crucible Upstairs can do

@@ -4,7 +4,6 @@
 
 use super::DataStore;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::error::ErrorHandler;
 use crate::db::error::public_error_from_diesel;
 use crate::db::pagination::paginated;
@@ -26,7 +25,7 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<BfdSession> {
-        use db::schema::bfd_session::dsl;
+        use nexus_db_schema::schema::bfd_session::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
         paginated(dsl::bfd_session, dsl::id, pagparams)
             .select(BfdSession::as_select())
@@ -41,7 +40,7 @@ impl DataStore {
         opctx: &OpContext,
         config: &params::BfdSessionEnable,
     ) -> CreateResult<BfdSession> {
-        use db::schema::bfd_session::dsl;
+        use nexus_db_schema::schema::bfd_session::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
 
         let session = BfdSession {
@@ -72,7 +71,7 @@ impl DataStore {
         opctx: &OpContext,
         config: &params::BfdSessionDisable,
     ) -> DeleteResult {
-        use db::schema::bfd_session::dsl;
+        use nexus_db_schema::schema::bfd_session::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
 
         diesel::update(dsl::bfd_session)

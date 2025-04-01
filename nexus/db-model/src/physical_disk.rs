@@ -6,9 +6,9 @@ use super::{
     Generation, PhysicalDiskKind, PhysicalDiskPolicy, PhysicalDiskState,
 };
 use crate::collection::DatastoreCollectionConfig;
-use crate::schema::{physical_disk, zpool};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
+use nexus_db_schema::schema::{physical_disk, zpool};
 use nexus_types::{external_api::views, identity::Asset};
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use uuid::Uuid;
@@ -120,7 +120,7 @@ mod diesel_util {
         type Output = E::Output;
 
         fn physical_disk_filter(self, filter: DiskFilter) -> Self::Output {
-            use crate::schema::physical_disk::dsl as physical_disk_dsl;
+            use nexus_db_schema::schema::physical_disk::dsl as physical_disk_dsl;
 
             // These are only boxed for ease of reference above.
             let all_matching_policies: BoxedIterator<
@@ -148,11 +148,11 @@ mod diesel_util {
     type BoxedIterator<T> = Box<dyn Iterator<Item = T>>;
     type PhysicalDiskFilterQuery = And<
         EqAny<
-            crate::schema::physical_disk::disk_policy,
+            nexus_db_schema::schema::physical_disk::disk_policy,
             BoxedIterator<crate::PhysicalDiskPolicy>,
         >,
         EqAny<
-            crate::schema::physical_disk::disk_state,
+            nexus_db_schema::schema::physical_disk::disk_state,
             BoxedIterator<crate::PhysicalDiskState>,
         >,
     >;
