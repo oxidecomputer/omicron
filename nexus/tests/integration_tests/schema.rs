@@ -1779,10 +1779,10 @@ fn before_133_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                         instance_id
                     ) VALUES
                     (
-                        '{vmm1_id}', '{sled_id}', 1, 0, 0, {instance1_id}
+                        '{vmm1_id}', '{sled_id}', 1, 0, 0, '{instance1_id}'
                     ),
                     (
-                        '{vmm2_id}', '{sled_id}', 1, 0, 0, {instance2_id}
+                        '{vmm2_id}', '{sled_id}', 1, 0, 0, '{instance2_id}'
                     );
 
                 "
@@ -1806,16 +1806,16 @@ fn before_133_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                     propolis_port,
                     state
                 ) VALUES (
-                    {vmm1_id},
+                    '{vmm1_id}',
                     now(),
                     NULL,
-                    {instance1_id},
+                    '{instance1_id}',
                     now(),
                     1,
-                    {sled_id},
-                    fd00:1122:3344:104::1,
+                    '{sled_id}',
+                    'fd00:1122:3344:104::1',
                     12400,
-                    'running',
+                    'running'
                 );
             "
             ))
@@ -1835,9 +1835,7 @@ fn after_133_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
             .client
             .query(
                 r#"
-                SELECT
-                    id,
-                FROM sled_resource_vmm
+                SELECT id FROM sled_resource_vmm
                 "#,
                 &[],
             )
