@@ -94,7 +94,7 @@ pub struct MemoryReservations {
     /// RAM must include headroom for those services potentially forking and
     /// bursting required swap or resident pages.
     //
-    // XXX: This is really something we should be told by Neuxs, perhaps after
+    // XXX: This is really something we should be told by Nexus, perhaps after
     // starting with this conservative estimate to get the sled started.
     control_plane_earmark_bytes: u64,
     // XXX: Crucible involves some amount of memory in support of the volumes it
