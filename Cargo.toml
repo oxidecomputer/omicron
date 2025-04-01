@@ -59,6 +59,7 @@ members = [
     "gateway-types",
     "id-map",
     "illumos-utils",
+    "illumos-utils/header-check",
     "installinator-api",
     "installinator-common",
     "installinator",

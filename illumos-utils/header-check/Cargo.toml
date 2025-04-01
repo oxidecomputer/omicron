@@ -1,0 +1,26 @@
+[package]
+name = "illumos-utils-hdrchk"
+version = "0.0.0"
+license = "MPL-2.0"
+build = "build.rs"
+publish = false
+edition = "2015"
+
+[dependencies]
+illumos-utils = { path = "../" }
+libc = "0.2"
+strum = "0.25"
+
+[build-dependencies]
+cc = "1"
+ctest2 = "0.4.7"
+
+[[test]]
+name = "page"
+path = "test/page.rs"
+harness = false
+
+[[test]]
+name = "dkio"
+path = "test/dkio.rs"
+harness = false

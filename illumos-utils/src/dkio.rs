@@ -93,11 +93,15 @@ impl MediaInfoExtended {
 
 // Types and constants from `man dkio` under `DKIOCGMEDIAINFOEXT`
 
+// pub only for header-check, doc(hidden) because we'd hide it otherwise.
 #[derive(Debug, Default, Clone, Copy)]
 #[repr(C)]
 #[allow(non_camel_case_types)]
-struct dk_minfo_ext {
-    dki_media_type: c_uint,
+#[doc(hidden)]
+pub struct dk_minfo_ext {
+    // Same as `struct page`, this is public only to quash a warning in the
+    // `ctest2` test.
+    pub dki_media_type: c_uint,
     dki_lbsize: c_uint,
     dki_capacity: diskaddr_t,
     dki_pbsize: c_uint,

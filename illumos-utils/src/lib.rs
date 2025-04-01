@@ -22,6 +22,7 @@ pub mod ipadm;
 pub mod libc;
 pub mod link;
 pub mod opte;
+pub mod page;
 pub mod route;
 pub mod running_zone;
 pub mod scf;
