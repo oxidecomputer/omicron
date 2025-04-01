@@ -19,9 +19,9 @@ use diesel::dsl::sql_query;
 use diesel::expression::SelectableHelper;
 use diesel::sql_types;
 use nexus_db_model::DbOximeterReadMode;
-use nexus_db_model::OximeterReadModeEnum;
 use nexus_db_model::OximeterReadPolicy as DbOximeterReadPolicy;
 use nexus_db_model::SqlU32;
+use nexus_db_schema::enums::OximeterReadModeEnum;
 use nexus_types::deployment::OximeterReadPolicy;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -34,7 +34,7 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, SqlU32>,
     ) -> ListResultVec<OximeterReadPolicy> {
-        use db::schema::oximeter_read_policy;
+        use nexus_db_schema::schema::oximeter_read_policy;
 
         opctx
             .authorize(authz::Action::ListChildren, &authz::BLUEPRINT_CONFIG)
@@ -61,7 +61,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        use db::schema::oximeter_read_policy::dsl;
+        use nexus_db_schema::schema::oximeter_read_policy::dsl;
 
         let latest_policy = dsl::oximeter_read_policy
             .order_by(dsl::version.desc())

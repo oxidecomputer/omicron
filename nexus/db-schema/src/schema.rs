@@ -910,7 +910,7 @@ table! {
 table! {
     oximeter_read_policy (version) {
         version -> Int8,
-        oximeter_read_mode -> crate::oximeter_read_policy::OximeterReadModeEnum,
+        oximeter_read_mode -> crate::enums::OximeterReadModeEnum,
         time_created -> Timestamptz,
     }
 }

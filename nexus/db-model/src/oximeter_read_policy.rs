@@ -6,18 +6,15 @@
 
 use super::impl_enum_type;
 use crate::SqlU32;
-use crate::schema::oximeter_read_policy;
 use chrono::{DateTime, Utc};
+use nexus_db_schema::schema::oximeter_read_policy;
 use nexus_types::deployment;
 use serde::{Deserialize, Serialize};
 
 impl_enum_type!(
-    #[derive(Clone, SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "oximeter_read_mode", schema = "public"))]
-    pub struct OximeterReadModeEnum;
+    OximeterReadModeEnum:
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
-    #[diesel(sql_type = OximeterReadModeEnum)]
     pub enum DbOximeterReadMode;
 
     // Enum values
