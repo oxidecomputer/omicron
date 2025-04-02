@@ -113,7 +113,7 @@ pub(crate) async fn build_tuf_repo(
     }
 
     // XXX fixme
-    let mut measurement_corpus = Vec::new();
+    let measurement_corpus = Vec::new();
     manifest.artifacts.insert(
         KnownArtifactKind::ControlPlane,
         vec![DeserializedArtifactData {
