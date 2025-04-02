@@ -139,11 +139,11 @@ impl MemoryReservations {
 
         info!(
             self.log,
-            "Calculated {vmm_eligible} bytes for VMM \
-            reservoir: {hardware_physical_ram_bytes} physical RAM bytes \
-            - {max_page_t_bytes} bytes for maximum page_t structures \
-            - {} bytes held back for services on the sled",
-            self.control_plane_earmark_bytes
+            "Calculated eligible VMM reservoir size";
+            "vmm_eligible" => %vmm_eligible,
+            "physical_ram_bytes" => %hardware_physical_ram_bytes,
+            "max_page_t_bytes" => %max_page_t_bytes,
+            "control_plane_earmark_bytes" => %self.control_plane_earmark_bytes,
         );
 
         vmm_eligible

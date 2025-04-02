@@ -18,9 +18,6 @@ sidecar_revision.physical = "b"
 # in-sync, rather than querying its NTP zone.
 skip_timesync = true
 
-# Percentage of usable physical DRAM to use for the VMM reservoir, which
-# guest memory is pulled from.
-vmm_reservoir_percentage = 86.3
 # The amount of memory held back for services which exist between zero and one
 # on this Gimlet. This currently includes some additional terms reflecting
 # OS memory use under load.
@@ -33,6 +30,21 @@ vmm_reservoir_percentage = 86.3
 # * Maghemite: 0.25 GiB
 # * NTP: 0.25 GiB
 control_plane_memory_earmark_mb = 45056
+
+# Percentage of otherwise-unbudgeted physical DRAM to use for the VMM reservoir,
+# which guest memory is pulled from.
+#
+# The budget including this number is described in more detail in RFD 413. There
+# are two key details to reiterate here. First, this number is chosen so that
+# there is no change in overall VMM reservoir size on Gimlets with 1 TiB of
+# DRAM, compared to our initial budgeting strategy. Second, whatever the value
+# here, it should be at or below the percentage of memory requested by Propolis
+# even if a sled has a full complement of minimum-sized VMs. Any higher and we
+# risk swapping or OOMing under typical conditions; bad for everyone.
+#
+# We expect this should be higher, but currently a lack of long-uptime
+# varied-usage measurements leads us to be cautious.
+vmm_reservoir_percentage = 86.3
 
 # Swap device size for the system. The device is a sparsely allocated zvol on
 # the internal zpool of the M.2 that we booted from.

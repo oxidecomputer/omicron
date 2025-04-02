@@ -43,10 +43,6 @@ vdevs = [
   "u2_8.vdev",
 ]
 
-# Percentage of usable physical DRAM to use for the VMM reservoir, which
-# guest memory is pulled from.
-vmm_reservoir_percentage = 60
-
 # The amount of memory held back for services which exist between zero and one
 # times on this system. As this is a non-Gimlet target, it is likely that
 # services will all cohabitate here, so this is perhaps less overallocation than
@@ -63,6 +59,22 @@ vmm_reservoir_percentage = 60
 # * Maghemite: 0.25 GiB
 # * NTP: 0.25 GiB
 control_plane_memory_earmark_mb = 6144
+
+# Percentage of otherwise-unbudgeted physical DRAM to use for the VMM reservoir,
+# which guest memory is pulled from.
+#
+# Unlike the Gimlet configurations, this number is not described by an RFD, but
+# has been chosen to not affect development workflows on expected test hardware..
+# The example BOMs describe workstations with 128 GiB of memory, where the
+# initial strategy had sized the VMM reservoir at 64 GiB. A smaller 64 GiB
+# workstation had its VMM reservoir sized to 32 GiB. Taking the next
+# multiple of 10 percentage is an arbitrary choice that, for these two shapes of
+# system, gives the following reservoir sizes:
+# * 128 - 6 (earmark) - 3.75 (`page_t`s)) * 0.6 == 70.95 GiB VMM reservoir
+# * 64 - 6 (earmark) - 1.875 (`page_t`s)) * 0.6 == 33.675 GiB VMM reservoir
+#
+# or reservoirs just a bit larger than their previous 64 and 32 GiB values.
+vmm_reservoir_percentage = 60
 
 # Optionally you can specify the size of the VMM reservoir in MiB.
 # Note vmm_reservoir_percentage and vmm_reservoir_size_mb cannot be specified
