@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::convert::Infallible;
+use std::sync::Arc;
 
 use super::CurrentConfig;
 use super::internal_disks::InternalDisksReceiver;
@@ -76,14 +77,14 @@ pub struct LedgerTask {
     rx: mpsc::Receiver<WriteNewConfig>,
     current_config: watch::Sender<CurrentConfig>,
     internal_disks: InternalDisksReceiver,
-    key_manager_waiter: KeyManagerWaiter,
+    key_manager_waiter: Arc<KeyManagerWaiter>,
     log: Logger,
 }
 
 impl LedgerTask {
     pub fn spawn(
         internal_disks: InternalDisksReceiver,
-        key_manager_waiter: KeyManagerWaiter,
+        key_manager_waiter: Arc<KeyManagerWaiter>,
         log: Logger,
     ) -> (LedgerTaskHandle, watch::Receiver<CurrentConfig>) {
         // We don't expect messages to be queued for long in this channel, so
@@ -585,7 +586,8 @@ mod tests {
             disks_rx,
             mount_config.clone(),
         );
-        let key_manager_waiter = KeyManagerWaiter::fake_key_manager_waiter();
+        let key_manager_waiter =
+            Arc::new(KeyManagerWaiter::fake_key_manager_waiter());
         key_manager_waiter.notify_key_manager_ready();
         let (task_handle, mut current_config) = LedgerTask::spawn(
             internal_disks.clone(),
