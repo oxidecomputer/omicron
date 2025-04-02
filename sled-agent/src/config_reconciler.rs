@@ -20,20 +20,17 @@ use omicron_common::disk::DiskIdentity;
 use sled_storage::config::MountConfig;
 use sled_storage::disk::RawDisk;
 use slog::Logger;
-use tokio::sync::oneshot;
 use tokio::sync::watch;
 
 mod datasets;
 mod external_disks;
 mod internal_disks;
-mod key_requester;
 mod ledger;
 mod raw_disks;
 mod zones;
 
 use self::external_disks::ExternalDisks;
 use self::internal_disks::InternalDisksTask;
-use self::key_requester::KeyManagerWaiter;
 use self::ledger::LedgerTask;
 use self::ledger::LedgerTaskHandle;
 use self::zones::ZoneMap;
@@ -42,7 +39,6 @@ pub use self::ledger::LedgerTaskError;
 
 pub struct ConfigReconcilerHandle {
     reconciler_state_rx: watch::Receiver<Arc<ReconcilerTaskState>>,
-    key_manager_waiter: Arc<KeyManagerWaiter>,
     raw_disks: watch::Sender<IdMap<RawDisk>>,
     ledger_task: LedgerTaskHandle,
     hold_while_waiting_for_sled_agent:
@@ -53,7 +49,7 @@ pub struct ConfigReconcilerHandle {
 struct ReconcilerTaskDependenciesHeldUntilSledAgentStarted {
     reconciler_state_tx: watch::Sender<Arc<ReconcilerTaskState>>,
     current_config_rx: watch::Receiver<CurrentConfig>,
-    key_requester_rx: oneshot::Receiver<StorageKeyRequester>,
+    key_requester: StorageKeyRequester,
 }
 
 impl ConfigReconcilerHandle {
@@ -69,15 +65,8 @@ impl ConfigReconcilerHandle {
             base_log.new(slog::o!("component" => "InternalDisksTask")),
         );
 
-        let (key_manager_waiter, key_requester_rx) =
-            KeyManagerWaiter::hold_requester_until_key_manager_ready(
-                key_requester,
-            );
-        let key_manager_waiter = Arc::new(key_manager_waiter);
-
         let (ledger_task, current_config_rx) = LedgerTask::spawn(
             internal_disks_rx,
-            Arc::clone(&key_manager_waiter),
             base_log.new(slog::o!("component" => "LedgerTask")),
         );
 
@@ -88,7 +77,7 @@ impl ConfigReconcilerHandle {
             ReconcilerTaskDependenciesHeldUntilSledAgentStarted {
                 reconciler_state_tx,
                 current_config_rx,
-                key_requester_rx,
+                key_requester,
             },
         ));
 
@@ -97,7 +86,6 @@ impl ConfigReconcilerHandle {
 
         Self {
             reconciler_state_rx,
-            key_manager_waiter,
             raw_disks,
             ledger_task,
             hold_while_waiting_for_sled_agent,
@@ -105,11 +93,7 @@ impl ConfigReconcilerHandle {
         }
     }
 
-    pub fn notify_key_manager_ready(&self) {
-        self.key_manager_waiter.notify_key_manager_ready();
-    }
-
-    pub fn notify_sled_agent_started(&self) {
+    pub fn spawn_reconciliation_task(&self) {
         let deps =
             match self.hold_while_waiting_for_sled_agent.lock().unwrap().take()
             {
@@ -120,7 +104,7 @@ impl ConfigReconcilerHandle {
                     // call.
                     warn!(
                         self.log,
-                        "notify_sled_agent_started() called multiple times \
+                        "spawn_reconciliation_task() called multiple times \
                          (ignored after first call)"
                     );
                     return;
@@ -129,15 +113,16 @@ impl ConfigReconcilerHandle {
         let ReconcilerTaskDependenciesHeldUntilSledAgentStarted {
             reconciler_state_tx,
             current_config_rx,
-            key_requester_rx,
+            key_requester,
         } = deps;
 
         let reconciler_task = ReconcilerTask {
             state: reconciler_state_tx,
             current_config_rx,
+            key_requester,
         };
 
-        tokio::task::spawn(reconciler_task.run(key_requester_rx));
+        tokio::task::spawn(reconciler_task.run());
     }
 
     pub fn set_raw_disks<I>(&self, raw_disks: I)
@@ -224,12 +209,9 @@ impl ReconcilerTaskState {
 struct ReconcilerTask {
     state: watch::Sender<Arc<ReconcilerTaskState>>,
     current_config_rx: watch::Receiver<CurrentConfig>,
+    key_requester: StorageKeyRequester,
 }
 
 impl ReconcilerTask {
-    async fn run(
-        self,
-        key_requester_rx: oneshot::Receiver<StorageKeyRequester>,
-    ) {
-    }
+    async fn run(self) {}
 }

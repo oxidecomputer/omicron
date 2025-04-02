@@ -2,13 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::convert::Infallible;
-use std::sync::Arc;
-
 use super::CurrentConfig;
 use super::internal_disks::InternalDisksReceiver;
-use super::key_requester::KeyManagerWaiter;
-use super::key_requester::KeyRequesterStatus;
 use crate::services::OmicronZonesConfigLocal;
 use camino::Utf8PathBuf;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
@@ -19,6 +14,7 @@ use omicron_common::ledger;
 use omicron_common::ledger::Ledger;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
+use std::convert::Infallible;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot;
@@ -77,14 +73,12 @@ pub struct LedgerTask {
     rx: mpsc::Receiver<WriteNewConfig>,
     current_config: watch::Sender<CurrentConfig>,
     internal_disks: InternalDisksReceiver,
-    key_manager_waiter: Arc<KeyManagerWaiter>,
     log: Logger,
 }
 
 impl LedgerTask {
     pub fn spawn(
         internal_disks: InternalDisksReceiver,
-        key_manager_waiter: Arc<KeyManagerWaiter>,
         log: Logger,
     ) -> (LedgerTaskHandle, watch::Receiver<CurrentConfig>) {
         // We don't expect messages to be queued for long in this channel, so
@@ -99,16 +93,7 @@ impl LedgerTask {
         let (current_config, current_config_rx) =
             watch::channel(CurrentConfig::WaitingForInternalDisks);
 
-        tokio::spawn(
-            Self {
-                rx,
-                current_config,
-                internal_disks,
-                key_manager_waiter,
-                log,
-            }
-            .run(),
-        );
+        tokio::spawn(Self { rx, current_config, internal_disks, log }.run());
 
         (LedgerTaskHandle { tx }, current_config_rx)
     }
@@ -163,18 +148,6 @@ impl LedgerTask {
         &mut self,
         new_config: OmicronSledConfig,
     ) -> Result<(), LedgerTaskError> {
-        // Refuse to accept new configs before the storage key manager is ready.
-        // Technically we could accept them, but we can't act on them in any
-        // meaningful way (other than writing them to the ledger), and we also
-        // can't compare our actual on-disk state to check for validity of the
-        // incoming request.
-        match self.key_manager_waiter.status() {
-            KeyRequesterStatus::Ready => (),
-            KeyRequesterStatus::WaitingForKeyManager => {
-                return Err(LedgerTaskError::WaitingForKeyManager);
-            }
-        }
-
         let config_datasets =
             self.internal_disks.borrow_and_update().all_config_datasets();
 
@@ -586,14 +559,8 @@ mod tests {
             disks_rx,
             mount_config.clone(),
         );
-        let key_manager_waiter =
-            Arc::new(KeyManagerWaiter::fake_key_manager_waiter());
-        key_manager_waiter.notify_key_manager_ready();
-        let (task_handle, mut current_config) = LedgerTask::spawn(
-            internal_disks.clone(),
-            key_manager_waiter,
-            logctx.log.clone(),
-        );
+        let (task_handle, mut current_config) =
+            LedgerTask::spawn(internal_disks.clone(), logctx.log.clone());
 
         // We have no disks, so the ledger task should be waiting for them.
         assert_eq!(
