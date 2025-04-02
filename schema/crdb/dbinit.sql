@@ -599,8 +599,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.crucible_dataset (
      * otherwise ignores this field. It's updated by Nexus as region allocations
      * and deletions are performed using this dataset.
      *
-     * Note that this is the size *reserved* by the Crucible agent for regions,
-     * not the actual region size.
+     * Note that the value in this column is _not_ the sum of requested region
+     * sizes, but sum of the size *reserved* by the Crucible agent for the
+     * dataset that contains the regions (which is larger than the the actual
+     * region size).
      */
     size_used INT NOT NULL
 );
