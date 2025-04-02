@@ -192,6 +192,7 @@ pub trait Api: Send + Sync {
         vlan: Option<VlanID>,
         mtu: usize,
     ) -> Result<(), CreateVnicError> {
+        println!("(real) dladm::create_vnic");
         let mut command = std::process::Command::new(PFEXEC);
         let mut args = vec![
             DLADM.to_string(),

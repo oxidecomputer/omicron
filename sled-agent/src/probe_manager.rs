@@ -347,7 +347,7 @@ impl ProbeManagerInner {
             dhcp_config: DhcpCfg::default(),
         })?;
 
-        let installed_zone = ZoneBuilderFactory::default()
+        let installed_zone = ZoneBuilderFactory::real()
             .builder()
             .with_log(self.log.clone())
             .with_underlay_vnic_allocator(&self.vnic_allocator)
@@ -362,7 +362,7 @@ impl ProbeManagerInner {
             .with_opte_ports(vec![port])
             .with_links(vec![])
             .with_limit_priv(vec![])
-            .install(self.system_api.zones())
+            .install()
             .await?;
 
         info!(self.log, "installed probe {}", probe.id);

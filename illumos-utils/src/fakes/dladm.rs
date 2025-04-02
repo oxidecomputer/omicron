@@ -29,6 +29,7 @@ impl Api for Dladm {
         _vlan: Option<VlanID>,
         _mtu: usize,
     ) -> Result<(), CreateVnicError> {
+        println!("(fake) dladm::create_vnic");
         Ok(())
     }
 

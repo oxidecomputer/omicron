@@ -1606,11 +1606,12 @@ impl ServiceManager {
 
         // We use the fake initialiser for testing
         let mut zone_builder = match self.inner.system_api.fake_install_dir() {
-            None => ZoneBuilderFactory::default().builder(),
-            Some(dir) => {
-                ZoneBuilderFactory::fake(Some(&dir.as_str().to_string()))
-                    .builder()
-            }
+            None => ZoneBuilderFactory::real().builder(),
+            Some(dir) => ZoneBuilderFactory::fake(
+                Some(&dir.as_str().to_string()),
+                Arc::new(illumos_utils::fakes::zone::Zones::new()),
+            )
+            .builder(),
         };
         if let Some(uuid) = unique_name {
             zone_builder = zone_builder.with_unique_name(uuid);
@@ -1631,7 +1632,7 @@ impl ServiceManager {
             .with_opte_ports(opte_ports)
             .with_links(links)
             .with_limit_priv(limit_priv)
-            .install(self.inner.system_api.zones())
+            .install()
             .await?;
 
         let disabled_ssh_service = ServiceBuilder::new("network/ssh")
@@ -5033,18 +5034,14 @@ mod illumos_tests {
     use crate::metrics;
 
     use super::*;
-    use illumos_utils::{
-        dladm::{
-            BOOTSTRAP_ETHERSTUB_NAME, Etherstub, UNDERLAY_ETHERSTUB_NAME,
-            UNDERLAY_ETHERSTUB_VNIC_NAME,
-        },
-        svc,
+    use illumos_utils::dladm::{
+        BOOTSTRAP_ETHERSTUB_NAME, Etherstub, UNDERLAY_ETHERSTUB_NAME,
+        UNDERLAY_ETHERSTUB_VNIC_NAME,
     };
 
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
-    use std::os::unix::process::ExitStatusExt;
     use std::{
         net::{Ipv6Addr, SocketAddrV6},
         time::Duration,
@@ -5056,7 +5053,6 @@ mod illumos_tests {
     const GLOBAL_ZONE_BOOTSTRAP_IP: Ipv6Addr = Ipv6Addr::LOCALHOST;
     const SWITCH_ZONE_BOOTSTRAP_IP: Ipv6Addr = Ipv6Addr::LOCALHOST;
 
-    const EXPECTED_ZONE_NAME_PREFIX: &str = "oxz_ntp";
     const EXPECTED_PORT: u16 = 12223;
 
     // Timeout within which we must have received a message about a zone's links
@@ -5132,7 +5128,6 @@ mod illumos_tests {
         generation: Generation,
         zone_type: OmicronZoneType,
     ) -> Result<(), Error> {
-        let zone_prefix = format!("oxz_{}", zone_type.kind().zone_prefix());
         mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
             generation,
             zones: vec![OmicronZoneConfig {

@@ -95,7 +95,7 @@ impl InstanceManager {
     pub fn new(
         log: Logger,
         nexus_client: NexusClient,
-        etherstub: Etherstub,
+        vnic_allocator: VnicAllocator<Etherstub>,
         port_manager: PortManager,
         storage: StorageHandle,
         zone_bundler: ZoneBundler,
@@ -114,11 +114,7 @@ impl InstanceManager {
             terminate_rx,
             nexus_client,
             jobs: BTreeMap::new(),
-            vnic_allocator: VnicAllocator::new(
-                "Instance",
-                etherstub,
-                Arc::new(illumos_utils::dladm::Dladm {}),
-            ),
+            vnic_allocator,
             port_manager,
             storage_generation: None,
             storage,

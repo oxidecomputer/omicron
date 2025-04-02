@@ -983,7 +983,7 @@ pub struct FakeZoneBuilderConfig {
     temp_dir: Arc<Utf8PathBuf>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct ZoneBuilderFactory {
     // Why this is part of this builder/factory and not some separate builder
     // type: At time of writing, to the best of my knowledge:
@@ -994,11 +994,19 @@ pub struct ZoneBuilderFactory {
     //   needs to construct zones (and anything else with a lot of parameters)
     //   seems like a worse idea.
     fake_cfg: Option<FakeZoneBuilderConfig>,
+    zones_api: Arc<dyn crate::zone::Api>,
 }
 
 impl ZoneBuilderFactory {
+    pub fn real() -> Self {
+        Self { fake_cfg: None, zones_api: Arc::new(crate::zone::Zones {}) }
+    }
+
     /// For use in unit tests that don't require actual zone creation to occur.
-    pub fn fake(temp_dir: Option<&String>) -> Self {
+    pub fn fake(
+        temp_dir: Option<&String>,
+        zones_api: Arc<dyn crate::zone::Api>,
+    ) -> Self {
         let temp_dir = match temp_dir {
             Some(dir) => Utf8PathBuf::from(dir),
             None => Utf8TempDir::new().unwrap().into_path(),
@@ -1007,12 +1015,21 @@ impl ZoneBuilderFactory {
             fake_cfg: Some(FakeZoneBuilderConfig {
                 temp_dir: Arc::new(temp_dir),
             }),
+            zones_api,
         }
+    }
+
+    pub fn zones_api(&self) -> &Arc<dyn crate::zone::Api> {
+        &self.zones_api
     }
 
     /// Create a [ZoneBuilder] that inherits this factory's fakeness.
     pub fn builder<'a>(&self) -> ZoneBuilder<'a> {
-        ZoneBuilder { fake_cfg: self.fake_cfg.clone(), ..Default::default() }
+        ZoneBuilder {
+            fake_cfg: self.fake_cfg.clone(),
+            zones_api: Some(self.zones_api.clone()),
+            ..Default::default()
+        }
     }
 }
 
@@ -1059,6 +1076,8 @@ pub struct ZoneBuilder<'a> {
     /// temporary directories according to the contents of the provided
     /// `FakeZoneBuilderConfig`.
     fake_cfg: Option<FakeZoneBuilderConfig>,
+
+    zones_api: Option<Arc<dyn crate::zone::Api>>,
 }
 
 impl<'a> ZoneBuilder<'a> {
@@ -1155,11 +1174,9 @@ impl<'a> ZoneBuilder<'a> {
     }
 
     // (used in unit tests)
-    fn fake_install(
-        self,
-        zones_api: Arc<dyn crate::zone::Api>,
-    ) -> Result<InstalledZone, InstallZoneError> {
+    fn fake_install(mut self) -> Result<InstalledZone, InstallZoneError> {
         println!("RunningZone: Fake install");
+        let zones_api = self.zones_api.take().unwrap();
         let zone = self
             .zone_type
             .ok_or(InstallZoneError::IncompleteBuilder)?
@@ -1203,13 +1220,10 @@ impl<'a> ZoneBuilder<'a> {
     /// Create the zone with the provided parameters.
     /// Returns `Err(InstallZoneError::IncompleteBuilder)` if a necessary
     /// parameter was not provided.
-    pub async fn install(
-        self,
-        zones_api: Arc<dyn crate::zone::Api>,
-    ) -> Result<InstalledZone, InstallZoneError> {
+    pub async fn install(mut self) -> Result<InstalledZone, InstallZoneError> {
         println!("RunningZone: install");
         if self.fake_cfg.is_some() {
-            return self.fake_install(zones_api);
+            return self.fake_install();
         }
         println!("RunningZone: install - REAL");
 
@@ -1278,6 +1292,7 @@ impl<'a> ZoneBuilder<'a> {
 
         zone_root_path.path = zone_root_path.path.join(&full_zone_name);
 
+        let zones_api = self.zones_api.take().unwrap();
         zones_api
             .install_omicron_zone(
                 &log,

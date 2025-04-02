@@ -41,20 +41,16 @@ uuid.workspace = true
 whoami.workspace = true
 zone.workspace = true
 
-# only enabled via the `testing` feature
-mockall = { workspace = true, optional = true }
 omicron-workspace-hack.workspace = true
 
 [target.'cfg(target_os = "illumos")'.dependencies]
 opte-ioctl.workspace = true
 
 [dev-dependencies]
-mockall.workspace = true
 omicron-test-utils.workspace = true
 regress.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 
 [features]
-# Enable to generate MockZones
-testing = ["mockall"]
+testing = []

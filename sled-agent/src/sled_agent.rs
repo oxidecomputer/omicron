@@ -507,14 +507,19 @@ impl SledAgent {
             reservoir_mode,
         );
 
+        let instance_vnic_allocator = illumos_utils::link::VnicAllocator::new(
+            "Instance",
+            etherstub.clone(),
+            Arc::new(illumos_utils::dladm::Dladm {}),
+        );
         let instances = InstanceManager::new(
             parent_log.clone(),
             nexus_client.clone(),
-            etherstub.clone(),
+            instance_vnic_allocator,
             port_manager.clone(),
             storage_manager.clone(),
             long_running_task_handles.zone_bundler.clone(),
-            ZoneBuilderFactory::default(),
+            ZoneBuilderFactory::real(),
             vmm_reservoir_manager.clone(),
             metrics_manager.request_queue(),
         )?;

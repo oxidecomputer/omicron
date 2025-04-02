@@ -22,7 +22,6 @@ use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
-use illumos_utils::svc::wait_for_service;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use omicron_common::NoDebug;
@@ -516,26 +515,6 @@ struct InstanceRunner {
 
     // Object representing membership in the "instance manager".
     instance_ticket: InstanceTicket,
-
-    system_api: Box<dyn SystemApi>,
-}
-
-trait SystemApi: Send + Sync {
-    fn zones(&self) -> Arc<dyn illumos_utils::zone::Api>;
-}
-
-struct RealSystemApi {}
-
-impl RealSystemApi {
-    pub fn new() -> Box<dyn SystemApi> {
-        Box::new(RealSystemApi {})
-    }
-}
-
-impl SystemApi for RealSystemApi {
-    fn zones(&self) -> Arc<dyn illumos_utils::zone::Api> {
-        Arc::new(illumos_utils::zone::Zones {})
-    }
 }
 
 impl InstanceRunner {
@@ -1383,7 +1362,7 @@ impl InstanceRunner {
             zone_name: running_zone.name().to_string(),
             client: client.clone(),
             tx_monitor: self.tx_monitor.clone(),
-            zones_api: self.system_api.zones(),
+            zones_api: self.zone_builder_factory.zones_api().clone(),
             log: self.log.clone(),
         };
         let log = self.log.clone();
@@ -1459,8 +1438,8 @@ impl InstanceRunner {
             omicron_common::backoff::retry(
                 omicron_common::backoff::retry_policy_local(),
                 || async {
-                    self.system_api
-                        .zones()
+                    self.zone_builder_factory
+                        .zones_api()
                         .halt_and_remove_logged(&self.log, &zname)
                         .await
                         .map_err(|e| {
@@ -1848,7 +1827,6 @@ impl Instance {
             zone_bundler,
             metrics_queue,
             instance_ticket: ticket,
-            system_api: RealSystemApi::new(),
         };
 
         let runner_handle =
@@ -2037,7 +2015,10 @@ impl InstanceRunner {
                 // Set up the Propolis zone and the objects associated with it.
                 let setup = match self.setup_propolis_inner().await {
                     Ok(setup) => setup,
-                    Err(e) => break 'setup Err(e),
+                    Err(e) => {
+                        println!("setup_propolis_inner failed: {e:?}");
+                        break 'setup Err(e);
+                    }
                 };
 
                 // Direct the Propolis server to create its VM and the tasks
@@ -2155,14 +2136,20 @@ impl InstanceRunner {
             } else {
                 (None, None, &[][..])
             };
-            let port = self.port_manager.create_port(PortCreateParams {
-                nic,
-                source_nat: snat,
-                ephemeral_ip,
-                floating_ips,
-                firewall_rules: &self.firewall_rules,
-                dhcp_config: self.dhcp_config.clone(),
-            })?;
+            let port = self
+                .port_manager
+                .create_port(PortCreateParams {
+                    nic,
+                    source_nat: snat,
+                    ephemeral_ip,
+                    floating_ips,
+                    firewall_rules: &self.firewall_rules,
+                    dhcp_config: self.dhcp_config.clone(),
+                })
+                .map_err(|err| {
+                    println!("failed to create_port: {err:?}");
+                    err
+                })?;
             opte_port_names.push(port.0.name().to_string());
             opte_ports.push(port);
         }
@@ -2203,7 +2190,7 @@ impl InstanceRunner {
             .with_opte_ports(opte_ports)
             .with_links(vec![])
             .with_limit_priv(vec![])
-            .install(self.system_api.zones())
+            .install()
             .await?;
 
         let gateway = self.port_manager.underlay_ip();
@@ -2243,8 +2230,8 @@ impl InstanceRunner {
         // but it helps distinguish "online in SMF" from "responding to HTTP
         // requests".
         let fmri = fmri_name();
-        self.system_api
-            .zones()
+        self.zone_builder_factory
+            .zones_api()
             .wait_for_service(Some(&zname), &fmri, self.log.clone())
             .await
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
@@ -2445,7 +2432,7 @@ mod tests {
     const PROPOLIS_ID: Uuid =
         uuid::uuid!("e8e95a60-2aaf-4453-90e4-e0e58f126762");
 
-    #[derive(Default, Clone)]
+    #[derive(Debug, Default, Clone)]
     enum ReceivedInstanceState {
         #[default]
         None,
@@ -2671,7 +2658,7 @@ mod tests {
         temp_dir: &String,
     ) -> (InstanceManagerServices, MetricsRx) {
         let vnic_allocator = VnicAllocator::new(
-            "Foo",
+            "Instance",
             Etherstub("mystub".to_string()),
             Arc::new(illumos_utils::fakes::dladm::Dladm::new()),
         );
@@ -2694,7 +2681,10 @@ mod tests {
             port_manager,
             storage: storage_handle,
             zone_bundler,
-            zone_builder_factory: ZoneBuilderFactory::fake(Some(temp_dir)),
+            zone_builder_factory: ZoneBuilderFactory::fake(
+                Some(temp_dir),
+                Arc::new(illumos_utils::fakes::zone::Zones::new()),
+            ),
             metrics_queue,
         };
         (services, rx)
@@ -2775,7 +2765,7 @@ mod tests {
             message,
             metrics::Message::TrackVnic {
                 zone_name,
-                name: "oxControlFoo0".into(),
+                name: "oxControlInstance0".into(),
             },
             "Expected instance zone to send a message on its metrics \
             request queue, asking to track its control VNIC",
@@ -2998,7 +2988,7 @@ mod tests {
         );
         let InstanceManagerServices {
             nexus_client,
-            vnic_allocator: _,
+            vnic_allocator,
             port_manager,
             storage,
             zone_bundler,
@@ -3006,14 +2996,12 @@ mod tests {
             metrics_queue,
         } = services;
 
-        let etherstub = Etherstub("mystub".to_string());
-
         let vmm_reservoir_manager = VmmReservoirManagerHandle::stub_for_test();
 
         let mgr = crate::instance_manager::InstanceManager::new(
             logctx.log.new(o!("component" => "InstanceManager")),
             nexus_client,
-            etherstub,
+            vnic_allocator,
             port_manager,
             storage,
             zone_bundler,
@@ -3069,11 +3057,14 @@ mod tests {
 
         timeout(
             TIMEOUT_DURATION,
-            state_rx.wait_for(|maybe_state| match maybe_state {
-                ReceivedInstanceState::InstancePut(sled_inst_state) => {
-                    sled_inst_state.vmm_state.state == VmmState::Running
+            state_rx.wait_for(|maybe_state| {
+                println!("state_rx saw: {maybe_state:?}");
+                match maybe_state {
+                    ReceivedInstanceState::InstancePut(sled_inst_state) => {
+                        sled_inst_state.vmm_state.state == VmmState::Running
+                    }
+                    _ => false,
                 }
-                _ => false,
             }),
         )
         .await
@@ -3135,7 +3126,7 @@ mod tests {
         );
         let InstanceManagerServices {
             nexus_client,
-            vnic_allocator: _,
+            vnic_allocator,
             port_manager,
             storage,
             zone_bundler,
@@ -3143,14 +3134,12 @@ mod tests {
             metrics_queue,
         } = services;
 
-        let etherstub = Etherstub("mystub".to_string());
-
         let vmm_reservoir_manager = VmmReservoirManagerHandle::stub_for_test();
 
         let mgr = crate::instance_manager::InstanceManager::new(
             logctx.log.new(o!("component" => "InstanceManager")),
             nexus_client,
-            etherstub,
+            vnic_allocator,
             port_manager,
             storage,
             zone_bundler,
@@ -3166,7 +3155,6 @@ mod tests {
 
         let instance_id = InstanceUuid::new_v4();
         let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
-        let zone_name = propolis_zone_name(&propolis_id);
         let InstanceInitialState {
             hardware,
             vmm_runtime,
