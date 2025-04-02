@@ -5,8 +5,9 @@
 //! A configuration of a trust quroum at a given epoch
 
 use crate::crypto::{EncryptedRackSecret, RackSecret, Salt, Sha3_256Digest};
-use crate::{Epoch, PlatformId, ReconfigureMsg, Threshold};
-use gfss::shamir::SplitError;
+use crate::validators::ValidatedReconfigureMsg;
+use crate::{Epoch, PlatformId, Threshold};
+use gfss::shamir::{SecretShares, SplitError};
 use omicron_uuid_kinds::RackUuid;
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
@@ -57,8 +58,8 @@ impl Configuration {
     /// the last committed epoch.
     pub fn new(
         coordinator: PlatformId,
-        reconfigure_msg: &ReconfigureMsg,
-    ) -> Result<Configuration, ConfigurationError> {
+        reconfigure_msg: &ValidatedReconfigureMsg,
+    ) -> Result<(Configuration, SecretShares), ConfigurationError> {
         let rack_secret = RackSecret::new();
         let shares = rack_secret.split(
             reconfigure_msg.threshold,
@@ -82,14 +83,17 @@ impl Configuration {
             .zip(share_digests)
             .collect();
 
-        Ok(Configuration {
-            rack_id: reconfigure_msg.rack_id,
-            epoch: reconfigure_msg.epoch,
-            coordinator,
-            members,
-            threshold: reconfigure_msg.threshold,
-            previous_configuration: None,
-        })
+        Ok((
+            Configuration {
+                rack_id: reconfigure_msg.rack_id,
+                epoch: reconfigure_msg.epoch,
+                coordinator,
+                members,
+                threshold: reconfigure_msg.threshold,
+                previous_configuration: None,
+            },
+            shares,
+        ))
     }
 }
 
