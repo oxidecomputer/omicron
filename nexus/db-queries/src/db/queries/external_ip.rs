@@ -1004,6 +1004,7 @@ mod tests {
                 boot_disk: None,
                 start: false,
                 auto_restart_policy: Default::default(),
+                anti_affinity_groups: Vec::new(),
             });
 
             let conn = self

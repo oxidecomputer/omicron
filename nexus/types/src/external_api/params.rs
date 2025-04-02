@@ -1228,6 +1228,10 @@ pub struct InstanceCreate {
     /// `null`.
     #[serde(default)]
     pub auto_restart_policy: Option<InstanceAutoRestartPolicy>,
+
+    /// Anti-Affinity groups which this instance should be added.
+    #[serde(default)]
+    pub anti_affinity_groups: Vec<NameOrId>,
 }
 
 /// Parameters of an `Instance` that can be reconfigured after creation.
@@ -2112,6 +2116,7 @@ pub enum ImageSource {
 
     /// Boot the Alpine ISO that ships with the Propolis zone. Intended for
     /// development purposes only.
+    #[schemars(skip)] // keep it out of the OpenAPI schema
     YouCanBootAnythingAsLongAsItsAlpine,
 }
 

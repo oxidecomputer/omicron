@@ -121,7 +121,9 @@ pub fn allocation_query(
         params.block_size * params.blocks_per_extent * params.extent_count;
     let redundancy: i64 = i64::try_from(redundancy).unwrap();
 
-    let builder = QueryBuilder::new().sql(
+    let mut builder = QueryBuilder::new();
+
+    builder.sql(
     // Find all old regions associated with a particular volume
 "WITH
   old_regions AS (
@@ -138,7 +140,7 @@ pub fn allocation_query(
       sum(crucible_dataset.size_used) AS size_used
     FROM crucible_dataset WHERE ((crucible_dataset.size_used IS NOT NULL) AND (crucible_dataset.time_deleted IS NULL)) GROUP BY crucible_dataset.pool_id),");
 
-    let builder = if let Some(snapshot_id) = snapshot_id {
+    if let Some(snapshot_id) = snapshot_id {
         // Any zpool already have this volume's existing regions, or host the
         // snapshot volume's regions?
         builder.sql("
@@ -168,7 +170,7 @@ pub fn allocation_query(
     // when taking an existing allocation of regions and increasing the
     // redundancy in order to _not_ allocate to sleds already used.
 
-    let builder = if distinct_sleds {
+    if distinct_sleds {
         builder.sql(
             "
         existing_sleds AS (
@@ -179,9 +181,7 @@ pub fn allocation_query(
           WHERE
             zpool.id = ANY(SELECT pool_id FROM existing_zpools)
         ),",
-        )
-    } else {
-        builder
+        );
     };
 
     // Identifies zpools with enough space for region allocation, that are not
@@ -189,16 +189,16 @@ pub fn allocation_query(
     //
     // NOTE: 'distinct_sleds' changes the format of the underlying SQL query, as it uses
     // distinct bind parameters depending on the conditional branch.
-    let builder = builder.sql(
+    builder.sql(
         "
   candidate_zpools AS (",
     );
-    let builder = if distinct_sleds {
+    if distinct_sleds {
         builder.sql("SELECT DISTINCT ON (zpool.sled_id) ")
     } else {
         builder.sql("SELECT ")
     };
-    let builder = builder.sql("
+    builder.sql("
         old_zpool_usage.pool_id
     FROM
         old_zpool_usage
@@ -219,7 +219,7 @@ pub fn allocation_query(
     "
     ).bind::<sql_types::BigInt, _>(size_delta as i64);
 
-    let builder = if distinct_sleds {
+    if distinct_sleds {
         builder
             .sql("AND NOT(sled.id = ANY(SELECT existing_sleds.id FROM existing_sleds)))
             ORDER BY zpool.sled_id, md5((CAST(zpool.id as BYTEA) || ")
@@ -416,7 +416,9 @@ UNION
     .sql(AllColumnsOfRegion::with_prefix("inserted_regions")).sql("
   FROM (inserted_regions INNER JOIN updated_datasets ON (inserted_regions.dataset_id = updated_datasets.id))
 )"
-    ).query()
+    );
+
+    builder.query()
 }
 
 #[cfg(test)]

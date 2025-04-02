@@ -3039,9 +3039,11 @@ mod test {
             .pool_connection_for_tests()
             .await
             .context("Failed to get datastore connection")?;
-        let tables: Vec<String> = QueryBuilder::new().sql(
+        let mut query = QueryBuilder::new();
+        query.sql(
             "SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'inv\\_%'"
-            )
+        );
+        let tables: Vec<String> = query
             .query::<diesel::sql_types::Text>()
             .load_async(&*conn)
             .await
@@ -3063,14 +3065,16 @@ mod test {
                 .context("Failed to allow full table scans")?;
 
             for table in tables {
-                let count: i64 = QueryBuilder::new().sql(
-                        // We're scraping the table names dynamically here, so we
-                        // don't know them ahead of time. However, this is also a
-                        // test, so this usage is pretty benign.
-                        TrustedStr::i_take_responsibility_for_validating_this_string(
-                            format!("SELECT COUNT(*) FROM {table}")
-                        )
+                let mut query = QueryBuilder::new();
+                query.sql(
+                    // We're scraping the table names dynamically here, so we
+                    // don't know them ahead of time. However, this is also a
+                    // test, so this usage is pretty benign.
+                    TrustedStr::i_take_responsibility_for_validating_this_string(
+                        format!("SELECT COUNT(*) FROM {table}")
                     )
+                );
+                let count: i64 = query
                     .query::<diesel::sql_types::Int8>()
                     .get_result_async(&conn)
                     .await

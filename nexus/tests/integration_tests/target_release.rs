@@ -4,6 +4,7 @@
 
 //! Get/set the target release via the external API.
 
+use anyhow::Result;
 use camino::Utf8Path;
 use camino_tempfile::Utf8TempDir;
 use chrono::Utc;
@@ -23,7 +24,7 @@ use omicron_sled_agent::sim;
 use semver::Version;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn get_set_target_release() -> anyhow::Result<()> {
+async fn get_set_target_release() -> Result<()> {
     let mut config = load_test_config();
     config.pkg.updates = Some(UpdatesConfig {
         // XXX: This is currently not used by the update system, but
@@ -87,11 +88,11 @@ async fn get_set_target_release() -> anyhow::Result<()> {
 
         assert_eq!(
             system_version,
-            upload_tuf_repo(client, &path).await.recorded.repo.system_version
+            upload_tuf_repo(client, &path).await?.recorded.repo.system_version
         );
 
         let target_release =
-            set_target_release(client, system_version.clone()).await;
+            set_target_release(client, system_version.clone()).await?;
         let after = Utc::now();
         assert_eq!(target_release.generation, 2);
         assert!(target_release.time_requested >= before);
@@ -102,7 +103,7 @@ async fn get_set_target_release() -> anyhow::Result<()> {
         );
     }
 
-    // Add a repo with non-semver versions.
+    // Adding a repo with non-semver artifact versions should be ok, too.
     {
         let before = Utc::now();
         let system_version = Version::new(2, 0, 0);
@@ -121,11 +122,11 @@ async fn get_set_target_release() -> anyhow::Result<()> {
 
         assert_eq!(
             system_version,
-            upload_tuf_repo(client, &path).await.recorded.repo.system_version
+            upload_tuf_repo(client, &path).await?.recorded.repo.system_version
         );
 
         let target_release =
-            set_target_release(client, system_version.clone()).await;
+            set_target_release(client, system_version.clone()).await?;
         let after = Utc::now();
         assert_eq!(target_release.generation, 3);
         assert!(target_release.time_requested >= before);
@@ -136,6 +137,12 @@ async fn get_set_target_release() -> anyhow::Result<()> {
         );
     }
 
+    // Attempting to downgrade to an earlier system version (2.0.0 → 1.0.0)
+    // should not be allowed.
+    set_target_release(client, Version::new(1, 0, 0))
+        .await
+        .expect_err("shouldn't be able to downgrade system");
+
     ctx.teardown().await;
     logctx.cleanup_successful();
     Ok(())
@@ -144,7 +151,7 @@ async fn get_set_target_release() -> anyhow::Result<()> {
 async fn upload_tuf_repo(
     client: &ClientTestContext,
     path: &Utf8Path,
-) -> TufRepoInsertResponse {
+) -> Result<TufRepoInsertResponse> {
     NexusRequest::new(
         RequestBuilder::new(
             client,
@@ -157,15 +164,13 @@ async fn upload_tuf_repo(
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .unwrap()
-    .parsed_body::<TufRepoInsertResponse>()
-    .unwrap()
+    .map(|response| response.parsed_body().unwrap())
 }
 
 async fn set_target_release(
     client: &ClientTestContext,
     system_version: Version,
-) -> TargetRelease {
+) -> Result<TargetRelease> {
     NexusRequest::new(
         RequestBuilder::new(
             client,
@@ -178,7 +183,5 @@ async fn set_target_release(
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .unwrap()
-    .parsed_body()
-    .unwrap()
+    .map(|response| response.parsed_body().unwrap())
 }

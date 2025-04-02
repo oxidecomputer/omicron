@@ -487,9 +487,9 @@ checksum = "8b75356056920673b02621b35afd0f7dda9306d03c79a30f5c56c44cf256e3de"
 
 [[package]]
 name = "async-trait"
-version = "0.1.87"
+version = "0.1.88"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d556ec1359574147ec0c4fc5eb525f3f23263a592b1a9c07e0a75b427de55c97"
+checksum = "e539d3fca749fcee5236ab05e93a52867dd549cc157c8cb7f99595f3cedffdb5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -691,7 +691,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=6b5f2af796a3ea57405721407ab70520a93ec73f#6b5f2af796a3ea57405721407ab70520a93ec73f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=e5c85d84b0a51803caffb335a1063612edb02f6d#e5c85d84b0a51803caffb335a1063612edb02f6d"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -701,7 +701,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=6b5f2af796a3ea57405721407ab70520a93ec73f#6b5f2af796a3ea57405721407ab70520a93ec73f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=e5c85d84b0a51803caffb335a1063612edb02f6d#e5c85d84b0a51803caffb335a1063612edb02f6d"
 dependencies = [
  "libc",
  "strum",
@@ -716,7 +716,7 @@ dependencies = [
  "bitflags 2.6.0",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "log",
@@ -1916,7 +1916,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=81a3528adacdbde18fcbf3938247fef17233db11#81a3528adacdbde18fcbf3938247fef17233db11"
+source = "git+https://github.com/oxidecomputer/crucible?rev=da3cf198a0e000bb89efc3a1c77d7ba09340a600#da3cf198a0e000bb89efc3a1c77d7ba09340a600"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1932,7 +1932,7 @@ dependencies = [
 [[package]]
 name = "crucible-client-types"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=d2d8f8ad449df7e2befb7ee2723a442dd74b9b72#d2d8f8ad449df7e2befb7ee2723a442dd74b9b72"
+source = "git+https://github.com/oxidecomputer/crucible?rev=da3cf198a0e000bb89efc3a1c77d7ba09340a600#da3cf198a0e000bb89efc3a1c77d7ba09340a600"
 dependencies = [
  "base64 0.22.1",
  "crucible-workspace-hack",
@@ -1945,12 +1945,12 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=81a3528adacdbde18fcbf3938247fef17233db11#81a3528adacdbde18fcbf3938247fef17233db11"
+source = "git+https://github.com/oxidecomputer/crucible?rev=da3cf198a0e000bb89efc3a1c77d7ba09340a600#da3cf198a0e000bb89efc3a1c77d7ba09340a600"
 dependencies = [
  "anyhow",
  "atty",
  "crucible-workspace-hack",
- "dropshot 0.12.0",
+ "dropshot 0.16.0",
  "nix 0.29.0",
  "rustls-pemfile 1.0.4",
  "schemars",
@@ -1962,7 +1962,7 @@ dependencies = [
  "slog-dtrace",
  "slog-term",
  "tempfile",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
  "tokio",
  "tokio-rustls 0.24.1",
  "toml 0.8.20",
@@ -1974,7 +1974,7 @@ dependencies = [
 [[package]]
 name = "crucible-pantry-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=81a3528adacdbde18fcbf3938247fef17233db11#81a3528adacdbde18fcbf3938247fef17233db11"
+source = "git+https://github.com/oxidecomputer/crucible?rev=da3cf198a0e000bb89efc3a1c77d7ba09340a600#da3cf198a0e000bb89efc3a1c77d7ba09340a600"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1991,13 +1991,13 @@ dependencies = [
 [[package]]
 name = "crucible-smf"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=81a3528adacdbde18fcbf3938247fef17233db11#81a3528adacdbde18fcbf3938247fef17233db11"
+source = "git+https://github.com/oxidecomputer/crucible?rev=da3cf198a0e000bb89efc3a1c77d7ba09340a600#da3cf198a0e000bb89efc3a1c77d7ba09340a600"
 dependencies = [
  "crucible-workspace-hack",
  "libc",
  "num-derive",
  "num-traits",
- "thiserror 1.0.69",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -2209,11 +2209,11 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=caafd889f31faacfaa51e02902990c220c20ef60#caafd889f31faacfaa51e02902990c220c20ef60"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=5a0d6edd0ecc7f26225a5bf3849d8508956682d0#5a0d6edd0ecc7f26225a5bf3849d8508956682d0"
 dependencies = [
  "oxnet",
  "percent-encoding",
- "progenitor 0.8.0",
+ "progenitor 0.9.1",
  "reqwest",
  "serde",
  "serde_json",
@@ -2711,7 +2711,6 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.25.0",
  "toml 0.8.20",
- "usdt",
  "uuid",
  "version_check",
  "waitgroup",
@@ -3049,6 +3048,53 @@ name = "equivalent"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
+
+[[package]]
+name = "ereport-api"
+version = "0.1.0"
+dependencies = [
+ "dropshot 0.16.0",
+ "ereport-types",
+ "omicron-workspace-hack",
+ "openapi-manager-types",
+ "schemars",
+ "semver 1.0.25",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "uuid",
+]
+
+[[package]]
+name = "ereport-client"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "ereport-types",
+ "expectorate",
+ "http",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "progenitor 0.9.1",
+ "reqwest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "uuid",
+]
+
+[[package]]
+name = "ereport-types"
+version = "0.1.0"
+dependencies = [
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
+ "serde_json",
+ "uuid",
+]
 
 [[package]]
 name = "errno"
@@ -3630,6 +3676,20 @@ dependencies = [
  "libc",
  "wasi 0.13.3+wasi-0.2.2",
  "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "gfss"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "proptest",
+ "rand 0.8.5",
+ "secrecy",
+ "subtle",
+ "test-strategy",
+ "thiserror 1.0.69",
+ "zeroize",
 ]
 
 [[package]]
@@ -5560,12 +5620,12 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=caafd889f31faacfaa51e02902990c220c20ef60#caafd889f31faacfaa51e02902990c220c20ef60"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=5a0d6edd0ecc7f26225a5bf3849d8508956682d0#5a0d6edd0ecc7f26225a5bf3849d8508956682d0"
 dependencies = [
  "anyhow",
  "chrono",
  "percent-encoding",
- "progenitor 0.8.0",
+ "progenitor 0.9.1",
  "reqwest",
  "schemars",
  "serde",
@@ -6973,6 +7033,7 @@ dependencies = [
  "chrono",
  "clap",
  "dropshot 0.16.0",
+ "ereport-api",
  "expectorate",
  "futures",
  "gateway-api",
@@ -7093,6 +7154,7 @@ dependencies = [
  "dns-service-client",
  "dpd-client",
  "dropshot 0.16.0",
+ "ereport-client",
  "expectorate",
  "fatfs",
  "futures",
@@ -7166,7 +7228,7 @@ dependencies = [
  "pq-sys",
  "pretty_assertions",
  "progenitor-client 0.9.1",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=6b5f2af796a3ea57405721407ab70520a93ec73f)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=e5c85d84b0a51803caffb335a1063612edb02f6d)",
  "qorb",
  "rand 0.8.5",
  "range-requests",
@@ -7258,8 +7320,10 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "owo-colors",
  "oximeter-client",
  "oximeter-db",
+ "oxnet",
  "petgraph 0.7.1",
  "pq-sys",
  "ratatui",
@@ -7269,6 +7333,7 @@ dependencies = [
  "sled-agent-client",
  "slog",
  "slog-error-chain",
+ "steno",
  "strum",
  "subprocess",
  "supports-color",
@@ -7437,6 +7502,7 @@ dependencies = [
  "dns-service-client",
  "dpd-client",
  "dropshot 0.16.0",
+ "ereport-api",
  "expectorate",
  "flate2",
  "flume",
@@ -7478,7 +7544,7 @@ dependencies = [
  "oximeter-producer",
  "oxnet",
  "pretty_assertions",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=6b5f2af796a3ea57405721407ab70520a93ec73f)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=e5c85d84b0a51803caffb335a1063612edb02f6d)",
  "propolis-mock-server",
  "propolis_api_types",
  "rand 0.8.5",
@@ -7613,7 +7679,6 @@ dependencies = [
  "daft",
  "digest",
  "dof",
- "dropshot 0.12.0",
  "ecdsa",
  "ed25519-dalek",
  "either",
@@ -7647,7 +7712,6 @@ dependencies = [
  "inout",
  "ipnetwork",
  "itertools 0.10.5",
- "itertools 0.12.1",
  "lalrpop-util",
  "lazy_static",
  "libc",
@@ -7801,6 +7865,7 @@ dependencies = [
  "debug-ignore",
  "dns-server-api",
  "dropshot 0.16.0",
+ "ereport-api",
  "fs-err",
  "gateway-api",
  "hex",
@@ -9326,7 +9391,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=6b5f2af796a3ea57405721407ab70520a93ec73f#6b5f2af796a3ea57405721407ab70520a93ec73f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=e5c85d84b0a51803caffb335a1063612edb02f6d#e5c85d84b0a51803caffb335a1063612edb02f6d"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -9371,7 +9436,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=6b5f2af796a3ea57405721407ab70520a93ec73f#6b5f2af796a3ea57405721407ab70520a93ec73f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=e5c85d84b0a51803caffb335a1063612edb02f6d#e5c85d84b0a51803caffb335a1063612edb02f6d"
 dependencies = [
  "anyhow",
  "atty",
@@ -9413,7 +9478,7 @@ dependencies = [
 [[package]]
 name = "propolis_api_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=6b5f2af796a3ea57405721407ab70520a93ec73f#6b5f2af796a3ea57405721407ab70520a93ec73f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=e5c85d84b0a51803caffb335a1063612edb02f6d#e5c85d84b0a51803caffb335a1063612edb02f6d"
 dependencies = [
  "crucible-client-types",
  "propolis_types",
@@ -9427,7 +9492,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=6b5f2af796a3ea57405721407ab70520a93ec73f#6b5f2af796a3ea57405721407ab70520a93ec73f"
+source = "git+https://github.com/oxidecomputer/propolis?rev=e5c85d84b0a51803caffb335a1063612edb02f6d#e5c85d84b0a51803caffb335a1063612edb02f6d"
 dependencies = [
  "schemars",
  "serde",
@@ -10694,9 +10759,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.218"
+version = "1.0.219"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8dfc9d19bdbf6d17e22319da49161d5d0108e4188e8b680aef6299eed22df60"
+checksum = "5f0e2c6ed6606019b4e29e69dbaba95b11854410e5347d525002456dbbb786b6"
 dependencies = [
  "serde_derive",
 ]
@@ -10723,9 +10788,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.218"
+version = "1.0.219"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f09503e191f4e797cb8aac08e9a4a4695c5edf6a2e70e376d961ddd5c969f82b"
+checksum = "5b0276cf7f2c73365f7157c8123c21cd9a50fbbd844757af28ca1f5925fc2a00"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -10754,9 +10819,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.139"
+version = "1.0.140"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44f86c3acccc9c65b153fe1b85a3be07fe5515274ec9f0653b4a0875731c72a6"
+checksum = "20068b6e96dc6c9bd23e01df8827e6c7e1f2fddd43c21810382803c136b99373"
 dependencies = [
  "itoa",
  "memchr",
@@ -11084,7 +11149,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor 0.9.1",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=6b5f2af796a3ea57405721407ab70520a93ec73f)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=e5c85d84b0a51803caffb335a1063612edb02f6d)",
  "regress",
  "reqwest",
  "schemars",
@@ -11110,7 +11175,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=6b5f2af796a3ea57405721407ab70520a93ec73f)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=e5c85d84b0a51803caffb335a1063612edb02f6d)",
  "rcgen",
  "schemars",
  "serde",

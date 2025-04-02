@@ -12,7 +12,7 @@
 #:	"!/var/tmp/omicron_tmp/rustc*",
 #: ]
 #: access_repos = [
-#:	"oxidecomputer/dendrite",
+#:	"oxidecomputer/dendrite"
 #: ]
 #:
 #: [[publish]]

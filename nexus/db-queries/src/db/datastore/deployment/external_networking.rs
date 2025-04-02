@@ -607,9 +607,9 @@ mod tests {
                 BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: self.nexus_id,
-                    filesystem_pool: Some(ZpoolName::new_external(
+                    filesystem_pool: ZpoolName::new_external(
                         ZpoolUuid::new_v4(),
-                    )),
+                    ),
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
                             internal_address: "[::1]:0".parse().unwrap(),
@@ -624,9 +624,9 @@ mod tests {
                 BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: self.dns_id,
-                    filesystem_pool: Some(ZpoolName::new_external(
+                    filesystem_pool: ZpoolName::new_external(
                         ZpoolUuid::new_v4(),
-                    )),
+                    ),
                     zone_type: BlueprintZoneType::ExternalDns(
                         blueprint_zone_type::ExternalDns {
                             dataset: OmicronZoneDataset {
@@ -644,9 +644,9 @@ mod tests {
                 BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: self.ntp_id,
-                    filesystem_pool: Some(ZpoolName::new_external(
+                    filesystem_pool: ZpoolName::new_external(
                         ZpoolUuid::new_v4(),
-                    )),
+                    ),
                     zone_type: BlueprintZoneType::BoundaryNtp(
                         blueprint_zone_type::BoundaryNtp {
                             address: "[::1]:0".parse().unwrap(),

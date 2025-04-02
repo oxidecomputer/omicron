@@ -115,7 +115,9 @@ mod zpool;
 pub use address_lot::AddressLotCreateResult;
 pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
-pub use instance::{InstanceAndActiveVmm, InstanceGestalt};
+pub use instance::{
+    InstanceAndActiveVmm, InstanceGestalt, InstanceStateComputer,
+};
 pub use inventory::DataStoreInventoryTest;
 use nexus_db_model::AllSchemaVersions;
 pub use oximeter::CollectorReassignment;
