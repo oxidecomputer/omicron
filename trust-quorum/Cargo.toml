@@ -26,6 +26,7 @@ tokio.workspace = true
 uuid.workspace = true
 omicron-uuid-kinds.workspace = true
 zeroize.workspace = true
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

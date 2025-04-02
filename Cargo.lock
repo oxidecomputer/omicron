@@ -12635,6 +12635,7 @@ dependencies = [
  "hex",
  "hkdf",
  "omicron-uuid-kinds",
+ "omicron-workspace-hack",
  "proptest",
  "rand 0.8.5",
  "secrecy",
