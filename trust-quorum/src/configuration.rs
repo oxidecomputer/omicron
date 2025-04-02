@@ -4,23 +4,34 @@
 
 //! A configuration of a trust quroum at a given epoch
 
-use crate::crypto::{
-    EncryptedRackSecret, EncryptedShares, KeyShareGf256, RackSecret, Salt,
-    ShareDigestGf256,
-};
-use crate::{Epoch, Error, PlatformId, RackId, ReconfigureMsg, Threshold};
+use crate::crypto::{EncryptedRackSecret, RackSecret, Salt, Sha3_256Digest};
+use crate::{Epoch, PlatformId, ReconfigureMsg, Threshold};
+use gfss::shamir::SplitError;
+use omicron_uuid_kinds::RackUuid;
+use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
+use slog_error_chain::SlogInlineError;
 use std::collections::BTreeMap;
+
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq, SlogInlineError)]
+pub enum ConfigurationError {
+    #[error("rack secret split error")]
+    RackSecretSplit(
+        #[from]
+        #[source]
+        SplitError,
+    ),
+    #[error("too many members: must be fewer than 255")]
+    TooManyMembers,
+}
 
 /// The configuration for a given epoch.
 ///
 /// Only valid for non-lrtq configurations
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Configuration {
     /// Unique Id of the rack
-    pub rack_id: RackId,
+    pub rack_id: RackUuid,
 
     // Unique, monotonically increasing identifier for a configuration
     pub epoch: Epoch,
@@ -29,15 +40,10 @@ pub struct Configuration {
     pub coordinator: PlatformId,
 
     // All members of the current configuration and the hash of their key shares
-    pub members: BTreeMap<PlatformId, ShareDigestGf256>,
+    pub members: BTreeMap<PlatformId, Sha3_256Digest>,
 
     /// The number of sleds required to reconstruct the rack secret
     pub threshold: Threshold,
-
-    /// Encrypted key shares for this configuration. This is used to generate
-    /// `Prepare` messages to send to members of this configuration in case they
-    /// were offline during initial distribution.
-    pub encrypted_shares: EncryptedShares,
 
     // There is no previous configuration for the initial configuration
     pub previous_configuration: Option<PreviousConfiguration>,
@@ -52,13 +58,23 @@ impl Configuration {
     pub fn new(
         coordinator: PlatformId,
         reconfigure_msg: &ReconfigureMsg,
-    ) -> Result<(Configuration, BTreeMap<PlatformId, KeyShareGf256>), Error>
-    {
+    ) -> Result<Configuration, ConfigurationError> {
         let rack_secret = RackSecret::new();
-        let shares = rack_secret
-            .split(reconfigure_msg.threshold, reconfigure_msg.members.len())?;
+        let shares = rack_secret.split(
+            reconfigure_msg.threshold,
+            reconfigure_msg
+                .members
+                .len()
+                .try_into()
+                .map_err(|_| ConfigurationError::TooManyMembers)?,
+        )?;
 
-        let share_digests = shares.iter().map(|s| s.digest());
+        let share_digests = shares.shares.expose_secret().iter().map(|s| {
+            let mut digest = Sha3_256Digest::default();
+            s.digest::<sha3::Sha3_256>(&mut digest.0);
+            digest
+        });
+
         let members = reconfigure_msg
             .members
             .iter()
@@ -66,25 +82,14 @@ impl Configuration {
             .zip(share_digests)
             .collect();
 
-        let shares_by_member: BTreeMap<PlatformId, KeyShareGf256> =
-            reconfigure_msg.members.iter().cloned().zip(shares).collect();
-
-        let rack_id = reconfigure_msg.rack_id;
-        let encrypted_shares =
-            EncryptedShares::new(&rack_id, &rack_secret, &shares_by_member)?;
-
-        Ok((
-            Configuration {
-                rack_id,
-                epoch: reconfigure_msg.epoch,
-                coordinator,
-                members,
-                threshold: reconfigure_msg.threshold,
-                encrypted_shares,
-                previous_configuration: None,
-            },
-            shares_by_member,
-        ))
+        Ok(Configuration {
+            rack_id: reconfigure_msg.rack_id,
+            epoch: reconfigure_msg.epoch,
+            coordinator,
+            members,
+            threshold: reconfigure_msg.threshold,
+            previous_configuration: None,
+        })
     }
 }
 
@@ -102,12 +107,13 @@ pub struct PreviousConfiguration {
 
     /// The encrypted rack secret for the last committed epoch
     ///
-    /// This allows us to derive old encrytpion keys so they can be rotated
+    /// This allows us to derive old encryption keys so they can be rotated
     pub encrypted_last_committed_rack_secret: EncryptedRackSecret,
 
     /// A random value used to derive the key to encrypt the rack secret from
     /// the last committed epoch.
     ///
-    /// We only encrypt the rack secret once and so we use a nonce of all zeros
+    /// We only encrypt the rack secret once and so we use a nonce of all zeros.
+    /// This is why there is no corresponding `nonce` field.
     pub encrypted_last_committed_rack_secret_salt: Salt,
 }

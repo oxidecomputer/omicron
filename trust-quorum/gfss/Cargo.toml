@@ -9,8 +9,10 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
+digest.workspace = true
 rand = { workspace = true, features = ["getrandom"] }
 secrecy.workspace = true
+serde.workspace = true
 subtle = "2.6"
 thiserror.workspace = true
 zeroize.workspace = true

@@ -11,39 +11,13 @@
 
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 mod configuration;
 pub(crate) mod crypto;
-mod error;
 mod messages;
 pub use configuration::Configuration;
-pub use error::Error;
+pub use crypto::RackSecret;
 pub use messages::*;
-
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-    Display,
-)]
-pub struct RackId(Uuid);
-
-impl RackId {
-    pub fn new(uuid: Uuid) -> RackId {
-        RackId(uuid)
-    }
-
-    pub fn random() -> RackId {
-        RackId(Uuid::new_v4())
-    }
-}
 
 #[derive(
     Debug,
@@ -92,7 +66,7 @@ pub struct PlatformId {
 }
 
 /// A container to make messages between trust quorum nodes routable
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Envelope {
     to: PlatformId,
     from: PlatformId,

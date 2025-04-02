@@ -4,8 +4,10 @@
 
 //! Shamir secret sharing over GF(2^8)
 
+use digest::Digest;
 use rand::{Rng, rngs::OsRng};
 use secrecy::Secret;
+use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -101,10 +103,33 @@ impl<'a> ValidShares<'a> {
     }
 }
 
-#[derive(Clone, Zeroize, ZeroizeOnDrop)]
+#[derive(Clone, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct Share {
     pub x_coordinate: Gf256,
     pub y_coordinates: Box<[Gf256]>,
+}
+
+impl Share {
+    // Return a cryptographic hash of a Share using the parameterized
+    // algorithm.
+    pub fn digest<D: Digest>(&self, output: &mut [u8]) {
+        let mut hasher = D::new();
+        hasher.update([self.x_coordinate.clone().into_u8()]);
+        // Implementing AsRef<[u8]> for Box<[Gf256]> doesn't work due to
+        // coherence rules. To get around that we'd need a transparent newtype
+        // for the y_coordinates and some unsafe code, which we're loathe to do.
+        let mut ys: Vec<u8> =
+            self.y_coordinates.iter().map(|y| *y.as_ref()).collect();
+        hasher.update(&ys);
+        output.copy_from_slice(&hasher.finalize());
+        ys.zeroize();
+    }
+}
+
+impl std::fmt::Debug for Share {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KeyShareGf256").finish()
+    }
 }
 
 pub struct SecretShares {

@@ -66,6 +66,7 @@ impl_typed_uuid_kind! {
     OmicronZone => "service",
     PhysicalDisk => "physical_disk",
     Propolis => "propolis",
+    Rack => "rack",
     RackInit => "rack_init",
     RackReset => "rack_reset",
     ReconfiguratorSim => "reconfigurator_sim",

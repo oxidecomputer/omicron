@@ -4,8 +4,10 @@
 
 //! Messsages for the trust quorum protocol
 
-use crate::crypto::{KeyShareEd25519, KeyShareGf256};
-use crate::{Configuration, Epoch, PlatformId, RackId, Threshold};
+use crate::crypto::LrtqShare;
+use crate::{Configuration, Epoch, PlatformId, Threshold};
+use gfss::shamir::Share;
+use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, time::Duration};
 
@@ -13,7 +15,7 @@ use std::{collections::BTreeSet, time::Duration};
 /// reconfiguration.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ReconfigureMsg {
-    pub rack_id: RackId,
+    pub rack_id: RackUuid,
     pub epoch: Epoch,
     pub last_committed_epoch: Option<Epoch>,
     pub members: BTreeSet<PlatformId>,
@@ -24,29 +26,25 @@ pub struct ReconfigureMsg {
 }
 
 /// Messages sent between trust quorum members over a sprockets channel
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PeerMsg {
     Prepare(PrepareMsg),
     PrepareAck(Epoch),
     Commit(CommitMsg),
 
     GetShare(Epoch),
-    Share { epoch: Epoch, share: KeyShareGf256 },
+    Share { epoch: Epoch, share: Share },
 
     // LRTQ shares are always at epoch 0
     GetLrtqShare,
-    LrtqShare(KeyShareEd25519),
+    LrtqShare(LrtqShare),
 }
 
 /// The start of a reconfiguration sent from a coordinator to a specific peer
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrepareMsg {
     pub config: Configuration,
-    pub share: KeyShareGf256,
+    pub share: Share,
 }
 
 #[derive(

@@ -388,6 +388,7 @@ derive-where = "1.2.7"
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
 diesel = { version = "2.2.8", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = "0.4.2"
+digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
@@ -422,6 +423,7 @@ gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-
 gateway-test-utils = { path = "gateway-test-utils" }
 gateway-types = { path = "gateway-types" }
 gethostname = "0.5.0"
+gfss = { path = "trust-quorum/gfss" }
 glob = "0.3.2"
 guppy = "0.17.17"
 headers = "0.4.0"
@@ -660,6 +662,7 @@ static_assertions = "1.1.0"
 steno = "0.4.1"
 strum = { version = "0.26", features = [ "derive" ] }
 subprocess = "0.2.9"
+subtle = "2.6.1"
 supports-color = "3.0.2"
 swrite = "0.1.0"
 sync-ptr = "0.1.1"
