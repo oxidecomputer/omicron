@@ -14,7 +14,9 @@ use nexus_db_queries::{
 use nexus_external_api::TimeseriesSchemaPaginationParams;
 use nexus_types::external_api::params::SystemMetricName;
 use omicron_common::api::external::{Error, InternalContext};
-use oximeter_db::{Measurement, QueryAuthzScope, TimeseriesSchema};
+use oximeter_db::{
+    Measurement, TimeseriesSchema, oxql::query::QueryAuthzScope,
+};
 use std::num::NonZeroU32;
 
 impl super::Nexus {

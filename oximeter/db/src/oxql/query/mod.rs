@@ -446,7 +446,6 @@ mod tests {
     use super::Filter;
     use super::Ident;
     use super::Query;
-    use crate::QueryAuthzScope;
     use crate::oxql::ast::SplitQuery;
     use crate::oxql::ast::cmp::Comparison;
     use crate::oxql::ast::literal::Literal;
@@ -460,6 +459,7 @@ mod tests {
     use crate::oxql::ast::table_ops::join::Join;
     use crate::oxql::ast::table_ops::limit::Limit;
     use crate::oxql::ast::table_ops::limit::LimitKind;
+    use crate::oxql::query::QueryAuthzScope;
     use crate::oxql::query::restrict_filter_idents;
     use crate::oxql::query::uuid_eq_filter;
     use assert_matches::assert_matches;
