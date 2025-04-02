@@ -1608,7 +1608,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3655,10 +3655,12 @@ dependencies = [
 name = "gfss"
 version = "0.1.0"
 dependencies = [
+ "digest",
  "omicron-workspace-hack",
  "proptest",
  "rand 0.8.5",
  "secrecy",
+ "serde",
  "subtle",
  "test-strategy",
  "thiserror 1.0.69",
@@ -5243,7 +5245,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -7643,7 +7645,6 @@ dependencies = [
  "getrandom 0.3.1",
  "group",
  "hashbrown 0.15.1",
- "heck 0.4.1",
  "hex",
  "hickory-proto",
  "hmac",
@@ -11414,7 +11415,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.98",
@@ -12622,6 +12623,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "trust-quorum"
+version = "0.1.0"
+dependencies = [
+ "bcs",
+ "bootstore",
+ "camino",
+ "chacha20poly1305",
+ "derive_more",
+ "gfss",
+ "hex",
+ "hkdf",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "proptest",
+ "rand 0.8.5",
+ "secrecy",
+ "serde",
+ "serde_with",
+ "sha3",
+ "slog",
+ "slog-error-chain",
+ "subtle",
+ "test-strategy",
+ "thiserror 1.0.69",
+ "tokio",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13736,7 +13767,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

@@ -26,6 +26,7 @@ use core::fmt::{self, Binary, Display, Formatter, LowerHex, UpperHex};
 use core::ops::{Add, AddAssign, Div, Mul, MulAssign, Sub};
 use rand::Rng;
 use rand::distributions::{Distribution, Standard};
+use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
@@ -34,8 +35,14 @@ use zeroize::Zeroize;
 /// We explicitly don't enable the equality operators to prevent ourselves from
 /// accidentally using those instead of the constant time ones.
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, Zeroize)]
+#[derive(Debug, Clone, Copy, Zeroize, Serialize, Deserialize)]
 pub struct Gf256(u8);
+
+impl AsRef<u8> for Gf256 {
+    fn as_ref(&self) -> &u8 {
+        &self.0
+    }
+}
 
 impl Gf256 {
     pub fn new(n: u8) -> Gf256 {
