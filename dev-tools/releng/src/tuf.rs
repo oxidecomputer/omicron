@@ -111,12 +111,18 @@ pub(crate) async fn build_tuf_repo(
                 .join(format!("{}.tar.gz", package)),
         });
     }
+
+    // XXX fixme
+    let mut measurement_corpus = Vec::new();
     manifest.artifacts.insert(
         KnownArtifactKind::ControlPlane,
         vec![DeserializedArtifactData {
             name: "control-plane".to_string(),
             version: artifact_version.clone(),
-            source: DeserializedArtifactSource::CompositeControlPlane { zones },
+            source: DeserializedArtifactSource::CompositeControlPlane {
+                zones,
+                measurement_corpus,
+            },
         }],
     );
 
