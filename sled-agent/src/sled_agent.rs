@@ -80,11 +80,10 @@ use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
+use illumos_utils::dladm::Dladm;
 use illumos_utils::running_zone::ZoneBuilderFactory;
-#[cfg(not(test))]
-use illumos_utils::{dladm::Dladm, zone::Zones};
-#[cfg(test)]
-use illumos_utils::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
+use illumos_utils::zone::Api;
+use illumos_utils::zone::Zones;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -799,7 +798,8 @@ impl SledAgent {
 
     /// List the zones that the sled agent is currently managing.
     pub async fn zones_list(&self) -> Result<Vec<String>, Error> {
-        Zones::get()
+        Zones {}
+            .get()
             .await
             .map(|zones| {
                 let mut zn: Vec<_> = zones

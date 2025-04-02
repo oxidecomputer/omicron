@@ -114,7 +114,11 @@ impl InstanceManager {
             terminate_rx,
             nexus_client,
             jobs: BTreeMap::new(),
-            vnic_allocator: VnicAllocator::new("Instance", etherstub),
+            vnic_allocator: VnicAllocator::new(
+                "Instance",
+                etherstub,
+                Arc::new(illumos_utils::dladm::Dladm {}),
+            ),
             port_manager,
             storage_generation: None,
             storage,

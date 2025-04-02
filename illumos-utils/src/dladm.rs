@@ -68,7 +68,7 @@ pub enum GetMacError {
 
 /// Errors returned from [`Dladm::create_vnic`].
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to create VNIC {name} on link {link:?}: {err}")]
+#[error("Failed to create VNIC {name} on link {link:?}")]
 pub struct CreateVnicError {
     name: String,
     link: String,
@@ -78,7 +78,7 @@ pub struct CreateVnicError {
 
 /// Errors returned from [`Dladm::get_vnics`].
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to get vnics: {err}")]
+#[error("Failed to get vnics")]
 pub struct GetVnicError {
     #[source]
     err: ExecutionError,
@@ -86,7 +86,7 @@ pub struct GetVnicError {
 
 /// Errors returned from [`Dladm::get_simulated_tfports`].
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to get simnets: {err}")]
+#[error("Failed to get simnets")]
 pub struct GetSimnetError {
     #[source]
     err: ExecutionError,
@@ -94,7 +94,7 @@ pub struct GetSimnetError {
 
 /// Errors returned from [`Dladm::delete_vnic`].
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to delete vnic {name}: {err}")]
+#[error("Failed to delete vnic {name}")]
 pub struct DeleteVnicError {
     name: String,
     #[source]
@@ -103,9 +103,7 @@ pub struct DeleteVnicError {
 
 /// Errors returned from [`Dladm::get_linkprop`].
 #[derive(thiserror::Error, Debug)]
-#[error(
-    "Failed to get link property \"{prop_name}\" on vnic {link_name}: {err}"
-)]
+#[error("Failed to get link property \"{prop_name}\" on vnic {link_name}")]
 pub struct GetLinkpropError {
     link_name: String,
     prop_name: String,
@@ -116,7 +114,7 @@ pub struct GetLinkpropError {
 /// Errors returned from [`Dladm::set_linkprop`].
 #[derive(thiserror::Error, Debug)]
 #[error(
-    "Failed to set link property \"{prop_name}\" to \"{prop_value}\" on vnic {link_name}: {err}"
+    "Failed to set link property \"{prop_name}\" to \"{prop_value}\" on vnic {link_name}"
 )]
 pub struct SetLinkpropError {
     link_name: String,
@@ -128,9 +126,7 @@ pub struct SetLinkpropError {
 
 /// Errors returned from [`Dladm::reset_linkprop`].
 #[derive(thiserror::Error, Debug)]
-#[error(
-    "Failed to reset link property \"{prop_name}\" on vnic {link_name}: {err}"
-)]
+#[error("Failed to reset link property \"{prop_name}\" on vnic {link_name}")]
 pub struct ResetLinkpropError {
     link_name: String,
     prop_name: String,
@@ -176,7 +172,108 @@ impl VnicSource for PhysicalLink {
 /// Wraps commands for interacting with data links.
 pub struct Dladm {}
 
-#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
+/// Describes the API for interfacing with Data links.
+///
+/// This is a trait so that it can be faked out for tests.
+#[async_trait::async_trait]
+pub trait Api: Send + Sync {
+    /// Creates a new VNIC atop a physical device.
+    ///
+    /// * `physical`: The physical link on top of which a device will be
+    /// created.
+    /// * `vnic_name`: Exact name of the VNIC to be created.
+    /// * `mac`: An optional unicast MAC address for the newly created NIC.
+    /// * `vlan`: An optional VLAN ID for VLAN tagging.
+    fn create_vnic(
+        &self,
+        source: &(dyn VnicSource + 'static),
+        vnic_name: &str,
+        mac: Option<MacAddr>,
+        vlan: Option<VlanID>,
+        mtu: usize,
+    ) -> Result<(), CreateVnicError> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let mut args = vec![
+            DLADM.to_string(),
+            "create-vnic".to_string(),
+            "-t".to_string(),
+            "-l".to_string(),
+            source.name().to_string(),
+        ];
+
+        if let Some(mac) = mac {
+            args.push("-m".to_string());
+            args.push(mac.0.to_string());
+        }
+
+        if let Some(vlan) = vlan {
+            args.push("-v".to_string());
+            args.push(vlan.to_string());
+        }
+
+        args.push("-p".to_string());
+        args.push(format!("mtu={mtu}"));
+
+        args.push(vnic_name.to_string());
+
+        let cmd = command.args(&args);
+        execute(cmd).map_err(|err| CreateVnicError {
+            name: vnic_name.to_string(),
+            link: source.name().to_string(),
+            err,
+        })?;
+
+        // In certain situations, `create-vnic -p mtu=N` does not actually set
+        // the mtu to N. Set it here using `set-linkprop`.
+        //
+        // See https://www.illumos.org/issues/15695 for the illumos bug.
+        let mut command = std::process::Command::new(PFEXEC);
+        let prop = format!("mtu={}", mtu);
+        let cmd = command.args(&[
+            DLADM,
+            "set-linkprop",
+            "-t",
+            "-p",
+            &prop,
+            vnic_name,
+        ]);
+        execute(cmd).map_err(|err| CreateVnicError {
+            name: vnic_name.to_string(),
+            link: source.name().to_string(),
+            err,
+        })?;
+
+        Ok(())
+    }
+
+    /// Verify that the given link exists
+    fn verify_link(&self, link: &str) -> Result<Link, FindPhysicalLinkError> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[DLADM, "show-link", "-p", "-o", "LINK", link]);
+        let output = execute(cmd)?;
+        match String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .next()
+            .map(|s| s.trim())
+        {
+            Some(x) if x == link => Ok(Link::wrap_physical(link)),
+            _ => Err(FindPhysicalLinkError::NoPhysicalLinkFound),
+        }
+    }
+
+    /// Remove a vnic from the sled.
+    fn delete_vnic(&self, name: &str) -> Result<(), DeleteVnicError> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[DLADM, "delete-vnic", name]);
+        execute(cmd)
+            .map_err(|err| DeleteVnicError { name: name.to_string(), err })?;
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl Api for Dladm {}
+
 impl Dladm {
     /// Creates an etherstub, or returns one which already exists.
     pub fn ensure_etherstub(name: &str) -> Result<Etherstub, ExecutionError> {
@@ -212,7 +309,7 @@ impl Dladm {
         if let Ok(vnic) = Self::get_etherstub_vnic(vnic_name) {
             return Ok(vnic);
         }
-        Self::create_vnic(source, vnic_name, None, None, mtu)?;
+        Self {}.create_vnic(source, vnic_name, None, None, mtu)?;
         Ok(EtherstubVnic(vnic_name.to_string()))
     }
 
@@ -260,21 +357,6 @@ impl Dladm {
             execute(cmd)?;
         }
         Ok(())
-    }
-
-    /// Verify that the given link exists
-    pub fn verify_link(link: &str) -> Result<Link, FindPhysicalLinkError> {
-        let mut command = std::process::Command::new(PFEXEC);
-        let cmd = command.args(&[DLADM, "show-link", "-p", "-o", "LINK", link]);
-        let output = execute(cmd)?;
-        match String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .next()
-            .map(|s| s.trim())
-        {
-            Some(x) if x == link => Ok(Link::wrap_physical(link)),
-            _ => Err(FindPhysicalLinkError::NoPhysicalLinkFound),
-        }
     }
 
     /// Returns the name of the first observed physical data link.
@@ -336,74 +418,6 @@ impl Dladm {
         Ok(mac)
     }
 
-    /// Creates a new VNIC atop a physical device.
-    ///
-    /// * `physical`: The physical link on top of which a device will be
-    /// created.
-    /// * `vnic_name`: Exact name of the VNIC to be created.
-    /// * `mac`: An optional unicast MAC address for the newly created NIC.
-    /// * `vlan`: An optional VLAN ID for VLAN tagging.
-    pub fn create_vnic<T: VnicSource + 'static>(
-        source: &T,
-        vnic_name: &str,
-        mac: Option<MacAddr>,
-        vlan: Option<VlanID>,
-        mtu: usize,
-    ) -> Result<(), CreateVnicError> {
-        let mut command = std::process::Command::new(PFEXEC);
-        let mut args = vec![
-            DLADM.to_string(),
-            "create-vnic".to_string(),
-            "-t".to_string(),
-            "-l".to_string(),
-            source.name().to_string(),
-        ];
-
-        if let Some(mac) = mac {
-            args.push("-m".to_string());
-            args.push(mac.0.to_string());
-        }
-
-        if let Some(vlan) = vlan {
-            args.push("-v".to_string());
-            args.push(vlan.to_string());
-        }
-
-        args.push("-p".to_string());
-        args.push(format!("mtu={mtu}"));
-
-        args.push(vnic_name.to_string());
-
-        let cmd = command.args(&args);
-        execute(cmd).map_err(|err| CreateVnicError {
-            name: vnic_name.to_string(),
-            link: source.name().to_string(),
-            err,
-        })?;
-
-        // In certain situations, `create-vnic -p mtu=N` does not actually set
-        // the mtu to N. Set it here using `set-linkprop`.
-        //
-        // See https://www.illumos.org/issues/15695 for the illumos bug.
-        let mut command = std::process::Command::new(PFEXEC);
-        let prop = format!("mtu={}", mtu);
-        let cmd = command.args(&[
-            DLADM,
-            "set-linkprop",
-            "-t",
-            "-p",
-            &prop,
-            vnic_name,
-        ]);
-        execute(cmd).map_err(|err| CreateVnicError {
-            name: vnic_name.to_string(),
-            link: source.name().to_string(),
-            err,
-        })?;
-
-        Ok(())
-    }
-
     /// Returns VNICs that may be managed by the Sled Agent.
     pub fn get_vnics() -> Result<Vec<String>, GetVnicError> {
         let mut command = std::process::Command::new(PFEXEC);
@@ -441,15 +455,6 @@ impl Dladm {
             })
             .collect();
         Ok(tfports)
-    }
-
-    /// Remove a vnic from the sled.
-    pub fn delete_vnic(name: &str) -> Result<(), DeleteVnicError> {
-        let mut command = std::process::Command::new(PFEXEC);
-        let cmd = command.args(&[DLADM, "delete-vnic", name]);
-        execute(cmd)
-            .map_err(|err| DeleteVnicError { name: name.to_string(), err })?;
-        Ok(())
     }
 
     /// Get a link property value on a VNIC

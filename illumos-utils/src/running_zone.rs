@@ -11,11 +11,12 @@ use crate::addrobj::{
 use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
-use crate::svc::wait_for_service;
 use crate::zone::AddressRequest;
+use crate::zone::Zones;
 use crate::zpool::{PathInPool, ZpoolOrRamdisk};
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
+use debug_ignore::DebugIgnore;
 use ipnetwork::IpNetwork;
 use omicron_common::backoff;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -27,11 +28,6 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 #[cfg(target_os = "illumos")]
 use std::thread;
-
-#[cfg(any(test, feature = "testing"))]
-use crate::zone::MockZones as Zones;
-#[cfg(not(any(test, feature = "testing")))]
-use crate::zone::Zones;
 
 /// Errors returned from methods for fetching SMF services and log files
 #[derive(thiserror::Error, Debug)]
@@ -490,7 +486,7 @@ impl RunningZone {
         // Boot the zone.
         info!(zone.log, "Booting {} zone", zone.name);
 
-        Zones::boot(&zone.name).await?;
+        zone.zones_api.boot(&zone.name).await?;
 
         // Wait until the zone reaches the 'single-user' SMF milestone.
         // At this point, we know that the dependent
@@ -499,16 +495,18 @@ impl RunningZone {
         // services are up, so future requests to create network addresses
         // or manipulate services will work.
         let fmri = "svc:/milestone/single-user:default";
-        wait_for_service(Some(&zone.name), fmri, zone.log.clone())
+        zone.zones_api
+            .wait_for_service(Some(&zone.name), fmri, zone.log.clone())
             .await
             .map_err(|_| BootError::Timeout {
                 service: fmri.to_string(),
                 zone: zone.name.to_string(),
             })?;
 
-        let id = Zones::id(&zone.name)
-            .await?
-            .ok_or_else(|| BootError::NoZoneId { zone: zone.name.clone() })?;
+        let id =
+            zone.zones_api.id(&zone.name).await?.ok_or_else(|| {
+                BootError::NoZoneId { zone: zone.name.clone() }
+            })?;
 
         let running_zone = RunningZone { id: Some(id), inner: zone };
 
@@ -716,7 +714,9 @@ impl RunningZone {
         if let Some(_) = self.id.take() {
             let log = self.inner.log.clone();
             let name = self.name().to_string();
-            Zones::halt_and_remove_logged(&log, &name)
+            self.inner
+                .zones_api
+                .halt_and_remove_logged(&log, &name)
                 .await
                 .map_err(|err| err.to_string())?;
         }
@@ -836,8 +836,9 @@ impl Drop for RunningZone {
         if let Some(_) = self.id.take() {
             let log = self.inner.log.clone();
             let name = self.name().to_string();
+            let zones_api = self.inner.zones_api.clone();
             tokio::task::spawn(async move {
-                match Zones::halt_and_remove_logged(&log, &name).await {
+                match zones_api.halt_and_remove_logged(&log, &name).await {
                     Ok(()) => {
                         info!(log, "Stopped and uninstalled zone")
                     }
@@ -909,6 +910,9 @@ pub struct InstalledZone {
 
     // Physical NICs possibly provisioned to the zone.
     links: Vec<Link>,
+
+    // API to underlying zone commands
+    zones_api: DebugIgnore<Arc<dyn crate::zone::Api>>,
 }
 
 impl InstalledZone {
@@ -1151,7 +1155,11 @@ impl<'a> ZoneBuilder<'a> {
     }
 
     // (used in unit tests)
-    fn fake_install(self) -> Result<InstalledZone, InstallZoneError> {
+    fn fake_install(
+        self,
+        zones_api: Arc<dyn crate::zone::Api>,
+    ) -> Result<InstalledZone, InstallZoneError> {
+        println!("RunningZone: Fake install");
         let zone = self
             .zone_type
             .ok_or(InstallZoneError::IncompleteBuilder)?
@@ -1182,6 +1190,7 @@ impl<'a> ZoneBuilder<'a> {
                 bootstrap_vnic: self.bootstrap_vnic,
                 opte_ports: self.opte_ports?,
                 links: self.links?,
+                zones_api: DebugIgnore(zones_api),
             };
             let xml_path = iz.site_profile_xml_path().parent()?.to_path_buf();
             std::fs::create_dir_all(&xml_path)
@@ -1194,10 +1203,15 @@ impl<'a> ZoneBuilder<'a> {
     /// Create the zone with the provided parameters.
     /// Returns `Err(InstallZoneError::IncompleteBuilder)` if a necessary
     /// parameter was not provided.
-    pub async fn install(self) -> Result<InstalledZone, InstallZoneError> {
+    pub async fn install(
+        self,
+        zones_api: Arc<dyn crate::zone::Api>,
+    ) -> Result<InstalledZone, InstallZoneError> {
+        println!("RunningZone: install");
         if self.fake_cfg.is_some() {
-            return self.fake_install();
+            return self.fake_install(zones_api);
         }
+        println!("RunningZone: install - REAL");
 
         let Self {
             log: Some(log),
@@ -1220,7 +1234,6 @@ impl<'a> ZoneBuilder<'a> {
             return Err(InstallZoneError::IncompleteBuilder);
         };
 
-        // XXX
         let control_vnic =
             underlay_vnic_allocator.new_control(None).map_err(|err| {
                 InstallZoneError::CreateVnic {
@@ -1265,24 +1278,24 @@ impl<'a> ZoneBuilder<'a> {
 
         zone_root_path.path = zone_root_path.path.join(&full_zone_name);
 
-        // XXX-smklein
-        Zones::install_omicron_zone(
-            &log,
-            &zone_root_path,
-            &full_zone_name,
-            &zone_image_path,
-            datasets,
-            filesystems,
-            devices,
-            net_device_names,
-            limit_priv,
-        )
-        .await
-        .map_err(|err| InstallZoneError::InstallZone {
-            zone: full_zone_name.to_string(),
-            image_path: zone_image_path.clone(),
-            err,
-        })?;
+        zones_api
+            .install_omicron_zone(
+                &log,
+                &zone_root_path,
+                &full_zone_name,
+                &zone_image_path,
+                datasets,
+                filesystems,
+                devices,
+                net_device_names,
+                limit_priv,
+            )
+            .await
+            .map_err(|err| InstallZoneError::InstallZone {
+                zone: full_zone_name.to_string(),
+                image_path: zone_image_path.clone(),
+                err,
+            })?;
 
         Ok(InstalledZone {
             log: log.new(o!("zone" => full_zone_name.clone())),
@@ -1292,6 +1305,7 @@ impl<'a> ZoneBuilder<'a> {
             bootstrap_vnic,
             opte_ports,
             links,
+            zones_api: DebugIgnore(zones_api),
         })
     }
 }

@@ -200,7 +200,6 @@ pub struct PathInPool {
     pub path: Utf8PathBuf,
 }
 
-#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zpool {
     pub fn create(
         name: &ZpoolName,

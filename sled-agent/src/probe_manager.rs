@@ -5,7 +5,6 @@ use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
-use illumos_utils::zone::Zones;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use nexus_client::types::{
     BackgroundTasksActivateRequest, ProbeExternalIp, ProbeInfo,
@@ -65,6 +64,26 @@ pub(crate) struct ProbeManagerInner {
     port_manager: PortManager,
     metrics_queue: MetricsRequestQueue,
     running_probes: Mutex<RunningProbes>,
+
+    system_api: Box<dyn SystemApi>,
+}
+
+trait SystemApi: Send + Sync {
+    fn zones(&self) -> Arc<dyn illumos_utils::zone::Api>;
+}
+
+struct RealSystemApi {}
+
+impl RealSystemApi {
+    pub fn new() -> Box<dyn SystemApi> {
+        Box::new(RealSystemApi {})
+    }
+}
+
+impl SystemApi for RealSystemApi {
+    fn zones(&self) -> Arc<dyn illumos_utils::zone::Api> {
+        Arc::new(illumos_utils::zone::Zones {})
+    }
 }
 
 impl ProbeManager {
@@ -83,6 +102,7 @@ impl ProbeManager {
                 vnic_allocator: VnicAllocator::new(
                     VNIC_ALLOCATOR_SCOPE,
                     etherstub,
+                    Arc::new(illumos_utils::dladm::Dladm {}),
                 ),
                 running_probes: Mutex::new(RunningProbes {
                     storage_generation: None,
@@ -94,6 +114,7 @@ impl ProbeManager {
                 storage,
                 port_manager,
                 metrics_queue,
+                system_api: RealSystemApi::new(),
             }),
         }
     }
@@ -341,7 +362,7 @@ impl ProbeManagerInner {
             .with_opte_ports(vec![port])
             .with_links(vec![])
             .with_limit_priv(vec![])
-            .install()
+            .install(self.system_api.zones())
             .await?;
 
         info!(self.log, "installed probe {}", probe.id);
@@ -457,7 +478,10 @@ impl ProbeManagerInner {
 
     /// Collect the current probe state from the running zones on this sled.
     async fn current_state(self: &Arc<Self>) -> Result<HashSet<ProbeState>> {
-        Ok(Zones::get()
+        Ok(self
+            .system_api
+            .zones()
+            .get()
             .await?
             .into_iter()
             .filter_map(|z| ProbeState::try_from(z).ok())

@@ -8,7 +8,9 @@ use anyhow::{Context, Result, anyhow, bail};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Parser, Subcommand};
 use futures::stream::{self, StreamExt, TryStreamExt};
-use illumos_utils::{zfs, zone};
+use illumos_utils::zfs;
+use illumos_utils::zone;
+use illumos_utils::zone::Api;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use omicron_package::cargo_plan::{
     build_cargo_plan, do_show_cargo_commands_for_config,
@@ -585,10 +587,10 @@ async fn do_install(
 
 async fn uninstall_all_omicron_zones() -> Result<()> {
     const CONCURRENCY_CAP: usize = 32;
-    futures::stream::iter(zone::Zones::get().await?)
+    futures::stream::iter(zone::Zones {}.get().await?)
         .map(Ok::<_, anyhow::Error>)
         .try_for_each_concurrent(CONCURRENCY_CAP, |zone| async move {
-            zone::Zones::halt_and_remove(zone.name()).await?;
+            zone::Zones {}.halt_and_remove(zone.name()).await?;
             Ok(())
         })
         .await?;

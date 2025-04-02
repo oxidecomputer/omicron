@@ -17,6 +17,7 @@ camino.workspace = true
 camino-tempfile.workspace = true
 cfg-if.workspace = true
 crucible-smf.workspace = true
+debug-ignore.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 http.workspace = true
