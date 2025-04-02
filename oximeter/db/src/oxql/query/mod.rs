@@ -367,31 +367,26 @@ impl Query {
         &self.parsed
     }
 
-    pub(crate) fn add_filters(&self, filters: Vec<(String, Uuid)>) -> Self {
-        let mut new_ops = self.parsed.table_ops().cloned().collect::<Vec<_>>();
-        let filters = filters
-            .iter()
-            .map(|(key, value)| {
-                let simple_filter = SimpleFilter {
-                    ident: Ident(key.to_string()),
-                    cmp: Comparison::Eq,
-                    value: Literal::Uuid(*value),
-                };
-                let filter_expr = FilterExpr::Simple(simple_filter);
-                let filter_op = Filter { negated: false, expr: filter_expr };
-                TableOp::Basic(BasicTableOp::Filter(filter_op))
-            })
-            .collect::<Vec<_>>();
-
-        // TODO: I think ops can't be empty if it parses, so we can prob do an unreachable! here
-        if !new_ops.is_empty() {
-            new_ops.splice(1..1, filters);
-        } else {
-            new_ops.extend(filters);
+    /// Insert filters after the `get`, or in the case of subqueries, recurse
+    /// down the tree and insert them after each get.
+    pub(crate) fn add_filters(&self, filters: Vec<Filter>) -> Self {
+        Self {
+            parsed: self.parsed.add_filters(filters),
+            end_time: self.end_time,
         }
-
-        Self { parsed: QueryNode::new(new_ops), end_time: self.end_time }
     }
+}
+
+// TODO: move this to a more appropriate spot
+/// Just a helper for creating a UUID filter node concisely
+pub fn uuid_eq_filter(key: String, id: Uuid) -> Filter {
+    let simple_filter = SimpleFilter {
+        ident: Ident(key),
+        cmp: Comparison::Eq,
+        value: Literal::Uuid(id),
+    };
+    let filter_expr = FilterExpr::Simple(simple_filter);
+    Filter { negated: false, expr: filter_expr }
 }
 
 // Return a new filter containing only parts that refer to either:
@@ -442,6 +437,7 @@ mod tests {
     use crate::oxql::ast::literal::Literal;
     use crate::oxql::ast::logical_op::LogicalOp;
     use crate::oxql::ast::table_ops::BasicTableOp;
+    use crate::oxql::ast::table_ops::GroupedTableOp;
     use crate::oxql::ast::table_ops::TableOp;
     use crate::oxql::ast::table_ops::filter::CompoundFilter;
     use crate::oxql::ast::table_ops::filter::FilterExpr;
@@ -450,6 +446,8 @@ mod tests {
     use crate::oxql::ast::table_ops::limit::Limit;
     use crate::oxql::ast::table_ops::limit::LimitKind;
     use crate::oxql::query::restrict_filter_idents;
+    use crate::oxql::query::uuid_eq_filter;
+    use assert_matches::assert_matches;
     use chrono::NaiveDateTime;
     use chrono::Utc;
     use std::time::Duration;
@@ -1044,8 +1042,8 @@ mod tests {
         let silo_id = Uuid::new_v4();
         let project_id = Uuid::new_v4();
         let new_query = query.add_filters(vec![
-            ("silo_id".to_string(), silo_id),
-            ("project_id".to_string(), project_id),
+            uuid_eq_filter("silo_id".to_string(), silo_id),
+            uuid_eq_filter("project_id".to_string(), project_id),
         ]);
 
         assert_eq!(query.parsed.table_ops().len(), 2);
@@ -1065,34 +1063,119 @@ mod tests {
     #[test]
     fn test_add_filters_with_subqueries() {
         let query =
-            Query::new("{ get a:b | filter timestamp > @now(); get c:d }")
+            Query::new("{ get a:b | filter timestamp > @2025-03-05; get c:d }")
                 .unwrap();
         let silo_id = Uuid::new_v4();
         let project_id = Uuid::new_v4();
-        // TODO: right now it adds the filters after the subquery. should it insert them into each subquery?
-        let new_query = query.add_filters(vec![
-            ("silo_id".to_string(), silo_id),
-            ("project_id".to_string(), project_id),
-        ]);
-        assert_eq!(query.parsed.table_ops().len(), 1);
-        assert_eq!(new_query.parsed.table_ops().len(), 3);
 
-        // inserted after the subquery (for now)
-        assert_eq!(
-            new_query.parsed.table_ops().nth(1).unwrap().to_string(),
-            format!("filter (silo_id == \"{}\")", silo_id)
-        );
-        assert_eq!(
-            new_query.parsed.table_ops().nth(2).unwrap().to_string(),
-            format!("filter (project_id == \"{}\")", project_id)
-        );
+        // Define expected filters as AST nodes
+        let silo_filter = uuid_eq_filter("silo_id".to_string(), silo_id);
+        let project_filter =
+            uuid_eq_filter("project_id".to_string(), project_id);
+
+        let expected_silo_op =
+            TableOp::Basic(BasicTableOp::Filter(silo_filter.clone()));
+        let expected_project_op =
+            TableOp::Basic(BasicTableOp::Filter(project_filter.clone()));
+
+        let new_query = query.add_filters(vec![silo_filter, project_filter]);
+
+        // Check top-level structure (should remain a single grouped op)
+        assert_eq!(query.parsed.table_ops().len(), 1);
+        assert_eq!(new_query.parsed.table_ops().len(), 1);
+
+        let only_op = new_query.parsed.first_op();
+        let TableOp::Grouped(GroupedTableOp { ops }) = only_op else {
+            panic!("Expected the only operation to be TableOp::Grouped");
+        };
+
+        assert_eq!(ops.len(), 2, "Expected two subqueries in the group");
+
+        // first subquery has the original get and filter and now two extra filters in the middle
+        let subq1: Vec<_> = ops[0].table_ops().cloned().collect();
+        assert_eq!(subq1.len(), 4,);
+        assert_matches!(subq1[0], TableOp::Basic(BasicTableOp::Get(_)));
+        assert_eq!(subq1[1], expected_silo_op);
+        assert_eq!(subq1[2], expected_project_op);
+        assert_matches!(subq1[3], TableOp::Basic(BasicTableOp::Filter(_)));
+
+        // second subquery has the original get and now two extra filters
+        let subq2: Vec<_> = ops[1].table_ops().cloned().collect();
+        assert_eq!(subq2.len(), 3);
+        assert_matches!(subq2[0], TableOp::Basic(BasicTableOp::Get(_)));
+        assert_eq!(subq2[1], expected_silo_op);
+        assert_eq!(subq2[2], expected_project_op);
     }
 
     #[test]
     fn test_add_filters_with_nested_subqueries() {
-        let query =
-            Query::new("{ get a:b | filter timestamp > @now(); { get c:d; get e:f | filter timestamp < @now() } ; get g:h }")
-                .unwrap();
-        dbg!(query);
+        let query_str = "{ get a:b | filter timestamp > @2025-03-05; { get c:d; get e:f | filter timestamp < @2025-04-06 }; get g:h }";
+        let query = Query::new(query_str).unwrap();
+        let silo_id = Uuid::new_v4();
+        let project_id = Uuid::new_v4();
+
+        // Define expected filters as AST nodes
+        let silo_filter = uuid_eq_filter("silo_id".to_string(), silo_id);
+        let project_filter =
+            uuid_eq_filter("project_id".to_string(), project_id);
+
+        let expected_silo_op =
+            TableOp::Basic(BasicTableOp::Filter(silo_filter.clone()));
+        let expected_project_op =
+            TableOp::Basic(BasicTableOp::Filter(project_filter.clone()));
+
+        let new_query = query.add_filters(vec![silo_filter, project_filter]);
+
+        // Check top-level structure (should remain a single grouped op)
+        assert_eq!(query.parsed.table_ops().len(), 1);
+        assert_eq!(new_query.parsed.table_ops().len(), 1);
+
+        let top_op = new_query.parsed.first_op();
+        let TableOp::Grouped(GroupedTableOp { ops: top_ops }) = top_op else {
+            panic!("Expected the top operation to be TableOp::Grouped");
+        };
+
+        assert_eq!(top_ops.len(), 3,);
+
+        // Check first subquery (get a:b | filter ...)
+        let subq1: Vec<_> = top_ops[0].table_ops().cloned().collect();
+        assert_eq!(subq1.len(), 4, "Expected 4 ops in subquery 1");
+        assert_matches!(subq1[0], TableOp::Basic(BasicTableOp::Get(_)));
+        assert_eq!(subq1[1], expected_silo_op);
+        assert_eq!(subq1[2], expected_project_op);
+        assert_matches!(subq1[3], TableOp::Basic(BasicTableOp::Filter(_))); // Original filter
+
+        // Check second subquery (the nested group { get c:d; get e:f | filter ... })
+        let nested_ops = &top_ops[1].table_ops().collect::<Vec<_>>();
+        assert_eq!(nested_ops.len(), 1);
+
+        let TableOp::Grouped(GroupedTableOp { ops: nested_queries }) =
+            nested_ops[0]
+        else {
+            panic!("Expected the top operation to be TableOp::Grouped");
+        };
+        let nested_subq1 = nested_queries[0].table_ops().collect::<Vec<_>>();
+        assert_eq!(nested_subq1.len(), 3);
+        assert_matches!(nested_subq1[0], TableOp::Basic(BasicTableOp::Get(_)));
+        assert_eq!(nested_subq1[1], &expected_silo_op);
+        assert_eq!(nested_subq1[2], &expected_project_op);
+
+        // Check second nested subquery (get e:f | filter ...)
+        let nested_subq2 = nested_queries[1].table_ops().collect::<Vec<_>>();
+        assert_eq!(nested_subq2.len(), 4);
+        assert_matches!(nested_subq2[0], TableOp::Basic(BasicTableOp::Get(_)));
+        assert_eq!(nested_subq2[1], &expected_silo_op);
+        assert_eq!(nested_subq2[2], &expected_project_op);
+        assert_matches!(
+            nested_subq2[3],
+            TableOp::Basic(BasicTableOp::Filter(_))
+        ); // Original filter
+
+        // Check third subquery (get g:h)
+        let subq3: Vec<_> = top_ops[2].table_ops().cloned().collect();
+        assert_eq!(subq3.len(), 3, "Expected 3 ops in subquery 3");
+        assert_matches!(subq3[0], TableOp::Basic(BasicTableOp::Get(_)));
+        assert_eq!(subq3[1], expected_silo_op);
+        assert_eq!(subq3[2], expected_project_op);
     }
 }

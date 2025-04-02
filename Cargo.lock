@@ -8118,6 +8118,7 @@ name = "oximeter-db"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "async-recursion",
  "async-trait",
  "bcs",

@@ -552,7 +552,7 @@ async fn test_project_timeseries_query(
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].timeseries().len(), 2);
 
-    // TODO: test with a set of subqueries
+    // TODO: test with a gnarly nested query
 
     // expect error when querying a metric that has no project_id on it
     let q5 = "get integration_target:integration_metric";
