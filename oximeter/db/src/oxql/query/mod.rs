@@ -369,9 +369,9 @@ impl Query {
 
     /// Insert filters after the `get`, or in the case of subqueries, recurse
     /// down the tree and insert them after each get.
-    pub(crate) fn add_filters(&self, filters: Vec<Filter>) -> Self {
+    pub(crate) fn insert_filters(&self, filters: Vec<Filter>) -> Self {
         Self {
-            parsed: self.parsed.add_filters(filters),
+            parsed: self.parsed.insert_filters(filters),
             end_time: self.end_time,
         }
     }
@@ -1037,11 +1037,11 @@ mod tests {
     }
 
     #[test]
-    fn test_add_filters() {
+    fn test_insert_filters() {
         let query = Query::new("get a:b | filter timestamp > @now()").unwrap();
         let silo_id = Uuid::new_v4();
         let project_id = Uuid::new_v4();
-        let new_query = query.add_filters(vec![
+        let new_query = query.insert_filters(vec![
             uuid_eq_filter("silo_id".to_string(), silo_id),
             uuid_eq_filter("project_id".to_string(), project_id),
         ]);
@@ -1061,10 +1061,12 @@ mod tests {
     }
 
     #[test]
-    fn test_add_filters_with_subqueries() {
-        let query =
-            Query::new("{ get a:b | filter timestamp > @2025-03-05; get c:d }")
-                .unwrap();
+    fn test_insert_filters_with_subqueries() {
+        let query = Query::new(
+            "{ get a:b | filter timestamp > @2025-03-05; get c:d } | filter timestamp > @2025-01-01",
+        )
+        .unwrap();
+
         let silo_id = Uuid::new_v4();
         let project_id = Uuid::new_v4();
 
@@ -1078,11 +1080,18 @@ mod tests {
         let expected_project_op =
             TableOp::Basic(BasicTableOp::Filter(project_filter.clone()));
 
-        let new_query = query.add_filters(vec![silo_filter, project_filter]);
+        let new_query = query.insert_filters(vec![silo_filter, project_filter]);
 
-        // Check top-level structure (should remain a single grouped op)
-        assert_eq!(query.parsed.table_ops().len(), 1);
-        assert_eq!(new_query.parsed.table_ops().len(), 1);
+        // Check top-level structure (should remain one grouped op and one filter)
+        let orig_ops = query.parsed.table_ops().collect::<Vec<_>>();
+        assert_eq!(orig_ops.len(), 2);
+        assert_matches!(orig_ops[1], TableOp::Basic(BasicTableOp::Filter(_)));
+
+        let new_ops = new_query.parsed.table_ops().collect::<Vec<_>>();
+        assert_eq!(new_ops.len(), 2);
+
+        // second filter op unchanged
+        assert_eq!(orig_ops[1], new_ops[1]);
 
         let only_op = new_query.parsed.first_op();
         let TableOp::Grouped(GroupedTableOp { ops }) = only_op else {
@@ -1108,7 +1117,7 @@ mod tests {
     }
 
     #[test]
-    fn test_add_filters_with_nested_subqueries() {
+    fn test_insert_filters_with_nested_subqueries() {
         let query_str = "{ get a:b | filter timestamp > @2025-03-05; { get c:d; get e:f | filter timestamp < @2025-04-06 }; get g:h }";
         let query = Query::new(query_str).unwrap();
         let silo_id = Uuid::new_v4();
@@ -1124,7 +1133,7 @@ mod tests {
         let expected_project_op =
             TableOp::Basic(BasicTableOp::Filter(project_filter.clone()));
 
-        let new_query = query.add_filters(vec![silo_filter, project_filter]);
+        let new_query = query.insert_filters(vec![silo_filter, project_filter]);
 
         // Check top-level structure (should remain a single grouped op)
         assert_eq!(query.parsed.table_ops().len(), 1);

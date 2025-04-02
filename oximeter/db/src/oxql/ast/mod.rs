@@ -196,7 +196,7 @@ impl Query {
 
     /// Insert filters after the `get`, or in the case of subqueries, recurse
     /// down the tree and insert them after each get.
-    pub(crate) fn add_filters(&self, filters: Vec<Filter>) -> Self {
+    pub(crate) fn insert_filters(&self, filters: Vec<Filter>) -> Self {
         let mut new_ops = self.ops.clone();
 
         match self.first_op() {
@@ -216,7 +216,7 @@ impl Query {
                     ops: op
                         .ops
                         .iter()
-                        .map(|query| query.add_filters(filters.clone()))
+                        .map(|query| query.insert_filters(filters.clone()))
                         .collect(),
                 });
             }
