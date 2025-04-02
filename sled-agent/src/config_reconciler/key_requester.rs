@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use key_manager::StorageKeyRequester;
-use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::oneshot;
 
@@ -13,16 +12,16 @@ pub enum KeyRequesterStatus {
     Ready,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct KeyManagerWaiter {
-    release_from_escrow: Arc<Mutex<ReleaseFromEscrow>>,
+    release_from_escrow: Mutex<ReleaseFromEscrow>,
 }
 
 impl KeyManagerWaiter {
     #[cfg(test)]
     pub(super) fn fake_key_manager_waiter() -> Self {
         let (release_from_escrow, _rx) = spawn_escrow_task(());
-        let release_from_escrow = Arc::new(Mutex::new(release_from_escrow));
+        let release_from_escrow = Mutex::new(release_from_escrow);
         Self { release_from_escrow }
     }
 
@@ -30,7 +29,7 @@ impl KeyManagerWaiter {
         key_requester: StorageKeyRequester,
     ) -> (Self, oneshot::Receiver<StorageKeyRequester>) {
         let (release_from_escrow, rx) = spawn_escrow_task(key_requester);
-        let release_from_escrow = Arc::new(Mutex::new(release_from_escrow));
+        let release_from_escrow = Mutex::new(release_from_escrow);
         (Self { release_from_escrow }, rx)
     }
 
@@ -42,7 +41,7 @@ impl KeyManagerWaiter {
         }
     }
 
-    pub fn notify_key_manager_ready(&self) {
+    pub(super) fn notify_key_manager_ready(&self) {
         self.release_from_escrow.lock().unwrap().release();
     }
 }

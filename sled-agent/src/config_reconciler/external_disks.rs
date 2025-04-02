@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use camino::Utf8PathBuf;
 use id_map::IdMap;
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::DiskManagementError;
@@ -12,7 +11,6 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::DatasetError;
-use sled_storage::dataset::U2_DEBUG_DATASET;
 use sled_storage::disk::Disk;
 use sled_storage::disk::DiskError;
 use sled_storage::disk::RawDisk;
@@ -32,21 +30,6 @@ pub struct ExternalDisks {
 impl ExternalDisks {
     pub fn new(mount_config: Arc<MountConfig>) -> Self {
         Self { disks: BTreeMap::new(), mount_config }
-    }
-
-    /// Returns all `DEBUG_DATASET` paths within available external disks.
-    pub fn all_debug_datasets(&self) -> Vec<Utf8PathBuf> {
-        self.all_datasets(U2_DEBUG_DATASET)
-    }
-
-    fn all_datasets(&self, dataset_name: &str) -> Vec<Utf8PathBuf> {
-        self.disks
-            .values()
-            .map(|disk| {
-                disk.zpool_name()
-                    .dataset_mountpoint(&self.mount_config.root, dataset_name)
-            })
-            .collect()
     }
 
     /// Retain all disks that we are supposed to manage (based on `config`) that
