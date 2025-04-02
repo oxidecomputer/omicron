@@ -12652,7 +12652,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
-source = "git+https://github.com//oxidecomputer/tufaceous?rev=5fce50e771071c64f78e113c6839c342276f317c#5fce50e771071c64f78e113c6839c342276f317c"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#9648f0fe59951fc4b512d7375e265114bf8bb258"
 dependencies = [
  "anyhow",
  "camino",
@@ -12673,7 +12673,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
-source = "git+https://github.com//oxidecomputer/tufaceous?rev=5fce50e771071c64f78e113c6839c342276f317c#5fce50e771071c64f78e113c6839c342276f317c"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#9648f0fe59951fc4b512d7375e265114bf8bb258"
 dependencies = [
  "daft",
  "hex",
@@ -12691,7 +12691,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
-source = "git+https://github.com//oxidecomputer/tufaceous?rev=5fce50e771071c64f78e113c6839c342276f317c#5fce50e771071c64f78e113c6839c342276f317c"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#9648f0fe59951fc4b512d7375e265114bf8bb258"
 dependencies = [
  "semver 1.0.25",
  "serde",
@@ -12703,7 +12703,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
-source = "git+https://github.com//oxidecomputer/tufaceous?rev=5fce50e771071c64f78e113c6839c342276f317c#5fce50e771071c64f78e113c6839c342276f317c"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#9648f0fe59951fc4b512d7375e265114bf8bb258"
 dependencies = [
  "anyhow",
  "async-trait",

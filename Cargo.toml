@@ -898,16 +898,11 @@ opt-level = 3
 # propolis-client = { path = "../propolis/lib/propolis-client" }
 # propolis-mock-server = { path = "../propolis/bin/mock-server" }
 
-# TODO: remove this section back as it was after tufaceous#16 is landed
-[patch."https://github.com/oxidecomputer/tufaceous"]
+# [patch."https://github.com/oxidecomputer/tufaceous"]
 # tufaceous = { path = "../tufaceous/bin" }
 # tufaceous-artifact = { path = "../tufaceous/artifact" }
 # tufaceous-brand-metadata = { path = "../tufaceous/brand-metadata" }
 # tufaceous-lib = { path = "../tufaceous/lib" }
-tufaceous = { git = "https://github.com//oxidecomputer/tufaceous", rev = "5fce50e771071c64f78e113c6839c342276f317c" }
-tufaceous-artifact = { git = "https://github.com//oxidecomputer/tufaceous", rev = "5fce50e771071c64f78e113c6839c342276f317c" }
-tufaceous-brand-metadata = { git = "https://github.com//oxidecomputer/tufaceous", rev = "5fce50e771071c64f78e113c6839c342276f317c" }
-tufaceous-lib = { git = "https://github.com//oxidecomputer/tufaceous", rev = "5fce50e771071c64f78e113c6839c342276f317c" }
 
 # [patch."https://github.com/oxidecomputer/typify"]
 # typify = { path = "../typify/typify" }
