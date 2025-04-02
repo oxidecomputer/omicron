@@ -211,8 +211,8 @@ impl Client {
         let parsed_query = oxql::Query::new(query)?;
         // this has to be used for everything
         let filtered_query = parsed_query.insert_filters(vec![
-            uuid_eq_filter("silo_id".to_string(), silo_id),
-            uuid_eq_filter("project_id".to_string(), project_id),
+            uuid_eq_filter("silo_id", silo_id),
+            uuid_eq_filter("project_id", project_id),
         ]);
 
         let plan = self.build_query_plan(&filtered_query).await?;

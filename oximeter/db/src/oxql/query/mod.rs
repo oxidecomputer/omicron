@@ -379,9 +379,9 @@ impl Query {
 
 // TODO: move this to a more appropriate spot
 /// Just a helper for creating a UUID filter node concisely
-pub fn uuid_eq_filter(key: String, id: Uuid) -> Filter {
+pub fn uuid_eq_filter(key: impl AsRef<str>, id: Uuid) -> Filter {
     let simple_filter = SimpleFilter {
-        ident: Ident(key),
+        ident: Ident(key.as_ref().to_string()),
         cmp: Comparison::Eq,
         value: Literal::Uuid(id),
     };
@@ -1042,8 +1042,8 @@ mod tests {
         let silo_id = Uuid::new_v4();
         let project_id = Uuid::new_v4();
         let new_query = query.insert_filters(vec![
-            uuid_eq_filter("silo_id".to_string(), silo_id),
-            uuid_eq_filter("project_id".to_string(), project_id),
+            uuid_eq_filter("silo_id", silo_id),
+            uuid_eq_filter("project_id", project_id),
         ]);
 
         assert_eq!(query.parsed.table_ops().len(), 2);
@@ -1071,9 +1071,8 @@ mod tests {
         let project_id = Uuid::new_v4();
 
         // Define expected filters as AST nodes
-        let silo_filter = uuid_eq_filter("silo_id".to_string(), silo_id);
-        let project_filter =
-            uuid_eq_filter("project_id".to_string(), project_id);
+        let silo_filter = uuid_eq_filter("silo_id", silo_id);
+        let project_filter = uuid_eq_filter("project_id", project_id);
 
         let expected_silo_op =
             TableOp::Basic(BasicTableOp::Filter(silo_filter.clone()));
@@ -1124,9 +1123,8 @@ mod tests {
         let project_id = Uuid::new_v4();
 
         // Define expected filters as AST nodes
-        let silo_filter = uuid_eq_filter("silo_id".to_string(), silo_id);
-        let project_filter =
-            uuid_eq_filter("project_id".to_string(), project_id);
+        let silo_filter = uuid_eq_filter("silo_id", silo_id);
+        let project_filter = uuid_eq_filter("project_id", project_id);
 
         let expected_silo_op =
             TableOp::Basic(BasicTableOp::Filter(silo_filter.clone()));
