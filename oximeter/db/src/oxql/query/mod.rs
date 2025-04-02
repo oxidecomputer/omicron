@@ -375,7 +375,7 @@ impl Query {
                 let simple_filter = SimpleFilter {
                     ident: Ident(key.to_string()),
                     cmp: Comparison::Eq,
-                    value: Literal::Uuid(value.clone()),
+                    value: Literal::Uuid(*value),
                 };
                 let filter_expr = FilterExpr::Simple(simple_filter);
                 let filter_op = Filter { negated: false, expr: filter_expr };
@@ -1038,18 +1038,28 @@ mod tests {
         );
     }
 
-    // TODO: actual asserts in these tests
-
     #[test]
     fn test_add_filters() {
         let query = Query::new("get a:b | filter timestamp > @now()").unwrap();
         let silo_id = Uuid::new_v4();
         let project_id = Uuid::new_v4();
-        let new_query = dbg!(query.add_filters(vec![
+        let new_query = query.add_filters(vec![
             ("silo_id".to_string(), silo_id),
-            ("project_id".to_string(), project_id)
-        ]));
-        assert!(true);
+            ("project_id".to_string(), project_id),
+        ]);
+
+        assert_eq!(query.parsed.table_ops().len(), 2);
+        assert_eq!(new_query.parsed.table_ops().len(), 4);
+
+        // inserted after the get
+        assert_eq!(
+            new_query.parsed.table_ops().nth(1).unwrap().to_string(),
+            format!("filter (silo_id == \"{}\")", silo_id)
+        );
+        assert_eq!(
+            new_query.parsed.table_ops().nth(2).unwrap().to_string(),
+            format!("filter (project_id == \"{}\")", project_id)
+        );
     }
 
     #[test]
@@ -1060,10 +1070,29 @@ mod tests {
         let silo_id = Uuid::new_v4();
         let project_id = Uuid::new_v4();
         // TODO: right now it adds the filters after the subquery. should it insert them into each subquery?
-        let new_query = dbg!(query.add_filters(vec![
+        let new_query = query.add_filters(vec![
             ("silo_id".to_string(), silo_id),
-            ("project_id".to_string(), project_id)
-        ]));
-        assert!(true);
+            ("project_id".to_string(), project_id),
+        ]);
+        assert_eq!(query.parsed.table_ops().len(), 1);
+        assert_eq!(new_query.parsed.table_ops().len(), 3);
+
+        // inserted after the subquery (for now)
+        assert_eq!(
+            new_query.parsed.table_ops().nth(1).unwrap().to_string(),
+            format!("filter (silo_id == \"{}\")", silo_id)
+        );
+        assert_eq!(
+            new_query.parsed.table_ops().nth(2).unwrap().to_string(),
+            format!("filter (project_id == \"{}\")", project_id)
+        );
+    }
+
+    #[test]
+    fn test_add_filters_with_nested_subqueries() {
+        let query =
+            Query::new("{ get a:b | filter timestamp > @now(); { get c:d; get e:f | filter timestamp < @now() } ; get g:h }")
+                .unwrap();
+        dbg!(query);
     }
 }
