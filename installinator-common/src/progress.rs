@@ -296,6 +296,8 @@ pub enum ControlPlaneZonesStepId {
 
     /// Writing the MUPdate override file.
     MupdateOverride,
+    /// Writing a measurement corpus
+    MeasurementCorpus { name: String },
 
     /// Syncing writes to disk.
     Fsync,

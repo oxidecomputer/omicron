@@ -728,6 +728,34 @@ impl ControlPlaneZoneWriteContext<'_> {
                 .register();
         }
 
+        for (name, data) in &self.zones.measurement_corpus {
+            let out_path = self.output_directory.join(name);
+            transport = engine
+                .new_step(
+                    WriteComponent::ControlPlane,
+                    ControlPlaneZonesStepId::MeasurementCorpus { name: name.clone() },
+                    format!("Writing measurement corpus {name}"),
+                    async move |cx| {
+                        let transport = transport.into_value(cx.token()).await;
+                        write_artifact_impl(
+                            WriteComponent::ControlPlane,
+                            slot,
+                            data.clone().into(),
+                            &out_path,
+                            transport,
+                            &cx,
+                        )
+                        .await?;
+
+                        StepSuccess::new(transport).into()
+                    },
+                )
+                .register();
+        }
+
+
+
+        // XXX here is where we can write the corpus
         // `fsync()` the directory to ensure the directory entries for all the
         // files we just created are written to disk.
         let output_directory = self.output_directory.to_path_buf();
@@ -1183,6 +1211,7 @@ mod tests {
                 destination_control_plane.file_name().unwrap().to_string(),
                 artifact_control_plane.iter().flatten().copied().collect(),
             )],
+            measurement_corpus: vec![],
         };
 
         let mut writer = ArtifactWriter::new(
