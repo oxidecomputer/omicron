@@ -44,10 +44,6 @@ impl fmt::Display for Query {
 }
 
 impl Query {
-    pub(crate) fn new(ops: Vec<TableOp>) -> Self {
-        Self { ops }
-    }
-
     // Return the first operation in the query, which is always a form of `get`.
     pub(crate) fn first_op(&self) -> &TableOp {
         self.ops.first().expect("Should have parsed at least 1 operation")
@@ -222,7 +218,7 @@ impl Query {
             }
         }
 
-        Self::new(new_ops)
+        Self { ops: new_ops }
     }
 }
 

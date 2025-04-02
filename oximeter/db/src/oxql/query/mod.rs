@@ -37,6 +37,12 @@ pub struct Query {
     pub(super) end_time: DateTime<Utc>,
 }
 
+pub enum QueryAuthzScope {
+    Fleet,
+    Silo { silo_id: Uuid },
+    Project { silo_id: Uuid, project_id: Uuid },
+}
+
 impl Query {
     /// Construct a query written in OxQL.
     pub fn new(query: impl AsRef<str>) -> Result<Self, Error> {
@@ -367,19 +373,27 @@ impl Query {
         &self.parsed
     }
 
-    /// Insert filters after the `get`, or in the case of subqueries, recurse
-    /// down the tree and insert them after each get.
-    pub(crate) fn insert_filters(&self, filters: Vec<Filter>) -> Self {
-        Self {
-            parsed: self.parsed.insert_filters(filters),
-            end_time: self.end_time,
-        }
+    /// Insert silo and project filters after the `get`, or in the case of
+    /// subqueries, recurse down the tree and insert them after each get.
+    pub(crate) fn insert_authz_filters(&self, scope: QueryAuthzScope) -> Self {
+        let filtered_query = match scope {
+            QueryAuthzScope::Fleet => self.parsed.clone(),
+            QueryAuthzScope::Silo { silo_id } => self
+                .parsed
+                .insert_filters(vec![uuid_eq_filter("silo_id", silo_id)]),
+            QueryAuthzScope::Project { silo_id, project_id } => {
+                self.parsed.insert_filters(vec![
+                    uuid_eq_filter("silo_id", silo_id),
+                    uuid_eq_filter("project_id", project_id),
+                ])
+            }
+        };
+        Self { parsed: filtered_query, end_time: self.end_time }
     }
 }
 
-// TODO: move this to a more appropriate spot
 /// Just a helper for creating a UUID filter node concisely
-pub fn uuid_eq_filter(key: impl AsRef<str>, id: Uuid) -> Filter {
+fn uuid_eq_filter(key: impl AsRef<str>, id: Uuid) -> Filter {
     let simple_filter = SimpleFilter {
         ident: Ident(key.as_ref().to_string()),
         cmp: Comparison::Eq,
@@ -432,6 +446,7 @@ mod tests {
     use super::Filter;
     use super::Ident;
     use super::Query;
+    use crate::QueryAuthzScope;
     use crate::oxql::ast::SplitQuery;
     use crate::oxql::ast::cmp::Comparison;
     use crate::oxql::ast::literal::Literal;
@@ -1041,10 +1056,8 @@ mod tests {
         let query = Query::new("get a:b | filter timestamp > @now()").unwrap();
         let silo_id = Uuid::new_v4();
         let project_id = Uuid::new_v4();
-        let new_query = query.insert_filters(vec![
-            uuid_eq_filter("silo_id", silo_id),
-            uuid_eq_filter("project_id", project_id),
-        ]);
+        let scope = QueryAuthzScope::Project { silo_id, project_id };
+        let new_query = query.insert_authz_filters(scope);
 
         assert_eq!(query.parsed.table_ops().len(), 2);
         assert_eq!(new_query.parsed.table_ops().len(), 4);
@@ -1079,7 +1092,8 @@ mod tests {
         let expected_project_op =
             TableOp::Basic(BasicTableOp::Filter(project_filter.clone()));
 
-        let new_query = query.insert_filters(vec![silo_filter, project_filter]);
+        let scope = QueryAuthzScope::Project { silo_id, project_id };
+        let new_query = query.insert_authz_filters(scope);
 
         // Check top-level structure (should remain one grouped op and one filter)
         let orig_ops = query.parsed.table_ops().collect::<Vec<_>>();
@@ -1131,7 +1145,8 @@ mod tests {
         let expected_project_op =
             TableOp::Basic(BasicTableOp::Filter(project_filter.clone()));
 
-        let new_query = query.insert_filters(vec![silo_filter, project_filter]);
+        let scope = QueryAuthzScope::Project { silo_id, project_id };
+        let new_query = query.insert_authz_filters(scope);
 
         // Check top-level structure (should remain a single grouped op)
         assert_eq!(query.parsed.table_ops().len(), 1);

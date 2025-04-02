@@ -14,7 +14,7 @@ use nexus_db_queries::{
 use nexus_external_api::TimeseriesSchemaPaginationParams;
 use nexus_types::external_api::params::SystemMetricName;
 use omicron_common::api::external::{Error, InternalContext};
-use oximeter_db::{Measurement, TimeseriesSchema};
+use oximeter_db::{Measurement, QueryAuthzScope, TimeseriesSchema};
 use std::num::NonZeroU32;
 
 impl super::Nexus {
@@ -138,7 +138,7 @@ impl super::Nexus {
         // resources they have access to.
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.timeseries_client
-            .oxql_query(query)
+            .oxql_query(query, QueryAuthzScope::Fleet)
             .await
             // TODO-observability: The query method returns information
             // about the duration of the OxQL query and the database
@@ -162,7 +162,13 @@ impl super::Nexus {
         let (authz_silo, authz_project) =
             project_lookup.lookup_for(authz::Action::Read).await?;
         self.timeseries_client
-            .oxql_query_project(query, authz_silo.id(), authz_project.id())
+            .oxql_query(
+                query,
+                QueryAuthzScope::Project {
+                    silo_id: authz_silo.id(),
+                    project_id: authz_project.id(),
+                },
+            )
             .await
             .map(|result| result.tables)
             .map_err(map_timeseries_err)

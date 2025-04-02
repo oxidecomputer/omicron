@@ -54,6 +54,7 @@ pub use client::TestDbWrite;
 pub use client::oxql::OxqlResult;
 pub use client::query_summary::QuerySummary;
 pub use model::OXIMETER_VERSION;
+pub use oxql::query::QueryAuthzScope;
 
 #[derive(Debug, Error)]
 pub enum Error {
