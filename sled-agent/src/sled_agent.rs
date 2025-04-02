@@ -729,6 +729,14 @@ impl SledAgent {
         self.sprockets.clone()
     }
 
+    pub async fn corpus(&self) -> Result<Vec<Utf8PathBuf>, AddSledError> {
+        crate::bootstrap::measurements::sled_new_measurement_paths(
+            &self.inner.config_reconciler.internal_disks_rx(),
+        )
+        .await
+        .map_err(AddSledError::MeasurementError)
+    }
+
     /// Trigger a request to Nexus informing it that the current sled exists,
     /// with information about the existing set of hardware.
     pub(crate) async fn notify_nexus_about_self(&self, log: &Logger) {
@@ -1243,12 +1251,16 @@ pub enum AddSledError {
         sled_id: Baseboard,
         err: crate::bootstrap::client::Error,
     },
+    #[error("Measurement error: {0}")]
+    MeasurementError(crate::bootstrap::measurements::MeasurementError),
 }
 
 /// Add a sled to an initialized rack.
 pub async fn sled_add(
     log: Logger,
     sprockets_config: SprocketsConfig,
+    corpus: Vec<Utf8PathBuf>,
+    //internal_disks_rx: InternalDisksReceiver,
     sled_id: BaseboardId,
     request: StartSledAgentRequest,
 ) -> Result<(), AddSledError> {
@@ -1309,6 +1321,7 @@ pub async fn sled_add(
     let client = crate::bootstrap::client::Client::new(
         bootstrap_addr,
         sprockets_config,
+        corpus,
         log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
     );
 
