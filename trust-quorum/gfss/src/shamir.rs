@@ -114,7 +114,7 @@ impl Share {
     // algorithm.
     pub fn digest<D: Digest>(&self, output: &mut [u8]) {
         let mut hasher = D::new();
-        hasher.update([self.x_coordinate.clone().into_u8()]);
+        hasher.update([*self.x_coordinate.as_ref()]);
         // Implementing AsRef<[u8]> for Box<[Gf256]> doesn't work due to
         // coherence rules. To get around that we'd need a transparent newtype
         // for the y_coordinates and some unsafe code, which we're loathe to do.
