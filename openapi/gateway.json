@@ -1631,20 +1631,12 @@
                 "$ref": "#/components/schemas/Ena"
               }
             ]
-          },
-          "report": {
-            "description": "The body of the ereport.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ReportKind"
-              }
-            ]
           }
         },
         "required": [
-          "ena",
-          "report"
-        ]
+          "ena"
+        ],
+        "additionalProperties": true
       },
       "Ereports": {
         "description": "A tranche of ereports received from a reporter.",
@@ -1693,19 +1685,6 @@
         "required": [
           "message",
           "request_id"
-        ]
-      },
-      "Event": {
-        "type": "object",
-        "properties": {
-          "class": {
-            "type": "string"
-          },
-          "data": {}
-        },
-        "required": [
-          "class",
-          "data"
         ]
       },
       "GetCfpaParams": {
@@ -1904,47 +1883,6 @@
             },
             "required": [
               "status"
-            ]
-          }
-        ]
-      },
-      "LossReport": {
-        "description": "The number of ereports that were discarded, if it is known.\n\nIf ereports are dropped because a buffer has reached its capacity, the reporter is strongly encouraged to attempt to count the number of ereports lost. In other cases, such as a reporter crashing and restarting, the reporter may not be capable of determining the number of ereports that were lost, or even *if* data loss actually occurred.",
-        "oneOf": [
-          {
-            "description": "An unknown number of ereports MAY have been lost.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "unknown"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "description": "The provided number of ereports are known to have been lost.",
-            "type": "object",
-            "properties": {
-              "lost": {
-                "type": "integer",
-                "format": "uint32",
-                "minimum": 0
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "exact"
-                ]
-              }
-            },
-            "required": [
-              "lost",
-              "type"
             ]
           }
         ]
@@ -2516,37 +2454,6 @@
           "A0",
           "A1",
           "A2"
-        ]
-      },
-      "ReportKind": {
-        "description": "The body of an ereport: either an event is reported, or a loss report.",
-        "oneOf": [
-          {
-            "description": "An ereport.",
-            "type": "object",
-            "properties": {
-              "event": {
-                "$ref": "#/components/schemas/Event"
-              }
-            },
-            "required": [
-              "event"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "description": "Ereports were lost, or may have been lost.",
-            "type": "object",
-            "properties": {
-              "loss": {
-                "$ref": "#/components/schemas/LossReport"
-              }
-            },
-            "required": [
-              "loss"
-            ],
-            "additionalProperties": false
-          }
         ]
       },
       "RotCfpa": {
