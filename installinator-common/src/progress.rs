@@ -294,6 +294,9 @@ pub enum ControlPlaneZonesStepId {
     /// Writing a zone.
     Zone { name: String },
 
+    /// Writing a measurement corpus
+    MeasurementCorpus { name: String },
+
     /// Syncing writes to disk.
     Fsync,
 

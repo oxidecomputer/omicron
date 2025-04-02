@@ -111,12 +111,23 @@ pub(crate) async fn build_tuf_repo(
                 .join(format!("{}.tar.gz", package)),
         });
     }
+
+    // XXX fixme
+    let measurement_corpus = vec![
+        DeserializedControlPlaneZoneSource::File {
+            file_name: Some(format!("test_manifest.cbor")),
+            path: format!("/home/labbott/omicron/Cargo.toml").into(),
+        }
+    ];
     manifest.artifacts.insert(
         KnownArtifactKind::ControlPlane,
         vec![DeserializedArtifactData {
             name: "control-plane".to_string(),
             version: artifact_version.clone(),
-            source: DeserializedArtifactSource::CompositeControlPlane { zones },
+            source: DeserializedArtifactSource::CompositeControlPlane {
+                zones,
+                measurement_corpus,
+            },
         }],
     );
 
