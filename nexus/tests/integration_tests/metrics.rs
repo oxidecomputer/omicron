@@ -474,7 +474,7 @@ async fn test_project_timeseries_query(
     // Create resources in each project
     let i1p1 = create_instance(&client, "project1", "instance1").await;
     // need a second instance to test group_by
-    let _i2p1 = create_instance(&client, "project1", "instance2").await;
+    let i2p1 = create_instance(&client, "project1", "instance2").await;
     let _i3p2 = create_instance(&client, "project2", "instance3").await;
 
     let internal_client = &cptestctx.internal_client;
@@ -546,19 +546,40 @@ async fn test_project_timeseries_query(
     // now let's test it with group_by
     let q4 = &format!(
         "{} | align mean_within(1m) | group_by [instance_id], sum",
-        q2
+        q1
     );
     let result = metrics_querier.project_timeseries_query("project1", q4).await;
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].timeseries().len(), 2);
 
-    // TODO: test with a gnarly nested query
+    // test with a nested query
+    let q5 = &format!(
+        "{{ \
+           get virtual_machine:check | filter instance_id == \"{}\"; \
+           get virtual_machine:check | filter instance_id == \"{}\" \
+         }} | filter timestamp < @now()",
+        i1p1.identity.id, i2p1.identity.id,
+    );
+    let result = metrics_querier.project_timeseries_query("project1", q5).await;
+
+    // we get two results, each contains one timeseries, and the instance ID
+    // on each corresponds to the one we requested
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].timeseries().len(), 1);
+    let timeseries = result[0].timeseries().next().unwrap();
+    let instance_id = timeseries.fields.get("instance_id").unwrap().to_string();
+    assert_eq!(instance_id, i1p1.identity.id.to_string());
+
+    assert_eq!(result[1].timeseries().len(), 1);
+    let timeseries = result[1].timeseries().next().unwrap();
+    let instance_id = timeseries.fields.get("instance_id").unwrap().to_string();
+    assert_eq!(instance_id, i2p1.identity.id.to_string());
 
     // expect error when querying a metric that has no project_id on it
-    let q5 = "get integration_target:integration_metric";
+    let q6 = "get integration_target:integration_metric";
     let url = "/v1/timeseries/query?project=project1";
     let body = nexus_types::external_api::params::TimeseriesQuery {
-        query: q5.to_string(),
+        query: q6.to_string(),
     };
     let result =
         object_create_error(client, url, &body, StatusCode::BAD_REQUEST).await;
@@ -578,7 +599,7 @@ async fn test_project_timeseries_query(
     // nonexistent project
     let url = "/v1/timeseries/query?project=nonexistent";
     let body = nexus_types::external_api::params::TimeseriesQuery {
-        query: q5.to_string(),
+        query: q6.to_string(),
     };
     let result =
         object_create_error(client, url, &body, StatusCode::NOT_FOUND).await;
