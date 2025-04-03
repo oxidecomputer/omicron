@@ -689,8 +689,8 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    #[tokio::test]
-    async fn allocation_query_region_size_overflow() {
+    #[test]
+    fn allocation_query_region_size_overflow() {
         let volume_id = VolumeUuid::nil();
         let snapshot_id = None;
 
@@ -716,8 +716,8 @@ mod test {
         assert!(matches!(e, AllocationQueryError::RegionSizeOverflow));
     }
 
-    #[tokio::test]
-    async fn allocation_query_region_size_too_large() {
+    #[test]
+    fn allocation_query_region_size_too_large() {
         let volume_id = VolumeUuid::nil();
         let snapshot_id = None;
 
