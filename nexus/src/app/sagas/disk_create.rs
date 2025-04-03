@@ -1014,7 +1014,7 @@ pub(crate) mod test {
         for zpool in test.zpools() {
             for dataset in &zpool.datasets {
                 if datastore
-                    .regions_total_occupied_size(dataset.id)
+                    .regions_total_reserved_size(dataset.id)
                     .await
                     .unwrap()
                     != 0
