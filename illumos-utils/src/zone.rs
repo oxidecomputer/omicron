@@ -268,6 +268,7 @@ pub trait Api: Send + Sync {
     /// - If a zone with the name `zone_name` exists and is currently running,
     /// we return immediately.
     /// - Otherwise, the zone is deleted.
+    #[allow(clippy::too_many_arguments)]
     async fn install_omicron_zone(
         &self,
         log: &Logger,
