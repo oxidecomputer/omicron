@@ -24,7 +24,6 @@ impl Dladm {
     }
 }
 
-#[async_trait::async_trait]
 impl Api for Dladm {
     fn create_vnic(
         &self,

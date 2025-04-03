@@ -178,7 +178,6 @@ pub struct Dladm {
 /// Describes the API for interfacing with Data links.
 ///
 /// This is a trait so that it can be faked out for tests.
-#[async_trait::async_trait]
 pub trait Api: Send + Sync {
     /// Creates a new VNIC atop a physical device.
     ///
@@ -274,7 +273,6 @@ pub trait Api: Send + Sync {
     }
 }
 
-#[async_trait::async_trait]
 impl Api for Dladm {}
 
 impl Dladm {

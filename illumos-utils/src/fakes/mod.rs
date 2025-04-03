@@ -6,3 +6,4 @@
 
 pub mod dladm;
 pub mod zone;
+pub mod zpool;
