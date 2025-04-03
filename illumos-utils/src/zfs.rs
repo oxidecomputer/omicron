@@ -692,7 +692,7 @@ fn ensure_mountpoint_empty(path: &Utf8Path) -> Result<(), MountpointError> {
     // The directory is not empty. Let's make a new directory,
     // with the "old-under-mountpoint-" prefix, and move all data there.
 
-    let prefix = format!("{MOUNTPOINT_TRANSFER_PREFIX}{file}");
+    let prefix = format!("{MOUNTPOINT_TRANSFER_PREFIX}{file}-");
     let destination_dir = Utf8TempDir::with_prefix_in(prefix, parent)
         .map_err(|err| MountpointError::CreateTransferDirectory(err))?
         .into_path();

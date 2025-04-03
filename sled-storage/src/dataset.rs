@@ -20,6 +20,7 @@ use omicron_common::disk::{
 };
 use rand::distributions::{Alphanumeric, DistString};
 use slog::{Logger, debug, info, warn};
+use slog_error_chain::InlineErrorChain;
 use std::process::Stdio;
 use std::str::FromStr;
 use std::sync::OnceLock;
@@ -278,7 +279,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
                 log,
                 "Failed to ensure encrypted root filesystem";
                 "name" => ?name,
-                "err" => ?err
+                "err" => InlineErrorChain::new(&err),
             );
             err
         });
@@ -350,7 +351,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
                 log,
                 "Failed to ensure dataset";
                 "name" => ?name,
-                "err" => ?err
+                "err" => InlineErrorChain::new(&err),
             );
             err
         })?;
