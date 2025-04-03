@@ -12,6 +12,7 @@ use std::fmt;
 use chrono::DateTime;
 use chrono::Utc;
 use oximeter::TimeseriesName;
+use table_ops::filter::Filter;
 
 use self::table_ops::BasicTableOp;
 use self::table_ops::GroupedTableOp;
@@ -44,7 +45,7 @@ impl fmt::Display for Query {
 
 impl Query {
     // Return the first operation in the query, which is always a form of `get`.
-    fn first_op(&self) -> &TableOp {
+    pub(crate) fn first_op(&self) -> &TableOp {
         self.ops.first().expect("Should have parsed at least 1 operation")
     }
 
@@ -187,6 +188,37 @@ impl Query {
                 grouped_max.max(op_max)
             }
         }
+    }
+
+    /// Insert filters after the `get`, or in the case of subqueries, recurse
+    /// down the tree and insert them after each get.
+    pub(crate) fn insert_filters(&self, filters: Vec<Filter>) -> Self {
+        let mut new_ops = self.ops.clone();
+
+        match self.first_op() {
+            // for a basic query, just insert the filters after the first entry (the get)
+            TableOp::Basic(_) => {
+                let filter_ops = filters
+                    .iter()
+                    .map(|filter| {
+                        TableOp::Basic(BasicTableOp::Filter(filter.clone()))
+                    })
+                    .collect::<Vec<_>>();
+                new_ops.splice(1..1, filter_ops);
+            }
+            // for a grouped query, recurse to insert the filters in all subqueries
+            TableOp::Grouped(op) => {
+                new_ops[0] = TableOp::Grouped(GroupedTableOp {
+                    ops: op
+                        .ops
+                        .iter()
+                        .map(|query| query.insert_filters(filters.clone()))
+                        .collect(),
+                });
+            }
+        }
+
+        Self { ops: new_ops }
     }
 }
 
