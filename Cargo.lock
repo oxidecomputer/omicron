@@ -12646,7 +12646,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#0ae289102f0fe2605781afcb4c5395652a9c842b"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=measurement_corpus#8d8b48dc57cd47703a328c00a3abcf31f366987a"
 dependencies = [
  "anyhow",
  "camino",
@@ -12667,7 +12667,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#0ae289102f0fe2605781afcb4c5395652a9c842b"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=measurement_corpus#8d8b48dc57cd47703a328c00a3abcf31f366987a"
 dependencies = [
  "daft",
  "parse-display",
@@ -12684,7 +12684,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#0ae289102f0fe2605781afcb4c5395652a9c842b"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=measurement_corpus#8d8b48dc57cd47703a328c00a3abcf31f366987a"
 dependencies = [
  "semver 1.0.25",
  "serde",
@@ -12696,7 +12696,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#0ae289102f0fe2605781afcb4c5395652a9c842b"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=measurement_corpus#8d8b48dc57cd47703a328c00a3abcf31f366987a"
 dependencies = [
  "anyhow",
  "async-trait",
