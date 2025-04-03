@@ -109,6 +109,9 @@ pub enum AllocationQueryError {
 
     /// Adding the overhead to the requested size overflowed
     RequestedRegionOverheadOverflow { request: i64, overhead: i64 },
+
+    /// Converting from u64 to i64 truncated
+    RequestedRegionSizeTruncated { request: u64, e: String },
 }
 
 impl From<AllocationQueryError> for external::Error {
@@ -146,6 +149,13 @@ impl From<AllocationQueryError> for external::Error {
                     "adding {overhead} to region size {request} overflowed"
                 ),
             ),
+
+            AllocationQueryError::RequestedRegionSizeTruncated {
+                request,
+                e,
+            } => external::Error::internal_error(&format!(
+                "converting {request} to i64 failed! {e}"
+            )),
         }
     }
 }
@@ -200,9 +210,17 @@ pub fn allocation_query(
         });
     }
 
-    // After the above check, unconditionally cast from u64 to i64. The value is
-    // low enough that this shouldn't truncate.
-    let requested_size: i64 = requested_size.try_into().unwrap();
+    // After the above check, cast from u64 to i64. The value is low enough
+    // (after the check above) that try_into should always return Ok.
+    let requested_size: i64 = match requested_size.try_into() {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(AllocationQueryError::RequestedRegionSizeTruncated {
+                request: requested_size,
+                e: e.to_string(),
+            });
+        }
+    };
 
     let reservation_percent = RegionReservationPercent::TwentyFive;
 
