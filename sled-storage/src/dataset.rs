@@ -274,14 +274,13 @@ pub(crate) async fn ensure_zpool_has_datasets(
             id: None,
             additional_options: None,
         })
-        .map_err(|err| {
+        .inspect_err(|err| {
             warn!(
                 log,
                 "Failed to ensure encrypted root filesystem";
                 "name" => ?name,
                 "err" => InlineErrorChain::new(&err),
             );
-            err
         });
 
         keyfile.zero_and_unlink().await.map_err(|error| {
@@ -346,14 +345,13 @@ pub(crate) async fn ensure_zpool_has_datasets(
             id: None,
             additional_options: None,
         })
-        .map_err(|err| {
+        .inspect_err(|err| {
             warn!(
                 log,
                 "Failed to ensure dataset";
                 "name" => ?name,
                 "err" => InlineErrorChain::new(&err),
             );
-            err
         })?;
 
         if dataset.wipe {
