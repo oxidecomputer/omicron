@@ -587,10 +587,10 @@ async fn do_install(
 
 async fn uninstall_all_omicron_zones() -> Result<()> {
     const CONCURRENCY_CAP: usize = 32;
-    futures::stream::iter(zone::Zones {}.get().await?)
+    futures::stream::iter(zone::Zones::real_api().get().await?)
         .map(Ok::<_, anyhow::Error>)
         .try_for_each_concurrent(CONCURRENCY_CAP, |zone| async move {
-            zone::Zones {}.halt_and_remove(zone.name()).await?;
+            zone::Zones::real_api().halt_and_remove(zone.name()).await?;
             Ok(())
         })
         .await?;

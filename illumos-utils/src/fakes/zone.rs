@@ -7,15 +7,20 @@ use crate::zpool::PathInPool;
 
 use camino::Utf8Path;
 use slog::Logger;
+use std::sync::Arc;
 use std::sync::Mutex;
 
+/// A fake implementation of [crate::zone::Zones].
+///
+/// This struct implements the [crate::zone::Api] interface but avoids
+/// interacting with the host OS.
 pub struct Zones {
     zones: Mutex<Vec<zone::Zone>>,
 }
 
 impl Zones {
-    pub fn new() -> Self {
-        Self { zones: Mutex::new(vec![]) }
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self { zones: Mutex::new(vec![]) })
     }
 }
 
@@ -44,6 +49,9 @@ impl Api for Zones {
         Ok(())
     }
 
+    // NOTE: Once we have better signal fidelity within our fake Zone
+    // implementation (accurately tracking booted zones, and implementing 'get'
+    // with a non-empty Vec) we can delete this implementation.
     async fn id(
         &self,
         _name: &str,

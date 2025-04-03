@@ -474,19 +474,24 @@ impl Config {
     }
 }
 
-// TODO: not pub?
+/// Describes the host OS interfaces used by [ServiceManager].
+///
+/// Default implementations cause this trait to access the host
+/// OS, but can be overwritten to intercept calls to the host
+/// for testing.
 pub trait SystemApi: Send + Sync {
-    fn fake_install_dir(&self) -> Option<&Utf8Path>;
+    fn fake_install_dir(&self) -> Option<&Utf8Path> {
+        None
+    }
 
     fn dladm(&self) -> Arc<dyn illumos_utils::dladm::Api> {
-        Arc::new(illumos_utils::dladm::Dladm {})
+        Arc::new(illumos_utils::dladm::Dladm::real_api())
     }
     fn zones(&self) -> Arc<dyn illumos_utils::zone::Api> {
-        Arc::new(illumos_utils::zone::Zones {})
+        Arc::new(illumos_utils::zone::Zones::real_api())
     }
 }
 
-// TODO: Maybe not pub?
 pub struct RealSystemApi {}
 
 impl RealSystemApi {
@@ -495,11 +500,7 @@ impl RealSystemApi {
     }
 }
 
-impl SystemApi for RealSystemApi {
-    fn fake_install_dir(&self) -> Option<&Utf8Path> {
-        None
-    }
-}
+impl SystemApi for RealSystemApi {}
 
 // The filename of the ledger, within the provided directory.
 const ZONES_LEDGER_FILENAME: &str = "omicron-zones.json";
@@ -1609,7 +1610,7 @@ impl ServiceManager {
             None => ZoneBuilderFactory::real().builder(),
             Some(dir) => ZoneBuilderFactory::fake(
                 Some(&dir.as_str().to_string()),
-                Arc::new(illumos_utils::fakes::zone::Zones::new()),
+                illumos_utils::fakes::zone::Zones::new(),
             )
             .builder(),
         };
@@ -5069,8 +5070,8 @@ mod illumos_tests {
         fn new(fake_install_dir: Utf8PathBuf) -> Box<dyn SystemApi> {
             Box::new(Self {
                 fake_install_dir,
-                dladm: Arc::new(illumos_utils::fakes::dladm::Dladm::new()),
-                zones: Arc::new(illumos_utils::fakes::zone::Zones::new()),
+                dladm: illumos_utils::fakes::dladm::Dladm::new(),
+                zones: illumos_utils::fakes::zone::Zones::new(),
             })
         }
     }

@@ -197,9 +197,6 @@ impl Link {
         }
     }
 
-    // TODO: is this right? seems like the drop function still runs, even if
-    // this completed successfully?
-
     /// Deletes a NIC (if it has not already been deleted).
     pub fn delete(&mut self) -> Result<(), DeleteVnicError> {
         if self.deleted || self.kind == LinkKind::Physical {
@@ -262,7 +259,7 @@ mod test {
         let allocator = VnicAllocator::new(
             "Foo",
             Etherstub("mystub".to_string()),
-            Arc::new(crate::fakes::dladm::Dladm::new()),
+            crate::fakes::dladm::Dladm::new(),
         );
         assert_eq!("oxFoo0", allocator.next());
         assert_eq!("oxFoo1", allocator.next());
@@ -274,7 +271,7 @@ mod test {
         let allocator = VnicAllocator::new(
             "Foo",
             Etherstub("mystub".to_string()),
-            Arc::new(crate::fakes::dladm::Dladm::new()),
+            crate::fakes::dladm::Dladm::new(),
         );
         assert_eq!("oxFoo0", allocator.next());
         let allocator = allocator.new_superscope("Baz");

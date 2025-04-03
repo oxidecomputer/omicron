@@ -201,7 +201,7 @@ async fn cleanup_all_old_global_state(log: &Logger) -> Result<(), StartError> {
     // Currently, we're removing these zones. In the future, we should
     // re-establish contact (i.e., if the Sled Agent crashed, but we wanted
     // to leave the running Zones intact).
-    let zones = Zones {}.get().await.map_err(StartError::ListZones)?;
+    let zones = Zones::real_api().get().await.map_err(StartError::ListZones)?;
 
     stream::iter(zones)
         .zip(stream::iter(std::iter::repeat(log.clone())))
@@ -211,7 +211,7 @@ async fn cleanup_all_old_global_state(log: &Logger) -> Result<(), StartError> {
         // the caller that this failed.
         .for_each_concurrent_then_try(None, |(zone, log)| async move {
             warn!(log, "Deleting existing zone"; "zone_name" => zone.name());
-            Zones {}.halt_and_remove_logged(&log, zone.name()).await
+            Zones::real_api().halt_and_remove_logged(&log, zone.name()).await
         })
         .await
         .map_err(StartError::DeleteZone)?;

@@ -104,7 +104,7 @@ pub async fn delete_omicron_vnics(log: &Logger) -> Result<(), Error> {
                     "vnic_name" => &vnic,
                     "vnic_kind" => ?LinkKind::from_name(&vnic).unwrap(),
                 );
-                Dladm {}.delete_vnic(&vnic)
+                Dladm::real_api().delete_vnic(&vnic)
             })
             .await
             .unwrap()

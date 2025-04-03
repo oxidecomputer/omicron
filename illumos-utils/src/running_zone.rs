@@ -465,18 +465,13 @@ impl RunningZone {
         I: IntoIterator<Item = S>,
         S: AsRef<std::ffi::OsStr>,
     {
-        // NOTE: This implementation is useless, and will never work. However,
-        // it must actually call `crate::execute()` for the testing purposes.
-        // That's mocked by `mockall` to return known data, and so the command
-        // that's actually run is irrelevant.
-        let mut command = std::process::Command::new("echo");
-        let command = command.args(args);
-        crate::execute(command)
-            .map_err(|err| RunCommandError {
-                zone: self.name().to_string(),
-                err,
-            })
-            .map(|output| String::from_utf8_lossy(&output.stdout).to_string())
+        let all_args = args
+            .into_iter()
+            .map(|arg| arg.as_ref().to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        panic!(
+            "Attempting to run a host OS command on a non-illumos platform: {all_args:?}"
+        );
     }
 
     /// Boots a new zone.
@@ -999,7 +994,10 @@ pub struct ZoneBuilderFactory {
 
 impl ZoneBuilderFactory {
     pub fn real() -> Self {
-        Self { fake_cfg: None, zones_api: Arc::new(crate::zone::Zones {}) }
+        Self {
+            fake_cfg: None,
+            zones_api: Arc::new(crate::zone::Zones::real_api()),
+        }
     }
 
     /// For use in unit tests that don't require actual zone creation to occur.
@@ -1175,7 +1173,6 @@ impl<'a> ZoneBuilder<'a> {
 
     // (used in unit tests)
     fn fake_install(mut self) -> Result<InstalledZone, InstallZoneError> {
-        println!("RunningZone: Fake install");
         let zones_api = self.zones_api.take().unwrap();
         let zone = self
             .zone_type
@@ -1221,11 +1218,9 @@ impl<'a> ZoneBuilder<'a> {
     /// Returns `Err(InstallZoneError::IncompleteBuilder)` if a necessary
     /// parameter was not provided.
     pub async fn install(mut self) -> Result<InstalledZone, InstallZoneError> {
-        println!("RunningZone: install");
         if self.fake_cfg.is_some() {
             return self.fake_install();
         }
-        println!("RunningZone: install - REAL");
 
         let Self {
             log: Some(log),

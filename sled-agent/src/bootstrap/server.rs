@@ -603,14 +603,14 @@ impl Inner {
     // Uninstall all oxide zones (except the switch zone)
     async fn uninstall_zones(&self) -> Result<(), BootstrapError> {
         const CONCURRENCY_CAP: usize = 32;
-        futures::stream::iter(Zones {}.get().await?)
+        futures::stream::iter(Zones::real_api().get().await?)
             .map(Ok::<_, anyhow::Error>)
             // Use for_each_concurrent_then_try to delete as much as possible.
             // We only return one error though -- hopefully that's enough to
             // signal to the caller that this failed.
             .for_each_concurrent_then_try(CONCURRENCY_CAP, |zone| async move {
                 if zone.name() != "oxz_switch" {
-                    Zones {}.halt_and_remove(zone.name()).await?;
+                    Zones::real_api().halt_and_remove(zone.name()).await?;
                 }
                 Ok(())
             })

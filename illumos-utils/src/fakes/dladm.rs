@@ -10,12 +10,17 @@ use crate::dladm::VnicSource;
 use crate::link::Link;
 use omicron_common::api::external::MacAddr;
 use omicron_common::vlan::VlanID;
+use std::sync::Arc;
 
+/// A fake implementation of [crate::dladm::Dladm].
+///
+/// This struct implements the [crate::dladm::Api] interface but avoids
+/// interacting with the host OS.
 pub struct Dladm {}
 
 impl Dladm {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {})
     }
 }
 
@@ -29,7 +34,6 @@ impl Api for Dladm {
         _vlan: Option<VlanID>,
         _mtu: usize,
     ) -> Result<(), CreateVnicError> {
-        println!("(fake) dladm::create_vnic");
         Ok(())
     }
 

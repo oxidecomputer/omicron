@@ -1,0 +1,53 @@
+:showtitle:
+:toc: left
+:icons: font
+
+= illumos fakes
+
+This directory contains fake implementations of illumos commands.
+
+These implementations use the following pattern:
+
+* They attempt to "fake out" access to the host OS
+** Example: `zone.rs` attempts to provide a fake interface for Zone management.
+* They are named identically to a "real" counterpart struct in `illumos-utils/src`
+** Example: `illumos-utils/src/fakes/zone.rs` defines a `Zone` struct, as does
+   `illumos-utils/src/zone.rs`, which provides the "real API".
+* They implement an `Api` trait, defined by their "real API" counterpart
+** Example: `illumos-utils/src/zone.rs` defines this `Api` trait.
+
+This convention makes it easy to access the real host OS interface, but also
+makes it straightforward to provide test-only alternate implementations which
+can implement arbitrary host OS behavior.
+
+== Why not use mocks?
+
+By using this fake implementations, which are hopefully relatively narrow in
+scope, we can avoid creating "mocks". Mocks have historically created a number
+of problems in the Omicron codebase:
+
+* They jump between abstraction layers. If you're calling a mocked API which
+  accesses the host OS several callstacks down, your test **must** have an
+  "expect" call for that API, or it will fail.
+* They make refactoring difficult to manage. Each "mock" call is per-test,
+  which means that changed host OS interactions can require changes across a
+  broad number of tests. With fakes, in comparison, a small (hopefully single?)
+  number of implementations of a "fake interface" should suffice for all tests.
+  It should be possible to customize the fake implementation to either gain more
+  signal fidelity (matching the behavior of the host OS) or to provide mechanisms
+  for control (e.g. introducing failures).
+* They encourage conditional compilation - e.g., the usage of `#[cfg(test)]`
+  blocks, or feature-gated calls - which can make it incredibly difficult, to
+  test certain codepaths.
+  With fake APIs, in constrast, it's still possible to test the "real API" - that's
+  just one of many possible implementations of the host OS.
+
+== Why not use VMMs and integration tests?
+
+The usage of fakes is not intended to replace VMM-based testing -- it's here to
+augment that testing. See also: https://github.com/oxidecomputer/omicron/issues/5226
+
+The intent here is to make it possible to test APIs which use a small number
+of host OS interface -- when a large portion of the host OS is being tested, or
+multiple subsystems are being tested together, it is probably preferable to use VMM
+based tests, and to get a "more real" signal from tests.

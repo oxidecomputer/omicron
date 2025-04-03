@@ -510,7 +510,7 @@ impl SledAgent {
         let instance_vnic_allocator = illumos_utils::link::VnicAllocator::new(
             "Instance",
             etherstub.clone(),
-            Arc::new(illumos_utils::dladm::Dladm {}),
+            Arc::new(illumos_utils::dladm::Dladm::real_api()),
         );
         let instances = InstanceManager::new(
             parent_log.clone(),
@@ -803,7 +803,7 @@ impl SledAgent {
 
     /// List the zones that the sled agent is currently managing.
     pub async fn zones_list(&self) -> Result<Vec<String>, Error> {
-        Zones {}
+        Zones::real_api()
             .get()
             .await
             .map(|zones| {

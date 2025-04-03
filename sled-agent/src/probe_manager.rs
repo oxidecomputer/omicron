@@ -65,25 +65,7 @@ pub(crate) struct ProbeManagerInner {
     metrics_queue: MetricsRequestQueue,
     running_probes: Mutex<RunningProbes>,
 
-    system_api: Box<dyn SystemApi>,
-}
-
-trait SystemApi: Send + Sync {
-    fn zones(&self) -> Arc<dyn illumos_utils::zone::Api>;
-}
-
-struct RealSystemApi {}
-
-impl RealSystemApi {
-    pub fn new() -> Box<dyn SystemApi> {
-        Box::new(RealSystemApi {})
-    }
-}
-
-impl SystemApi for RealSystemApi {
-    fn zones(&self) -> Arc<dyn illumos_utils::zone::Api> {
-        Arc::new(illumos_utils::zone::Zones {})
-    }
+    zones_api: Arc<dyn illumos_utils::zone::Api>,
 }
 
 impl ProbeManager {
@@ -102,7 +84,7 @@ impl ProbeManager {
                 vnic_allocator: VnicAllocator::new(
                     VNIC_ALLOCATOR_SCOPE,
                     etherstub,
-                    Arc::new(illumos_utils::dladm::Dladm {}),
+                    Arc::new(illumos_utils::dladm::Dladm::real_api()),
                 ),
                 running_probes: Mutex::new(RunningProbes {
                     storage_generation: None,
@@ -114,7 +96,7 @@ impl ProbeManager {
                 storage,
                 port_manager,
                 metrics_queue,
-                system_api: RealSystemApi::new(),
+                zones_api: Arc::new(illumos_utils::zone::Zones::real_api()),
             }),
         }
     }
@@ -479,8 +461,7 @@ impl ProbeManagerInner {
     /// Collect the current probe state from the running zones on this sled.
     async fn current_state(self: &Arc<Self>) -> Result<HashSet<ProbeState>> {
         Ok(self
-            .system_api
-            .zones()
+            .zones_api
             .get()
             .await?
             .into_iter()

@@ -10,6 +10,7 @@ use crate::{ExecutionError, PFEXEC, execute};
 use omicron_common::api::external::MacAddr;
 use omicron_common::vlan::VlanID;
 use serde::{Deserialize, Serialize};
+use std::marker::PhantomData;
 use std::str::FromStr;
 use std::str::Utf8Error;
 
@@ -170,7 +171,9 @@ impl VnicSource for PhysicalLink {
 }
 
 /// Wraps commands for interacting with data links.
-pub struct Dladm {}
+pub struct Dladm {
+    phantom: PhantomData<()>,
+}
 
 /// Describes the API for interfacing with Data links.
 ///
@@ -192,7 +195,6 @@ pub trait Api: Send + Sync {
         vlan: Option<VlanID>,
         mtu: usize,
     ) -> Result<(), CreateVnicError> {
-        println!("(real) dladm::create_vnic");
         let mut command = std::process::Command::new(PFEXEC);
         let mut args = vec![
             DLADM.to_string(),
@@ -276,6 +278,14 @@ pub trait Api: Send + Sync {
 impl Api for Dladm {}
 
 impl Dladm {
+    /// Access the real dladm API, which will invoke commands on the host OS.
+    ///
+    /// If you're interested in testing this interface, consider using
+    /// [crate::fakes::dladm::Dladm] instead.
+    pub fn real_api() -> Self {
+        Self { phantom: PhantomData }
+    }
+
     /// Creates an etherstub, or returns one which already exists.
     pub fn ensure_etherstub(name: &str) -> Result<Etherstub, ExecutionError> {
         if let Ok(stub) = Self::get_etherstub(name) {
@@ -310,7 +320,7 @@ impl Dladm {
         if let Ok(vnic) = Self::get_etherstub_vnic(vnic_name) {
             return Ok(vnic);
         }
-        Self {}.create_vnic(source, vnic_name, None, None, mtu)?;
+        Self::real_api().create_vnic(source, vnic_name, None, None, mtu)?;
         Ok(EtherstubVnic(vnic_name.to_string()))
     }
 
