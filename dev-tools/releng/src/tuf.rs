@@ -113,7 +113,12 @@ pub(crate) async fn build_tuf_repo(
     }
 
     // XXX fixme
-    let measurement_corpus = Vec::new();
+    let measurement_corpus = vec![
+        DeserailzedControlPlanZoneSource::File {
+            file_name: "test_manifest.cbor",
+            path: format!("/home/labbott/omicron/Cargo.toml"),
+        }
+    ];
     manifest.artifacts.insert(
         KnownArtifactKind::ControlPlane,
         vec![DeserializedArtifactData {
