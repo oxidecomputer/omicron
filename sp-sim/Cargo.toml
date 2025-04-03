@@ -18,6 +18,7 @@ gateway-types.workspace = true
 hex = { workspace = true, features = [ "serde" ] }
 omicron-common.workspace = true
 serde.workspace = true
+serde_cbor.workspace = true
 slog.workspace = true
 slog-dtrace.workspace = true
 thiserror.workspace = true
@@ -25,6 +26,7 @@ tokio = { workspace = true, features = [ "full" ] }
 toml.workspace = true
 omicron-workspace-hack.workspace = true
 nix.workspace = true
+uuid.workspace = true
 
 [[bin]]
 name = "sp-sim"

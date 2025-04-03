@@ -11445,11 +11445,13 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "serde",
+ "serde_cbor",
  "slog",
  "slog-dtrace",
  "thiserror 1.0.69",
  "tokio",
  "toml 0.8.20",
+ "uuid",
 ]
 
 [[package]]

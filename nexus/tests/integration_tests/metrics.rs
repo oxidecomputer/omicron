@@ -676,6 +676,7 @@ async fn test_mgs_metrics(
             for sensor in &component.sensors {
                 use gateway_messages::measurement::MeasurementKind as Kind;
                 match sensor.def.kind {
+                    Kind::CpuTctl => cpu_tctl += 1,
                     Kind::Temperature => {
                         // Currently, Tctl measurements are reported as a
                         // "temperature" measurement, but are tracked by a

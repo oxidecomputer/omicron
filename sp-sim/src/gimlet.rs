@@ -7,6 +7,7 @@ use crate::SIM_ROT_BOARD;
 use crate::SimulatedSp;
 use crate::config::GimletConfig;
 use crate::config::SpComponentConfig;
+use crate::ereport::EreportState;
 use crate::helpers::rot_slot_id_from_u16;
 use crate::helpers::rot_slot_id_to_u16;
 use crate::sensors::Sensors;
@@ -22,6 +23,8 @@ use futures::future;
 use gateway_messages::CfpaPage;
 use gateway_messages::ComponentAction;
 use gateway_messages::ComponentActionResponse;
+use gateway_messages::DumpSegment;
+use gateway_messages::DumpTask;
 use gateway_messages::Header;
 use gateway_messages::MgsRequest;
 use gateway_messages::MgsResponse;
@@ -34,8 +37,6 @@ use gateway_messages::SpError;
 use gateway_messages::SpPort;
 use gateway_messages::SpRequest;
 use gateway_messages::SpStateV2;
-use gateway_messages::DumpSegment;
-use gateway_messages::DumpTask;
 use gateway_messages::ignition::{self, LinkEvents};
 use gateway_messages::sp_impl::Sender;
 use gateway_messages::sp_impl::SpHandler;
@@ -222,6 +223,20 @@ impl Gimlet {
 
         let servers = [servers.0, servers.1];
 
+        let ereport_servers = match &gimlet.common.ereport_network_config {
+            Some(cfg) => {
+                assert_eq!(cfg.len(), 2); // gimlet SP always has 2 ports
+
+                let servers = future::try_join(
+                    UdpServer::new(&cfg[0], &log),
+                    UdpServer::new(&cfg[1], &log),
+                )
+                .await?;
+                Some([servers.0, servers.1])
+            }
+            None => None,
+        };
+
         for component_config in &gimlet.common.components {
             let id = component_config.id.as_str();
             let component = SpComponent::try_from(id)
@@ -277,6 +292,11 @@ impl Gimlet {
         let local_addrs = [servers[0].local_addr(), servers[1].local_addr()];
         let (inner, handler, responses_sent_count) = UdpTask::new(
             servers,
+            ereport_servers,
+            EreportState::new(
+                gimlet.common.ereport_restarts.clone(),
+                log.new(slog::o!("sim-component" => "ereport-state")),
+            ),
             gimlet.common.components.clone(),
             attached_mgs,
             gimlet.common.serial_number.clone(),
@@ -488,6 +508,8 @@ struct Ack;
 struct UdpTask {
     udp0: UdpServer,
     udp1: UdpServer,
+    ereport_servers: Option<[UdpServer; 2]>,
+    ereport_state: EreportState,
     handler: Arc<TokioMutex<Handler>>,
     commands: mpsc::UnboundedReceiver<Command>,
     responses_sent_count: watch::Sender<usize>,
@@ -498,6 +520,8 @@ impl UdpTask {
     #[allow(clippy::too_many_arguments)]
     fn new(
         servers: [UdpServer; 2],
+        ereport_servers: Option<[UdpServer; 2]>,
+        ereport_state: EreportState,
         components: Vec<SpComponentConfig>,
         attached_mgs: AttachedMgsSerialConsole,
         serial_number: String,
@@ -514,7 +538,7 @@ impl UdpTask {
             components,
             attached_mgs,
             incoming_serial_console,
-            log,
+            log.clone(),
             old_rot_state,
             no_stage0_caboose,
         )));
@@ -524,6 +548,8 @@ impl UdpTask {
             Self {
                 udp0,
                 udp1,
+                ereport_servers,
+                ereport_state,
                 handler: Arc::clone(&handler),
                 commands,
                 responses_sent_count,
@@ -539,6 +565,25 @@ impl UdpTask {
         let mut responsiveness = Responsiveness::Responsive;
         let mut throttle_count = usize::MAX;
         let mut throttler: Option<mpsc::UnboundedReceiver<usize>> = None;
+
+        async fn ereport_recv(
+            sock: Option<&mut UdpServer>,
+        ) -> anyhow::Result<(
+            gateway_messages::EreportRequest,
+            SocketAddrV6,
+            &mut UdpServer,
+        )> {
+            match sock {
+                Some(sock) => {
+                    let (msg, addr) = sock.recv_from().await?;
+                    let (req, _) = gateway_messages::deserialize::<
+                        gateway_messages::EreportRequest,
+                    >(msg)?;
+                    Ok((req, addr, sock))
+                }
+                None => futures::future::pending().await,
+            }
+        }
         loop {
             let incr_throttle_count: Pin<
                 Box<dyn Future<Output = Option<usize>> + Send>,
@@ -546,6 +591,10 @@ impl UdpTask {
                 Box::pin(throttler.recv())
             } else {
                 Box::pin(future::pending())
+            };
+            let (ereport0, ereport1) = match self.ereport_servers.as_mut() {
+                Some([e0, e1]) => (Some(e0), Some(e1)),
+                None => (None, None),
             };
             select! {
                 Some(n) = incr_throttle_count => {
@@ -589,6 +638,18 @@ impl UdpTask {
                         self.udp1.send_to(resp, addr).await?;
                         self.responses_sent_count.send_modify(|n| *n += 1);
                     }
+                }
+
+                recv = ereport_recv(ereport0) => {
+                    let (req, addr, sock) = recv?;
+                    let rsp = self.ereport_state.handle_request(req, &mut out_buf);
+                    sock.send_to(rsp, addr).await?;
+                }
+
+                recv = ereport_recv(ereport1) => {
+                    let (req, addr, sock) = recv?;
+                    let rsp = self.ereport_state.handle_request(req, &mut out_buf);
+                    sock.send_to(rsp, addr).await?;
                 }
 
                 command = self.commands.recv() => {
@@ -1525,7 +1586,6 @@ impl SpHandler for Handler {
     ) -> Result<Option<DumpSegment>, SpError> {
         unimplemented!()
     }
-
 }
 
 impl SimSpHandler for Handler {
