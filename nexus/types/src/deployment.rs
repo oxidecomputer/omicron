@@ -101,7 +101,11 @@ use blueprint_display::{
 };
 use id_map::{IdMap, IdMappable};
 
+use crate::inventory::BaseboardId;
 pub use blueprint_diff::BlueprintDiffSummary;
+use blueprint_display::BpPendingMgsUpdates;
+use gateway_client::types::SpType;
+use omicron_common::update::ArtifactHashId;
 
 /// Describes a complete set of software and configuration for the system
 // Blueprints are a fundamental part of how the system modifies itself.  Each
@@ -150,6 +154,9 @@ pub struct Blueprint {
 
     /// A map of sled id -> desired configuration of the sled.
     pub sleds: BTreeMap<SledUuid, BlueprintSledConfig>,
+
+    /// List of pending MGS-mediated updates
+    pub pending_mgs_updates: BTreeMap<BaseboardId, PendingMgsUpdate>,
 
     /// which blueprint this blueprint is based on
     pub parent_blueprint_id: Option<BlueprintUuid>,
@@ -488,6 +495,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
         let Blueprint {
             id,
             sleds,
+            pending_mgs_updates,
             parent_blueprint_id,
             // These two cockroachdb_* fields are handled by
             // `make_cockroachdb_table()`, called below.
@@ -568,6 +576,38 @@ impl fmt::Display for BlueprintDisplay<'_> {
 
         writeln!(f, "{}", self.make_cockroachdb_table())?;
         writeln!(f, "{}", self.make_metadata_table())?;
+
+        writeln!(
+            f,
+            " PENDING MGS-MANAGED UPDATES: {}",
+            pending_mgs_updates.len()
+        )?;
+        if !pending_mgs_updates.is_empty() {
+            writeln!(
+                f,
+                "{}",
+                BpTable::new(
+                    BpPendingMgsUpdates {},
+                    None,
+                    pending_mgs_updates
+                        .values()
+                        .map(|pu| {
+                            BpTableRow::from_strings(
+                                BpDiffState::Unchanged,
+                                vec![
+                                    pu.sp_type.to_string(),
+                                    pu.slot_id.to_string(),
+                                    pu.baseboard_id.part_number.clone(),
+                                    pu.baseboard_id.serial_number.clone(),
+                                    pu.artifact_hash_id.kind.to_string(),
+                                    pu.artifact_hash_id.hash.to_string(),
+                                ],
+                            )
+                        })
+                        .collect()
+                )
+            )?;
+        }
 
         Ok(())
     }
@@ -960,6 +1000,21 @@ impl fmt::Display for BlueprintZoneImageSource {
             }
         }
     }
+}
+
+#[derive(
+    Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize, Diffable,
+)]
+pub struct PendingMgsUpdate {
+    /// id of the baseboard that we're going to update
+    baseboard_id: BaseboardId,
+    /// what type of baseboard this is
+    sp_type: SpType,
+    /// last known MGS slot (cubby number) of the baseboard
+    slot_id: u16,
+    /// which artifact to apply to this device
+    /// (implies which component is being updated)
+    artifact_hash_id: ArtifactHashId,
 }
 
 /// The desired state of an Omicron-managed physical disk in a blueprint.

@@ -872,6 +872,8 @@ impl DataStore {
 
         Ok(Blueprint {
             id: blueprint_id,
+            // TODO these need to be serialized to the database.
+            pending_mgs_updates: BTreeMap::new(),
             sleds: sled_configs,
             parent_blueprint_id,
             internal_dns_version,
