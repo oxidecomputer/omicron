@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use id_map::IdMap;
+use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::DiskManagementError;
 use omicron_common::disk::DiskVariant;
@@ -30,6 +31,16 @@ pub struct ExternalDisks {
 impl ExternalDisks {
     pub fn new(mount_config: Arc<MountConfig>) -> Self {
         Self { disks: BTreeMap::new(), mount_config }
+    }
+
+    pub(super) fn mount_config(&self) -> &MountConfig {
+        &self.mount_config
+    }
+
+    // TODO-cleanup Remove this? Wrong level of abstraction: should be working
+    // in terms of datasets, not pools
+    pub(super) fn all_u2_pools(&self) -> Vec<ZpoolName> {
+        self.disks.values().map(|disk| disk.zpool_name().clone()).collect()
     }
 
     /// Retain all disks that we are supposed to manage (based on `config`) that

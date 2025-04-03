@@ -35,12 +35,14 @@ mod zones;
 use crate::ddm_reconciler::DdmReconciler;
 use crate::metrics::MetricsRequestQueue;
 use crate::services::ServiceManager;
+use crate::services::TimeSyncConfig;
 use crate::zone_bundle::ZoneBundler;
 
 use self::external_disks::ExternalDisks;
 use self::internal_disks::InternalDisksTask;
 use self::ledger::LedgerTask;
 use self::ledger::LedgerTaskHandle;
+use self::zones::TimeSyncStatus;
 use self::zones::ZoneMap;
 
 pub use self::ledger::LedgerTaskError;
@@ -58,13 +60,15 @@ struct ReconcilerTaskDependenciesHeldUntilSledAgentStarted {
     reconciler_state_tx: watch::Sender<Arc<ReconcilerTaskState>>,
     current_config_rx: watch::Receiver<CurrentConfig>,
     key_requester: StorageKeyRequester,
+    time_sync_config: TimeSyncConfig,
     log: Logger,
 }
 
 impl ConfigReconcilerHandle {
-    pub fn new(
+    pub(crate) fn new(
         key_requester: StorageKeyRequester,
         mount_config: Arc<MountConfig>,
+        time_sync_config: TimeSyncConfig,
         base_log: &Logger,
     ) -> Self {
         let (raw_disks, raw_disks_rx) = watch::channel(IdMap::new());
@@ -87,6 +91,7 @@ impl ConfigReconcilerHandle {
                 reconciler_state_tx,
                 current_config_rx,
                 key_requester,
+                time_sync_config,
                 log: base_log.new(slog::o!("component" => "ReconcilerTask")),
             },
         ));
@@ -131,12 +136,14 @@ impl ConfigReconcilerHandle {
             reconciler_state_tx,
             current_config_rx,
             key_requester,
+            time_sync_config,
             log,
         } = deps;
 
         let reconciler_task = ReconcilerTask {
             state: reconciler_state_tx,
             current_config_rx,
+            time_sync_config,
             service_manager,
             key_requester,
             metrics_queue,
@@ -227,6 +234,7 @@ pub(crate) enum ReconcilerTaskStatus {
 pub(crate) struct ReconcilerTaskState {
     external_disks: ExternalDisks,
     zones: ZoneMap,
+    timesync_status: TimeSyncStatus,
     status: ReconcilerTaskStatus,
 }
 
@@ -235,6 +243,7 @@ impl ReconcilerTaskState {
         Self {
             external_disks: ExternalDisks::new(mount_config),
             zones: ZoneMap::default(),
+            timesync_status: TimeSyncStatus::NotYetChecked,
             status: ReconcilerTaskStatus::WaitingForInternalDisks,
         }
     }
@@ -243,6 +252,7 @@ impl ReconcilerTaskState {
 struct ReconcilerTask {
     state: watch::Sender<Arc<ReconcilerTaskState>>,
     current_config_rx: watch::Receiver<CurrentConfig>,
+    time_sync_config: TimeSyncConfig,
     service_manager: ServiceManager,
     key_requester: StorageKeyRequester,
     metrics_queue: MetricsRequestQueue,
@@ -316,30 +326,95 @@ impl ReconcilerTask {
             CurrentConfig::Ledgered(omicron_sled_config) => omicron_sled_config,
         };
 
+        // Update the current state to note that we're performing reconcilation,
+        // and also stash a clone of it in `current_state`.
         let started = Instant::now();
+        let mut current_state = None;
         self.state.send_modify(|state| {
-            let state = Arc::make_mut(state);
-            state.status = ReconcilerTaskStatus::PerformingReconciliation {
-                config: sled_config.clone(),
-                started,
-            };
+            let mut state = Arc::clone(state);
+            Arc::make_mut(&mut state).status =
+                ReconcilerTaskStatus::PerformingReconciliation {
+                    config: sled_config.clone(),
+                    started,
+                };
+            current_state = Some(state);
         });
+        let mut current_state =
+            current_state.expect("always populated by send_modify");
 
-        self.reconcile_against_config(&sled_config).await;
+        // Perform the actual reconcilation.
+        let mutable_state = Arc::make_mut(&mut current_state);
+        self.reconcile_against_config(mutable_state, &sled_config).await;
 
+        // Notify any receivers of our post-reconciliation state. We always
+        // update the `status`, and may or may not have updated other fields.
+        mutable_state.status = ReconcilerTaskStatus::Idle {
+            last_reconciled_config: sled_config,
+            completed: Instant::now(),
+            elapsed: started.elapsed(),
+        };
         self.state.send_modify(|state| {
-            let state = Arc::make_mut(state);
-            state.status = ReconcilerTaskStatus::Idle {
-                last_reconciled_config: sled_config,
-                completed: Instant::now(),
-                elapsed: started.elapsed(),
-            };
+            *state = current_state;
         });
     }
 
     async fn reconcile_against_config(
-        &mut self,
+        &self,
+        state: &mut ReconcilerTaskState,
         sled_config: &OmicronSledConfig,
     ) {
+        // ---
+        // We go through the removal process first: shut down zones, then remove
+        // datasets, then remove disks.
+        // ---
+
+        // First, shut down any zones that need to be shut down.
+        state
+            .zones
+            .shut_down_zones_if_needed(
+                &sled_config.zones,
+                &self.metrics_queue,
+                &self.zone_bundler,
+                &self.ddm_reconciler,
+                &self.underlay_vnic,
+                &self.log,
+            )
+            .await;
+
+        // Next, delete any datasets that need to be deleted.
+        //
+        // TODO We don't do this yet:
+        // https://github.com/oxidecomputer/omicron/issues/6177
+
+        // Now remove any disks we're no longer supposed to use.
+        //state.external_disks.retain_present_and_managed(raw_disks, config);
+
+        // ---
+        // Now go through the add process: start managing disks, create
+        // datasets, start zones.
+        // ---
+
+        //state.external_disks.ensure_managing(raw_disks, config, key_requester, log)
+
+        // TODO datasets
+
+        // Finally, start up any new zones. This may include relaunching zones
+        // we shut down above (e.g., if they've just been upgraded).
+        //
+        // To start zones, we need to know if we're currently timesync'd.
+        state.timesync_status =
+            state.zones.timesync_status(&self.time_sync_config).await;
+
+        state
+            .zones
+            .start_zones_if_needed(
+                &sled_config.zones,
+                &self.service_manager,
+                state.external_disks.mount_config(),
+                state.timesync_status.is_synchronized(),
+                &state.external_disks.all_u2_pools(),
+                &self.log,
+            )
+            .await;
     }
 }

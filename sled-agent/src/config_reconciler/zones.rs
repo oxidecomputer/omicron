@@ -8,6 +8,7 @@ use id_map::IdMap;
 use id_map::IdMappable;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm::EtherstubVnic;
+use illumos_utils::running_zone::RunCommandError;
 use illumos_utils::running_zone::RunningZone;
 use illumos_utils::zone::AdmError;
 use illumos_utils::zone::DeleteAddressError;
@@ -18,19 +19,56 @@ use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use sled_agent_types::time_sync::TimeSync;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
 use sled_storage::config::MountConfig;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
+use std::net::IpAddr;
+use std::net::Ipv6Addr;
+use std::str::FromStr as _;
 use std::sync::Arc;
 
 use crate::ddm_reconciler::DdmReconciler;
 use crate::metrics::MetricsRequestQueue;
 use crate::params::OmicronZoneConfigExt;
 use crate::services::ServiceManager;
+use crate::services::TimeSyncConfig;
 use crate::services::internal_dns_addrobj_name;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
+
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum TimeSyncError {
+    #[error("no running NTP zone")]
+    NoRunningNtpZone,
+    #[error("multiple running NTP zones - this should never happen!")]
+    MultipleRunningNtpZones,
+    #[error("failed to execute chronyc within NTP zone")]
+    ExecuteChronyc(#[source] Arc<RunCommandError>),
+    #[error(
+        "failed to parse chronyc tracking output: {reason} (stdout: {stdout:?})"
+    )]
+    FailedToParse { reason: &'static str, stdout: String },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum TimeSyncStatus {
+    NotYetChecked,
+    ConfiguredToSkip,
+    FailedToGetSyncStatus(TimeSyncError), // TODO error type
+    TimeSync(TimeSync),
+}
+
+impl TimeSyncStatus {
+    pub fn is_synchronized(&self) -> bool {
+        match self {
+            Self::ConfiguredToSkip => true,
+            Self::NotYetChecked | Self::FailedToGetSyncStatus(_) => false,
+            Self::TimeSync(TimeSync { sync, .. }) => *sync,
+        }
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ZoneShutdownError {
@@ -61,21 +99,115 @@ pub struct ZoneMap {
 }
 
 impl ZoneMap {
+    pub(super) async fn timesync_status(
+        &self,
+        config: &TimeSyncConfig,
+    ) -> TimeSyncStatus {
+        match config {
+            TimeSyncConfig::Normal => {
+                match self.timesync_status_from_ntp_zone().await {
+                    Ok(timesync) => TimeSyncStatus::TimeSync(timesync),
+                    Err(err) => TimeSyncStatus::FailedToGetSyncStatus(err),
+                }
+            }
+            TimeSyncConfig::Skip => TimeSyncStatus::ConfiguredToSkip,
+        }
+    }
+
+    async fn timesync_status_from_ntp_zone(
+        &self,
+    ) -> Result<TimeSync, TimeSyncError> {
+        // Get the one and only running NTP zone, or return an error.
+        let mut running_ntp_zones = self.zones.iter().filter_map(|z| {
+            if !z.config.zone_type.is_ntp() {
+                return None;
+            }
+
+            match &z.state {
+                ZoneState::Running(running_zone) => Some(running_zone),
+                ZoneState::PartiallyShutDown { .. }
+                | ZoneState::FailedToStart(_) => None,
+            }
+        });
+        let running_ntp_zone =
+            running_ntp_zones.next().ok_or(TimeSyncError::NoRunningNtpZone)?;
+        if running_ntp_zones.next().is_some() {
+            return Err(TimeSyncError::MultipleRunningNtpZones);
+        }
+
+        // XXXNTP - This could be replaced with a direct connection to the
+        // daemon using a patched version of the chrony_candm crate to allow
+        // a custom server socket path. From the GZ, it should be possible to
+        // connect to the UNIX socket at
+        // format!("{}/var/run/chrony/chronyd.sock", ntp_zone.root())
+
+        let stdout = running_ntp_zone
+            .run_cmd(&["/usr/bin/chronyc", "-c", "tracking"])
+            .map_err(Arc::new)
+            .map_err(TimeSyncError::ExecuteChronyc)?;
+
+        let v: Vec<&str> = stdout.split(',').collect();
+
+        if v.len() < 10 {
+            return Err(TimeSyncError::FailedToParse {
+                reason: "too few fields",
+                stdout,
+            });
+        }
+
+        let Ok(ref_id) = u32::from_str_radix(v[0], 16) else {
+            return Err(TimeSyncError::FailedToParse {
+                reason: "bad ref_id",
+                stdout,
+            });
+        };
+        let ip_addr =
+            IpAddr::from_str(v[1]).unwrap_or(Ipv6Addr::UNSPECIFIED.into());
+        let Ok(stratum) = u8::from_str(v[2]) else {
+            return Err(TimeSyncError::FailedToParse {
+                reason: "bad stratum",
+                stdout,
+            });
+        };
+        let Ok(ref_time) = f64::from_str(v[3]) else {
+            return Err(TimeSyncError::FailedToParse {
+                reason: "bad ref_time",
+                stdout,
+            });
+        };
+        let Ok(correction) = f64::from_str(v[4]) else {
+            return Err(TimeSyncError::FailedToParse {
+                reason: "bad correction",
+                stdout,
+            });
+        };
+
+        // Per `chronyc waitsync`'s implementation, if either the
+        // reference IP address is not unspecified or the reference
+        // ID is not 0 or 0x7f7f0101, we are synchronized to a peer.
+        let peer_sync =
+            !ip_addr.is_unspecified() || (ref_id != 0 && ref_id != 0x7f7f0101);
+
+        let sync = stratum < 10
+            && ref_time > 1234567890.0
+            && peer_sync
+            && correction.abs() <= 0.05;
+
+        Ok(TimeSync { sync, ref_id, ip_addr, stratum, ref_time, correction })
+    }
+
     /// Attempt to shut down any zones that aren't present in `desired_zones`,
     /// or that weren't present in some prior call but which didn't succeed in
     /// shutting down and are in a partially-shut-down state.
-    ///
-    /// If any changes are made, returns a new instance of `Self`.
-    #[must_use]
     pub(super) async fn shut_down_zones_if_needed(
-        &self,
+        &mut self,
         desired_zones: &IdMap<OmicronZoneConfig>,
         metrics_queue: &MetricsRequestQueue,
         zone_bundler: &ZoneBundler,
         ddm_reconciler: &DdmReconciler,
         underlay_vnic: &EtherstubVnic,
         log: &Logger,
-    ) -> Option<Self> {
+    ) {
         let deps = RealShutdownDependencies {
             metrics_queue,
             zone_bundler,
@@ -87,24 +219,18 @@ impl ZoneMap {
 
     /// Attempt to start any zones that are present in `desired_zones` but not
     /// in `self`.
-    ///
-    /// If any changes are made, returns a new instance of `Self`.
-    #[must_use]
-    #[allow(clippy::too_many_arguments)] // TODO remove once we trim this down
     pub(super) async fn start_zones_if_needed(
-        &self,
+        &mut self,
         desired_zones: &IdMap<OmicronZoneConfig>,
         service_manager: &ServiceManager,
         mount_config: &MountConfig,
-        zone: &OmicronZoneConfig,
         time_is_synchronized: bool,
         all_u2_pools: &Vec<ZpoolName>,
         log: &Logger,
-    ) -> Option<Self> {
+    ) {
         let deps = RealStartDependencies {
             service_manager,
             mount_config,
-            zone,
             time_is_synchronized,
             all_u2_pools,
         };
@@ -112,11 +238,11 @@ impl ZoneMap {
     }
 
     async fn shut_down_zones_if_needed_impl<T: ShutdownDependencies>(
-        &self,
+        &mut self,
         desired_zones: &IdMap<OmicronZoneConfig>,
         deps: &T,
         log: &Logger,
-    ) -> Option<Self> {
+    ) {
         let mut shutdown_futures = Vec::new();
 
         for current_zone in self.zones.iter() {
@@ -165,24 +291,16 @@ impl ZoneMap {
             );
         }
 
-        if shutdown_futures.is_empty() {
-            // If we have no shutdown work to do, we're done and made no
-            // changes.
-            None
-        } else {
-            // Otherwise, clone ourself and update all zones that needed
-            // shutdown work.
+        if !shutdown_futures.is_empty() {
             let shutdown_results = future::join_all(shutdown_futures).await;
-            let mut new_self = self.clone();
 
             for (zone_id, result) in shutdown_results {
                 match result {
                     Ok(()) => {
-                        new_self.zones.remove(&zone_id);
+                        self.zones.remove(&zone_id);
                     }
                     Err((state, err)) => {
-                        new_self
-                            .zones
+                        self.zones
                             .get_mut(&zone_id)
                             .expect("shutdown task operates on existing zone")
                             .state =
@@ -190,17 +308,15 @@ impl ZoneMap {
                     }
                 }
             }
-
-            Some(new_self)
         }
     }
 
     async fn start_zones_if_needed_impl<T: StartDependencies>(
-        &self,
+        &mut self,
         desired_zones: &IdMap<OmicronZoneConfig>,
         deps: &T,
         log: &Logger,
-    ) -> Option<Self> {
+    ) {
         let zones_to_start = desired_zones
             .iter()
             .filter(|zone| {
@@ -237,18 +353,13 @@ impl ZoneMap {
 
         let mut start_futures = Vec::new();
         for zone in zones_to_start {
-            start_futures
-                .push(deps.start_zone(zone).map(move |result| (zone, result)));
+            start_futures.push(
+                deps.start_zone(zone).map(move |result| (zone.clone(), result)),
+            );
         }
 
-        if start_futures.is_empty() {
-            // If we have no work to do, we're done and made no changes.
-            None
-        } else {
-            // Otherwise, clone ourself and insert records for all the zones we
-            // tried to start.
+        if !start_futures.is_empty() {
             let start_results = future::join_all(start_futures).await;
-            let mut new_self = self.clone();
             for (config, result) in start_results {
                 let state = match result {
                     Ok(running_zone) => {
@@ -256,11 +367,8 @@ impl ZoneMap {
                     }
                     Err(err) => ZoneState::FailedToStart(Arc::new(err)),
                 };
-                new_self
-                    .zones
-                    .insert(OmicronZone { config: config.clone(), state });
+                self.zones.insert(OmicronZone { config, state });
             }
-            Some(new_self)
         }
     }
 }
@@ -518,7 +626,6 @@ trait StartDependencies {
 struct RealStartDependencies<'a> {
     service_manager: &'a ServiceManager,
     mount_config: &'a MountConfig,
-    zone: &'a OmicronZoneConfig,
     time_is_synchronized: bool,
     all_u2_pools: &'a Vec<ZpoolName>,
 }
@@ -718,7 +825,7 @@ mod tests {
         let fake_zone = FakeZoneBuilder::new()
             .make_running_zone("test", logctx.log.clone())
             .await;
-        let zones0 = ZoneMap {
+        let mut zones = ZoneMap {
             zones: [OmicronZone {
                 config: OmicronZoneConfig {
                     id: fake_zone_id,
@@ -744,19 +851,16 @@ mod tests {
             ZoneShutdownError::FakeErrorForTests("boom".into()),
         ));
 
-        let zones1 = zones0
+        zones
             .shut_down_zones_if_needed_impl(
                 &desired_zones,
                 &fake_deps,
                 &logctx.log,
             )
-            .await
-            .expect("tried to shut down zone");
+            .await;
 
-        let new_zone = zones1
-            .zones
-            .get(&fake_zone_id)
-            .expect("zone ID should be in new map");
+        let new_zone =
+            zones.zones.get(&fake_zone_id).expect("zone ID should be present");
 
         // We should have recorded that we failed to stop the zone with the
         // error specified above.
@@ -774,18 +878,17 @@ mod tests {
         // restart it.)
         let desired_zones = [new_zone.config.clone()].into_iter().collect();
         fake_deps.push_halt_response(Ok(()));
-        let zones2 = zones1
+        zones
             .shut_down_zones_if_needed_impl(
                 &desired_zones,
                 &fake_deps,
                 &logctx.log,
             )
-            .await
-            .expect("tried to shut down zone");
+            .await;
 
         assert!(
-            zones2.zones.is_empty(),
-            "expected zones2 to be empty but got {zones2:?}"
+            zones.zones.is_empty(),
+            "expected zones to be empty but got {zones:?}"
         );
 
         logctx.cleanup_successful();
@@ -817,20 +920,19 @@ mod tests {
 
         // Starting with no zones, we should try and fail to start the one zone
         // in `desired_zones`.
-        let zones0 = ZoneMap::default();
-        let zones1 = zones0
+        let mut zones = ZoneMap::default();
+        zones
             .start_zones_if_needed_impl(&desired_zones, &fake_deps, &logctx.log)
-            .await
-            .expect("got new zones map");
+            .await;
 
-        assert_eq!(zones1.zones.len(), 1);
-        let zones1_zone =
-            zones1.zones.get(&fake_zone_id).expect("zone is present");
+        assert_eq!(zones.zones.len(), 1);
+        let zone_should_be_failed_to_start =
+            zones.zones.get(&fake_zone_id).expect("zone is present");
         assert_eq!(
-            zones1_zone.config,
+            zone_should_be_failed_to_start.config,
             *desired_zones.get(&fake_zone_id).unwrap()
         );
-        match &zones1_zone.state {
+        match &zone_should_be_failed_to_start.state {
             ZoneState::FailedToStart(err)
                 if matches!(**err, ZoneStartError::FakeErrorForTests(_)) =>
             {
@@ -847,19 +949,18 @@ mod tests {
 
         // Starting from the "zone failed to start" state, we should try again
         // to start the zone (and succeed this time).
-        let zones2 = zones1
+        zones
             .start_zones_if_needed_impl(&desired_zones, &fake_deps, &logctx.log)
-            .await
-            .expect("got new zones map");
+            .await;
 
-        assert_eq!(zones2.zones.len(), 1);
-        let zones2_zone =
-            zones2.zones.get(&fake_zone_id).expect("zone is present");
+        assert_eq!(zones.zones.len(), 1);
+        let zone_should_be_running =
+            zones.zones.get(&fake_zone_id).expect("zone is present");
         assert_eq!(
-            zones2_zone.config,
+            zone_should_be_running.config,
             *desired_zones.get(&fake_zone_id).unwrap()
         );
-        match &zones2_zone.state {
+        match &zone_should_be_running.state {
             ZoneState::Running(_) => (),
             other => panic!("unexpected zone state: {other:?}"),
         }
