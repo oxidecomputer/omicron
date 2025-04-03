@@ -50,7 +50,11 @@ pub fn from_diesel(e: DieselError) -> external::Error {
             NOT_ENOUGH_ZPOOL_SPACE_SENTINEL => {
                 return external::Error::insufficient_capacity(
                     external_message,
-                    "Not enough zpool space to allocate disks. There may not be enough disks with space for the requested region. You may also see this if your rack is in a degraded state, or you're running the default multi-rack topology configuration in a 1-sled development environment.",
+                    "Not enough zpool space to allocate disks. There may not \
+                    be enough disks with space for the requested region. You \
+                    may also see this if your rack is in a degraded state, or \
+                    you're running the default multi-rack topology \
+                    configuration in a 1-sled development environment.",
                 );
             }
             NOT_ENOUGH_UNIQUE_ZPOOLS_SENTINEL => {
