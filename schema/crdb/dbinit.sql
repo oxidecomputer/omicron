@@ -82,6 +82,43 @@ CREATE TABLE IF NOT EXISTS omicron.public.clickhouse_policy (
     time_created TIMESTAMPTZ NOT NULL
 );
 
+
+/*
+ * The ClickHouse installation Oximeter should read from 
+ */
+CREATE TYPE IF NOT EXISTS omicron.public.oximeter_read_mode AS ENUM (
+   -- Read from the single node ClickHouse installation 
+   'single_node',
+
+   -- Read from the replicated ClickHouse cluster 
+   'cluster'
+);
+
+/*
+ * A planning policy for oximeter_read for a single multirack setup
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.oximeter_read_policy (
+    -- Monotonically increasing version for all policies
+    version INT8 PRIMARY KEY,
+
+    oximeter_read_mode omicron.public.oximeter_read_mode NOT NULL,
+
+    time_created TIMESTAMPTZ NOT NULL
+);
+
+/*
+* Oximeter read policy defaults to reading from a single node ClickHouse server.
+*/
+INSERT INTO omicron.public.oximeter_read_policy (
+    version,
+    oximeter_read_mode,
+    time_created
+) VALUES (
+    0,
+    'single_node',
+    NOW()
+) ON CONFLICT DO NOTHING;
+
 /*
  * Racks
  */
@@ -5001,7 +5038,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '133.0.0', NULL)
+    (TRUE, NOW(), NOW(), '134.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
