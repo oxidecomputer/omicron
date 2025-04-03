@@ -21,7 +21,7 @@ use std::collections::btree_map::Entry;
 use std::future::Future;
 use std::sync::Arc;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ExternalDisks {
     disks: BTreeMap<PhysicalDiskUuid, Disk>,
     mount_config: Arc<MountConfig>,

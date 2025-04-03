@@ -10,10 +10,13 @@
 
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::Duration;
+use std::time::Instant;
 
 use id_map::Entry;
 use id_map::IdMap;
 use id_map::IdMappable as _;
+use illumos_utils::dladm::EtherstubVnic;
 use key_manager::StorageKeyRequester;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use omicron_common::disk::DiskIdentity;
@@ -28,6 +31,11 @@ mod internal_disks;
 mod ledger;
 mod raw_disks;
 mod zones;
+
+use crate::ddm_reconciler::DdmReconciler;
+use crate::metrics::MetricsRequestQueue;
+use crate::services::ServiceManager;
+use crate::zone_bundle::ZoneBundler;
 
 use self::external_disks::ExternalDisks;
 use self::internal_disks::InternalDisksTask;
@@ -50,6 +58,7 @@ struct ReconcilerTaskDependenciesHeldUntilSledAgentStarted {
     reconciler_state_tx: watch::Sender<Arc<ReconcilerTaskState>>,
     current_config_rx: watch::Receiver<CurrentConfig>,
     key_requester: StorageKeyRequester,
+    log: Logger,
 }
 
 impl ConfigReconcilerHandle {
@@ -78,6 +87,7 @@ impl ConfigReconcilerHandle {
                 reconciler_state_tx,
                 current_config_rx,
                 key_requester,
+                log: base_log.new(slog::o!("component" => "ReconcilerTask")),
             },
         ));
 
@@ -93,7 +103,14 @@ impl ConfigReconcilerHandle {
         }
     }
 
-    pub fn spawn_reconciliation_task(&self) {
+    pub(crate) fn spawn_reconciliation_task(
+        &self,
+        service_manager: ServiceManager,
+        metrics_queue: MetricsRequestQueue,
+        zone_bundler: ZoneBundler,
+        ddm_reconciler: DdmReconciler,
+        underlay_vnic: EtherstubVnic,
+    ) {
         let deps =
             match self.hold_while_waiting_for_sled_agent.lock().unwrap().take()
             {
@@ -114,12 +131,19 @@ impl ConfigReconcilerHandle {
             reconciler_state_tx,
             current_config_rx,
             key_requester,
+            log,
         } = deps;
 
         let reconciler_task = ReconcilerTask {
             state: reconciler_state_tx,
             current_config_rx,
+            service_manager,
             key_requester,
+            metrics_queue,
+            zone_bundler,
+            ddm_reconciler,
+            underlay_vnic,
+            log,
         };
 
         tokio::task::spawn(reconciler_task.run());
@@ -184,12 +208,22 @@ enum CurrentConfig {
     Ledgered(OmicronSledConfig),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum ReconcilerTaskStatus {
     WaitingForInternalDisks,
+    WaitingForRackSetup,
+    PerformingReconciliation {
+        config: OmicronSledConfig,
+        started: Instant,
+    },
+    Idle {
+        last_reconciled_config: OmicronSledConfig,
+        completed: Instant,
+        elapsed: Duration,
+    },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ReconcilerTaskState {
     external_disks: ExternalDisks,
     zones: ZoneMap,
@@ -209,9 +243,103 @@ impl ReconcilerTaskState {
 struct ReconcilerTask {
     state: watch::Sender<Arc<ReconcilerTaskState>>,
     current_config_rx: watch::Receiver<CurrentConfig>,
+    service_manager: ServiceManager,
     key_requester: StorageKeyRequester,
+    metrics_queue: MetricsRequestQueue,
+    zone_bundler: ZoneBundler,
+    ddm_reconciler: DdmReconciler,
+    underlay_vnic: EtherstubVnic,
+    log: Logger,
 }
 
 impl ReconcilerTask {
-    async fn run(self) {}
+    async fn run(mut self) {
+        loop {
+            self.do_reconcilation().await;
+
+            tokio::select! {
+                // Cancel-safe per docs on `changed()`
+                result = self.current_config_rx.changed() => {
+                    match result {
+                        Ok(()) => continue,
+                        Err(_closed) => {
+                            // This should never happen in production, but may
+                            // in tests.
+                            warn!(
+                                self.log,
+                                "current_config watch channel closed; exiting"
+                            );
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    async fn do_reconcilation(&mut self) {
+        let current_config = self.current_config_rx.borrow_and_update().clone();
+
+        let sled_config = match current_config {
+            CurrentConfig::WaitingForInternalDisks => {
+                self.state.send_if_modified(|state| {
+                    if matches!(
+                        state.status,
+                        ReconcilerTaskStatus::WaitingForInternalDisks
+                    ) {
+                        false
+                    } else {
+                        let state = Arc::make_mut(state);
+                        state.status =
+                            ReconcilerTaskStatus::WaitingForInternalDisks;
+                        true
+                    }
+                });
+                return;
+            }
+            CurrentConfig::WaitingForRackSetup => {
+                self.state.send_if_modified(|state| {
+                    if matches!(
+                        state.status,
+                        ReconcilerTaskStatus::WaitingForRackSetup
+                    ) {
+                        false
+                    } else {
+                        let state = Arc::make_mut(state);
+                        state.status =
+                            ReconcilerTaskStatus::WaitingForRackSetup;
+                        true
+                    }
+                });
+                return;
+            }
+            CurrentConfig::Ledgered(omicron_sled_config) => omicron_sled_config,
+        };
+
+        let started = Instant::now();
+        self.state.send_modify(|state| {
+            let state = Arc::make_mut(state);
+            state.status = ReconcilerTaskStatus::PerformingReconciliation {
+                config: sled_config.clone(),
+                started,
+            };
+        });
+
+        self.reconcile_against_config(&sled_config).await;
+
+        self.state.send_modify(|state| {
+            let state = Arc::make_mut(state);
+            state.status = ReconcilerTaskStatus::Idle {
+                last_reconciled_config: sled_config,
+                completed: Instant::now(),
+                elapsed: started.elapsed(),
+            };
+        });
+    }
+
+    async fn reconcile_against_config(
+        &mut self,
+        sled_config: &OmicronSledConfig,
+    ) {
+    }
 }

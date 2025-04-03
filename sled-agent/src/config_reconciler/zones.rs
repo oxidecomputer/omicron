@@ -560,9 +560,6 @@ impl StartDependencies for RealStartDependencies<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
-    use std::sync::Mutex;
-
     use super::*;
     use illumos_utils::dladm::Etherstub;
     use illumos_utils::dladm::MockDladm;
@@ -574,6 +571,8 @@ mod tests {
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ZpoolUuid;
+    use std::collections::VecDeque;
+    use std::sync::Mutex;
 
     struct FakeZoneBuilder {
         vnic_alloc: VnicAllocator<Etherstub>,
