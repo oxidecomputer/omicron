@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::ByteCount;
-use crate::schema::virtual_provisioning_resource;
 use chrono::{DateTime, Utc};
+use nexus_db_schema::schema::virtual_provisioning_resource;
 use omicron_common::api::external;
 use uuid::Uuid;
 

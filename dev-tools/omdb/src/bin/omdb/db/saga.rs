@@ -19,7 +19,6 @@ use internal_dns_types::names::ServiceName;
 use nexus_db_model::Saga;
 use nexus_db_model::SagaNodeEvent;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::DataStoreConnection;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
@@ -165,7 +164,7 @@ You should only do this if:
     // ensure that the Nexus is down.
     if !args.bypass_sec_check {
         let saga: Saga = {
-            use db::schema::saga::dsl;
+            use nexus_db_schema::schema::saga::dsl;
             dsl::saga
                 .filter(dsl::id.eq(args.saga_id))
                 .first_async(&*conn)
@@ -314,7 +313,7 @@ You should only do this if:
     // Find all the nodes where there is a started record but not a done record
 
     let started_nodes: Vec<SagaNodeEvent> = {
-        use db::schema::saga_node_event::dsl;
+        use nexus_db_schema::schema::saga_node_event::dsl;
 
         dsl::saga_node_event
             .filter(dsl::saga_id.eq(args.saga_id))
@@ -324,7 +323,7 @@ You should only do this if:
     };
 
     let complete_nodes: Vec<SagaNodeEvent> = {
-        use db::schema::saga_node_event::dsl;
+        use nexus_db_schema::schema::saga_node_event::dsl;
 
         // Note the actual enum contents don't matter in both these cases, it
         // won't affect the label string
@@ -395,7 +394,7 @@ You should only do this if:
         );
 
         {
-            use db::schema::saga_node_event::dsl;
+            use nexus_db_schema::schema::saga_node_event::dsl;
 
             diesel::insert_into(dsl::saga_node_event)
                 .values(fault.clone())
@@ -416,7 +415,7 @@ async fn get_all_sagas_in_state(
     let mut sagas = Vec::new();
     let mut paginator = Paginator::new(SQL_BATCH_SIZE);
     while let Some(p) = paginator.next() {
-        use db::schema::saga::dsl;
+        use nexus_db_schema::schema::saga::dsl;
         let records_batch =
             paginated(dsl::saga, dsl::id, &p.current_pagparams())
                 .filter(

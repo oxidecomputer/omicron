@@ -2515,7 +2515,7 @@ mod tests {
             ));
             let metadata = Metadata::new(ArchiveType::Layer(LayerInfo {
                 pkg: name.to_owned(),
-                version: VERSION_0,
+                version: ARTIFACT_VERSION_0,
             }));
             metadata.append_to_tar(&mut tar, 0).unwrap();
             let data = tar.into_inner().unwrap().finish().unwrap();

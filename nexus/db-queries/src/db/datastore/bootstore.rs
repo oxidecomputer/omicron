@@ -1,6 +1,5 @@
 use super::DataStore;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::error::{ErrorHandler, public_error_from_diesel};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::ExpressionMethods;
@@ -15,8 +14,8 @@ impl DataStore {
         opctx: &OpContext,
         key: String,
     ) -> LookupResult<i64> {
-        use db::schema::bootstore_keys;
-        use db::schema::bootstore_keys::dsl;
+        use nexus_db_schema::schema::bootstore_keys;
+        use nexus_db_schema::schema::bootstore_keys::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -41,7 +40,7 @@ impl DataStore {
         opctx: &OpContext,
         config: BootstoreConfig,
     ) -> CreateResult<()> {
-        use db::schema::bootstore_config::dsl;
+        use nexus_db_schema::schema::bootstore_config::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -61,7 +60,7 @@ impl DataStore {
         opctx: &OpContext,
         key: String,
     ) -> LookupResult<Option<BootstoreConfig>> {
-        use db::schema::bootstore_config::dsl;
+        use nexus_db_schema::schema::bootstore_config::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 

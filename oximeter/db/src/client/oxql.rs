@@ -20,6 +20,7 @@ use crate::oxql::ast::table_ops::filter;
 use crate::oxql::ast::table_ops::filter::Filter;
 use crate::oxql::ast::table_ops::limit::Limit;
 use crate::oxql::ast::table_ops::limit::LimitKind;
+use crate::oxql::query::QueryAuthzScope;
 use crate::query::field_table_name;
 use oximeter::Measurement;
 use oximeter::TimeseriesSchema;
@@ -147,22 +148,13 @@ impl Client {
     pub async fn oxql_query(
         &self,
         query: impl AsRef<str>,
+        scope: QueryAuthzScope,
     ) -> Result<OxqlResult, Error> {
-        // TODO-security: Need a way to implement authz checks for things like
-        // viewing resources in another project or silo.
-        //
-        // I think one way to do that is look at the predicates and make sure
-        // they refer to things the user has access to. Another is to add some
-        // implicit predicates here, indicating the subset of fields that the
-        // query should be able to access.
-        //
-        // This probably means we'll need to parse the query in Nexus, so that
-        // we can attach the other filters ourselves.
-        //
-        // See https://github.com/oxidecomputer/omicron/issues/5298.
         let query = query.as_ref();
         let parsed_query = oxql::Query::new(query)?;
-        let plan = self.build_query_plan(&parsed_query).await?;
+        let filtered_query = parsed_query.insert_authz_filters(scope);
+
+        let plan = self.build_query_plan(&filtered_query).await?;
         if plan.requires_full_table_scan() {
             return Err(Error::Oxql(anyhow::anyhow!(
                 "This query requires at least one full table scan. \
@@ -179,6 +171,7 @@ impl Client {
             "parsed OxQL query";
             "query" => query,
             "parsed_query" => ?parsed_query,
+            "filtered_query" => ?filtered_query,
         );
         let id = usdt::UniqueId::new();
         probes::oxql__query__start!(|| (&id, &query_id, query));
@@ -188,7 +181,7 @@ impl Client {
                 &query_log,
                 &mut self.claim_connection().await?,
                 query_id,
-                parsed_query,
+                filtered_query,
                 &mut total_rows_fetched,
                 None,
                 None,
@@ -1187,7 +1180,9 @@ fn update_total_rows_and_check(
 #[cfg(test)]
 mod tests {
     use super::ConsistentKeyGroup;
-    use crate::client::oxql::chunk_consistent_key_groups_impl;
+    use crate::client::oxql::{
+        QueryAuthzScope, chunk_consistent_key_groups_impl,
+    };
     use crate::oxql::ast::grammar::query_parser;
     use crate::{Client, DATABASE_TIMESTAMP_FORMAT, DbWrite};
     use crate::{Metric, Target};
@@ -1348,7 +1343,7 @@ mod tests {
             "get some_target:some_metric | filter timestamp > @2020-01-01";
         let result = ctx
             .client
-            .oxql_query(query)
+            .oxql_query(query, QueryAuthzScope::Fleet)
             .await
             .expect("failed to run OxQL query");
         assert_eq!(result.tables.len(), 1, "Should be exactly 1 table");
@@ -1407,7 +1402,7 @@ mod tests {
         );
         let result = ctx
             .client
-            .oxql_query(&query)
+            .oxql_query(&query, QueryAuthzScope::Fleet)
             .await
             .expect("failed to run OxQL query");
         assert_eq!(result.tables.len(), 1, "Should be exactly 1 table");
@@ -1463,7 +1458,7 @@ mod tests {
         );
         let result = ctx
             .client
-            .oxql_query(&query)
+            .oxql_query(&query, QueryAuthzScope::Fleet)
             .await
             .expect("failed to run OxQL query");
         assert_eq!(result.tables.len(), 1, "Should be exactly 1 table");
@@ -1695,7 +1690,7 @@ mod tests {
         );
         let result = ctx
             .client
-            .oxql_query(&query)
+            .oxql_query(&query, QueryAuthzScope::Fleet)
             .await
             .expect("failed to run OxQL query");
         assert_eq!(result.tables.len(), 1, "Should be exactly 1 table");
