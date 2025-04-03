@@ -103,7 +103,7 @@ enum MountpointError {
     CreateTransferDirectory(#[source] std::io::Error),
 
     #[error(
-        "Mountpoint directoyr not empty. Is someone concurrently adding files here?"
+        "Mountpoint directory not empty. Is someone concurrently adding files here?"
     )]
     DirectoryNotEmpty,
 
@@ -950,6 +950,15 @@ impl Zfs {
         }
 
         // If the dataset doesn't exist, create it.
+
+        // Non-zoned datasets with an explicit mountpoint and the
+        // "canmount=on" property should be mounted within the global zone.
+        //
+        // We'll ensure they have an empty immutable mountpoint before
+        // creating the dataset itself, which will also mount it.
+        //
+        // Zoned datasets are mounted when their zones are booted, so
+        // we don't do this mountpoint manipulation for them.
         if !zoned {
             if let (CanMount::On, Mountpoint::Path(path)) =
                 (&can_mount, &mountpoint)
