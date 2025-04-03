@@ -4,8 +4,9 @@
 
 //! Tool for discovering oxide related logfiles on sleds
 
+use chrono::{DateTime, Utc};
 use clap::{ArgAction, Args, Parser, Subcommand};
-use oxlog::{Filter, LogFile, Zones};
+use oxlog::{DateRange, Filter, LogFile, Zones};
 use std::collections::BTreeSet;
 
 #[derive(Debug, Parser)]
@@ -34,6 +35,16 @@ enum Commands {
 
         #[command(flatten)]
         filter: FilterArgs,
+
+        /// Show log files with an `mtime` before this timestamp. May be absolute or relative,
+        /// e.g. '2025-04-01T01:01:01', '-1 hour', 'yesterday'
+        #[arg(short = 'B', long, value_parser = parse_timestamp)]
+        before: Option<DateTime<Utc>>,
+
+        /// Show log files with an `mtime` after this timestamp. May be absolute or relative,
+        /// e.g. '2025-04-01T01:01:01', '-1 hour', 'yesterday'
+        #[arg(short = 'A', long, value_parser = parse_timestamp)]
+        after: Option<DateTime<Utc>>,
     },
 
     /// List the names of all services in a zone, from the perspective of oxlog.
@@ -65,6 +76,14 @@ struct FilterArgs {
     show_empty: bool,
 }
 
+fn parse_timestamp(date_str: &str) -> Result<DateTime<Utc>, String> {
+    let timestamp = parse_datetime::parse_datetime(date_str)
+        .map_err(|e| format!("could not parse timestamp: {e}"))?;
+
+    // No-op, the local TZ on the rack is always UTC.
+    Ok(timestamp.with_timezone(&Utc))
+}
+
 fn main() -> Result<(), anyhow::Error> {
     sigpipe::reset();
 
@@ -77,13 +96,22 @@ fn main() -> Result<(), anyhow::Error> {
             }
             Ok(())
         }
-        Commands::Logs { zone, service, metadata, filter } => {
+        Commands::Logs { zone, service, metadata, filter, before, after } => {
             let zones = Zones::load()?;
+            let date_range = match (before, after) {
+                (None, None) => None,
+                _ => Some(DateRange::new(
+                    before.unwrap_or(DateTime::<Utc>::MAX_UTC),
+                    after.unwrap_or(DateTime::<Utc>::MIN_UTC),
+                )),
+            };
+
             let filter = Filter {
                 current: filter.current,
                 archived: filter.archived,
                 extra: filter.extra,
                 show_empty: filter.show_empty,
+                date_range,
             };
             let print_metadata = |f: &LogFile| {
                 println!(
@@ -142,6 +170,7 @@ fn main() -> Result<(), anyhow::Error> {
                 archived: true,
                 extra: true,
                 show_empty: true,
+                date_range: None,
             };
 
             // Collect a unique set of services, based on the logs in the
