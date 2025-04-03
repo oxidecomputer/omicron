@@ -5,7 +5,7 @@
 //! Implementation of queries for provisioning regions.
 
 use crate::db::column_walker::AllColumnsOf;
-use crate::db::model::{CrucibleDataset, Region};
+use crate::db::model::{CrucibleDataset, Region, RegionReservationPercent};
 use crate::db::raw_query_builder::{QueryBuilder, TypedSqlQuery};
 use crate::db::true_or_cast_error::matches_sentinel;
 use const_format::concatcp;
@@ -13,6 +13,7 @@ use diesel::pg::Pg;
 use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use nexus_config::RegionAllocationStrategy;
+use nexus_db_schema::enums::RegionReservationPercentEnum;
 use nexus_db_schema::schema;
 use omicron_common::api::external;
 use omicron_uuid_kinds::GenericUuid;
@@ -199,36 +200,39 @@ pub fn allocation_query(
     // low enough that this shouldn't truncate.
     let requested_size: i64 = requested_size.try_into().unwrap();
 
-    // The Crucible Agent's current reservation factor is 25%, so add that here.
-    // Check first that the requested region size is divisible by this. This
-    // should basically never fail because all block sizes are divisible by 4.
-    if requested_size % 4 != 0 {
-        return Err(
-            AllocationQueryError::RequestedRegionNotDivisibleByFactor {
-                request: requested_size,
-                factor: 4,
-            },
-        );
-    }
+    let reservation_percent = RegionReservationPercent::TwentyFive;
 
-    let overhead: i64 = requested_size.checked_div(4).ok_or(
-        AllocationQueryError::RequestedRegionNotDivisibleByFactor {
-            request: requested_size,
-            factor: 4,
-        },
-    )?;
+    let size_delta: i64 = match reservation_percent {
+        RegionReservationPercent::TwentyFive => {
+            // Check first that the requested region size is divisible by this.
+            // This should basically never fail because all block sizes are
+            // divisible by 4.
+            if requested_size % 4 != 0 {
+                return Err(
+                    AllocationQueryError::RequestedRegionNotDivisibleByFactor {
+                        request: requested_size,
+                        factor: 4,
+                    },
+                );
+            }
 
-    let size_delta: i64 = requested_size.checked_add(overhead).ok_or(
-        AllocationQueryError::RequestedRegionOverheadOverflow {
-            request: requested_size,
-            overhead,
-        },
-    )?;
+            let overhead: i64 = requested_size.checked_div(4).ok_or(
+                AllocationQueryError::RequestedRegionNotDivisibleByFactor {
+                    request: requested_size,
+                    factor: 4,
+                },
+            )?;
+
+            requested_size.checked_add(overhead).ok_or(
+                AllocationQueryError::RequestedRegionOverheadOverflow {
+                    request: requested_size,
+                    overhead,
+                },
+            )?
+        }
+    };
 
     let redundancy: i64 = i64::try_from(redundancy).unwrap();
-
-    let reservation_percent =
-        crate::db::model::RegionReservationPercent::TwentyFive;
 
     let mut builder = QueryBuilder::new();
 
@@ -396,7 +400,7 @@ pub fn allocation_query(
     .bind::<sql_types::BigInt, _>(params.blocks_per_extent as i64)
     .bind::<sql_types::BigInt, _>(params.extent_count as i64)
     .bind::<sql_types::Bool, _>(params.read_only)
-    .bind::<nexus_db_schema::enums::RegionReservationPercentEnum, _>(reservation_percent)
+    .bind::<RegionReservationPercentEnum, _>(reservation_percent)
     .bind::<sql_types::BigInt, _>(redundancy)
 
     // A subquery which summarizes the changes we intend to make, showing:
