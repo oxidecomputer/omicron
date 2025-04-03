@@ -53,6 +53,7 @@ define_enums! {
     ReadOnlyTargetReplacementTypeEnum => "read_only_target_replacement_type",
     RegionReplacementStateEnum => "region_replacement_state",
     RegionReplacementStepTypeEnum => "region_replacement_step_type",
+    RegionReservationPercentEnum => "region_reservation_percent",
     RegionSnapshotReplacementStateEnum => "region_snapshot_replacement_state",
     RegionSnapshotReplacementStepStateEnum => "region_snapshot_replacement_step_state",
     RotImageErrorEnum => "rot_image_error",
