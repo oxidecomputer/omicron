@@ -935,14 +935,55 @@ impl GatewayApi for GatewayImpl {
 
     async fn sp_ereports_ingest(
         rqctx: RequestContext<Self::Context>,
-        _path: Path<PathSp>,
-        _query: Query<ereport_types::EreportQuery>,
+        path: Path<PathSp>,
+        query: Query<ereport_types::EreportQuery>,
     ) -> Result<HttpResponseOk<ereport_types::Ereports>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
-            Err(HttpError::for_internal_error(
-                "endpoint not yet implemented".to_string(),
-            ))
+            use gateway_sp_comms::ereport;
+            use omicron_uuid_kinds::GenericUuid;
+
+            let ereport_types::EreportQuery {
+                restart_id,
+                start_at,
+                committed,
+                // TODO(eliza)
+                limit,
+            } = query.into_inner();
+            let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
+            let req_restart_id =
+                ereport::RestartId(restart_id.as_untyped_uuid().as_u128());
+            let start_ena = start_at
+                .map(|ereport_types::Ena(e)| ereport::Ena(e))
+                .unwrap_or(ereport::Ena(0));
+
+            let committed_ena =
+                committed.map(|ereport_types::Ena(e)| ereport::Ena(e));
+            let ereport::EreportTranche { restart_id, ereports } = sp
+                .ereports(req_restart_id, start_ena, committed_ena)
+                .await
+                .map_err(|_| {
+                    HttpError::for_internal_error(
+                        "TODO(eliza) HAVE A GOOD ERROR FOR THIS".to_string(),
+                    )
+                })?;
+            let restart_id =
+                ereport_types::EreporterRestartUuid::from_u128(restart_id.0);
+            let ereports = ereports
+                .into_iter()
+                .map(|ereport::Ereport { ena: ereport::Ena(ena), data }| {
+                    ereport_types::Ereport {
+                        ena: ereport_types::Ena(ena),
+                        data,
+                    }
+                })
+                .collect();
+            let reports = dropshot::ResultsPage::new(
+                ereports,
+                &dropshot::EmptyScanParams {},
+                |ereport_types::Ereport { ena, .. }, _| *ena,
+            )?;
+            Ok(HttpResponseOk(ereport_types::Ereports { restart_id, reports }))
         };
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await
     }

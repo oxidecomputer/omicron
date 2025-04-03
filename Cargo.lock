@@ -6991,6 +6991,7 @@ dependencies = [
  "ipcc",
  "omicron-common",
  "omicron-test-utils",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oximeter",
  "oximeter-instruments",
