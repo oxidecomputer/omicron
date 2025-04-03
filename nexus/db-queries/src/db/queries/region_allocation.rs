@@ -85,15 +85,6 @@ pub struct RegionParameters {
 type AllocationQuery =
     TypedSqlQuery<(SelectableSql<CrucibleDataset>, SelectableSql<Region>)>;
 
-impl std::fmt::Debug for AllocationQuery {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> Result<(), std::fmt::Error> {
-        f.write_str("AllocationQuery")
-    }
-}
-
 /// Currently the largest region that can be allocated matches the largest disk
 /// that can be requested, but separate this constant so that when
 /// MAX_DISK_SIZE_BYTES is increased the region allocation query will still use
