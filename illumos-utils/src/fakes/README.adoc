@@ -22,7 +22,7 @@ can implement arbitrary host OS behavior.
 
 == Why not use mocks?
 
-By using this fake implementations, which are hopefully relatively narrow in
+By using these fake implementations, which are hopefully relatively narrow in
 scope, we can avoid creating "mocks". Mocks have historically created a number
 of problems in the Omicron codebase:
 
