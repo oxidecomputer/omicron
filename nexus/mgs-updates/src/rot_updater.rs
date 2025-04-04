@@ -195,5 +195,8 @@ impl SpComponentUpdater for RotUpdater {
 }
 
 // XXX-dap replace with real impl
+// XXX-dap we'll also need something here that cracks open the artifact we've
+// been pointed to and extracts just the thing that we care about.  (The RoT
+// artifact is a composite artifact.)
 pub struct ReconfiguratorRotUpdater;
 impl ReconfiguratorSpComponentUpdater for ReconfiguratorRotUpdater {}
