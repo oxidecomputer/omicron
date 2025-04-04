@@ -312,7 +312,6 @@ impl DataStore {
         Ok(SledUuid::from_untyped_uuid(id))
     }
 
-    #[cfg(any(test, feature = "testing", feature = "omdb"))]
     pub async fn zpool_set_control_plane_storage_buffer(
         &self,
         opctx: &OpContext,

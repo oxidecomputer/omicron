@@ -246,7 +246,6 @@ impl DataStore {
         Ok(physical_disk.disk_policy == PhysicalDiskPolicy::InService)
     }
 
-    #[cfg(any(test, feature = "testing", feature = "omdb"))]
     pub async fn mark_crucible_dataset_not_provisionable(
         &self,
         opctx: &OpContext,
@@ -265,7 +264,6 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    #[cfg(any(test, feature = "testing", feature = "omdb"))]
     pub async fn mark_crucible_dataset_provisionable(
         &self,
         opctx: &OpContext,
