@@ -940,6 +940,7 @@ impl GatewayApi for GatewayImpl {
     ) -> Result<HttpResponseOk<ereport_types::Ereports>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
+            use crate::EreportError;
             use gateway_sp_comms::ereport;
             use omicron_uuid_kinds::GenericUuid;
 
@@ -950,7 +951,9 @@ impl GatewayApi for GatewayImpl {
                 // TODO(eliza)
                 limit,
             } = query.into_inner();
-            let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
+
+            let sp_id = path.into_inner().sp.into();
+            let sp = apictx.mgmt_switch.sp(sp_id)?;
             let req_restart_id =
                 ereport::RestartId(restart_id.as_untyped_uuid().as_u128());
             let start_ena = start_at
@@ -962,10 +965,11 @@ impl GatewayApi for GatewayImpl {
             let ereport::EreportTranche { restart_id, ereports } = sp
                 .ereports(req_restart_id, start_ena, committed_ena)
                 .await
-                .map_err(|_| {
-                    HttpError::for_internal_error(
-                        "TODO(eliza) HAVE A GOOD ERROR FOR THIS".to_string(),
-                    )
+                .map_err(|error| match error {
+                    gateway_sp_comms::error::EreportError::Communication(
+                        err,
+                    ) => EreportError::SpCommunicationFailed { sp: sp_id, err },
+                    err => EreportError::Ereport { sp: sp_id, err },
                 })?;
             let restart_id =
                 ereport_types::EreporterRestartUuid::from_u128(restart_id.0);
