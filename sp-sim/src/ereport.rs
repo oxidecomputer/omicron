@@ -80,6 +80,7 @@ impl EreportState {
         }
 
         if req.flags.contains(EreportRequestFlags::COMMIT) {
+            slog::debug!(self.log, "commit flag is there");
             let committed = req.committed_ena;
             let mut discarded = 0;
             while current_restart
@@ -112,6 +113,8 @@ impl EreportState {
             .expect("serialization shouldn't fail");
             pos += gateway_messages::serialize(&mut buf[pos..], ena)
                 .expect("serialing ena shouldn't fail");
+            buf[pos] = 0x9f; // start list
+            pos += 1;
             let bytes = serde_cbor::to_vec(ereport).unwrap();
             buf[pos..pos + bytes.len()].copy_from_slice(&bytes[..]);
             pos += bytes.len();
@@ -119,15 +122,15 @@ impl EreportState {
                 self.log,
                 "wrote initial ereport: {ereport:#?}";
                 "ena" => ?ena,
-                "pos" => pos,
-                "bytes" => bytes.len(),
+                "packet_bytes" => pos,
+                "ereport_bytes" => bytes.len(),
             );
 
             // try to fill the rest of the packet
             for (_, ereport) in respondant_ereports {
                 let bytes = serde_cbor::to_vec(ereport).unwrap();
                 // packet full!
-                if buf[pos..].len() < bytes.len() {
+                if buf[pos..].len() < (bytes.len() + 1) {
                     break;
                 }
 
@@ -136,10 +139,13 @@ impl EreportState {
                 slog::debug!(
                     self.log,
                     "wrote subsequent ereport: {ereport:#?}";
-                    "pos" => pos,
-                    "bytes" => bytes.len(),
+                    "packet_bytes" => pos,
+                    "ereport_bytes" => bytes.len(),
                 );
             }
+
+            buf[pos] = 0xff; // break list;
+            pos += 1;
             pos
         } else {
             gateway_messages::serialize(
