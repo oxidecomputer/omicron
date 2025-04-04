@@ -18,17 +18,28 @@ use sled_storage::disk::RawDisk;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
-use std::collections::btree_map::Entry;
 use std::future::Future;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
-pub struct ExternalDisks {
-    disks: BTreeMap<PhysicalDiskUuid, Disk>,
+struct ExternalDisk {
+    config: OmicronPhysicalDiskConfig,
+    state: Arc<DiskState>,
+}
+
+#[derive(Debug)]
+enum DiskState {
+    Managed(Disk),
+    FailedToStartManaging(DiskManagementError),
+}
+
+#[derive(Debug, Clone)]
+pub struct ExternalDiskMap {
+    disks: BTreeMap<PhysicalDiskUuid, ExternalDisk>,
     mount_config: Arc<MountConfig>,
 }
 
-impl ExternalDisks {
+impl ExternalDiskMap {
     pub fn new(mount_config: Arc<MountConfig>) -> Self {
         Self { disks: BTreeMap::new(), mount_config }
     }
@@ -40,123 +51,170 @@ impl ExternalDisks {
     // TODO-cleanup Remove this? Wrong level of abstraction: should be working
     // in terms of datasets, not pools
     pub(super) fn all_u2_pools(&self) -> Vec<ZpoolName> {
-        self.disks.values().map(|disk| disk.zpool_name().clone()).collect()
+        self.disks
+            .values()
+            .filter_map(|disk| match &*disk.state {
+                DiskState::Managed(disk) => Some(disk.zpool_name().clone()),
+                DiskState::FailedToStartManaging(_) => None,
+            })
+            .collect()
     }
 
     /// Retain all disks that we are supposed to manage (based on `config`) that
     /// are also physically present (based on `raw_disks`), removing any disks
     /// we'd previously started to manage that are no longer present in either
     /// set.
-    pub(super) fn retain_present_and_managed(
+    pub(super) fn stop_managing_if_needed(
         &mut self,
         raw_disks: &IdMap<RawDisk>,
         config: &IdMap<OmicronPhysicalDiskConfig>,
+        log: &Logger,
     ) {
-        self.disks.retain(|disk_id, disk| {
-            raw_disks.contains_key(disk.identity())
-                && config.contains_key(disk_id)
-        });
+        let mut disk_ids_to_remove = Vec::new();
+        let mut disk_ids_to_mark_not_found = Vec::new();
+
+        for (disk_id, disk) in &self.disks {
+            if !config.contains_key(disk_id) {
+                info!(
+                    log,
+                    "removing managed disk: no longer present in config";
+                    "disk_id" => %disk_id,
+                    "disk" => ?disk.config.identity,
+                );
+                disk_ids_to_remove.push(*disk_id);
+            } else if !raw_disks.contains_key(&disk.config.identity) {
+                // Disk is still present in config, but no longer available:
+                // make sure we've set the state appropriately.
+                if !matches!(
+                    &*disk.state,
+                    DiskState::FailedToStartManaging(
+                        DiskManagementError::NotFound
+                    )
+                ) {
+                    warn!(
+                        log,
+                        "removing managed disk: still present in config, \
+                         but no longer available from OS";
+                        "disk_id" => %disk_id,
+                        "disk" => ?disk.config.identity,
+                    );
+                    disk_ids_to_mark_not_found.push(*disk_id);
+                }
+            }
+        }
+
+        for disk_id in disk_ids_to_remove {
+            self.disks.remove(&disk_id);
+        }
+        for disk_id in disk_ids_to_mark_not_found {
+            let entry =
+                self.disks.get_mut(&disk_id).expect("IDs came from self.disks");
+            entry.state = Arc::new(DiskState::FailedToStartManaging(
+                DiskManagementError::NotFound,
+            ));
+        }
     }
 
     /// Attempt to start managing any disks specified by `config` that we aren't
     /// already managing.
-    pub(super) async fn ensure_managing(
+    pub(super) async fn start_managing_if_needed(
         &mut self,
         raw_disks: &IdMap<RawDisk>,
         config: &IdMap<OmicronPhysicalDiskConfig>,
         key_requester: &StorageKeyRequester,
         log: &Logger,
-    ) -> Result<(), BTreeMap<PhysicalDiskUuid, DiskManagementError>> {
+    ) {
         let mut disk_adopter = RealDiskAdopter { key_requester };
-        self.ensure_managing_impl(raw_disks, config, &mut disk_adopter, log)
-            .await
+        self.start_managing_if_needed_impl(
+            raw_disks,
+            config,
+            &mut disk_adopter,
+            log,
+        )
+        .await
     }
 
-    async fn ensure_managing_impl<T: DiskAdopter>(
+    async fn start_managing_if_needed_impl<T: DiskAdopter>(
         &mut self,
         raw_disks: &IdMap<RawDisk>,
         config: &IdMap<OmicronPhysicalDiskConfig>,
         disk_adopter: &mut T,
         log: &Logger,
-    ) -> Result<(), BTreeMap<PhysicalDiskUuid, DiskManagementError>> {
-        let mut errors = BTreeMap::new();
-
+    ) {
         for config_disk in config {
-            let identity = &config_disk.identity;
+            if let Some(result) = self
+                .start_managing_single_disk_if_needed(
+                    raw_disks,
+                    config_disk,
+                    disk_adopter,
+                    log,
+                )
+                .await
+            {
+                let state = match result {
+                    Ok(disk) => DiskState::Managed(disk),
+                    Err(err) => DiskState::FailedToStartManaging(err),
+                };
+                self.disks.insert(
+                    config_disk.id,
+                    ExternalDisk {
+                        config: config_disk.clone(),
+                        state: Arc::new(state),
+                    },
+                );
+            }
+        }
+    }
 
-            let Some(raw_disk) = raw_disks.get(identity) else {
+    async fn start_managing_single_disk_if_needed<T: DiskAdopter>(
+        &self,
+        raw_disks: &IdMap<RawDisk>,
+        config_disk: &OmicronPhysicalDiskConfig,
+        disk_adopter: &mut T,
+        log: &Logger,
+    ) -> Option<Result<Disk, DiskManagementError>> {
+        let identity = &config_disk.identity;
+
+        let Some(raw_disk) = raw_disks.get(identity) else {
+            warn!(
+                log,
+                "Control plane disk requested, but not detected within sled";
+                "disk_identity" => ?identity
+            );
+            return Some(Err(DiskManagementError::NotFound));
+        };
+
+        // Refuse to manage internal disks.
+        match raw_disk.variant() {
+            DiskVariant::U2 => (),
+            DiskVariant::M2 => {
                 warn!(
                     log,
-                    "Control plane disk requested, but not detected within sled";
-                    "disk_identity" => ?identity
+                    "Control plane requested management of internal disk";
+                    "disk_identity" => ?identity,
+                    "config_request" => ?config_disk,
                 );
-                errors.insert(config_disk.id, DiskManagementError::NotFound);
-                continue;
-            };
-
-            // Refuse to manage internal disks.
-            match raw_disk.variant() {
-                DiskVariant::U2 => (),
-                DiskVariant::M2 => {
-                    warn!(
-                        log,
-                        "Control plane requested management of internal disk";
-                        "disk_identity" => ?identity,
-                        "config_request" => ?config_disk,
-                    );
-                    errors.insert(
+                return Some(Err(
+                    DiskManagementError::InternalDiskControlPlaneRequest(
                         config_disk.id,
-                        DiskManagementError::InternalDiskControlPlaneRequest(
-                            config_disk.id,
-                        ),
-                    );
-                    continue;
-                }
+                    ),
+                ));
             }
+        }
 
-            match self.disks.entry(config_disk.id) {
-                Entry::Vacant(entry) => {
-                    info!(
-                        log, "Starting management of disk";
-                        "disk_identity" => ?identity,
-                    );
-                    let disk = match disk_adopter
-                        .adopt_disk(
-                            raw_disk.clone(),
-                            &self.mount_config,
-                            config_disk.pool_id,
-                            log,
-                        )
-                        .await
-                    {
-                        Ok(disk) => disk,
-                        Err(err) => {
-                            warn!(
-                                log, "Disk adoption failed";
-                                "disk_identity" => ?identity,
-                                InlineErrorChain::new(&err),
-                            );
-                            errors.insert(config_disk.id, err);
-                            continue;
-                        }
-                    };
-
-                    info!(
-                        log, "Successfully started management of disk";
-                        "disk_identity" => ?identity,
-                    );
-                    entry.insert(disk);
-                }
-                // Disk is already managed. Check that the configuration
-                // matches what we expect.
-                Entry::Occupied(entry) => {
+        match self.disks.get(&config_disk.id) {
+            Some(disk) => match &*disk.state {
+                // Disk is already managed; nothing to do but confirm we're not
+                // in some weird misconfigured state.
+                DiskState::Managed(disk) => {
                     let expected = config_disk.pool_id;
-                    let observed = entry.get().zpool_name().id();
-                    if expected == observed {
+                    let observed = disk.zpool_name().id();
+                    let maybe_new_state = if expected == observed {
                         info!(
                             log, "Disk already managed successfully";
                             "disk_identity" => ?identity,
                         );
+                        None
                     } else {
                         warn!(
                             log,
@@ -165,20 +223,56 @@ impl ExternalDisks {
                             "observed" => ?observed,
                             "disk_identity" => ?identity,
                         );
-                        errors.insert(
-                            config_disk.id,
-                            DiskManagementError::ZpoolUuidMismatch {
-                                expected,
-                                observed,
-                            },
-                        );
-                        continue;
-                    }
+                        Some(Err(DiskManagementError::ZpoolUuidMismatch {
+                            expected,
+                            observed,
+                        }))
+                    };
+                    return maybe_new_state;
                 }
+                DiskState::FailedToStartManaging(prev_err) => {
+                    info!(
+                        log, "Retrying management of disk";
+                        "disk_identity" => ?identity,
+                        "prev_err" => InlineErrorChain::new(&prev_err),
+                    );
+                    // fall through to disk adoption below
+                }
+            },
+            None => {
+                info!(
+                    log, "Starting management of disk";
+                    "disk_identity" => ?identity,
+                );
+                // fall through to disk adoption below
             }
         }
 
-        if errors.is_empty() { Ok(()) } else { Err(errors) }
+        match disk_adopter
+            .adopt_disk(
+                raw_disk.clone(),
+                &self.mount_config,
+                config_disk.pool_id,
+                log,
+            )
+            .await
+        {
+            Ok(disk) => {
+                info!(
+                    log, "Successfully started management of disk";
+                    "disk_identity" => ?identity,
+                );
+                Some(Ok(disk))
+            }
+            Err(err) => {
+                warn!(
+                    log, "Disk adoption failed";
+                    "disk_identity" => ?identity,
+                    InlineErrorChain::new(&err),
+                );
+                Some(Err(err))
+            }
+        }
     }
 }
 
@@ -302,10 +396,10 @@ mod tests {
         let logctx = dev::test_setup_log("test_only_adopts_m2_disks");
 
         let mut external_disks =
-            ExternalDisks::new(Arc::new(any_mount_config()));
+            ExternalDiskMap::new(Arc::new(any_mount_config()));
 
         // There should be no disks to start.
-        assert_eq!(external_disks.disks, BTreeMap::new());
+        assert!(external_disks.disks.is_empty());
 
         // Add four disks: two M.2 and two U.2.
         let raw_disks = [
@@ -331,18 +425,14 @@ mod tests {
         // This should partially succeed: we should adopt the two U.2s and
         // report errors on the two M.2s.
         let mut disk_adopter = TestDiskAdopter::default();
-        let errors = match external_disks
-            .ensure_managing_impl(
+        external_disks
+            .start_managing_if_needed_impl(
                 &raw_disks,
                 &config_disks,
                 &mut disk_adopter,
                 &logctx.log,
             )
-            .await
-        {
-            Ok(()) => panic!("unexpected success"),
-            Err(errors) => errors,
-        };
+            .await;
 
         // Only two disk adoptions should have been attempted.
         assert_eq!(disk_adopter.requests.len(), 2);
@@ -358,22 +448,24 @@ mod tests {
         // Ensure each disk is in the state we expect: either adopted or
         // reported as an error.
         for disk in config_disks {
+            let disk_state = &*external_disks
+                .disks
+                .get(&disk.id)
+                .expect("all config disks have entries")
+                .state;
             match raw_disks.get(&disk.identity).unwrap().variant() {
-                DiskVariant::U2 => {
-                    assert!(!errors.contains_key(&disk.id));
-                    assert!(external_disks.disks.contains_key(&disk.id));
-                }
-                DiskVariant::M2 => {
-                    assert!(!external_disks.disks.contains_key(&disk.id));
-                    let err =
-                        errors.get(&disk.id).expect("errors contains disk");
-                    assert_eq!(
-                        *err,
+                DiskVariant::U2 => match disk_state {
+                    DiskState::Managed(_) => (),
+                    _ => panic!("unexpected state: {disk_state:?}"),
+                },
+                DiskVariant::M2 => match disk_state {
+                    DiskState::FailedToStartManaging(
                         DiskManagementError::InternalDiskControlPlaneRequest(
-                            disk.id
-                        )
-                    );
-                }
+                            id,
+                        ),
+                    ) if *id == disk.id => (),
+                    _ => panic!("unexpected state: {disk_state:?}"),
+                },
             }
         }
 

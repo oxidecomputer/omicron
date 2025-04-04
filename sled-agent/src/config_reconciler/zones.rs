@@ -389,7 +389,7 @@ enum PartiallyShutDownState {
     FailedToDeleteGzAddress,
 }
 
-// A running zone and the configuration which started it.
+// A potentially-running zone and the configuration which started it.
 #[derive(Debug, Clone)]
 struct OmicronZone {
     config: OmicronZoneConfig,

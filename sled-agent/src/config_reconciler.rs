@@ -38,7 +38,7 @@ use crate::services::ServiceManager;
 use crate::services::TimeSyncConfig;
 use crate::zone_bundle::ZoneBundler;
 
-use self::external_disks::ExternalDisks;
+use self::external_disks::ExternalDiskMap;
 use self::internal_disks::InternalDisksTask;
 use self::ledger::LedgerTask;
 use self::ledger::LedgerTaskHandle;
@@ -236,7 +236,7 @@ pub(crate) enum ReconcilerTaskStatus {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ReconcilerTaskState {
-    external_disks: ExternalDisks,
+    external_disks: ExternalDiskMap,
     zones: ZoneMap,
     timesync_status: TimeSyncStatus,
     status: ReconcilerTaskStatus,
@@ -245,7 +245,7 @@ pub(crate) struct ReconcilerTaskState {
 impl ReconcilerTaskState {
     fn new(mount_config: Arc<MountConfig>) -> Self {
         Self {
-            external_disks: ExternalDisks::new(mount_config),
+            external_disks: ExternalDiskMap::new(mount_config),
             zones: ZoneMap::default(),
             timesync_status: TimeSyncStatus::NotYetChecked,
             status: ReconcilerTaskStatus::WaitingForInternalDisks,
@@ -430,9 +430,11 @@ impl ReconcilerTask {
         // https://github.com/oxidecomputer/omicron/issues/6177
 
         // Now remove any disks we're no longer supposed to use.
-        state
-            .external_disks
-            .retain_present_and_managed(raw_disks, &sled_config.disks);
+        state.external_disks.stop_managing_if_needed(
+            raw_disks,
+            &sled_config.disks,
+            &self.log,
+        );
 
         // ---
         // Now go through the add process: start managing disks, create
@@ -441,7 +443,7 @@ impl ReconcilerTask {
 
         state
             .external_disks
-            .ensure_managing(
+            .start_managing_if_needed(
                 raw_disks,
                 &sled_config.disks,
                 &self.key_requester,
