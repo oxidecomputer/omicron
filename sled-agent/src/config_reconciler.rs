@@ -59,6 +59,7 @@ pub struct ConfigReconcilerHandle {
 struct ReconcilerTaskDependenciesHeldUntilSledAgentStarted {
     reconciler_state_tx: watch::Sender<Arc<ReconcilerTaskState>>,
     current_config_rx: watch::Receiver<CurrentConfig>,
+    raw_disks_rx: watch::Receiver<IdMap<RawDisk>>,
     key_requester: StorageKeyRequester,
     time_sync_config: TimeSyncConfig,
     log: Logger,
@@ -74,7 +75,7 @@ impl ConfigReconcilerHandle {
         let (raw_disks, raw_disks_rx) = watch::channel(IdMap::new());
         let internal_disks_rx = InternalDisksTask::spawn(
             Arc::clone(&mount_config),
-            raw_disks_rx,
+            raw_disks_rx.clone(),
             base_log.new(slog::o!("component" => "InternalDisksTask")),
         );
 
@@ -90,6 +91,7 @@ impl ConfigReconcilerHandle {
             ReconcilerTaskDependenciesHeldUntilSledAgentStarted {
                 reconciler_state_tx,
                 current_config_rx,
+                raw_disks_rx,
                 key_requester,
                 time_sync_config,
                 log: base_log.new(slog::o!("component" => "ReconcilerTask")),
@@ -135,6 +137,7 @@ impl ConfigReconcilerHandle {
         let ReconcilerTaskDependenciesHeldUntilSledAgentStarted {
             reconciler_state_tx,
             current_config_rx,
+            raw_disks_rx,
             key_requester,
             time_sync_config,
             log,
@@ -143,6 +146,7 @@ impl ConfigReconcilerHandle {
         let reconciler_task = ReconcilerTask {
             state: reconciler_state_tx,
             current_config_rx,
+            raw_disks_rx,
             time_sync_config,
             service_manager,
             key_requester,
@@ -252,6 +256,7 @@ impl ReconcilerTaskState {
 struct ReconcilerTask {
     state: watch::Sender<Arc<ReconcilerTaskState>>,
     current_config_rx: watch::Receiver<CurrentConfig>,
+    raw_disks_rx: watch::Receiver<IdMap<RawDisk>>,
     time_sync_config: TimeSyncConfig,
     service_manager: ServiceManager,
     key_requester: StorageKeyRequester,
@@ -267,6 +272,11 @@ impl ReconcilerTask {
         loop {
             self.do_reconcilation().await;
 
+            // Wait for one of:
+            //
+            // 1. The current ledgered `OmicronSledConfig` has changed
+            // 2. The set of `RawDisk`s has changed
+            // 3. (TODO) retries
             tokio::select! {
                 // Cancel-safe per docs on `changed()`
                 result = self.current_config_rx.changed() => {
@@ -283,12 +293,29 @@ impl ReconcilerTask {
                         }
                     }
                 }
+
+                // Cancel-safe per docs on `changed()`
+                result = self.raw_disks_rx.changed() => {
+                    match result {
+                        Ok(()) => continue,
+                        Err(_closed) => {
+                            // This should never happen in production, but may
+                            // in tests.
+                            warn!(
+                                self.log,
+                                "raw_disks watch channel closed; exiting"
+                            );
+                            return;
+                        }
+                    }
+                }
             }
         }
     }
 
     async fn do_reconcilation(&mut self) {
         let current_config = self.current_config_rx.borrow_and_update().clone();
+        let current_raw_disks = self.raw_disks_rx.borrow_and_update().clone();
 
         let sled_config = match current_config {
             CurrentConfig::WaitingForInternalDisks => {
@@ -299,6 +326,18 @@ impl ReconcilerTask {
                     ) {
                         false
                     } else {
+                        // TODO-performance This clones the entire `state` if
+                        // another caller is holding a clone of the Arc. Most of
+                        // our modifications are only to the `status` field, so
+                        // we could break the Arc up into finer-grained pieces
+                        // if the cost of this potential clone is high. (Ir
+                        // probably isn't: it's a handful of maps containing
+                        // metadata about the disks + datasets + zones we're
+                        // managing.)
+                        //
+                        // The same note applies to a couple other places in
+                        // this function where we call `make_mut` exclusively to
+                        // change `state.status`.
                         let state = Arc::make_mut(state);
                         state.status =
                             ReconcilerTaskStatus::WaitingForInternalDisks;
@@ -331,36 +370,40 @@ impl ReconcilerTask {
         let started = Instant::now();
         let mut current_state = None;
         self.state.send_modify(|state| {
-            let mut state = Arc::clone(state);
-            Arc::make_mut(&mut state).status =
-                ReconcilerTaskStatus::PerformingReconciliation {
-                    config: sled_config.clone(),
-                    started,
-                };
-            current_state = Some(state);
+            let state = Arc::make_mut(state);
+            state.status = ReconcilerTaskStatus::PerformingReconciliation {
+                config: sled_config.clone(),
+                started,
+            };
+            current_state = Some(state.clone());
         });
         let mut current_state =
             current_state.expect("always populated by send_modify");
 
         // Perform the actual reconcilation.
-        let mutable_state = Arc::make_mut(&mut current_state);
-        self.reconcile_against_config(mutable_state, &sled_config).await;
+        self.reconcile_against_config(
+            &mut current_state,
+            &current_raw_disks,
+            &sled_config,
+        )
+        .await;
 
         // Notify any receivers of our post-reconciliation state. We always
         // update the `status`, and may or may not have updated other fields.
-        mutable_state.status = ReconcilerTaskStatus::Idle {
+        current_state.status = ReconcilerTaskStatus::Idle {
             last_reconciled_config: sled_config,
             completed: Instant::now(),
             elapsed: started.elapsed(),
         };
         self.state.send_modify(|state| {
-            *state = current_state;
+            *state = Arc::new(current_state);
         });
     }
 
     async fn reconcile_against_config(
         &self,
         state: &mut ReconcilerTaskState,
+        raw_disks: &IdMap<RawDisk>,
         sled_config: &OmicronSledConfig,
     ) {
         // ---
@@ -387,14 +430,24 @@ impl ReconcilerTask {
         // https://github.com/oxidecomputer/omicron/issues/6177
 
         // Now remove any disks we're no longer supposed to use.
-        //state.external_disks.retain_present_and_managed(raw_disks, config);
+        state
+            .external_disks
+            .retain_present_and_managed(raw_disks, &sled_config.disks);
 
         // ---
         // Now go through the add process: start managing disks, create
         // datasets, start zones.
         // ---
 
-        //state.external_disks.ensure_managing(raw_disks, config, key_requester, log)
+        state
+            .external_disks
+            .ensure_managing(
+                raw_disks,
+                &sled_config.disks,
+                &self.key_requester,
+                &self.log,
+            )
+            .await;
 
         // TODO datasets
 

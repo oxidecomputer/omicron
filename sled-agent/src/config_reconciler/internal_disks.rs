@@ -277,7 +277,7 @@ impl InternalDisksTask {
         // any disks to remove or insert, and its liveness would guarantee the
         // `Arc::make_mut()` below would have to clone the full disks map. We
         // might still have to clone it if outside callers have a live clone,
-        // but we can save the clone any time that isn't true.
+        // but we can save the deep clone any time that isn't true.
         mem::drop(disks_snapshot);
 
         if !disks_to_remove.is_empty() || !disks_to_insert.is_empty() {
