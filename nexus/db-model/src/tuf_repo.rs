@@ -8,17 +8,16 @@ use crate::{Generation, SemverVersion, typed_uuid::DbTypedUuid};
 use chrono::{DateTime, Utc};
 use diesel::{deserialize::FromSql, serialize::ToSql, sql_types::Text};
 use nexus_db_schema::schema::{tuf_artifact, tuf_repo, tuf_repo_artifact};
-use omicron_common::{
-    api::external,
-    update::{ArtifactHash as ExternalArtifactHash, ArtifactId},
-};
+use omicron_common::{api::external, update::ArtifactId};
 use omicron_uuid_kinds::TufArtifactKind;
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
 use parse_display::Display;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use tufaceous_artifact::{ArtifactKind, ArtifactVersion};
+use tufaceous_artifact::{
+    ArtifactHash as ExternalArtifactHash, ArtifactKind, ArtifactVersion,
+};
 use uuid::Uuid;
 
 /// A description of a TUF update: a repo, along with the artifacts it
@@ -286,11 +285,13 @@ pub struct TufRepoArtifact {
     Copy,
     Clone,
     Debug,
+    Hash,
+    PartialEq,
+    Eq,
     AsExpression,
     FromSqlRow,
     Serialize,
     Deserialize,
-    PartialEq,
 )]
 #[diesel(sql_type = Text)]
 #[serde(transparent)]

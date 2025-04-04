@@ -16,8 +16,6 @@ use futures::Stream;
 use futures::TryStreamExt;
 use omicron_common::api::external::TufRepoDescription;
 use omicron_common::api::external::TufRepoMeta;
-use omicron_common::update::ArtifactHash;
-use omicron_common::update::ArtifactHashId;
 use omicron_common::update::ArtifactId;
 use sha2::{Digest, Sha256};
 use slog::Logger;
@@ -27,6 +25,8 @@ use std::collections::HashMap;
 use std::io;
 use tokio::io::AsyncWriteExt;
 use tough::TargetName;
+use tufaceous_artifact::ArtifactHash;
+use tufaceous_artifact::ArtifactHashId;
 use tufaceous_lib::ArchiveExtractor;
 use tufaceous_lib::OmicronRepo;
 

@@ -716,7 +716,7 @@ dependencies = [
  "bitflags 2.6.0",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "log",
@@ -739,7 +739,7 @@ dependencies = [
  "bitflags 2.6.0",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -1271,9 +1271,9 @@ dependencies = [
 
 [[package]]
 name = "chrono-tz"
-version = "0.10.1"
+version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c6ac4f2c0bf0f44e9161aec9675e1050aa4a530663c4a9e37e108fa948bca9f"
+checksum = "efdce149c370f133a071ca8ef6ea340b7b88748ab0810097a9e2976eaa34b4f3"
 dependencies = [
  "chrono",
  "chrono-tz-build",
@@ -1607,7 +1607,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -3503,6 +3503,7 @@ dependencies = [
  "termios",
  "tokio",
  "tokio-tungstenite 0.23.1",
+ "tufaceous-artifact",
  "uuid",
 ]
 
@@ -3601,6 +3602,7 @@ dependencies = [
  "omicron-workspace-hack",
  "schemars",
  "serde",
+ "tufaceous-artifact",
  "uuid",
 ]
 
@@ -4776,6 +4778,7 @@ dependencies = [
  "schemars",
  "serde",
  "slog",
+ "tufaceous-artifact",
  "uuid",
 ]
 
@@ -4917,6 +4920,7 @@ dependencies = [
  "serde",
  "test-strategy",
  "thiserror 1.0.69",
+ "tufaceous-artifact",
  "uuid",
 ]
 
@@ -5228,7 +5232,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -6359,6 +6363,7 @@ dependencies = [
  "sled-hardware-types",
  "strum",
  "thiserror 1.0.69",
+ "tufaceous-artifact",
  "uuid",
 ]
 
@@ -7009,6 +7014,7 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite 0.23.1",
  "toml 0.8.20",
+ "tufaceous-artifact",
  "uuid",
 ]
 
@@ -7643,6 +7649,7 @@ dependencies = [
  "getrandom 0.3.1",
  "group",
  "hashbrown 0.15.1",
+ "heck 0.4.1",
  "hex",
  "hickory-proto",
  "hmac",
@@ -7655,7 +7662,6 @@ dependencies = [
  "inout",
  "ipnetwork",
  "itertools 0.10.5",
- "itertools 0.12.1",
  "lalrpop-util",
  "lazy_static",
  "libc",
@@ -9935,10 +9941,10 @@ name = "repo-depot-api"
 version = "0.1.0"
 dependencies = [
  "dropshot 0.16.0",
- "omicron-common",
  "omicron-workspace-hack",
  "schemars",
  "serde",
+ "tufaceous-artifact",
 ]
 
 [[package]]
@@ -11068,6 +11074,7 @@ dependencies = [
  "sled-agent-types",
  "sled-diagnostics",
  "sled-hardware-types",
+ "tufaceous-artifact",
  "uuid",
 ]
 
@@ -11210,10 +11217,12 @@ dependencies = [
  "serde_json",
  "sled-hardware",
  "slog",
+ "slog-error-chain",
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
  "uuid",
+ "xshell",
 ]
 
 [[package]]
@@ -11415,7 +11424,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.98",
@@ -12646,7 +12655,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#0ae289102f0fe2605781afcb4c5395652a9c842b"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#73145c2795adabe2f97d4e000b0b0515ad6c7afe"
 dependencies = [
  "anyhow",
  "camino",
@@ -12667,10 +12676,10 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#0ae289102f0fe2605781afcb4c5395652a9c842b"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#73145c2795adabe2f97d4e000b0b0515ad6c7afe"
 dependencies = [
  "daft",
- "parse-display",
+ "hex",
  "proptest",
  "schemars",
  "semver 1.0.25",
@@ -12684,7 +12693,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#0ae289102f0fe2605781afcb4c5395652a9c842b"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#73145c2795adabe2f97d4e000b0b0515ad6c7afe"
 dependencies = [
  "semver 1.0.25",
  "serde",
@@ -12696,7 +12705,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#0ae289102f0fe2605781afcb4c5395652a9c842b"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#73145c2795adabe2f97d4e000b0b0515ad6c7afe"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12707,12 +12716,14 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
+ "daft",
  "debug-ignore",
  "flate2",
  "fs-err",
  "futures",
  "hex",
  "hubtools",
+ "indent_write",
  "itertools 0.13.0",
  "parse-size",
  "rand 0.8.5",
@@ -12723,6 +12734,7 @@ dependencies = [
  "sha2",
  "slog",
  "tar",
+ "thiserror 2.0.12",
  "tokio",
  "toml 0.8.20",
  "tough",
@@ -13561,6 +13573,7 @@ dependencies = [
  "tokio",
  "toml 0.8.20",
  "transceiver-controller",
+ "tufaceous-artifact",
  "update-engine",
 ]
 
@@ -13683,6 +13696,7 @@ dependencies = [
  "serde",
  "sled-hardware-types",
  "slog",
+ "tufaceous-artifact",
  "wicket-common",
 ]
 
@@ -13738,7 +13752,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -14039,6 +14053,21 @@ dependencies = [
  "linux-raw-sys 0.4.14",
  "rustix 0.38.37",
 ]
+
+[[package]]
+name = "xshell"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e7290c623014758632efe00737145b6867b66292c42167f2ec381eb566a373d"
+dependencies = [
+ "xshell-macros",
+]
+
+[[package]]
+name = "xshell-macros"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32ac00cd3f8ec9c1d33fb3e7958a82df6989c42d747bd326c822b1d625283547"
 
 [[package]]
 name = "xtask"
