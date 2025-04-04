@@ -23,6 +23,7 @@ use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::DATABASE_OPTIONS_HEADING;
 use crate::helpers::const_max_len;
 use anyhow::Context;
+use anyhow::anyhow;
 use anyhow::bail;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -140,6 +141,7 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::DownstairsRegionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::ParseError;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -154,6 +156,7 @@ use std::collections::HashSet;
 use std::fmt::Display;
 use std::future::Future;
 use std::num::NonZeroU32;
+use std::str::FromStr;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 use tabled::Tabled;
@@ -555,11 +558,56 @@ enum CollectionsCommands {
 
 #[derive(Debug, Args, Clone)]
 struct CollectionsShowArgs {
-    /// id of the collection
-    id: CollectionUuid,
+    /// id of the collection (or `latest`)
+    id_or_latest: CollectionIdOrLatest,
     /// show long strings in their entirety
     #[clap(long)]
     show_long_strings: bool,
+}
+
+#[derive(Debug, Clone, Copy, Args)]
+struct CollectionIdArgs {
+    /// id of collection (or `latest` for the latest one)
+    collection_id: CollectionIdOrLatest,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum CollectionIdOrLatest {
+    Latest,
+    CollectionId(CollectionUuid),
+}
+
+impl FromStr for CollectionIdOrLatest {
+    type Err = ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "latest" {
+            Ok(Self::Latest)
+        } else {
+            let id = s.parse()?;
+            Ok(Self::CollectionId(id))
+        }
+    }
+}
+
+impl CollectionIdOrLatest {
+    async fn to_collection(
+        &self,
+        opctx: &OpContext,
+        datastore: &DataStore,
+    ) -> anyhow::Result<Collection> {
+        match self {
+            CollectionIdOrLatest::Latest => datastore
+                .inventory_get_latest_collection(opctx)
+                .await
+                .context("fetching latest collection")?
+                .ok_or_else(|| anyhow!("no inventory collections found")),
+            CollectionIdOrLatest::CollectionId(id) => datastore
+                .inventory_collection_read(opctx, *id)
+                .await
+                .with_context(|| format!("fetching collection {id}")),
+        }
+    }
 }
 
 #[derive(Debug, Args, Clone, Copy)]
@@ -6078,7 +6126,7 @@ async fn cmd_db_inventory(
         InventoryCommands::Collections(CollectionsArgs {
             command:
                 CollectionsCommands::Show(CollectionsShowArgs {
-                    id,
+                    id_or_latest,
                     show_long_strings,
                 }),
         }) => {
@@ -6087,7 +6135,7 @@ async fn cmd_db_inventory(
             cmd_db_inventory_collections_show(
                 opctx,
                 datastore,
-                id,
+                id_or_latest,
                 long_string_formatter,
             )
             .await
@@ -6377,13 +6425,10 @@ async fn cmd_db_inventory_collections_list(
 async fn cmd_db_inventory_collections_show(
     opctx: &OpContext,
     datastore: &DataStore,
-    id: CollectionUuid,
+    id_or_latest: CollectionIdOrLatest,
     long_string_formatter: LongStringFormatter,
 ) -> Result<(), anyhow::Error> {
-    let collection = datastore
-        .inventory_collection_read(opctx, id)
-        .await
-        .context("reading collection")?;
+    let collection = id_or_latest.to_collection(opctx, datastore).await?;
 
     inv_collection_print(&collection).await?;
     let nerrors = inv_collection_print_errors(&collection).await?;
