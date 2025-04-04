@@ -638,10 +638,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "8452936a53c3b16e53cbbf4e34e5e59899afc965"
+source.commit = "4d684a84833a602248ab4c2872e20781d67bf73d"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "3974c5aab10946f909017bd70ba1e39848df7f36c79c22ac6650c5c97e69cb84"
+source.sha256 = "ab47e3086829fe11f96da90611ed143a6cbf378df405ac70d8653ba2919461d7"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -654,10 +654,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "8452936a53c3b16e53cbbf4e34e5e59899afc965"
+source.commit = "4d684a84833a602248ab4c2872e20781d67bf73d"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "ce3a5ede353e688b12171725d8b7253fabe83aa1a722700e03773ff7c1f56cd0"
+source.sha256 = "4a06d9a9ce5397474cb12c74a3991fb27604b1fe20e7720dcbb16d9dc598bcf5"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -669,7 +669,7 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "8452936a53c3b16e53cbbf4e34e5e59899afc965"
+source.commit = "4d684a84833a602248ab4c2872e20781d67bf73d"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
 source.sha256 = "2ecf7f9b5afa7880ac3a1a5612083cfe6da5f443379be35c692dd56de1dc8141"
