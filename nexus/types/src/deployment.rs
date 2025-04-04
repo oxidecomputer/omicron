@@ -46,6 +46,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use slog::Key;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
@@ -1023,6 +1024,30 @@ pub struct PendingMgsUpdate {
     /// which artifact to apply to this device
     /// (implies which component is being updated)
     pub artifact_hash_id: ArtifactHashId,
+}
+
+impl slog::KV for PendingMgsUpdate {
+    fn serialize(
+        &self,
+        record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        // XXX-dap nesting would be nice here
+        slog::KV::serialize(&self.baseboard_id, record, serializer)?;
+        serializer
+            .emit_str(Key::from("sp_type"), &format!("{:?}", self.sp_type))?;
+        serializer.emit_u32(Key::from("sp_slot"), self.slot_id)?;
+        serializer.emit_str(Key::from("component"), &self.component)?;
+        serializer.emit_u16(Key::from("firmware_slot"), self.firmware_slot)?;
+        serializer.emit_str(
+            Key::from("artifact_kind"),
+            &self.artifact_hash_id.kind.as_str(),
+        )?;
+        serializer.emit_str(
+            Key::from("artifact_hash"),
+            &self.artifact_hash_id.hash.to_string(),
+        )
+    }
 }
 
 /// The desired state of an Omicron-managed physical disk in a blueprint.

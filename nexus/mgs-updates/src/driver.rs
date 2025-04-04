@@ -4,31 +4,29 @@
 
 //! Drive one or more in-progress MGS-managed updates
 
-use crate::{
-    ArtifactCache, ArtifactCacheError, MgsClients,
-    common_sp_update::{
-        ReconfiguratorSpComponentUpdater, STATUS_POLL_INTERVAL, VersionStatus,
-    },
-    mgs_clients::GatewayClientError,
-    rot_updater::ReconfiguratorRotUpdater,
-    sp_updater::ReconfiguratorSpUpdater,
-};
-use futures::{
-    FutureExt, StreamExt, future::BoxFuture, stream::FuturesUnordered,
-};
-use gateway_client::{
-    SpComponent,
-    types::{SpType, SpUpdateStatus},
-};
-use nexus_types::{deployment::PendingMgsUpdate, inventory::BaseboardId};
-use qorb::resolver::{AllBackends, BoxedResolver};
+use crate::common_sp_update::ReconfiguratorSpComponentUpdater;
+use crate::common_sp_update::STATUS_POLL_INTERVAL;
+use crate::common_sp_update::VersionStatus;
+use crate::mgs_clients::GatewayClientError;
+use crate::rot_updater::ReconfiguratorRotUpdater;
+use crate::sp_updater::ReconfiguratorSpUpdater;
+use crate::{ArtifactCache, ArtifactCacheError, MgsClients};
+use futures::FutureExt;
+use futures::StreamExt;
+use futures::future::BoxFuture;
+use futures::stream::FuturesUnordered;
+use gateway_client::SpComponent;
+use gateway_client::types::{SpType, SpUpdateStatus};
+use nexus_types::deployment::PendingMgsUpdate;
+use nexus_types::inventory::BaseboardId;
+use qorb::resolver::AllBackends;
 use slog::{debug, error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 use std::sync::Arc;
-use std::{
-    collections::{BTreeMap, btree_map::Entry},
-    time::{Duration, Instant},
-};
+use std::time::Duration;
+use std::time::Instant;
 use thiserror::Error;
 use tokio::sync::watch;
 use tufaceous_artifact::KnownArtifactKind;
@@ -77,9 +75,9 @@ pub struct MgsUpdateDriver {
     // XXX-dap fill in status here
     in_progress: BTreeMap<BaseboardId, InProgressUpdate>,
     futures: FuturesUnordered<BoxFuture<'static, UpdateAttemptResult>>,
-    // XXX-dap who calls terminate on this?  when?
-    mgs_resolver: BoxedResolver,
     mgs_rx: watch::Receiver<AllBackends>,
+    status_tx: watch::Sender<DriverStatus>,
+    status_rx: watch::Receiver<DriverStatus>,
 }
 
 impl MgsUpdateDriver {
@@ -87,9 +85,12 @@ impl MgsUpdateDriver {
         log: slog::Logger,
         artifacts: Arc<ArtifactCache>,
         rx: watch::Receiver<BTreeMap<BaseboardId, PendingMgsUpdate>>,
-        mut mgs_resolver: BoxedResolver,
+        mgs_rx: watch::Receiver<AllBackends>,
     ) -> MgsUpdateDriver {
-        let mgs_rx = mgs_resolver.monitor();
+        let (status_tx, status_rx) = watch::channel(DriverStatus {
+            recent: Vec::new(),
+            in_progress: BTreeMap::new(),
+        });
 
         MgsUpdateDriver {
             log,
@@ -97,9 +98,14 @@ impl MgsUpdateDriver {
             requests: rx,
             in_progress: BTreeMap::new(),
             futures: FuturesUnordered::new(),
-            mgs_resolver,
             mgs_rx,
+            status_tx,
+            status_rx,
         }
+    }
+
+    pub fn status_rx(&self) -> watch::Receiver<DriverStatus> {
+        self.status_rx.clone()
     }
 
     pub async fn run(mut self) {
@@ -146,20 +152,50 @@ impl MgsUpdateDriver {
             .remove(&result.requested_update.baseboard_id)
             .expect("in-progress record for attempt that just completed");
 
-        // XXX-dap record ringbuffer of attempts
-        info!(
-            &in_progress.log,
-            "update attempt done";
-            "result" => ?result.result
-        );
+        let completed = CompletedAttempt {
+            time_started: in_progress.time_started,
+            time_done: chrono::Utc::now(),
+            elapsed: in_progress.instant_started.elapsed(),
+            request: result.requested_update.clone(),
+            result: match &result.result {
+                Ok(success) => Ok(success.clone()),
+                Err(error) => Err(InlineErrorChain::new(error).to_string()),
+            },
+        };
+
+        match &completed.result {
+            Ok(success) => {
+                info!(
+                    &in_progress.log,
+                    "update attempt done";
+                    "elapsed_millis" => completed.elapsed.as_millis(),
+                    "result" => ?success,
+                );
+            }
+            Err(error) => {
+                info!(
+                    &in_progress.log,
+                    "update attempt done";
+                    "elapsed_millis" => completed.elapsed.as_millis(),
+                    "error" => error,
+                )
+            }
+        };
+
+        let baseboard_id = completed.request.baseboard_id.clone();
+        self.status_tx.send_modify(|driver_status| {
+            // XXX-dap prune ringbuffer
+            driver_status.recent.push(completed);
+            let found = driver_status.in_progress.remove(&baseboard_id);
+            assert!(found.is_some());
+        });
 
         // Re-dispatch this update if either of these is true:
         //
         // - the request is unchanged and the attempt was not successful
         // - the request is changed and not `None`
         let requests = self.requests.borrow();
-        let maybe_new_plan =
-            requests.get(&result.requested_update.baseboard_id);
+        let maybe_new_plan = requests.get(&baseboard_id);
         match (maybe_new_plan, result.result) {
             (None, _) => {
                 info!(
@@ -184,10 +220,7 @@ impl MgsUpdateDriver {
                     new_plan,
                 );
                 drop(requests);
-                self.do_dispatch(
-                    result.requested_update.baseboard_id.clone(),
-                    work,
-                );
+                self.do_dispatch(baseboard_id.clone(), work);
             }
         };
     }
@@ -240,6 +273,16 @@ impl MgsUpdateDriver {
         )>,
     ) {
         if let Some((in_progress, future)) = what {
+            self.status_tx.send_modify(|driver_status| {
+                driver_status.in_progress.insert(
+                    baseboard_id.clone(),
+                    InProgressUpdateStatus {
+                        time_started: in_progress.time_started,
+                        instant_started: in_progress.instant_started,
+                    },
+                );
+            });
+
             self.in_progress.insert(baseboard_id.clone(), in_progress);
             self.futures.push(future);
         }
@@ -252,19 +295,22 @@ impl MgsUpdateDriver {
         update: &PendingMgsUpdate,
     ) -> Option<(InProgressUpdate, BoxFuture<'static, UpdateAttemptResult>)>
     {
-        let log = log.new(o!("update" => format!("{:?}", update)));
+        let update_id = Uuid::new_v4();
+        let log =
+            log.new(o!(update.clone(), "update_id" => update_id.to_string()));
+        info!(&log, "update requested for baseboard");
+
         let raw_kind = &update.artifact_hash_id.kind;
         let Some(known_kind) = raw_kind.to_known() else {
             error!(
                 &log,
-                "ignoring update requested for unknown artifact kind: {:?}",
-                update.artifact_hash_id.kind,
+                "ignoring update requested for unknown artifact kind";
+                "kind" => %update.artifact_hash_id.kind,
             );
             return None;
         };
 
         // XXX-dap check sp_type against artifact kind
-        let update_id = Uuid::new_v4();
         let (sp_update, updater): (
             SpComponentUpdate,
             Box<dyn ReconfiguratorSpComponentUpdater + Send + Sync>,
@@ -313,21 +359,22 @@ impl MgsUpdateDriver {
                 error!(
                     &log,
                     "ignoring update requested for unsupported artifact \
-                         kind: {:?}",
+                     kind: {:?}",
                     known_kind,
                 );
                 return None;
             }
         };
 
-        info!(
-            &log,
-            "update requested for baseboard";
-            "request" => ?update,
-        );
-
         let (status_tx, status_rx) = watch::channel(());
-        let in_progress = InProgressUpdate { log, status_tx, status_rx };
+        let in_progress = InProgressUpdate {
+            log,
+            update_id,
+            time_started: chrono::Utc::now(),
+            instant_started: Instant::now(),
+            status_tx,
+            status_rx,
+        };
         let update = update.clone();
         let future = async move {
             // XXX-dap clones
@@ -337,22 +384,54 @@ impl MgsUpdateDriver {
             UpdateAttemptResult { requested_update: update, result }
         }
         .boxed();
+
         Some((in_progress, future))
     }
 }
 
+/// internal bookkeeping for each in-progress update
 struct InProgressUpdate {
     log: slog::Logger,
-    status_tx: watch::Sender<InProgressUpdateStatus>,
-    status_rx: watch::Receiver<InProgressUpdateStatus>,
+    update_id: Uuid,
+    time_started: chrono::DateTime<chrono::Utc>,
+    instant_started: Instant,
+    status_tx: watch::Sender<InternalStatus>,
+    status_rx: watch::Receiver<InternalStatus>,
 }
 
 // XXX-dap
-type InProgressUpdateStatus = ();
+type InternalStatus = ();
 
+/// externally-exposed status for each in-progress update
+// XXX-dap to add: number of previous attempts
+#[derive(Debug)]
+pub struct InProgressUpdateStatus {
+    pub time_started: chrono::DateTime<chrono::Utc>,
+    pub instant_started: std::time::Instant,
+}
+
+/// externally-exposed status for a completed attempt
+// XXX-dap to add: number of previous or total attempts
+// XXX-dap to add: whether we did an update, saw one in progress, aborted one,
+// etc.
+#[derive(Debug)]
+pub struct CompletedAttempt {
+    pub time_started: chrono::DateTime<chrono::Utc>,
+    pub time_done: chrono::DateTime<chrono::Utc>,
+    pub elapsed: Duration,
+    pub request: PendingMgsUpdate,
+    pub result: Result<ApplyUpdateResult, String>,
+}
+
+/// internal result of a completed update attempt
 struct UpdateAttemptResult {
     requested_update: PendingMgsUpdate,
     result: Result<ApplyUpdateResult, ApplyUpdateError>,
+}
+
+pub struct DriverStatus {
+    pub recent: Vec<CompletedAttempt>,
+    pub in_progress: BTreeMap<BaseboardId, InProgressUpdateStatus>,
 }
 
 /// Parameters describing a request to update one SP-managed component
@@ -487,7 +566,7 @@ async fn wait_for_delivery(
 // version?  that way if it's changed, we won't proceed.  requires extra
 // blueprint work in planner to fix up if things do change.
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum ApplyUpdateResult {
     /// the update was completed successfully
     Completed,
@@ -592,6 +671,7 @@ pub async fn apply_update(
     // Obtain the contents of the artifact that we need.
     let data =
         artifacts.artifact_contents(&update.artifact_hash_id.hash).await?;
+    debug!(log, "loaded artifact contents");
 
     // XXX-dap need some component-specific way to determine:
     // - this is not yet updated but ready for update
@@ -613,6 +693,7 @@ pub async fn apply_update(
         }
         VersionStatus::ReadyForUpdate => (),
     };
+    debug!(log, "ready to start update");
 
     // Start the update.
     let log = &sp_update.log;
@@ -656,6 +737,7 @@ pub async fn apply_update(
         // - other non-transient errors probably mean bailing out
         Err(_) => todo!(),
     };
+    debug!(log, "started update");
 
     let our_update = match wait_for_delivery(&mut mgs_clients, sp_update)
         .await?
@@ -673,6 +755,7 @@ pub async fn apply_update(
 
         DeliveryWaitStatus::Completed(id) => id == my_update_id,
     };
+    debug!(log, "delivered artifact");
 
     // If we were the one doing the update, then we're responsible for
     // any post-update action (generally, resetting the device).
@@ -732,10 +815,7 @@ pub async fn apply_update(
     match wait_for_update_done(updater, &mut mgs_clients, update, None).await {
         // We did not specify a timeout so it should not time out.
         Err(UpdateWaitError::Timeout(_)) => unreachable!(),
-        Ok(()) => {
-            info!(log, "update completed");
-            Ok(ApplyUpdateResult::Completed)
-        }
+        Ok(()) => Ok(ApplyUpdateResult::Completed),
         Err(UpdateWaitError::Indeterminate) => {
             Err(ApplyUpdateError::Indeterminate)
         }

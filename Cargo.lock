@@ -6117,6 +6117,7 @@ dependencies = [
 name = "nexus-mgs-updates"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "futures",
  "gateway-client",
  "gateway-messages",

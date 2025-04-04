@@ -7,6 +7,7 @@ edition = "2021"
 workspace = true
 
 [dependencies]
+chrono.workspace = true
 futures.workspace = true
 gateway-client.workspace = true
 internal-dns-resolver.workspace = true
