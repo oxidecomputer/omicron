@@ -64,6 +64,7 @@ impl Workspaces {
             //   |                       |         |     features when loading
             //   v                       v         v
             ("crucible", "crucible-agent-client", None),
+            ("dendrite", "dpd-client", None),
             (
                 "propolis",
                 "propolis-client",
@@ -180,46 +181,6 @@ impl Workspaces {
             })
             .collect();
 
-        // TODO As of this writing, we have three distinct packages called
-        // "dpd-client":
-        //
-        // - There's one in the "dendrite" repo.  This is used by:
-        //   - `swadm` (in Dendrite)
-        //   - `tfportd` (in Dendrite)`
-        //   - `ddm` (in Maghemite)
-        //   - `ddmd` (in Maghemite)
-        //   - `mgd` (via `mg-lower`) (in Maghemite)
-        // - There's one in the "lldpd" repo.  This is used by:
-        //   - `lldpd` (in lldpd)
-        // - There's one in the "omicron" repo.  This is used by:
-        //   - `wicketd` (in Omicron)
-        //   - `omicron-sled-agent` (in Omicron)
-        //   - `omicron-nexus` (in Omicron)
-        //
-        // This is problematic for two reasons:
-        //
-        // 1. This tool assumes that every API has exactly one client and it
-        //    uses the client as the primary key to identify the API.
-        //
-        // 2. The Rust package name is supposed to be unique.  This happens to
-        //    work, probably in part because the packages in the above two
-        //    groups are never built in the same workspace.  This tool _does_
-        //    merge information from all these workspaces, and it's likely
-        //    conflating the two packages.  That happens to be a good thing
-        //    because it keeps (1) from being an actual problem.  That is: if
-        //    this tool actually realized they were separate Rust packages, then
-        //    it would be upset that we had two different clients for the same
-        //    API.
-        //
-        // To keep things working, we just have this function always report the
-        // one in the Omicron repo.
-        if server_pkgname == "dpd-client" && found_in_workspaces.len() == 3 {
-            if let Some(rv) =
-                found_in_workspaces.iter().find(|w| w.0.name() == "omicron")
-            {
-                return Ok(*rv);
-            }
-        }
         ensure!(
             !found_in_workspaces.is_empty(),
             "server package {:?} was not found in any workspace",

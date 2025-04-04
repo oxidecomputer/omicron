@@ -45,23 +45,6 @@ jobs:
         run: |
           ./tools/update_dendrite.sh
 
-      - name: Extract new dendrite package version
-        run: |
-          eval $(cat tools/dendrite_openapi_version | grep COMMIT)
-          echo "version=${COMMIT:0:7}" >> $GITHUB_OUTPUT
-        id: updated
-
-      - name: Commit changes
-        run: |
-          . ./tools/reflector/helpers.sh
-
-          PATHS=("tools/dendrite_openapi_version")
-          CHANGES=()
-          commit $TARGET_BRANCH $INT_BRANCH ${{ inputs.reflector_user_id }} PATHS CHANGES
-
-          echo "api=${CHANGES[0]}" >> $GITHUB_OUTPUT
-        id: committed
-
       - name: Update pull request
         env:
           GH_TOKEN: ${{ inputs.reflector_access_token }}
