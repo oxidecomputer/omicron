@@ -189,7 +189,7 @@ impl LocalStorage for StorageHandle {
     }
 
     fn zpool_mountpoint_root(&self) -> Cow<Utf8Path> {
-        Cow::Borrowed(illumos_utils::zpool::ZPOOL_MOUNTPOINT_ROOT.into())
+        Cow::Borrowed(self.mount_config().root.as_path())
     }
 }
 
@@ -521,6 +521,7 @@ impl<'a> SupportBundleManager<'a> {
             "dataset_id" => dataset_id.to_string(),
             "bundle_id" => support_bundle_id.to_string(),
         ));
+        info!(log, "creating support bundle");
         let root =
             self.get_configured_dataset(zpool_id, dataset_id).await?.name;
         let dataset =
