@@ -2195,7 +2195,6 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_datasets_get_mounted() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx = test_setup_log("ensure_datasets_get_mounted");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
 
@@ -2254,7 +2253,6 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_datasets_get_mounted_even_with_data() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
         let logctx =
             test_setup_log("ensure_datasets_get_mounted_even_with_data");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
