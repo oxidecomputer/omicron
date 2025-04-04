@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 
+// XXX-dap probably wants a resolver for many clients?
 // XXX-dap want omdb-based introspection, control
 // XXX-dap in an ideal world this would load everything it needs in the
 // background.  Maybe this should go into a background task?

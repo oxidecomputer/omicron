@@ -7395,6 +7395,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-reconfigurator-sp-updater"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "chrono",
+ "clap",
+ "dropshot 0.16.0",
+ "futures",
+ "gateway-client",
+ "humantime",
+ "internal-dns-resolver",
+ "internal-dns-types",
+ "nexus-mgs-updates",
+ "nexus-reconfigurator-execution",
+ "nexus-types",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "reedline",
+ "repo-depot-client",
+ "serde_json",
+ "slog",
+ "slog-error-chain",
+ "supports-color",
+ "tokio",
+ "tufaceous",
+ "tufaceous-artifact",
+ "uuid",
+]
+
+[[package]]
 name = "omicron-releng"
 version = "0.1.0"
 dependencies = [

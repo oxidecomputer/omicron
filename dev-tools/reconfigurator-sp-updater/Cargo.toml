@@ -1,0 +1,41 @@
+[package]
+name = "omicron-reconfigurator-sp-updater"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+# XXX-dap Review all of these
+anyhow.workspace = true
+camino.workspace = true
+clap.workspace = true
+chrono.workspace = true
+dropshot.workspace = true
+futures.workspace = true
+gateway-client.workspace = true
+humantime.workspace = true
+internal-dns-resolver.workspace = true
+internal-dns-types.workspace = true
+nexus-mgs-updates.workspace = true
+nexus-reconfigurator-execution.workspace = true
+nexus-types.workspace = true
+omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
+reedline.workspace = true
+repo-depot-client.workspace = true
+serde_json.workspace = true
+slog.workspace = true
+slog-error-chain.workspace = true
+supports-color.workspace = true
+tokio = { workspace = true, features = [ "full" ] }
+tufaceous.workspace = true
+tufaceous-artifact.workspace = true
+uuid.workspace = true
+omicron-workspace-hack.workspace = true
+
+[[bin]]
+name = "reconfigurator-sp-updater"
+path = "src/main.rs"
