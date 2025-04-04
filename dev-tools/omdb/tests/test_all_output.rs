@@ -83,6 +83,8 @@ async fn test_omdb_usage_errors() {
         &["db", "inventory", "collections", "--help"],
         &["db", "inventory", "collections", "show"],
         &["db", "inventory", "collections", "show", "--help"],
+        &["db", "inventory", "collections", "show", "all", "--help"],
+        &["db", "inventory", "collections", "show", "sp", "--help"],
         &["db", "sleds", "--help"],
         &["db", "saga"],
         &["db", "snapshots"],
