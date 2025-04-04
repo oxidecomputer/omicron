@@ -99,6 +99,16 @@ pub struct ZoneMap {
 }
 
 impl ZoneMap {
+    pub(super) fn has_zone_with_retryable_error(&self) -> bool {
+        self.zones.iter().any(|zone| match &zone.state {
+            ZoneState::Running(_) => false,
+            // Assume all zone stop/start errors are retryable. This is probably
+            // wrong?
+            ZoneState::PartiallyShutDown { .. }
+            | ZoneState::FailedToStart(_) => true,
+        })
+    }
+
     pub(super) async fn timesync_status(
         &self,
         config: &TimeSyncConfig,

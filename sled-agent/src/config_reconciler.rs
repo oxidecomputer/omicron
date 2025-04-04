@@ -13,6 +13,8 @@ use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 
+use futures::future;
+use futures::future::Either;
 use id_map::Entry;
 use id_map::IdMap;
 use id_map::IdMappable as _;
@@ -251,6 +253,12 @@ impl ReconcilerTaskState {
             status: ReconcilerTaskStatus::WaitingForInternalDisks,
         }
     }
+
+    fn has_retryable_error(&self) -> bool {
+        // TODO-john also check datasets once they exist
+        self.external_disks.has_disk_with_retryable_error()
+            || self.zones.has_zone_with_retryable_error()
+    }
 }
 
 struct ReconcilerTask {
@@ -269,14 +277,34 @@ struct ReconcilerTask {
 
 impl ReconcilerTask {
     async fn run(mut self) {
+        // If reconciliation fails, we may want to retry it. The "happy path"
+        // that requires this is waiting for time sync: during RSS, cold boot,
+        // or replacement of the NTP zone, we may fail to start any zones that
+        // depend on time sync. We want to retry this pretty frequently: it's
+        // cheap if we haven't time sync'd yet, and we'd like to move on to
+        // starting zones as soon as we can.
+        //
+        // We could use a more complicated retry policy than "sleep for a few
+        // seconds" (e.g., backoff, or even "pick the retry policy based on the
+        // particular kind of failure we're retrying"). For now we'll just take
+        // this pretty aggressive policy.
+        const SLEEP_BETWEEN_RETRIES: Duration = Duration::from_secs(5);
+
         loop {
-            self.do_reconcilation().await;
+            let maybe_retry = match self.do_reconcilation().await {
+                ReconciliationResult::NoRetryNeeded => {
+                    Either::Left(future::pending())
+                }
+                ReconciliationResult::ShouldRetry => {
+                    Either::Right(tokio::time::sleep(SLEEP_BETWEEN_RETRIES))
+                }
+            };
 
             // Wait for one of:
             //
             // 1. The current ledgered `OmicronSledConfig` has changed
             // 2. The set of `RawDisk`s has changed
-            // 3. (TODO) retries
+            // 3. Our retry timer expires
             tokio::select! {
                 // Cancel-safe per docs on `changed()`
                 result = self.current_config_rx.changed() => {
@@ -309,14 +337,25 @@ impl ReconcilerTask {
                         }
                     }
                 }
+
+                // Cancel-safe: this is either `future::pending()` (never
+                // completes) or `sleep()` (we don't care if it's cancelled)
+                _ = maybe_retry => {
+                    continue;
+                }
             }
         }
     }
 
-    async fn do_reconcilation(&mut self) {
+    async fn do_reconcilation(&mut self) -> ReconciliationResult {
         let current_config = self.current_config_rx.borrow_and_update().clone();
         let current_raw_disks = self.raw_disks_rx.borrow_and_update().clone();
 
+        // If we're still waiting for the internal disks (i.e., we don't yet
+        // know whether we have a ledgered config to read) or RSS, just update
+        // the status and return. We don't need to retry in these cases: we'll
+        // key off of changes to `current_config` when there's progress from
+        // either of these states.
         let sled_config = match current_config {
             CurrentConfig::WaitingForInternalDisks => {
                 self.state.send_if_modified(|state| {
@@ -344,7 +383,7 @@ impl ReconcilerTask {
                         true
                     }
                 });
-                return;
+                return ReconciliationResult::NoRetryNeeded;
             }
             CurrentConfig::WaitingForRackSetup => {
                 self.state.send_if_modified(|state| {
@@ -360,7 +399,7 @@ impl ReconcilerTask {
                         true
                     }
                 });
-                return;
+                return ReconciliationResult::NoRetryNeeded;
             }
             CurrentConfig::Ledgered(omicron_sled_config) => omicron_sled_config,
         };
@@ -388,6 +427,12 @@ impl ReconcilerTask {
         )
         .await;
 
+        let result = if current_state.has_retryable_error() {
+            ReconciliationResult::ShouldRetry
+        } else {
+            ReconciliationResult::NoRetryNeeded
+        };
+
         // Notify any receivers of our post-reconciliation state. We always
         // update the `status`, and may or may not have updated other fields.
         current_state.status = ReconcilerTaskStatus::Idle {
@@ -398,6 +443,8 @@ impl ReconcilerTask {
         self.state.send_modify(|state| {
             *state = Arc::new(current_state);
         });
+
+        result
     }
 
     async fn reconcile_against_config(
@@ -472,4 +519,9 @@ impl ReconcilerTask {
             )
             .await;
     }
+}
+
+enum ReconciliationResult {
+    NoRetryNeeded,
+    ShouldRetry,
 }

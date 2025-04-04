@@ -68,6 +68,13 @@ impl ExternalDiskMap {
             .collect()
     }
 
+    pub(super) fn has_disk_with_retryable_error(&self) -> bool {
+        self.disks.iter().any(|disk| match &*disk.state {
+            DiskState::Managed(_) => false,
+            DiskState::FailedToStartManaging(err) => err.retryable(),
+        })
+    }
+
     /// Retain all disks that we are supposed to manage (based on `config`) that
     /// are also physically present (based on `raw_disks`), removing any disks
     /// we'd previously started to manage that are no longer present in either
