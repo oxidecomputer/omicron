@@ -294,6 +294,52 @@ async fn test_repo_upload() -> Result<()> {
             &response.body,
             "Uploaded artifacts don't match existing artifacts with same IDs:",
         )?;
+        assert_error_message_contains(
+            &response.body,
+            "For artifact (name: zone1, version: 1.0.0, kind: zone), uploaded \
+             SHA256 hash",
+        )?;
+    }
+
+    // Upload a new repository with the same *hash* but a different artifact
+    // version.
+    {
+        let tweaks = &[
+            ManifestTweak::SystemVersion("2.0.0".parse().unwrap()),
+            ManifestTweak::ArtifactVersion {
+                kind: KnownArtifactKind::GimletSp,
+                version: "2.0.0".parse().unwrap(),
+            },
+            ManifestTweak::ArtifactDataVersion {
+                kind: KnownArtifactKind::GimletSp,
+                // 1.0.0 is the original version in the fake manifest.
+                data_version: Some("1.0.0".parse().unwrap()),
+            },
+        ];
+
+        let archive_path = make_tweaked_archive(&logctx.log, tweaks).await?;
+
+        let response =
+            make_upload_request(client, &archive_path, StatusCode::CONFLICT)
+                .execute()
+                .await
+                .context(
+                    "error uploading repository with artifact \
+                     containing different hash for same version",
+                )?;
+        assert_error_message_contains(
+            &response.body,
+            "Uploaded artifacts don't match existing artifacts with same IDs:",
+        )?;
+        assert_error_message_contains(
+            &response.body,
+            "For artifact (kind: gimlet_sp, hash: ",
+        )?;
+        assert_error_message_contains(
+            &response.body,
+            "uploaded name fake-gimlet-sp and version 2.0.0, but \
+             existing artifact has name fake-gimlet-sp and version 1.0.0.",
+        )?;
     }
 
     // Upload a new repository with a different system version but no other

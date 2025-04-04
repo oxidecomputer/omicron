@@ -1796,8 +1796,12 @@ table! {
         disposition_expunged_ready_for_cleanup -> Bool,
         external_ip_id -> Nullable<Uuid>,
         filesystem_pool -> Uuid,
+        image_source -> crate::enums::BpZoneImageSourceEnum,
+        image_artifact_sha256 -> Nullable<Text>,
     }
 }
+
+allow_tables_to_appear_in_same_query!(bp_omicron_zone, tuf_artifact);
 
 table! {
     bp_omicron_zone_nic (blueprint_id, id) {

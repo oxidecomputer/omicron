@@ -285,11 +285,13 @@ pub struct TufRepoArtifact {
     Copy,
     Clone,
     Debug,
+    Hash,
+    PartialEq,
+    Eq,
     AsExpression,
     FromSqlRow,
     Serialize,
     Deserialize,
-    PartialEq,
 )]
 #[diesel(sql_type = Text)]
 #[serde(transparent)]
