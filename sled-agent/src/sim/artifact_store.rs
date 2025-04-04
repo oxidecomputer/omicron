@@ -11,7 +11,6 @@ use dropshot::{
     Path, RequestContext, ServerBuilder,
 };
 use repo_depot_api::*;
-use sled_storage::error::Error as StorageError;
 use std::sync::Arc;
 
 use crate::artifact_store::{ArtifactStore, DatasetsManager};
@@ -36,9 +35,8 @@ impl SimArtifactStorage {
 impl DatasetsManager for SimArtifactStorage {
     async fn artifact_storage_paths(
         &self,
-    ) -> Result<impl Iterator<Item = camino::Utf8PathBuf> + '_, StorageError>
-    {
-        Ok(self.dirs.iter().map(|tempdir| tempdir.path().to_owned()))
+    ) -> impl Iterator<Item = camino::Utf8PathBuf> + '_ {
+        self.dirs.iter().map(|tempdir| tempdir.path().to_owned())
     }
 }
 
