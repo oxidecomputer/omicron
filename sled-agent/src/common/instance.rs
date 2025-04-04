@@ -188,6 +188,10 @@ impl InstanceStates {
         &self.vmm
     }
 
+    pub fn vmm_halted(&self) -> bool {
+        matches!(self.vmm.state, VmmState::Destroyed | VmmState::Failed)
+    }
+
     pub fn migration_in(&self) -> Option<&MigrationRuntimeState> {
         self.migration_in.as_ref()
     }
@@ -212,7 +216,7 @@ impl InstanceStates {
     pub(crate) fn apply_propolis_observation(
         &mut self,
         observed: &ObservedPropolisState,
-    ) -> Option<Action> {
+    ) {
         fn transition_migration(
             current: &mut Option<MigrationRuntimeState>,
             ObservedMigrationState { id, state }: ObservedMigrationState,
@@ -248,7 +252,7 @@ impl InstanceStates {
             }
         }
 
-        fn destroy_migration(
+        fn fail_migration_if_active(
             migration: &mut MigrationRuntimeState,
             now: DateTime<Utc>,
         ) {
@@ -259,15 +263,6 @@ impl InstanceStates {
             }
         }
 
-        let vmm_gone = matches!(
-            observed.vmm_state.0,
-            PropolisApiState::Destroyed | PropolisApiState::Failed
-        );
-
-        // Apply this observation to the VMM record. It is safe to apply the
-        // Destroyed state directly here because this routine ensures that if
-        // this VMM is active, it will be retired and an appropriate
-        // non-Destroyed state applied to the instance itself.
         self.vmm.state = observed.vmm_state.into();
         self.vmm.gen = self.vmm.gen.next();
         self.vmm.time_updated = observed.time;
@@ -281,29 +276,15 @@ impl InstanceStates {
             transition_migration(&mut self.migration_out, m, observed.time);
         }
 
-        // If this Propolis has exited, tear down its zone. If it was in the
-        // active position, immediately retire any migration that might have
-        // been pending and clear the active Propolis ID so that the instance
-        // can start somewhere else.
-        //
-        // N.B. It is important to refetch the current Propolis role here,
-        //      because it might have changed in the course of dealing with a
-        //      completed migration. (In particular, if this VMM is gone because
-        //      it was the source of a successful migration out, control has
-        //      been transferred to the target, and what was once an active VMM
-        //      is now retired.)
-        if vmm_gone {
+        if self.vmm_halted() {
             // If there's an active migration and the VMM is suddenly gone,
             // that should constitute a migration failure!
             if let Some(ref mut m) = self.migration_in {
-                destroy_migration(m, observed.time);
+                fail_migration_if_active(m, observed.time);
             }
             if let Some(ref mut m) = self.migration_out {
-                destroy_migration(m, observed.time);
+                fail_migration_if_active(m, observed.time);
             }
-            Some(Action::Destroy)
-        } else {
-            None
         }
     }
 
@@ -319,34 +300,28 @@ impl InstanceStates {
         self.vmm.time_updated = now;
     }
 
-    /// Updates the state of this instance in response to a rude termination of
-    /// its Propolis zone, marking the VMM as destroyed and applying any
-    /// consequent state updates.
-    ///
-    /// # Synchronization
-    ///
-    /// A caller who is rudely terminating a Propolis zone must hold locks
-    /// sufficient to ensure that no other Propolis observations arrive in the
-    /// transaction that terminates the zone and then calls this function.
-    ///
-    /// TODO(#4004): This routine works by synthesizing a Propolis state change
-    /// that says "this Propolis is destroyed and its active migration failed."
-    /// If this conflicts with the actual Propolis state--e.g., if the
-    /// underlying Propolis was destroyed but migration *succeeded*--the
-    /// instance's state in Nexus may become inconsistent. This routine should
-    /// therefore only be invoked by callers who know that an instance is not
-    /// migrating.
-    pub(crate) fn terminate_rudely(&mut self, mark_failed: bool) {
-        let vmm_state = if mark_failed {
-            PropolisInstanceState(PropolisApiState::Failed)
-        } else {
-            PropolisInstanceState(PropolisApiState::Destroyed)
-        };
+    /// Forcibly transitions this VMM to the Failed state. The instance runner
+    /// may use this to force a VMM to reach this state when it knows no
+    /// more state updates are forthcoming from Propolis (or when there might be
+    /// updates, but the monitor has decided it no longer cares).
+    pub(crate) fn force_state_to_failed(&mut self) {
+        self.force_state_to(PropolisApiState::Failed);
+    }
 
+    /// Forcibly transitions this VMM to the Destroyed state. This allows the
+    /// instance runner to force the VMM to reach a terminal state if a client
+    /// asks to stop that VMM before actually asking to start it.
+    pub(crate) fn force_state_to_destroyed(&mut self) {
+        self.force_state_to(PropolisApiState::Destroyed);
+    }
+
+    fn force_state_to(&mut self, state: PropolisApiState) {
+        // The callee interprets the `None` values in the migration state fields
+        // as "no update," so this won't replace any in-progress migration data
+        // (unless the supplied state is a terminal state, in which case any
+        // active migrations will be canceled).
         let fake_observed = ObservedPropolisState {
-            vmm_state,
-            // We don't actually need to populate these, because observing a
-            // `Destroyed` instance state will fail any in progress migrations anyway.
+            vmm_state: PropolisInstanceState(state),
             migration_in: None,
             migration_out: None,
             time: Utc::now(),
@@ -432,13 +407,12 @@ mod test {
     }
 
     #[test]
-    fn propolis_terminal_states_request_destroy_action() {
+    fn propolis_terminal_states_make_vmm_halted() {
         for state in [Observed::Destroyed, Observed::Failed] {
             let mut instance_state = make_instance();
-            let requested_action = instance_state
+            instance_state
                 .apply_propolis_observation(&make_observed_state(state.into()));
-
-            assert!(matches!(requested_action, Some(Action::Destroy)));
+            assert!(instance_state.vmm_halted())
         }
     }
 
@@ -448,7 +422,7 @@ mod test {
             let mut instance_state = make_migration_source_instance();
             let original_migration =
                 instance_state.clone().migration_out.unwrap();
-            let requested_action = instance_state
+            instance_state
                 .apply_propolis_observation(&make_observed_state(state.into()));
 
             let migration = instance_state
@@ -456,7 +430,6 @@ mod test {
                 .expect("state must have a migration");
             assert_eq!(migration.state, MigrationState::Failed);
             assert!(migration.gen > original_migration.gen);
-            assert!(matches!(requested_action, Some(Action::Destroy)));
         }
     }
 
@@ -466,7 +439,7 @@ mod test {
             let mut instance_state = make_migration_target_instance();
             let original_migration =
                 instance_state.clone().migration_in.unwrap();
-            let requested_action = instance_state
+            instance_state
                 .apply_propolis_observation(&make_observed_state(state.into()));
 
             let migration = instance_state
@@ -474,7 +447,6 @@ mod test {
                 .expect("state must have a migration");
             assert_eq!(migration.state, MigrationState::Failed);
             assert!(migration.gen > original_migration.gen);
-            assert!(matches!(requested_action, Some(Action::Destroy)));
         }
     }
 
@@ -499,7 +471,8 @@ mod test {
         // actually marking the migration as completed. This advances the
         // instance's state generation.
         let prev = state.clone();
-        assert!(state.apply_propolis_observation(&observed).is_none());
+        state.apply_propolis_observation(&observed);
+        assert!(!state.vmm_halted());
         assert_state_change_has_gen_change(&prev, &state);
 
         // The migration state should transition to "completed"
@@ -518,7 +491,8 @@ mod test {
         // anymore.
         let prev = state.clone();
         observed.vmm_state = PropolisInstanceState(Observed::Stopped);
-        assert!(state.apply_propolis_observation(&observed).is_none());
+        state.apply_propolis_observation(&observed);
+        assert!(!state.vmm_halted());
         assert_state_change_has_gen_change(&prev, &state);
 
         // The Stopped state is translated internally to Stopping to prevent
@@ -538,10 +512,8 @@ mod test {
 
         let prev = state.clone();
         observed.vmm_state = PropolisInstanceState(Observed::Destroyed);
-        assert!(matches!(
-            state.apply_propolis_observation(&observed),
-            Some(Action::Destroy)
-        ));
+        state.apply_propolis_observation(&observed);
+        assert!(state.vmm_halted());
         assert_state_change_has_gen_change(&prev, &state);
         assert_eq!(state.vmm.state, VmmState::Destroyed);
         assert!(state.vmm.gen > prev.vmm.gen);
@@ -553,7 +525,7 @@ mod test {
         assert_eq!(migration.state, MigrationState::Completed);
         assert_eq!(migration.gen, prev_migration.gen);
 
-        state.terminate_rudely(false);
+        state.force_state_to_destroyed();
         let migration = state
             .migration_out
             .clone()
@@ -580,10 +552,8 @@ mod test {
         };
 
         let prev = state.clone();
-        assert!(matches!(
-            state.apply_propolis_observation(&observed),
-            Some(Action::Destroy)
-        ));
+        state.apply_propolis_observation(&observed);
+        assert!(state.vmm_halted());
         assert_state_change_has_gen_change(&prev, &state);
         assert_eq!(state.vmm.state, VmmState::Failed);
         assert!(state.vmm.gen > prev.vmm.gen);
@@ -597,19 +567,14 @@ mod test {
         assert!(migration.gen > prev_migration.gen);
     }
 
-    // Verifies that the rude-termination state change doesn't update the
-    // instance record if the VMM under consideration is a migration target.
-    //
-    // The live migration saga relies on this property for correctness (it needs
-    // to know that unwinding its "create destination VMM" step will not produce
-    // an updated instance record).
+    // Verifies that rudely terminating a migration target causes any pending
+    // migrations to fail instantly.
     #[test]
-    fn rude_terminate_of_migration_target_does_not_transition_instance() {
+    fn rude_terminate_of_migration_target_fails_migrations() {
         let mut state = make_migration_target_instance();
 
         let prev = state.clone();
-        let mark_failed = false;
-        state.terminate_rudely(mark_failed);
+        state.force_state_to_failed();
 
         assert_state_change_has_gen_change(&prev, &state);
 

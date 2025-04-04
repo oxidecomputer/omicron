@@ -5,6 +5,7 @@
 //! API for controlling multiple instances on a sled.
 
 use crate::instance::Instance;
+use crate::instance::VmmStateOwner;
 use crate::metrics::MetricsRequestQueue;
 use crate::nexus::NexusClient;
 use crate::vmm_reservoir::VmmReservoirManagerHandle;
@@ -681,8 +682,7 @@ impl InstanceManagerRunner {
 
         // Otherwise, we pipeline the request, and send it to the instance,
         // where it can receive an appropriate response.
-        let mark_failed = false;
-        instance.terminate(tx, mark_failed)?;
+        instance.terminate(tx, VmmStateOwner::Nexus)?;
         Ok(())
     }
 
@@ -852,8 +852,7 @@ impl InstanceManagerRunner {
             info!(self.log, "use_only_these_disks: Removing instance"; "instance_id" => ?id);
             if let Some(instance) = self.jobs.remove(&id) {
                 let (tx, rx) = oneshot::channel();
-                let mark_failed = true;
-                if let Err(e) = instance.terminate(tx, mark_failed) {
+                if let Err(e) = instance.terminate(tx, VmmStateOwner::Runner) {
                     warn!(self.log, "use_only_these_disks: Failed to request instance removal"; "err" => ?e);
                     continue;
                 }
@@ -886,20 +885,13 @@ impl InstanceTicket {
     pub(crate) fn new_without_manager_for_test(id: PropolisUuid) -> Self {
         Self { id, terminate_tx: None }
     }
-
-    /// Idempotently removes this instance from the tracked set of
-    /// instances. This acts as an "upcall" for instances to remove
-    /// themselves after stopping.
-    pub fn deregister(&mut self) {
-        if let Some(terminate_tx) = self.terminate_tx.take() {
-            let _ =
-                terminate_tx.send(InstanceDeregisterRequest { id: self.id });
-        }
-    }
 }
 
 impl Drop for InstanceTicket {
     fn drop(&mut self) {
-        self.deregister();
+        if let Some(terminate_tx) = self.terminate_tx.take() {
+            let _ =
+                terminate_tx.send(InstanceDeregisterRequest { id: self.id });
+        }
     }
 }

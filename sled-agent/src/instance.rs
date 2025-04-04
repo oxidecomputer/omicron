@@ -5,8 +5,7 @@
 //! API for controlling a single instance.
 
 use crate::common::instance::{
-    Action as InstanceAction, InstanceStates, ObservedPropolisState,
-    PublishedVmmState,
+    InstanceStates, ObservedPropolisState, PublishedVmmState,
 };
 use crate::instance_manager::{
     Error as ManagerError, InstanceManagerServices, InstanceTicket,
@@ -194,13 +193,6 @@ pub fn propolis_zone_name(id: &PropolisUuid) -> String {
     format!("{}{}", PROPOLIS_ZONE_PREFIX, id)
 }
 
-// Action to be taken by the Sled Agent after monitoring Propolis for
-// state changes.
-enum Reaction {
-    Continue,
-    Terminate,
-}
-
 // State associated with a running instance.
 struct RunningState {
     // Connection to Propolis.
@@ -298,9 +290,28 @@ impl InstanceRequest {
     }
 }
 
+/// Identifies the component that's responsible for updating a specific VMM's
+/// state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum VmmStateOwner {
+    /// The [`InstanceRunner`] that manages the VMM is also responsible for
+    /// updating its state.
+    Runner,
+
+    /// Nexus has indicated to this runner that it (Nexus) will drive future
+    /// state changes to this VM.
+    Nexus,
+}
+
+/// A request to immediately shut down an instance runner and terminate its
+/// Propolis zone.
 struct TerminateRequest {
-    mark_failed: bool,
+    /// A channel to which to send the result of this request.
     tx: oneshot::Sender<Result<VmmUnregisterResponse, ManagerError>>,
+
+    /// The logical owner of the VMM state once this request is successfully
+    /// processed.
+    new_state_owner: VmmStateOwner,
 }
 
 // A small task which tracks the state of the instance, by constantly querying
@@ -347,7 +358,7 @@ impl InstanceMonitorRunner {
             let (tx, rx) = oneshot::channel();
             self.tx_monitor.send(InstanceMonitorRequest { update, tx }).await?;
 
-            if let Reaction::Terminate = rx.await? {
+            if let InstanceMonitorResponse::Exit = rx.await? {
                 return Ok(());
             }
         }
@@ -443,9 +454,24 @@ enum InstanceMonitorUpdate {
     Error(PropolisErrorCode),
 }
 
+/// A request issued from the instance monitor to the instance runner.
 struct InstanceMonitorRequest {
+    /// The body of the instance monitor's message.
     update: InstanceMonitorUpdate,
-    tx: oneshot::Sender<Reaction>,
+
+    /// After handling an update, the instance runner uses this channel to tell
+    /// the monitor whether to continue running.
+    tx: oneshot::Sender<InstanceMonitorResponse>,
+}
+
+/// Sent by the instance runner to the instance monitor after the runner handles
+/// an update from the monitor.
+enum InstanceMonitorResponse {
+    /// Indicates that the monitor should continue running.
+    Continue,
+
+    /// Indicates that the monitor can lay down its sword.
+    Exit,
 }
 
 struct InstanceRunner {
@@ -514,7 +540,7 @@ struct InstanceRunner {
     metrics_queue: MetricsRequestQueue,
 
     // Object representing membership in the "instance manager".
-    instance_ticket: InstanceTicket,
+    _instance_ticket: InstanceTicket,
 }
 
 impl InstanceRunner {
@@ -524,6 +550,8 @@ impl InstanceRunner {
 
     async fn run(mut self, mut terminate_rx: mpsc::Receiver<TerminateRequest>) {
         use InstanceRequest::*;
+
+        let mut state_owner = VmmStateOwner::Runner;
 
         // Timeout for stopping the instance gracefully.
         //
@@ -549,77 +577,7 @@ impl InstanceRunner {
 
                 // Handle messages from our own "Monitor the VMM" task.
                 request = self.rx_monitor.recv() => {
-                    use InstanceMonitorUpdate::*;
-                    match request {
-                        Some(InstanceMonitorRequest { update: State(state), tx }) => {
-                            let observed = ObservedPropolisState::new(&state);
-                            let reaction = self.observe_state(&observed).await;
-                            self.publish_state_to_nexus().await;
-
-                            // NOTE: If we fail to send here, the
-                            // InstanceMonitorRunner has stopped running for
-                            // some reason. We'd presumably handle that on the
-                            // next iteration of the loop.
-                            if let Err(_) = tx.send(reaction) {
-                                warn!(self.log, "InstanceRunner failed to send to InstanceMonitorRunner");
-                            }
-                        },
-                        // The Propolis zone has abruptly vanished. It's not supposed
-                        // to do that! Move it to failed.
-                        Some(InstanceMonitorRequest { update: ZoneGone, tx }) => {
-                            warn!(
-                                self.log,
-                                "Propolis zone has gone away entirely! Moving \
-                                 to Failed"
-                            );
-                            self.terminate(true).await;
-                            if let Err(_) = tx.send(Reaction::Terminate) {
-                                warn!(self.log, "InstanceRunner failed to send to InstanceMonitorRunner");
-                            }
-                        }
-                        Some(InstanceMonitorRequest { update: Error(code), tx }) => {
-                            let reaction = if code == PropolisErrorCode::NoInstance {
-                                // If we see a `NoInstance` error code from
-                                // Propolis after the instance has been ensured,
-                                // this means that Propolis must have crashed
-                                // and been restarted, and now no longer
-                                // remembers that it once had a VM. In that
-                                // case, this Propolis is permanently busted, so
-                                // mark it as Failed and tear down the zone.
-                                warn!(
-                                    self.log,
-                                    "Propolis has lost track of its instance! \
-                                     It must have crashed. Moving to Failed";
-                                    "error_code" => ?code,
-                                );
-                                self.terminate(true).await;
-                                Reaction::Terminate
-                            } else {
-                                // The other error codes we know of are not
-                                // expected here --- they all relate to the
-                                // instance-creation APIs. So I guess we'll just
-                                // whine about it and then keep trying to
-                                // monitor the instance.
-                                warn!(
-                                    self.log,
-                                    "Propolis state monitor returned an \
-                                     unexpected error code";
-                                    "error_code" => ?code,
-                                );
-                                Reaction::Continue
-                            };
-                            if let Err(_) = tx.send(reaction) {
-                                warn!(self.log, "InstanceRunner failed to send to InstanceMonitorRunner");
-                            }
-                        },
-                        // NOTE: This case shouldn't really happen, as we keep a copy
-                        // of the sender alive in "self.tx_monitor".
-                        None => {
-                            warn!(self.log, "Instance 'VMM monitor' channel closed; shutting down");
-                            let mark_failed = true;
-                            self.terminate(mark_failed).await;
-                        },
-                    }
+                    self.handle_monitor_request(request).await;
                 },
 
                 // We are waiting for the VMM to stop, and the grace period has
@@ -636,14 +594,25 @@ impl InstanceRunner {
                         "Instance failed to stop within the grace period, \
                          terminating it violently!",
                     );
-                    let mark_failed = false;
-                    self.terminate(mark_failed).await;
+
+                    // This looks kind of like a failure condition (the VMM
+                    // didn't do what it was asked), but if the instance goes
+                    // to Failed as a result of this timeout, Nexus might
+                    // automatically restart it even though the user asked for
+                    // it to be stopped. To avoid this, move the VMM to
+                    // Destroyed here.
+                    self.state.force_state_to_destroyed();
+                    self.terminate().await;
+                    break;
                 }
 
                 // Requests to terminate the instance take priority over any
                 // other request to the instance.
                 request = terminate_rx.recv() => {
-                    self.handle_termination_request(request, None).await;
+                    state_owner = self.handle_termination_request(
+                        request,
+                        None
+                    ).await;
                     break;
                 }
 
@@ -652,12 +621,21 @@ impl InstanceRunner {
                     let request = match request {
                         Some(r) => r,
                         None => {
-                            warn!(self.log, "Instance request channel closed; shutting down");
-                            let mark_failed = false;
-                            self.terminate(mark_failed).await;
+                            // This shouldn't happen: it indicates that the
+                            // manager has dropped the tx side of this channel
+                            // before a final instance state was published! Try
+                            // to recover by marking the VMM as Failed and
+                            // publishing the corresponding state update.
+                            error!(
+                                self.log,
+                                "instance request channel unexpectedly closed"
+                            );
+
+                            self.fail_vmm_and_terminate().await;
                             break;
                         }
                     };
+
                     let request_variant = request.to_string();
                     // Okay, this is a little bit wacky: if we are waiting for
                     // one of the instance operations we run here to come back,
@@ -733,7 +711,7 @@ impl InstanceRunner {
                         biased;
 
                         request = terminate_rx.recv() => {
-                            self.handle_termination_request(
+                            state_owner = self.handle_termination_request(
                                 request,
                                 Some(&request_variant),
                             ).await;
@@ -756,7 +734,20 @@ impl InstanceRunner {
             }
         }
 
-        self.publish_state_to_nexus().await;
+        // This is the last opportunity to publish VMM state to Nexus for this
+        // VMM, so the VMM had better be in a state that allows Nexus to
+        // dissociate it from its instance.
+        if !self.state.vmm_halted() {
+            error!(
+                self.log,
+                "instance runner exiting with VMM in non-terminal state";
+                "state" => ?self.current_state()
+            );
+        }
+
+        if state_owner == VmmStateOwner::Runner {
+            self.publish_state_to_nexus().await;
+        }
 
         // Okay, now that we've terminated the instance, drain any outstanding
         // requests in the queue, so that they see an error indicating that the
@@ -799,6 +790,9 @@ impl InstanceRunner {
                 updated_runtime: Some(self.current_state()),
             }));
         }
+
+        // Returning from this routine drops the instance ticket and so
+        // deregisters the instance from its instance manager.
     }
 
     /// Yields this instance's ID.
@@ -890,57 +884,102 @@ impl InstanceRunner {
         }
     }
 
+    async fn handle_monitor_request(
+        &mut self,
+        request: Option<InstanceMonitorRequest>,
+    ) {
+        let Some(request) = request else {
+            unreachable!("runner keeps a copy of the monitor tx");
+        };
+
+        let InstanceMonitorRequest { update, tx } = request;
+        let response = match update {
+            InstanceMonitorUpdate::State(state) => {
+                self.observe_state(&ObservedPropolisState::new(&state));
+
+                // If Propolis still has an active VM, just publish this state
+                // update and resume normal operation. Otherwise, go through the
+                // Propolis teardown sequence.
+                if !self.state.vmm_halted() {
+                    self.publish_state_to_nexus().await;
+                    InstanceMonitorResponse::Continue
+                } else {
+                    self.terminate().await;
+                    InstanceMonitorResponse::Exit
+                }
+            }
+            InstanceMonitorUpdate::ZoneGone => {
+                warn!(self.log, "Propolis zone is gone, marking VMM as failed");
+
+                // There's no way to restore the zone at this point, so the
+                // runner is now the sole driver of the VMM state machine. Drive
+                // the VMM to Failed and go through the termination sequence.
+                self.fail_vmm_and_terminate().await;
+                InstanceMonitorResponse::Exit
+            }
+            InstanceMonitorUpdate::Error(PropolisErrorCode::NoInstance) => {
+                warn!(
+                    self.log,
+                    "Propolis monitor unexpectedly reported no instance, \
+                    marking as failed"
+                );
+
+                // This error indicates that Propolis crashed and restarted and
+                // lost whatever VM was previously created there. Nothing to do
+                // but mark the VMM as failed and tear things down.
+                self.fail_vmm_and_terminate().await;
+                InstanceMonitorResponse::Exit
+            }
+            InstanceMonitorUpdate::Error(
+                code @ PropolisErrorCode::AlreadyRunning
+                | code @ PropolisErrorCode::AlreadyInitialized
+                | code @ PropolisErrorCode::CreateFailed,
+            ) => {
+                // These error codes are lifecycle-related errors that the
+                // monitor is never expected to return. Put up a warning here
+                // but let the monitor continue to see if it recovers.
+                warn!(
+                    self.log,
+                    "Propolis monitor returned unexpected error code";
+                    "error_code" => ?code
+                );
+
+                InstanceMonitorResponse::Continue
+            }
+        };
+
+        if tx.send(response).is_err() {
+            warn!(
+                self.log,
+                "failed to send response to instance state monitor"
+            );
+        }
+    }
+
     /// Processes a Propolis state change observed by the Propolis monitoring
     /// task.
-    async fn observe_state(
-        &mut self,
-        state: &ObservedPropolisState,
-    ) -> Reaction {
-        info!(self.log, "Observing new propolis state: {:?}", state);
+    fn observe_state(&mut self, state: &ObservedPropolisState) {
+        info!(self.log, "observed new Propolis state"; "state" => ?state);
 
-        // This instance may no longer have a Propolis zone if it was rudely
-        // terminated between the time the call to Propolis returned and the
-        // time this thread acquired the instance lock and entered this routine.
-        // If the Propolis zone is gone, do not publish the Propolis state;
-        // instead, maintain whatever state was published when the zone was
-        // destroyed.
+        // This shouldn't happen: the monitor can't observe anything before a
+        // Propolis zone comes into being, and once the runner decides to
+        // discard the active zone, it should stop listening for new requests
+        // from the monitor.
         if self.running_state.is_none() {
-            info!(
+            error!(
                 self.log,
-                "Ignoring new propolis state: Propolis is already destroyed"
+                "received Propolis state observation without a zone"
             );
-
-            // Return the Terminate action so that the caller will cleanly
-            // cease to monitor this Propolis. Note that terminating an instance
-            // that's already terminated is a no-op.
-            return Reaction::Terminate;
+            return;
         }
 
-        // Update the Sled Agent's internal state machine.
-        let action = self.state.apply_propolis_observation(state);
+        self.state.apply_propolis_observation(state);
         info!(
             self.log,
             "updated state after observing Propolis state change";
             "propolis_id" => %self.propolis_id,
             "new_vmm_state" => ?self.state.vmm()
         );
-
-        // If the zone is now safe to terminate, tear it down and discard the
-        // instance ticket before returning and publishing the new instance
-        // state to Nexus. This ensures that the instance is actually gone from
-        // the sled when Nexus receives the state update saying it's actually
-        // destroyed.
-        match action {
-            Some(InstanceAction::Destroy) => {
-                info!(self.log, "terminating VMM that has exited";
-                      "instance_id" => %self.instance_id(),
-                      "propolis_id" => %self.propolis_id);
-                let mark_failed = false;
-                self.terminate(mark_failed).await;
-                Reaction::Terminate
-            }
-            None => Reaction::Continue,
-        }
     }
 
     /// Sends an instance state PUT request to this instance's Propolis.
@@ -969,7 +1008,7 @@ impl InstanceRunner {
     /// Sends an instance ensure request to this instance's Propolis,
     /// constructing its configuration from the fields in `self` that describe
     /// the instance's virtual hardware configuration.
-    async fn propolis_ensure_inner(
+    async fn send_propolis_instance_ensure(
         &self,
         client: &PropolisClient,
         running_zone: &RunningZone,
@@ -1335,23 +1374,10 @@ impl InstanceRunner {
         Ok(())
     }
 
-    /// Given a freshly-created Propolis process, sends an ensure request to
-    /// that Propolis and launches all of the tasks needed to monitor the
-    /// resulting Propolis VM.
-    ///
-    /// # Panics
-    ///
-    /// Panics if this routine is called more than once for a given Instance.
-    async fn ensure_propolis_and_tasks(
+    async fn install_running_state(
         &mut self,
-        setup: PropolisSetup,
-        migrate: Option<InstanceMigrationTargetParams>,
-    ) -> Result<(), Error> {
-        assert!(self.running_state.is_none());
-
-        let PropolisSetup { client, running_zone } = setup;
-        self.propolis_ensure_inner(&client, &running_zone, migrate).await?;
-
+        PropolisSetup { client, running_zone }: PropolisSetup,
+    ) {
         // Monitor propolis for state changes in the background.
         //
         // This task exits after its associated Propolis has been terminated
@@ -1374,8 +1400,6 @@ impl InstanceRunner {
         });
         self.monitor_handle = Some(monitor_handle);
         self.running_state = Some(RunningState { client, running_zone });
-
-        Ok(())
     }
 
     /// Immediately terminates this instance's Propolis zone and cleans up any
@@ -1383,7 +1407,7 @@ impl InstanceRunner {
     ///
     /// This routine is safe to call even if the instance's zone was never
     /// started. It is also safe to call multiple times on a single instance.
-    async fn terminate_inner(&mut self) {
+    async fn remove_propolis_zone(&mut self) {
         let zname = propolis_zone_name(&self.propolis_id);
 
         // First fetch the running state.
@@ -1398,9 +1422,6 @@ impl InstanceRunner {
                 "Instance::terminate() called with no running state"
             );
 
-            // Ensure the instance is removed from the instance manager's table
-            // so that a new instance can take its place.
-            self.instance_ticket.deregister();
             return;
         };
 
@@ -1460,9 +1481,6 @@ impl InstanceRunner {
                 panic!("Zone {zname:?} could not be halted within 5 minutes")
             }
         }
-
-        // Remove ourselves from the instance manager's map of instances.
-        self.instance_ticket.deregister();
 
         // See if there are any runtime objects to clean up.
         //
@@ -1826,7 +1844,7 @@ impl Instance {
             zone_builder_factory,
             zone_bundler,
             metrics_queue,
-            instance_ticket: ticket,
+            _instance_ticket: ticket,
         };
 
         let runner_handle =
@@ -1898,10 +1916,10 @@ impl Instance {
     pub fn terminate(
         &self,
         tx: oneshot::Sender<Result<VmmUnregisterResponse, ManagerError>>,
-        mark_failed: bool,
+        new_state_owner: VmmStateOwner,
     ) -> Result<(), Error> {
         self.terminate_tx
-            .try_send(TerminateRequest { mark_failed, tx })
+            .try_send(TerminateRequest { tx, new_state_owner })
             .or_else(|err| match err {
                 mpsc::error::TrySendError::Closed(TerminateRequest {
                     tx,
@@ -1993,55 +2011,57 @@ impl InstanceRunner {
         self.state.sled_instance_state()
     }
 
-    /// Ensures that a Propolis process exists for this instance, then sends it
-    /// an instance ensure request.
+    /// Idempotently ensures that there is an active Propolis zone and that it
+    /// has been asked to create the VM described by this instance struct and
+    /// the supplied `migration_params`.
     async fn propolis_ensure(
         &mut self,
         migration_params: Option<InstanceMigrationTargetParams>,
     ) -> Result<(), Error> {
+        // If there's already a Propolis zone, send the request there. This
+        // allows Propolis to reject requests to initialize a VM with parameters
+        // that are incompatible with a previous initialization request.
         if let Some(running_state) = self.running_state.as_ref() {
             info!(
                 &self.log,
-                "Ensuring instance which already has a running state"
+                "ensuring instance which already has a Propolis zone"
             );
-            self.propolis_ensure_inner(
-                &running_state.client,
-                &running_state.running_zone,
+
+            return self
+                .send_propolis_instance_ensure(
+                    &running_state.client,
+                    &running_state.running_zone,
+                    migration_params,
+                )
+                .await
+                .map_err(Into::into);
+        }
+
+        // Otherwise, set up the zone first, then ask Propolis to create the VM.
+        let setup = match self.setup_propolis_zone().await {
+            Ok(setup) => setup,
+            Err(e) => {
+                error!(&self.log, "failed to set up Propolis zone"; "error" => ?e);
+                return Err(e.into());
+            }
+        };
+
+        if let Err(e) = self
+            .send_propolis_instance_ensure(
+                &setup.client,
+                &setup.running_zone,
                 migration_params,
             )
-            .await?;
-        } else {
-            let setup_result: Result<(), Error> = 'setup: {
-                // Set up the Propolis zone and the objects associated with it.
-                let setup = match self.setup_propolis_inner().await {
-                    Ok(setup) => setup,
-                    Err(e) => break 'setup Err(e),
-                };
-
-                // Direct the Propolis server to create its VM and the tasks
-                // associated with it. On success, the zone handle moves into
-                // this instance, preserving the zone.
-                self.ensure_propolis_and_tasks(setup, migration_params).await
-            };
-
-            // If this instance started from scratch, and startup failed, move
-            // the instance to the Failed state instead of leaking the Starting
-            // state.
-            //
-            // Once again, migration targets don't do this, because a failure to
-            // start a migration target simply leaves the VM running untouched
-            // on the source.
-            if migration_params.is_none() && setup_result.is_err() {
-                error!(&self.log, "vmm setup failed: {:?}", setup_result);
-
-                // This case is morally equivalent to starting Propolis and then
-                // rudely terminating it before asking it to do anything. Update
-                // the VMM and instance states accordingly.
-                let mark_failed = false;
-                self.state.terminate_rudely(mark_failed);
-            }
-            setup_result?;
+            .await
+        {
+            error!(&self.log, "failed to create Propolis VM"; "error" => ?e);
+            return Err(e.into());
         }
+
+        // Move ownership of the zone into the instance and set up state
+        // monitoring. This prevents the zone from being shut down when this
+        // routine returns.
+        self.install_running_state(setup).await;
         Ok(())
     }
 
@@ -2050,23 +2070,46 @@ impl InstanceRunner {
         state: VmmStateRequested,
     ) -> Result<SledVmmState, Error> {
         use propolis_client::types::InstanceStateRequested as PropolisRequest;
-        let (propolis_state, next_published) = match state {
+        let (propolis_request, next_published) = match state {
             VmmStateRequested::MigrationTarget(migration_params) => {
-                self.propolis_ensure(Some(migration_params)).await?;
+                if let Err(e) =
+                    self.propolis_ensure(Some(migration_params)).await
+                {
+                    // If the ensure call didn't even install a Propolis zone,
+                    // then VM creation has failed entirely and this VMM should
+                    // just move to Failed so that the corresponding instance
+                    // can be stopped.
+                    if self.running_state.is_none() {
+                        self.fail_vmm_and_terminate().await;
+                        return Err(e);
+                    }
+                }
+
                 (None, None)
             }
             VmmStateRequested::Running => {
-                self.propolis_ensure(None).await?;
+                if let Err(e) = self.propolis_ensure(None).await {
+                    // As above, if the ensure call didn't even install a
+                    // Propolis zone, then VM creation has failed entirely and
+                    // this VMM should just move to Failed so that the
+                    // corresponding instance can be stopped.
+                    if self.running_state.is_none() {
+                        self.fail_vmm_and_terminate().await;
+                        return Err(e);
+                    }
+                }
+
                 (Some(PropolisRequest::Run), None)
             }
             VmmStateRequested::Stopped => {
-                // If the instance has not started yet, unregister it
-                // immediately. Since there is no Propolis to push updates when
-                // this happens, generate an instance record bearing the
-                // "Destroyed" state and return it to the caller.
+                // If there's no running Propolis yet, unregister this instance
+                // straightaway. Since nothing will ever send a state update in
+                // this case, force the VMM into a terminal Destroyed state,
+                // which is what it would have reached if it *had* existed and
+                // then stopped in an orderly manner.
                 if self.running_state.is_none() {
-                    let mark_failed = false;
-                    self.terminate(mark_failed).await;
+                    self.state.force_state_to_destroyed();
+                    self.terminate().await;
                     (None, None)
                 } else {
                     (
@@ -2086,23 +2129,42 @@ impl InstanceRunner {
             }
         };
 
-        if let Some(p) = propolis_state {
+        // All the arms above should either create a Propolis zone on success or
+        // check that one already exists. Note that the calls that create the
+        // zone also send a VM creation request to the new Propolis process, but
+        // this is trickier to assert without actually calling the Propolis API.
+        assert!(
+            self.running_state.is_some(),
+            "should have an active Propolis zone by now"
+        );
+
+        // Since there's an active Propolis zone with an extant VM, it's
+        // possible to ask Propolis to drive the VM state machine.
+        if let Some(p) = propolis_request {
             if let Err(e) = self.propolis_state_put(p).await {
                 match propolis_error_code(&self.log, &e) {
                     Some(
                         code @ PropolisErrorCode::NoInstance
                         | code @ PropolisErrorCode::CreateFailed,
                     ) => {
+                        // Propolis is alive but thinks there's no VM here,
+                        // which implies that it restarted and lost the
+                        // previously-created VM. This is grounds to mark the
+                        // VMM as Failed.
                         error!(self.log,
-                            "Propolis error code indicates VMM failure";
+                            "Propolis VM is missing, can't change its state";
                             "code" => ?code,
                         );
-                        self.terminate(true).await;
-                        // We've transitioned to `Failed`, so just return the
-                        // failed state normally. We return early here instead
-                        // of falling through because we don't want to overwrite
-                        // `self.state` with the published VMM state determined
-                        // above.
+
+                        self.fail_vmm_and_terminate().await;
+
+                        // Return the newly-installed Failed state here so it
+                        // doesn't get clobbered by the published VMM state
+                        // chosen above.
+                        //
+                        // REVIEW(gjc) it's a little weird that we might return
+                        // "success" from a call to, say, reboot an instance
+                        // when we know the instance actually failed...
                         return Ok(self.state.sled_instance_state());
                     }
                     _ => {
@@ -2117,7 +2179,9 @@ impl InstanceRunner {
         Ok(self.state.sled_instance_state())
     }
 
-    async fn setup_propolis_inner(&mut self) -> Result<PropolisSetup, Error> {
+    /// Sets up the Propolis zone that will host this instance's virtual
+    /// machine.
+    async fn setup_propolis_zone(&mut self) -> Result<PropolisSetup, Error> {
         // Create OPTE ports for the instance. We also store the names of all
         // those ports to notify the metrics task to start collecting statistics
         // for them.
@@ -2255,34 +2319,33 @@ impl InstanceRunner {
         Ok(PropolisSetup { client, running_zone })
     }
 
+    /// Handles a request to rudely and immediately terminate a running
+    /// Propolis.
     async fn handle_termination_request(
         &mut self,
         req: Option<TerminateRequest>,
         current_req: Option<&str>,
-    ) {
+    ) -> VmmStateOwner {
         match req {
-            Some(TerminateRequest { tx, mark_failed }) => {
+            Some(TerminateRequest { tx, new_state_owner }) => {
                 if let Some(request) = current_req {
                     info!(
                         self.log,
                         "Received request to terminate instance while waiting \
                          on an ongoing request";
                         "request" => %request,
-                        "mark_failed" => mark_failed,
                     );
                 } else {
                     info!(
                         self.log,
                         "Received request to terminate instance";
-                        "mark_failed" => mark_failed,
                     );
                 }
 
+                self.fail_vmm_and_terminate().await;
                 let result = tx
                     .send(Ok(VmmUnregisterResponse {
-                        updated_runtime: Some(
-                            self.terminate(mark_failed).await,
-                        ),
+                        updated_runtime: Some(self.state.sled_instance_state()),
                     }))
                     .map_err(|_| Error::FailedSendClientClosed);
                 if let Err(err) = result {
@@ -2292,6 +2355,8 @@ impl InstanceRunner {
                         "err" => ?err,
                     );
                 }
+
+                new_state_owner
             }
             None => {
                 if let Some(request) = current_req {
@@ -2308,18 +2373,27 @@ impl InstanceRunner {
                          shutting down";
                     );
                 }
-                self.terminate(false).await;
+
+                // REVIEW(gjc) how do we even get here while there's a valid
+                // instance ticket etc.?
+                self.terminate().await;
+                VmmStateOwner::Runner
             }
-        };
+        }
     }
 
-    async fn terminate(&mut self, mark_failed: bool) -> SledVmmState {
-        self.terminate_inner().await;
-        self.state.terminate_rudely(mark_failed);
+    /// Forcibly moves this VMM to the Failed state, then goes through the
+    /// runner termination sequence.
+    async fn fail_vmm_and_terminate(&mut self) {
+        self.state.force_state_to_failed();
+        self.terminate().await;
+    }
 
-        // This causes the "run" task to exit on the next iteration.
+    /// Ensures that no Propolis zone exists for this instance runner and sets
+    /// its `should_terminate` flag so that the runner will shut down.
+    async fn terminate(&mut self) {
+        self.remove_propolis_zone().await;
         self.should_terminate = true;
-        self.state.sled_instance_state()
     }
 
     async fn issue_snapshot_request(
