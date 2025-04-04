@@ -13,26 +13,25 @@
 
 mod artifacts;
 mod common_sp_update;
+mod driver;
 mod host_phase1_updater;
 mod mgs_clients;
 mod rot_updater;
 mod sp_updater;
-mod tracker;
 
 pub use artifacts::ArtifactCache;
 pub use artifacts::ArtifactCacheError;
 pub use common_sp_update::ReconfiguratorSpComponentUpdater;
 pub use common_sp_update::SpComponentUpdateError;
 pub use common_sp_update::SpComponentUpdater;
+pub use driver::ApplyUpdateError;
+pub use driver::ApplyUpdateResult;
+pub use driver::MgsUpdateDriver;
+pub use driver::apply_update;
 pub use host_phase1_updater::HostPhase1Updater;
 pub use mgs_clients::MgsClients;
 pub use rot_updater::RotUpdater;
 pub use sp_updater::SpUpdater;
-// XXX-dap split tracker up into ConcurrentUpdater and Tracker?
-pub use tracker::ApplyUpdateError;
-pub use tracker::ApplyUpdateResult;
-pub use tracker::MgsUpdateDriver;
-pub use tracker::apply_update;
 // XXX-dap add type definitions for the map of requests?  or maybe even a
 // struct to manage this?
 
