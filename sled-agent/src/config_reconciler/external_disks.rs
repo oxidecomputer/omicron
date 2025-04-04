@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use id_map::IdMap;
+use id_map::IdMappable;
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::DiskManagementError;
@@ -17,7 +18,6 @@ use sled_storage::disk::DiskError;
 use sled_storage::disk::RawDisk;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
-use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::Arc;
 
@@ -25,6 +25,14 @@ use std::sync::Arc;
 struct ExternalDisk {
     config: OmicronPhysicalDiskConfig,
     state: Arc<DiskState>,
+}
+
+impl IdMappable for ExternalDisk {
+    type Id = PhysicalDiskUuid;
+
+    fn id(&self) -> Self::Id {
+        self.config.id
+    }
 }
 
 #[derive(Debug)]
@@ -35,13 +43,13 @@ enum DiskState {
 
 #[derive(Debug, Clone)]
 pub struct ExternalDiskMap {
-    disks: BTreeMap<PhysicalDiskUuid, ExternalDisk>,
+    disks: IdMap<ExternalDisk>,
     mount_config: Arc<MountConfig>,
 }
 
 impl ExternalDiskMap {
     pub fn new(mount_config: Arc<MountConfig>) -> Self {
-        Self { disks: BTreeMap::new(), mount_config }
+        Self { disks: IdMap::default(), mount_config }
     }
 
     pub(super) fn mount_config(&self) -> &MountConfig {
@@ -52,7 +60,7 @@ impl ExternalDiskMap {
     // in terms of datasets, not pools
     pub(super) fn all_u2_pools(&self) -> Vec<ZpoolName> {
         self.disks
-            .values()
+            .iter()
             .filter_map(|disk| match &*disk.state {
                 DiskState::Managed(disk) => Some(disk.zpool_name().clone()),
                 DiskState::FailedToStartManaging(_) => None,
@@ -73,15 +81,16 @@ impl ExternalDiskMap {
         let mut disk_ids_to_remove = Vec::new();
         let mut disk_ids_to_mark_not_found = Vec::new();
 
-        for (disk_id, disk) in &self.disks {
-            if !config.contains_key(disk_id) {
+        for disk in &self.disks {
+            let disk_id = disk.config.id;
+            if !config.contains_key(&disk_id) {
                 info!(
                     log,
                     "removing managed disk: no longer present in config";
                     "disk_id" => %disk_id,
                     "disk" => ?disk.config.identity,
                 );
-                disk_ids_to_remove.push(*disk_id);
+                disk_ids_to_remove.push(disk_id);
             } else if !raw_disks.contains_key(&disk.config.identity) {
                 // Disk is still present in config, but no longer available:
                 // make sure we've set the state appropriately.
@@ -98,7 +107,7 @@ impl ExternalDiskMap {
                         "disk_id" => %disk_id,
                         "disk" => ?disk.config.identity,
                     );
-                    disk_ids_to_mark_not_found.push(*disk_id);
+                    disk_ids_to_mark_not_found.push(disk_id);
                 }
             }
         }
@@ -107,7 +116,7 @@ impl ExternalDiskMap {
             self.disks.remove(&disk_id);
         }
         for disk_id in disk_ids_to_mark_not_found {
-            let entry =
+            let mut entry =
                 self.disks.get_mut(&disk_id).expect("IDs came from self.disks");
             entry.state = Arc::new(DiskState::FailedToStartManaging(
                 DiskManagementError::NotFound,
@@ -155,13 +164,10 @@ impl ExternalDiskMap {
                     Ok(disk) => DiskState::Managed(disk),
                     Err(err) => DiskState::FailedToStartManaging(err),
                 };
-                self.disks.insert(
-                    config_disk.id,
-                    ExternalDisk {
-                        config: config_disk.clone(),
-                        state: Arc::new(state),
-                    },
-                );
+                self.disks.insert(ExternalDisk {
+                    config: config_disk.clone(),
+                    state: Arc::new(state),
+                });
             }
         }
     }
