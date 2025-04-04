@@ -993,7 +993,7 @@ pub struct ZoneBuilderFactory {
 }
 
 impl ZoneBuilderFactory {
-    pub fn real() -> Self {
+    pub fn new() -> Self {
         Self {
             fake_cfg: None,
             zones_api: Arc::new(crate::zone::Zones::real_api()),

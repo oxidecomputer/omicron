@@ -81,7 +81,6 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use illumos_utils::dladm::Dladm;
-use illumos_utils::running_zone::ZoneBuilderFactory;
 use illumos_utils::zone::Api;
 use illumos_utils::zone::Zones;
 
@@ -526,7 +525,6 @@ impl SledAgent {
             port_manager.clone(),
             storage_manager.clone(),
             long_running_task_handles.zone_bundler.clone(),
-            ZoneBuilderFactory::real(),
             vmm_reservoir_manager.clone(),
             metrics_manager.request_queue(),
         )?;

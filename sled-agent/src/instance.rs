@@ -2875,7 +2875,7 @@ mod tests {
 
         let vmm_reservoir_manager = VmmReservoirManagerHandle::stub_for_test();
 
-        let mgr = crate::instance_manager::InstanceManager::new(
+        let mgr = crate::instance_manager::InstanceManager::new_inner(
             logctx.log.new(o!("component" => "InstanceManager")),
             nexus_client,
             vnic_allocator,
@@ -3010,7 +3010,7 @@ mod tests {
 
         let vmm_reservoir_manager = VmmReservoirManagerHandle::stub_for_test();
 
-        let mgr = crate::instance_manager::InstanceManager::new(
+        let mgr = crate::instance_manager::InstanceManager::new_inner(
             logctx.log.new(o!("component" => "InstanceManager")),
             nexus_client,
             vnic_allocator,

@@ -329,7 +329,7 @@ impl ProbeManagerInner {
             dhcp_config: DhcpCfg::default(),
         })?;
 
-        let installed_zone = ZoneBuilderFactory::real()
+        let installed_zone = ZoneBuilderFactory::new()
             .builder()
             .with_log(self.log.clone())
             .with_underlay_vnic_allocator(&self.vnic_allocator)

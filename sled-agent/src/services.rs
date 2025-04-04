@@ -824,6 +824,32 @@ impl ServiceManager {
         switch_zone_maghemite_links: Vec<PhysicalLink>,
         storage: StorageHandle,
         zone_bundler: ZoneBundler,
+    ) -> Self {
+        Self::new_inner(
+            log,
+            ddm_reconciler,
+            bootstrap_networking,
+            sled_mode,
+            time_sync_config,
+            sidecar_revision,
+            switch_zone_maghemite_links,
+            storage,
+            zone_bundler,
+            RealSystemApi::new(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn new_inner(
+        log: &Logger,
+        ddm_reconciler: DdmReconciler,
+        bootstrap_networking: BootstrapNetworking,
+        sled_mode: SledMode,
+        time_sync_config: TimeSyncConfig,
+        sidecar_revision: SidecarRevision,
+        switch_zone_maghemite_links: Vec<PhysicalLink>,
+        storage: StorageHandle,
+        zone_bundler: ZoneBundler,
         system_api: Box<dyn SystemApi>,
     ) -> Self {
         let log = log.new(o!("component" => "ServiceManager"));
@@ -1607,7 +1633,7 @@ impl ServiceManager {
 
         // We use the fake initialiser for testing
         let mut zone_builder = match self.inner.system_api.fake_install_dir() {
-            None => ZoneBuilderFactory::real().builder(),
+            None => ZoneBuilderFactory::new().builder(),
             Some(dir) => ZoneBuilderFactory::fake(
                 Some(&dir.as_str().to_string()),
                 illumos_utils::fakes::zone::Zones::new(),
@@ -5277,7 +5303,7 @@ mod illumos_tests {
             let reconciler =
                 DdmReconciler::new(Ipv6Subnet::new(Ipv6Addr::LOCALHOST), log)
                     .expect("created DdmReconciler");
-            let mgr = ServiceManager::new(
+            let mgr = ServiceManager::new_inner(
                 log,
                 reconciler,
                 make_bootstrap_networking_config(),
