@@ -5,7 +5,6 @@ use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
-use illumos_utils::zone::Zones;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use nexus_client::types::{
     BackgroundTasksActivateRequest, ProbeExternalIp, ProbeInfo,
@@ -65,6 +64,8 @@ pub(crate) struct ProbeManagerInner {
     port_manager: PortManager,
     metrics_queue: MetricsRequestQueue,
     running_probes: Mutex<RunningProbes>,
+
+    zones_api: Arc<dyn illumos_utils::zone::Api>,
 }
 
 impl ProbeManager {
@@ -83,6 +84,7 @@ impl ProbeManager {
                 vnic_allocator: VnicAllocator::new(
                     VNIC_ALLOCATOR_SCOPE,
                     etherstub,
+                    Arc::new(illumos_utils::dladm::Dladm::real_api()),
                 ),
                 running_probes: Mutex::new(RunningProbes {
                     storage_generation: None,
@@ -94,6 +96,7 @@ impl ProbeManager {
                 storage,
                 port_manager,
                 metrics_queue,
+                zones_api: Arc::new(illumos_utils::zone::Zones::real_api()),
             }),
         }
     }
@@ -326,7 +329,7 @@ impl ProbeManagerInner {
             dhcp_config: DhcpCfg::default(),
         })?;
 
-        let installed_zone = ZoneBuilderFactory::default()
+        let installed_zone = ZoneBuilderFactory::new()
             .builder()
             .with_log(self.log.clone())
             .with_underlay_vnic_allocator(&self.vnic_allocator)
@@ -457,7 +460,9 @@ impl ProbeManagerInner {
 
     /// Collect the current probe state from the running zones on this sled.
     async fn current_state(self: &Arc<Self>) -> Result<HashSet<ProbeState>> {
-        Ok(Zones::get()
+        Ok(self
+            .zones_api
+            .get()
             .await?
             .into_iter()
             .filter_map(|z| ProbeState::try_from(z).ok())

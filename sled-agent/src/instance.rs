@@ -22,7 +22,6 @@ use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
-use illumos_utils::svc::wait_for_service;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use omicron_common::NoDebug;
@@ -52,11 +51,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
-
-#[cfg(test)]
-use illumos_utils::zone::MockZones as Zones;
-#[cfg(not(test))]
-use illumos_utils::zone::Zones;
 
 // The depth of the request queue for the instance.
 const QUEUE_SIZE: usize = 32;
@@ -317,6 +311,7 @@ struct InstanceMonitorRunner {
     client: Arc<PropolisClient>,
     zone_name: String,
     tx_monitor: mpsc::Sender<InstanceMonitorRequest>,
+    zones_api: Arc<dyn illumos_utils::zone::Api>,
     log: slog::Logger,
 }
 
@@ -386,7 +381,7 @@ impl InstanceMonitorRunner {
             // If we couldn't communicate with propolis-server, let's make sure
             // the zone is still there...
             Err(e @ PropolisClientError::CommunicationError(_)) => {
-                match Zones::find(&self.zone_name).await {
+                match self.zones_api.find(&self.zone_name).await {
                     Ok(None) => {
                         // Oh it's GONE!
                         info!(
@@ -1367,6 +1362,7 @@ impl InstanceRunner {
             zone_name: running_zone.name().to_string(),
             client: client.clone(),
             tx_monitor: self.tx_monitor.clone(),
+            zones_api: self.zone_builder_factory.zones_api().clone(),
             log: self.log.clone(),
         };
         let log = self.log.clone();
@@ -1442,7 +1438,9 @@ impl InstanceRunner {
             omicron_common::backoff::retry(
                 omicron_common::backoff::retry_policy_local(),
                 || async {
-                    Zones::halt_and_remove_logged(&self.log, &zname)
+                    self.zone_builder_factory
+                        .zones_api()
+                        .halt_and_remove_logged(&self.log, &zname)
                         .await
                         .map_err(|e| {
                             if e.is_invalid_state() {
@@ -2223,7 +2221,9 @@ impl InstanceRunner {
         // but it helps distinguish "online in SMF" from "responding to HTTP
         // requests".
         let fmri = fmri_name();
-        wait_for_service(Some(&zname), &fmri, self.log.clone())
+        self.zone_builder_factory
+            .zones_api()
+            .wait_for_service(Some(&zname), &fmri, self.log.clone())
             .await
             .map_err(|_| Error::Timeout(fmri.to_string()))?;
         info!(self.log, "Propolis SMF service is online");
@@ -2399,13 +2399,6 @@ mod tests {
     use camino_tempfile::Utf8TempDir;
     use dns_server::TransientServer;
     use dropshot::HttpServer;
-    use illumos_utils::dladm::__mock_MockDladm::__create_vnic::Context as MockDladmCreateVnicContext;
-    use illumos_utils::dladm::__mock_MockDladm::__delete_vnic::Context as MockDladmDeleteVnicContext;
-    use illumos_utils::dladm::MockDladm;
-    use illumos_utils::svc::__wait_for_service::Context as MockWaitForServiceContext;
-    use illumos_utils::zone::__mock_MockZones::__boot::Context as MockZonesBootContext;
-    use illumos_utils::zone::__mock_MockZones::__id::Context as MockZonesIdContext;
-    use illumos_utils::zone::MockZones;
     use internal_dns_resolver::Resolver;
     use omicron_common::FileKv;
     use omicron_common::api::external::{
@@ -2494,38 +2487,6 @@ mod tests {
 
             Self { nexus_client, _nexus_server, state_rx, _dns_server }
         }
-    }
-
-    fn mock_vnic_contexts()
-    -> (MockDladmCreateVnicContext, MockDladmDeleteVnicContext) {
-        let create_vnic_ctx = MockDladm::create_vnic_context();
-        let delete_vnic_ctx = MockDladm::delete_vnic_context();
-        create_vnic_ctx.expect().return_once(
-            |physical_link: &Etherstub, _, _, _, _| {
-                assert_eq!(&physical_link.0, "mystub");
-                Ok(())
-            },
-        );
-        delete_vnic_ctx.expect().returning(|_| Ok(()));
-        (create_vnic_ctx, delete_vnic_ctx)
-    }
-
-    // InstanceManager::ensure_state calls Instance::put_state(Running),
-    //  which calls Instance::propolis_ensure,
-    //   which spawns Instance::monitor_state_task,
-    //    which calls cpapi_instances_put
-    //   and calls Instance::setup_propolis_inner,
-    //    which creates the zone (which isn't real in these tests, of course)
-    fn mock_zone_contexts()
-    -> (MockZonesBootContext, MockWaitForServiceContext, MockZonesIdContext)
-    {
-        let boot_ctx = MockZones::boot_context();
-        boot_ctx.expect().return_once(|_| Ok(()));
-        let wait_ctx = illumos_utils::svc::wait_for_service_context();
-        wait_ctx.expect().times(..).returning(|_, _, _| Ok(()));
-        let zone_id_ctx = MockZones::id_context();
-        zone_id_ctx.expect().times(..).returning(|_| Ok(Some(1)));
-        (boot_ctx, wait_ctx, zone_id_ctx)
     }
 
     // note the "mock" here is different from the vnic/zone contexts above.
@@ -2687,8 +2648,11 @@ mod tests {
         nexus_client: NexusClient,
         temp_dir: &String,
     ) -> (InstanceManagerServices, MetricsRx) {
-        let vnic_allocator =
-            VnicAllocator::new("Foo", Etherstub("mystub".to_string()));
+        let vnic_allocator = VnicAllocator::new(
+            "Instance",
+            Etherstub("mystub".to_string()),
+            illumos_utils::fakes::dladm::Dladm::new(),
+        );
         let port_manager = PortManager::new(
             log.new(o!("component" => "PortManager")),
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
@@ -2708,7 +2672,10 @@ mod tests {
             port_manager,
             storage: storage_handle,
             zone_bundler,
-            zone_builder_factory: ZoneBuilderFactory::fake(Some(temp_dir)),
+            zone_builder_factory: ZoneBuilderFactory::fake(
+                Some(temp_dir),
+                illumos_utils::fakes::zone::Zones::new(),
+            ),
             metrics_queue,
         };
         (services, rx)
@@ -2723,10 +2690,6 @@ mod tests {
 
         let (propolis_server, _propolis_client) = propolis_mock_server(&log);
         let propolis_addr = propolis_server.local_addr();
-
-        // automock'd things used during this test
-        let _mock_vnic_contexts = mock_vnic_contexts();
-        let _mock_zone_contexts = mock_zone_contexts();
 
         let FakeNexusParts {
             nexus_client,
@@ -2793,7 +2756,7 @@ mod tests {
             message,
             metrics::Message::TrackVnic {
                 zone_name,
-                name: "oxControlFoo0".into(),
+                name: "oxControlInstance0".into(),
             },
             "Expected instance zone to send a message on its metrics \
             request queue, asking to track its control VNIC",
@@ -2813,10 +2776,6 @@ mod tests {
             "test_instance_create_timeout_while_starting_propolis",
         );
         let log = logctx.log.new(o!(FileKv));
-
-        // automock'd things used during this test
-        let _mock_vnic_contexts = mock_vnic_contexts();
-        let _mock_zone_contexts = mock_zone_contexts();
 
         let FakeNexusParts {
             nexus_client,
@@ -2878,133 +2837,12 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_instance_create_timeout_while_creating_zone() {
-        let logctx = omicron_test_utils::dev::test_setup_log(
-            "test_instance_create_timeout_while_creating_zone",
-        );
-        let log = logctx.log.new(o!(FileKv));
-
-        // automock'd things used during this test
-        let _mock_vnic_contexts = mock_vnic_contexts();
-
-        // time out while booting zone, on purpose!
-        let boot_ctx = MockZones::boot_context();
-        const TIMEOUT: Duration = Duration::from_secs(1);
-        let (boot_continued_tx, boot_continued_rx) =
-            std::sync::mpsc::sync_channel(1);
-        let boot_log = log.clone();
-        boot_ctx.expect().times(1).return_once(move |_| {
-            // We need a way to slow down zone boot, but that doesn't block the
-            // entire Tokio runtime. Since this closure is synchronous, it also
-            // has no way to await anything, all waits are blocking. That means
-            // we cannot use a single-threaded runtime, which also means no
-            // manually advancing time. The test has to take the full "slow boot
-            // time".
-            //
-            // To do this, we use a multi-threaded runtime, and call
-            // block_in_place so that we can just literally sleep for a while.
-            // The sleep duration here is twice a timeout we set on the attempt
-            // to actually set the instance running below.
-            //
-            // This boot method also directly signals the main test code to
-            // continue when it's done sleeping to synchronize with it.
-            tokio::task::block_in_place(move || {
-                debug!(
-                    boot_log,
-                    "MockZones::boot() called, waiting for timeout"
-                );
-                std::thread::sleep(TIMEOUT * 2);
-                debug!(
-                    boot_log,
-                    "MockZones::boot() waited for timeout, continuing"
-                );
-                boot_continued_tx.send(()).unwrap();
-            });
-            Ok(())
-        });
-        let wait_ctx = illumos_utils::svc::wait_for_service_context();
-        wait_ctx.expect().times(..).returning(|_, _, _| Ok(()));
-        let zone_id_ctx = MockZones::id_context();
-        zone_id_ctx.expect().times(..).returning(|_| Ok(Some(1)));
-
-        let FakeNexusParts {
-            nexus_client,
-            state_rx,
-            _dns_server,
-            _nexus_server,
-        } = FakeNexusParts::new(&log).await;
-
-        let mut storage_harness = setup_storage_manager(&logctx.log).await;
-        let storage_handle = storage_harness.handle().clone();
-
-        let temp_guard = Utf8TempDir::new().unwrap();
-        let temp_dir = temp_guard.path().to_string();
-
-        let (inst, _) = timeout(
-            TIMEOUT_DURATION,
-            instance_struct(
-                &log,
-                // isn't running because the "zone" never "boots"
-                SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 1, 0, 0)),
-                nexus_client,
-                storage_handle,
-                &temp_dir,
-            ),
-        )
-        .await
-        .expect("timed out creating Instance struct");
-
-        let (put_tx, put_rx) = oneshot::channel();
-
-        // pretending we're InstanceManager::ensure_state, try in vain to start
-        // our "instance", but the zone never finishes installing
-        inst.put_state(put_tx, VmmStateRequested::Running)
-            .expect("failed to send Instance::put_state");
-
-        // Timeout our future waiting for the instance-state-change at 1s. This
-        // is much shorter than the actual `TIMEOUT_DURATION`, but the test
-        // structure requires that we actually wait this period, since we cannot
-        // advance time manually in a multi-threaded runtime.
-        let timeout_fut = timeout(TIMEOUT, put_rx);
-        debug!(log, "Awaiting zone-boot timeout");
-        timeout_fut
-            .await
-            .expect_err("*should've* timed out waiting for Instance::put_state, but didn't?");
-        debug!(log, "Zone-boot timeout awaited");
-
-        if let ReceivedInstanceState::InstancePut(SledVmmState {
-            vmm_state: VmmRuntimeState { state: VmmState::Running, .. },
-            ..
-        }) = state_rx.borrow().to_owned()
-        {
-            panic!(
-                "Nexus's InstanceState should never have reached running if zone creation timed out"
-            );
-        }
-
-        // Notify the "boot" closure that it can continue, and then wait to
-        // ensure it's actually called.
-        debug!(log, "Waiting for zone-boot to continue");
-        tokio::task::spawn_blocking(move || boot_continued_rx.recv().unwrap())
-            .await
-            .unwrap();
-        debug!(log, "Received continued message from MockZones::boot()");
-
-        storage_harness.cleanup().await;
-        logctx.cleanup_successful();
-    }
-
     #[tokio::test]
     async fn test_instance_manager_creation() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_instance_manager_creation",
         );
         let log = logctx.log.new(o!(FileKv));
-
-        // automock'd things used during this test
-        let _mock_vnic_contexts = mock_vnic_contexts();
-        let _mock_zone_contexts = mock_zone_contexts();
 
         let mut storage_harness = setup_storage_manager(&logctx.log).await;
         let storage_handle = storage_harness.handle().clone();
@@ -3027,7 +2865,7 @@ mod tests {
         );
         let InstanceManagerServices {
             nexus_client,
-            vnic_allocator: _,
+            vnic_allocator,
             port_manager,
             storage,
             zone_bundler,
@@ -3035,14 +2873,12 @@ mod tests {
             metrics_queue,
         } = services;
 
-        let etherstub = Etherstub("mystub".to_string());
-
         let vmm_reservoir_manager = VmmReservoirManagerHandle::stub_for_test();
 
-        let mgr = crate::instance_manager::InstanceManager::new(
+        let mgr = crate::instance_manager::InstanceManager::new_inner(
             logctx.log.new(o!("component" => "InstanceManager")),
             nexus_client,
-            etherstub,
+            vnic_allocator,
             port_manager,
             storage,
             zone_bundler,
@@ -3143,10 +2979,6 @@ mod tests {
         );
         let log = logctx.log.new(o!(FileKv));
 
-        // automock'd things used during this test
-        let _mock_vnic_contexts = mock_vnic_contexts();
-        let _mock_zone_contexts = mock_zone_contexts();
-
         let mut storage_harness = setup_storage_manager(&logctx.log).await;
         let storage_handle = storage_harness.handle().clone();
 
@@ -3168,7 +3000,7 @@ mod tests {
         );
         let InstanceManagerServices {
             nexus_client,
-            vnic_allocator: _,
+            vnic_allocator,
             port_manager,
             storage,
             zone_bundler,
@@ -3176,14 +3008,12 @@ mod tests {
             metrics_queue,
         } = services;
 
-        let etherstub = Etherstub("mystub".to_string());
-
         let vmm_reservoir_manager = VmmReservoirManagerHandle::stub_for_test();
 
-        let mgr = crate::instance_manager::InstanceManager::new(
+        let mgr = crate::instance_manager::InstanceManager::new_inner(
             logctx.log.new(o!("component" => "InstanceManager")),
             nexus_client,
-            etherstub,
+            vnic_allocator,
             port_manager,
             storage,
             zone_bundler,
@@ -3199,7 +3029,6 @@ mod tests {
 
         let instance_id = InstanceUuid::new_v4();
         let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
-        let zone_name = propolis_zone_name(&propolis_id);
         let InstanceInitialState {
             hardware,
             vmm_runtime,
@@ -3281,14 +3110,6 @@ mod tests {
 
         // NOW WE STOP ADVANCING THE MOCK PROPOLIS STATE MACHINE --- IT WILL
         // NEVER REACH `Stopped`.
-
-        // Expect that the `InstanceRunner` will attempt to halt and remove the
-        // zone.
-        let halt_ctx = MockZones::halt_and_remove_logged_context();
-        halt_ctx.expect().returning(move |_, name| {
-            assert_eq!(name, &zone_name);
-            Ok(())
-        });
 
         // Now, pause time and advance the Tokio clock past the stop grace
         // period. This should cause the stop timeout to fire, without requiring

@@ -10,16 +10,12 @@ use std::sync::OnceLock;
 use crate::illumos::gpt;
 use crate::{DiskPaths, Partition, PooledDiskError};
 use camino::Utf8Path;
+use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolName;
 use omicron_common::disk::{DiskIdentity, DiskVariant};
 use omicron_uuid_kinds::ZpoolUuid;
 use slog::Logger;
 use slog::info;
-
-#[cfg(test)]
-use illumos_utils::zpool::MockZpool as Zpool;
-#[cfg(not(test))]
-use illumos_utils::zpool::Zpool;
 
 /// NVMe devices use a meta size of 0 as we don't support writing addditional
 /// metadata
@@ -153,7 +149,12 @@ pub fn ensure_partition_layout(
     zpool_id: Option<ZpoolUuid>,
 ) -> Result<Vec<Partition>, PooledDiskError> {
     internal_ensure_partition_layout::<libefi_illumos::Gpt>(
-        log, paths, variant, identity, zpool_id,
+        log,
+        &Zpool::real_api(),
+        paths,
+        variant,
+        identity,
+        zpool_id,
     )
 }
 
@@ -161,6 +162,7 @@ pub fn ensure_partition_layout(
 // for access to external resources.
 fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
     log: &Logger,
+    zpool_api: &dyn illumos_utils::zpool::Api,
     paths: &DiskPaths,
     variant: DiskVariant,
     identity: &DiskIdentity,
@@ -212,7 +214,7 @@ fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
 
                     // If a zpool does not already exist, create one.
                     let zpool_name = ZpoolName::new_external(zpool_id);
-                    Zpool::create(&zpool_name, dev_path)?;
+                    zpool_api.create(&zpool_name, dev_path)?;
                     return Ok(vec![Partition::ZfsPool]);
                 }
                 DiskVariant::M2 => {
@@ -360,7 +362,6 @@ mod test {
     use super::*;
     use crate::DiskPaths;
     use camino::Utf8PathBuf;
-    use illumos_utils::zpool::MockZpool;
     use omicron_test_utils::dev::{mock_disk_identity, test_setup_log};
     use std::path::Path;
 
@@ -395,6 +396,7 @@ mod test {
         let devfs_path = Utf8PathBuf::from("/devfs/path");
         let result = internal_ensure_partition_layout::<LabelNotFoundGPT>(
             &log,
+            illumos_utils::fakes::zpool::Zpool::new().as_ref(),
             &DiskPaths { devfs_path, dev_path: None },
             DiskVariant::U2,
             &mock_disk_identity(),
@@ -417,16 +419,9 @@ mod test {
         let devfs_path = Utf8PathBuf::from("/devfs/path");
         const DEV_PATH: &'static str = "/dev/path";
 
-        // We expect that formatting a zpool will involve calling
-        // "Zpool::create" with the provided "dev_path".
-        let create_ctx = MockZpool::create_context();
-        create_ctx.expect().return_once(|_, observed_dev_path| {
-            assert_eq!(&Utf8PathBuf::from(DEV_PATH), observed_dev_path);
-            Ok(())
-        });
-
         let partitions = internal_ensure_partition_layout::<LabelNotFoundGPT>(
             &log,
+            illumos_utils::fakes::zpool::Zpool::new().as_ref(),
             &DiskPaths {
                 devfs_path,
                 dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
@@ -454,6 +449,7 @@ mod test {
         assert!(
             internal_ensure_partition_layout::<LabelNotFoundGPT>(
                 &log,
+                illumos_utils::fakes::zpool::Zpool::new().as_ref(),
                 &DiskPaths {
                     devfs_path,
                     dev_path: Some(Utf8PathBuf::from(DEV_PATH))
@@ -494,6 +490,7 @@ mod test {
 
         let partitions = internal_ensure_partition_layout::<FakeU2GPT>(
             &log,
+            illumos_utils::fakes::zpool::Zpool::new().as_ref(),
             &DiskPaths {
                 devfs_path,
                 dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
@@ -538,6 +535,7 @@ mod test {
 
         let partitions = internal_ensure_partition_layout::<FakeM2GPT>(
             &log,
+            illumos_utils::fakes::zpool::Zpool::new().as_ref(),
             &DiskPaths {
                 devfs_path,
                 dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
@@ -579,6 +577,7 @@ mod test {
         assert!(matches!(
             internal_ensure_partition_layout::<EmptyGPT>(
                 &log,
+                illumos_utils::fakes::zpool::Zpool::new().as_ref(),
                 &DiskPaths {
                     devfs_path,
                     dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
@@ -606,6 +605,7 @@ mod test {
         assert!(matches!(
             internal_ensure_partition_layout::<EmptyGPT>(
                 &log,
+                illumos_utils::fakes::zpool::Zpool::new().as_ref(),
                 &DiskPaths {
                     devfs_path,
                     dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
