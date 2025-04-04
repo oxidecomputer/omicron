@@ -35,6 +35,7 @@ use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::wait_for_producer;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
+use nexus_types::identity::Asset;
 use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
@@ -2592,6 +2593,249 @@ async fn test_disk_expunge(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     assert_eq!(expunged_regions.len(), 3);
+}
+
+#[nexus_test(extra_sled_agents = 3)]
+async fn test_do_not_provision_on_dataset(cptestctx: &ControlPlaneTestContext) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Create one zpool, each with one dataset, on all the sleds
+    let disk_test = DiskTestBuilder::new(&cptestctx)
+        .on_all_sleds()
+        .with_zpool_count(1)
+        .build()
+        .await;
+
+    // For one of the datasets, mark it as not provisionable
+    let dataset = &disk_test.zpools().next().unwrap().datasets[0];
+
+    datastore
+        .mark_crucible_dataset_not_provisionable(&opctx, dataset.id)
+        .await
+        .unwrap();
+
+    // Create a disk
+    let client = &cptestctx.external_client;
+    let _project_id = create_project_and_pool(client).await;
+
+    let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
+
+    // Assert no region was allocated to the marked dataset
+    let disk_id = disk.identity.id;
+    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk_id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+    let allocated_regions =
+        datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
+
+    for (allocated_region_dataset, _) in allocated_regions {
+        assert_ne!(allocated_region_dataset.id(), dataset.id);
+    }
+}
+
+#[nexus_test(extra_sled_agents = 2)]
+async fn test_do_not_provision_on_dataset_not_enough(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Create one zpool, each with one dataset, on all the sleds
+    let disk_test = DiskTestBuilder::new(&cptestctx)
+        .on_all_sleds()
+        .with_zpool_count(1)
+        .build()
+        .await;
+
+    // For one of the datasets, mark it as not provisionable
+    let dataset = &disk_test.zpools().next().unwrap().datasets[0];
+
+    datastore
+        .mark_crucible_dataset_not_provisionable(&opctx, dataset.id)
+        .await
+        .unwrap();
+
+    // Because there's only 3 sled agents, each with one zpool with one dataset,
+    // this shouldn't be enough to create a disk.
+
+    let client = &cptestctx.external_client;
+    create_project_and_pool(client).await;
+
+    let disks_url = get_disks_url();
+
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DISK_NAME.parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: ByteCount::from_gibibytes_u32(1),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::INSUFFICIENT_STORAGE)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Marking that dataset as provisionable should allow the disk to be
+    // created.
+
+    datastore
+        .mark_crucible_dataset_provisionable(&opctx, dataset.id)
+        .await
+        .unwrap();
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+}
+
+#[nexus_test(extra_sled_agents = 2)]
+async fn test_zpool_control_plane_storage_buffer(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Create one zpool, each with one dataset, on all the sleds
+    let disk_test = DiskTestBuilder::new(&cptestctx)
+        .on_all_sleds()
+        .with_zpool_count(1)
+        .build()
+        .await;
+
+    // Assert default is still 16 GiB
+    assert_eq!(16, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
+
+    let client = &cptestctx.external_client;
+    create_project_and_pool(client).await;
+
+    let disks_url = get_disks_url();
+
+    // Creating a 8G disk will work (10G size used due to reservation overhead)
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "disk1".parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: ByteCount::from_gibibytes_u32(8),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Creating a 4G disk will also work (5G size used due to reservation
+    // overhead plus the previous 10G size used is less than 16G)
+    let new_disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "disk2".parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: ByteCount::from_gibibytes_u32(4),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Delete the 4G disk
+    let disk_url = get_disk_url("disk2");
+    NexusRequest::object_delete(client, &disk_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk");
+
+    // For any of the zpools, set the control plane storage buffer to 2G. This
+    // should prevent the disk's region allocation from succeeding (as the
+    // reserved sizes of 10G + 5G plus the storage buffer of 2G is 1G over the
+    // the backing pool's 16G).
+
+    let zpool = &disk_test.zpools().next().unwrap();
+    datastore
+        .zpool_set_control_plane_storage_buffer(
+            &opctx,
+            zpool.id,
+            ByteCount::from_gibibytes_u32(2).into(),
+        )
+        .await
+        .unwrap();
+
+    // Now creating the 4G disk should fail
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::INSUFFICIENT_STORAGE)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Setting the storage buffer to 1G should allow the disk creation to
+    // succeed.
+
+    datastore
+        .zpool_set_control_plane_storage_buffer(
+            &opctx,
+            zpool.id,
+            ByteCount::from_gibibytes_u32(1).into(),
+        )
+        .await
+        .unwrap();
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&new_disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
 }
 
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {

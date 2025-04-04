@@ -4,6 +4,7 @@
 
 //! Rack management
 
+use crate::app::CONTROL_PLANE_STORAGE_BUFFER;
 use crate::external_api::params;
 use crate::external_api::params::CertificateCreate;
 use crate::external_api::shared::ServiceUsingCertificate;
@@ -136,6 +137,7 @@ impl super::Nexus {
                     pool.id,
                     pool.sled_id,
                     pool.physical_disk_id,
+                    CONTROL_PLANE_STORAGE_BUFFER.into(),
                 )
             })
             .collect();

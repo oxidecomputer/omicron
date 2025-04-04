@@ -55,8 +55,9 @@ WITH
         INNER JOIN (zpool INNER JOIN sled ON zpool.sled_id = sled.id) ON
             zpool.id = old_zpool_usage.pool_id
         INNER JOIN physical_disk ON zpool.physical_disk_id = physical_disk.id
+        INNER JOIN crucible_dataset ON crucible_dataset.pool_id = zpool.id
       WHERE
-        (old_zpool_usage.size_used + $2)
+        (old_zpool_usage.size_used + $2 + zpool.control_plane_storage_buffer)
         <= (
             SELECT
               total_size
@@ -74,6 +75,8 @@ WITH
         AND physical_disk.disk_policy = 'in_service'
         AND physical_disk.disk_state = 'active'
         AND NOT (zpool.id = ANY (SELECT existing_zpools.pool_id FROM existing_zpools))
+        AND (crucible_dataset.time_deleted IS NULL)
+        AND crucible_dataset.no_provision = false
         AND NOT (sled.id = ANY (SELECT existing_sleds.id FROM existing_sleds))
       ORDER BY
         zpool.sled_id, md5(CAST(zpool.id AS BYTES) || $3)
@@ -86,7 +89,7 @@ WITH
         crucible_dataset
         INNER JOIN candidate_zpools ON crucible_dataset.pool_id = candidate_zpools.pool_id
       WHERE
-        crucible_dataset.time_deleted IS NULL
+        (crucible_dataset.time_deleted IS NULL) AND crucible_dataset.no_provision = false
       ORDER BY
         crucible_dataset.pool_id, md5(CAST(crucible_dataset.id AS BYTES) || $4)
     ),
@@ -290,7 +293,8 @@ WITH
         crucible_dataset.pool_id,
         crucible_dataset.ip,
         crucible_dataset.port,
-        crucible_dataset.size_used
+        crucible_dataset.size_used,
+        crucible_dataset.no_provision
     )
 (
   SELECT
@@ -303,6 +307,7 @@ WITH
     crucible_dataset.ip,
     crucible_dataset.port,
     crucible_dataset.size_used,
+    crucible_dataset.no_provision,
     old_regions.id,
     old_regions.time_created,
     old_regions.time_modified,
@@ -330,6 +335,7 @@ UNION
       updated_datasets.ip,
       updated_datasets.port,
       updated_datasets.size_used,
+      updated_datasets.no_provision,
       inserted_regions.id,
       inserted_regions.time_created,
       inserted_regions.time_modified,

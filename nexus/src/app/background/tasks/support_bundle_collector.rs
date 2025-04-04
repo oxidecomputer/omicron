@@ -839,6 +839,7 @@ mod test {
     use nexus_db_model::Zpool;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
+    use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::DatasetConfig;
@@ -930,7 +931,12 @@ mod test {
         let zpool = datastore
             .zpool_insert(
                 opctx,
-                Zpool::new(Uuid::new_v4(), sled_id.into_untyped_uuid(), id),
+                Zpool::new(
+                    Uuid::new_v4(),
+                    sled_id.into_untyped_uuid(),
+                    id,
+                    ByteCount::from(0).into(),
+                ),
             )
             .await
             .unwrap();

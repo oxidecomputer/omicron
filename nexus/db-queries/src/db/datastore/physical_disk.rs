@@ -766,7 +766,12 @@ mod test {
             sled_id,
         );
 
-        let zpool = Zpool::new(Uuid::new_v4(), sled_id, disk.id());
+        let zpool = Zpool::new(
+            Uuid::new_v4(),
+            sled_id,
+            disk.id(),
+            ByteCount::from(0).into(),
+        );
         (disk, zpool)
     }
 
