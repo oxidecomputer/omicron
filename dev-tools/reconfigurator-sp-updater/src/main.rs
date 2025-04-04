@@ -36,6 +36,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::watch;
 use tufaceous_artifact::ArtifactKind;
+use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactKind;
 
 #[tokio::main]
@@ -180,7 +181,7 @@ impl ReconfiguratorSpUpdater {
         info!(&log, "waiting for qorb to shut down");
         mgs_resolver.terminate().await;
         info!(&log, "waiting for driver task to stop");
-        driver_task.await.expect("waiting for driver task");
+        driver_task.await.context("waiting for driver task");
 
         Ok(())
     }
@@ -415,6 +416,8 @@ struct SetArgs {
     firmware_slot: Option<u8>,
     /// artifact hash id
     artifact_hash: ArtifactHash,
+    /// version // XXX-dap remove this
+    version: String,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -450,6 +453,8 @@ fn cmd_set(
         },
         firmware_slot: u16::from(args.firmware_slot.unwrap_or(0)),
         artifact_hash_id,
+        artifact_version: ArtifactVersion::new(args.version)
+            .context("parsing artifact version")?,
     };
 
     let changed = updater_state.requests_tx.send_if_modified(|requests| {

@@ -684,7 +684,7 @@ pub async fn apply_update(
     // sp_component_caboose_get() + caboose parse (with some logic around other
     // stuff)
     // e.g., for host OS it's: unclear?
-    match updater.version_status(&mut mgs_clients, update).await? {
+    match updater.version_status(log, &mut mgs_clients, update).await? {
         VersionStatus::UpdateComplete => {
             return Ok(ApplyUpdateResult::Completed);
         }
@@ -696,7 +696,6 @@ pub async fn apply_update(
     debug!(log, "ready to start update");
 
     // Start the update.
-    let log = &sp_update.log;
     let sp_type = sp_update.target_sp_type;
     let sp_slot = sp_update.target_sp_slot;
     let component = sp_update.component();
@@ -735,7 +734,14 @@ pub async fn apply_update(
         //   think?  Is it safe to bail out if this happens?  I guess it
         //   probably is if things just get stuck.
         // - other non-transient errors probably mean bailing out
-        Err(_) => todo!(),
+        Err(error) => {
+            error!(
+                log,
+                "failed to start update";
+                InlineErrorChain::new(&error)
+            );
+            todo!();
+        }
     };
     debug!(log, "started update");
 
@@ -771,6 +777,7 @@ pub async fn apply_update(
         true
     } else {
         match wait_for_update_done(
+            log,
             updater,
             &mut mgs_clients,
             update,
@@ -795,7 +802,7 @@ pub async fn apply_update(
         // update but not managed to reset the device, there's no point where
         // we'd want to stop trying to do so.
         while let Err(error) =
-            updater.post_update(&mut mgs_clients, update).await
+            updater.post_update(log, &mut mgs_clients, update).await
         {
             if !matches!(error, gateway_client::Error::CommunicationError(_)) {
                 let error = InlineErrorChain::new(&error);
@@ -812,7 +819,9 @@ pub async fn apply_update(
     //
     // There's no point where we'd want to give up here.  We know a reset was
     // sent.
-    match wait_for_update_done(updater, &mut mgs_clients, update, None).await {
+    match wait_for_update_done(log, updater, &mut mgs_clients, update, None)
+        .await
+    {
         // We did not specify a timeout so it should not time out.
         Err(UpdateWaitError::Timeout(_)) => unreachable!(),
         Ok(()) => Ok(ApplyUpdateResult::Completed),
@@ -843,6 +852,7 @@ enum UpdateWaitError {
 /// running neither the old software (prior to the update) nor the new one
 /// (after the update).
 async fn wait_for_update_done(
+    log: &slog::Logger,
     updater: &(dyn ReconfiguratorSpComponentUpdater + Send + Sync),
     mgs_clients: &mut MgsClients,
     update: &PendingMgsUpdate,
@@ -854,7 +864,7 @@ async fn wait_for_update_done(
     // error or the caller wants to give up due to a timeout.
 
     loop {
-        match updater.version_status(mgs_clients, update).await {
+        match updater.version_status(log, mgs_clients, update).await {
             Ok(VersionStatus::UpdateComplete) => return Ok(()),
             Ok(VersionStatus::NotReadyForUpdate) => {
                 return Err(UpdateWaitError::Indeterminate);

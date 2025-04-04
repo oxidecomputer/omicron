@@ -1024,6 +1024,7 @@ pub struct PendingMgsUpdate {
     /// which artifact to apply to this device
     /// (implies which component is being updated)
     pub artifact_hash_id: ArtifactHashId,
+    pub artifact_version: ArtifactVersion,
 }
 
 impl slog::KV for PendingMgsUpdate {
