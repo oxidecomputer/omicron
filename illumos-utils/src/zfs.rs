@@ -139,8 +139,8 @@ enum EnsureDatasetErrorRaw {
     #[error("Unexpected output from ZFS commands: {0}")]
     Output(String),
 
-    #[error("Failed to mount encrypted filesystem")]
-    MountEncryptedFsFailed(#[source] crate::ExecutionError),
+    #[error("Failed to mount filesystem")]
+    MountFsFailed(#[source] crate::ExecutionError),
 
     #[error("Failed to mount overlay filesystem")]
     MountOverlayFsFailed(#[source] crate::ExecutionError),
@@ -1028,9 +1028,8 @@ impl Zfs {
     fn mount_dataset(name: &str) -> Result<(), EnsureDatasetErrorRaw> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "mount", "-l", name]);
-        execute(cmd).map_err(|err| {
-            EnsureDatasetErrorRaw::MountEncryptedFsFailed(err)
-        })?;
+        execute(cmd)
+            .map_err(|err| EnsureDatasetErrorRaw::MountFsFailed(err))?;
         Ok(())
     }
 
