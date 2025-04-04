@@ -27,6 +27,8 @@ use gateway_messages::ComponentAction;
 use gateway_messages::ComponentActionResponse;
 use gateway_messages::ComponentDetails;
 use gateway_messages::DiscoverResponse;
+use gateway_messages::DumpSegment;
+use gateway_messages::DumpTask;
 use gateway_messages::IgnitionCommand;
 use gateway_messages::IgnitionState;
 use gateway_messages::MgsError;
@@ -1201,6 +1203,27 @@ impl SpHandler for Handler {
                 })),
             }
         }
+    }
+
+    fn get_task_dump_count(&mut self) -> Result<u32, SpError> {
+        unimplemented!()
+    }
+
+    fn task_dump_read_start(
+        &mut self,
+        _index: u32,
+        _key: [u8; 16],
+    ) -> Result<DumpTask, SpError> {
+        unimplemented!()
+    }
+
+    fn task_dump_read_continue(
+        &mut self,
+        _key: [u8; 16],
+        _seq: u32,
+        _buf: &mut [u8],
+    ) -> Result<Option<DumpSegment>, SpError> {
+        unimplemented!()
     }
 }
 

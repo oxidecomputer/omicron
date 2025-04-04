@@ -11,6 +11,7 @@ use gateway_messages::DeviceCapabilities;
 use gateway_messages::DevicePresence;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::VecDeque;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::path::Path;
@@ -76,6 +77,9 @@ pub struct SpCommonConfig {
     /// Network config for the two (fake) KSZ8463 ports.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub network_config: Option<[NetworkConfig; 2]>,
+    /// Network config for the (fake) ereport UDP ports.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub ereport_network_config: Option<[NetworkConfig; 2]>,
     /// Fake serial number
     pub serial_number: String,
     /// 32-byte seed to create a manufacturing root certificate.
@@ -94,6 +98,9 @@ pub struct SpCommonConfig {
     /// Simulate a RoT stage0 with no caboose
     #[serde(default)]
     pub no_stage0_caboose: bool,
+    /// Fake ereport restart generations.
+    #[serde(skip_serializing_if = "VecDeque::is_empty", default)]
+    pub ereport_restarts: VecDeque<EreportRestart>,
 }
 
 /// Configuration of a simulated SP component
@@ -213,4 +220,22 @@ impl GimletConfig {
             .map_err(|err| LoadError::Parse { path: path.into(), err })?;
         Ok(config)
     }
+}
+
+/// Represents a single simulated restart generation of the simulated SP's
+/// ereporter.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct EreportRestart {
+    pub id: uuid::Uuid,
+    pub metadata: toml::map::Map<String, toml::Value>,
+    pub ereports: Vec<Ereport>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Ereport {
+    pub task_name: String,
+    pub task_gen: u32,
+    pub uptime: u64,
+    #[serde(flatten)]
+    pub data: toml::map::Map<String, toml::Value>,
 }
