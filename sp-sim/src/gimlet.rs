@@ -34,6 +34,8 @@ use gateway_messages::SpError;
 use gateway_messages::SpPort;
 use gateway_messages::SpRequest;
 use gateway_messages::SpStateV2;
+use gateway_messages::DumpSegment;
+use gateway_messages::DumpTask;
 use gateway_messages::ignition::{self, LinkEvents};
 use gateway_messages::sp_impl::Sender;
 use gateway_messages::sp_impl::SpHandler;
@@ -1502,6 +1504,28 @@ impl SpHandler for Handler {
             }
         }
     }
+
+    fn get_task_dump_count(&mut self) -> Result<u32, SpError> {
+        unimplemented!()
+    }
+
+    fn task_dump_read_start(
+        &mut self,
+        _index: u32,
+        _key: [u8; 16],
+    ) -> Result<DumpTask, SpError> {
+        unimplemented!()
+    }
+
+    fn task_dump_read_continue(
+        &mut self,
+        _key: [u8; 16],
+        _seq: u32,
+        _buf: &mut [u8],
+    ) -> Result<Option<DumpSegment>, SpError> {
+        unimplemented!()
+    }
+
 }
 
 impl SimSpHandler for Handler {
