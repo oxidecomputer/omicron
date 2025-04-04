@@ -254,7 +254,11 @@ impl ManagementSwitch {
                     .await
                 }
 
-                SwitchPortConfig::Simulated { addr, ereport_addr, .. } => {
+                SwitchPortConfig::Simulated {
+                    addr,
+                    ereport_addr,
+                    fake_interface,
+                } => {
                     // Bind a new socket for each simulated switch port.
                     let bind_addr: SocketAddrV6 =
                         SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0);
@@ -281,7 +285,9 @@ impl ManagementSwitch {
                         ereport_socket,
                         *ereport_addr,
                         retry_config,
-                        log.clone(),
+                        log.new(
+                            slog::o!("interface" => fake_interface.clone()),
+                        ),
                     )
                 }
             };
