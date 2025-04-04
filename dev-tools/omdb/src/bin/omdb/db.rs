@@ -1615,10 +1615,11 @@ async fn cmd_crucible_dataset_show_overprovisioned(
             continue;
         }
 
-        let control_plane_storage_buffer = zpools
+        let control_plane_storage_buffer: i64 = zpools
             .get(&crucible_dataset.pool_id)
             .unwrap()
-            .control_plane_storage_buffer();
+            .control_plane_storage_buffer()
+            .into();
 
         let total_dataset_size =
             crucible_dataset.size_used + control_plane_storage_buffer;
@@ -7752,7 +7753,9 @@ async fn cmd_db_zpool_list(
                 sled_id: p.sled_id,
                 physical_disk_id: p.physical_disk_id.into_untyped_uuid(),
                 total_size: *zpool_total_size.get(&zpool_id).unwrap(),
-                control_plane_storage_buffer: p.control_plane_storage_buffer(),
+                control_plane_storage_buffer: p
+                    .control_plane_storage_buffer()
+                    .into(),
             }
         })
         .collect();

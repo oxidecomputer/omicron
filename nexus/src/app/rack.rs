@@ -4,6 +4,7 @@
 
 //! Rack management
 
+use crate::app::CONTROL_PLANE_STORAGE_BUFFER;
 use crate::external_api::params;
 use crate::external_api::params::CertificateCreate;
 use crate::external_api::shared::ServiceUsingCertificate;
@@ -52,7 +53,6 @@ use nexus_types::silo::silo_dns_name;
 use omicron_common::address::{Ipv6Subnet, RACK_PREFIX, get_64_subnet};
 use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::BgpPeer;
-use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -137,8 +137,7 @@ impl super::Nexus {
                     pool.id,
                     pool.sled_id,
                     pool.physical_disk_id,
-                    // See oxidecomputer/omicron#7875 for the 250G determination
-                    ByteCount::from_gibibytes_u32(250).into(),
+                    CONTROL_PLANE_STORAGE_BUFFER.into(),
                 )
             })
             .collect();

@@ -33,7 +33,7 @@ pub struct Zpool {
 
     /// How much storage to prevent Crucible from allocating for regions on a
     /// given pool.
-    control_plane_storage_buffer: i64,
+    control_plane_storage_buffer: ByteCount,
 }
 
 impl Zpool {
@@ -49,7 +49,7 @@ impl Zpool {
             rcgen: Generation::new(),
             sled_id,
             physical_disk_id: physical_disk_id.into(),
-            control_plane_storage_buffer: control_plane_storage_buffer.into(),
+            control_plane_storage_buffer,
         }
     }
 
@@ -57,7 +57,7 @@ impl Zpool {
         self.time_deleted
     }
 
-    pub fn control_plane_storage_buffer(&self) -> i64 {
+    pub fn control_plane_storage_buffer(&self) -> ByteCount {
         self.control_plane_storage_buffer
     }
 }
