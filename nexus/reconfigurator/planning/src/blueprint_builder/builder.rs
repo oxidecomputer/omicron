@@ -2031,13 +2031,14 @@ pub mod test {
     use nexus_reconfigurator_blippy::Blippy;
     use nexus_reconfigurator_blippy::BlippyReportSortKey;
     use nexus_types::deployment::BlueprintDatasetDisposition;
+    use nexus_types::deployment::BlueprintZoneImageVersion;
     use nexus_types::deployment::OmicronZoneNetworkResources;
     use nexus_types::external_api::views::SledPolicy;
     use omicron_common::address::IpRange;
-    use omicron_common::update::ArtifactHash;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeSet;
     use std::mem;
+    use tufaceous_artifact::ArtifactHash;
     use tufaceous_artifact::ArtifactVersion;
 
     pub const DEFAULT_N_SLEDS: usize = 3;
@@ -2899,7 +2900,9 @@ pub mod test {
                 .set_zone_image_source(
                     &zone_id,
                     BlueprintZoneImageSource::Artifact {
-                        version: ARTIFACT_VERSION,
+                        version: BlueprintZoneImageVersion::Available {
+                            version: ARTIFACT_VERSION,
+                        },
                         // The hash is not displayed in the diff -- only the
                         // version is.
                         hash: ArtifactHash([0x12; 32]),

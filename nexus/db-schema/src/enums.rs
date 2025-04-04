@@ -28,6 +28,7 @@ define_enums! {
     BpDatasetDispositionEnum => "bp_dataset_disposition",
     BpPhysicalDiskDispositionEnum => "bp_physical_disk_disposition",
     BpZoneDispositionEnum => "bp_zone_disposition",
+    BpZoneImageSourceEnum => "bp_zone_image_source",
     CabooseWhichEnum => "caboose_which",
     ClickhouseModeEnum => "clickhouse_mode",
     DatasetKindEnum => "dataset_kind",
