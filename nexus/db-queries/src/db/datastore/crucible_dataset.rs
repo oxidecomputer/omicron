@@ -257,6 +257,7 @@ impl DataStore {
 
         diesel::update(dsl::crucible_dataset)
             .filter(dsl::id.eq(to_db_typed_uuid(dataset_id)))
+            .filter(dsl::time_deleted.is_null())
             .set(dsl::no_provision.eq(true))
             .execute_async(&*conn)
             .await
@@ -275,6 +276,7 @@ impl DataStore {
 
         diesel::update(dsl::crucible_dataset)
             .filter(dsl::id.eq(to_db_typed_uuid(dataset_id)))
+            .filter(dsl::time_deleted.is_null())
             .set(dsl::no_provision.eq(false))
             .execute_async(&*conn)
             .await
