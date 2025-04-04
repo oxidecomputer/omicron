@@ -238,8 +238,7 @@ impl SimInstanceInner {
             VmmStateRequested::Stopped => {
                 match self.next_resting_state() {
                     VmmState::Starting => {
-                        let mark_failed = false;
-                        self.state.terminate_rudely(mark_failed);
+                        self.state.force_state_to_destroyed();
                     }
                     VmmState::Running => self.queue_graceful_stop(),
                     // Idempotently allow requests to stop an instance that is
@@ -307,7 +306,9 @@ impl SimInstanceInner {
 
             self.state.apply_propolis_observation(&ObservedPropolisState::new(
                 &self.last_response,
-            ))
+            ));
+
+            self.state.vmm_halted().then_some(InstanceAction::Destroy)
         } else {
             None
         }
@@ -385,11 +386,10 @@ impl SimInstanceInner {
         })
     }
 
-    /// Simulates rude termination by moving the instance to the Destroyed state
+    /// Simulates rude termination by moving the instance to the Failed state
     /// immediately and clearing the queue of pending state transitions.
     fn terminate(&mut self) -> SledVmmState {
-        let mark_failed = false;
-        self.state.terminate_rudely(mark_failed);
+        self.state.force_state_to_failed();
         self.queue.clear();
         self.destroyed = true;
         self.state.sled_instance_state()
