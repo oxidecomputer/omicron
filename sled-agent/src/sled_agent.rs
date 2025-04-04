@@ -69,7 +69,7 @@ use sled_agent_types::zone_bundle::{
     PriorityOrder, StorageLimit, ZoneBundleMetadata,
 };
 use sled_diagnostics::{SledDiagnosticsCmdError, SledDiagnosticsCmdOutput};
-use sled_hardware::{HardwareManager, underlay};
+use sled_hardware::{HardwareManager, MemoryReservations, underlay};
 use sled_hardware_types::Baseboard;
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_storage::manager::StorageHandle;
@@ -494,6 +494,16 @@ impl SledAgent {
             *sled_address.ip(),
         );
 
+        // The VMM reservoir is configured with respect to what's left after
+        // accounting for relatively fixed and predictable uses.
+        // We expect certain amounts of memory to be set aside for kernel,
+        // buffer, or control plane uses.
+        let memory_sizes = MemoryReservations::new(
+            parent_log.new(o!("component" => "MemoryReservations")),
+            long_running_task_handles.hardware_manager.clone(),
+            config.control_plane_memory_earmark_mb,
+        );
+
         // Configure the VMM reservoir as either a percentage of DRAM or as an
         // exact size in MiB.
         let reservoir_mode = ReservoirMode::from_config(
@@ -501,11 +511,8 @@ impl SledAgent {
             config.vmm_reservoir_size_mb,
         );
 
-        let vmm_reservoir_manager = VmmReservoirManager::spawn(
-            &log,
-            long_running_task_handles.hardware_manager.clone(),
-            reservoir_mode,
-        );
+        let vmm_reservoir_manager =
+            VmmReservoirManager::spawn(&log, memory_sizes, reservoir_mode);
 
         let instance_vnic_allocator = illumos_utils::link::VnicAllocator::new(
             "Instance",
