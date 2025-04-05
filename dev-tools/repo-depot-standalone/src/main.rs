@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Serve the Repo Depot API from an extracted TUF repo
+//! Serve the Repo Depot API from one or more extracted TUF repos
 
 use anyhow::Context;
 use anyhow::anyhow;
@@ -21,8 +21,12 @@ use repo_depot_api::ArtifactPathParams;
 use repo_depot_api::RepoDepotApi;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tough::Repository;
+use tough::TargetName;
+use tufaceous_artifact::ArtifactHash;
 use tufaceous_lib::OmicronRepo;
 
 #[tokio::main]
@@ -37,7 +41,7 @@ async fn main() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-/// Serve the Repo Depot API from an extracted TUF repo
+/// Serve the Repo Depot API from one or more extracted TUF repos
 #[derive(Debug, Parser)]
 struct RepoDepotStandalone {
     /// log level filter
@@ -53,8 +57,9 @@ struct RepoDepotStandalone {
     #[arg(long, default_value = "[::]:0")]
     listen_addr: SocketAddr,
 
-    /// path to local extracted Omicron TUF repository
-    repo_path: Utf8PathBuf,
+    /// paths to local extracted Omicron TUF repositories
+    #[arg(required = true, num_args = 1..)]
+    repo_paths: Vec<Utf8PathBuf>,
 }
 
 fn parse_dropshot_log_level(
@@ -71,21 +76,25 @@ impl RepoDepotStandalone {
         .to_logger("repo-depot-standalone")
         .context("failed to create logger")?;
 
-        let repo_path = &self.repo_path;
-        let repo =
-            OmicronRepo::load_untrusted_ignore_expiration(&log, repo_path)
-                .await
-                .with_context(|| {
-                    format!("loading repository at {repo_path}")
-                })?;
-        info!(&log, "loaded Omicron TUF repository"; "path" => %repo_path);
+        let mut ctx = RepoMetadata::new();
+        for repo_path in &self.repo_paths {
+            let omicron_repo =
+                OmicronRepo::load_untrusted_ignore_expiration(&log, repo_path)
+                    .await
+                    .with_context(|| {
+                        format!("loading repository at {repo_path}")
+                    })?;
+            ctx.load_repo(omicron_repo)
+                .context("loading artifacts from repository at {repo_path}")?;
+            info!(&log, "loaded Omicron TUF repository"; "path" => %repo_path);
+        }
 
         let my_api = repo_depot_api::repo_depot_api_mod::api_description::<
             StandaloneApiImpl,
         >()
         .unwrap();
 
-        let server = ServerBuilder::new(my_api, Arc::new(repo), log)
+        let server = ServerBuilder::new(my_api, Arc::new(ctx), log)
             .config(dropshot::ConfigDropshot {
                 bind_address: self.listen_addr,
                 ..Default::default()
@@ -97,35 +106,70 @@ impl RepoDepotStandalone {
     }
 }
 
+/// Keeps metadata that allows us to fetch a target from any of the TUF repos
+/// based on its hash.
+struct RepoMetadata {
+    repos: Vec<OmicronRepo>,
+    targets_by_hash: BTreeMap<ArtifactHash, (usize, TargetName)>,
+}
+
+impl RepoMetadata {
+    pub fn new() -> RepoMetadata {
+        RepoMetadata { repos: Vec::new(), targets_by_hash: BTreeMap::new() }
+    }
+
+    pub fn load_repo(
+        &mut self,
+        omicron_repo: OmicronRepo,
+    ) -> anyhow::Result<()> {
+        let repo_index = self.repos.len();
+
+        let tuf_repo = omicron_repo.repo();
+        for (target_name, target) in &tuf_repo.targets().signed.targets {
+            let target_hash: &[u8] = &target.hashes.sha256;
+            let target_hash_array: [u8; 32] = target_hash
+                .try_into()
+                .context("sha256 hash wasn't 32 bytes")?;
+            let artifact_hash = ArtifactHash(target_hash_array);
+            self.targets_by_hash
+                .insert(artifact_hash, (repo_index, target_name.clone()));
+        }
+
+        self.repos.push(omicron_repo);
+        Ok(())
+    }
+
+    pub fn repo_and_target_name_for_hash(
+        &self,
+        requested_sha: &ArtifactHash,
+    ) -> Option<(&Repository, &TargetName)> {
+        let (repo_index, target_name) =
+            self.targets_by_hash.get(requested_sha)?;
+        let omicron_repo = &self.repos[*repo_index];
+        Some((omicron_repo.repo(), target_name))
+    }
+}
+
 struct StandaloneApiImpl;
 
 impl RepoDepotApi for StandaloneApiImpl {
-    type Context = Arc<OmicronRepo>;
+    type Context = Arc<RepoMetadata>;
 
     async fn artifact_get_by_sha256(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<ArtifactPathParams>,
     ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
-        let omicron_repo = rqctx.context();
-        let tuf_repo = omicron_repo.repo();
-        let fetch_sha = path_params.into_inner().sha256;
-        let target_name = tuf_repo
-            .targets()
-            .signed
-            .targets
-            .iter()
-            .find(|(_, target)| {
-                let fetch_array: &[u8] = fetch_sha.as_ref();
-                let target_array: &[u8] = &target.hashes.sha256;
-                fetch_array == target_array
-            })
+        let repo_metadata = rqctx.context();
+        let requested_sha = &path_params.into_inner().sha256;
+        let (tuf_repo, target_name) = repo_metadata
+            .repo_and_target_name_for_hash(requested_sha)
             .ok_or_else(|| {
                 HttpError::for_not_found(
                     None,
                     String::from("found no target with this hash"),
                 )
-            })?
-            .0;
+            })?;
+
         let reader = tuf_repo
             .read_target(&target_name)
             .await

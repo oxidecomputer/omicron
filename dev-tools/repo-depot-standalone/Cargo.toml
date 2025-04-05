@@ -20,6 +20,8 @@ serde_json.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
+tough.workspace = true
+tufaceous-artifact.workspace = true
 tufaceous-lib.workspace = true
 omicron-workspace-hack.workspace = true
 

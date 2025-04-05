@@ -7436,6 +7436,8 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "tokio",
+ "tough",
+ "tufaceous-artifact",
  "tufaceous-lib",
 ]
 
