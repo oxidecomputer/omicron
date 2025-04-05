@@ -10,6 +10,7 @@ use crate::config::Config;
 use crate::config::SidecarConfig;
 use crate::config::SimulatedSpsConfig;
 use crate::config::SpComponentConfig;
+use crate::ereport;
 use crate::helpers::rot_slot_id_from_u16;
 use crate::helpers::rot_slot_id_to_u16;
 use crate::sensors::Sensors;
@@ -156,6 +157,28 @@ impl SimulatedSp for Sidecar {
         }
         tx
     }
+
+    async fn ereport_restart(&self, restart: crate::config::EreportRestart) {
+        let (tx, rx) = oneshot::channel();
+        if self
+            .commands
+            .send(Command::Ereport(ereport::Command::Restart(restart, tx)))
+            .is_ok()
+        {
+            rx.await.unwrap();
+        }
+    }
+
+    async fn ereport_append(
+        &self,
+        ereport: crate::config::Ereport,
+    ) -> gateway_messages::ereport::Ena {
+        let (tx, rx) = oneshot::channel();
+        self.commands
+            .send(Command::Ereport(ereport::Command::Append(ereport, tx)))
+            .expect("simulated sidecar task has died");
+        rx.await.unwrap()
+    }
 }
 
 impl Sidecar {
@@ -228,6 +251,7 @@ enum Command {
     CurrentIgnitionState(oneshot::Sender<Vec<IgnitionState>>),
     SetResponsiveness(Responsiveness, oneshot::Sender<Ack>),
     SetThrottler(Option<mpsc::UnboundedReceiver<usize>>, oneshot::Sender<Ack>),
+    Ereport(ereport::Command),
 }
 
 #[derive(Debug)]
@@ -358,6 +382,7 @@ impl Inner {
                             tx.send(Ack)
                                 .map_err(|_| "receiving half died").unwrap();
                         }
+                        Command::Ereport(_) => todo!("eliza"),
                     }
                 }
             }

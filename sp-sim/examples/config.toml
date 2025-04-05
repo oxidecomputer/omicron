@@ -72,23 +72,17 @@ sensors = [
     { name = "CPU", kind = "Temperature", last_data.value = 64.5, last_data.timestamp = 1234 },
 ]
 
-[[simulated_sps.gimlet.ereport_restarts]]
-id = "af1ebf85-36ba-4c31-bbec-b9825d6d9d8b"
+[simulated_sps.gimlet.ereport_config]
+restart_id = "af1ebf85-36ba-4c31-bbec-b9825d6d9d8b"
 
-[simulated_sps.gimlet.ereport_restarts.metadata]
-chassis_model = "SimGimletSp"
-chassis_serial = "SimGimlet0"
-chassis_revision = 4
-hubris_archive_id = "fefefe"
-
-[[simulated_sps.gimlet.ereport_restarts.ereports]]
+[[simulated_sps.gimlet.ereport_config.ereports]]
 task_name = "task_apollo_server"
 task_gen = 13
 uptime = 1233
 class = "gov.nasa.apollo.o2_tanks.stir.begin"
 message = "stirring the tanks"
 
-[[simulated_sps.gimlet.ereport_restarts.ereports]]
+[[simulated_sps.gimlet.ereport_config.ereports]]
 task_name = "drv_ae35_server"
 task_gen = 1
 uptime = 1234
@@ -97,7 +91,7 @@ message = "i've just picked up a fault in the AE-35 unit"
 de = { scheme = "fmd", authority = { product-id = "HAL-9000-series computer", server-id = "HAL 9000"}, mod-name = "ae35-diagnosis" }
 hours_to_failure = 72
 
-[[simulated_sps.gimlet.ereport_restarts.ereports]]
+[[simulated_sps.gimlet.ereport_config.ereports]]
 task_name = "task_apollo_server"
 task_gen = 13
 uptime = 1237
@@ -105,14 +99,14 @@ class = "gov.nasa.apollo.fault"
 message = "houston, we have a problem"
 crew = ["Lovell", "Swigert", "Hayes"]
 
-[[simulated_sps.gimlet.ereport_restarts.ereports]]
+[[simulated_sps.gimlet.ereport_config.ereports]]
 task_name = "drv_thingy_server"
 task_gen = 2
 uptime = 1240
 class = "flagrant_error"
 computer = false
 
-[[simulated_sps.gimlet.ereport_restarts.ereports]]
+[[simulated_sps.gimlet.ereport_config.ereports]]
 task_name = "task_latex_server"
 task_gen = 1
 uptime = 1245

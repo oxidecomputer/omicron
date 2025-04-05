@@ -7,6 +7,7 @@ use crate::SIM_ROT_BOARD;
 use crate::SimulatedSp;
 use crate::config::GimletConfig;
 use crate::config::SpComponentConfig;
+use crate::ereport;
 use crate::ereport::EreportState;
 use crate::helpers::rot_slot_id_from_u16;
 use crate::helpers::rot_slot_id_to_u16;
@@ -63,7 +64,8 @@ use tokio::sync::watch;
 use tokio::task::{self, JoinHandle};
 
 pub const SIM_GIMLET_BOARD: &str = "SimGimletSp";
-const SP_GITC0: &[u8] = b"ffffffff";
+const SP_GITC0_STRING: &str = "ffffffff";
+const SP_GITC0: &[u8] = SP_GITC0_STRING.as_bytes();
 const SP_GITC1: &[u8] = b"fefefefe";
 const SP_BORD: &[u8] = SIM_GIMLET_BOARD.as_bytes();
 const SP_NAME: &[u8] = b"SimGimlet";
@@ -184,6 +186,28 @@ impl SimulatedSp for Gimlet {
         }
         tx
     }
+
+    async fn ereport_restart(&self, restart: crate::config::EreportRestart) {
+        let (tx, rx) = oneshot::channel();
+        if self
+            .commands
+            .send(Command::Ereport(ereport::Command::Restart(restart, tx)))
+            .is_ok()
+        {
+            rx.await.unwrap();
+        }
+    }
+
+    async fn ereport_append(
+        &self,
+        ereport: crate::config::Ereport,
+    ) -> gateway_messages::ereport::Ena {
+        let (tx, rx) = oneshot::channel();
+        self.commands
+            .send(Command::Ereport(ereport::Command::Append(ereport, tx)))
+            .expect("simulated gimlet task has died");
+        rx.await.unwrap()
+    }
 }
 
 impl Gimlet {
@@ -291,13 +315,32 @@ impl Gimlet {
             }
         }
         let local_addrs = [servers[0].local_addr(), servers[1].local_addr()];
+        let ereport_state = {
+            let mut cfg = gimlet.common.ereport_config.clone();
+            if cfg.restart.metadata.is_empty() {
+                let map = &mut cfg.restart.metadata;
+                map.insert(
+                    "chassis_model".to_string(),
+                    SIM_GIMLET_BOARD.into(),
+                );
+                map.insert(
+                    "chassis_serial".to_string(),
+                    gimlet.common.serial_number.clone().into(),
+                );
+                map.insert(
+                    "hubris_archive_id".to_string(),
+                    SP_GITC0_STRING.into(),
+                );
+            }
+            EreportState::new(
+                cfg,
+                log.new(slog::o!("sim-component" => "ereport-state")),
+            )
+        };
         let (inner, handler, responses_sent_count) = UdpTask::new(
             servers,
             ereport_servers,
-            EreportState::new(
-                gimlet.common.ereport_restarts.clone(),
-                log.new(slog::o!("sim-component" => "ereport-state")),
-            ),
+            ereport_state,
             gimlet.common.components.clone(),
             attached_mgs,
             gimlet.common.serial_number.clone(),
@@ -502,6 +545,7 @@ impl SerialConsoleTcpTask {
 enum Command {
     SetResponsiveness(Responsiveness, oneshot::Sender<Ack>),
     SetThrottler(Option<mpsc::UnboundedReceiver<usize>>, oneshot::Sender<Ack>),
+    Ereport(ereport::Command),
 }
 
 struct Ack;
@@ -674,7 +718,8 @@ impl UdpTask {
                             }
                             tx.send(Ack)
                                 .map_err(|_| "receiving half died").unwrap();
-                        }
+                        },
+                        Command::Ereport(cmd) => self.ereport_state.handle_command(cmd),
                     }
                 }
             }

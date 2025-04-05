@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::config::Ereport;
+use crate::config::EreportConfig;
 use crate::config::EreportRestart;
 use gateway_messages::ereport;
 use gateway_messages::ereport::Ena;
@@ -12,25 +13,87 @@ use gateway_messages::ereport::ResponseHeaderV0;
 use gateway_messages::ereport::RestartId;
 use std::collections::VecDeque;
 use std::io::Cursor;
+use tokio::sync::oneshot;
 
 pub(crate) struct EreportState {
-    restarts: VecDeque<EreportRestart>,
-    current_restart: Option<RestartState>,
+    ereports: VecDeque<(Ena, EreportList)>,
+    meta: toml::map::Map<String, toml::Value>,
+    /// Next ENA, used for appending new ENAs at runtime.
+    next_ena: Ena,
+    restart_id: RestartId,
     log: slog::Logger,
+}
+
+#[derive(Debug)]
+pub(crate) enum Command {
+    Restart(EreportRestart, oneshot::Sender<()>),
+    Append(Ereport, oneshot::Sender<Ena>),
 }
 
 impl EreportState {
     pub(crate) fn new(
-        mut restarts: VecDeque<EreportRestart>,
+        EreportConfig { restart, ereports }: EreportConfig,
         log: slog::Logger,
     ) -> Self {
-        let current_restart = restarts.pop_front().map(RestartState::from);
-        Self { restarts, current_restart, log }
+        let EreportRestart { metadata, restart_id } = restart;
+        slog::info!(
+            log,
+            "configuring sim ereports";
+            "restart_id" => ?restart_id,
+            "n_ereports" => ereports.len(),
+            "metadata" => ?metadata,
+        );
+        let ereports: VecDeque<(Ena, EreportList)> = ereports
+            .into_iter()
+            .enumerate()
+            .map(|(i, ereport)| (Ena(i as u64), ereport.to_list()))
+            .collect();
+        let restart_id = RestartId(restart_id.as_u128());
+        let next_ena = Ena(ereports.len() as u64);
+        Self { ereports, next_ena, restart_id, meta: metadata, log }
     }
 
-    pub(crate) fn pretend_to_restart(&mut self) {
-        self.current_restart =
-            self.restarts.pop_front().map(RestartState::from);
+    pub(crate) fn handle_command(&mut self, cmd: Command) {
+        match cmd {
+            Command::Append(ereport, tx) => {
+                let ena = self.append_ereport(ereport);
+                tx.send(ena).map_err(|_| "receiving half died").unwrap();
+            }
+            Command::Restart(restart, tx) => {
+                self.pretend_to_restart(restart);
+                tx.send(()).map_err(|_| "receiving half died").unwrap();
+            }
+        }
+    }
+
+    pub(crate) fn pretend_to_restart(
+        &mut self,
+        EreportRestart { metadata, restart_id }: EreportRestart,
+    ) {
+        slog::info!(
+            self.log,
+            "simulating restart";
+            "curr_restart_id" => ?self.restart_id,
+            "next_restart_id" => ?restart_id,
+            "metadata" => ?metadata,
+        );
+        self.restart_id = RestartId(restart_id.as_u128());
+        self.meta = metadata;
+        self.ereports.clear();
+        self.next_ena = Ena(0);
+    }
+
+    pub(crate) fn append_ereport(&mut self, ereport: Ereport) -> Ena {
+        let ena = self.next_ena;
+        slog::info!(
+            self.log,
+            "appending new ereport";
+            "ena" => ?ena,
+            "ereport" => ?ereport,
+        );
+        self.ereports.push_back((ena, ereport.to_list()));
+        self.next_ena.0 += 1;
+        ena
     }
 
     pub(crate) fn handle_request<'buf>(
@@ -41,38 +104,24 @@ impl EreportState {
         let EreportRequest::V0(req) = request;
         slog::info!(self.log, "ereport request: {req:?}");
 
-        let current_restart = match self.current_restart.as_mut() {
-            None => {
-                let amt = gateway_messages::serialize(
-                    buf,
-                    &EreportResponseHeader::V0(ResponseHeaderV0::new_empty(
-                        req.restart_id,
-                    )),
-                )
-                .expect("serialization shouldn't fail");
-                return &buf[..amt];
-            }
-            Some(c) => c,
-        };
-
-        if req.restart_id != current_restart.restart_id {
+        if req.restart_id != self.restart_id {
             slog::info!(
                 self.log,
                 "requested restart ID is not current, pretending to have \
                  restarted...";
                 "req_restart_id" => ?req.restart_id,
-                "current_restart_id" => ?current_restart.restart_id,
+                "current_restart_id" => ?self.restart_id,
             );
             let amt = gateway_messages::serialize(
                 buf,
                 &EreportResponseHeader::V0(ResponseHeaderV0::new_restarted(
-                    current_restart.restart_id,
+                    self.restart_id,
                 )),
             )
             .expect("serialization shouldn't fail");
             let amt = {
                 let mut cursor = Cursor::new(&mut buf[amt..]);
-                serde_cbor::to_writer(&mut cursor, &current_restart.meta)
+                serde_cbor::to_writer(&mut cursor, &self.meta)
                     .expect("serializing metadata should fit in a packet...");
                 amt + cursor.position() as usize
             };
@@ -85,13 +134,13 @@ impl EreportState {
                 "MGS committed ereports up to {committed_ena:?}"
             );
             let mut discarded = 0;
-            while current_restart
+            while self
                 .ereports
                 .front()
                 .map(|(ena, _)| ena <= &committed_ena)
                 .unwrap_or(false)
             {
-                current_restart.ereports.pop_front();
+                self.ereports.pop_front();
                 discarded += 1;
             }
 
@@ -101,17 +150,13 @@ impl EreportState {
             );
         }
 
-        let mut respondant_ereports = current_restart
-            .ereports
-            .iter()
-            .filter(|(ena, _)| ena.0 >= req.start_ena.0);
+        let mut respondant_ereports =
+            self.ereports.iter().filter(|(ena, _)| ena.0 >= req.start_ena.0);
         let end = if let Some((ena, ereport)) = respondant_ereports.next() {
             let mut pos = gateway_messages::serialize(
                 buf,
                 &EreportResponseHeader::V0(
-                    ereport::ResponseHeaderV0::new_data(
-                        current_restart.restart_id,
-                    ),
+                    ereport::ResponseHeaderV0::new_data(self.restart_id),
                 ),
             )
             .expect("serialization shouldn't fail");
@@ -176,24 +221,6 @@ impl Ereport {
             (uptime as i64).into(),
             data.into(),
         ]
-    }
-}
-
-struct RestartState {
-    ereports: VecDeque<(Ena, EreportList)>,
-    meta: toml::map::Map<String, toml::Value>,
-    restart_id: RestartId,
-}
-
-impl From<EreportRestart> for RestartState {
-    fn from(restart: EreportRestart) -> Self {
-        let EreportRestart { id, metadata, ereports } = restart;
-        let ereports = ereports
-            .into_iter()
-            .enumerate()
-            .map(|(ena, ereport)| (Ena(ena as u64), ereport.to_list()))
-            .collect();
-        Self { ereports, meta: metadata, restart_id: RestartId(id.as_u128()) }
     }
 }
 

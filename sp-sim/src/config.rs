@@ -11,7 +11,6 @@ use gateway_messages::DeviceCapabilities;
 use gateway_messages::DevicePresence;
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::VecDeque;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use std::path::Path;
@@ -98,9 +97,9 @@ pub struct SpCommonConfig {
     /// Simulate a RoT stage0 with no caboose
     #[serde(default)]
     pub no_stage0_caboose: bool,
-    /// Fake ereport restart generations.
-    #[serde(skip_serializing_if = "VecDeque::is_empty", default)]
-    pub ereport_restarts: VecDeque<EreportRestart>,
+    /// Fake ereport configuration
+    #[serde(default)]
+    pub ereport_config: EreportConfig,
 }
 
 /// Configuration of a simulated SP component
@@ -222,13 +221,32 @@ impl GimletConfig {
     }
 }
 
+#[derive(
+    Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, Default,
+)]
+pub struct EreportConfig {
+    #[serde(flatten, default)]
+    pub restart: EreportRestart,
+
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub ereports: Vec<Ereport>,
+}
+
 /// Represents a single simulated restart generation of the simulated SP's
 /// ereporter.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EreportRestart {
-    pub id: uuid::Uuid,
+    #[serde(default = "uuid::Uuid::new_v4")]
+    pub restart_id: uuid::Uuid,
+
+    #[serde(skip_serializing_if = "toml::map::Map::is_empty", default)]
     pub metadata: toml::map::Map<String, toml::Value>,
-    pub ereports: Vec<Ereport>,
+}
+
+impl Default for EreportRestart {
+    fn default() -> Self {
+        Self { restart_id: uuid::Uuid::new_v4(), metadata: Default::default() }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]

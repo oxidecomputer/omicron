@@ -99,6 +99,20 @@ pub trait SimulatedSp {
     async fn install_udp_accept_semaphore(
         &self,
     ) -> mpsc::UnboundedSender<usize>;
+
+    /// Simulate a restart of the SP for the purposes of ereport collection.
+    ///
+    /// This will clear any simulated ereports buffered by the simulated SP, and
+    /// set the simulated snitch task's restart ID and metadata to the provided
+    /// [`config::EreportRestart`] value.
+    async fn ereport_restart(&self, restart: config::EreportRestart);
+
+    /// Add a new simulated ereport to the SP's queue of ereports, returning its
+    /// ENA.
+    async fn ereport_append(
+        &self,
+        restart: config::Ereport,
+    ) -> gateway_messages::ereport::Ena;
 }
 
 // Helper function to pad a simulated serial number (stored as a `String`) to
