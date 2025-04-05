@@ -2035,8 +2035,7 @@ impl InstanceRunner {
                     &running_state.running_zone,
                     migration_params,
                 )
-                .await
-                .map_err(Into::into);
+                .await;
         }
 
         // Otherwise, set up the zone first, then ask Propolis to create the VM.
@@ -2044,7 +2043,7 @@ impl InstanceRunner {
             Ok(setup) => setup,
             Err(e) => {
                 error!(&self.log, "failed to set up Propolis zone"; "error" => ?e);
-                return Err(e.into());
+                return Err(e);
             }
         };
 
@@ -2057,7 +2056,7 @@ impl InstanceRunner {
             .await
         {
             error!(&self.log, "failed to create Propolis VM"; "error" => ?e);
-            return Err(e.into());
+            return Err(e);
         }
 
         // Move ownership of the zone into the instance and set up state
