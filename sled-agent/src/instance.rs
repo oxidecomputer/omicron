@@ -2159,11 +2159,9 @@ impl InstanceRunner {
 
                         // Return the newly-installed Failed state here so it
                         // doesn't get clobbered by the published VMM state
-                        // chosen above.
-                        //
-                        // REVIEW(gjc) it's a little weird that we might return
-                        // "success" from a call to, say, reboot an instance
-                        // when we know the instance actually failed...
+                        // chosen above. (Note that returning `Ok` here means it
+                        // is possible for a state change operation to "succeed"
+                        // even though the outcome is a failed instance.)
                         return Ok(self.state.sled_instance_state());
                     }
                     _ => {
@@ -2358,6 +2356,21 @@ impl InstanceRunner {
                 new_state_owner
             }
             None => {
+                // This path shouldn't be reachable (as of this writing): it
+                // requires the sender side of the runner's `terminate_rx` to be
+                // dropped; this is owned by the runner's corresponding
+                // Instance; the instance is only removed from its
+                // InstanceManager in response to the instance ticket being
+                // dropped; and the instance ticket isn't dropped until the
+                // runner exits, which by definition hasn't happened if the
+                // runner is still selecting on its termination receiver.
+                //
+                // This logic relies on an assumption about non-local code
+                // (specifically that the instance manager has no way to drop an
+                // Instance without its ticket being dropped), so defensively
+                // drive the instance into a terminal state here anyway. (If the
+                // instance manager shutdown sequence wants different behavior
+                // it can send an explicit termination request.)
                 if let Some(request) = current_req {
                     warn!(
                         self.log,
@@ -2373,8 +2386,6 @@ impl InstanceRunner {
                     );
                 }
 
-                // REVIEW(gjc) how do we even get here while there's a valid
-                // instance ticket etc.?
                 self.terminate().await;
                 VmmStateOwner::Runner
             }
