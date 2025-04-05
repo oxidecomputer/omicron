@@ -13,11 +13,18 @@ use derive_more::Display;
 use serde::{Deserialize, Serialize};
 
 mod configuration;
+mod coordinator_state;
 pub(crate) mod crypto;
 mod messages;
+mod node;
+mod persistent_state;
+mod validators;
 pub use configuration::Configuration;
+pub(crate) use coordinator_state::CoordinatorState;
 pub use crypto::RackSecret;
 pub use messages::*;
+pub use node::Node;
+pub use persistent_state::PersistentState;
 
 #[derive(
     Debug,
@@ -61,8 +68,22 @@ pub struct Threshold(pub u8);
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
 pub struct PlatformId {
-    pub part_number: String,
-    pub serial_number: String,
+    part_number: String,
+    serial_number: String,
+}
+
+impl PlatformId {
+    pub fn new(part_number: String, serial_number: String) -> PlatformId {
+        PlatformId { part_number, serial_number }
+    }
+
+    pub fn part_number(&self) -> &str {
+        &self.part_number
+    }
+
+    pub fn serial_number(&self) -> &str {
+        &self.serial_number
+    }
 }
 
 /// A container to make messages between trust quorum nodes routable
