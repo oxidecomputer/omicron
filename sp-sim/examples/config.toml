@@ -162,6 +162,21 @@ sensors = [
     { name = "CPU", kind = "Temperature", last_data.value = 63.1, last_data.timestamp = 1234 },
 ]
 
+
+[simulated_sps.gimlet.ereport_config]
+restart_id = "55e30cc7-a109-492f-aca9-735ed725df3c"
+
+[[simulated_sps.gimlet.ereport_config.ereports]]
+task_name = "task_thermal_server"
+task_gen = 1
+uptime = 1233
+class = "computer.oxide.gimlet.chassis_integrity.fault"
+nosub_class = "chassis_integrity.cat_hair_detected"
+message = "cat hair detected inside gimlet"
+de = { scheme = "fmd", mod-name = "hubris-thermal-diagnosis", mod-version = "1.0", authority = { "product-id" = "oxide", server-id = "SimGimlet1" }}
+certainty = 0x64
+cat_hair_amount = 10000
+
 [log]
 # Show log messages of this level and more severe
 level = "debug"
