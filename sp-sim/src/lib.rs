@@ -45,6 +45,10 @@ pub trait SimulatedSp {
     /// configured to listen.
     fn local_addr(&self, port: SpPort) -> Option<SocketAddrV6>;
 
+    /// Listening UDP ereport address of the given port of this simulated SP, if it was
+    /// configured to listen for ereport packets.
+    fn local_ereport_addr(&self, port: SpPort) -> Option<SocketAddrV6>;
+
     /// Simulate the SP being unresponsive, in which it ignores all incoming
     /// messages.
     async fn set_responsiveness(&self, r: Responsiveness);

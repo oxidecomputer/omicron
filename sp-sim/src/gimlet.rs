@@ -101,6 +101,7 @@ pub enum SimSpHandledRequest {
 
 pub struct Gimlet {
     local_addrs: Option<[SocketAddrV6; 2]>,
+    ereport_addrs: Option<[SocketAddrV6; 2]>,
     handler: Option<Arc<TokioMutex<Handler>>>,
     serial_console_addrs: HashMap<String, SocketAddrV6>,
     commands: mpsc::UnboundedSender<Command>,
@@ -132,6 +133,14 @@ impl SimulatedSp for Gimlet {
             SpPort::Two => 1,
         };
         self.local_addrs.map(|addrs| addrs[i])
+    }
+
+    fn local_ereport_addr(&self, port: SpPort) -> Option<SocketAddrV6> {
+        let i = match port {
+            SpPort::One => 0,
+            SpPort::Two => 1,
+        };
+        self.ereport_addrs.map(|addrs| addrs[i])
     }
 
     async fn set_responsiveness(&self, r: Responsiveness) {
@@ -228,6 +237,7 @@ impl Gimlet {
         let Some(network_config) = &gimlet.common.network_config else {
             return Ok(Self {
                 local_addrs: None,
+                ereport_addrs: None,
                 handler: None,
                 serial_console_addrs,
                 commands,
@@ -248,18 +258,41 @@ impl Gimlet {
 
         let servers = [servers.0, servers.1];
 
-        let ereport_servers = match &gimlet.common.ereport_network_config {
-            Some(cfg) => {
-                assert_eq!(cfg.len(), 2); // gimlet SP always has 2 ports
+        let ereport_log = log.new(slog::o!("component" => "ereport-sim"));
+        let (ereport_servers, ereport_addrs) =
+            match &gimlet.common.ereport_network_config {
+                Some(cfg) => {
+                    assert_eq!(cfg.len(), 2); // gimlet SP always has 2 ports
 
-                let servers = future::try_join(
-                    UdpServer::new(&cfg[0], &log),
-                    UdpServer::new(&cfg[1], &log),
-                )
-                .await?;
-                Some([servers.0, servers.1])
+                    let servers = future::try_join(
+                        UdpServer::new(&cfg[0], &ereport_log),
+                        UdpServer::new(&cfg[1], &ereport_log),
+                    )
+                    .await?;
+                    let addrs =
+                        [servers.0.local_addr(), servers.1.local_addr()];
+                    (Some([servers.0, servers.1]), Some(addrs))
+                }
+                None => (None, None),
+            };
+        let ereport_state = {
+            let mut cfg = gimlet.common.ereport_config.clone();
+            if cfg.restart.metadata.is_empty() {
+                let map = &mut cfg.restart.metadata;
+                map.insert(
+                    "chassis_model".to_string(),
+                    SIM_GIMLET_BOARD.into(),
+                );
+                map.insert(
+                    "chassis_serial".to_string(),
+                    gimlet.common.serial_number.clone().into(),
+                );
+                map.insert(
+                    "hubris_archive_id".to_string(),
+                    SP_GITC0_STRING.into(),
+                );
             }
-            None => None,
+            EreportState::new(cfg, ereport_log)
         };
 
         for component_config in &gimlet.common.components {
@@ -315,28 +348,6 @@ impl Gimlet {
             }
         }
         let local_addrs = [servers[0].local_addr(), servers[1].local_addr()];
-        let ereport_state = {
-            let mut cfg = gimlet.common.ereport_config.clone();
-            if cfg.restart.metadata.is_empty() {
-                let map = &mut cfg.restart.metadata;
-                map.insert(
-                    "chassis_model".to_string(),
-                    SIM_GIMLET_BOARD.into(),
-                );
-                map.insert(
-                    "chassis_serial".to_string(),
-                    gimlet.common.serial_number.clone().into(),
-                );
-                map.insert(
-                    "hubris_archive_id".to_string(),
-                    SP_GITC0_STRING.into(),
-                );
-            }
-            EreportState::new(
-                cfg,
-                log.new(slog::o!("sim-component" => "ereport-state")),
-            )
-        };
         let (inner, handler, responses_sent_count) = UdpTask::new(
             servers,
             ereport_servers,
@@ -356,6 +367,7 @@ impl Gimlet {
 
         Ok(Self {
             local_addrs: Some(local_addrs),
+            ereport_addrs,
             handler: Some(handler),
             serial_console_addrs,
             commands,
