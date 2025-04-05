@@ -6,7 +6,6 @@
 
 use crate::{ExecutionError, PFEXEC, execute};
 use camino::{Utf8Path, Utf8PathBuf};
-use std::marker::PhantomData;
 use std::str::FromStr;
 
 pub use omicron_common::zpool_name::ZpoolName;
@@ -199,9 +198,7 @@ pub struct PathInPool {
 }
 
 /// Wraps commands for interacting with ZFS pools.
-pub struct Zpool {
-    phantom: PhantomData<()>,
-}
+pub struct Zpool(());
 
 /// Describes the API for interfacing with zpools
 ///
@@ -238,7 +235,7 @@ impl Api for Zpool {}
 
 impl Zpool {
     pub fn real_api() -> Self {
-        Self { phantom: PhantomData }
+        Self(())
     }
 
     pub fn destroy(name: &ZpoolName) -> Result<(), DestroyError> {

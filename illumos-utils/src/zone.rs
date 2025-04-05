@@ -10,7 +10,6 @@ use ipnetwork::IpNetwork;
 use ipnetwork::IpNetworkError;
 use slog::Logger;
 use slog::info;
-use std::marker::PhantomData;
 use std::net::{IpAddr, Ipv6Addr};
 
 use crate::ExecutionError;
@@ -234,9 +233,7 @@ fn parse_ip_network(s: &str) -> Result<IpNetwork, IpNetworkError> {
 }
 
 /// Wraps commands for interacting with Zones.
-pub struct Zones {
-    phantom: PhantomData<()>,
-}
+pub struct Zones(());
 
 /// Describes the API for interfacing with Zones.
 ///
@@ -478,7 +475,7 @@ impl Zones {
     /// If you're interested in testing this interface, consider using
     /// [crate::fakes::zone::Zones] instead.
     pub fn real_api() -> Self {
-        Self { phantom: PhantomData }
+        Self(())
     }
 
     /// Returns the name of the VNIC used to communicate with the control plane.
