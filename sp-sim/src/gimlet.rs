@@ -37,6 +37,7 @@ use gateway_messages::SpError;
 use gateway_messages::SpPort;
 use gateway_messages::SpRequest;
 use gateway_messages::SpStateV2;
+use gateway_messages::ereport::EreportRequest;
 use gateway_messages::ignition::{self, LinkEvents};
 use gateway_messages::sp_impl::Sender;
 use gateway_messages::sp_impl::SpHandler;
@@ -568,17 +569,13 @@ impl UdpTask {
 
         async fn ereport_recv(
             sock: Option<&mut UdpServer>,
-        ) -> anyhow::Result<(
-            gateway_messages::EreportRequest,
-            SocketAddrV6,
-            &mut UdpServer,
-        )> {
+        ) -> anyhow::Result<(EreportRequest, SocketAddrV6, &mut UdpServer)>
+        {
             match sock {
                 Some(sock) => {
                     let (msg, addr) = sock.recv_from().await?;
-                    let (req, _) = gateway_messages::deserialize::<
-                        gateway_messages::EreportRequest,
-                    >(msg)?;
+                    let (req, _) =
+                        gateway_messages::deserialize::<EreportRequest>(msg)?;
                     Ok((req, addr, sock))
                 }
                 None => futures::future::pending().await,

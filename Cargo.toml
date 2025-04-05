@@ -409,8 +409,8 @@ gateway-client = { path = "clients/gateway-client" }
 # is "fine", because SP/MGS communication maintains forwards and backwards
 # compatibility, but will mean that faux-mgs might be missing new
 # functionality.)
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "df8f30e4dda3345890dd77021681366438947bf9", default-features = false, features = ["std"] }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "df8f30e4dda3345890dd77021681366438947bf9" }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "663df644d8e731ca293502fb88c1872e38f2929e", default-features = false, features = ["std"] }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "663df644d8e731ca293502fb88c1872e38f2929e" }
 gateway-test-utils = { path = "gateway-test-utils" }
 gateway-types = { path = "gateway-types" }
 gethostname = "0.5.0"

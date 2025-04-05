@@ -4,11 +4,11 @@
 
 use crate::config::Ereport;
 use crate::config::EreportRestart;
-use gateway_messages::EreportHeader;
-use gateway_messages::EreportHeaderV0;
-use gateway_messages::EreportRequest;
-use gateway_messages::EreportRequestFlags;
+use gateway_messages::ereport;
 use gateway_messages::ereport::Ena;
+use gateway_messages::ereport::EreportRequest;
+use gateway_messages::ereport::EreportResponseHeader;
+use gateway_messages::ereport::ResponseHeaderV0;
 use gateway_messages::ereport::RestartId;
 use std::collections::VecDeque;
 use std::io::Cursor;
@@ -45,7 +45,7 @@ impl EreportState {
             None => {
                 let amt = gateway_messages::serialize(
                     buf,
-                    &EreportHeader::V0(EreportHeaderV0::new_empty(
+                    &EreportResponseHeader::V0(ResponseHeaderV0::new_empty(
                         req.restart_id,
                     )),
                 )
@@ -65,7 +65,7 @@ impl EreportState {
             );
             let amt = gateway_messages::serialize(
                 buf,
-                &EreportHeader::V0(EreportHeaderV0::new_restarted(
+                &EreportResponseHeader::V0(ResponseHeaderV0::new_restarted(
                     current_restart.restart_id,
                 )),
             )
@@ -79,14 +79,16 @@ impl EreportState {
             return &buf[..amt];
         }
 
-        if req.flags.contains(EreportRequestFlags::COMMIT) {
-            slog::debug!(self.log, "commit flag is there");
-            let committed = req.committed_ena;
+        if let Some(committed_ena) = req.committed_ena() {
+            slog::debug!(
+                self.log,
+                "MGS committed ereports up to {committed_ena:?}"
+            );
             let mut discarded = 0;
             while current_restart
                 .ereports
                 .front()
-                .map(|(ena, _)| ena.0 <= committed.0)
+                .map(|(ena, _)| ena <= &committed_ena)
                 .unwrap_or(false)
             {
                 current_restart.ereports.pop_front();
@@ -95,7 +97,7 @@ impl EreportState {
 
             slog::info!(
                 self.log,
-                "discarded {discarded} ereports up to {committed:?}"
+                "discarded {discarded} ereports up to {committed_ena:?}"
             );
         }
 
@@ -106,9 +108,11 @@ impl EreportState {
         let end = if let Some((ena, ereport)) = respondant_ereports.next() {
             let mut pos = gateway_messages::serialize(
                 buf,
-                &EreportHeader::V0(EreportHeaderV0::new_data(
-                    current_restart.restart_id,
-                )),
+                &EreportResponseHeader::V0(
+                    ereport::ResponseHeaderV0::new_data(
+                        current_restart.restart_id,
+                    ),
+                ),
             )
             .expect("serialization shouldn't fail");
             pos += gateway_messages::serialize(&mut buf[pos..], ena)
@@ -150,7 +154,9 @@ impl EreportState {
         } else {
             gateway_messages::serialize(
                 buf,
-                &EreportHeader::V0(EreportHeaderV0::new_empty(req.restart_id)),
+                &EreportResponseHeader::V0(ResponseHeaderV0::new_empty(
+                    req.restart_id,
+                )),
             )
             .expect("serialization shouldn't fail")
         };

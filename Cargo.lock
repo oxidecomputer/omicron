@@ -1607,7 +1607,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3457,7 +3457,7 @@ dependencies = [
  "clap",
  "futures",
  "gateway-client",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=df8f30e4dda3345890dd77021681366438947bf9)",
+ "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=663df644d8e731ca293502fb88c1872e38f2929e)",
  "omicron-common",
  "omicron-workspace-hack",
  "reqwest",
@@ -3478,7 +3478,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=df8f30e4dda3345890dd77021681366438947bf9)",
+ "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=663df644d8e731ca293502fb88c1872e38f2929e)",
  "omicron-workspace-hack",
  "progenitor 0.9.1",
  "rand 0.8.5",
@@ -3488,6 +3488,23 @@ dependencies = [
  "serde_json",
  "slog",
  "uuid",
+]
+
+[[package]]
+name = "gateway-messages"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=663df644d8e731ca293502fb88c1872e38f2929e#663df644d8e731ca293502fb88c1872e38f2929e"
+dependencies = [
+ "bitflags 2.9.0",
+ "hubpack",
+ "serde",
+ "serde-big-array",
+ "serde_repr",
+ "smoltcp 0.9.1",
+ "static_assertions",
+ "strum_macros 0.25.3",
+ "uuid",
+ "zerocopy 0.6.6",
 ]
 
 [[package]]
@@ -3508,32 +3525,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "gateway-messages"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=df8f30e4dda3345890dd77021681366438947bf9#df8f30e4dda3345890dd77021681366438947bf9"
-dependencies = [
- "bitflags 2.9.0",
- "hubpack",
- "serde",
- "serde-big-array",
- "serde_repr",
- "smoltcp 0.9.1",
- "static_assertions",
- "strum_macros 0.25.3",
- "uuid",
- "zerocopy 0.6.6",
-]
-
-[[package]]
 name = "gateway-sp-comms"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=df8f30e4dda3345890dd77021681366438947bf9#df8f30e4dda3345890dd77021681366438947bf9"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=663df644d8e731ca293502fb88c1872e38f2929e#663df644d8e731ca293502fb88c1872e38f2929e"
 dependencies = [
  "async-trait",
  "backoff",
  "futures",
  "fxhash",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=df8f30e4dda3345890dd77021681366438947bf9)",
+ "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=663df644d8e731ca293502fb88c1872e38f2929e)",
  "hex",
  "hubpack",
  "hubtools",
@@ -3565,7 +3565,7 @@ version = "0.1.0"
 dependencies = [
  "camino",
  "dropshot 0.16.0",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=df8f30e4dda3345890dd77021681366438947bf9)",
+ "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=663df644d8e731ca293502fb88c1872e38f2929e)",
  "gateway-types",
  "omicron-gateway",
  "omicron-test-utils",
@@ -3580,7 +3580,7 @@ dependencies = [
 name = "gateway-types"
 version = "0.1.0"
 dependencies = [
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=df8f30e4dda3345890dd77021681366438947bf9)",
+ "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=663df644d8e731ca293502fb88c1872e38f2929e)",
  "hex",
  "ipcc",
  "omicron-common",
@@ -5220,7 +5220,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -5589,7 +5589,7 @@ dependencies = [
  "anyhow",
  "clap",
  "futures",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=df8f30e4dda3345890dd77021681366438947bf9)",
+ "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=663df644d8e731ca293502fb88c1872e38f2929e)",
  "gateway-test-utils",
  "libc",
  "omicron-gateway",
@@ -6055,7 +6055,7 @@ dependencies = [
  "expectorate",
  "futures",
  "gateway-client",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=df8f30e4dda3345890dd77021681366438947bf9)",
+ "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=663df644d8e731ca293502fb88c1872e38f2929e)",
  "gateway-test-utils",
  "nexus-sled-agent-shared",
  "nexus-types",
@@ -6119,7 +6119,7 @@ version = "0.1.0"
 dependencies = [
  "futures",
  "gateway-client",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=df8f30e4dda3345890dd77021681366438947bf9)",
+ "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=663df644d8e731ca293502fb88c1872e38f2929e)",
  "gateway-test-utils",
  "hubtools",
  "omicron-workspace-hack",
@@ -6392,7 +6392,7 @@ dependencies = [
  "dns-service-client",
  "dropshot 0.16.0",
  "futures",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=df8f30e4dda3345890dd77021681366438947bf9)",
+ "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=663df644d8e731ca293502fb88c1872e38f2929e)",
  "gateway-test-utils",
  "headers",
  "hickory-resolver",
@@ -6980,7 +6980,7 @@ dependencies = [
  "expectorate",
  "futures",
  "gateway-api",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=df8f30e4dda3345890dd77021681366438947bf9)",
+ "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=663df644d8e731ca293502fb88c1872e38f2929e)",
  "gateway-sp-comms",
  "gateway-test-utils",
  "gateway-types",
@@ -7102,7 +7102,7 @@ dependencies = [
  "fatfs",
  "futures",
  "gateway-client",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=df8f30e4dda3345890dd77021681366438947bf9)",
+ "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=663df644d8e731ca293502fb88c1872e38f2929e)",
  "gateway-test-utils",
  "headers",
  "hex",
@@ -7238,7 +7238,7 @@ dependencies = [
  "expectorate",
  "futures",
  "gateway-client",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=df8f30e4dda3345890dd77021681366438947bf9)",
+ "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=663df644d8e731ca293502fb88c1872e38f2929e)",
  "gateway-test-utils",
  "http",
  "humantime",
@@ -11439,7 +11439,7 @@ dependencies = [
  "clap",
  "dropshot 0.16.0",
  "futures",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=df8f30e4dda3345890dd77021681366438947bf9)",
+ "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=663df644d8e731ca293502fb88c1872e38f2929e)",
  "gateway-types",
  "hex",
  "nix 0.29.0",
@@ -13615,7 +13615,7 @@ dependencies = [
  "fs-err",
  "futures",
  "gateway-client",
- "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=df8f30e4dda3345890dd77021681366438947bf9)",
+ "gateway-messages 0.1.0 (git+https://github.com/oxidecomputer/management-gateway-service?rev=663df644d8e731ca293502fb88c1872e38f2929e)",
  "gateway-test-utils",
  "hex",
  "hickory-resolver",
@@ -13744,7 +13744,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
