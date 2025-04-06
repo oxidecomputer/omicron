@@ -475,8 +475,8 @@ lldpd-client = { git = "https://github.com/oxidecomputer/lldp" }
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 newtype_derive = "0.1.6"
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "4d684a84833a602248ab4c2872e20781d67bf73d" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "4d684a84833a602248ab4c2872e20781d67bf73d" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "b6cffe6791c1649c6029ddd7a0831d85e12cb93c" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "b6cffe6791c1649c6029ddd7a0831d85e12cb93c" }
 multimap = "0.10.0"
 nexus-auth = { path = "nexus/auth" }
 nexus-client = { path = "clients/nexus-client" }
