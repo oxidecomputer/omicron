@@ -5,7 +5,9 @@
 //! Utilities for manipulating the routing tables.
 
 use crate::zone::ROUTE;
-use crate::{ExecutionError, PFEXEC, execute, inner, output_to_exec_error};
+use crate::{
+    ExecutionError, PFEXEC, command_to_string, execute, output_to_exec_error,
+};
 use libc::ESRCH;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -18,7 +20,6 @@ pub enum Gateway {
     Ipv6(Ipv6Addr),
 }
 
-#[cfg_attr(any(test, feature = "testing"), mockall::automock)]
 impl Route {
     pub fn ensure_default_route_with_gateway(
         gateway: Gateway,
@@ -42,7 +43,7 @@ impl Route {
 
         let out =
             cmd.output().map_err(|err| ExecutionError::ExecutionStart {
-                command: inner::to_string(cmd),
+                command: command_to_string(cmd),
                 err,
             })?;
         match out.status.code() {
@@ -82,7 +83,7 @@ impl Route {
 
         let out =
             cmd.output().map_err(|err| ExecutionError::ExecutionStart {
-                command: inner::to_string(cmd),
+                command: command_to_string(cmd),
                 err,
             })?;
         match out.status.code() {
