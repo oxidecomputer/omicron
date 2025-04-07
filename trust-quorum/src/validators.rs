@@ -6,7 +6,7 @@
 
 use crate::configuration::ConfigurationError;
 use crate::messages::ReconfigureMsg;
-use crate::{CoordinatorState, Epoch, PersistentState, PlatformId, Threshold};
+use crate::{Epoch, PersistentStateSummary, PlatformId, Threshold};
 use omicron_uuid_kinds::RackUuid;
 use slog::{Logger, error, info, warn};
 use std::collections::BTreeSet;
@@ -15,9 +15,9 @@ use std::time::Duration;
 /// RackId's must remain the same over the lifetime of a trust quorum instance
 pub fn check_rack_id(
     msg_rack_id: RackUuid,
-    persistent_state: &PersistentState,
+    persistent_state: &PersistentStateSummary,
 ) -> Result<(), MismatchedRackIdError> {
-    if let Some(rack_id) = persistent_state.rack_id() {
+    if let Some(rack_id) = persistent_state.rack_id {
         if rack_id != msg_rack_id {
             return Err(MismatchedRackIdError {
                 expected: rack_id,
@@ -31,13 +31,13 @@ pub fn check_rack_id(
 
 /// Verify that the node is not decommissioned
 fn check_in_service(
-    persistent_state: &PersistentState,
+    persistent_state: &PersistentStateSummary,
 ) -> Result<(), SledDecommissionedError> {
     if let Some(decommissioned) = &persistent_state.decommissioned {
         return Err(SledDecommissionedError {
             from: decommissioned.from.clone(),
             epoch: decommissioned.epoch,
-            last_prepared_epoch: persistent_state.last_prepared_epoch(),
+            last_prepared_epoch: persistent_state.last_prepared_epoch,
         });
     }
 
@@ -181,10 +181,10 @@ impl ValidatedReconfigureMsg {
         log: &Logger,
         platform_id: &PlatformId,
         msg: ReconfigureMsg,
-        persistent_state: &PersistentState,
-        coordinator_state: &Option<CoordinatorState>,
+        persistent_state: PersistentStateSummary,
+        last_reconfig_msg: Option<&ValidatedReconfigureMsg>,
     ) -> Result<Option<Self>, ReconfigurationError> {
-        if persistent_state.is_lrtq_only() {
+        if persistent_state.is_lrtq_only {
             return Err(ReconfigurationError::UpgradeFromLrtqRequired);
         }
 
@@ -195,11 +195,11 @@ impl ValidatedReconfigureMsg {
         }
 
         Self::check_membership_sizes(&msg)?;
-        check_rack_id(msg.rack_id, persistent_state)?;
-        check_in_service(persistent_state)?;
-        Self::check_epoch(&msg, persistent_state)?;
+        check_rack_id(msg.rack_id, &persistent_state)?;
+        check_in_service(&persistent_state)?;
+        Self::check_epoch(&msg, &persistent_state)?;
         let is_idempotent_request =
-            Self::check_existing_coordination(log, &msg, coordinator_state)?;
+            Self::check_existing_coordination(log, &msg, last_reconfig_msg)?;
 
         if is_idempotent_request {
             return Ok(None);
@@ -253,20 +253,19 @@ impl ValidatedReconfigureMsg {
     // Ensure that the epoch for this reconfiguration is valid
     fn check_epoch(
         msg: &ReconfigureMsg,
-        persistent_state: &PersistentState,
+        persistent_state: &PersistentStateSummary,
     ) -> Result<(), ReconfigurationError> {
         // Ensure we are strictly ordering committed configurations
-        if msg.last_committed_epoch != persistent_state.last_committed_epoch() {
+        if msg.last_committed_epoch != persistent_state.last_committed_epoch {
             return Err(ReconfigurationError::LastCommittedEpochMismatch {
-                node_epoch: persistent_state.last_committed_epoch(),
+                node_epoch: persistent_state.last_committed_epoch,
                 msg_epoch: msg.last_committed_epoch,
             });
         }
 
         // Ensure that we haven't seen a prepare message for a newer
         // configuration.
-        if let Some(last_prepared_epoch) =
-            persistent_state.last_prepared_epoch()
+        if let Some(last_prepared_epoch) = persistent_state.last_prepared_epoch
         {
             if msg.epoch <= last_prepared_epoch {
                 return Err(ReconfigurationError::PreparedEpochMismatch {
@@ -287,12 +286,11 @@ impl ValidatedReconfigureMsg {
     fn check_existing_coordination(
         log: &Logger,
         new_msg: &ReconfigureMsg,
-        coordinator_state: &Option<CoordinatorState>,
+        last_reconfig_msg: Option<&ValidatedReconfigureMsg>,
     ) -> Result<bool, ReconfigurationError> {
-        let Some(coordinator_state) = coordinator_state else {
+        let Some(existing_msg) = last_reconfig_msg else {
             return Ok(false);
         };
-        let existing_msg = &coordinator_state.reconfigure_msg;
         let current_epoch = existing_msg.epoch;
         if current_epoch > new_msg.epoch {
             warn!(
@@ -336,5 +334,119 @@ impl ValidatedReconfigureMsg {
 
         // Valid new request
         Ok(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::{GenericUuid, RackUuid};
+    use proptest::prelude::*;
+    use test_strategy::{Arbitrary, proptest};
+    use uuid::Uuid;
+
+    fn arb_member() -> impl Strategy<Value = PlatformId> {
+        (0..255u8).prop_map(|serial| {
+            PlatformId::new("test".into(), serial.to_string())
+        })
+    }
+
+    fn arb_members() -> impl Strategy<Value = BTreeSet<PlatformId>> {
+        proptest::collection::btree_set(arb_member(), 3..10)
+    }
+
+    // We want to limit the number of unique rack ids to 2
+    // so that they match in most cases.
+    fn arb_rack_id() -> impl Strategy<Value = RackUuid> {
+        (0..10u8).prop_map(|val| {
+            let raw = if val == 9 {
+                Uuid::nil()
+            } else {
+                Uuid::from_bytes([
+                    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+                ])
+            };
+            RackUuid::from_untyped_uuid(raw)
+        })
+    }
+
+    #[derive(Arbitrary, Debug)]
+    pub struct TestInput {
+        #[strategy(arb_rack_id())]
+        rack_id: RackUuid,
+        #[strategy(arb_members())]
+        members: BTreeSet<PlatformId>,
+        #[strategy((1..10u64).prop_map(|x| Epoch(x)))]
+        epoch: Epoch,
+        new_config: bool,
+    }
+
+    // Generate dependent values such that reconfiguration always succeds
+    #[proptest]
+    fn test_validate_reconfigure_msg_new_success(input: TestInput) {
+        let logctx = test_setup_log("validate_reconfigure_msg_new_success");
+        let last_committed_epoch = if input.new_config {
+            None
+        } else {
+            Some(Epoch(input.epoch.0 - 1))
+        };
+        let msg = ReconfigureMsg {
+            rack_id: input.rack_id,
+            epoch: input.epoch,
+            last_committed_epoch,
+            members: input.members.clone(),
+            threshold: Threshold(input.members.len() as u8 - 1),
+            retry_timeout: Duration::from_millis(100),
+        };
+
+        let platform_id = input.members.first().unwrap().clone();
+        let (persistent_state, last_reconfig_msg) = if input.new_config {
+            let persistent_state = PersistentStateSummary {
+                rack_id: None,
+                is_lrtq_only: false,
+                is_uninitialized: true,
+                last_prepared_epoch: None,
+                last_committed_epoch: None,
+                decommissioned: None,
+            };
+            (persistent_state, None)
+        } else {
+            let persistent_state = PersistentStateSummary {
+                rack_id: Some(msg.rack_id),
+                is_lrtq_only: false,
+                is_uninitialized: false,
+                last_prepared_epoch: msg.last_committed_epoch,
+                last_committed_epoch: msg.last_committed_epoch,
+                decommissioned: None,
+            };
+            let mut members = input.members.clone();
+            members
+                .insert(PlatformId::new("test".into(), "removed_node".into()));
+            let last_reconfig_msg = ValidatedReconfigureMsg {
+                rack_id: input.rack_id,
+                epoch: msg.last_committed_epoch.unwrap(),
+                last_committed_epoch: None,
+                members,
+                threshold: msg.threshold,
+                retry_timeout: msg.retry_timeout,
+            };
+
+            (persistent_state, Some(last_reconfig_msg))
+        };
+
+        assert!(
+            ValidatedReconfigureMsg::new(
+                &logctx.log,
+                &platform_id,
+                msg,
+                persistent_state,
+                last_reconfig_msg.as_ref()
+            )
+            .expect("valid msg")
+            .is_some()
+        );
+
+        logctx.cleanup_successful();
     }
 }

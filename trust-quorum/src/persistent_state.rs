@@ -108,3 +108,27 @@ pub struct DecommissionedMetadata {
     /// Which node this commit information was learned from  
     pub from: PlatformId,
 }
+
+/// A subset of information stored in [`PersistentState`] that is useful
+/// for validation, testing, and informational purposes.
+pub struct PersistentStateSummary {
+    pub rack_id: Option<RackUuid>,
+    pub is_lrtq_only: bool,
+    pub is_uninitialized: bool,
+    pub last_prepared_epoch: Option<Epoch>,
+    pub last_committed_epoch: Option<Epoch>,
+    pub decommissioned: Option<DecommissionedMetadata>,
+}
+
+impl From<&PersistentState> for PersistentStateSummary {
+    fn from(value: &PersistentState) -> Self {
+        PersistentStateSummary {
+            rack_id: value.rack_id(),
+            is_lrtq_only: value.is_lrtq_only(),
+            is_uninitialized: value.is_uninitialized(),
+            last_prepared_epoch: value.last_prepared_epoch(),
+            last_committed_epoch: value.last_committed_epoch(),
+            decommissioned: value.decommissioned.clone(),
+        }
+    }
+}

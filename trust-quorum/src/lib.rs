@@ -24,7 +24,7 @@ pub(crate) use coordinator_state::CoordinatorState;
 pub use crypto::RackSecret;
 pub use messages::*;
 pub use node::Node;
-pub use persistent_state::PersistentState;
+pub use persistent_state::{PersistentState, PersistentStateSummary};
 
 #[derive(
     Debug,
