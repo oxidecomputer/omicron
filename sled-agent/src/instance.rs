@@ -539,9 +539,6 @@ struct InstanceRunner {
 
     // Queue to notify the sled agent's metrics task about our VNICs.
     metrics_queue: MetricsRequestQueue,
-
-    // Object representing membership in the "instance manager".
-    _instance_ticket: InstanceTicket,
 }
 
 impl InstanceRunner {
@@ -549,7 +546,11 @@ impl InstanceRunner {
     /// terminating the zone.
     const STOP_GRACE_PERIOD: Duration = Duration::from_secs(60 * 10);
 
-    async fn run(mut self, mut terminate_rx: mpsc::Receiver<TerminateRequest>) {
+    async fn run(
+        mut self,
+        mut terminate_rx: mpsc::Receiver<TerminateRequest>,
+        ticket: InstanceTicket,
+    ) {
         use InstanceRequest::*;
 
         let mut state_owner = VmmStateOwner::Runner;
@@ -748,11 +749,22 @@ impl InstanceRunner {
             info!(self.log, "instance runner exited main loop");
         }
 
-        info!(self.log, "before publish_state_to_nexus");
         if state_owner == VmmStateOwner::Runner {
             self.publish_state_to_nexus().await;
         }
-        info!(self.log, "after publish_state_to_nexus");
+
+        // Drop the instance ticket so that this instance will be removed from
+        // the instance manager. This ensures that no more requests will be
+        // queued to the runner, which allows this routine to send replies to
+        // those requests in an orderly fashion.
+        //
+        // This needs to be done only after publishing the final VMM state to
+        // Nexus so that Nexus is guaranteed to have received notice of the
+        // VMM's terminal state before it begins to see "no such VMM" errors
+        // from the instance manager. Otherwise it is possible for Nexus to
+        // conclude that a cleanly-stopped instance has gone missing and should
+        // be restarted.
+        drop(ticket);
 
         // Okay, now that we've terminated the instance, drain any outstanding
         // requests in the queue, so that they see an error indicating that the
@@ -787,8 +799,6 @@ impl InstanceRunner {
             };
         }
 
-        info!(self.log, "after draining request queue");
-
         // Anyone else who was trying to ask us to go die will be happy to learn
         // that we have now done so!
         while let Some(TerminateRequest { tx, .. }) = terminate_rx.recv().await
@@ -797,10 +807,6 @@ impl InstanceRunner {
                 updated_runtime: Some(self.current_state()),
             }));
         }
-
-        // Returning from this routine drops the instance ticket and so
-        // deregisters the instance from its instance manager.
-        info!(self.log, "returning from InstanceRunner::run");
     }
 
     /// Yields this instance's ID.
@@ -1852,11 +1858,11 @@ impl Instance {
             zone_builder_factory,
             zone_bundler,
             metrics_queue,
-            _instance_ticket: ticket,
         };
 
-        let runner_handle =
-            tokio::task::spawn(async move { runner.run(terminate_rx).await });
+        let runner_handle = tokio::task::spawn(async move {
+            runner.run(terminate_rx, ticket).await
+        });
 
         Ok(Instance {
             id,
@@ -3245,7 +3251,6 @@ mod tests {
             cmd_rx: mpsc::Receiver<InstanceRequest>,
             monitor_tx: mpsc::Sender<InstanceMonitorRequest>,
             monitor_rx: mpsc::Receiver<InstanceMonitorRequest>,
-            ticket: InstanceTicket,
         ) -> Self {
             let metadata = InstanceMetadata {
                 silo_id: Uuid::new_v4(),
@@ -3322,7 +3327,6 @@ mod tests {
                 zone_builder_factory,
                 zone_bundler,
                 metrics_queue,
-                _instance_ticket: ticket,
             }
         }
     }
@@ -3357,9 +3361,9 @@ mod tests {
 
         let initial_state = fake_instance_initial_state(propolis_addr);
 
-        let (_terminate_tx, terminate_rx) = mpsc::channel(1);
+        let (terminate_tx, terminate_rx) = mpsc::channel(1);
         let (monitor_tx, monitor_rx) = mpsc::channel(1);
-        let (_cmd_tx, cmd_rx) = mpsc::channel(QUEUE_SIZE);
+        let (cmd_tx, cmd_rx) = mpsc::channel(QUEUE_SIZE);
         let (remove_tx, mut remove_rx) = mpsc::unbounded_channel();
         let ticket = InstanceTicket::new(propolis_id, remove_tx);
 
@@ -3371,11 +3375,10 @@ mod tests {
             cmd_rx,
             monitor_tx.clone(),
             monitor_rx,
-            ticket,
         );
 
-        let _runner_task = tokio::spawn(async move {
-            runner.run(terminate_rx).await;
+        let runner_task = tokio::spawn(async move {
+            runner.run(terminate_rx, ticket).await;
         });
 
         let (resp_tx, resp_rx) = oneshot::channel();
@@ -3401,7 +3404,7 @@ mod tests {
         assert_eq!(resp, InstanceMonitorResponse::Exit);
 
         // ...and the runner should advise the instance manager to remove this
-        // instance from its table.
+        // instance from its table before it tries to return.
         assert!(remove_rx.recv().await.is_some());
 
         // By the time the "remove this instance" message arrives, the runner
@@ -3412,6 +3415,13 @@ mod tests {
         };
 
         assert_eq!(state.vmm_state.state, VmmState::Destroyed);
+
+        // Make sure the runner actually runs to completion once its command
+        // channels are dropped. (This simulates what happens when the "real"
+        // instance manager is asked to remove a record from its VMM table.)
+        drop(cmd_tx);
+        drop(terminate_tx);
+        let _ = runner_task.await;
 
         storage_harness.cleanup().await;
         logctx.cleanup_successful();
