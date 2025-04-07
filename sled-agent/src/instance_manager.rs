@@ -418,7 +418,7 @@ enum InstanceManagerRequest {
 
 // Requests that the instance manager stop processing information about a
 // particular instance.
-struct InstanceDeregisterRequest {
+pub(crate) struct InstanceDeregisterRequest {
     id: PropolisUuid,
 }
 
@@ -874,7 +874,7 @@ pub struct InstanceTicket {
 impl InstanceTicket {
     // Creates a new instance ticket for the Propolis job with the supplied `id`
     // to be removed from the manager on destruction.
-    fn new(
+    pub(crate) fn new(
         id: PropolisUuid,
         terminate_tx: mpsc::UnboundedSender<InstanceDeregisterRequest>,
     ) -> Self {

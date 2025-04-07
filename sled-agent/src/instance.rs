@@ -466,6 +466,7 @@ struct InstanceMonitorRequest {
 
 /// Sent by the instance runner to the instance monitor after the runner handles
 /// an update from the monitor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InstanceMonitorResponse {
     /// Indicates that the monitor should continue running.
     Continue,
@@ -743,11 +744,15 @@ impl InstanceRunner {
                 "instance runner exiting with VMM in non-terminal state";
                 "state" => ?self.current_state()
             );
+        } else {
+            info!(self.log, "instance runner exited main loop");
         }
 
+        info!(self.log, "before publish_state_to_nexus");
         if state_owner == VmmStateOwner::Runner {
             self.publish_state_to_nexus().await;
         }
+        info!(self.log, "after publish_state_to_nexus");
 
         // Okay, now that we've terminated the instance, drain any outstanding
         // requests in the queue, so that they see an error indicating that the
@@ -782,6 +787,8 @@ impl InstanceRunner {
             };
         }
 
+        info!(self.log, "after draining request queue");
+
         // Anyone else who was trying to ask us to go die will be happy to learn
         // that we have now done so!
         while let Some(TerminateRequest { tx, .. }) = terminate_rx.recv().await
@@ -793,6 +800,7 @@ impl InstanceRunner {
 
         // Returning from this routine drops the instance ticket and so
         // deregisters the instance from its instance manager.
+        info!(self.log, "returning from InstanceRunner::run");
     }
 
     /// Yields this instance's ID.
@@ -965,13 +973,13 @@ impl InstanceRunner {
         // Propolis zone comes into being, and once the runner decides to
         // discard the active zone, it should stop listening for new requests
         // from the monitor.
-        if self.running_state.is_none() {
-            error!(
-                self.log,
-                "received Propolis state observation without a zone"
-            );
-            return;
-        }
+        // if self.running_state.is_none() {
+        //     error!(
+        //         self.log,
+        //         "received Propolis state observation without a zone"
+        //     );
+        //     return;
+        // }
 
         self.state.apply_propolis_observation(state);
         info!(
@@ -2490,10 +2498,13 @@ mod tests {
     };
     use omicron_common::api::internal::nexus::{InstanceProperties, VmmState};
     use omicron_common::api::internal::shared::{DhcpConfig, SledIdentifiers};
+    use propolis_client::types::{
+        InstanceMigrateStatusResponse, InstanceStateMonitorResponse,
+    };
     use sled_agent_types::zone_bundle::CleanupContext;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
-    use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
+    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4};
     use std::str::FromStr;
     use std::time::Duration;
     use tokio::sync::watch::Receiver;
@@ -2507,7 +2518,7 @@ mod tests {
     const PROPOLIS_ID: Uuid =
         uuid::uuid!("e8e95a60-2aaf-4453-90e4-e0e58f126762");
 
-    #[derive(Default, Clone)]
+    #[derive(Default, Clone, Debug)]
     enum ReceivedInstanceState {
         #[default]
         None,
@@ -3222,6 +3233,187 @@ mod tests {
         .expect("failed to receive FakeNexus' InstanceState");
 
         test_objects.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    impl InstanceRunner {
+        fn new_for_test(
+            log: &slog::Logger,
+            propolis_id: PropolisUuid,
+            initial_state: InstanceInitialState,
+            services: InstanceManagerServices,
+            cmd_rx: mpsc::Receiver<InstanceRequest>,
+            monitor_tx: mpsc::Sender<InstanceMonitorRequest>,
+            monitor_rx: mpsc::Receiver<InstanceMonitorRequest>,
+            ticket: InstanceTicket,
+        ) -> Self {
+            let metadata = InstanceMetadata {
+                silo_id: Uuid::new_v4(),
+                project_id: Uuid::new_v4(),
+            };
+            let sled_identifiers = SledIdentifiers {
+                rack_id: Uuid::new_v4(),
+                sled_id: Uuid::new_v4(),
+                model: "fake-model".into(),
+                revision: 1,
+                serial: "fake-serial".into(),
+            };
+
+            let metadata = propolis_client::types::InstanceMetadata {
+                project_id: metadata.project_id,
+                silo_id: metadata.silo_id,
+                sled_id: sled_identifiers.sled_id,
+                sled_model: sled_identifiers.model,
+                sled_revision: sled_identifiers.revision,
+                sled_serial: sled_identifiers.serial,
+            };
+
+            let InstanceInitialState {
+                hardware,
+                vmm_runtime,
+                propolis_addr,
+                migration_id,
+            } = initial_state;
+
+            let InstanceManagerServices {
+                nexus_client,
+                vnic_allocator,
+                port_manager,
+                storage,
+                zone_bundler,
+                zone_builder_factory,
+                metrics_queue,
+            } = services;
+
+            let dhcp_config = DhcpCfg::default();
+
+            Self {
+                log: log.new(o!("component" => "TestInstanceRunner")),
+                should_terminate: false,
+                rx: cmd_rx,
+                tx_monitor: monitor_tx,
+                rx_monitor: monitor_rx,
+                monitor_handle: None,
+                properties: propolis_client::types::InstanceProperties {
+                    id: propolis_id.into_untyped_uuid(),
+                    name: "test instance".to_string(),
+                    description: "test instance".to_string(),
+                    metadata,
+                },
+                vcpus: 1,
+                memory_mib: 1024,
+                propolis_id,
+                propolis_addr,
+                vnic_allocator,
+                port_manager,
+                requested_nics: hardware.nics,
+                source_nat: hardware.source_nat,
+                ephemeral_ip: hardware.ephemeral_ip,
+                floating_ips: hardware.floating_ips,
+                firewall_rules: hardware.firewall_rules,
+                dhcp_config,
+                requested_disks: hardware.disks,
+                cloud_init_bytes: hardware.cloud_init_bytes,
+                boot_settings: hardware.boot_settings,
+                state: InstanceStates::new(vmm_runtime, migration_id),
+                running_state: None,
+                nexus_client,
+                storage,
+                zone_builder_factory,
+                zone_bundler,
+                metrics_queue,
+                _instance_ticket: ticket,
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_destroy_published_when_instance_removed() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_destroy_published_before_instanced_removed",
+        );
+        let log = logctx.log.new(o!(FileKv));
+
+        let mut storage_harness = setup_storage_manager(&log).await;
+        let FakeNexusParts {
+            nexus_client,
+            _nexus_server,
+            state_rx,
+            _dns_server,
+        } = FakeNexusParts::new(&log).await;
+
+        let temp_guard = Utf8TempDir::new().unwrap();
+        let (services, _metrics_rx) = fake_instance_manager_services(
+            &log,
+            storage_harness.handle().clone(),
+            nexus_client,
+            &temp_guard.path().to_string(),
+        );
+        let propolis_id = PropolisUuid::new_v4();
+        let propolis_addr = SocketAddr::V4(SocketAddrV4::new(
+            Ipv4Addr::new(127, 0, 0, 1),
+            12400,
+        ));
+
+        let initial_state = fake_instance_initial_state(propolis_addr);
+
+        let (_terminate_tx, terminate_rx) = mpsc::channel(1);
+        let (monitor_tx, monitor_rx) = mpsc::channel(1);
+        let (_cmd_tx, cmd_rx) = mpsc::channel(QUEUE_SIZE);
+        let (remove_tx, mut remove_rx) = mpsc::unbounded_channel();
+        let ticket = InstanceTicket::new(propolis_id, remove_tx);
+
+        let runner = InstanceRunner::new_for_test(
+            &log.new(o!("component" => "InstanceRunner")),
+            propolis_id,
+            initial_state,
+            services,
+            cmd_rx,
+            monitor_tx.clone(),
+            monitor_rx,
+            ticket,
+        );
+
+        let _runner_task = tokio::spawn(async move {
+            runner.run(terminate_rx).await;
+        });
+
+        let (resp_tx, resp_rx) = oneshot::channel();
+        monitor_tx
+            .send(InstanceMonitorRequest {
+                update: InstanceMonitorUpdate::State(
+                    InstanceStateMonitorResponse {
+                        gen: 5,
+                        migration: InstanceMigrateStatusResponse {
+                            migration_in: None,
+                            migration_out: None,
+                        },
+                        state: propolis_client::types::InstanceState::Destroyed,
+                    },
+                ),
+                tx: resp_tx,
+            })
+            .await
+            .unwrap();
+
+        // Since the fake VMM is gone, the monitor should be told to exit...
+        let resp = resp_rx.await.unwrap();
+        assert_eq!(resp, InstanceMonitorResponse::Exit);
+
+        // ...and the runner should advise the instance manager to remove this
+        // instance from its table.
+        assert!(remove_rx.recv().await.is_some());
+
+        // By the time the "remove this instance" message arrives, the runner
+        // should have published the Destroyed VM state.
+        let state = state_rx.borrow().clone();
+        let ReceivedInstanceState::InstancePut(state) = state else {
+            panic!("unexpected ReceivedInstanceState variant {state:?}");
+        };
+
+        assert_eq!(state.vmm_state.state, VmmState::Destroyed);
+
+        storage_harness.cleanup().await;
         logctx.cleanup_successful();
     }
 }
