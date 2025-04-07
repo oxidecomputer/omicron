@@ -7692,7 +7692,6 @@ dependencies = [
  "getrandom 0.3.1",
  "group",
  "hashbrown 0.15.1",
- "hex",
  "hickory-proto",
  "hmac",
  "hyper",
@@ -12762,7 +12761,7 @@ name = "transceiver-messages"
 version = "0.1.1"
 source = "git+https://github.com/oxidecomputer/transceiver-control?branch=main#7ebff6ecdd78b5dfc2a4ae7af780f04638a3a637"
 dependencies = [
- "bitflags 2.6.0",
+ "bitflags 2.9.0",
  "clap",
  "hubpack",
  "schemars",
