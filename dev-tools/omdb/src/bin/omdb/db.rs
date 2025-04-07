@@ -1321,11 +1321,15 @@ impl DbArgs {
                     }) => cmd_db_zpool_list(&opctx, &datastore).await,
                     DbCommands::Pool(PoolArgs {
                         command: PoolCommands::SetStorageBuffer(args)
-                    }) => cmd_db_zpool_set_storage_buffer(
-                        &opctx,
-                        &datastore,
-                        &args,
-                    ).await,
+                    }) => {
+                        let token = omdb.check_allow_destructive()?;
+                        cmd_db_zpool_set_storage_buffer(
+                            &opctx,
+                            &datastore,
+                            &args,
+                            token,
+                        ).await
+                    }
                 }
             }
         }).await
@@ -7774,6 +7778,7 @@ async fn cmd_db_zpool_set_storage_buffer(
     opctx: &OpContext,
     datastore: &DataStore,
     args: &SetStorageBufferArgs,
+    _token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     datastore
         .zpool_set_control_plane_storage_buffer(
