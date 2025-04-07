@@ -34,8 +34,7 @@ use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zone::ZONE_PREFIX;
 use nexus_sled_agent_shared::inventory::{
     Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
-    OmicronSledConfig, OmicronSledConfigResult, OmicronZoneImageSource,
-    OmicronZonesConfig, SledRole,
+    OmicronSledConfig, OmicronSledConfigResult, OmicronZonesConfig, SledRole,
 };
 use omicron_common::address::{
     Ipv6Subnet, SLED_PREFIX, get_sled_address, get_switch_zone_address,
@@ -602,10 +601,14 @@ impl SledAgent {
             )
             .await?;
 
-        let repo_depot = ArtifactStore::new(&log, storage_manager.clone())
-            .await
-            .start(sled_address, &config.dropshot)
-            .await?;
+        let repo_depot = ArtifactStore::new(
+            &log,
+            storage_manager.clone(),
+            Some(services.clone()),
+        )
+        .await
+        .start(sled_address, &config.dropshot)
+        .await?;
 
         // Spawn a background task for managing notifications to nexus
         // about this sled-agent.
@@ -1049,8 +1052,7 @@ impl SledAgent {
 
         // Ensure that any zone images from the artifact store are present.
         for zone in &requested_zones.zones {
-            if let OmicronZoneImageSource::Artifact { hash } = zone.image_source
-            {
+            if let Some(hash) = zone.image_source.artifact_hash() {
                 if let Err(err) = self.artifact_store().get(hash).await {
                     return Err(Error::ArtifactNotFound {
                         hash,

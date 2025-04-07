@@ -17,6 +17,7 @@
 //! Operations that list or modify artifacts or the configuration are called by
 //! Nexus and handled by the Sled Agent API.
 
+use std::collections::BTreeSet;
 use std::future::Future;
 use std::io::ErrorKind;
 use std::net::SocketAddrV6;
@@ -46,6 +47,8 @@ use tokio::fs::{File, OpenOptions};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, oneshot, watch};
 use tufaceous_artifact::ArtifactHash;
+
+use crate::services::ServiceManager;
 
 // These paths are defined under the artifact storage dataset. They
 // cannot conflict with any artifact paths because all artifact paths are
@@ -86,7 +89,11 @@ pub(crate) struct ArtifactStore<T: DatasetsManager> {
 }
 
 impl<T: DatasetsManager> ArtifactStore<T> {
-    pub(crate) async fn new(log: &Logger, storage: T) -> ArtifactStore<T> {
+    pub(crate) async fn new(
+        log: &Logger,
+        storage: T,
+        services: Option<ServiceManager>,
+    ) -> ArtifactStore<T> {
         let log = log.new(slog::o!("component" => "ArtifactStore"));
 
         let mut ledger_paths = Vec::new();
@@ -125,6 +132,7 @@ impl<T: DatasetsManager> ArtifactStore<T> {
         tokio::task::spawn(ledger_manager(
             log.clone(),
             ledger_paths,
+            services,
             ledger_rx,
             config_tx,
         ));
@@ -456,9 +464,11 @@ type LedgerManagerRequest =
 async fn ledger_manager(
     log: Logger,
     ledger_paths: Vec<Utf8PathBuf>,
+    services: Option<ServiceManager>,
     mut rx: mpsc::Receiver<LedgerManagerRequest>,
     config_channel: watch::Sender<Option<ArtifactConfig>>,
 ) {
+    let services = services.as_ref();
     let handle_request = async |new_config: ArtifactConfig| {
         if ledger_paths.is_empty() {
             return Err(Error::NoUpdateDataset);
@@ -467,7 +477,38 @@ async fn ledger_manager(
             Ledger::<ArtifactConfig>::new(&log, ledger_paths.clone()).await
         {
             if new_config.generation > ledger.data().generation {
-                // New config generation; update the ledger.
+                // New config generation. First check that it's not asking
+                // us to delete any artifact that is part of the current zone
+                // configuration.
+                if let Some(services) = services {
+                    let mut difference = ledger
+                        .data()
+                        .artifacts
+                        .difference(&new_config.artifacts)
+                        .copied()
+                        .peekable();
+                    if difference.peek().is_some() {
+                        let in_use = services
+                            .omicron_zones_list()
+                            .await
+                            .zones
+                            .into_iter()
+                            .filter_map(|zone| {
+                                zone.image_source.artifact_hash()
+                            })
+                            .collect::<BTreeSet<_>>();
+                        for sha256 in difference {
+                            if in_use.contains(&sha256) {
+                                return Err(Error::ArtifactInUse {
+                                    sha256,
+                                    thing: "current zone configuration",
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // Everything looks okay; update the ledger.
                 *ledger.data_mut() = new_config;
                 ledger
             } else if new_config == *ledger.data() {
@@ -774,6 +815,12 @@ pub enum Error {
     #[error("Another task is already writing artifact {sha256}")]
     AlreadyInProgress { sha256: ArtifactHash },
 
+    #[error(
+        "Artifact {sha256} is in use by {thing} \
+        but would be deleted by new artifact config"
+    )]
+    ArtifactInUse { sha256: ArtifactHash, thing: &'static str },
+
     #[error("Error while reading request body")]
     Body(dropshot::HttpError),
 
@@ -853,7 +900,8 @@ impl From<Error> for HttpError {
     fn from(err: Error) -> HttpError {
         match err {
             // 4xx errors
-            Error::HashMismatch { .. }
+            Error::ArtifactInUse { .. }
+            | Error::HashMismatch { .. }
             | Error::NoConfig
             | Error::NotInConfig { .. } => {
                 HttpError::for_bad_request(None, err.to_string())
@@ -993,7 +1041,7 @@ mod test {
 
         let log = test_setup_log("generations");
         let backend = TestBackend::new(2);
-        let store = ArtifactStore::new(&log.log, backend).await;
+        let store = ArtifactStore::new(&log.log, backend, None).await;
 
         // get_config returns None
         assert!(store.get_config().is_none());
@@ -1046,7 +1094,7 @@ mod test {
     async fn list_get_put() {
         let log = test_setup_log("list_get_put");
         let backend = TestBackend::new(2);
-        let mut store = ArtifactStore::new(&log.log, backend).await;
+        let mut store = ArtifactStore::new(&log.log, backend, None).await;
 
         // get fails, because it doesn't exist yet
         assert!(matches!(
@@ -1166,7 +1214,7 @@ mod test {
 
         let log = test_setup_log("no_dataset");
         let backend = TestBackend::new(0);
-        let store = ArtifactStore::new(&log.log, backend).await;
+        let store = ArtifactStore::new(&log.log, backend, None).await;
 
         assert!(matches!(
             store.get(TEST_HASH).await,
@@ -1194,7 +1242,7 @@ mod test {
 
         let log = test_setup_log("wrong_hash");
         let backend = TestBackend::new(2);
-        let store = ArtifactStore::new(&log.log, backend).await;
+        let store = ArtifactStore::new(&log.log, backend, None).await;
         let mut config = ArtifactConfig {
             generation: 1u32.into(),
             artifacts: BTreeSet::new(),
