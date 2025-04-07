@@ -212,10 +212,10 @@ impl ManagementSwitch {
                             shared_socket = Some(
                                 SharedSocket::bind(
                                     config.udp_listen_port,
-                                    shared_socket::ControlPlaneAgentHandler::new(&host_phase2_provider, &log),
-                                    log.clone(),
+                                    shared_socket::ControlPlaneAgentHandler::new(&host_phase2_provider),
+                                    log.new(slog::o!("socket" => "control-plane-agent")),
                                 )
-                                .await?,
+                                .await?
                             );
 
                             shared_socket.as_ref().unwrap()
@@ -226,12 +226,11 @@ impl ManagementSwitch {
 
                     let ereport_socket = match &mut ereport_socket {
                         None => {
-                            let log = log.new(slog::o!("socket" => "ereport"));
                             ereport_socket = Some(
                                 SharedSocket::bind(
                                     config.ereport_udp_listen_port,
-                                    ereport::EreportHandler::new(log.clone()),
-                                    log,
+                                    ereport::EreportHandler::default(),
+                                    log.new(slog::o!("socket" => "ereport")),
                                 )
                                 .await?,
                             );
