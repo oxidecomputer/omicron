@@ -7431,6 +7431,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-repo-depot-standalone"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "buf-list",
+ "bytes",
+ "camino",
+ "clap",
+ "dropshot 0.16.0",
+ "futures",
+ "omicron-workspace-hack",
+ "repo-depot-api",
+ "serde_json",
+ "slog",
+ "slog-error-chain",
+ "tokio",
+ "tough",
+ "tufaceous-artifact",
+ "tufaceous-lib",
+]
+
+[[package]]
 name = "omicron-rpaths"
 version = "0.1.0"
 dependencies = [
