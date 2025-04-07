@@ -321,7 +321,7 @@ struct TerminateRequest {
 struct InstanceMonitorRunner {
     client: Arc<PropolisClient>,
     zone_name: String,
-    tx_monitor: mpsc::Sender<InstanceMonitorRequest>,
+    tx_monitor: mpsc::Sender<InstanceMonitorMessage>,
     zones_api: Arc<dyn illumos_utils::zone::Api>,
     log: slog::Logger,
 }
@@ -356,9 +356,9 @@ impl InstanceMonitorRunner {
             // It will decide the new state, provide that info to Nexus,
             // and possibly identify if we should terminate.
             let (tx, rx) = oneshot::channel();
-            self.tx_monitor.send(InstanceMonitorRequest { update, tx }).await?;
+            self.tx_monitor.send(InstanceMonitorMessage { update, tx }).await?;
 
-            if let InstanceMonitorResponse::Exit = rx.await? {
+            if rx.await?.is_break() {
                 return Ok(());
             }
         }
@@ -454,25 +454,14 @@ enum InstanceMonitorUpdate {
     Error(PropolisErrorCode),
 }
 
-/// A request issued from the instance monitor to the instance runner.
-struct InstanceMonitorRequest {
+/// A message sent by an instance monitor to its runner.
+struct InstanceMonitorMessage {
     /// The body of the instance monitor's message.
     update: InstanceMonitorUpdate,
 
     /// After handling an update, the instance runner uses this channel to tell
     /// the monitor whether to continue running.
-    tx: oneshot::Sender<InstanceMonitorResponse>,
-}
-
-/// Sent by the instance runner to the instance monitor after the runner handles
-/// an update from the monitor.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum InstanceMonitorResponse {
-    /// Indicates that the monitor should continue running.
-    Continue,
-
-    /// Indicates that the monitor can lay down its sword.
-    Exit,
+    tx: oneshot::Sender<std::ops::ControlFlow<()>>,
 }
 
 struct InstanceRunner {
@@ -486,8 +475,8 @@ struct InstanceRunner {
     rx: mpsc::Receiver<InstanceRequest>,
 
     // Request channel on which monitor requests are made.
-    tx_monitor: mpsc::Sender<InstanceMonitorRequest>,
-    rx_monitor: mpsc::Receiver<InstanceMonitorRequest>,
+    tx_monitor: mpsc::Sender<InstanceMonitorMessage>,
+    rx_monitor: mpsc::Receiver<InstanceMonitorMessage>,
     monitor_handle: Option<tokio::task::JoinHandle<()>>,
 
     // Properties visible to Propolis
@@ -579,7 +568,7 @@ impl InstanceRunner {
 
                 // Handle messages from our own "Monitor the VMM" task.
                 request = self.rx_monitor.recv() => {
-                    self.handle_monitor_request(request).await;
+                    self.handle_monitor_message(request).await;
                 },
 
                 // We are waiting for the VMM to stop, and the grace period has
@@ -603,6 +592,10 @@ impl InstanceRunner {
                     // automatically restart it even though the user asked for
                     // it to be stopped. To avoid this, move the VMM to
                     // Destroyed here.
+                    //
+                    // Note that this timeout is only implicated when Nexus
+                    // asks to stop an instance (it is not enabled when someone
+                    // forcibly terminates a VM).
                     self.state.force_state_to_destroyed();
                     self.terminate().await;
                     break;
@@ -739,7 +732,16 @@ impl InstanceRunner {
         // This is the last opportunity to publish VMM state to Nexus for this
         // VMM, so the VMM had better be in a state that allows Nexus to
         // dissociate it from its instance.
-        if !self.state.vmm_halted() {
+        //
+        // It should be possible to assert this property here: all the paths out
+        // of the previous loop are supposed either to set a terminal state
+        // themselves or ensure that one was observed before setting the "loop
+        // should exit" flag. But program defensively anyway, since an assertion
+        // failure that takes out sled agent can affect multiple instances,
+        // whereas incorrectly removing one VMM from the table will affect only
+        // that VMM (and even that VMM's instance will get back on track when
+        // Nexus realizes what has happened).
+        if !self.state.vmm_is_halted() {
             error!(
                 self.log,
                 "instance runner exiting with VMM in non-terminal state";
@@ -898,15 +900,15 @@ impl InstanceRunner {
         }
     }
 
-    async fn handle_monitor_request(
+    async fn handle_monitor_message(
         &mut self,
-        request: Option<InstanceMonitorRequest>,
+        request: Option<InstanceMonitorMessage>,
     ) {
         let Some(request) = request else {
             unreachable!("runner keeps a copy of the monitor tx");
         };
 
-        let InstanceMonitorRequest { update, tx } = request;
+        let InstanceMonitorMessage { update, tx } = request;
         let response = match update {
             InstanceMonitorUpdate::State(state) => {
                 self.observe_state(&ObservedPropolisState::new(&state));
@@ -914,12 +916,12 @@ impl InstanceRunner {
                 // If Propolis still has an active VM, just publish this state
                 // update and resume normal operation. Otherwise, go through the
                 // Propolis teardown sequence.
-                if !self.state.vmm_halted() {
+                if !self.state.vmm_is_halted() {
                     self.publish_state_to_nexus().await;
-                    InstanceMonitorResponse::Continue
+                    std::ops::ControlFlow::Continue(())
                 } else {
                     self.terminate().await;
-                    InstanceMonitorResponse::Exit
+                    std::ops::ControlFlow::Break(())
                 }
             }
             InstanceMonitorUpdate::ZoneGone => {
@@ -929,7 +931,7 @@ impl InstanceRunner {
                 // runner is now the sole driver of the VMM state machine. Drive
                 // the VMM to Failed and go through the termination sequence.
                 self.fail_vmm_and_terminate().await;
-                InstanceMonitorResponse::Exit
+                std::ops::ControlFlow::Break(())
             }
             InstanceMonitorUpdate::Error(PropolisErrorCode::NoInstance) => {
                 warn!(
@@ -942,7 +944,7 @@ impl InstanceRunner {
                 // lost whatever VM was previously created there. Nothing to do
                 // but mark the VMM as failed and tear things down.
                 self.fail_vmm_and_terminate().await;
-                InstanceMonitorResponse::Exit
+                std::ops::ControlFlow::Break(())
             }
             InstanceMonitorUpdate::Error(
                 code @ PropolisErrorCode::AlreadyRunning
@@ -958,14 +960,14 @@ impl InstanceRunner {
                     "error_code" => ?code
                 );
 
-                InstanceMonitorResponse::Continue
+                std::ops::ControlFlow::Continue(())
             }
         };
 
         if tx.send(response).is_err() {
             warn!(
                 self.log,
-                "failed to send response to instance state monitor"
+                "failed to send control flow response to instance state monitor"
             );
         }
     }
@@ -2400,7 +2402,7 @@ impl InstanceRunner {
                     );
                 }
 
-                self.terminate().await;
+                self.fail_vmm_and_terminate().await;
                 VmmStateOwner::Runner
             }
         }
@@ -3249,8 +3251,8 @@ mod tests {
             initial_state: InstanceInitialState,
             services: InstanceManagerServices,
             cmd_rx: mpsc::Receiver<InstanceRequest>,
-            monitor_tx: mpsc::Sender<InstanceMonitorRequest>,
-            monitor_rx: mpsc::Receiver<InstanceMonitorRequest>,
+            monitor_tx: mpsc::Sender<InstanceMonitorMessage>,
+            monitor_rx: mpsc::Receiver<InstanceMonitorMessage>,
         ) -> Self {
             let metadata = InstanceMetadata {
                 silo_id: Uuid::new_v4(),
@@ -3383,7 +3385,7 @@ mod tests {
 
         let (resp_tx, resp_rx) = oneshot::channel();
         monitor_tx
-            .send(InstanceMonitorRequest {
+            .send(InstanceMonitorMessage {
                 update: InstanceMonitorUpdate::State(
                     InstanceStateMonitorResponse {
                         gen: 5,
@@ -3401,7 +3403,7 @@ mod tests {
 
         // Since the fake VMM is gone, the monitor should be told to exit...
         let resp = resp_rx.await.unwrap();
-        assert_eq!(resp, InstanceMonitorResponse::Exit);
+        assert!(resp.is_break());
 
         // ...and the runner should advise the instance manager to remove this
         // instance from its table before it tries to return.

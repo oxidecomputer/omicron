@@ -308,7 +308,7 @@ impl SimInstanceInner {
                 &self.last_response,
             ));
 
-            self.state.vmm_halted().then_some(InstanceAction::Destroy)
+            self.state.vmm_is_halted().then_some(InstanceAction::Destroy)
         } else {
             None
         }

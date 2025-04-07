@@ -188,7 +188,7 @@ impl InstanceStates {
         &self.vmm
     }
 
-    pub fn vmm_halted(&self) -> bool {
+    pub fn vmm_is_halted(&self) -> bool {
         matches!(self.vmm.state, VmmState::Destroyed | VmmState::Failed)
     }
 
@@ -276,7 +276,7 @@ impl InstanceStates {
             transition_migration(&mut self.migration_out, m, observed.time);
         }
 
-        if self.vmm_halted() {
+        if self.vmm_is_halted() {
             // If there's an active migration and the VMM is suddenly gone,
             // that should constitute a migration failure!
             if let Some(ref mut m) = self.migration_in {
@@ -412,7 +412,7 @@ mod test {
             let mut instance_state = make_instance();
             instance_state
                 .apply_propolis_observation(&make_observed_state(state.into()));
-            assert!(instance_state.vmm_halted())
+            assert!(instance_state.vmm_is_halted())
         }
     }
 
@@ -472,7 +472,7 @@ mod test {
         // instance's state generation.
         let prev = state.clone();
         state.apply_propolis_observation(&observed);
-        assert!(!state.vmm_halted());
+        assert!(!state.vmm_is_halted());
         assert_state_change_has_gen_change(&prev, &state);
 
         // The migration state should transition to "completed"
@@ -492,7 +492,7 @@ mod test {
         let prev = state.clone();
         observed.vmm_state = PropolisInstanceState(Observed::Stopped);
         state.apply_propolis_observation(&observed);
-        assert!(!state.vmm_halted());
+        assert!(!state.vmm_is_halted());
         assert_state_change_has_gen_change(&prev, &state);
 
         // The Stopped state is translated internally to Stopping to prevent
@@ -513,7 +513,7 @@ mod test {
         let prev = state.clone();
         observed.vmm_state = PropolisInstanceState(Observed::Destroyed);
         state.apply_propolis_observation(&observed);
-        assert!(state.vmm_halted());
+        assert!(state.vmm_is_halted());
         assert_state_change_has_gen_change(&prev, &state);
         assert_eq!(state.vmm.state, VmmState::Destroyed);
         assert!(state.vmm.gen > prev.vmm.gen);
@@ -553,7 +553,7 @@ mod test {
 
         let prev = state.clone();
         state.apply_propolis_observation(&observed);
-        assert!(state.vmm_halted());
+        assert!(state.vmm_is_halted());
         assert_state_change_has_gen_change(&prev, &state);
         assert_eq!(state.vmm.state, VmmState::Failed);
         assert!(state.vmm.gen > prev.vmm.gen);
