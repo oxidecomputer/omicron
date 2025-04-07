@@ -11,6 +11,7 @@ use illumos_utils::dladm::EtherstubVnic;
 use illumos_utils::running_zone::RunCommandError;
 use illumos_utils::running_zone::RunningZone;
 use illumos_utils::zone::AdmError;
+use illumos_utils::zone::Api as _;
 use illumos_utils::zone::DeleteAddressError;
 use illumos_utils::zone::Zones;
 use illumos_utils::zpool::ZpoolName;
@@ -597,7 +598,7 @@ impl ShutdownDependencies for RealShutdownDependencies<'_> {
         // This may leave our `RunningZone` is a bogus state where it still
         // holds a `zoneid_t` that doesn't exist anymore, but if we're in the
         // shutdown path we never use that `zoneid_t`.
-        Zones::halt_and_remove_logged(log, zone.name())
+        Zones::real_api().halt_and_remove_logged(log, zone.name())
             .await
             .map_err(ZoneShutdownError::HaltAndRemove)
     }
@@ -665,7 +666,6 @@ impl StartDependencies for RealStartDependencies<'_> {
                 zone,
                 self.time_is_synchronized,
                 self.all_u2_pools,
-                None,
             )
             .await
         {
@@ -679,7 +679,6 @@ impl StartDependencies for RealStartDependencies<'_> {
 mod tests {
     use super::*;
     use illumos_utils::dladm::Etherstub;
-    use illumos_utils::dladm::MockDladm;
     use illumos_utils::link::VnicAllocator;
     use illumos_utils::running_zone::ZoneBuilderFactory;
     use illumos_utils::zpool::PathInPool;
@@ -699,8 +698,15 @@ mod tests {
     impl FakeZoneBuilder {
         fn new() -> Self {
             let vnic_source = Etherstub("teststubvnic".to_string());
-            let vnic_alloc = VnicAllocator::new("testvnic", vnic_source);
-            let factory = ZoneBuilderFactory::fake(None);
+            let vnic_alloc = VnicAllocator::new(
+                "testvnic",
+                vnic_source,
+                illumos_utils::fakes::dladm::Dladm::new(),
+            );
+            let factory = ZoneBuilderFactory::fake(
+                None,
+                illumos_utils::fakes::zone::Zones::new(),
+            );
             Self { vnic_alloc, factory }
         }
 
@@ -709,10 +715,6 @@ mod tests {
             name: &str,
             log: Logger,
         ) -> RunningZone {
-            let create_vnic_ctx = MockDladm::create_vnic_context();
-            create_vnic_ctx
-                .expect()
-                .return_once(|_: &Etherstub, _, _, _, _| Ok(()));
             let installed_fake_zone = self
                 .factory
                 .builder()
