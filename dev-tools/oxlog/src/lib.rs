@@ -8,7 +8,7 @@
 
 use anyhow::Context;
 use camino::{Utf8DirEntry, Utf8Path, Utf8PathBuf};
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use std::collections::BTreeMap;
 use std::io;
 use uuid::Uuid;
@@ -83,13 +83,13 @@ pub struct Filter {
 #[derive(Copy, Clone, Debug)]
 pub struct DateRange {
     /// Files with `mtime`s equal to or later than this will be excluded.
-    before: DateTime<Utc>,
+    before: Timestamp,
     /// Files with `mtime`s equal to or earlier than this will be excluded.
-    after: DateTime<Utc>,
+    after: Timestamp,
 }
 
 impl DateRange {
-    pub fn new(before: DateTime<Utc>, after: DateTime<Utc>) -> Self {
+    pub fn new(before: Timestamp, after: Timestamp) -> Self {
         Self { before, after }
     }
 }
@@ -100,7 +100,7 @@ impl DateRange {
 pub struct LogFile {
     pub path: Utf8PathBuf,
     pub size: Option<u64>,
-    pub modified: Option<DateTime<Utc>>,
+    pub modified: Option<Timestamp>,
 }
 
 impl LogFile {
@@ -108,7 +108,8 @@ impl LogFile {
         if let Ok(metadata) = entry.metadata() {
             self.size = Some(metadata.len());
             if let Ok(modified) = metadata.modified() {
-                self.modified = Some(modified.into());
+                // An mtime that overflows Timestamp is not accurate, ignore.
+                self.modified = modified.try_into().ok();
             }
         }
     }
@@ -627,7 +628,7 @@ mod tests {
     fn test_daterange_filter() {
         use super::{DateRange, LogFile};
         use camino::Utf8PathBuf;
-        use chrono::{DateTime, Utc};
+        use jiff::Timestamp;
 
         let old_log = LogFile {
             path: Utf8PathBuf::from("old"),
@@ -657,7 +658,7 @@ mod tests {
         // Range if '--after` is not set.
         let min_after_date_range = DateRange {
             before: "2025-01-01T23:59:59Z".parse().unwrap(),
-            after: DateTime::<Utc>::MIN_UTC,
+            after: Timestamp::MIN,
         };
 
         assert!(old_log.in_date_range(&min_after_date_range));
@@ -666,7 +667,7 @@ mod tests {
 
         // Range if '--before` is not set.
         let max_before_date_range = DateRange {
-            before: DateTime::<Utc>::MAX_UTC,
+            before: Timestamp::MAX,
             after: "1986-01-01T00:00:01Z".parse().unwrap(),
         };
 

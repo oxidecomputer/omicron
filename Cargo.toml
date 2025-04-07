@@ -463,6 +463,7 @@ itertools = "0.14.0"
 internet-checksum = "0.2"
 ipnetwork = { version = "0.21", features = ["schemars", "serde"] }
 ispf = { git = "https://github.com/oxidecomputer/ispf" }
+jiff = "0.2.5"
 key-manager = { path = "key-manager" }
 kstat-rs = "0.2.4"
 libc = "0.2.170"
@@ -554,7 +555,6 @@ oximeter-timeseries-macro = { path = "oximeter/timeseries-macro" }
 oximeter-types = { path = "oximeter/types" }
 oxql-types = { path = "oximeter/oxql-types" }
 p256 = "0.13"
-parse_datetime = "0.8.0"
 parse-display = "0.10.0"
 partial-io = { version = "0.5.4", features = ["proptest1", "tokio1"] }
 parse-size = "1.1.0"

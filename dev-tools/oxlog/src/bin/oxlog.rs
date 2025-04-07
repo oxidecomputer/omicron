@@ -4,8 +4,10 @@
 
 //! Tool for discovering oxide related logfiles on sleds
 
-use chrono::{DateTime, Utc};
 use clap::{ArgAction, Args, Parser, Subcommand};
+use jiff::civil::DateTime;
+use jiff::tz::TimeZone;
+use jiff::{Span, Timestamp};
 use oxlog::{DateRange, Filter, LogFile, Zones};
 use std::collections::BTreeSet;
 
@@ -38,13 +40,13 @@ enum Commands {
 
         /// Show log files with an `mtime` before this timestamp. May be absolute or relative,
         /// e.g. '2025-04-01T01:01:01', '-1 hour', 'yesterday'
-        #[arg(short = 'B', long, value_parser = parse_timestamp)]
-        before: Option<DateTime<Utc>>,
+        #[arg(short = 'B', long, value_parser = parse_timestamp_now)]
+        before: Option<Timestamp>,
 
         /// Show log files with an `mtime` after this timestamp. May be absolute or relative,
         /// e.g. '2025-04-01T01:01:01', '-1 hour', 'yesterday'
-        #[arg(short = 'A', long, value_parser = parse_timestamp)]
-        after: Option<DateTime<Utc>>,
+        #[arg(short = 'A', long, value_parser = parse_timestamp_now)]
+        after: Option<Timestamp>,
     },
 
     /// List the names of all services in a zone, from the perspective of oxlog.
@@ -76,12 +78,32 @@ struct FilterArgs {
     show_empty: bool,
 }
 
-fn parse_timestamp(date_str: &str) -> Result<DateTime<Utc>, String> {
-    let timestamp = parse_datetime::parse_datetime(date_str)
-        .map_err(|e| format!("could not parse timestamp: {e}"))?;
+fn parse_timestamp_now(date_str: &str) -> Result<Timestamp, anyhow::Error> {
+    parse_timestamp(Timestamp::now(), date_str)
+}
 
-    // No-op, the local TZ on the rack is always UTC.
-    Ok(timestamp.with_timezone(&Utc))
+fn parse_timestamp(
+    relative_to: Timestamp,
+    date_str: &str,
+) -> Result<Timestamp, anyhow::Error> {
+    // Parse as both a TimeStamp and a DateTime to provide maximum flexibility to users.
+    // Timestamp must have a timezone, while DateTime must not have a "Z" TZ.
+    let timestamp = date_str.parse::<Timestamp>();
+    let datetime = date_str.parse::<DateTime>();
+    let span = date_str.parse::<Span>();
+
+    match (timestamp, datetime, span) {
+        (Ok(ts), _, _) => Ok(ts),
+        (_, Ok(dt), _) => Ok(dt.to_zoned(TimeZone::UTC)?.timestamp()),
+        (_, _, Ok(s)) => {
+            // Convert to Zoned for addition, Timestamp cannot be offset by a full day or more.
+            let zoned = relative_to.to_zoned(TimeZone::UTC);
+            Ok(zoned.saturating_add(s).timestamp())
+        }
+        (Err(e), Err(_), Err(_)) => {
+            Err(anyhow::anyhow!("could not parse timestamp: {e}"))
+        }
+    }
 }
 
 fn main() -> Result<(), anyhow::Error> {
@@ -101,8 +123,8 @@ fn main() -> Result<(), anyhow::Error> {
             let date_range = match (before, after) {
                 (None, None) => None,
                 _ => Some(DateRange::new(
-                    before.unwrap_or(DateTime::<Utc>::MAX_UTC),
-                    after.unwrap_or(DateTime::<Utc>::MIN_UTC),
+                    before.unwrap_or(Timestamp::MAX),
+                    after.unwrap_or(Timestamp::MIN),
                 )),
             };
 
@@ -119,7 +141,7 @@ fn main() -> Result<(), anyhow::Error> {
                     f.path,
                     f.size.map_or_else(|| "-".to_string(), |s| s.to_string()),
                     f.modified
-                        .map_or_else(|| "-".to_string(), |s| s.to_rfc3339())
+                        .map_or_else(|| "-".to_string(), |s| s.to_string())
                 );
             };
 
@@ -184,5 +206,47 @@ fn main() -> Result<(), anyhow::Error> {
 
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_timestamp;
+
+    use jiff::civil::date;
+    use jiff::{Timestamp, ToSpan};
+
+    #[test]
+    fn test_parse_timestamp() {
+        let now = Timestamp::now();
+
+        let ts = parse_timestamp(now, "2025-04-07T10:01:00Z").unwrap();
+        let expected =
+            date(2025, 4, 7).at(10, 1, 0, 0).in_tz("UTC").unwrap().timestamp();
+        assert_eq!(expected, ts);
+
+        let dt = parse_timestamp(now, "2025-04-07T10:01:00").unwrap();
+        let expected =
+            date(2025, 4, 7).at(10, 1, 0, 0).in_tz("UTC").unwrap().timestamp();
+        assert_eq!(expected, dt);
+
+        let dt_no_t = parse_timestamp(now, "2025-04-07 19:01:00").unwrap();
+        let expected =
+            date(2025, 4, 7).at(19, 1, 0, 0).in_tz("UTC").unwrap().timestamp();
+        assert_eq!(expected, dt_no_t);
+
+        let dt_short = parse_timestamp(now, "2025-04-07T10").unwrap();
+        let expected =
+            date(2025, 4, 7).at(10, 0, 0, 0).in_tz("UTC").unwrap().timestamp();
+        assert_eq!(expected, dt_short);
+
+        let relative = parse_timestamp(now, "-6 hours").unwrap();
+        let expected = now.saturating_sub(6.hours()).unwrap();
+        assert_eq!(expected, relative);
+
+        let ago = parse_timestamp(now, "10 days ago").unwrap();
+        let expected =
+            now.in_tz("UTC").unwrap().saturating_sub(10.days()).timestamp();
+        assert_eq!(expected, ago);
     }
 }
