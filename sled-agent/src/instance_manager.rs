@@ -885,13 +885,19 @@ impl InstanceTicket {
     pub(crate) fn new_without_manager_for_test(id: PropolisUuid) -> Self {
         Self { id, terminate_tx: None }
     }
-}
 
-impl Drop for InstanceTicket {
-    fn drop(&mut self) {
+    /// Informs this instance's manager that it should release the instance.
+    /// Does nothing if the ticket has already been deregistered.
+    pub(crate) fn deregister(&mut self) {
         if let Some(terminate_tx) = self.terminate_tx.take() {
             let _ =
                 terminate_tx.send(InstanceDeregisterRequest { id: self.id });
         }
+    }
+}
+
+impl Drop for InstanceTicket {
+    fn drop(&mut self) {
+        self.deregister();
     }
 }

@@ -45,6 +45,7 @@ use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::ops::ControlFlow;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -292,6 +293,28 @@ impl InstanceRequest {
 
 /// Identifies the component that's responsible for updating a specific VMM's
 /// state.
+///
+/// Every VMM in the system has a database record (in Nexus) that contains the
+/// VMM's current state. Nexus and Sled Agent work together to ensure that only
+/// one entity in the system drives an individual VMM's state machine at once.
+/// (If this weren't true, updates from multiple sources could race in ways that
+/// produce invalid state transitions.) The general rules are:
+///
+/// - Nexus owns the state machines for newly-defined VMMs that it has not yet
+///   asked to start.
+/// - Once Nexus asks Sled Agent to start a VM in a Propolis instance, the
+///   [`InstanceRunner`] takes over the state machine. The runner can change the
+///   VM's state in response to updates from Propolis or other commands issued
+///   to Sled Agent.
+/// - Some Nexus commands (e.g., forcibly deregistering an instance from Sled
+///   Agent) imply that Nexus also wants to reclaim responsibility for driving
+///   the VMM state machine. For example, an unwinding instance start saga will
+///   want the instance runner to exit without further updating the relevant
+///   VMM's state machine (since this will be updated by saga unwind).
+///
+/// Each instance runner tracks who owns the state machine so that it can avoid
+/// publishing unwanted state updates if Nexus reclaims control of a VMM's
+/// state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum VmmStateOwner {
     /// The [`InstanceRunner`] that manages the VMM is also responsible for
@@ -461,7 +484,7 @@ struct InstanceMonitorMessage {
 
     /// After handling an update, the instance runner uses this channel to tell
     /// the monitor whether to continue running.
-    tx: oneshot::Sender<std::ops::ControlFlow<()>>,
+    tx: oneshot::Sender<ControlFlow<()>>,
 }
 
 struct InstanceRunner {
@@ -538,7 +561,7 @@ impl InstanceRunner {
     async fn run(
         mut self,
         mut terminate_rx: mpsc::Receiver<TerminateRequest>,
-        ticket: InstanceTicket,
+        mut ticket: InstanceTicket,
     ) {
         use InstanceRequest::*;
 
@@ -758,10 +781,9 @@ impl InstanceRunner {
             self.publish_state_to_nexus().await;
         }
 
-        // Drop the instance ticket so that this instance will be removed from
-        // the instance manager. This ensures that no more requests will be
-        // queued to the runner, which allows this routine to send replies to
-        // those requests in an orderly fashion.
+        // Deregister this instance from the instance manager. This ensures that
+        // no more requests will be queued to the runner, which allows this
+        // routine to send replies to those requests in an orderly fashion.
         //
         // This needs to be done only after publishing the final VMM state to
         // Nexus so that Nexus is guaranteed to have received notice of the
@@ -769,7 +791,7 @@ impl InstanceRunner {
         // from the instance manager. Otherwise it is possible for Nexus to
         // conclude that a cleanly-stopped instance has gone missing and should
         // be restarted.
-        drop(ticket);
+        ticket.deregister();
 
         // Okay, now that we've terminated the instance, drain any outstanding
         // requests in the queue, so that they see an error indicating that the
@@ -921,10 +943,10 @@ impl InstanceRunner {
                 // Propolis teardown sequence.
                 if !self.state.vmm_is_halted() {
                     self.publish_state_to_nexus().await;
-                    std::ops::ControlFlow::Continue(())
+                    ControlFlow::Continue(())
                 } else {
                     self.terminate().await;
-                    std::ops::ControlFlow::Break(())
+                    ControlFlow::Break(())
                 }
             }
             InstanceMonitorUpdate::ZoneGone => {
@@ -934,7 +956,7 @@ impl InstanceRunner {
                 // runner is now the sole driver of the VMM state machine. Drive
                 // the VMM to Failed and go through the termination sequence.
                 self.fail_vmm_and_terminate().await;
-                std::ops::ControlFlow::Break(())
+                ControlFlow::Break(())
             }
             InstanceMonitorUpdate::Error(PropolisErrorCode::NoInstance) => {
                 warn!(
@@ -947,7 +969,7 @@ impl InstanceRunner {
                 // lost whatever VM was previously created there. Nothing to do
                 // but mark the VMM as failed and tear things down.
                 self.fail_vmm_and_terminate().await;
-                std::ops::ControlFlow::Break(())
+                ControlFlow::Break(())
             }
             InstanceMonitorUpdate::Error(
                 code @ PropolisErrorCode::AlreadyRunning
@@ -963,7 +985,7 @@ impl InstanceRunner {
                     "error_code" => ?code
                 );
 
-                std::ops::ControlFlow::Continue(())
+                ControlFlow::Continue(())
             }
         };
 
