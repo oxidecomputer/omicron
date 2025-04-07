@@ -3460,6 +3460,15 @@ mod tests {
 
         // By the time the "remove this instance" message arrives, the runner
         // should have published the Destroyed VM state.
+        //
+        // NOTE: Strictly speaking the expected behavior is that the runner will
+        // publish state to Nexus *before* it removes the instance from the
+        // table, so that there is no window where the instance is gone but
+        // Nexus has yet to be told about the terminal VMM state. But these
+        // messages are sent to different channels, so it's possible here that
+        // the runner requested removal and then published the Destroyed state
+        // quickly enough to satisfy this check. But this at least tests that
+        // this window, if it exists, is very small.
         let state = state_rx.borrow().clone();
         let ReceivedInstanceState::InstancePut(state) = state else {
             panic!("unexpected ReceivedInstanceState variant {state:?}");
@@ -3474,6 +3483,49 @@ mod tests {
         drop(terminate_tx);
         let _ = runner_task.await;
 
+        storage_harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_failed_published_when_zone_gone() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_failed_published_when_zone_gone",
+        );
+        let log = logctx.log.new(o!(FileKv));
+
+        let TestInstanceRunner {
+            runner_task: _rt,
+            state_rx,
+            terminate_tx: _tt,
+            monitor_tx,
+            cmd_tx: _ct,
+            mut remove_rx,
+            _nexus_server,
+            _dns_server,
+            mut storage_harness,
+        } = TestInstanceRunner::new(&log).await;
+
+        let (resp_tx, resp_rx) = oneshot::channel();
+        monitor_tx
+            .send(InstanceMonitorMessage {
+                update: InstanceMonitorUpdate::ZoneGone,
+                tx: resp_tx,
+            })
+            .await
+            .unwrap();
+
+        // The "zone gone" message should cause the VMM to be moved to Failed
+        // and removed from the instance table.
+        let resp = resp_rx.await.unwrap();
+        assert!(resp.is_break());
+        assert!(remove_rx.recv().await.is_some());
+        let state = state_rx.borrow().clone();
+        let ReceivedInstanceState::InstancePut(state) = state else {
+            panic!("unexpected ReceivedInstanceState variant {state:?}");
+        };
+
+        assert_eq!(state.vmm_state.state, VmmState::Failed);
         storage_harness.cleanup().await;
         logctx.cleanup_successful();
     }
