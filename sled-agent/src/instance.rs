@@ -747,6 +747,9 @@ impl InstanceRunner {
                 "instance runner exiting with VMM in non-terminal state";
                 "state" => ?self.current_state()
             );
+
+            // Assert in tests, at least.
+            debug_assert!(self.state.vmm_is_halted());
         } else {
             info!(self.log, "instance runner exited main loop");
         }
@@ -3333,6 +3336,83 @@ mod tests {
         }
     }
 
+    struct TestInstanceRunner {
+        runner_task: tokio::task::JoinHandle<()>,
+        state_rx: tokio::sync::watch::Receiver<ReceivedInstanceState>,
+        terminate_tx: mpsc::Sender<TerminateRequest>,
+        monitor_tx: mpsc::Sender<InstanceMonitorMessage>,
+        cmd_tx: mpsc::Sender<InstanceRequest>,
+        remove_rx: mpsc::UnboundedReceiver<
+            crate::instance_manager::InstanceDeregisterRequest,
+        >,
+
+        // Hold onto all of the test doubles that the instance runner will end
+        // up communicating with, even though the tests may not interact with
+        // them directly.
+        _nexus_server: HttpServer<ServerContext>,
+        _dns_server: TransientServer,
+        storage_harness: StorageManagerTestHarness,
+    }
+
+    impl TestInstanceRunner {
+        async fn new(log: &slog::Logger) -> Self {
+            let storage_harness = setup_storage_manager(&log).await;
+            let FakeNexusParts {
+                nexus_client,
+                _nexus_server,
+                state_rx,
+                _dns_server,
+            } = FakeNexusParts::new(&log).await;
+
+            let temp_guard = Utf8TempDir::new().unwrap();
+            let (services, _metrics_rx) = fake_instance_manager_services(
+                &log,
+                storage_harness.handle().clone(),
+                nexus_client,
+                &temp_guard.path().to_string(),
+            );
+            let propolis_id = PropolisUuid::new_v4();
+            let propolis_addr = SocketAddr::V4(SocketAddrV4::new(
+                Ipv4Addr::new(127, 0, 0, 1),
+                12400,
+            ));
+
+            let initial_state = fake_instance_initial_state(propolis_addr);
+
+            let (terminate_tx, terminate_rx) = mpsc::channel(1);
+            let (monitor_tx, monitor_rx) = mpsc::channel(1);
+            let (cmd_tx, cmd_rx) = mpsc::channel(QUEUE_SIZE);
+            let (remove_tx, remove_rx) = mpsc::unbounded_channel();
+            let ticket = InstanceTicket::new(propolis_id, remove_tx);
+
+            let runner = InstanceRunner::new_for_test(
+                &log.new(o!("component" => "InstanceRunner")),
+                propolis_id,
+                initial_state,
+                services,
+                cmd_rx,
+                monitor_tx.clone(),
+                monitor_rx,
+            );
+
+            let runner_task = tokio::spawn(async move {
+                runner.run(terminate_rx, ticket).await;
+            });
+
+            Self {
+                runner_task,
+                state_rx,
+                terminate_tx,
+                monitor_tx,
+                cmd_tx,
+                remove_rx,
+                _nexus_server,
+                _dns_server,
+                storage_harness,
+            }
+        }
+    }
+
     #[tokio::test]
     async fn test_destroy_published_when_instance_removed() {
         let logctx = omicron_test_utils::dev::test_setup_log(
@@ -3340,48 +3420,17 @@ mod tests {
         );
         let log = logctx.log.new(o!(FileKv));
 
-        let mut storage_harness = setup_storage_manager(&log).await;
-        let FakeNexusParts {
-            nexus_client,
-            _nexus_server,
+        let TestInstanceRunner {
+            runner_task,
             state_rx,
+            terminate_tx,
+            monitor_tx,
+            cmd_tx,
+            mut remove_rx,
+            _nexus_server,
             _dns_server,
-        } = FakeNexusParts::new(&log).await;
-
-        let temp_guard = Utf8TempDir::new().unwrap();
-        let (services, _metrics_rx) = fake_instance_manager_services(
-            &log,
-            storage_harness.handle().clone(),
-            nexus_client,
-            &temp_guard.path().to_string(),
-        );
-        let propolis_id = PropolisUuid::new_v4();
-        let propolis_addr = SocketAddr::V4(SocketAddrV4::new(
-            Ipv4Addr::new(127, 0, 0, 1),
-            12400,
-        ));
-
-        let initial_state = fake_instance_initial_state(propolis_addr);
-
-        let (terminate_tx, terminate_rx) = mpsc::channel(1);
-        let (monitor_tx, monitor_rx) = mpsc::channel(1);
-        let (cmd_tx, cmd_rx) = mpsc::channel(QUEUE_SIZE);
-        let (remove_tx, mut remove_rx) = mpsc::unbounded_channel();
-        let ticket = InstanceTicket::new(propolis_id, remove_tx);
-
-        let runner = InstanceRunner::new_for_test(
-            &log.new(o!("component" => "InstanceRunner")),
-            propolis_id,
-            initial_state,
-            services,
-            cmd_rx,
-            monitor_tx.clone(),
-            monitor_rx,
-        );
-
-        let runner_task = tokio::spawn(async move {
-            runner.run(terminate_rx, ticket).await;
-        });
+            mut storage_harness,
+        } = TestInstanceRunner::new(&log).await;
 
         let (resp_tx, resp_rx) = oneshot::channel();
         monitor_tx
