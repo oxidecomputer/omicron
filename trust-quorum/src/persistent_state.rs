@@ -111,6 +111,7 @@ pub struct DecommissionedMetadata {
 
 /// A subset of information stored in [`PersistentState`] that is useful
 /// for validation, testing, and informational purposes.
+#[derive(Debug, Clone)]
 pub struct PersistentStateSummary {
     pub rack_id: Option<RackUuid>,
     pub is_lrtq_only: bool,

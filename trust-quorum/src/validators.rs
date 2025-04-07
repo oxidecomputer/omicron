@@ -125,6 +125,7 @@ pub enum ReconfigurationError {
 /// A `ReconfigureMsg` that has been determined to be valid for the remainder
 /// of code paths. We encode this check into a type in a "parse, don't validate"
 /// manner.
+#[derive(Debug)]
 pub struct ValidatedReconfigureMsg {
     pub rack_id: RackUuid,
     pub epoch: Epoch,
@@ -340,6 +341,7 @@ impl ValidatedReconfigureMsg {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assert_matches::assert_matches;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::{GenericUuid, RackUuid};
     use proptest::prelude::*;
@@ -446,6 +448,133 @@ mod tests {
             .expect("valid msg")
             .is_some()
         );
+
+        logctx.cleanup_successful();
+    }
+
+    /// Test some error conditions when validating a `ReconfigureMsg`
+    #[proptest]
+    fn test_validate_reconfigure_msg_failure(input: TestInput) {
+        let logctx = test_setup_log("validate_reconfigure_msg_new_failure");
+        let last_committed_epoch = if input.new_config {
+            None
+        } else {
+            Some(Epoch(input.epoch.0 - 1))
+        };
+        let msg = ReconfigureMsg {
+            rack_id: input.rack_id,
+            epoch: input.epoch,
+            last_committed_epoch,
+            members: input.members.clone(),
+            threshold: Threshold(input.members.len() as u8 - 1),
+            retry_timeout: Duration::from_millis(100),
+        };
+
+        let platform_id = input.members.first().unwrap().clone();
+        let (mut persistent_state, mut last_reconfig_msg) = if input.new_config
+        {
+            let persistent_state = PersistentStateSummary {
+                rack_id: None,
+                is_lrtq_only: false,
+                is_uninitialized: true,
+                last_prepared_epoch: None,
+                last_committed_epoch: None,
+                decommissioned: None,
+            };
+            (persistent_state, None)
+        } else {
+            let persistent_state = PersistentStateSummary {
+                rack_id: Some(msg.rack_id),
+                is_lrtq_only: false,
+                is_uninitialized: false,
+                last_prepared_epoch: msg.last_committed_epoch,
+                last_committed_epoch: msg.last_committed_epoch,
+                decommissioned: None,
+            };
+            let mut members = input.members.clone();
+            members
+                .insert(PlatformId::new("test".into(), "removed_node".into()));
+            let last_reconfig_msg = ValidatedReconfigureMsg {
+                rack_id: input.rack_id,
+                epoch: msg.last_committed_epoch.unwrap(),
+                last_committed_epoch: None,
+                members,
+                threshold: msg.threshold,
+                retry_timeout: msg.retry_timeout,
+            };
+
+            (persistent_state, Some(last_reconfig_msg))
+        };
+
+        // The messages are valid at this point. We tweak them to elicit
+        // different failures.
+
+        // Can't upgrade from LRTQ with a normal `ReconfigureMsg`
+        let original_persistent_state = persistent_state.clone();
+        let original_msg = msg.clone();
+
+        persistent_state.is_lrtq_only = true;
+        let err = ValidatedReconfigureMsg::new(
+            &logctx.log,
+            &platform_id,
+            msg,
+            persistent_state.clone(),
+            last_reconfig_msg.as_ref(),
+        )
+        .unwrap_err();
+        assert_eq!(err, ReconfigurationError::UpgradeFromLrtqRequired);
+
+        let persistent_state = original_persistent_state.clone();
+
+        if original_persistent_state.rack_id.is_some() {
+            let mut msg = original_msg.clone();
+            // Rack IDs must match
+            msg.rack_id = RackUuid::from_untyped_uuid(Uuid::from_bytes([
+                2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+            ]));
+            let err = ValidatedReconfigureMsg::new(
+                &logctx.log,
+                &platform_id,
+                msg,
+                persistent_state,
+                last_reconfig_msg.as_ref(),
+            )
+            .unwrap_err();
+            assert_matches!(err, ReconfigurationError::InvalidRackId(_));
+
+            // last_committed epoch must be valid
+            let mut msg = original_msg.clone();
+            let persistent_state = original_persistent_state.clone();
+            msg.last_committed_epoch = Some(Epoch(999));
+            let err = ValidatedReconfigureMsg::new(
+                &logctx.log,
+                &platform_id,
+                msg,
+                persistent_state.clone(),
+                last_reconfig_msg.as_ref(),
+            )
+            .unwrap_err();
+            assert_matches!(
+                err,
+                ReconfigurationError::LastCommittedEpochMismatch { .. }
+            );
+
+            // Make the existing coordination invalid
+            let msg = original_msg.clone();
+            last_reconfig_msg.as_mut().unwrap().epoch = Epoch(999);
+            let err = ValidatedReconfigureMsg::new(
+                &logctx.log,
+                &platform_id,
+                msg,
+                persistent_state.clone(),
+                last_reconfig_msg.as_ref(),
+            )
+            .unwrap_err();
+            assert_matches!(
+                err,
+                ReconfigurationError::ReconfigurationInProgress { .. }
+            );
+        }
 
         logctx.cleanup_successful();
     }
