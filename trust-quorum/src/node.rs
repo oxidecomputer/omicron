@@ -81,9 +81,9 @@ impl Node {
         // This function is going to be called unconditionally in `tick`
         // callbacks. In this case we may not actually be a coordinator. We just
         // ignore the call in that case.
-        self.coordinator_state.as_mut().map(|c| {
+        if let Some(c) = self.coordinator_state.as_mut() {
             c.send_msgs(now, outbox);
-        });
+        }
     }
 
     /// Set the coordinator state and conditionally set and return the

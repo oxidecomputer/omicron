@@ -27,7 +27,7 @@ use std::time::Instant;
 /// We allow some unused fields before we complete the coordination code
 #[allow(unused)]
 pub struct CoordinatorState {
-    /// A copy of the platform_id from [`Node`] purely for ergonomics
+    /// A copy of the platform_id from [`crate::Node`] purely for ergonomics
     platform_id: PlatformId,
 
     /// When the reconfiguration started

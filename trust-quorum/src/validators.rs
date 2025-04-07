@@ -22,8 +22,7 @@ pub fn check_rack_id(
             return Err(MismatchedRackIdError {
                 expected: rack_id,
                 got: msg_rack_id,
-            }
-            .into());
+            });
         }
     }
 
@@ -305,8 +304,7 @@ impl ValidatedReconfigureMsg {
             return Err(ReconfigurationError::ReconfigurationInProgress {
                 current_epoch: existing_msg.epoch,
                 msg_epoch: new_msg.epoch,
-            }
-            .into());
+            });
         }
 
         if current_epoch == new_msg.epoch {
@@ -318,10 +316,11 @@ impl ValidatedReconfigureMsg {
                         "but messages differ");
                     "epoch" => new_msg.epoch.to_string(),
                 );
-                return Err(ReconfigurationError::MismatchedReconfigurationForSameEpoch(
-                    new_msg.epoch,
-                )
-                .into());
+                return Err(
+                    ReconfigurationError::MismatchedReconfigurationForSameEpoch(
+                        new_msg.epoch,
+                    ),
+                );
             }
 
             // Idempotent request
